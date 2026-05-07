@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai4archive"
+version = "0.1.0"
+description = "Local archive scan quality-control utilities"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "Pillow>=10,<13",
+]
+
+[project.scripts]
+archive-scan-qc = "archive_scan_qc.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
