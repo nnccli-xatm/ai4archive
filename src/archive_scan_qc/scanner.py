@@ -49,18 +49,33 @@ def scan_batch(config: ScanConfig) -> dict[str, Any]:
     files = [_inspect_file(path, input_dir) for path in _iter_candidate_files(input_dir)]
     findings = _build_findings(files, config)
     summary = _summarize(files, findings)
+    generated_at = datetime.now(timezone.utc).isoformat()
+    project = {
+        "project_id": config.project_id,
+        "batch_id": config.batch_id,
+        "input_dir": str(input_dir),
+        "output_dir": str(config.output_dir.resolve()),
+        "min_dpi": config.min_dpi,
+        "name_pattern": config.name_pattern,
+    }
+    manifest = {
+        "project_id": project["project_id"],
+        "batch_id": project["batch_id"],
+        "input_dir": project["input_dir"],
+        "output_dir": project["output_dir"],
+        "rule_version": "scan-qc.phase1.v1",
+        "generated_at": generated_at,
+        "total_files": summary["total_files"],
+        "p0_findings": summary["p0_findings"],
+        "p1_findings": summary["p1_findings"],
+        "p2_findings": summary["p2_findings"],
+    }
 
     return {
         "schema_version": "scan-qc.phase1.v1",
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "project": {
-            "project_id": config.project_id,
-            "batch_id": config.batch_id,
-            "input_dir": str(input_dir),
-            "output_dir": str(config.output_dir.resolve()),
-            "min_dpi": config.min_dpi,
-            "name_pattern": config.name_pattern,
-        },
+        "generated_at": generated_at,
+        "project": project,
+        "manifest": manifest,
         "dependency_notes": [
             "Pillow is used for local image openability and metadata collection; it is open source, lightweight, cross-platform, and does not require cloud services.",
             "Only Python standard-library modules are used for hashing, CSV, JSON, paths, and rule checks.",
