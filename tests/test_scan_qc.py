@@ -12,6 +12,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter
 
 from archive_scan_qc import __version__
+from archive_scan_qc.benchmark import _recommendations
 from archive_scan_qc.cli import main
 from archive_scan_qc.processing import ProcessingOptions, process_images
 from archive_scan_qc.reports import write_reports
@@ -266,25 +267,33 @@ class ScanQcTest(unittest.TestCase):
             Image.new("RGB", (32, 24), "white").save(input_dir / "private_name_001.png", dpi=(300, 300))
             (input_dir / "private_broken.png").write_text("not an image", encoding="utf-8")
 
-            exit_code = main(
-                [
-                    "benchmark",
-                    "--input",
-                    str(input_dir),
-                    "--out",
-                    str(output_dir),
-                    "--workers-list",
-                    "1",
-                    "--scan-only",
-                ]
-            )
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "benchmark",
+                        "--input",
+                        str(input_dir),
+                        "--out",
+                        str(output_dir),
+                        "--workers-list",
+                        "1",
+                        "--scan-only",
+                    ]
+                )
 
             self.assertEqual(exit_code, 0)
+            self.assertIn("Benchmark recommendation: scan workers=1", stdout.getvalue())
             json_path = output_dir / "benchmark_results.json"
             csv_path = output_dir / "benchmark_results.csv"
             self.assertTrue(json_path.exists())
             self.assertTrue(csv_path.exists())
             payload = json.loads(json_path.read_text(encoding="utf-8"))
+            self.assertIn("recommendations", payload)
+            self.assertEqual(payload["recommendations"]["generated_from_runs"], 1)
+            self.assertEqual(payload["recommendations"]["scan_only"]["best_requested_workers"], 1)
+            self.assertEqual(payload["recommendations"]["scan_only"]["best_effective_workers"], 1)
+            self.assertIsNone(payload["recommendations"]["processing"])
             self.assertEqual(len(payload["runs"]), 1)
             run = payload["runs"][0]
             self.assertEqual(run["total_files"], 2)
@@ -338,6 +347,10 @@ class ScanQcTest(unittest.TestCase):
             payload = json.loads((output_dir / "benchmark_results.json").read_text(encoding="utf-8"))
             self.assertEqual([run["requested_workers"] for run in payload["runs"]], [1, 2])
             self.assertEqual([run["run_index"] for run in payload["runs"]], [1, 2])
+            self.assertEqual(
+                [point["requested_workers"] for point in payload["recommendations"]["scan_only"]["workers"]],
+                [1, 2],
+            )
 
     def test_benchmark_processing_options_generate_aggregate(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -348,26 +361,32 @@ class ScanQcTest(unittest.TestCase):
             input_dir.mkdir()
             Image.new("RGB", (40, 30), "white").save(input_dir / "private_processed.png", dpi=(300, 300))
 
-            exit_code = main(
-                [
-                    "benchmark",
-                    "--input",
-                    str(input_dir),
-                    "--out",
-                    str(output_dir),
-                    "--process-out",
-                    str(process_dir),
-                    "--workers-list",
-                    "1",
-                    "--auto-crop",
-                    "--deskew",
-                    "--trim-dark-border",
-                    "--despeckle",
-                ]
-            )
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "benchmark",
+                        "--input",
+                        str(input_dir),
+                        "--out",
+                        str(output_dir),
+                        "--process-out",
+                        str(process_dir),
+                        "--workers-list",
+                        "1",
+                        "--auto-crop",
+                        "--deskew",
+                        "--trim-dark-border",
+                        "--despeckle",
+                    ]
+                )
 
             self.assertEqual(exit_code, 0)
+            self.assertIn("Benchmark recommendation: processing workers=1", stdout.getvalue())
             payload = json.loads((output_dir / "benchmark_results.json").read_text(encoding="utf-8"))
+            self.assertEqual(payload["recommendations"]["processing"]["best_requested_workers"], 1)
+            self.assertEqual(payload["recommendations"]["processing"]["best_effective_workers"], 1)
+            self.assertIsNotNone(payload["recommendations"]["processing"]["files_per_minute"])
             run = payload["runs"][0]
             self.assertFalse(run["scan_only"])
             self.assertTrue(run["operations"]["auto_crop"])
@@ -375,6 +394,25 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(run["processing"]["processed_files"], 1)
             self.assertIsNotNone(run["processing"]["elapsed_seconds"])
             self.assertFalse(any(process_dir.glob("*/processing_manifest.json")))
+
+    def test_benchmark_recommendations_rank_workers_and_flag_diminishing_returns(self) -> None:
+        runs = [
+            _benchmark_run_stub(1, 1, 1, scan_rate=100.0, processing_rate=40.0),
+            _benchmark_run_stub(2, 1, 2, scan_rate=105.0, processing_rate=80.0),
+            _benchmark_run_stub(3, 1, 4, scan_rate=102.0, processing_rate=82.0),
+        ]
+
+        recommendations = _recommendations(runs)
+
+        scan = recommendations["scan_only"]
+        self.assertEqual(scan["best_requested_workers"], 2)
+        self.assertTrue(scan["diminishing_returns"])
+        self.assertIn("1 -> 2", scan["notes"][0])
+
+        processing = recommendations["processing"]
+        self.assertEqual(processing["best_requested_workers"], 4)
+        self.assertTrue(processing["diminishing_returns"])
+        self.assertIn("2 -> 4", processing["notes"][0])
 
     def test_benchmark_invalid_workers_and_repeats_are_clear(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1474,6 +1512,50 @@ def _synthetic_light_noise_page() -> Image.Image:
     for point in [(20, 20), (80, 60), (140, 100), (210, 150)]:
         draw.point(point, fill=(238, 238, 238))
     return image
+
+
+def _benchmark_run_stub(
+    run_index: int,
+    repeat_index: int,
+    requested_workers: int,
+    *,
+    scan_rate: float,
+    processing_rate: float,
+) -> dict[str, object]:
+    return {
+        "run_index": run_index,
+        "repeat_index": repeat_index,
+        "requested_workers": requested_workers,
+        "effective_workers": requested_workers,
+        "worker_mode": "serial" if requested_workers == 1 else "parallel",
+        "operations": {
+            "deskew": True,
+            "auto_crop": True,
+            "trim_dark_border": True,
+            "despeckle": True,
+        },
+        "scan_only": False,
+        "total_files": 10,
+        "openable_files": 10,
+        "finding_severity_counts": {"P0": 0, "P1": 0, "P2": 0},
+        "finding_rule_counts": {},
+        "processing": {
+            "enabled": True,
+            "processed_files": 10,
+            "failed_files": 0,
+            "skipped_files": 0,
+            "elapsed_seconds": 1.0,
+            "processed_files_per_minute": processing_rate,
+            "total_files_per_minute": processing_rate,
+            "effective_workers": requested_workers,
+            "worker_mode": "serial" if requested_workers == 1 else "parallel",
+        },
+        "scan": {
+            "elapsed_seconds": 1.0,
+            "files_per_minute": scan_rate,
+            "openable_files_per_minute": scan_rate,
+        },
+    }
 
 
 def _dark_pixel_count(image: Image.Image) -> int:

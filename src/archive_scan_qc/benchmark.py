@@ -21,6 +21,7 @@ from .scanner import ScanConfig, scan_batch
 
 BENCHMARK_JSON = "benchmark_results.json"
 BENCHMARK_CSV = "benchmark_results.csv"
+DIMINISHING_RETURNS_THRESHOLD_RATIO = 0.10
 
 
 def positive_int(value: str, label: str) -> int:
@@ -137,6 +138,7 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
     shutil.rmtree(output_dir / ".benchmark_work", ignore_errors=True)
     payload = _payload(started_at, results, finished_at=datetime.now(timezone.utc).isoformat())
     _write_results(payload, output_dir)
+    _print_recommendation_summary(payload["recommendations"])
     return payload
 
 
@@ -158,8 +160,135 @@ def _payload(started_at: str, results: list[dict[str, Any]], finished_at: str | 
             ],
         },
         "environment": _environment(),
+        "recommendations": _recommendations(results),
         "runs": results,
     }
+
+
+def _recommendations(runs: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "schema_version": "scan-qc.benchmark.recommendations.v1",
+        "generated_from_runs": len(runs),
+        "basis": (
+            "Recommendations are calculated from this benchmark run's aggregate throughput only. "
+            "Choose the worker count with the highest mean files/minute, then review diminishing-return notes "
+            "alongside local CPU, memory, and I/O observations."
+        ),
+        "diminishing_returns_threshold_ratio": DIMINISHING_RETURNS_THRESHOLD_RATIO,
+        "scan_only": _operation_recommendation(
+            runs,
+            operation="scan-only",
+            metric_path=("scan", "files_per_minute"),
+            effective_workers_path=("effective_workers",),
+            metric_name="scan_files_per_minute",
+        ),
+        "processing": _operation_recommendation(
+            [run for run in runs if not run["scan_only"] and run["processing"]["enabled"]],
+            operation="processing",
+            metric_path=("processing", "processed_files_per_minute"),
+            effective_workers_path=("processing", "effective_workers"),
+            metric_name="processing_processed_files_per_minute",
+        ),
+    }
+
+
+def _operation_recommendation(
+    runs: list[dict[str, Any]],
+    *,
+    operation: str,
+    metric_path: tuple[str, str],
+    effective_workers_path: tuple[str, ...],
+    metric_name: str,
+) -> dict[str, Any] | None:
+    points = _worker_points(runs, metric_path, effective_workers_path)
+    if not points:
+        return None
+
+    best = max(points, key=lambda point: (point["files_per_minute"], -point["requested_workers"]))
+    diminishing_notes = _diminishing_return_notes(points, operation)
+    notes = []
+    if diminishing_notes:
+        notes.extend(diminishing_notes)
+    else:
+        notes.append(
+            f"No adjacent worker step was below the {DIMINISHING_RETURNS_THRESHOLD_RATIO:.0%} "
+            "diminishing-return threshold."
+        )
+
+    return {
+        "operation": operation,
+        "metric": metric_name,
+        "best_requested_workers": best["requested_workers"],
+        "best_effective_workers": best["effective_workers"],
+        "files_per_minute": best["files_per_minute"],
+        "run_count": sum(point["run_count"] for point in points),
+        "selection_basis": (
+            f"Highest mean {metric_name} among requested worker counts in this benchmark payload."
+        ),
+        "diminishing_returns": bool(diminishing_notes),
+        "notes": notes,
+        "workers": points,
+    }
+
+
+def _worker_points(
+    runs: list[dict[str, Any]], metric_path: tuple[str, str], effective_workers_path: tuple[str, ...]
+) -> list[dict[str, Any]]:
+    grouped: dict[int, list[dict[str, Any]]] = {}
+    first_seen: dict[int, int] = {}
+    for position, run in enumerate(runs):
+        metric_value = run[metric_path[0]][metric_path[1]]
+        if metric_value is None:
+            continue
+        requested_workers = int(run["requested_workers"])
+        grouped.setdefault(requested_workers, []).append(run)
+        first_seen.setdefault(requested_workers, position)
+
+    points = []
+    for requested_workers, worker_runs in grouped.items():
+        throughputs = [float(run[metric_path[0]][metric_path[1]]) for run in worker_runs]
+        effective_workers = [float(_nested_value(run, effective_workers_path)) for run in worker_runs]
+        points.append(
+            {
+                "requested_workers": requested_workers,
+                "effective_workers": _rounded_mean(effective_workers),
+                "files_per_minute": round(sum(throughputs) / len(throughputs), 2),
+                "run_count": len(worker_runs),
+                "first_run_index": min(int(run["run_index"]) for run in worker_runs),
+            }
+        )
+    return sorted(points, key=lambda point: (first_seen[point["requested_workers"]], point["requested_workers"]))
+
+
+def _nested_value(payload: dict[str, Any], path: tuple[str, ...]) -> Any:
+    value: Any = payload
+    for key in path:
+        value = value[key]
+    return value
+
+
+def _rounded_mean(values: list[float]) -> int | float:
+    mean = round(sum(values) / len(values), 2)
+    if mean.is_integer():
+        return int(mean)
+    return mean
+
+
+def _diminishing_return_notes(points: list[dict[str, Any]], operation: str) -> list[str]:
+    notes = []
+    for previous, current in zip(points, points[1:]):
+        previous_rate = previous["files_per_minute"]
+        current_rate = current["files_per_minute"]
+        if previous_rate <= 0:
+            continue
+        gain_ratio = (current_rate - previous_rate) / previous_rate
+        if gain_ratio < DIMINISHING_RETURNS_THRESHOLD_RATIO:
+            notes.append(
+                f"{operation}: requested workers {previous['requested_workers']} -> "
+                f"{current['requested_workers']} improved mean throughput by {gain_ratio:.1%}; "
+                "verify CPU, memory, and disk I/O before selecting the higher setting."
+            )
+    return notes
 
 
 def _environment() -> dict[str, Any]:
@@ -329,6 +458,27 @@ def _csv_row(run: dict[str, Any], environment: dict[str, Any]) -> dict[str, Any]
         "memory_total_bytes": environment["memory_total_bytes"],
         "gpu": environment["gpu"],
     }
+
+
+def _print_recommendation_summary(recommendations: dict[str, Any]) -> None:
+    scan = recommendations["scan_only"]
+    if scan:
+        print(
+            "Benchmark recommendation: "
+            f"scan workers={scan['best_requested_workers']} "
+            f"(effective {scan['best_effective_workers']}), "
+            f"{scan['files_per_minute']} files/min"
+        )
+    processing = recommendations["processing"]
+    if processing:
+        print(
+            "Benchmark recommendation: "
+            f"processing workers={processing['best_requested_workers']} "
+            f"(effective {processing['best_effective_workers']}), "
+            f"{processing['files_per_minute']} files/min"
+        )
+    if (scan and scan["diminishing_returns"]) or (processing and processing["diminishing_returns"]):
+        print("Benchmark note: diminishing returns detected; see benchmark_results.json recommendations.")
 
 
 def _remove_sensitive_processing_manifest(process_dir: Path) -> None:

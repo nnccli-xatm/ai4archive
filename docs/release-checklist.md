@@ -43,7 +43,8 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 - Run `archive-scan-qc benchmark` on approved internal real samples.
 - Share only aggregate `benchmark_results.json` or `benchmark_results.csv`.
 - Record total files, openable files, finding counts, elapsed seconds, files per
-  minute, effective workers, CPU count, platform, and Python version.
+  minute, recommended scan/processing workers, effective workers, CPU count,
+  platform, and Python version.
 - Keep normal scan reports, processing manifests, filenames, paths, hashes,
   thumbnails, derivative images, and source images inside the approved private
   environment.
@@ -60,9 +61,11 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 
 ## Performance record
 
-- Record worker settings tested, effective worker count, elapsed seconds, files
-  per minute, processed files per minute when processing is enabled, CPU count,
-  memory note when available, platform, Python version, and Pillow version.
+- Record worker settings tested, recommended workers from
+  `benchmark_results.json` `recommendations`, effective worker count, elapsed
+  seconds, files per minute, processed files per minute when processing is
+  enabled, CPU count, memory note when available, platform, Python version, and
+  Pillow version.
 - Compare against the previous release on the same sample set and hardware.
 - Note any throughput regression or operational limit in release notes.
 
