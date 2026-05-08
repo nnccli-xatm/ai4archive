@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import csv
 import io
 import json
 import shutil
@@ -202,6 +203,147 @@ class ScanQcTest(unittest.TestCase):
             self.assertTrue(saved["manifest"]["manifest_used"])
             self.assertEqual(saved["summary"]["manifest_missing_count"], 1)
             self.assertEqual(saved["summary"]["manifest_unexpected_count"], 1)
+
+    def test_benchmark_writes_privacy_safe_json_and_csv(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "benchmark"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "private_name_001.png", dpi=(300, 300))
+            (input_dir / "private_broken.png").write_text("not an image", encoding="utf-8")
+
+            exit_code = main(
+                [
+                    "benchmark",
+                    "--input",
+                    str(input_dir),
+                    "--out",
+                    str(output_dir),
+                    "--workers-list",
+                    "1",
+                    "--scan-only",
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            json_path = output_dir / "benchmark_results.json"
+            csv_path = output_dir / "benchmark_results.csv"
+            self.assertTrue(json_path.exists())
+            self.assertTrue(csv_path.exists())
+            payload = json.loads(json_path.read_text(encoding="utf-8"))
+            self.assertEqual(len(payload["runs"]), 1)
+            run = payload["runs"][0]
+            self.assertEqual(run["total_files"], 2)
+            self.assertEqual(run["openable_files"], 1)
+            self.assertEqual(run["finding_rule_counts"]["openability"], 1)
+            self.assertTrue(run["scan_only"])
+            raw_json = json_path.read_text(encoding="utf-8")
+            raw_csv = csv_path.read_text(encoding="utf-8")
+            for forbidden in ["private_name_001.png", "private_broken.png", "relative_path", "sha256"]:
+                self.assertNotIn(forbidden, raw_json)
+                self.assertNotIn(forbidden, raw_csv)
+
+            with csv_path.open("r", newline="", encoding="utf-8") as handle:
+                rows = list(csv.DictReader(handle))
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["total_files"], "2")
+            self.assertEqual(rows[0]["openable_files"], "1")
+
+    def test_benchmark_workers_list_order_is_stable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "benchmark"
+            input_dir.mkdir()
+            for index in range(3):
+                Image.new("RGB", (32, 24), "white").save(input_dir / f"page_{index}.png", dpi=(300, 300))
+
+            exit_code = main(
+                [
+                    "benchmark",
+                    "--input",
+                    str(input_dir),
+                    "--out",
+                    str(output_dir),
+                    "--workers-list",
+                    "1,2",
+                    "--scan-only",
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads((output_dir / "benchmark_results.json").read_text(encoding="utf-8"))
+            self.assertEqual([run["requested_workers"] for run in payload["runs"]], [1, 2])
+            self.assertEqual([run["run_index"] for run in payload["runs"]], [1, 2])
+
+    def test_benchmark_processing_options_generate_aggregate(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "benchmark"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            Image.new("RGB", (40, 30), "white").save(input_dir / "private_processed.png", dpi=(300, 300))
+
+            exit_code = main(
+                [
+                    "benchmark",
+                    "--input",
+                    str(input_dir),
+                    "--out",
+                    str(output_dir),
+                    "--process-out",
+                    str(process_dir),
+                    "--workers-list",
+                    "1",
+                    "--auto-crop",
+                    "--deskew",
+                    "--trim-dark-border",
+                    "--despeckle",
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads((output_dir / "benchmark_results.json").read_text(encoding="utf-8"))
+            run = payload["runs"][0]
+            self.assertFalse(run["scan_only"])
+            self.assertTrue(run["operations"]["auto_crop"])
+            self.assertTrue(run["operations"]["deskew"])
+            self.assertEqual(run["processing"]["processed_files"], 1)
+            self.assertIsNotNone(run["processing"]["elapsed_seconds"])
+            self.assertFalse(any(process_dir.glob("*/processing_manifest.json")))
+
+    def test_benchmark_invalid_workers_and_repeats_are_clear(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "benchmark"
+            input_dir.mkdir()
+
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+                main(["benchmark", "--input", str(input_dir), "--out", str(output_dir), "--workers-list", "1,0"])
+            self.assertEqual(raised.exception.code, 2)
+            self.assertIn("--workers-list must be a positive integer", stderr.getvalue())
+
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+                main(
+                    [
+                        "benchmark",
+                        "--input",
+                        str(input_dir),
+                        "--out",
+                        str(output_dir),
+                        "--workers-list",
+                        "1",
+                        "--repeats",
+                        "0",
+                    ]
+                )
+            self.assertEqual(raised.exception.code, 2)
+            self.assertIn("--repeats must be a positive integer", stderr.getvalue())
 
     def test_output_dir_inside_input_is_skipped_on_rerun(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

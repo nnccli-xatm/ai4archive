@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import replace
 from pathlib import Path
+import sys
 
 from .processing import ProcessingOptions, process_images
 from .reports import write_reports
@@ -90,6 +91,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] == "benchmark":
+        from .benchmark import main as benchmark_main
+
+        return benchmark_main(argv[1:])
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.auto_crop and not args.process_out:
