@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import compileall
+import csv
 import json
 import os
 from pathlib import Path
@@ -20,10 +21,27 @@ EXAMPLES_DIR = REPO_ROOT / "examples"
 EXAMPLE_RULES_PROFILE = EXAMPLES_DIR / "rules-profile.production-sample.json"
 EXAMPLE_MANIFEST = EXAMPLES_DIR / "manifest.sample.csv"
 
+SRC_DIR = REPO_ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
 
 def _run(command: list[str], *, env: dict[str, str] | None = None, cwd: Path = REPO_ROOT) -> None:
     print("+ " + " ".join(command), flush=True)
     subprocess.run(command, cwd=cwd, env=env, check=True)
+
+
+def _run_expect_exit(
+    command: list[str],
+    expected_exit: int,
+    *,
+    env: dict[str, str] | None = None,
+    cwd: Path = REPO_ROOT,
+) -> None:
+    print("+ " + " ".join(command) + f"  # expect exit {expected_exit}", flush=True)
+    result = subprocess.run(command, cwd=cwd, env=env, check=False)
+    if result.returncode != expected_exit:
+        raise SystemExit(f"expected exit {expected_exit} but got {result.returncode}: {' '.join(command)}")
 
 
 def _pythonpath_env() -> dict[str, str]:
@@ -309,6 +327,286 @@ def run_examples_dry_run() -> None:
             raise SystemExit("example suggested profile was not marked draft/suggested")
 
 
+def run_synthetic_integration_validation() -> None:
+    with tempfile.TemporaryDirectory(prefix="archive-scan-qc-synthetic-") as temp_dir:
+        temp = Path(temp_dir)
+        input_dir = temp / "input"
+        report_dir = temp / "reports"
+        process_dir = temp / "processed"
+        accepted_dir = temp / "accepted"
+        acceptance_blocked_dir = temp / "acceptance-blocked"
+        acceptance_pass_dir = temp / "acceptance-pass"
+        input_dir.mkdir()
+        _write_synthetic_batch(input_dir)
+
+        _run(
+            [
+                sys.executable,
+                "-m",
+                "archive_scan_qc",
+                "preflight",
+                "--input",
+                str(input_dir),
+                "--out",
+                str(report_dir),
+                "--process-out",
+                str(process_dir),
+                "--auto-crop",
+                "--deskew",
+                "--trim-dark-border",
+                "--despeckle",
+                "--workers",
+                "1",
+                "--project",
+                "release-candidate",
+                "--batch",
+                "synthetic-integration",
+            ],
+            env=_pythonpath_env(),
+        )
+        scan_command = [
+            sys.executable,
+            "-m",
+            "archive_scan_qc",
+            "--input",
+            str(input_dir),
+            "--out",
+            str(report_dir),
+            "--process-out",
+            str(process_dir),
+            "--auto-crop",
+            "--deskew",
+            "--trim-dark-border",
+            "--despeckle",
+            "--workers",
+            "1",
+            "--project",
+            "release-candidate",
+            "--batch",
+            "synthetic-integration",
+        ]
+        _run_expect_exit(scan_command, 1, env=_pythonpath_env())
+
+        retry_source = input_dir / "SYNTH_RETRY_AFTER_SCAN.png"
+        retry_source.write_text("synthetic image intentionally corrupted after scan\n", encoding="utf-8")
+        from archive_scan_qc.processing import ProcessingOptions, process_images
+
+        report = json.loads((report_dir / "scan_qc_report.json").read_text(encoding="utf-8"))
+        failed_manifest = process_images(
+            report,
+            input_dir,
+            process_dir,
+            ProcessingOptions(auto_crop=True, deskew=True, trim_dark_border=True, despeckle=True, workers=1),
+        )
+        retry_manifest = json.loads((process_dir / "processing_retry_manifest.json").read_text(encoding="utf-8"))
+        failed_audit = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
+
+        _assert_synthetic_scan(report)
+        _assert_synthetic_processing(failed_manifest, failed_audit, retry_manifest, expected_failed=1)
+
+        _run(
+            [
+                sys.executable,
+                "-m",
+                "archive_scan_qc",
+                "review-export",
+                "--report",
+                str(report_dir / "scan_qc_report.json"),
+                "--out",
+                str(report_dir / "review_template.csv"),
+            ],
+            env=_pythonpath_env(),
+        )
+        _run(
+            [
+                sys.executable,
+                "-m",
+                "archive_scan_qc",
+                "review-summary",
+                "--review",
+                str(report_dir / "review_template.csv"),
+                "--out",
+                str(report_dir / "review_summary.pending.json"),
+            ],
+            env=_pythonpath_env(),
+        )
+        _run_expect_exit(
+            [
+                sys.executable,
+                "-m",
+                "archive_scan_qc",
+                "acceptance-summary",
+                "--review-summary",
+                str(report_dir / "review_summary.pending.json"),
+                "--processing-audit-summary",
+                str(process_dir / "processing_audit_summary.json"),
+                "--out",
+                str(acceptance_blocked_dir),
+            ],
+            1,
+            env=_pythonpath_env(),
+        )
+        blocked_acceptance = json.loads((acceptance_blocked_dir / "acceptance_summary.json").read_text(encoding="utf-8"))
+        if blocked_acceptance["status"] != "fail" or not blocked_acceptance["blocking_items"]:
+            raise SystemExit("synthetic acceptance gate did not block pending review and retry evidence")
+
+        _mark_synthetic_review_resolved(report_dir / "review_template.csv", accepted_dir / "review_template.accepted.csv")
+        _run(
+            [
+                sys.executable,
+                "-m",
+                "archive_scan_qc",
+                "review-summary",
+                "--review",
+                str(accepted_dir / "review_template.accepted.csv"),
+                "--out",
+                str(accepted_dir / "review_summary.json"),
+            ],
+            env=_pythonpath_env(),
+        )
+        _restore_retry_source(retry_source)
+        clean_manifest = process_images(
+            report,
+            input_dir,
+            process_dir,
+            ProcessingOptions(auto_crop=True, deskew=True, trim_dark_border=True, despeckle=True, resume_processing=True, workers=1),
+        )
+        clean_audit = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
+        clean_retry = json.loads((process_dir / "processing_retry_manifest.json").read_text(encoding="utf-8"))
+        _assert_synthetic_processing(clean_manifest, clean_audit, clean_retry, expected_failed=0)
+        _run(
+            [
+                sys.executable,
+                "-m",
+                "archive_scan_qc",
+                "acceptance-summary",
+                "--review-summary",
+                str(accepted_dir / "review_summary.json"),
+                "--processing-audit-summary",
+                str(process_dir / "processing_audit_summary.json"),
+                "--out",
+                str(acceptance_pass_dir),
+            ],
+            env=_pythonpath_env(),
+        )
+        passed_acceptance = json.loads((acceptance_pass_dir / "acceptance_summary.json").read_text(encoding="utf-8"))
+        if passed_acceptance["status"] != "pass" or passed_acceptance["blocking_items"]:
+            raise SystemExit("synthetic acceptance gate did not pass resolved review and clean processing evidence")
+
+
+def _write_synthetic_batch(input_dir: Path) -> None:
+    from PIL import Image, ImageDraw
+
+    def page() -> Image.Image:
+        image = Image.new("RGB", (240, 180), "white")
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((24, 22, 216, 158), outline=(35, 35, 35), width=2)
+        for y in (50, 78, 106, 134):
+            draw.line((42, y, 198, y), fill=(20, 20, 20), width=2)
+        return image
+
+    clean = page()
+    clean.save(input_dir / "SYNTH_CLEAN_0001.png", dpi=(300, 300))
+    clean.copy().save(input_dir / "SYNTH_DUPLICATE_0001.png", dpi=(300, 300))
+    clean.rotate(1.0, resample=Image.Resampling.BICUBIC, expand=False, fillcolor="white").save(
+        input_dir / "SYNTH_SKEW_0001.png",
+        dpi=(300, 300),
+    )
+    border = Image.new("RGB", (240, 180), (12, 12, 12))
+    border.paste(clean.crop((9, 9, 231, 171)), (9, 9))
+    border.save(input_dir / "SYNTH_DARK_BORDER_0001.png", dpi=(300, 300))
+    speckle = page()
+    pixels = speckle.load()
+    for x, y in ((34, 34), (86, 43), (131, 151), (207, 37), (216, 146)):
+        pixels[x, y] = (0, 0, 0)
+    speckle.save(input_dir / "SYNTH_SPECKLE_0001.png", dpi=(300, 300))
+    low = Image.new("RGB", (240, 180), (252, 252, 252))
+    low.save(input_dir / "SYNTH_LOW_CONTRAST_0001.png", dpi=(300, 300))
+    retry = page()
+    ImageDraw.Draw(retry).line((54, 144, 184, 144), fill=(20, 20, 20), width=2)
+    retry.save(input_dir / "SYNTH_RETRY_AFTER_SCAN.png", dpi=(300, 300))
+
+
+def _restore_retry_source(path: Path) -> None:
+    from PIL import Image, ImageDraw
+
+    image = Image.new("RGB", (240, 180), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((24, 22, 216, 158), outline=(35, 35, 35), width=2)
+    draw.line((42, 72, 198, 72), fill=(20, 20, 20), width=2)
+    image.save(path, dpi=(300, 300))
+
+
+def _assert_synthetic_scan(report: dict[str, object]) -> None:
+    summary = report["summary"]
+    if not isinstance(summary, dict):
+        raise SystemExit("synthetic scan summary is malformed")
+    expected_total = 7
+    if summary["total_files"] != expected_total or summary["openable_files"] != expected_total:
+        raise SystemExit("synthetic scan did not inspect the full generated batch")
+    if summary["p0_findings"] < 1 or summary["blank_page_findings"] < 1:
+        raise SystemExit("synthetic scan did not produce expected duplicate and blank-like findings")
+    findings = report["findings"]
+    if not isinstance(findings, list):
+        raise SystemExit("synthetic scan findings are malformed")
+    rules = {str(finding.get("rule")) for finding in findings if isinstance(finding, dict)}
+    for expected_rule in {"duplicate_file", "quality_low_contrast"}:
+        if expected_rule not in rules:
+            raise SystemExit(f"synthetic scan missing expected rule: {expected_rule}")
+
+
+def _assert_synthetic_processing(
+    manifest: dict[str, object],
+    audit: dict[str, object],
+    retry_manifest: dict[str, object],
+    *,
+    expected_failed: int,
+) -> None:
+    summary = manifest["summary"]
+    counts = audit["counts"]
+    if not isinstance(summary, dict) or not isinstance(counts, dict):
+        raise SystemExit("synthetic processing summaries are malformed")
+    if summary["total_files"] != 7 or counts["total_files"] != 7:
+        raise SystemExit("synthetic processing did not include every scan record")
+    if summary["failed_files"] != expected_failed or counts["failed_files"] != expected_failed:
+        raise SystemExit("synthetic processing failure count did not match retry expectation")
+    if retry_manifest["summary"]["failed_files"] != expected_failed:
+        raise SystemExit("synthetic retry manifest count did not match processing failures")
+    operations = audit["operations"]
+    if not isinstance(operations, dict):
+        raise SystemExit("synthetic processing operations summary is malformed")
+    for operation in ("auto_crop", "deskew", "trim_dark_border", "despeckle"):
+        if operations.get(operation) is not True:
+            raise SystemExit(f"synthetic processing did not enable {operation}")
+    records = manifest["files"]
+    if not isinstance(records, list):
+        raise SystemExit("synthetic processing records are malformed")
+    processed_records = [record for record in records if isinstance(record, dict) and record.get("status") in {"processed", "resumed"}]
+    if not any(record.get("dark_border_trimmed") for record in processed_records):
+        raise SystemExit("synthetic processing did not trim the dark-border page")
+    if not any(record.get("despeckled") for record in processed_records):
+        raise SystemExit("synthetic processing did not despeckle the speckled page")
+    metrics = audit["metrics"]
+    if not isinstance(metrics, dict) or metrics["pixel_change_ratio"]["count"] != len(processed_records):
+        raise SystemExit("synthetic processing audit metrics did not cover processed records")
+    if audit["privacy"]["aggregate_only"] is not True:
+        raise SystemExit("synthetic processing audit was not aggregate-only")
+
+
+def _mark_synthetic_review_resolved(source_path: Path, target_path: Path) -> None:
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    with source_path.open("r", newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    for row in rows:
+        severity = row.get("severity")
+        row["status"] = "fixed" if severity in {"P0", "P1"} else "false_positive"
+        row["reviewer_notes"] = "synthetic release validation"
+    with target_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["finding_id", "rule", "severity", "relative_path", "status", "reviewer_notes"])
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 def run_benchmark_validation() -> None:
     with tempfile.TemporaryDirectory(prefix="archive-scan-qc-benchmark-") as temp_dir:
         temp = Path(temp_dir)
@@ -469,6 +767,7 @@ def main(argv: list[str] | None = None) -> int:
     if not args.skip_build_artifacts:
         run_build_artifacts()
     run_examples_dry_run()
+    run_synthetic_integration_validation()
     run_benchmark_validation()
     run_acceptance_validation()
     run_install_smoke()
