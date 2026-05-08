@@ -74,6 +74,14 @@ class ScanQcTest(unittest.TestCase):
             self.assertIn("A001_0002.png", html)
             self.assertIn("dpi_minimum", html)
             self.assertIn("P0", html)
+            self.assertIn("Schema Version", html)
+            self.assertIn("Project", html)
+            self.assertIn("Dependency Notes", html)
+            self.assertIn("Rules Profile", html)
+            self.assertIn("SHA256", html)
+            self.assertIn(saved["files"][0]["sha256"], html)
+            self.assertIn("Complete Report Data", html)
+            self.assertIn('id="scan-qc-report-data"', html)
 
     def test_workers_one_and_default_have_compatible_report_content(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

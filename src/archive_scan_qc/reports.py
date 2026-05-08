@@ -65,10 +65,15 @@ def write_reports(report: dict[str, Any], output_dir: Path) -> dict[str, Path]:
 
 
 def _render_html_report(report: dict[str, Any]) -> str:
+    schema_version = report.get("schema_version")
+    generated_at = report.get("generated_at")
+    project = report.get("project", {})
     manifest = report.get("manifest", {})
     summary = report.get("summary", {})
+    dependency_notes = report.get("dependency_notes", [])
     files = report.get("files", [])
     findings = report.get("findings", [])
+    report_json = json.dumps(report, ensure_ascii=False, indent=2)
 
     return f"""<!doctype html>
 <html lang="zh-CN">
@@ -156,6 +161,7 @@ def _render_html_report(report: dict[str, Any]) -> str:
       background: #eef2f7;
       color: #344054;
       font-size: 12px;
+      white-space: nowrap;
     }}
     tr:last-child td {{
       border-bottom: 0;
@@ -180,21 +186,81 @@ def _render_html_report(report: dict[str, Any]) -> str:
       color: var(--muted);
       padding: 16px;
     }}
+    .table-wrap {{
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow-x: auto;
+    }}
+    .table-wrap table {{
+      border: 0;
+      border-radius: 0;
+      min-width: 760px;
+    }}
+    .notes {{
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin: 0;
+      padding: 12px 16px 12px 28px;
+    }}
+    .notes li + li {{
+      margin-top: 8px;
+    }}
+    details {{
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+    }}
+    summary {{
+      cursor: pointer;
+      font-weight: 650;
+    }}
+    pre {{
+      background: #101828;
+      border-radius: 6px;
+      color: #f2f4f7;
+      font-size: 12px;
+      line-height: 1.5;
+      margin: 12px 0 0;
+      max-height: 520px;
+      overflow: auto;
+      padding: 12px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }}
   </style>
 </head>
 <body>
   <main>
     <h1>Scan QC Report</h1>
+    <section class="meta" aria-label="Report metadata">
+      <div class="item"><span class="label">Schema Version</span><span class="value">{_text(schema_version)}</span></div>
+      <div class="item"><span class="label">Generated At</span><span class="value">{_text(generated_at)}</span></div>
+    </section>
+    <h2>Project</h2>
+    {_key_value_table(project)}
+    <h2>Batch Manifest</h2>
     <section class="meta" aria-label="Batch manifest">
       {_manifest_items(manifest)}
     </section>
     <section class="cards" aria-label="Summary">
       {_summary_cards(summary)}
     </section>
+    <h2>Summary Details</h2>
+    {_key_value_table(summary)}
+    <h2>Dependency Notes</h2>
+    {_notes_list(dependency_notes)}
     <h2>Files</h2>
     {_files_table(files)}
     <h2>Findings</h2>
     {_findings_table(findings)}
+    <h2>Complete Report Data</h2>
+    <details open>
+      <summary>Full embedded JSON</summary>
+      <pre id="complete-report-json">{_text(report_json)}</pre>
+    </details>
+    <script id="scan-qc-report-data" type="application/json">{_script_json(report_json)}</script>
   </main>
 </body>
 </html>
@@ -244,38 +310,44 @@ def _summary_cards(summary: dict[str, Any]) -> str:
 def _files_table(files: list[dict[str, Any]]) -> str:
     if not files:
         return '<div class="empty">No files scanned.</div>'
+    fields = [
+        "relative_path",
+        "filename",
+        "extension",
+        "openable",
+        "format",
+        "width",
+        "height",
+        "dpi_x",
+        "dpi_y",
+        "color_mode",
+        "orientation_class",
+        "aspect_ratio",
+        "exif_orientation",
+        "exif_orientation_requires_transpose",
+        "quality_brightness_mean",
+        "quality_contrast_stddev",
+        "quality_sharpness_laplacian_var",
+        "quality_dark_pixel_ratio",
+        "quality_foreground_coverage",
+        "quality_edge_coverage",
+        "file_size",
+        "sha256",
+        "error",
+    ]
     rows = []
     for item in files:
         rows.append(
             "<tr>"
-            f"<td>{_text(item.get('relative_path'))}</td>"
-            f"<td>{_text(item.get('openable'))}</td>"
-            f"<td>{_text(item.get('format'))}</td>"
-            f"<td>{_text(item.get('width'))} x {_text(item.get('height'))}</td>"
-            f"<td>{_text(item.get('dpi_x'))} x {_text(item.get('dpi_y'))}</td>"
-            f"<td>{_text(item.get('color_mode'))}</td>"
-            f"<td>{_text(item.get('orientation_class'))}</td>"
-            f"<td>{_text(item.get('aspect_ratio'))}</td>"
-            f"<td>{_text(item.get('exif_orientation'))}</td>"
-            f"<td>{_text(item.get('exif_orientation_requires_transpose'))}</td>"
-            f"<td>{_text(item.get('quality_brightness_mean'))}</td>"
-            f"<td>{_text(item.get('quality_contrast_stddev'))}</td>"
-            f"<td>{_text(item.get('quality_sharpness_laplacian_var'))}</td>"
-            f"<td>{_text(item.get('quality_dark_pixel_ratio'))}</td>"
-            f"<td>{_text(item.get('quality_foreground_coverage'))}</td>"
-            f"<td>{_text(item.get('quality_edge_coverage'))}</td>"
-            f"<td>{_text(item.get('file_size'))}</td>"
-            f"<td>{_text(item.get('error'))}</td>"
-            "</tr>"
+            + "".join(f"<td>{_text(item.get(field))}</td>" for field in fields)
+            + "</tr>"
         )
     return (
-        "<table><thead><tr><th>Path</th><th>Openable</th><th>Format</th><th>Dimensions</th>"
-        "<th>DPI</th><th>Color</th><th>Orientation</th><th>Aspect Ratio</th>"
-        "<th>EXIF Orientation</th><th>EXIF Transpose Signal</th><th>Brightness Mean</th><th>Contrast Stddev</th>"
-        "<th>Sharpness Laplacian Var</th><th>Dark Pixel Ratio</th><th>Foreground Coverage</th>"
-        "<th>Edge Coverage</th><th>Bytes</th><th>Error</th></tr></thead><tbody>"
+        '<div class="table-wrap"><table><thead><tr>'
+        + "".join(f"<th>{_text(_label_from_key(field))}</th>" for field in fields)
+        + "</tr></thead><tbody>"
         + "\n".join(rows)
-        + "</tbody></table>"
+        + "</tbody></table></div>"
     )
 
 
@@ -295,13 +367,51 @@ def _findings_table(findings: list[dict[str, Any]]) -> str:
             "</tr>"
         )
     return (
-        "<table><thead><tr><th>Severity</th><th>Path</th><th>Rule</th><th>Message</th></tr></thead><tbody>"
+        '<div class="table-wrap"><table><thead><tr><th>Severity</th><th>Path</th><th>Rule</th><th>Message</th></tr></thead><tbody>'
         + "\n".join(rows)
-        + "</tbody></table>"
+        + "</tbody></table></div>"
     )
+
+
+def _key_value_table(data: dict[str, Any]) -> str:
+    if not data:
+        return '<div class="empty">No data.</div>'
+    rows = []
+    for key, value in data.items():
+        rows.append(f"<tr><th>{_text(_label_from_key(key))}</th><td>{_format_value(value)}</td></tr>")
+    return '<div class="table-wrap"><table><tbody>' + "\n".join(rows) + "</tbody></table></div>"
+
+
+def _notes_list(notes: list[Any]) -> str:
+    if not notes:
+        return '<div class="empty">No dependency notes.</div>'
+    return '<ul class="notes">' + "\n".join(f"<li>{_text(note)}</li>" for note in notes) + "</ul>"
+
+
+def _format_value(value: Any) -> str:
+    if isinstance(value, (dict, list)):
+        return f"<pre>{_text(json.dumps(value, ensure_ascii=False, indent=2))}</pre>"
+    return _text(value)
+
+
+def _label_from_key(key: str) -> str:
+    labels = {
+        "dpi_x": "DPI X",
+        "dpi_y": "DPI Y",
+        "exif_orientation": "EXIF Orientation",
+        "exif_orientation_requires_transpose": "EXIF Transpose Signal",
+        "sha256": "SHA256",
+    }
+    if key in labels:
+        return labels[key]
+    return key.replace("_", " ").title()
 
 
 def _text(value: Any) -> str:
     if value is None:
         return ""
     return escape(str(value), quote=True)
+
+
+def _script_json(value: str) -> str:
+    return value.replace("</", "<\\/")
