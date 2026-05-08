@@ -121,6 +121,10 @@ def main(argv: list[str] | None = None) -> int:
         from .benchmark import main as benchmark_main
 
         return benchmark_main(argv[1:])
+    if argv and argv[0] == "run-plan":
+        from .run_plan import main as run_plan_main
+
+        return run_plan_main(argv[1:])
     if argv and argv[0] == "preflight":
         return _main_preflight(argv[1:])
     if argv and argv[0] == "review-export":

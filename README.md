@@ -100,6 +100,38 @@ archive-scan-qc \
 The optional manifest CSV must include a `relative_path` column whose values
 are expected image paths relative to `--input`.
 
+For project-scale production runs, use a local run plan to drive multiple
+batches through preflight, scan, and optional processing:
+
+```bash
+archive-scan-qc run-plan \
+  --plan-csv /path/to/run-plan.csv \
+  --out /path/to/project-qc-output \
+  --project project-code \
+  --continue-on-error
+```
+
+The plan may be CSV or JSON. Each batch row/object must include `batch_id` and
+`input_dir`, and may include `report_dir` or a relative report name,
+`process_out`, `manifest_csv`, `rules_profile`, `workers`, `min_dpi`,
+`name_pattern`, `auto_crop`, `deskew`, `trim_dark_border`, `despeckle`, and
+`resume_processing`. Relative `input_dir`, `manifest_csv`, and `rules_profile`
+values are resolved relative to the plan file. Relative `report_dir` and
+`process_out` values are resolved under `--out`.
+
+`run-plan` writes each batch's normal local artifacts in its batch report and
+processing directories, then writes project-level `run_plan_summary.json` and
+`run_plan_summary.csv` under `--out`. The project summary is aggregate-only:
+it includes batch counts, pass/fail counts, P0/P1/P2 totals, processing failure
+totals, preflight error totals, throughput aggregates, and failed batch IDs. It
+does not include source filenames, relative or absolute source paths, hashes,
+thumbnails, row-level file metadata, or image content. Batch-level reports and
+processing manifests keep their existing sensitive local evidence behavior.
+
+By default, `run-plan` stops at the first failed batch and exits non-zero. Add
+`--continue-on-error` to keep running later batches while still recording the
+failed batch in the project summary and returning non-zero at the end.
+
 Run `archive-scan-qc preflight` before production batches. It validates the
 input directory, output and processing-output configuration, worker count, rules
 profile loading, and manifest structure without opening, copying, modifying, or
