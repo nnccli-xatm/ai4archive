@@ -15,6 +15,10 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 - Confirm a synthetic review template can be exported and a privacy-safe
   aggregate `review_summary.json` can be generated with no remaining P0/P1
   findings before acceptance.
+- Confirm a synthetic `archive-scan-qc calibrate-rules` run creates
+  `rules_calibration_summary.json` after automated QC and review summary, and
+  that any `--write-suggested-profile` output is marked draft/suggested and
+  does not overwrite the original profile.
 - Confirm a synthetic multi-batch `archive-scan-qc run-plan` creates per-batch
   preflight/scan/processing artifacts plus aggregate `run_plan_summary.json`
   and `run_plan_summary.csv`.
@@ -68,6 +72,9 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   `provider.<name>.<rule>` namespace, protected built-in P0 rule boundary,
   provider disable path, and the prohibition on uploads, image bytes,
   thumbnails, OCR text, and file content.
+- Confirm production runbooks explain the threshold calibration loop:
+  automated QC, human review, aggregate calibration recommendation, then human
+  approval before changing a project rules profile.
 
 ## Real sample aggregate validation
 
@@ -95,6 +102,8 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 - Do not enable an analysis provider that uploads source images, thumbnails,
   OCR text, derived content, hashes, row-level metadata, or findings to a
   network service.
+- Do not upload or attach private `scan_qc_report.json` files for calibration.
+  Share only aggregate `rules_calibration_summary.json` after policy review.
 - Do not publish run plan files if their input, manifest, rules-profile,
   report, or processing-output paths reveal private collection locations. Share
   only aggregate `run_plan_summary.json` or `run_plan_summary.csv` after policy
