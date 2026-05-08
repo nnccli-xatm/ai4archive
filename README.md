@@ -217,6 +217,54 @@ encode the agreed DPI, filename, brightness, contrast, and blur thresholds
 there. Invalid profile paths, malformed JSON, or wrong field types stop the CLI
 before reports are written.
 
+### Optional offline analysis provider
+
+By default no model or external analyzer runs; the CLI uses only built-in rules.
+To reserve a production-grade local model hook without adding GPU, network, or
+large-model dependencies, pass an optional local command:
+
+```bash
+archive-scan-qc \
+  --input /path/to/scanned-images \
+  --out /path/to/qc-report \
+  --project demo-project \
+  --batch batch-001 \
+  --analysis-provider-command '/approved-tools/local-provider --profile safe'
+```
+
+The provider runs as a controlled local child process. The scanner sends JSONL
+on stdin with minimized fields: project/batch identifiers, input/output
+directories, source `relative_path` and absolute local path, openability and
+basic image metadata, and rules profile metadata. It does not send image bytes,
+thumbnails, OCR text, hashes, or file content. The provider must not upload
+images or derived content; run it only in the same approved local environment
+as the source scans. Omit `--analysis-provider-command` to disable the provider.
+
+Provider output is JSONL on stdout. Metadata records are optional:
+
+```json
+{"type":"metadata","provider":{"name":"local-qc-model","version":"2026.1","model":"offline-small"}}
+```
+
+Finding records must use the provider namespace and include confidence:
+
+```json
+{"type":"finding","relative_path":"A001_0001.png","rule":"provider.local-qc-model.blur","severity":"P2","confidence":0.82,"message":"Local provider blur signal.","metadata":{"model":"offline-small"}}
+```
+
+Provider rule ids must match `provider.<name>.<rule>` and cannot override
+built-in rules such as `openability`, `dpi_minimum`, duplicate checks, or
+manifest P0 checks. Invalid JSONL, unknown paths, invalid severities,
+out-of-range confidence values, or non-provider rule ids stop the scan with a
+clear error before reports are written. Accepted provider findings are merged
+with built-in findings and marked with `source: "provider"`; built-in rule
+findings are marked with `source: "rules"`.
+
+Reports include provider aggregate metadata and provider finding counts. They
+still must not contain embedded images, thumbnails, OCR text, or file content;
+provider metadata keys that look like OCR/text/content/image/path/hash payloads
+are dropped before serialization.
+
 ### Review and rule calibration
 
 After a local scan, treat `scan_qc_report.json`, HTML, CSVs, and review

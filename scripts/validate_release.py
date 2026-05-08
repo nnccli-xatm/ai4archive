@@ -96,6 +96,43 @@ def run_install_smoke() -> None:
                 "synthetic",
             ]
         )
+        provider = temp / "fake_provider.py"
+        provider.write_text(
+            "import json, sys\n"
+            "for line in sys.stdin:\n"
+            "    row = json.loads(line)\n"
+            "    print(json.dumps({"
+            "'type':'finding',"
+            "'relative_path':row['relative_path'],"
+            "'rule':'provider.release.smoke',"
+            "'severity':'P2',"
+            "'confidence':0.5,"
+            "'message':'Synthetic release smoke provider finding.',"
+            "'metadata':{'model':'fake-release-smoke'}"
+            "}))\n",
+            encoding="utf-8",
+        )
+        provider_report_dir = temp / "provider-report"
+        _run(
+            [
+                str(python),
+                "-m",
+                "archive_scan_qc",
+                "--input",
+                str(sample_dir),
+                "--out",
+                str(provider_report_dir),
+                "--project",
+                "release-smoke",
+                "--batch",
+                "synthetic-provider",
+                "--analysis-provider-command",
+                f"{python} {provider}",
+            ]
+        )
+        provider_report = json.loads((provider_report_dir / "scan_qc_report.json").read_text(encoding="utf-8"))
+        if provider_report["summary"]["provider_findings"] != 1:
+            raise SystemExit("provider release smoke did not record the fake provider finding")
         expected = [
             report_dir / "scan_qc_report.json",
             report_dir / "scan_qc_report.html",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import re
 from typing import Any
 
 
@@ -205,6 +206,34 @@ RULE_REGISTRY: dict[str, RuleMetadata] = {
     ),
 }
 
+PROVIDER_RULE_PATTERN = re.compile(r"^provider\.[a-z0-9][a-z0-9_-]*\.[a-z0-9][a-z0-9_.-]*$")
+
+PROVIDER_RULE_POLICY = {
+    "namespace": "provider.<name>.<rule>",
+    "constraints": [
+        "Provider rule ids must use the provider namespace and must not reuse built-in rule ids.",
+        "Provider findings are external local analysis signals and cannot override protected built-in P0 rules.",
+        "Provider metadata must be aggregate or model/run metadata only; reports must not include images, thumbnails, OCR text, or file content.",
+    ],
+    "protected_builtin_p0_rules": [
+        "openability",
+        "dpi_minimum",
+        "dimensions",
+        "duplicate_name",
+        "duplicate_file",
+        "manifest_missing_file",
+        "manifest_unexpected_file",
+        "manifest_duplicate_entry",
+    ],
+}
+
 
 def rule_catalog() -> dict[str, dict[str, Any]]:
     return {rule_id: metadata.to_report_dict() for rule_id, metadata in sorted(RULE_REGISTRY.items())}
+
+
+def validate_provider_rule_id(rule_id: str) -> None:
+    if rule_id in RULE_REGISTRY:
+        raise ValueError(f"provider rule id '{rule_id}' cannot override a built-in rule.")
+    if not PROVIDER_RULE_PATTERN.fullmatch(rule_id):
+        raise ValueError("provider rule ids must match provider.<name>.<rule> using lowercase letters, numbers, _, -, or dots.")
