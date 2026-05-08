@@ -564,6 +564,7 @@ class ScanQcTest(unittest.TestCase):
             "quality_near_blank_page",
             "quality_skew_candidate",
             "quality_dark_border_candidate",
+            "quality_scanline_candidate",
             "batch_orientation_consistency",
         }
 
@@ -1288,6 +1289,54 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn("quality_skew_candidate", rules)
             self.assertNotIn("quality_dark_border_candidate", rules)
             self.assertIsNone(record["quality_dark_border_bbox"])
+
+    def test_scanline_quality_findings_flag_horizontal_and_vertical_streaks(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            _synthetic_scanline_page("horizontal").save(input_dir / "horizontal.png", dpi=(300, 300))
+            _synthetic_scanline_page("vertical").save(input_dir / "vertical.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            paths = write_reports(report, output_dir)
+            rules_by_path: dict[str, set[str]] = {}
+            for finding in report["findings"]:
+                rules_by_path.setdefault(finding["relative_path"], set()).add(finding["rule"])
+            records = {record["relative_path"]: record for record in report["files"]}
+
+            self.assertIn("quality_scanline_candidate", rules_by_path["horizontal.png"])
+            self.assertIn("quality_scanline_candidate", rules_by_path["vertical.png"])
+            self.assertEqual(records["horizontal.png"]["quality_scanline_orientation"], "horizontal")
+            self.assertEqual(records["vertical.png"]["quality_scanline_orientation"], "vertical")
+            self.assertGreaterEqual(records["horizontal.png"]["quality_scanline_score"], 0.85)
+            self.assertGreaterEqual(records["vertical.png"]["quality_scanline_score"], 0.85)
+            self.assertIsNotNone(records["horizontal.png"]["quality_scanline_reason"])
+
+            saved = json.loads(paths["json"].read_text(encoding="utf-8"))
+            self.assertIn("quality_scanline_candidate", saved["rule_catalog"])
+            self.assertIn("quality_scanline_score", paths["files_csv"].read_text(encoding="utf-8"))
+            self.assertIn("quality_scanline_candidate", paths["findings_csv"].read_text(encoding="utf-8"))
+            html = paths["html"].read_text(encoding="utf-8")
+            self.assertIn("Scanline or streak artifact candidate", html)
+            self.assertIn("Quality Scanline Candidate", html)
+
+    def test_scanline_quality_findings_stay_quiet_on_clean_control(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            _synthetic_text_page().save(input_dir / "clean.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            rules = {finding["rule"] for finding in report["findings"]}
+            record = report["files"][0]
+
+            self.assertNotIn("quality_scanline_candidate", rules)
+            self.assertIsNone(record["quality_scanline_orientation"])
+            self.assertLess(record["quality_scanline_score"], 0.85)
 
     def test_quality_metrics_flag_dark_bright_low_contrast_and_blur(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -3005,6 +3054,16 @@ def _synthetic_dark_border_page() -> Image.Image:
     draw = ImageDraw.Draw(image)
     for offset in range(5):
         draw.rectangle((offset, offset, image.width - 1 - offset, image.height - 1 - offset), outline=(8, 8, 8))
+    return image
+
+
+def _synthetic_scanline_page(orientation: str) -> Image.Image:
+    image = _synthetic_text_page().resize((360, 270), Image.Resampling.NEAREST)
+    draw = ImageDraw.Draw(image)
+    if orientation == "horizontal":
+        draw.rectangle((0, 134, image.width - 1, 139), fill=(0, 0, 0))
+    else:
+        draw.rectangle((178, 0, 183, image.height - 1), fill=(0, 0, 0))
     return image
 
 

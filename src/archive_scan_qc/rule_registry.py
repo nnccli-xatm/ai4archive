@@ -186,6 +186,15 @@ RULE_REGISTRY: dict[str, RuleMetadata] = {
         "automated screening",
         "Dark pixels touching the outer image edges indicate a likely scanner border that should be reviewed for trim.",
     ),
+    "quality_scanline_candidate": RuleMetadata(
+        "quality_scanline_candidate",
+        "Scanline or streak artifact candidate",
+        "P2",
+        ("DA/T 31-2017 10.4 decontaminate while preserving original appearance", "DA/T 31-2017 10.5.1 complete and readable image"),
+        "thumbnail row and column intensity anomalies",
+        "automated screening",
+        "A conservative full-span row or column anomaly indicates a possible scanner line or streak artifact.",
+    ),
     "batch_format_consistency": RuleMetadata(
         "batch_format_consistency",
         "Batch format consistency",
