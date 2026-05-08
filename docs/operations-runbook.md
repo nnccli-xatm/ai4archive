@@ -313,6 +313,16 @@ The scan command can optionally run a local offline analysis provider with
 the approved way to disable provider analysis and preserve the built-in
 rules-only path.
 
+Use `examples/local_analysis_provider.py` to validate the contract with
+synthetic data before approving a real provider:
+
+```bash
+archive-scan-qc \
+  --input /path/to/synthetic-images \
+  --out /path/to/qc-report \
+  --analysis-provider-command 'python3 examples/local_analysis_provider.py'
+```
+
 Only use providers installed in the approved local environment. The scanner
 sends JSONL to the provider process on stdin with local file paths and basic
 run/image metadata. It does not send image bytes, thumbnails, OCR text, hashes,
@@ -330,7 +340,21 @@ Provider findings are merged with built-in findings and marked with
 Reports show provider aggregate metadata and provider finding counts, but must
 not include embedded images, thumbnails, OCR text, file content, or provider
 metadata fields that carry row-level content. Validate this boundary with
-synthetic fake providers before enabling a real local model.
+synthetic providers before enabling a real local model.
+
+For future PaddleOCR, ONNX, Paddle, or GPU-capable providers, keep the scanner
+contract unchanged and put model-specific setup behind the local provider
+command. A GPU sidecar can run on the same approved workstation or secured
+processing node, but it must stay offline/local and must receive work only
+through the JSONL request records or local file paths already present on that
+machine. Do not adapt the scanner for cloud queues, remote inference endpoints,
+platform-specific GPU orchestration, or direct model dependencies.
+
+Forbidden provider outputs include OCR transcripts, detected personal data,
+image bytes, thumbnails, crops, base64 payloads, embeddings, prompts, raw model
+logs, absolute paths, hashes, private filenames, and any cloud or network
+location. Provider stdout should contain only the documented metadata and
+finding records, and metadata should remain aggregate or model/run-level.
 
 ## Human Review And Acceptance Summary
 

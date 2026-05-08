@@ -29,6 +29,7 @@ from archive_scan_qc.scanner import ScanConfig, scan_batch
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PRIVATE_INTEGRATION_PATH = REPO_ROOT / "scripts" / "run_private_integration.py"
+LOCAL_PROVIDER_EXAMPLE = REPO_ROOT / "examples" / "local_analysis_provider.py"
 
 
 def _load_private_integration_module():
@@ -399,6 +400,42 @@ class ScanQcTest(unittest.TestCase):
             self.assertIn("Provider Analysis", html)
             self.assertIn("provider.fake.suspected_issue", html)
             self.assertIn("provider,0.875", csv_text)
+
+    def test_example_analysis_provider_runs_through_cli_and_sanitizes_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.png", dpi=(300, 300))
+
+            exit_code = main(
+                [
+                    "--input",
+                    str(input_dir),
+                    "--out",
+                    str(output_dir),
+                    "--project",
+                    "p1",
+                    "--batch",
+                    "b1",
+                    "--analysis-provider-command",
+                    f"{sys.executable} {LOCAL_PROVIDER_EXAMPLE}",
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            report_text = (output_dir / "scan_qc_report.json").read_text(encoding="utf-8")
+            report = json.loads(report_text)
+            provider_findings = [finding for finding in report["findings"] if finding["source"] == "provider"]
+            self.assertEqual(len(provider_findings), 1)
+            self.assertEqual(provider_findings[0]["rule"], "provider.local-sample.small_canvas")
+            self.assertEqual(provider_findings[0]["confidence"], 0.66)
+            self.assertEqual(report["summary"]["provider_findings"], 1)
+            self.assertEqual(report["analysis_provider"]["provider"]["name"], "local-sample")
+            self.assertNotIn("sanitizer_probe_path", report_text)
+            self.assertNotIn("image_probe", report_text)
+            self.assertNotIn("synthetic-value-should-not-appear-in-reports", report_text)
 
     def test_invalid_analysis_provider_output_fails_clearly(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
