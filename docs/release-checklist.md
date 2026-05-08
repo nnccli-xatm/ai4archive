@@ -30,6 +30,9 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   `examples/manifest.sample.csv` through `archive-scan-qc preflight` and the
   scan/process CLI against synthetic files named `BATCH001_PAGE_0001.png` and
   `BATCH001_PAGE_0002.png`.
+- Run a synthetic fake provider smoke test with `--analysis-provider-command`
+  and confirm exactly one `source=provider` finding is reported, while omitting
+  the flag preserves the default rules-only path.
 - For offline or domestic-platform deployments, install from the approved local
   wheelhouse and verify the Pillow wheel on target hardware.
 
@@ -54,6 +57,10 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 - Confirm production runbooks explain the manual review template, allowed
   disposition statuses, aggregate acceptance summary, and which review artifacts
   are sensitive local evidence.
+- Confirm README and runbook document the offline provider JSONL contract,
+  `provider.<name>.<rule>` namespace, protected built-in P0 rule boundary,
+  provider disable path, and the prohibition on uploads, image bytes,
+  thumbnails, OCR text, and file content.
 
 ## Real sample aggregate validation
 
@@ -78,6 +85,9 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 - Do not upload or attach filled review templates or reviewer notes from
   private collections; share only aggregate `review_summary.json` after policy
   review.
+- Do not enable an analysis provider that uploads source images, thumbnails,
+  OCR text, derived content, hashes, row-level metadata, or findings to a
+  network service.
 
 ## Performance record
 

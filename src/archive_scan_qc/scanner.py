@@ -19,8 +19,9 @@ from typing import Any
 
 from PIL import Image, ImageStat, UnidentifiedImageError
 
+from .analysis_provider import run_analysis_provider
 from .concurrency import resolve_worker_count, worker_metadata
-from .rule_registry import rule_catalog
+from .rule_registry import PROVIDER_RULE_POLICY, rule_catalog
 from .rules import RulesProfile, default_rules_profile
 
 SUPPORTED_EXTENSIONS = {
@@ -64,6 +65,7 @@ class ScanConfig:
     blur_min_contrast_stddev: float = 12.0
     rules_profile: RulesProfile | None = None
     workers: int | None = None
+    analysis_provider_command: str | None = None
 
 
 @dataclass(frozen=True)
@@ -112,6 +114,9 @@ def scan_batch(config: ScanConfig) -> dict[str, Any]:
     files = _inspect_files(candidate_files, input_dir, scan_workers)
     manifest_paths = _read_manifest_paths(config.manifest_csv) if config.manifest_csv else None
     findings = _build_findings(files, profile, manifest_paths)
+    analysis_provider = _run_optional_analysis_provider(config, input_dir, files, profile)
+    if analysis_provider["enabled"]:
+        findings.extend(analysis_provider["findings"])
     manifest_check = _summarize_manifest_check(files, manifest_paths, config.manifest_csv)
     summary = _summarize(files, findings, manifest_check, skip_stats)
     finished_at = datetime.now(timezone.utc)
@@ -136,6 +141,7 @@ def scan_batch(config: ScanConfig) -> dict[str, Any]:
         "rules_profile": profile.metadata(),
         "workers": scan_workers,
         "worker_mode": performance["mode"],
+        "analysis_provider_enabled": analysis_provider["enabled"],
     }
     manifest = {
         "project_id": project["project_id"],
@@ -163,6 +169,7 @@ def scan_batch(config: ScanConfig) -> dict[str, Any]:
         "performance": performance,
         "workers": scan_workers,
         "worker_mode": performance["mode"],
+        "analysis_provider": analysis_provider["metadata"],
     }
 
     return {
@@ -176,9 +183,51 @@ def scan_batch(config: ScanConfig) -> dict[str, Any]:
         ],
         "summary": summary,
         "rule_catalog": rule_catalog(),
+        "provider_rule_policy": PROVIDER_RULE_POLICY,
+        "analysis_provider": analysis_provider["metadata"],
         "files": files,
         "findings": findings,
     }
+
+
+def _run_optional_analysis_provider(
+    config: ScanConfig,
+    input_dir: Path,
+    files: list[dict[str, Any]],
+    profile: RulesProfile,
+) -> dict[str, Any]:
+    if not config.analysis_provider_command:
+        return {
+            "enabled": False,
+            "findings": [],
+            "metadata": {
+                "enabled": False,
+                "transport": None,
+                "findings_accepted": 0,
+                "provider": {},
+            },
+        }
+
+    result = run_analysis_provider(
+        config.analysis_provider_command,
+        input_dir=input_dir,
+        output_dir=config.output_dir.resolve(),
+        project_id=config.project_id,
+        batch_id=config.batch_id,
+        files=files,
+        rules_profile=profile.metadata(),
+    )
+    metadata = {
+        "enabled": True,
+        **result.metadata,
+        "privacy": {
+            "local_process_only": True,
+            "input_minimized": True,
+            "image_bytes_sent": False,
+            "network_required": False,
+        },
+    }
+    return {"enabled": True, "findings": result.findings, "metadata": metadata}
 
 
 def _inspect_files(candidate_files: list[Path], input_dir: Path, workers: int) -> list[dict[str, Any]]:
@@ -741,6 +790,7 @@ def _finding(item: dict[str, Any], rule: str, severity: str, message: str) -> di
         "rule": rule,
         "severity": severity,
         "message": message,
+        "source": "rules",
     }
 
 
@@ -750,6 +800,7 @@ def _path_finding(relative_path: str, rule: str, severity: str, message: str) ->
         "rule": rule,
         "severity": severity,
         "message": message,
+        "source": "rules",
     }
 
 
@@ -796,6 +847,8 @@ def _summarize(
         "p1_findings": sum(1 for finding in findings if finding["severity"] == "P1"),
         "p2_findings": sum(1 for finding in findings if finding["severity"] == "P2"),
         "blank_page_findings": sum(1 for finding in findings if finding["rule"] == "quality_near_blank_page"),
+        "rules_findings": sum(1 for finding in findings if finding.get("source", "rules") == "rules"),
+        "provider_findings": sum(1 for finding in findings if finding.get("source") == "provider"),
         "manifest_used": manifest_check.used,
         "manifest_csv": manifest_check.path,
         "manifest_entry_count": manifest_check.entry_count,

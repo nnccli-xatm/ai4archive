@@ -236,6 +236,32 @@ active rules profile and report `rule_catalog` use the same clause references as
 that document before accepting a release candidate or changing production
 thresholds.
 
+## Offline Analysis Provider
+
+The scan command can optionally run a local offline analysis provider with
+`--analysis-provider-command`. This is disabled by default; omitting the flag is
+the approved way to disable provider analysis and preserve the built-in
+rules-only path.
+
+Only use providers installed in the approved local environment. The scanner
+sends JSONL to the provider process on stdin with local file paths and basic
+run/image metadata. It does not send image bytes, thumbnails, OCR text, hashes,
+or file content. Providers must not use the network or upload images, derived
+text, thumbnails, or metadata outside the controlled environment.
+
+Provider output must be JSONL on stdout. Findings must include `relative_path`,
+`rule`, `severity`, `confidence`, `message`, and optional safe `metadata`.
+Provider rules must use `provider.<name>.<rule>`; built-in rules and protected
+P0 checks cannot be overridden by a provider. Invalid output stops the run with
+a clear CLI error before reports are written.
+
+Provider findings are merged with built-in findings and marked with
+`source=provider`; built-in rule findings are marked with `source=rules`.
+Reports show provider aggregate metadata and provider finding counts, but must
+not include embedded images, thumbnails, OCR text, file content, or provider
+metadata fields that carry row-level content. Validate this boundary with
+synthetic fake providers before enabling a real local model.
+
 ## Human Review And Acceptance Summary
 
 When automated QC produces findings, create a local review template for manual

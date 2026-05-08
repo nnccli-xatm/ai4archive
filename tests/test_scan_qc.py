@@ -6,6 +6,7 @@ import io
 import json
 import re
 import shutil
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -17,7 +18,7 @@ from archive_scan_qc.benchmark import _recommendations
 from archive_scan_qc.cli import main
 from archive_scan_qc.processing import ProcessingOptions, process_images
 from archive_scan_qc.reports import build_review_summary, write_reports, write_review_export, write_review_summary
-from archive_scan_qc.rule_registry import RULE_REGISTRY
+from archive_scan_qc.rule_registry import RULE_REGISTRY, validate_provider_rule_id
 from archive_scan_qc.rules import RulesProfileError, load_rules_profile
 from archive_scan_qc.scanner import ScanConfig, scan_batch
 
@@ -111,6 +112,145 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn("<img", html.lower())
             self.assertNotIn("data:image", html.lower())
             self.assertNotIn("src=", html.lower())
+
+    def test_default_analysis_provider_is_disabled_and_report_shape_is_compatible(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+
+            self.assertFalse(report["analysis_provider"]["enabled"])
+            self.assertEqual(report["summary"]["provider_findings"], 0)
+            self.assertTrue(all(finding["source"] == "rules" for finding in report["findings"]))
+
+    def test_fake_analysis_provider_finding_is_merged_and_reported(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            provider = root / "fake_provider.py"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.png", dpi=(300, 300))
+            _write_fake_provider(
+                provider,
+                [
+                    {
+                        "type": "metadata",
+                        "provider": {"name": "fake", "version": "1.0", "model": "none"},
+                    },
+                    {
+                        "type": "finding",
+                        "relative_path": "A001_0001.png",
+                        "rule": "provider.fake.suspected_issue",
+                        "severity": "P2",
+                        "confidence": 0.875,
+                        "message": "Fake local model signal.",
+                        "metadata": {"model": "none", "backend": "unit-test"},
+                    },
+                ],
+            )
+
+            report = scan_batch(
+                ScanConfig(
+                    "p1",
+                    "b1",
+                    input_dir,
+                    output_dir,
+                    analysis_provider_command=f"{sys.executable} {provider}",
+                )
+            )
+            paths = write_reports(report, output_dir)
+            provider_findings = [finding for finding in report["findings"] if finding["source"] == "provider"]
+
+            self.assertEqual(len(provider_findings), 1)
+            self.assertEqual(provider_findings[0]["rule"], "provider.fake.suspected_issue")
+            self.assertEqual(provider_findings[0]["confidence"], 0.875)
+            self.assertEqual(report["summary"]["provider_findings"], 1)
+            self.assertEqual(report["analysis_provider"]["provider"]["name"], "fake")
+            html = paths["html"].read_text(encoding="utf-8")
+            csv_text = paths["findings_csv"].read_text(encoding="utf-8")
+            self.assertIn("Provider Analysis", html)
+            self.assertIn("provider.fake.suspected_issue", html)
+            self.assertIn("provider,0.875", csv_text)
+
+    def test_invalid_analysis_provider_output_fails_clearly(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            provider = root / "bad_provider.py"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.png", dpi=(300, 300))
+            provider.write_text("print('{not-json')\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "output line 1 is not valid JSON"):
+                scan_batch(
+                    ScanConfig(
+                        "p1",
+                        "b1",
+                        input_dir,
+                        output_dir,
+                        analysis_provider_command=f"{sys.executable} {provider}",
+                    )
+                )
+
+    def test_provider_rule_ids_cannot_override_builtin_rules(self) -> None:
+        with self.assertRaisesRegex(ValueError, "cannot override a built-in rule"):
+            validate_provider_rule_id("openability")
+        with self.assertRaisesRegex(ValueError, r"provider\.<name>\.<rule>"):
+            validate_provider_rule_id("Provider.Fake.Rule")
+        validate_provider_rule_id("provider.fake.quality_too_dark")
+
+    def test_provider_metadata_filter_does_not_report_image_or_ocr_content(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            provider = root / "leaky_provider.py"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "private_page.png", dpi=(300, 300))
+            _write_fake_provider(
+                provider,
+                [
+                    {
+                        "type": "metadata",
+                        "provider": {
+                            "name": "fake",
+                            "ocr_text": "SECRET_OCR_TEXT",
+                            "thumbnail": "data:image/png;base64,SECRET",
+                        },
+                    },
+                    {
+                        "type": "finding",
+                        "relative_path": "private_page.png",
+                        "rule": "provider.fake.signal",
+                        "severity": "P2",
+                        "confidence": 0.5,
+                        "message": "Aggregate local signal.",
+                        "metadata": {"ocr_text": "SECRET_OCR_TEXT", "model": "fake"},
+                    },
+                ],
+            )
+
+            report = scan_batch(
+                ScanConfig(
+                    "p1",
+                    "b1",
+                    input_dir,
+                    output_dir,
+                    analysis_provider_command=f"{sys.executable} {provider}",
+                )
+            )
+            paths = write_reports(report, output_dir)
+            report_text = paths["json"].read_text(encoding="utf-8") + paths["html"].read_text(encoding="utf-8")
+
+            self.assertNotIn("SECRET_OCR_TEXT", report_text)
+            self.assertNotIn("data:image", report_text)
+            self.assertEqual(report["findings"][-1]["metadata"], {"model": "fake"})
 
     def test_rule_registry_covers_current_finding_rules_and_reports_catalog(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1911,6 +2051,18 @@ def _benchmark_run_stub(
             "openable_files_per_minute": scan_rate,
         },
     }
+
+
+def _write_fake_provider(path: Path, records: list[dict[str, object]]) -> None:
+    path.write_text(
+        "import json\n"
+        "records = " + repr(records) + "\n"
+        "for _ in __import__('sys').stdin:\n"
+        "    pass\n"
+        "for record in records:\n"
+        "    print(json.dumps(record, ensure_ascii=False))\n",
+        encoding="utf-8",
+    )
 
 
 def _dark_pixel_count(image: Image.Image) -> int:

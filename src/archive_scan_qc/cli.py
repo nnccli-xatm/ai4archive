@@ -8,6 +8,7 @@ from pathlib import Path
 import sys
 
 from ._version import __version__
+from .analysis_provider import AnalysisProviderError
 from .preflight import PreflightConfig, run_preflight, write_preflight_report
 from .processing import ProcessingOptions, process_images
 from .reports import write_reports, write_review_export, write_review_summary
@@ -112,6 +113,17 @@ def _add_scan_arguments(parser: argparse.ArgumentParser, *, include_scan_overrid
         type=_positive_int,
         help="Maximum local worker threads for scan and processing. Use 1 for serial mode.",
     )
+    if include_scan_overrides:
+        parser.add_argument(
+            "--analysis-provider-command",
+            default=None,
+            help=(
+                "Optional local offline analysis provider command. The scanner sends minimized JSONL "
+                "records on stdin and reads provider findings as JSONL on stdout."
+            ),
+        )
+    else:
+        parser.set_defaults(analysis_provider_command=None)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -141,8 +153,12 @@ def main(argv: list[str] | None = None) -> int:
         manifest_csv=args.manifest_csv,
         rules_profile=rules_profile,
         workers=args.workers,
+        analysis_provider_command=args.analysis_provider_command,
     )
-    report = scan_batch(config)
+    try:
+        report = scan_batch(config)
+    except AnalysisProviderError as exc:
+        parser.error(str(exc))
     paths = write_reports(report, args.out)
 
     processing_manifest = (

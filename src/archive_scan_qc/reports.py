@@ -55,9 +55,9 @@ def write_reports(report: dict[str, Any], output_dir: Path) -> dict[str, Path]:
         writer.writeheader()
         writer.writerows(file_rows)
 
-    finding_fields = ["relative_path", "rule", "severity", "message"]
+    finding_fields = ["relative_path", "rule", "severity", "source", "confidence", "message"]
     with findings_csv_path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=finding_fields)
+        writer = csv.DictWriter(handle, fieldnames=finding_fields, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(report.get("findings", []))
 
@@ -218,6 +218,8 @@ def _render_html_report(report: dict[str, Any]) -> str:
     files = report.get("files", [])
     findings = report.get("findings", [])
     rule_catalog = report.get("rule_catalog", {})
+    provider_rule_policy = report.get("provider_rule_policy", {})
+    analysis_provider = report.get("analysis_provider", {})
     report_json = json.dumps(report, ensure_ascii=False, indent=2)
     rules_profile = manifest.get("rules_profile") or project.get("rules_profile") or {}
     performance = summary.get("performance") or manifest.get("performance") or {}
@@ -414,6 +416,10 @@ def _render_html_report(report: dict[str, Any]) -> str:
     {_findings_summary_tables(findings)}
     <h2>Rule Catalog</h2>
     {_rule_catalog_table(rule_catalog)}
+    <h2>Provider Analysis</h2>
+    {_key_value_table(analysis_provider)}
+    <h2>Provider Rule Policy</h2>
+    {_key_value_table(provider_rule_policy)}
     <h2>Summary Details</h2>
     {_key_value_table(summary)}
     <h2>Dependency Notes</h2>
@@ -460,6 +466,8 @@ def _summary_cards(summary: dict[str, Any]) -> str:
         ("P1", "p1_findings"),
         ("P2", "p2_findings"),
         ("Blank Page Findings", "blank_page_findings"),
+        ("Rules Findings", "rules_findings"),
+        ("Provider Findings", "provider_findings"),
         ("Manifest Entries", "manifest_entry_count"),
         ("Manifest Missing", "manifest_missing_count"),
         ("Manifest Unexpected", "manifest_unexpected_count"),
@@ -620,11 +628,13 @@ def _findings_table(findings: list[dict[str, Any]]) -> str:
             f'<td><span class="badge {badge_class}">{_text(item.get("severity"))}</span></td>'
             f"<td>{_text(item.get('relative_path'))}</td>"
             f"<td>{_text(item.get('rule'))}</td>"
+            f"<td>{_text(item.get('source', 'rules'))}</td>"
+            f"<td>{_text(item.get('confidence'))}</td>"
             f"<td>{_text(item.get('message'))}</td>"
             "</tr>"
         )
     return (
-        '<div class="table-wrap"><table><thead><tr><th>Severity</th><th>Path</th><th>Rule</th><th>Message</th></tr></thead><tbody>'
+        '<div class="table-wrap"><table><thead><tr><th>Severity</th><th>Path</th><th>Rule</th><th>Source</th><th>Confidence</th><th>Message</th></tr></thead><tbody>'
         + "\n".join(rows)
         + "</tbody></table></div>"
     )
