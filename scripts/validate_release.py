@@ -357,6 +357,94 @@ def run_benchmark_validation() -> None:
                 raise SystemExit(f"benchmark validation leaked row-level content: {forbidden}")
 
 
+def run_acceptance_validation() -> None:
+    with tempfile.TemporaryDirectory(prefix="archive-scan-qc-acceptance-") as temp_dir:
+        temp = Path(temp_dir)
+        evidence_dir = temp / "evidence"
+        out_dir = temp / "acceptance"
+        evidence_dir.mkdir()
+        run_plan = {
+            "schema_version": "scan-qc.run-plan-summary.v1",
+            "privacy": {"aggregate_only": True},
+            "summary": {
+                "failed_batches": 0,
+                "processing_failed_files": 0,
+                "scan_files_per_minute": 120.0,
+                "processing_files_per_minute": 75.0,
+                "failed_batch_ids": ["PRIVATE_BATCH_SHOULD_NOT_APPEAR"],
+            },
+            "batches": [
+                {
+                    "batch_id": "PRIVATE_BATCH_SHOULD_NOT_APPEAR",
+                    "report_dir": "/private/reports",
+                    "process_out": "../private/process",
+                    "workers": 2,
+                }
+            ],
+        }
+        review = {
+            "schema_version": "scan-qc.review-summary.v1",
+            "sensitivity": "Aggregate-only summary.",
+            "total_findings": 0,
+            "status_counts": {"pending": 0, "resolved": 0},
+            "remaining_p0": 0,
+            "remaining_p1": 0,
+            "acceptance_passed": True,
+        }
+        audit = {
+            "schema_version": "scan-qc.processing-audit.v1",
+            "privacy": {"aggregate_only": True},
+            "counts": {"failed_files": 0},
+            "throughput": {"processed_files_per_minute": 78.0},
+            "workers": {"effective_workers": 2},
+        }
+        benchmark = {
+            "schema_version": "scan-qc.benchmark.v1",
+            "privacy": {"aggregate_only": True},
+            "runs": [
+                {
+                    "effective_workers": 2,
+                    "scan": {"files_per_minute": 125.0},
+                    "processing": {"failed_files": 0, "processed_files_per_minute": 80.0, "effective_workers": 2},
+                }
+            ],
+        }
+        (evidence_dir / "run_plan_summary.json").write_text(json.dumps(run_plan), encoding="utf-8")
+        (evidence_dir / "review_summary.json").write_text(json.dumps(review), encoding="utf-8")
+        (evidence_dir / "processing_audit_summary.json").write_text(json.dumps(audit), encoding="utf-8")
+        (evidence_dir / "benchmark_results.json").write_text(json.dumps(benchmark), encoding="utf-8")
+        _run(
+            [
+                sys.executable,
+                "-m",
+                "archive_scan_qc",
+                "acceptance-summary",
+                "--run-plan-summary",
+                str(evidence_dir / "run_plan_summary.json"),
+                "--review-summary",
+                str(evidence_dir / "review_summary.json"),
+                "--processing-audit-summary",
+                str(evidence_dir / "processing_audit_summary.json"),
+                "--benchmark-results",
+                str(evidence_dir / "benchmark_results.json"),
+                "--min-scan-files-per-minute",
+                "100",
+                "--min-processing-files-per-minute",
+                "70",
+                "--out",
+                str(out_dir),
+            ],
+            env=_pythonpath_env(),
+        )
+        payload_text = (out_dir / "acceptance_summary.json").read_text(encoding="utf-8")
+        payload = json.loads(payload_text)
+        if payload["status"] != "pass" or payload["blocking_items"]:
+            raise SystemExit("acceptance validation did not pass clean aggregate evidence")
+        for forbidden in ["PRIVATE_BATCH_SHOULD_NOT_APPEAR", "/private/reports", "../private/process", "relative_path", "sha256"]:
+            if forbidden in payload_text:
+                raise SystemExit(f"acceptance validation leaked private content: {forbidden}")
+
+
 def run_build_artifacts() -> None:
     build_dir = REPO_ROOT / "dist"
     if build_dir.exists():
@@ -382,6 +470,7 @@ def main(argv: list[str] | None = None) -> int:
         run_build_artifacts()
     run_examples_dry_run()
     run_benchmark_validation()
+    run_acceptance_validation()
     run_install_smoke()
     print("release validation passed")
     return 0

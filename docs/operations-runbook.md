@@ -337,6 +337,37 @@ no row-level path list, filenames, hashes, messages, or reviewer notes. P0/P1
 findings remain open unless their status is `fixed` or `false_positive`.
 Acceptance passes only when remaining P0 and remaining P1 counts are both zero.
 
+## Production Acceptance Gate
+
+Run the final production gate after batch execution, derivative processing,
+human review, and any approved benchmark run have produced aggregate evidence.
+The command accepts any combination of aggregate evidence, but missing evidence
+is reported as a warning and at least one input is required.
+
+```bash
+archive-scan-qc acceptance-summary \
+  --run-plan-summary /approved-work/project/run_plan_summary.json \
+  --review-summary /approved-work/project/review_summary.json \
+  --processing-audit-summary /approved-work/project/processing_audit_summary.json \
+  --benchmark-results /approved-work/project/benchmark_results.json \
+  --min-scan-files-per-minute 100 \
+  --min-processing-files-per-minute 60 \
+  --out /approved-work/project/acceptance_summary.json
+```
+
+Default blocking criteria are strict for final delivery: remaining P0 must be
+zero, remaining P1 must be zero, failed batches must be zero, and processing
+failed files must be zero. Optional throughput thresholds block acceptance when
+provided evidence is below the configured minimum. If a threshold is configured
+but no matching throughput evidence is supplied, the command emits a warning.
+
+`acceptance_summary.json` is the shareable aggregate acceptance conclusion after
+local policy review. It includes pass/fail status, blocking items, warnings,
+remaining P0/P1 counts, failed batch and processing failure counts, throughput
+and worker summaries, human review status, and recommended next steps. It must
+not include source filenames, source locations, hashes, thumbnails, row-level
+findings, reviewer notes, OCR/text, or image content.
+
 ## Aggregate Rule Calibration
 
 Use rule calibration only as a local aggregate analysis loop. The workflow is:

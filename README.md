@@ -599,6 +599,37 @@ private sample benchmarks locally only, and publish aggregate
 performance/statistical summaries without images, paths, thumbnails, or
 row-level processing manifests.
 
+### Production acceptance gate
+
+Use `archive-scan-qc acceptance-summary` as the final aggregate-only gate before
+batch delivery. It can combine any approved aggregate evidence files:
+`run_plan_summary.json`, `review_summary.json`,
+`processing_audit_summary.json`, and `benchmark_results.json`.
+
+```bash
+archive-scan-qc acceptance-summary \
+  --run-plan-summary /approved-work/project/run_plan_summary.json \
+  --review-summary /approved-work/project/review_summary.json \
+  --processing-audit-summary /approved-work/project/processing_audit_summary.json \
+  --benchmark-results /approved-work/project/benchmark_results.json \
+  --min-scan-files-per-minute 100 \
+  --min-processing-files-per-minute 60 \
+  --out /approved-work/project/acceptance_summary.json
+```
+
+The default gate blocks when remaining P0 findings, remaining P1 findings,
+failed batches, or processing failed files are greater than zero. Throughput
+thresholds are optional and configured with `--min-scan-files-per-minute` and
+`--min-processing-files-per-minute`. Missing optional evidence produces warnings;
+at least one aggregate evidence input is required.
+
+`acceptance_summary.json` includes schema version, generation time, pass/fail
+status, blocking items, warnings, P0/P1 remaining counts, failed batch count,
+processing failure count, throughput and worker summaries, human review status,
+and recommended next steps. It must not include source filenames, source
+locations, hashes, thumbnails, row-level findings, reviewer notes, OCR/text, or
+image content.
+
 ### Release validation
 
 ```bash
@@ -610,8 +641,9 @@ python3 scripts/validate_release.py
 The local release validation runs unit tests, compileall, wheel creation, an
 examples-based synthetic preflight followed by an end-to-end dry-run with
 derivative processing, an isolated install smoke test, `archive-scan-qc
---version`, and a synthetic-image CLI scan. The dry-run uses only generated
-temporary images and the committed privacy-safe files in `examples/`.
+--version`, a synthetic benchmark, a synthetic acceptance smoke, and a
+synthetic-image CLI scan. The dry-run uses only generated temporary images and
+the committed privacy-safe files in `examples/`.
 
 See `docs/operations-runbook.md` for production installation, directory,
 privacy, troubleshooting, exit-code, and tuning guidance. See

@@ -22,6 +22,10 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 - Confirm a synthetic multi-batch `archive-scan-qc run-plan` creates per-batch
   preflight/scan/processing artifacts plus aggregate `run_plan_summary.json`
   and `run_plan_summary.csv`.
+- Confirm a synthetic `archive-scan-qc acceptance-summary` run creates an
+  aggregate `acceptance_summary.json` with pass/fail status, blocking items,
+  warnings, P0/P1 remaining counts, processing failure count, throughput and
+  worker summaries, human review status, and recommended next steps.
 - Confirm CI is green for Python 3.10, 3.11, and 3.12.
 
 ## Package and install checks
@@ -68,6 +72,9 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 - Confirm production runbooks explain the manual review template, allowed
   disposition statuses, aggregate acceptance summary, and which review artifacts
   are sensitive local evidence.
+- Confirm production runbooks explain final acceptance gate defaults, optional
+  scan and processing throughput thresholds, missing-evidence warnings, and the
+  privacy boundary for `acceptance_summary.json`.
 - Confirm README and runbook document the offline provider JSONL contract,
   `provider.<name>.<rule>` namespace, protected built-in P0 rule boundary,
   provider disable path, and the prohibition on uploads, image bytes,
