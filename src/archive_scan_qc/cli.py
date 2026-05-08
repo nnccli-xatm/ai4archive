@@ -47,6 +47,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Conservatively crop page borders in derivative images. Requires --process-out.",
     )
+    parser.add_argument(
+        "--deskew",
+        action="store_true",
+        help="Conservatively correct small-angle page skew in derivative images. Requires --process-out.",
+    )
     return parser
 
 
@@ -67,9 +72,11 @@ def main(argv: list[str] | None = None) -> int:
     paths = write_reports(report, args.out)
     if args.auto_crop and not args.process_out:
         parser.error("--auto-crop requires --process-out")
+    if args.deskew and not args.process_out:
+        parser.error("--deskew requires --process-out")
 
     processing_manifest = (
-        process_images(report, args.input, args.process_out, ProcessingOptions(auto_crop=args.auto_crop))
+        process_images(report, args.input, args.process_out, ProcessingOptions(auto_crop=args.auto_crop, deskew=args.deskew))
         if args.process_out
         else None
     )

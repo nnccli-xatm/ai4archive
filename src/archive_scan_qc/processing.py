@@ -19,6 +19,16 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 @dataclass(frozen=True)
 class ProcessingOptions:
     auto_crop: bool = False
+    deskew: bool = False
+    deskew_max_degrees: float = 5.0
+    deskew_min_confidence: float = 0.08
+
+
+@dataclass(frozen=True)
+class SkewDetection:
+    angle_degrees: float | None
+    confidence: float
+    reason: str
 
 
 def process_images(
@@ -48,6 +58,8 @@ def process_images(
         "operations": [
             "exif_transpose",
             "convert_non_l_or_rgb_to_rgb",
+            "skew_detect_projection",
+            "deskew_conservative" if options.deskew else "deskew_disabled",
             "auto_crop_conservative" if options.auto_crop else "auto_crop_disabled",
             "autocontrast_cutoff_0_5",
             "preserve_source_relative_path",
@@ -73,6 +85,12 @@ def _process_record(
         "output_sha256": None,
         "original_size": None,
         "output_size": None,
+        "pre_deskew_size": None,
+        "post_deskew_size": None,
+        "skew_angle_degrees": None,
+        "skew_confidence": 0.0,
+        "deskewed": False,
+        "deskew_reason": None,
         "crop_bbox": None,
         "cropped": False,
         "status": "skipped",
@@ -89,17 +107,23 @@ def _process_record(
     target = image_root / relative_path
     try:
         with Image.open(source) as image:
-            processed, operations, crop_info = _process_image(image, options)
+            processed, operations, process_info = _process_image(image, options)
             target.parent.mkdir(parents=True, exist_ok=True)
             _save_image(processed, target, image)
         base.update(
             {
                 "output_relative_path": target.relative_to(image_root.parent).as_posix(),
                 "output_sha256": _sha256(target),
-                "original_size": crop_info["original_size"],
-                "output_size": crop_info["output_size"],
-                "crop_bbox": crop_info["crop_bbox"],
-                "cropped": crop_info["cropped"],
+                "original_size": process_info["original_size"],
+                "output_size": process_info["output_size"],
+                "pre_deskew_size": process_info["pre_deskew_size"],
+                "post_deskew_size": process_info["post_deskew_size"],
+                "skew_angle_degrees": process_info["skew_angle_degrees"],
+                "skew_confidence": process_info["skew_confidence"],
+                "deskewed": process_info["deskewed"],
+                "deskew_reason": process_info["deskew_reason"],
+                "crop_bbox": process_info["crop_bbox"],
+                "cropped": process_info["cropped"],
                 "status": "processed",
                 "operations": operations,
             }
@@ -121,6 +145,33 @@ def _process_image(image: Image.Image, options: ProcessingOptions) -> tuple[Imag
         processed = processed.convert("RGB")
         operations.append("convert_to_rgb")
 
+    pre_deskew_size = list(processed.size)
+    post_deskew_size = list(processed.size)
+    skew = _detect_skew(processed)
+    operations.append("skew_detect_projection")
+    deskewed = False
+    deskew_reason = skew.reason
+    if not options.deskew:
+        operations.append("deskew_disabled")
+        deskew_reason = "deskew disabled"
+    elif skew.angle_degrees is None:
+        operations.append("deskew_noop")
+    elif skew.confidence < options.deskew_min_confidence:
+        operations.append("deskew_noop")
+        deskew_reason = "low confidence"
+    elif abs(skew.angle_degrees) > options.deskew_max_degrees:
+        operations.append("deskew_noop")
+        deskew_reason = "angle exceeds conservative threshold"
+    elif abs(skew.angle_degrees) < 0.2:
+        operations.append("deskew_noop")
+        deskew_reason = "angle below correction threshold"
+    else:
+        processed = _rotate_for_deskew(processed, -skew.angle_degrees)
+        operations.append("deskew_conservative")
+        post_deskew_size = list(processed.size)
+        deskewed = True
+        deskew_reason = "deskew applied"
+
     crop_bbox: tuple[int, int, int, int] | None = None
     if options.auto_crop:
         crop_bbox = _detect_conservative_crop_bbox(processed)
@@ -137,10 +188,99 @@ def _process_image(image: Image.Image, options: ProcessingOptions) -> tuple[Imag
     crop_info = {
         "original_size": original_size,
         "output_size": list(processed.size),
+        "pre_deskew_size": pre_deskew_size,
+        "post_deskew_size": post_deskew_size,
+        "skew_angle_degrees": skew.angle_degrees,
+        "skew_confidence": skew.confidence,
+        "deskewed": deskewed,
+        "deskew_reason": deskew_reason,
         "crop_bbox": list(crop_bbox) if crop_bbox else None,
         "cropped": crop_bbox is not None,
     }
     return processed, operations, crop_info
+
+
+def _detect_skew(image: Image.Image) -> SkewDetection:
+    width, height = image.size
+    if width < 30 or height < 30:
+        return SkewDetection(None, 0.0, "image too small")
+
+    grayscale = ImageOps.autocontrast(image.convert("L"), cutoff=1)
+    histogram = grayscale.histogram()
+    total_pixels = width * height
+    low = _histogram_percentile(histogram, total_pixels, 0.05)
+    high = _histogram_percentile(histogram, total_pixels, 0.95)
+    if high - low < 35:
+        return SkewDetection(None, 0.0, "low contrast")
+
+    threshold = max(0, min(255, low + int((high - low) * 0.35)))
+    ink = grayscale.point(lambda value: 255 if value <= threshold else 0, mode="L")
+    bbox = ink.getbbox()
+    if not bbox:
+        return SkewDetection(None, 0.0, "blank page")
+
+    ink_ratio = _nonzero_ratio(ink, bbox)
+    if ink_ratio < 0.002:
+        return SkewDetection(None, 0.0, "insufficient foreground")
+    if ink_ratio > 0.65:
+        return SkewDetection(None, 0.0, "foreground too dense")
+
+    sample = ink.crop(bbox)
+    sample.thumbnail((700, 700), Image.Resampling.BILINEAR)
+    background = 0
+    scores: list[tuple[float, float]] = []
+    for correction_angle in _frange(-7.0, 7.0, 0.25):
+        rotated = sample.rotate(correction_angle, resample=Image.Resampling.BILINEAR, expand=True, fillcolor=background)
+        scores.append((correction_angle, _horizontal_projection_variance(rotated)))
+
+    scores.sort(key=lambda item: item[1], reverse=True)
+    best_angle, best_score = scores[0]
+    runner_up = max(score for angle, score in scores if abs(angle - best_angle) >= 1.0)
+    confidence = 0.0 if best_score <= 0 else max(0.0, min(1.0, (best_score - runner_up) / best_score))
+    skew_angle = round(-best_angle, 2)
+    return SkewDetection(skew_angle, round(confidence, 3), "skew detected")
+
+
+def _histogram_percentile(histogram: list[int], total: int, percentile: float) -> int:
+    target = total * percentile
+    running = 0
+    for value, count in enumerate(histogram):
+        running += count
+        if running >= target:
+            return value
+    return 255
+
+
+def _nonzero_ratio(image: Image.Image, bbox: tuple[int, int, int, int]) -> float:
+    histogram = image.crop(bbox).histogram()
+    foreground = sum(histogram[1:])
+    area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+    return foreground / area if area else 0.0
+
+
+def _frange(start: float, stop: float, step: float) -> list[float]:
+    count = int(round((stop - start) / step))
+    return [start + index * step for index in range(count + 1)]
+
+
+def _horizontal_projection_variance(image: Image.Image) -> float:
+    width, height = image.size
+    pixels = image.load()
+    row_counts = []
+    for y in range(height):
+        row_counts.append(sum(1 for x in range(width) if pixels[x, y] > 0))
+    mean = sum(row_counts) / len(row_counts)
+    return sum((count - mean) ** 2 for count in row_counts) / len(row_counts)
+
+
+def _rotate_for_deskew(image: Image.Image, correction_angle: float) -> Image.Image:
+    fill = _corner_background_value(image.convert("L"))
+    fillcolor: int | tuple[int, int, int]
+    if image.mode == "RGB":
+        fillcolor = (fill, fill, fill)
+    else:
+        fillcolor = fill
+    return image.rotate(correction_angle, resample=Image.Resampling.BICUBIC, expand=True, fillcolor=fillcolor)
 
 
 def _detect_conservative_crop_bbox(image: Image.Image) -> tuple[int, int, int, int] | None:

@@ -232,7 +232,76 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(manifest["files"][0]["output_size"], [32, 24])
             self.assertIsNone(manifest["files"][0]["crop_bbox"])
             self.assertFalse(manifest["files"][0]["cropped"])
+            self.assertFalse(manifest["files"][0]["deskewed"])
+            self.assertEqual(manifest["files"][0]["deskew_reason"], "deskew disabled")
             self.assertIn("auto_crop_disabled", manifest["files"][0]["operations"])
+            self.assertIn("deskew_disabled", manifest["files"][0]["operations"])
+
+    def test_deskew_corrects_synthetic_light_skew(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "A001_0001.png"
+            image = _synthetic_text_page().rotate(-3.0, resample=Image.Resampling.BICUBIC, expand=True, fillcolor="white")
+            image.save(source)
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(deskew=True))
+
+            record = manifest["files"][0]
+            self.assertEqual(record["status"], "processed")
+            self.assertTrue(record["deskewed"])
+            self.assertAlmostEqual(record["skew_angle_degrees"], -3.0, delta=0.75)
+            self.assertGreaterEqual(record["skew_confidence"], 0.08)
+            self.assertEqual(record["deskew_reason"], "deskew applied")
+            self.assertNotEqual(record["pre_deskew_size"], record["post_deskew_size"])
+            self.assertIn("deskew_conservative", record["operations"])
+
+    def test_deskew_does_not_rotate_blank_or_low_contrast_pages(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            Image.new("RGB", (120, 90), "white").save(input_dir / "A001_0001.png")
+            low_contrast = Image.new("RGB", (160, 120), (245, 245, 245))
+            draw = ImageDraw.Draw(low_contrast)
+            for y in range(30, 90, 12):
+                draw.line((35, y, 125, y), fill=(235, 235, 235), width=2)
+            low_contrast.save(input_dir / "A001_0002.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(deskew=True))
+
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            self.assertFalse(records["A001_0001.png"]["deskewed"])
+            self.assertFalse(records["A001_0002.png"]["deskewed"])
+            self.assertIn(records["A001_0001.png"]["deskew_reason"], {"blank page", "low contrast"})
+            self.assertEqual(records["A001_0002.png"]["deskew_reason"], "low contrast")
+
+    def test_deskew_does_not_rotate_large_angle(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "A001_0001.png"
+            image = _synthetic_text_page().rotate(-8.0, resample=Image.Resampling.BICUBIC, expand=True, fillcolor="white")
+            image.save(source)
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(deskew=True))
+
+            record = manifest["files"][0]
+            self.assertFalse(record["deskewed"])
+            self.assertGreater(abs(record["skew_angle_degrees"]), 5.0)
+            self.assertEqual(record["deskew_reason"], "angle exceeds conservative threshold")
+            self.assertIn("deskew_noop", record["operations"])
 
     def test_auto_crop_trims_white_margin_around_black_page_border(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -323,6 +392,28 @@ class ScanQcTest(unittest.TestCase):
                 main(["--input", str(input_dir), "--out", str(output_dir), "--auto-crop"])
 
             self.assertEqual(raised.exception.code, 2)
+
+    def test_cli_deskew_requires_process_out(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+
+            with self.assertRaises(SystemExit) as raised:
+                main(["--input", str(input_dir), "--out", str(output_dir), "--deskew"])
+
+            self.assertEqual(raised.exception.code, 2)
+
+
+def _synthetic_text_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((24, 20, 215, 159), outline=(30, 30, 30), width=2)
+    for y in range(42, 132, 18):
+        draw.rectangle((48, y, 190, y + 4), fill=(20, 20, 20))
+    return image
 
 
 if __name__ == "__main__":
