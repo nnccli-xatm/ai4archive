@@ -6,10 +6,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from archive_scan_qc.cli import main
-from archive_scan_qc.processing import process_images
+from archive_scan_qc.processing import ProcessingOptions, process_images
 from archive_scan_qc.reports import write_reports
 from archive_scan_qc.scanner import ScanConfig, scan_batch
 
@@ -228,6 +228,64 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(manifest["summary"]["processed_files"], 1)
             self.assertEqual(manifest["files"][0]["status"], "processed")
             self.assertEqual(manifest["files"][0]["source_relative_path"], "A001_0001.jpg")
+            self.assertEqual(manifest["files"][0]["original_size"], [32, 24])
+            self.assertEqual(manifest["files"][0]["output_size"], [32, 24])
+            self.assertIsNone(manifest["files"][0]["crop_bbox"])
+            self.assertFalse(manifest["files"][0]["cropped"])
+            self.assertIn("auto_crop_disabled", manifest["files"][0]["operations"])
+
+    def test_auto_crop_trims_white_margin_around_black_page_border(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "A001_0001.png"
+            image = Image.new("RGB", (80, 60), "white")
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((10, 8, 69, 51), outline="black", width=3)
+            image.save(source)
+            source_bytes = source.read_bytes()
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True))
+
+            with Image.open(process_dir / "images" / "A001_0001.png") as processed:
+                processed_size = processed.size
+            record = manifest["files"][0]
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(record["status"], "processed")
+            self.assertTrue(record["cropped"])
+            self.assertEqual(record["crop_bbox"], [10, 8, 70, 52])
+            self.assertEqual(record["original_size"], [80, 60])
+            self.assertEqual(record["output_size"], [60, 44])
+            self.assertEqual(processed_size, (60, 44))
+            self.assertIn("auto_crop_conservative", record["operations"])
+
+    def test_auto_crop_does_not_overcrop_blank_or_low_contrast_images(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            Image.new("RGB", (80, 60), "white").save(input_dir / "A001_0001.png")
+            low_contrast = Image.new("RGB", (80, 60), (245, 245, 245))
+            draw = ImageDraw.Draw(low_contrast)
+            draw.rectangle((10, 8, 69, 51), outline=(235, 235, 235), width=3)
+            low_contrast.save(input_dir / "A001_0002.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True))
+
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            self.assertFalse(records["A001_0001.png"]["cropped"])
+            self.assertFalse(records["A001_0002.png"]["cropped"])
+            self.assertEqual(records["A001_0001.png"]["output_size"], [80, 60])
+            self.assertEqual(records["A001_0002.png"]["output_size"], [80, 60])
+            self.assertIn("auto_crop_noop", records["A001_0001.png"]["operations"])
+            self.assertIn("auto_crop_noop", records["A001_0002.png"]["operations"])
 
     def test_cli_process_out_writes_processing_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -252,6 +310,19 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertTrue((process_dir / "processing_manifest.json").exists())
             self.assertTrue((process_dir / "images" / "A001_0001.jpg").exists())
+
+    def test_cli_auto_crop_requires_process_out(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+
+            with self.assertRaises(SystemExit) as raised:
+                main(["--input", str(input_dir), "--out", str(output_dir), "--auto-crop"])
+
+            self.assertEqual(raised.exception.code, 2)
 
 
 if __name__ == "__main__":

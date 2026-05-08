@@ -43,6 +43,7 @@ archive-scan-qc \
   --input /path/to/scanned-images \
   --out /path/to/qc-report \
   --process-out /path/to/processed-images \
+  --auto-crop \
   --project demo-project \
   --batch batch-001 \
   --min-dpi 200 \
@@ -59,7 +60,11 @@ layer. Source images remain read-only. The CLI writes derivative images under
 `--process-out/processing_manifest.json` to link each derivative back to the
 source SHA-256. The initial processing pipeline applies EXIF orientation
 normalization, safe RGB/L color conversion, and light automatic contrast
-normalization.
+normalization. Add `--auto-crop` with `--process-out` to enable conservative
+Pillow-only page-border cropping for derivative images. The processing manifest
+records each image's crop bbox, crop decision, original size, output size,
+operations, and failure reason. Auto crop is opt-in to avoid surprising source
+batches; original images are still only read.
 
 For repeatable runs, keep `--out` outside the scanned image tree when possible.
 If `--out` is inside `--input`, the CLI automatically skips that output

@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from .processing import process_images
+from .processing import ProcessingOptions, process_images
 from .reports import write_reports
 from .scanner import ScanConfig, scan_batch
 
@@ -42,6 +42,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Optional derivative-image output directory. Originals remain read-only.",
     )
+    parser.add_argument(
+        "--auto-crop",
+        action="store_true",
+        help="Conservatively crop page borders in derivative images. Requires --process-out.",
+    )
     return parser
 
 
@@ -60,7 +65,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     report = scan_batch(config)
     paths = write_reports(report, args.out)
-    processing_manifest = process_images(report, args.input, args.process_out) if args.process_out else None
+    if args.auto_crop and not args.process_out:
+        parser.error("--auto-crop requires --process-out")
+
+    processing_manifest = (
+        process_images(report, args.input, args.process_out, ProcessingOptions(auto_crop=args.auto_crop))
+        if args.process_out
+        else None
+    )
 
     print(f"Scanned {report['summary']['total_files']} files.")
     print(f"Openable: {report['summary']['openable_files']}")
