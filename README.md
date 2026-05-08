@@ -36,13 +36,36 @@ overwrites. The quality metrics, crop, and deskew implementations are also
 Pillow-only; they do not add OpenCV, scikit-image, GPU, cloud, or other heavy
 native dependencies.
 
-### Install
+### Production install
+
+Use Python 3.10, 3.11, or 3.12 in production. The package exposes one console
+script, `archive-scan-qc`, and keeps the runtime dependency set intentionally
+small: Pillow plus the Python standard library.
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e .
+python -m pip install --upgrade pip
+python -m pip install .
+archive-scan-qc --version
 ```
+
+For local development, use `python -m pip install -e .` inside the same kind of
+virtual environment.
+
+For offline or domestic-platform deployments, build or mirror wheels on a
+networked machine that matches the target Python and platform, then install
+from a local wheelhouse:
+
+```bash
+python -m pip wheel --wheel-dir wheelhouse .
+python -m pip download --only-binary=:all: --dest wheelhouse 'Pillow>=10,<13'
+python -m pip install --no-index --find-links wheelhouse ai4archive
+```
+
+If the target platform cannot use a prebuilt Pillow wheel, prepare the platform
+toolchain and image libraries required by Pillow before installation, or build a
+validated internal Pillow wheel and install only from that trusted wheelhouse.
 
 ### Run
 
@@ -267,6 +290,20 @@ The process returns exit code `1` when P0 findings are present, so it can be
 used in batch scripts. Reports are written to the output directory; original
 images are only read.
 
+### Privacy and production handling
+
+Run private archive batches on local or approved internal machines only. Do not
+upload source images, derivative images, normal scan QC reports, processing
+manifests, filenames, path lists, thumbnails, hashes, or row-level finding data
+from private collections to public systems. For issue comments, PR bodies, and
+external benchmark notes, use synthetic samples or aggregate-only benchmark
+outputs.
+
+Keep `--out` and `--process-out` outside the source image tree when possible,
+and store generated reports according to the collection's data classification.
+The standalone HTML report has inline CSS and embedded JSON report data, but it
+does not embed images or remote resources.
+
 ### Local benchmark metrics
 
 For repeatable privacy-safe benchmarking across worker counts and hardware,
@@ -337,8 +374,14 @@ generated output directories from private image collections. Run private sample
 benchmarks locally only, and publish aggregate performance/statistical summaries
 without images, paths, thumbnails, or row-level processing manifests.
 
-### Test
+### Release validation
 
 ```bash
 PYTHONPATH=src python -m unittest discover -s tests
+PYTHONPATH=src python -m compileall -q src tests
+python3 scripts/validate_release.py
 ```
+
+The local release validation runs unit tests, compileall, wheel creation, an
+isolated install smoke test, `archive-scan-qc --version`, and a synthetic-image
+CLI scan. See `docs/release-checklist.md` before publishing a release.

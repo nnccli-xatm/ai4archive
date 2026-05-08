@@ -11,6 +11,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter
 
+from archive_scan_qc import __version__
 from archive_scan_qc.cli import main
 from archive_scan_qc.processing import ProcessingOptions, process_images
 from archive_scan_qc.reports import write_reports
@@ -19,6 +20,14 @@ from archive_scan_qc.scanner import ScanConfig, scan_batch
 
 
 class ScanQcTest(unittest.TestCase):
+    def test_version_output_matches_package_version(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout), self.assertRaises(SystemExit) as raised:
+            main(["--version"])
+
+        self.assertEqual(raised.exception.code, 0)
+        self.assertEqual(stdout.getvalue().strip(), f"archive-scan-qc {__version__}")
+
     def test_collects_metadata_and_writes_reports(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
