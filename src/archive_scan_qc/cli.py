@@ -12,6 +12,16 @@ from .rules import RulesProfileError, load_rules_profile
 from .scanner import ScanConfig, scan_batch
 
 
+def _positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("--workers must be a positive integer.") from exc
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("--workers must be a positive integer.")
+    return parsed
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="archive-scan-qc",
@@ -60,12 +70,22 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Conservatively correct small-angle page skew in derivative images. Requires --process-out.",
     )
+    parser.add_argument(
+        "--workers",
+        default=None,
+        type=_positive_int,
+        help="Maximum local worker threads for scan and processing. Use 1 for serial mode.",
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.auto_crop and not args.process_out:
+        parser.error("--auto-crop requires --process-out")
+    if args.deskew and not args.process_out:
+        parser.error("--deskew requires --process-out")
     try:
         rules_profile = load_rules_profile(args.rules_profile) if args.rules_profile else None
     except RulesProfileError as exc:
@@ -84,16 +104,18 @@ def main(argv: list[str] | None = None) -> int:
         name_pattern=args.name_pattern,
         manifest_csv=args.manifest_csv,
         rules_profile=rules_profile,
+        workers=args.workers,
     )
     report = scan_batch(config)
     paths = write_reports(report, args.out)
-    if args.auto_crop and not args.process_out:
-        parser.error("--auto-crop requires --process-out")
-    if args.deskew and not args.process_out:
-        parser.error("--deskew requires --process-out")
 
     processing_manifest = (
-        process_images(report, args.input, args.process_out, ProcessingOptions(auto_crop=args.auto_crop, deskew=args.deskew))
+        process_images(
+            report,
+            args.input,
+            args.process_out,
+            ProcessingOptions(auto_crop=args.auto_crop, deskew=args.deskew, workers=args.workers),
+        )
         if args.process_out
         else None
     )
@@ -103,12 +125,14 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Findings: {report['summary']['total_findings']}")
     scan_performance = report["summary"]["performance"]
     print(f"Scan elapsed: {scan_performance['elapsed_seconds']:.3f}s")
+    print(f"Scan workers: {scan_performance['effective_workers']} ({scan_performance['mode']})")
     print(f"Scan files/min: {scan_performance['files_per_minute']:.2f}")
     print(f"Scan openable files/min: {scan_performance['openable_files_per_minute']:.2f}")
     if processing_manifest:
         print(f"Processed: {processing_manifest['summary']['processed_files']}")
         processing_performance = processing_manifest["summary"]["performance"]
         print(f"Processing elapsed: {processing_performance['elapsed_seconds']:.3f}s")
+        print(f"Processing workers: {processing_performance['effective_workers']} ({processing_performance['mode']})")
         print(f"Processing files/min: {processing_performance['processed_files_per_minute']:.2f}")
         print(f"Processing total files/min: {processing_performance['total_files_per_minute']:.2f}")
         print(f"Processing manifest: {args.process_out / 'processing_manifest.json'}")

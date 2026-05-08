@@ -52,6 +52,7 @@ archive-scan-qc \
   --process-out /path/to/processed-images \
   --auto-crop \
   --deskew \
+  --workers 2 \
   --project demo-project \
   --batch batch-001 \
   --min-dpi 200 \
@@ -62,6 +63,14 @@ archive-scan-qc \
 
 The optional manifest CSV must include a `relative_path` column whose values
 are expected image paths relative to `--input`.
+
+Use `--workers N` to control local scan and derivative-processing concurrency.
+`--workers 1` forces fully serial mode for comparison baselines. When omitted,
+the CLI uses a conservative default and caps the effective worker count by CPU
+count, batch size, and an internal safety ceiling to avoid filling memory on
+low-spec or domestic-platform deployments. The effective worker count and mode
+are printed on stdout and recorded in JSON report and processing manifest
+performance metadata.
 
 The optional `--rules-profile` argument loads a local JSON rules profile. When
 omitted, the built-in default profile preserves the current behavior:
@@ -206,23 +215,29 @@ images are only read.
 The CLI prints concise timing lines after each run:
 
 - `Scan elapsed`, `Scan files/min`, and `Scan openable files/min`
+- `Scan workers`, showing the effective worker count and serial/parallel mode
 - `Processing elapsed`, `Processing files/min`, and
   `Processing total files/min` when `--process-out` is used
+- `Processing workers` when `--process-out` is used
 
 The JSON scan report stores the same scan metrics under
 `summary.performance` and `manifest.performance`: `started_at`, `finished_at`,
 `elapsed_seconds`, `total_files`, `openable_files`, `files_per_minute`, and
-`openable_files_per_minute`. The processing manifest stores processing metrics
+`openable_files_per_minute`, plus `requested_workers`, `effective_workers`,
+`worker_cap`, and `mode`. The processing manifest stores processing metrics
 under both `performance` and `summary.performance`: `elapsed_seconds`,
 `total_files`, `processed_files`, `skipped_files`, `failed_files`,
-`processed_files_per_minute`, and `total_files_per_minute`.
+`processed_files_per_minute`, `total_files_per_minute`, `requested_workers`,
+`effective_workers`, `worker_cap`, and `mode`.
 
 Use these aggregate fields for local hardware baselines by running the same
-batch and CLI options on each machine, then comparing files per minute and
-processed files per minute. For privacy-sensitive sample batches, share only
-aggregate counts, elapsed seconds, throughput, and finding totals. Do not share
-source images, filenames, thumbnails, per-file records, or generated output
-directories from private image collections.
+batch and CLI options on each machine with `--workers 1`, `--workers 2`,
+`--workers 4`, and the local CPU-count upper bound. Compare files per minute,
+processed files per minute, elapsed seconds, worker mode, and effective worker
+count. For privacy-sensitive sample batches, share only aggregate counts,
+elapsed seconds, throughput, effective worker count, worker mode, and finding
+totals. Do not share source images, filenames, thumbnails, per-file records, or
+generated output directories from private image collections.
 
 ### Test
 

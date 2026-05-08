@@ -7,6 +7,7 @@ It writes no derivative image files and never modifies originals.
 from __future__ import annotations
 
 import csv
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
@@ -18,6 +19,7 @@ from typing import Any
 
 from PIL import Image, ImageStat, UnidentifiedImageError
 
+from .concurrency import resolve_worker_count, worker_metadata
 from .rules import RulesProfile, default_rules_profile
 
 SUPPORTED_EXTENSIONS = {
@@ -60,6 +62,7 @@ class ScanConfig:
     blur_laplacian_variance_threshold: float = 20.0
     blur_min_contrast_stddev: float = 12.0
     rules_profile: RulesProfile | None = None
+    workers: int | None = None
 
 
 @dataclass(frozen=True)
@@ -104,7 +107,8 @@ def scan_batch(config: ScanConfig) -> dict[str, Any]:
 
     profile = _effective_profile(config)
     candidate_files, skip_stats = _iter_candidate_files(input_dir, config.output_dir, config.manifest_csv)
-    files = [_inspect_file(path, input_dir) for path in candidate_files]
+    scan_workers = resolve_worker_count(config.workers, len(candidate_files))
+    files = _inspect_files(candidate_files, input_dir, scan_workers)
     manifest_paths = _read_manifest_paths(config.manifest_csv) if config.manifest_csv else None
     findings = _build_findings(files, profile, manifest_paths)
     manifest_check = _summarize_manifest_check(files, manifest_paths, config.manifest_csv)
@@ -117,6 +121,7 @@ def scan_batch(config: ScanConfig) -> dict[str, Any]:
         time.perf_counter() - start_seconds,
         total_files=summary["total_files"],
         openable_files=summary["openable_files"],
+        workers=worker_metadata(config.workers, scan_workers),
     )
     summary["performance"] = performance
     project = {
@@ -128,6 +133,8 @@ def scan_batch(config: ScanConfig) -> dict[str, Any]:
         "name_pattern": profile.name_pattern,
         "manifest_csv": str(config.manifest_csv.resolve()) if config.manifest_csv else None,
         "rules_profile": profile.metadata(),
+        "workers": scan_workers,
+        "worker_mode": performance["mode"],
     }
     manifest = {
         "project_id": project["project_id"],
@@ -152,6 +159,8 @@ def scan_batch(config: ScanConfig) -> dict[str, Any]:
         "skipped_file_count": summary["skipped_file_count"],
         "skipped_directory_count": summary["skipped_directory_count"],
         "performance": performance,
+        "workers": scan_workers,
+        "worker_mode": performance["mode"],
     }
 
     return {
@@ -167,6 +176,13 @@ def scan_batch(config: ScanConfig) -> dict[str, Any]:
         "files": files,
         "findings": findings,
     }
+
+
+def _inspect_files(candidate_files: list[Path], input_dir: Path, workers: int) -> list[dict[str, Any]]:
+    if workers == 1:
+        return [_inspect_file(path, input_dir) for path in candidate_files]
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        return list(executor.map(lambda path: _inspect_file(path, input_dir), candidate_files))
 
 
 def _iter_candidate_files(input_dir: Path, output_dir: Path, manifest_csv: Path | None) -> tuple[list[Path], SkipStats]:
@@ -695,6 +711,7 @@ def _performance_summary(
     *,
     total_files: int,
     openable_files: int,
+    workers: dict[str, Any],
 ) -> dict[str, Any]:
     elapsed_seconds = max(0.0, round(elapsed_seconds, 6))
     return {
@@ -703,6 +720,7 @@ def _performance_summary(
         "elapsed_seconds": elapsed_seconds,
         "total_files": total_files,
         "openable_files": openable_files,
+        **workers,
         "files_per_minute": _files_per_minute(total_files, elapsed_seconds),
         "openable_files_per_minute": _files_per_minute(openable_files, elapsed_seconds),
     }

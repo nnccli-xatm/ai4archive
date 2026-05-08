@@ -60,6 +60,8 @@ class ScanQcTest(unittest.TestCase):
             self.assertIn("performance", saved["manifest"])
             self.assertEqual(saved["summary"]["performance"]["total_files"], 2)
             self.assertEqual(saved["summary"]["performance"]["openable_files"], 2)
+            self.assertIn("effective_workers", saved["summary"]["performance"])
+            self.assertIn(saved["summary"]["performance"]["mode"], {"serial", "parallel"})
             self.assertGreaterEqual(saved["summary"]["performance"]["elapsed_seconds"], 0)
             self.assertGreaterEqual(saved["summary"]["performance"]["files_per_minute"], 0)
             self.assertGreaterEqual(saved["summary"]["performance"]["openable_files_per_minute"], 0)
@@ -71,6 +73,48 @@ class ScanQcTest(unittest.TestCase):
             self.assertIn("A001_0002.png", html)
             self.assertIn("dpi_minimum", html)
             self.assertIn("P0", html)
+
+    def test_workers_one_and_default_have_compatible_report_content(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            serial_out = root / "serial"
+            default_out = root / "default"
+            input_dir.mkdir()
+
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+            Image.new("RGB", (16, 16), "white").save(input_dir / "A001_0002.png", dpi=(150, 150))
+            (input_dir / "broken.jpg").write_text("not an image", encoding="utf-8")
+
+            serial = scan_batch(ScanConfig("p1", "b1", input_dir, serial_out, workers=1))
+            default = scan_batch(ScanConfig("p1", "b1", input_dir, default_out))
+
+            self.assertEqual(serial["files"], default["files"])
+            self.assertEqual(serial["findings"], default["findings"])
+            self.assertEqual(serial["summary"]["total_files"], default["summary"]["total_files"])
+            self.assertEqual(serial["summary"]["total_findings"], default["summary"]["total_findings"])
+            self.assertEqual(serial["summary"]["performance"]["mode"], "serial")
+
+    def test_multi_worker_scan_output_and_findings_order_is_stable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+
+            for name in ["B_0002.png", "a_0001.jpg", "nested/C_0003.png"]:
+                path = input_dir / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                Image.new("RGB", (24, 24), "white").save(path, dpi=(150, 150))
+            (input_dir / "bad.png").write_text("not an image", encoding="utf-8")
+
+            first = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir, workers=4))
+            second = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir, workers=4))
+
+            self.assertEqual([item["relative_path"] for item in first["files"]], sorted(item["relative_path"] for item in first["files"]))
+            self.assertEqual(first["files"], second["files"])
+            self.assertEqual(first["findings"], second["findings"])
+            self.assertEqual(first["summary"]["performance"]["mode"], "parallel")
 
     def test_flags_unopenable_and_duplicate_hashes_without_cross_directory_name_false_positive(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -422,6 +466,7 @@ class ScanQcTest(unittest.TestCase):
             self.assertGreaterEqual(manifest["performance"]["elapsed_seconds"], 0)
             self.assertGreaterEqual(manifest["performance"]["processed_files_per_minute"], 0)
             self.assertGreaterEqual(manifest["performance"]["total_files_per_minute"], 0)
+            self.assertIn("effective_workers", manifest["performance"])
             self.assertEqual(manifest["files"][0]["status"], "processed")
             self.assertEqual(manifest["files"][0]["source_relative_path"], "A001_0001.jpg")
             self.assertEqual(manifest["files"][0]["original_size"], [32, 24])
@@ -432,6 +477,52 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(manifest["files"][0]["deskew_reason"], "deskew disabled")
             self.assertIn("auto_crop_disabled", manifest["files"][0]["operations"])
             self.assertIn("deskew_disabled", manifest["files"][0]["operations"])
+
+    def test_multi_worker_processing_manifest_order_and_outputs_are_stable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            for name in ["B_0002.png", "A_0001.png", "nested/C_0003.png"]:
+                path = input_dir / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                Image.new("RGB", (40, 30), "white").save(path)
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir, workers=4))
+            first = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, workers=4))
+            second = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, workers=4))
+
+            self.assertEqual([record["source_relative_path"] for record in first["files"]], [item["relative_path"] for item in report["files"]])
+            self.assertEqual(first["files"], second["files"])
+            self.assertEqual(first["summary"]["performance"]["mode"], "parallel")
+            for record in first["files"]:
+                self.assertEqual(record["status"], "processed")
+                self.assertTrue((process_dir / record["output_relative_path"]).exists())
+
+    def test_multi_worker_processing_failure_does_not_stop_other_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            good = input_dir / "A001_0001.png"
+            broken_after_scan = input_dir / "A001_0002.png"
+            Image.new("RGB", (40, 30), "white").save(good)
+            Image.new("RGB", (40, 30), "white").save(broken_after_scan)
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir, workers=2))
+            broken_after_scan.write_text("not an image anymore", encoding="utf-8")
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(workers=2))
+
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            self.assertEqual(records["A001_0001.png"]["status"], "processed")
+            self.assertEqual(records["A001_0002.png"]["status"], "failed")
+            self.assertEqual(manifest["summary"]["processed_files"], 1)
+            self.assertEqual(manifest["summary"]["failed_files"], 1)
 
     def test_deskew_corrects_synthetic_light_skew(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -579,9 +670,26 @@ class ScanQcTest(unittest.TestCase):
             self.assertTrue((process_dir / "images" / "A001_0001.jpg").exists())
             output = stdout.getvalue()
             self.assertIn("Scan elapsed:", output)
+            self.assertIn("Scan workers:", output)
             self.assertIn("Scan files/min:", output)
             self.assertIn("Processing elapsed:", output)
+            self.assertIn("Processing workers:", output)
             self.assertIn("Processing files/min:", output)
+
+    def test_cli_rejects_invalid_workers_without_writing_reports(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+
+            for value in ["0", "-1", "abc"]:
+                with self.assertRaises(SystemExit) as raised:
+                    main(["--input", str(input_dir), "--out", str(output_dir), "--workers", value])
+                self.assertEqual(raised.exception.code, 2)
+
+            self.assertFalse(output_dir.exists())
 
     def test_cli_auto_crop_requires_process_out(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

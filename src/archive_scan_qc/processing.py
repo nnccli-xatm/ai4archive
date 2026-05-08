@@ -6,6 +6,7 @@ and a manifest that links each output back to the original scan record.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
@@ -16,6 +17,8 @@ from typing import Any
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
+from .concurrency import resolve_worker_count, worker_metadata
+
 
 @dataclass(frozen=True)
 class ProcessingOptions:
@@ -23,6 +26,7 @@ class ProcessingOptions:
     deskew: bool = False
     deskew_max_degrees: float = 5.0
     deskew_min_confidence: float = 0.08
+    workers: int | None = None
 
 
 @dataclass(frozen=True)
@@ -44,7 +48,8 @@ def process_images(
     input_dir = input_dir.resolve()
     process_dir = process_dir.resolve()
     image_root = process_dir / "images"
-    records = [_process_record(item, input_dir, image_root, options) for item in report["files"]]
+    process_workers = resolve_worker_count(options.workers, len(report["files"]))
+    records = _process_records(report["files"], input_dir, image_root, options, process_workers)
     processed_files = sum(1 for item in records if item["status"] == "processed")
     skipped_files = sum(1 for item in records if item["status"] == "skipped")
     failed_files = sum(1 for item in records if item["status"] == "failed")
@@ -57,6 +62,7 @@ def process_images(
         processed_files=processed_files,
         skipped_files=skipped_files,
         failed_files=failed_files,
+        workers=worker_metadata(options.workers, process_workers),
     )
     manifest = {
         "schema_version": "scan-qc.processing.v1",
@@ -71,6 +77,8 @@ def process_images(
             "skipped_files": skipped_files,
             "failed_files": failed_files,
             "performance": performance,
+            "workers": process_workers,
+            "worker_mode": performance["mode"],
         },
         "performance": performance,
         "operations": [
@@ -89,6 +97,19 @@ def process_images(
     return manifest
 
 
+def _process_records(
+    files: list[dict[str, Any]],
+    input_dir: Path,
+    image_root: Path,
+    options: ProcessingOptions,
+    workers: int,
+) -> list[dict[str, Any]]:
+    if workers == 1:
+        return [_process_record(item, input_dir, image_root, options) for item in files]
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        return list(executor.map(lambda item: _process_record(item, input_dir, image_root, options), files))
+
+
 def _performance_summary(
     started_at: datetime,
     finished_at: datetime,
@@ -98,6 +119,7 @@ def _performance_summary(
     processed_files: int,
     skipped_files: int,
     failed_files: int,
+    workers: dict[str, Any],
 ) -> dict[str, Any]:
     elapsed_seconds = max(0.0, round(elapsed_seconds, 6))
     return {
@@ -108,6 +130,7 @@ def _performance_summary(
         "processed_files": processed_files,
         "skipped_files": skipped_files,
         "failed_files": failed_files,
+        **workers,
         "processed_files_per_minute": _files_per_minute(processed_files, elapsed_seconds),
         "total_files_per_minute": _files_per_minute(total_files, elapsed_seconds),
     }
@@ -154,6 +177,8 @@ def _process_record(
     source = input_dir / relative_path
     target = image_root / relative_path
     try:
+        if source.resolve() == target.resolve():
+            raise ValueError("derivative target would overwrite the source image")
         with Image.open(source) as image:
             processed, operations, process_info = _process_image(image, options)
             target.parent.mkdir(parents=True, exist_ok=True)
