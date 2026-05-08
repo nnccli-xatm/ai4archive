@@ -14,6 +14,7 @@ from .calibration import CALIBRATION_JSON, write_rules_calibration_summary
 from .handoff import write_delivery_handoff_manifest
 from .preflight import PreflightConfig, run_preflight, write_preflight_report
 from .processing import ProcessingOptions, process_images
+from .processing_plan import write_processing_plan
 from .processing_review import write_processing_review_package
 from .reports import write_reports, write_review_export, write_review_summary
 from .rules import RulesProfileError, load_rules_profile
@@ -164,6 +165,8 @@ def main(argv: list[str] | None = None) -> int:
         return _main_delivery_manifest(argv[1:])
     if argv and argv[0] == "processing-review-package":
         return _main_processing_review_package(argv[1:])
+    if argv and argv[0] == "processing-plan":
+        return _main_processing_plan(argv[1:])
     parser = build_parser()
     args = parser.parse_args(argv)
     _validate_processing_flags(parser, args)
@@ -431,6 +434,43 @@ def _main_processing_review_package(argv: list[str]) -> int:
     print(f"Processing review package JSON: {json_path}")
     print(f"Processing review package HTML: {html_path}")
     print("Sensitivity: local-only row-level evidence; do not use as public aggregate evidence.")
+    return 0
+
+
+def _main_processing_plan(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="archive-scan-qc processing-plan",
+        description="Write a sensitive local dry-run processing plan from scan_qc_report.json without derivative images.",
+    )
+    parser.add_argument("--report", required=True, type=Path, help="Path to scan_qc_report.json.")
+    parser.add_argument("--input", required=True, type=Path, help="Image directory used by the scan report.")
+    parser.add_argument("--out", required=True, type=Path, help="Output directory for processing_plan.json and processing_plan.csv.")
+    parser.add_argument("--auto-crop", action="store_true", help="Plan conservative page-border crop candidates.")
+    parser.add_argument("--deskew", action="store_true", help="Plan conservative small-angle deskew candidates.")
+    parser.add_argument("--trim-dark-border", action="store_true", help="Plan conservative dark scan border trim candidates.")
+    parser.add_argument("--despeckle", action="store_true", help="Plan isolated dark speckle cleanup candidates.")
+    args = parser.parse_args(argv)
+    try:
+        json_path, csv_path, plan = write_processing_plan(
+            args.report,
+            args.input,
+            args.out,
+            ProcessingOptions(
+                auto_crop=args.auto_crop,
+                deskew=args.deskew,
+                trim_dark_border=args.trim_dark_border,
+                despeckle=args.despeckle,
+            ),
+        )
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    summary = plan["summary"]
+    print(f"Processing plan JSON: {json_path}")
+    print(f"Processing plan CSV: {csv_path}")
+    print(f"Planned files: {summary['planned_files']}")
+    print(f"Skipped/unopenable files: {summary['skipped_files'] + summary['unopenable_files']}")
+    print("Derivative images written: no")
+    print("Sensitivity: sensitive local row-level evidence; contains paths/hashes, no thumbnails or image bytes.")
     return 0
 
 
