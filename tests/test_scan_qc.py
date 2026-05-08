@@ -39,11 +39,25 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(report["summary"]["openable_files"], 2)
             self.assertTrue(any(finding["rule"] == "dpi_minimum" for finding in report["findings"]))
             self.assertTrue(paths["json"].exists())
+            self.assertTrue(paths["html"].exists())
             self.assertTrue(paths["files_csv"].exists())
             self.assertTrue(paths["findings_csv"].exists())
 
             saved = json.loads(paths["json"].read_text(encoding="utf-8"))
             self.assertEqual(saved["project"]["project_id"], "p1")
+            self.assertEqual(saved["manifest"]["project_id"], "p1")
+            self.assertEqual(saved["manifest"]["batch_id"], "b1")
+            self.assertEqual(saved["manifest"]["rule_version"], "scan-qc.phase1.v1")
+            self.assertEqual(saved["manifest"]["total_files"], 2)
+            self.assertEqual(saved["manifest"]["p0_findings"], report["summary"]["p0_findings"])
+
+            html = paths["html"].read_text(encoding="utf-8")
+            self.assertIn("<!doctype html>", html)
+            self.assertIn("Scan QC Report", html)
+            self.assertIn("Total Files", html)
+            self.assertIn("A001_0002.png", html)
+            self.assertIn("dpi_minimum", html)
+            self.assertIn("P0", html)
 
     def test_flags_unopenable_duplicate_names_and_duplicate_hashes(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

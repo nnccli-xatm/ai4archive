@@ -16,7 +16,7 @@ The current implementation covers:
 - image format, DPI, color mode, width, height, file size, and SHA-256 capture
 - duplicate filename and duplicate file-content checks
 - batch-level format, DPI, and color-mode consistency findings
-- JSON report plus CSV file and finding exports
+- JSON report, standalone HTML report, and CSV file and finding exports
 
 ### Dependency choice
 
@@ -50,8 +50,15 @@ archive-scan-qc \
 The command writes:
 
 - `scan_qc_report.json`
+- `scan_qc_report.html`
 - `scan_qc_files.csv`
 - `scan_qc_findings.csv`
+
+The JSON report includes a batch `manifest` with project, batch, input
+directory, output directory, rule version, generation time, total file count,
+and P0/P1/P2 finding counts. The HTML report is a single static file with
+inline CSS for manual review; it shows the batch manifest, summary counts, file
+metadata table, and finding table with P0/P1/P2 severity badges.
 
 The process returns exit code `1` when P0 findings are present, so it can be
 used in batch scripts. Reports are written to the output directory; original
