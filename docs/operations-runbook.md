@@ -162,6 +162,39 @@ configuration, candidate count, skipped count, manifest count, error, and warnin
 fields only. Do not treat it as a scan report; it is a go/no-go configuration
 and manifest risk check.
 
+For project-scale production runs, create a local run plan instead of launching
+each batch manually. CSV example:
+
+```csv
+batch_id,input_dir,report_dir,process_out,manifest_csv,rules_profile,workers,auto_crop,deskew,trim_dark_border,despeckle,resume_processing
+batch-001,/approved-work/input-batches/batch-001,batch-001,/approved-work/processed-derivatives/batch-001,/approved-work/manifests/batch-001.csv,/approved-work/rules/project-rules.json,2,true,true,true,true,false
+batch-002,/approved-work/input-batches/batch-002,batch-002,/approved-work/processed-derivatives/batch-002,/approved-work/manifests/batch-002.csv,/approved-work/rules/project-rules.json,2,true,true,true,true,true
+```
+
+Run it with:
+
+```bash
+archive-scan-qc run-plan \
+  --plan-csv /approved-work/plans/project-run.csv \
+  --out /approved-work/qc-reports/project-code \
+  --project project-code \
+  --continue-on-error
+```
+
+JSON plans may be a top-level list of batch objects or an object with
+`project_id` and `batches`. Required batch fields are `batch_id` and
+`input_dir`. Optional fields are `report_dir`, `process_out`, `manifest_csv`,
+`rules_profile`, `workers`, `min_dpi`, `name_pattern`, `auto_crop`, `deskew`,
+`trim_dark_border`, `despeckle`, and `resume_processing`. Relative input,
+manifest, and rules-profile paths resolve relative to the plan file; relative
+report and processing-output paths resolve under the project `--out` root.
+
+`run-plan` performs preflight first for every batch it attempts. A preflight
+failure prevents that batch's scan and processing steps. Without
+`--continue-on-error`, the command stops after the first failed batch. With
+`--continue-on-error`, later batches still run, and the final exit code remains
+non-zero if any batch failed.
+
 ## Reports And Archival Evidence
 
 Each scan writes:
@@ -179,6 +212,11 @@ When derivative processing is enabled, `--process-out` also contains:
 - `processing_audit_summary.json`
 - `images/` with derivative images preserving source relative paths
 
+Each project run plan additionally writes under its project `--out` root:
+
+- `run_plan_summary.json`
+- `run_plan_summary.csv`
+
 Archive the command line, rules profile, manifest CSV, JSON report, HTML
 report, CSV exports, processing manifest, retry manifest, audit summary,
 package version, Python version, Pillow version, platform, and worker setting.
@@ -187,6 +225,12 @@ because they include filenames, relative paths, hashes, and per-file metrics.
 `processing_audit_summary.json` is aggregate-only: it records counts, operation
 flags, worker metadata, timing, throughput, failure totals, and resume counts
 without file lists, paths, hashes, thumbnails, or image content.
+`run_plan_summary.json` and `run_plan_summary.csv` are also aggregate-only:
+they record batch totals, passed and failed counts, P0/P1/P2 counts,
+processing failure counts, preflight error counts, throughput aggregates, and
+failed batch IDs. They intentionally omit source filenames, source paths,
+hashes, thumbnails, row-level file metadata, and image content. Keep the run
+plan file itself local if its paths reveal private collection locations.
 
 ## Interrupted Processing Recovery
 
