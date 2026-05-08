@@ -12,7 +12,7 @@ from .scanner import ScanConfig, scan_batch
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="archive-scan-qc",
-        description="Run phase-one archive scan QC checks and write JSON/CSV reports.",
+        description="Run phase-one archive scan QC checks and write JSON, HTML, and CSV reports.",
     )
     parser.add_argument("--input", required=True, type=Path, help="Image directory to scan.")
     parser.add_argument("--out", required=True, type=Path, help="Report output directory.")
