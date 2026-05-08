@@ -1364,6 +1364,46 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(report["status"], "fail")
             self.assertIn("process_output_required", {error["code"] for error in report["errors"]})
 
+    def test_preflight_invalid_rules_profile_writes_failure_report(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            invalid_profile = root / "invalid.json"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "PRIVATE_PRESENT.jpg", dpi=(300, 300))
+            invalid_profile.write_text('{"name": ""}', encoding="utf-8")
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                exit_code = main(
+                    [
+                        "preflight",
+                        "--input",
+                        str(input_dir),
+                        "--out",
+                        str(output_dir),
+                        "--rules-profile",
+                        str(invalid_profile),
+                    ]
+                )
+
+            report_path = output_dir / "preflight_report.json"
+            report_text = report_path.read_text(encoding="utf-8")
+            report = json.loads(report_text)
+            self.assertEqual(exit_code, 1)
+            self.assertTrue(report_path.exists())
+            self.assertEqual(report["status"], "fail")
+            self.assertFalse(report["configuration"]["rules_profile"]["loaded"])
+            self.assertTrue(report["configuration"]["rules_profile"]["provided"])
+            self.assertIn("rules_profile_invalid", {error["code"] for error in report["errors"]})
+            self.assertNotIn("PRIVATE_PRESENT.jpg", report_text)
+            self.assertNotIn(str(input_dir), report_text)
+            self.assertNotIn("sha256", report_text.lower())
+            self.assertFalse(report["privacy"]["contains_file_list"])
+            self.assertFalse(report["privacy"]["contains_hashes"])
+            self.assertFalse(report["privacy"]["contains_thumbnails"])
+            self.assertFalse(report["privacy"]["contains_image_content"])
+
     def test_preflight_rejects_illegal_manifest_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

@@ -177,7 +177,7 @@ def main(argv: list[str] | None = None) -> int:
 def _main_preflight(argv: list[str]) -> int:
     parser = build_preflight_parser()
     args = parser.parse_args(argv)
-    rules_profile = _load_rules_profile(parser, args)
+    rules_profile, rules_profile_error = _load_rules_profile_for_preflight(args)
     report = run_preflight(
         PreflightConfig(
             project_id=args.project,
@@ -187,6 +187,8 @@ def _main_preflight(argv: list[str]) -> int:
             process_out=args.process_out,
             manifest_csv=args.manifest_csv,
             rules_profile=rules_profile,
+            rules_profile_error=rules_profile_error,
+            rules_profile_provided=args.rules_profile is not None,
             workers=args.workers,
             auto_crop=args.auto_crop,
             deskew=args.deskew,
@@ -226,6 +228,15 @@ def _load_rules_profile(parser: argparse.ArgumentParser, args: argparse.Namespac
     if rules_profile and args.name_pattern is not None:
         rules_profile = replace(rules_profile, name_pattern=args.name_pattern)
     return rules_profile
+
+
+def _load_rules_profile_for_preflight(args: argparse.Namespace):
+    if not args.rules_profile:
+        return None, None
+    try:
+        return load_rules_profile(args.rules_profile), None
+    except RulesProfileError:
+        return None, "Rules profile could not be loaded or validated."
 
 
 if __name__ == "__main__":

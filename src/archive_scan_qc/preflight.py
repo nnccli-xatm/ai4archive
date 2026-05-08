@@ -26,6 +26,8 @@ class PreflightConfig:
     process_out: Path | None = None
     manifest_csv: Path | None = None
     rules_profile: RulesProfile | None = None
+    rules_profile_error: str | None = None
+    rules_profile_provided: bool = False
     workers: int | None = None
     auto_crop: bool = False
     deskew: bool = False
@@ -113,6 +115,9 @@ def run_preflight(config: PreflightConfig) -> dict[str, Any]:
         worker_error = str(exc)
         _add(errors, "workers_invalid", str(exc))
 
+    if config.rules_profile_error:
+        _add(errors, "rules_profile_invalid", config.rules_profile_error)
+
     profile = config.rules_profile or default_rules_profile()
     input_paths = {path.relative_to(config.input_dir.resolve()).as_posix() for path in candidate_files}
     manifest = _validate_manifest(config.manifest_csv, input_paths)
@@ -153,10 +158,10 @@ def run_preflight(config: PreflightConfig) -> dict[str, Any]:
             },
             "processing_flags": {flag: getattr(config, flag) for flag in PROCESSING_FLAGS},
             "rules_profile": {
-                "provided": config.rules_profile is not None,
+                "provided": config.rules_profile_provided or config.rules_profile is not None,
                 "name": profile.name,
                 "version": profile.version,
-                "loaded": True,
+                "loaded": config.rules_profile_error is None,
             },
             "workers": {
                 "valid": worker_error is None,
