@@ -6,6 +6,7 @@ It writes no derivative image files and never modifies originals.
 
 from __future__ import annotations
 
+import csv
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
@@ -37,6 +38,18 @@ class ScanConfig:
     output_dir: Path
     min_dpi: int = 200
     name_pattern: str | None = None
+    manifest_csv: Path | None = None
+
+
+@dataclass(frozen=True)
+class ManifestCheck:
+    used: bool
+    path: str | None
+    entry_count: int
+    unique_entry_count: int
+    missing_count: int
+    unexpected_count: int
+    duplicate_count: int
 
 
 def scan_batch(config: ScanConfig) -> dict[str, Any]:
@@ -47,8 +60,10 @@ def scan_batch(config: ScanConfig) -> dict[str, Any]:
         raise NotADirectoryError(f"Input path is not a directory: {input_dir}")
 
     files = [_inspect_file(path, input_dir) for path in _iter_candidate_files(input_dir)]
-    findings = _build_findings(files, config)
-    summary = _summarize(files, findings)
+    manifest_paths = _read_manifest_paths(config.manifest_csv) if config.manifest_csv else None
+    findings = _build_findings(files, config, manifest_paths)
+    manifest_check = _summarize_manifest_check(files, manifest_paths, config.manifest_csv)
+    summary = _summarize(files, findings, manifest_check)
     generated_at = datetime.now(timezone.utc).isoformat()
     project = {
         "project_id": config.project_id,
@@ -57,6 +72,7 @@ def scan_batch(config: ScanConfig) -> dict[str, Any]:
         "output_dir": str(config.output_dir.resolve()),
         "min_dpi": config.min_dpi,
         "name_pattern": config.name_pattern,
+        "manifest_csv": str(config.manifest_csv.resolve()) if config.manifest_csv else None,
     }
     manifest = {
         "project_id": project["project_id"],
@@ -69,6 +85,13 @@ def scan_batch(config: ScanConfig) -> dict[str, Any]:
         "p0_findings": summary["p0_findings"],
         "p1_findings": summary["p1_findings"],
         "p2_findings": summary["p2_findings"],
+        "manifest_used": summary["manifest_used"],
+        "manifest_csv": project["manifest_csv"],
+        "manifest_entry_count": summary["manifest_entry_count"],
+        "manifest_unique_entry_count": summary["manifest_unique_entry_count"],
+        "manifest_missing_count": summary["manifest_missing_count"],
+        "manifest_unexpected_count": summary["manifest_unexpected_count"],
+        "manifest_duplicate_count": summary["manifest_duplicate_count"],
     }
 
     return {
@@ -152,13 +175,76 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _build_findings(files: list[dict[str, Any]], config: ScanConfig) -> list[dict[str, str]]:
+def _read_manifest_paths(manifest_csv: Path) -> list[str]:
+    with manifest_csv.open("r", newline="", encoding="utf-8-sig") as handle:
+        reader = csv.DictReader(handle)
+        if not reader.fieldnames or "relative_path" not in reader.fieldnames:
+            raise ValueError("Manifest CSV must include a relative_path column.")
+        paths = []
+        for row in reader:
+            relative_path = _normalize_manifest_path(row.get("relative_path", ""))
+            if relative_path:
+                paths.append(relative_path)
+        return paths
+
+
+def _normalize_manifest_path(path: str) -> str:
+    return path.strip().replace("\\", "/").lstrip("/")
+
+
+def _build_findings(
+    files: list[dict[str, Any]],
+    config: ScanConfig,
+    manifest_paths: list[str] | None,
+) -> list[dict[str, str]]:
     findings: list[dict[str, str]] = []
     _add_per_file_findings(files, findings, config)
     _add_duplicate_name_findings(files, findings)
     _add_duplicate_hash_findings(files, findings)
     _add_batch_consistency_findings(files, findings)
+    if manifest_paths is not None:
+        _add_manifest_findings(files, findings, manifest_paths)
     return findings
+
+
+def _add_manifest_findings(
+    files: list[dict[str, Any]],
+    findings: list[dict[str, str]],
+    manifest_paths: list[str],
+) -> None:
+    file_paths = {item["relative_path"] for item in files}
+    manifest_set = set(manifest_paths)
+
+    for path in sorted(manifest_set - file_paths):
+        findings.append(
+            _path_finding(
+                path,
+                "manifest_missing_file",
+                "P0",
+                "Manifest expects this file, but it was not found in the scanned directory.",
+            )
+        )
+
+    for path in sorted(file_paths - manifest_set):
+        findings.append(
+            _path_finding(
+                path,
+                "manifest_unexpected_file",
+                "P0",
+                "File exists in the scanned directory, but it is not listed in the manifest.",
+            )
+        )
+
+    duplicate_paths = sorted(path for path, count in _path_counts(manifest_paths).items() if count > 1)
+    for path in duplicate_paths:
+        findings.append(
+            _path_finding(
+                path,
+                "manifest_duplicate_entry",
+                "P0",
+                "Manifest contains duplicate relative_path entries.",
+            )
+        )
 
 
 def _add_per_file_findings(
@@ -230,7 +316,49 @@ def _finding(item: dict[str, Any], rule: str, severity: str, message: str) -> di
     }
 
 
-def _summarize(files: list[dict[str, Any]], findings: list[dict[str, str]]) -> dict[str, int]:
+def _path_finding(relative_path: str, rule: str, severity: str, message: str) -> dict[str, str]:
+    return {
+        "relative_path": relative_path,
+        "rule": rule,
+        "severity": severity,
+        "message": message,
+    }
+
+
+def _path_counts(paths: list[str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for path in paths:
+        counts[path] = counts.get(path, 0) + 1
+    return counts
+
+
+def _summarize_manifest_check(
+    files: list[dict[str, Any]],
+    manifest_paths: list[str] | None,
+    manifest_csv: Path | None,
+) -> ManifestCheck:
+    if manifest_paths is None:
+        return ManifestCheck(False, None, 0, 0, 0, 0, 0)
+
+    file_paths = {item["relative_path"] for item in files}
+    manifest_set = set(manifest_paths)
+    duplicate_count = sum(1 for count in _path_counts(manifest_paths).values() if count > 1)
+    return ManifestCheck(
+        used=True,
+        path=str(manifest_csv.resolve()) if manifest_csv else None,
+        entry_count=len(manifest_paths),
+        unique_entry_count=len(manifest_set),
+        missing_count=len(manifest_set - file_paths),
+        unexpected_count=len(file_paths - manifest_set),
+        duplicate_count=duplicate_count,
+    )
+
+
+def _summarize(
+    files: list[dict[str, Any]],
+    findings: list[dict[str, str]],
+    manifest_check: ManifestCheck,
+) -> dict[str, int | bool | str | None]:
     return {
         "total_files": len(files),
         "openable_files": sum(1 for item in files if item["openable"]),
@@ -238,4 +366,11 @@ def _summarize(files: list[dict[str, Any]], findings: list[dict[str, str]]) -> d
         "p0_findings": sum(1 for finding in findings if finding["severity"] == "P0"),
         "p1_findings": sum(1 for finding in findings if finding["severity"] == "P1"),
         "p2_findings": sum(1 for finding in findings if finding["severity"] == "P2"),
+        "manifest_used": manifest_check.used,
+        "manifest_csv": manifest_check.path,
+        "manifest_entry_count": manifest_check.entry_count,
+        "manifest_unique_entry_count": manifest_check.unique_entry_count,
+        "manifest_missing_count": manifest_check.missing_count,
+        "manifest_unexpected_count": manifest_check.unexpected_count,
+        "manifest_duplicate_count": manifest_check.duplicate_count,
     }
