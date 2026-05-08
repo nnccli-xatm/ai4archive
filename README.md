@@ -132,6 +132,50 @@ By default, `run-plan` stops at the first failed batch and exits non-zero. Add
 `--continue-on-error` to keep running later batches while still recording the
 failed batch in the project summary and returning non-zero at the end.
 
+### Local private sample integration
+
+Use `scripts/run_private_integration.py` only inside the internal/local
+environment that can access private sample images. The repository does not
+include private images, private paths, private filenames, hashes, thumbnails,
+or row-level private results.
+
+```bash
+PYTHONPATH=src python3 scripts/run_private_integration.py \
+  --input /placeholder/private-image-directory \
+  --out /placeholder/private-output-root \
+  --workers 4 \
+  --process-images \
+  --auto-crop \
+  --deskew
+```
+
+The same required paths may be supplied through environment variables:
+
+```bash
+PRIVATE_INTEGRATION_INPUT=/placeholder/private-image-directory \
+PRIVATE_INTEGRATION_OUT=/placeholder/private-output-root \
+PYTHONPATH=src python3 scripts/run_private_integration.py \
+  --workers 4 \
+  --process-images
+```
+
+The script runs preflight, scan, optional derivative processing, run-plan, and
+an aggregate benchmark. If review-summary or acceptance-summary automation is
+not available for the current local evidence, the public summary records that
+the optional step was skipped or unavailable.
+
+Only stdout and `/placeholder/private-output-root/private_integration_summary.json`
+are intended as aggregate-only public outputs. They include total files,
+openable files, finding counts, processing counts, throughput, failed batch
+count, acceptance status, and the output directory name. The script performs a
+redaction self-check on the public summary and fails if it finds sensitive keys
+or private path values such as source paths, `relative_path`, `filename`,
+`sha256`, `thumbnail`, or `reviewer_notes`.
+
+Normal scan reports, processing manifests, retry manifests, and any row-level
+review artifacts remain under `/placeholder/private-output-root` as sensitive
+local evidence. Do not upload them to public systems.
+
 Run `archive-scan-qc preflight` before production batches. It validates the
 input directory, output and processing-output configuration, worker count, rules
 profile loading, and manifest structure without opening, copying, modifying, or

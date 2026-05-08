@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import csv
+import importlib.util
 import io
 import json
 import re
@@ -25,6 +26,17 @@ from archive_scan_qc.scanner import ScanConfig, scan_batch
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+PRIVATE_INTEGRATION_PATH = REPO_ROOT / "scripts" / "run_private_integration.py"
+
+
+def _load_private_integration_module():
+    spec = importlib.util.spec_from_file_location("run_private_integration", PRIVATE_INTEGRATION_PATH)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Could not load run_private_integration.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 class ScanQcTest(unittest.TestCase):
@@ -1662,6 +1674,10 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(audit_summary["counts"]["processed_files"], 1)
             self.assertEqual(audit_summary["counts"]["failed_files"], 1)
             self.assertEqual(audit_summary["counts"]["retry_list_files"], 1)
+            self.assertEqual(audit_summary["counts"]["processing_warning_files"], 0)
+            self.assertIn("pixel_change_ratio", audit_summary["metrics"])
+            self.assertIn("pixel_change_ratio", audit_summary["distributions"])
+            self.assertTrue(audit_summary["guardrails"]["enabled"])
             for forbidden in ["private_success.png", "private_failed.png", "relative_path", "sha256", str(input_dir)]:
                 self.assertNotIn(forbidden, audit_summary_text)
 
@@ -1699,6 +1715,7 @@ class ScanQcTest(unittest.TestCase):
             audit = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
             self.assertTrue(audit["operations"]["resume_processing"])
             self.assertEqual(audit["counts"]["skipped_due_to_resume"], 2)
+            self.assertEqual(audit["metrics"]["pixel_change_ratio"]["count"], 2)
 
     def test_resume_processing_reprocesses_missing_derivative(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1730,6 +1747,8 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(resumed["summary"]["processed_files"], 1)
             self.assertEqual(resumed["summary"]["skipped_due_to_resume"], 1)
             self.assertEqual(resumed["summary"]["reprocessed_files"], 1)
+            audit = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(audit["metrics"]["pixel_change_ratio"]["count"], 2)
 
     def test_resume_processing_retries_previous_failed_items(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1903,8 +1922,66 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(record["crop_bbox"], [10, 8, 70, 52])
             self.assertEqual(record["original_size"], [80, 60])
             self.assertEqual(record["output_size"], [60, 44])
+            self.assertGreater(record["processing_audit"]["crop_ratio"], 0.0)
+            self.assertEqual(record["processing_warnings"], [])
             self.assertEqual(processed_size, (60, 44))
             self.assertIn("auto_crop_conservative", record["operations"])
+
+    def test_processing_audit_allows_small_synthetic_change(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            image = Image.new("RGB", (80, 60), "white")
+            for point in [(10, 10), (20, 20), (30, 30)]:
+                image.putpixel(point, (0, 0, 0))
+            image.save(input_dir / "A001_0001.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+            audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
+
+            record = manifest["files"][0]
+            self.assertEqual(record["status"], "processed")
+            self.assertEqual(record["processing_warnings"], [])
+            self.assertGreater(record["processing_audit"]["pixel_change_ratio"], 0.0)
+            self.assertEqual(record["processing_audit"]["despeckle_pixel_ratio"], 0.000625)
+            self.assertEqual(audit_summary["counts"]["processing_warning_files"], 0)
+            self.assertEqual(audit_summary["metrics"]["despeckle_pixel_ratio"]["count"], 1)
+
+    def test_processing_guardrail_fails_overprocessed_derivative_without_touching_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "A001_0001.png"
+            image = Image.new("RGB", (80, 60), "white")
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((10, 8, 69, 51), outline="black", width=3)
+            image.save(source)
+            source_bytes = source.read_bytes()
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(auto_crop=True, audit_max_crop_ratio=0.10),
+            )
+            audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
+
+            record = manifest["files"][0]
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(record["status"], "failed")
+            self.assertIn("processing guardrail exceeded", record["failure_reason"])
+            self.assertIn("crop_ratio", record["processing_warnings"])
+            self.assertFalse((process_dir / "images" / "A001_0001.png").exists())
+            self.assertEqual(audit_summary["counts"]["guardrail_failed_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["failure_reasons"]["crop_ratio"], 1)
 
     def test_auto_crop_does_not_overcrop_blank_or_low_contrast_images(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2466,6 +2543,63 @@ class ScanQcTest(unittest.TestCase):
             manifest = json.loads((output_root / "processed" / "processing_manifest.json").read_text(encoding="utf-8"))
             self.assertTrue(manifest["resume"]["enabled"])
             self.assertEqual(manifest["summary"]["resumed_files"], 1)
+
+    def test_private_integration_summary_is_aggregate_only(self) -> None:
+        private_integration = _load_private_integration_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-source"
+            output_root = root / "private-output"
+            input_dir.mkdir()
+            Image.new("RGB", (80, 60), "white").save(input_dir / "sensitive_original_name.png", dpi=(300, 300))
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = private_integration.main(
+                    [
+                        "--input",
+                        str(input_dir),
+                        "--out",
+                        str(output_root),
+                        "--workers",
+                        "1",
+                        "--process-images",
+                        "--skip-benchmark",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            summary_path = output_root / "private_integration_summary.json"
+            self.assertTrue(summary_path.exists())
+            summary_text = summary_path.read_text(encoding="utf-8")
+            stdout_text = stdout.getvalue()
+            summary = json.loads(summary_text)
+
+            self.assertEqual(summary["aggregate_counts"]["total_files"], 1)
+            self.assertEqual(summary["aggregate_counts"]["openable_files"], 1)
+            self.assertEqual(summary["aggregate_counts"]["processing_processed_files"], 1)
+            self.assertTrue(summary["privacy_self_check"]["passed"])
+            self.assertEqual(summary["privacy_self_check"]["violation_count"], 0)
+            self.assertNotIn(str(input_dir), summary_text)
+            self.assertNotIn(str(output_root), summary_text)
+            self.assertNotIn("sensitive_original_name.png", summary_text)
+            self.assertNotIn("sensitive_original_name.png", stdout_text)
+            self.assertNotIn(str(input_dir), stdout_text)
+            self.assertIn("Sensitive local evidence", summary["privacy"]["row_level_artifacts"])
+
+    def test_private_integration_redaction_self_check_rejects_sensitive_keys_and_values(self) -> None:
+        private_integration = _load_private_integration_module()
+        leaks = private_integration.privacy_self_check(
+            {
+                "summary": {"total_files": 1},
+                "rows": [{"relative_path": "private/page.png", "ok": "safe"}],
+                "note": "/private/input/private/page.png",
+            },
+            forbidden_values={"private input directory": "/private/input"},
+        )
+
+        self.assertTrue(any("relative_path" in leak for leak in leaks))
+        self.assertTrue(any("private input directory" in leak for leak in leaks))
 
 
 def _synthetic_text_page() -> Image.Image:
