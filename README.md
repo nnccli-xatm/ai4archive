@@ -229,7 +229,47 @@ images are only read.
 
 ### Local benchmark metrics
 
-The CLI prints concise timing lines after each run:
+For repeatable privacy-safe benchmarking across worker counts and hardware,
+use the dedicated aggregate benchmark entry:
+
+```bash
+archive-scan-qc benchmark \
+  --input /path/to/private-sample-images \
+  --out /path/to/benchmark-output \
+  --workers-list 1,2,4 \
+  --repeats 3 \
+  --deskew \
+  --auto-crop \
+  --trim-dark-border \
+  --despeckle
+```
+
+Use `--scan-only` to measure scanning without derivative processing. Processing
+benchmarks write derivatives only to per-run scratch directories and remove
+them after each aggregate run. Pass `--process-out /path/to/benchmark-scratch`
+only if you want that scratch work outside the benchmark output tree.
+
+The benchmark writes only:
+
+- `benchmark_results.json`
+- `benchmark_results.csv`
+
+These files are aggregate-only. They include total file count, openable count,
+finding counts by severity and rule, processing success/failure/skip counts,
+scan and processing elapsed seconds, files per minute, requested and effective
+workers, operation flags, Python version, platform, CPU count, and best-effort
+memory/GPU fields. They do not include source images, filenames, relative
+paths, content hashes, thumbnails, per-file quality metrics, per-file finding
+rows, single-file manifests, or image content.
+
+For private local samples, share only `benchmark_results.json` and/or
+`benchmark_results.csv`. Do not share the image directory, generated derivative
+images, normal scan QC reports, processing manifests, filenames, thumbnails, or
+row-level records from private collections. This makes it practical to compare
+throughput on domestic platforms and different hardware while keeping sample
+identity and content local.
+
+The regular scan CLI also prints concise timing lines after each run:
 
 - `Scan elapsed`, `Scan files/min`, and `Scan openable files/min`
 - `Scan workers`, showing the effective worker count and serial/parallel mode
