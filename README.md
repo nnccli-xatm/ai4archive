@@ -14,7 +14,11 @@ The current implementation covers:
 - recursive image-directory import without modifying source files
 - file openability checks
 - image format, DPI, color mode, width, height, file size, and SHA-256 capture
+- Pillow-only image quality metrics: grayscale brightness mean, grayscale
+  contrast standard deviation, and Laplacian-variance sharpness approximation
 - duplicate filename and duplicate file-content checks
+- conservative P1/P2 quality findings for over-dark, over-bright,
+  low-contrast, and suspected-blur pages
 - batch-level format, DPI, and color-mode consistency findings
 - optional batch manifest CSV consistency checks
 - JSON report, standalone HTML report, and CSV file and finding exports
@@ -27,8 +31,9 @@ is open source, lightweight, cross-platform, and works offline. Hashing, JSON,
 CSV, path handling, and rule checks use only the Python standard library. This
 keeps phase one aligned with the design constraints: no cloud services, no
 large frontend framework, no generative image repair, and no original-image
-overwrites. The deskew implementation is also Pillow-only; it does not add
-OpenCV, scikit-image, or other heavy native dependencies.
+overwrites. The quality metrics, crop, and deskew implementations are also
+Pillow-only; they do not add OpenCV, scikit-image, GPU, cloud, or other heavy
+native dependencies.
 
 ### Install
 
@@ -104,11 +109,33 @@ The command writes:
 The JSON report includes a batch `manifest` with project, batch, input
 directory, output directory, rule version, generation time, total file count,
 P0/P1/P2 finding counts, and manifest usage/missing/unexpected/duplicate
-counts when a manifest is provided. JSON summary and manifest metadata include
-skipped file and directory counts for auditability. The HTML report is a single
-static file with inline CSS for manual review; it shows the batch manifest,
-summary counts, skipped counts, file metadata table, and finding table with
-P0/P1/P2 severity badges.
+counts when a manifest is provided. Each openable file record also includes:
+
+- `quality_brightness_mean`: mean grayscale value on a 0-255 scale. Lower is
+  darker; higher is brighter.
+- `quality_contrast_stddev`: grayscale standard deviation on a 0-255 scale.
+  Lower values indicate flatter, lower-contrast images.
+- `quality_sharpness_laplacian_var`: variance of a simple 4-neighbor
+  Laplacian approximation on a capped grayscale thumbnail. Lower values mean
+  fewer hard edges and can indicate blur.
+
+The default quality thresholds are intentionally conservative:
+
+- `quality_too_dark` P1 when brightness mean is below `45`.
+- `quality_too_bright` P1 when brightness mean is above `250` and contrast
+  standard deviation is below `10`.
+- `quality_low_contrast` P2 when contrast standard deviation is below `10`.
+- `quality_suspected_blur` P2 when contrast standard deviation is at least
+  `12` but Laplacian variance is below `20`.
+
+These thresholds are defaults on `ScanConfig` so batch-specific callers can
+tune them without changing report structure. JSON summary and manifest metadata
+include skipped file and directory counts for auditability. The CSV file export
+includes the quality metric columns. The HTML report is a single static file
+with inline CSS for manual review; it shows the batch manifest, summary counts,
+skipped counts, file metadata and quality metric table, and finding table with
+P0/P1/P2 severity badges. It does not embed source images, thumbnails, or file
+content.
 
 The process returns exit code `1` when P0 findings are present, so it can be
 used in batch scripts. Reports are written to the output directory; original

@@ -31,6 +31,9 @@ def write_reports(report: dict[str, Any], output_dir: Path) -> dict[str, Path]:
         "dpi_x",
         "dpi_y",
         "color_mode",
+        "quality_brightness_mean",
+        "quality_contrast_stddev",
+        "quality_sharpness_laplacian_var",
         "file_size",
         "sha256",
         "error",
@@ -243,13 +246,17 @@ def _files_table(files: list[dict[str, Any]]) -> str:
             f"<td>{_text(item.get('width'))} x {_text(item.get('height'))}</td>"
             f"<td>{_text(item.get('dpi_x'))} x {_text(item.get('dpi_y'))}</td>"
             f"<td>{_text(item.get('color_mode'))}</td>"
+            f"<td>{_text(item.get('quality_brightness_mean'))}</td>"
+            f"<td>{_text(item.get('quality_contrast_stddev'))}</td>"
+            f"<td>{_text(item.get('quality_sharpness_laplacian_var'))}</td>"
             f"<td>{_text(item.get('file_size'))}</td>"
             f"<td>{_text(item.get('error'))}</td>"
             "</tr>"
         )
     return (
         "<table><thead><tr><th>Path</th><th>Openable</th><th>Format</th><th>Dimensions</th>"
-        "<th>DPI</th><th>Color</th><th>Bytes</th><th>Error</th></tr></thead><tbody>"
+        "<th>DPI</th><th>Color</th><th>Brightness Mean</th><th>Contrast Stddev</th>"
+        "<th>Sharpness Laplacian Var</th><th>Bytes</th><th>Error</th></tr></thead><tbody>"
         + "\n".join(rows)
         + "</tbody></table>"
     )

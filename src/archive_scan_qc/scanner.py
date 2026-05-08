@@ -15,7 +15,7 @@ from pathlib import Path
 import re
 from typing import Any
 
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageStat, UnidentifiedImageError
 
 SUPPORTED_EXTENSIONS = {
     ".bmp",
@@ -40,6 +40,11 @@ class ScanConfig:
     min_dpi: int = 200
     name_pattern: str | None = None
     manifest_csv: Path | None = None
+    dark_mean_threshold: float = 45.0
+    bright_mean_threshold: float = 250.0
+    low_contrast_stddev_threshold: float = 10.0
+    blur_laplacian_variance_threshold: float = 20.0
+    blur_min_contrast_stddev: float = 12.0
 
 
 @dataclass(frozen=True)
@@ -197,6 +202,9 @@ def _inspect_file(path: Path, root: Path) -> dict[str, Any]:
         "dpi_x": None,
         "dpi_y": None,
         "color_mode": None,
+        "quality_brightness_mean": None,
+        "quality_contrast_stddev": None,
+        "quality_sharpness_laplacian_var": None,
         "error": None,
     }
 
@@ -205,6 +213,7 @@ def _inspect_file(path: Path, root: Path) -> dict[str, Any]:
             image.verify()
         with Image.open(path) as image:
             dpi_x, dpi_y = _extract_dpi(image.info.get("dpi"))
+            quality_metrics = _measure_quality(image)
             base.update(
                 {
                     "openable": True,
@@ -214,6 +223,7 @@ def _inspect_file(path: Path, root: Path) -> dict[str, Any]:
                     "dpi_x": dpi_x,
                     "dpi_y": dpi_y,
                     "color_mode": image.mode,
+                    **quality_metrics,
                     "error": None,
                 }
             )
@@ -221,6 +231,42 @@ def _inspect_file(path: Path, root: Path) -> dict[str, Any]:
         base["error"] = str(exc)
 
     return base
+
+
+def _measure_quality(image: Image.Image) -> dict[str, float]:
+    grayscale = image.convert("L")
+    sample = grayscale.copy()
+    sample.thumbnail((900, 900), Image.Resampling.BILINEAR)
+    stat = ImageStat.Stat(sample)
+    brightness_mean = float(stat.mean[0])
+    contrast_stddev = float(stat.stddev[0])
+    return {
+        "quality_brightness_mean": round(brightness_mean, 2),
+        "quality_contrast_stddev": round(contrast_stddev, 2),
+        "quality_sharpness_laplacian_var": round(_laplacian_variance(sample), 2),
+    }
+
+
+def _laplacian_variance(image: Image.Image) -> float:
+    width, height = image.size
+    if width < 3 or height < 3:
+        return 0.0
+
+    pixels = image.load()
+    count = 0
+    total = 0.0
+    total_sq = 0.0
+    for y in range(1, height - 1):
+        for x in range(1, width - 1):
+            center = pixels[x, y] * 4
+            value = center - pixels[x - 1, y] - pixels[x + 1, y] - pixels[x, y - 1] - pixels[x, y + 1]
+            total += value
+            total_sq += value * value
+            count += 1
+    if not count:
+        return 0.0
+    mean = total / count
+    return max(0.0, (total_sq / count) - (mean * mean))
 
 
 def _extract_dpi(raw_dpi: Any) -> tuple[int | None, int | None]:
@@ -334,6 +380,56 @@ def _add_per_file_findings(
             findings.append(_finding(item, "dimensions", "P0", "Image width or height is missing."))
         if name_regex and not name_regex.fullmatch(Path(item["filename"]).stem):
             findings.append(_finding(item, "name_pattern", "P1", "Filename stem does not match configured naming pattern."))
+        _add_quality_findings(item, findings, config)
+
+
+def _add_quality_findings(
+    item: dict[str, Any],
+    findings: list[dict[str, str]],
+    config: ScanConfig,
+) -> None:
+    brightness = item.get("quality_brightness_mean")
+    contrast = item.get("quality_contrast_stddev")
+    sharpness = item.get("quality_sharpness_laplacian_var")
+    if brightness is None or contrast is None or sharpness is None:
+        return
+
+    if brightness < config.dark_mean_threshold:
+        findings.append(
+            _finding(
+                item,
+                "quality_too_dark",
+                "P1",
+                f"Mean grayscale brightness {brightness} is below conservative threshold {config.dark_mean_threshold}.",
+            )
+        )
+    if brightness > config.bright_mean_threshold and contrast < config.low_contrast_stddev_threshold:
+        findings.append(
+            _finding(
+                item,
+                "quality_too_bright",
+                "P1",
+                f"Mean grayscale brightness {brightness} is above conservative threshold {config.bright_mean_threshold} with very low contrast.",
+            )
+        )
+    if contrast < config.low_contrast_stddev_threshold:
+        findings.append(
+            _finding(
+                item,
+                "quality_low_contrast",
+                "P2",
+                f"Grayscale standard deviation {contrast} is below conservative threshold {config.low_contrast_stddev_threshold}.",
+            )
+        )
+    if contrast >= config.blur_min_contrast_stddev and sharpness < config.blur_laplacian_variance_threshold:
+        findings.append(
+            _finding(
+                item,
+                "quality_suspected_blur",
+                "P2",
+                f"Laplacian variance sharpness {sharpness} is below conservative threshold {config.blur_laplacian_variance_threshold}.",
+            )
+        )
 
 
 def _add_duplicate_name_findings(files: list[dict[str, Any]], findings: list[dict[str, str]]) -> None:

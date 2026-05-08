@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 
 from archive_scan_qc.cli import main
 from archive_scan_qc.processing import ProcessingOptions, process_images
@@ -187,6 +187,65 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn("unsupported_format", rules)
             self.assertEqual(report["summary"]["manifest_unexpected_count"], 0)
             self.assertEqual(report["summary"]["skipped_manifest_file_count"], 1)
+
+    def test_quality_metrics_do_not_flag_synthetic_normal_page(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            _synthetic_text_page().save(input_dir / "A001_0001.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            rules = {finding["rule"] for finding in report["findings"]}
+            file_record = report["files"][0]
+
+            self.assertNotIn("quality_too_dark", rules)
+            self.assertNotIn("quality_too_bright", rules)
+            self.assertNotIn("quality_low_contrast", rules)
+            self.assertNotIn("quality_suspected_blur", rules)
+            self.assertGreater(file_record["quality_brightness_mean"], 0)
+            self.assertGreater(file_record["quality_contrast_stddev"], 0)
+            self.assertGreater(file_record["quality_sharpness_laplacian_var"], 0)
+
+    def test_quality_metrics_flag_dark_bright_low_contrast_and_blur(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            Image.new("RGB", (80, 80), (25, 25, 25)).save(input_dir / "dark.png")
+            Image.new("RGB", (80, 80), (253, 253, 253)).save(input_dir / "bright.png")
+            Image.new("RGB", (80, 80), (128, 128, 128)).save(input_dir / "low_contrast.png")
+            _synthetic_text_page().filter(ImageFilter.GaussianBlur(radius=3)).save(input_dir / "blur.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            rules_by_path: dict[str, set[str]] = {}
+            for finding in report["findings"]:
+                rules_by_path.setdefault(finding["relative_path"], set()).add(finding["rule"])
+
+            self.assertIn("quality_too_dark", rules_by_path["dark.png"])
+            self.assertIn("quality_too_bright", rules_by_path["bright.png"])
+            self.assertIn("quality_low_contrast", rules_by_path["low_contrast.png"])
+            self.assertIn("quality_suspected_blur", rules_by_path["blur.png"])
+
+    def test_quality_metrics_are_visible_in_json_csv_and_html(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            _synthetic_text_page().filter(ImageFilter.GaussianBlur(radius=3)).save(input_dir / "blur.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            paths = write_reports(report, output_dir)
+
+            saved = json.loads(paths["json"].read_text(encoding="utf-8"))
+            self.assertIn("quality_brightness_mean", saved["files"][0])
+            self.assertIn("quality_contrast_stddev", paths["files_csv"].read_text(encoding="utf-8"))
+            html = paths["html"].read_text(encoding="utf-8")
+            self.assertIn("Brightness Mean", html)
+            self.assertIn("quality_suspected_blur", html)
 
     def test_hidden_directories_are_skipped(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
