@@ -10,7 +10,7 @@ import sys
 from ._version import __version__
 from .preflight import PreflightConfig, run_preflight, write_preflight_report
 from .processing import ProcessingOptions, process_images
-from .reports import write_reports
+from .reports import write_reports, write_review_export, write_review_summary
 from .rules import RulesProfileError, load_rules_profile
 from .scanner import ScanConfig, scan_batch
 
@@ -122,6 +122,10 @@ def main(argv: list[str] | None = None) -> int:
         return benchmark_main(argv[1:])
     if argv and argv[0] == "preflight":
         return _main_preflight(argv[1:])
+    if argv and argv[0] == "review-export":
+        return _main_review_export(argv[1:])
+    if argv and argv[0] == "review-summary":
+        return _main_review_summary(argv[1:])
     parser = build_parser()
     args = parser.parse_args(argv)
     _validate_processing_flags(parser, args)
@@ -218,6 +222,39 @@ def _main_preflight(argv: list[str]) -> int:
     print(f"Warnings: {len(report['warnings'])}")
     print(f"Preflight report: {path}")
     return 0 if report["status"] == "pass" else 1
+
+
+def _main_review_export(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="archive-scan-qc review-export",
+        description="Export a sensitive local reviewer template from scan_qc_report.json.",
+    )
+    parser.add_argument("--report", required=True, type=Path, help="Path to scan_qc_report.json.")
+    parser.add_argument("--out", required=True, type=Path, help="Output review template CSV or JSON path.")
+    args = parser.parse_args(argv)
+    try:
+        path = write_review_export(args.report, args.out)
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    print(f"Review template: {path}")
+    print("Sensitivity: contains row-level paths and reviewer notes; keep local and do not upload publicly.")
+    return 0
+
+
+def _main_review_summary(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="archive-scan-qc review-summary",
+        description="Write an aggregate-only review_summary.json from a filled review template.",
+    )
+    parser.add_argument("--review", required=True, type=Path, help="Filled review template CSV or JSON path.")
+    parser.add_argument("--out", required=True, type=Path, help="Output aggregate review_summary.json path.")
+    args = parser.parse_args(argv)
+    try:
+        path = write_review_summary(args.review, args.out)
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    print(f"Review summary: {path}")
+    return 0
 
 
 def _validate_processing_flags(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:

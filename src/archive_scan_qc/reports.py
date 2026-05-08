@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import csv
+from datetime import datetime, timezone
 from html import escape
 import json
 from pathlib import Path
 from typing import Any
+
+REVIEW_STATUSES = {"pending", "accepted", "false_positive", "fixed", "needs_rescan"}
+RESOLVED_REVIEW_STATUSES = {"false_positive", "fixed"}
+REVIEW_TEMPLATE_FIELDS = ["finding_id", "rule", "severity", "relative_path", "status", "reviewer_notes"]
 
 
 def write_reports(report: dict[str, Any], output_dir: Path) -> dict[str, Path]:
@@ -62,6 +67,145 @@ def write_reports(report: dict[str, Any], output_dir: Path) -> dict[str, Path]:
         "files_csv": files_csv_path,
         "findings_csv": findings_csv_path,
     }
+
+
+def write_review_export(report_path: Path, output_path: Path) -> Path:
+    """Write a reviewer-editable finding template as CSV or JSON."""
+    report = _load_json_object(report_path, "Scan QC report")
+    findings = report.get("findings", [])
+    if not isinstance(findings, list):
+        raise ValueError("Scan QC report field 'findings' must be a list.")
+    rows = [_review_template_row(index, finding) for index, finding in enumerate(findings, start=1)]
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    if output_path.suffix.lower() == ".json":
+        payload = {
+            "schema_version": "scan-qc.review-template.v1",
+            "generated_at": _utc_now(),
+            "source_report": str(report_path),
+            "sensitivity": (
+                "Sensitive local evidence. Contains finding paths and reviewer notes; "
+                "do not upload to public systems."
+            ),
+            "allowed_statuses": sorted(REVIEW_STATUSES),
+            "findings": rows,
+        }
+        output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    else:
+        with output_path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=REVIEW_TEMPLATE_FIELDS)
+            writer.writeheader()
+            writer.writerows(rows)
+    return output_path
+
+
+def write_review_summary(review_path: Path, output_path: Path) -> Path:
+    rows = _load_review_rows(review_path)
+    summary = build_review_summary(rows)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return output_path
+
+
+def build_review_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    severity_counts: dict[str, int] = {}
+    rule_counts: dict[str, int] = {}
+    status_counts: dict[str, int] = {status: 0 for status in sorted(REVIEW_STATUSES)}
+    severity_status_counts: dict[str, dict[str, int]] = {}
+    rule_status_counts: dict[str, dict[str, int]] = {}
+    remaining_p0 = 0
+    remaining_p1 = 0
+
+    for line_number, row in enumerate(rows, start=2):
+        rule = _required_text(row, "rule", line_number)
+        severity = _required_text(row, "severity", line_number)
+        status = _required_text(row, "status", line_number)
+        if status not in REVIEW_STATUSES:
+            allowed = ", ".join(sorted(REVIEW_STATUSES))
+            raise ValueError(f"Invalid review status '{status}' on row {line_number}; expected one of: {allowed}.")
+
+        severity_counts[severity] = severity_counts.get(severity, 0) + 1
+        rule_counts[rule] = rule_counts.get(rule, 0) + 1
+        status_counts[status] = status_counts.get(status, 0) + 1
+        severity_status_counts.setdefault(severity, {item: 0 for item in sorted(REVIEW_STATUSES)})[status] += 1
+        rule_status_counts.setdefault(rule, {item: 0 for item in sorted(REVIEW_STATUSES)})[status] += 1
+        if status not in RESOLVED_REVIEW_STATUSES:
+            if severity == "P0":
+                remaining_p0 += 1
+            elif severity == "P1":
+                remaining_p1 += 1
+
+    return {
+        "schema_version": "scan-qc.review-summary.v1",
+        "generated_at": _utc_now(),
+        "sensitivity": "Aggregate-only summary. Does not include paths, filenames, hashes, messages, or reviewer notes.",
+        "total_findings": len(rows),
+        "severity_counts": dict(sorted(severity_counts.items())),
+        "rule_counts": dict(sorted(rule_counts.items())),
+        "status_counts": status_counts,
+        "severity_status_counts": {key: value for key, value in sorted(severity_status_counts.items())},
+        "rule_status_counts": {key: value for key, value in sorted(rule_status_counts.items())},
+        "remaining_p0": remaining_p0,
+        "remaining_p1": remaining_p1,
+        "acceptance_threshold": {
+            "remaining_p0_max": 0,
+            "remaining_p1_max": 0,
+        },
+        "acceptance_passed": remaining_p0 == 0 and remaining_p1 == 0,
+    }
+
+
+def _review_template_row(index: int, finding: Any) -> dict[str, str]:
+    if not isinstance(finding, dict):
+        raise ValueError("Scan QC report findings must be objects.")
+    return {
+        "finding_id": f"F{index:06d}",
+        "rule": str(finding.get("rule") or ""),
+        "severity": str(finding.get("severity") or ""),
+        "relative_path": str(finding.get("relative_path") or ""),
+        "status": "pending",
+        "reviewer_notes": "",
+    }
+
+
+def _load_review_rows(review_path: Path) -> list[dict[str, Any]]:
+    if review_path.suffix.lower() == ".json":
+        payload = _load_json_object(review_path, "Review template")
+        findings = payload.get("findings", [])
+        if not isinstance(findings, list):
+            raise ValueError("Review template JSON field 'findings' must be a list.")
+        if not all(isinstance(row, dict) for row in findings):
+            raise ValueError("Review template JSON findings must be objects.")
+        return findings
+    with review_path.open("r", newline="", encoding="utf-8-sig") as handle:
+        reader = csv.DictReader(handle)
+        if not reader.fieldnames:
+            raise ValueError("Review template CSV must include a header row.")
+        missing = [field for field in REVIEW_TEMPLATE_FIELDS if field not in reader.fieldnames]
+        if missing:
+            raise ValueError(f"Review template CSV missing required fields: {', '.join(missing)}.")
+        return list(reader)
+
+
+def _load_json_object(path: Path, label: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{label} JSON is invalid at line {exc.lineno}, column {exc.colno}: {exc.msg}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"{label} JSON must be an object.")
+    return payload
+
+
+def _required_text(row: dict[str, Any], field: str, line_number: int) -> str:
+    value = row.get(field)
+    if value is None or str(value) == "":
+        raise ValueError(f"Review template row {line_number} missing required field '{field}'.")
+    return str(value)
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _render_html_report(report: dict[str, Any]) -> str:
