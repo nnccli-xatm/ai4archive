@@ -15,7 +15,7 @@ from pathlib import Path
 import time
 from typing import Any
 
-from PIL import Image, ImageOps, UnidentifiedImageError
+from PIL import Image, ImageChops, ImageOps, ImageStat, UnidentifiedImageError
 
 from .concurrency import resolve_worker_count, worker_metadata
 
@@ -29,6 +29,13 @@ class ProcessingOptions:
     resume_processing: bool = False
     deskew_max_degrees: float = 5.0
     deskew_min_confidence: float = 0.08
+    audit_max_size_change_ratio: float = 0.55
+    audit_max_pixel_change_ratio: float = 0.60
+    audit_max_brightness_delta: float = 80.0
+    audit_max_contrast_delta: float = 80.0
+    audit_max_crop_ratio: float = 0.55
+    audit_max_trim_margin_ratio: float = 0.12
+    audit_max_despeckle_pixel_ratio: float = 0.01
     workers: int | None = None
 
 
@@ -211,6 +218,8 @@ def _process_record(
         "despeckled": False,
         "despeckle_pixels_changed": 0,
         "despeckle_reason": None,
+        "processing_audit": None,
+        "processing_warnings": [],
         "status": "skipped",
         "resumed": False,
         "reprocessed": False,
@@ -243,6 +252,9 @@ def _process_record(
             raise ValueError("derivative target would overwrite the source image")
         with Image.open(source) as image:
             processed, operations, process_info = _process_image(image, options)
+            guardrail_failures = process_info["processing_audit"].get("guardrail_failures", [])
+            if guardrail_failures:
+                raise ValueError("processing guardrail exceeded: " + "; ".join(guardrail_failures))
             target.parent.mkdir(parents=True, exist_ok=True)
             _save_image(processed, target, image)
         base.update(
@@ -265,6 +277,8 @@ def _process_record(
                 "despeckled": process_info["despeckled"],
                 "despeckle_pixels_changed": process_info["despeckle_pixels_changed"],
                 "despeckle_reason": process_info["despeckle_reason"],
+                "processing_audit": process_info["processing_audit"],
+                "processing_warnings": process_info["processing_warnings"],
                 "status": "processed",
                 "operations": operations,
             }
@@ -273,6 +287,30 @@ def _process_record(
         base["status"] = "failed"
         base["error"] = str(exc)
         base["failure_reason"] = str(exc)
+        if "process_info" in locals():
+            base.update(
+                {
+                    "original_size": process_info["original_size"],
+                    "output_size": process_info["output_size"],
+                    "pre_deskew_size": process_info["pre_deskew_size"],
+                    "post_deskew_size": process_info["post_deskew_size"],
+                    "skew_angle_degrees": process_info["skew_angle_degrees"],
+                    "skew_confidence": process_info["skew_confidence"],
+                    "deskewed": process_info["deskewed"],
+                    "deskew_reason": process_info["deskew_reason"],
+                    "dark_border_trimmed": process_info["dark_border_trimmed"],
+                    "dark_border_bbox": process_info["dark_border_bbox"],
+                    "dark_border_reason": process_info["dark_border_reason"],
+                    "crop_bbox": process_info["crop_bbox"],
+                    "cropped": process_info["cropped"],
+                    "despeckled": process_info["despeckled"],
+                    "despeckle_pixels_changed": process_info["despeckle_pixels_changed"],
+                    "despeckle_reason": process_info["despeckle_reason"],
+                    "processing_audit": process_info["processing_audit"],
+                    "processing_warnings": process_info["processing_warnings"],
+                    "operations": operations,
+                }
+            )
     return base
 
 
@@ -322,6 +360,15 @@ def _retry_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
 def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict[str, Any]:
     summary = manifest["summary"]
     performance = summary["performance"]
+    audit_records = [record["processing_audit"] for record in manifest["files"] if isinstance(record.get("processing_audit"), dict)]
+    warning_records = [record for record in manifest["files"] if record.get("processing_warnings")]
+    guardrail_failures = [
+        failure
+        for audit in audit_records
+        for failure in audit.get("guardrail_failures", [])
+        if isinstance(failure, str)
+    ]
+    guardrail_failed_files = sum(1 for audit in audit_records if audit.get("guardrail_failures"))
     return {
         "schema_version": "scan-qc.processing.audit.v1",
         "generated_at": manifest["generated_at"],
@@ -352,6 +399,31 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "skipped_files": summary["skipped_files"],
             "failed_files": summary["failed_files"],
             "retry_list_files": summary["retry_list_files"],
+            "processing_warning_files": len(warning_records),
+            "guardrail_failed_files": guardrail_failed_files,
+        },
+        "thresholds": _audit_thresholds(options),
+        "metrics": {
+            "size_change_ratio": _aggregate_metric(audit_records, "size_change_ratio"),
+            "pixel_change_ratio": _aggregate_metric(audit_records, "pixel_change_ratio"),
+            "brightness_delta": _aggregate_metric(audit_records, "brightness_delta"),
+            "contrast_delta": _aggregate_metric(audit_records, "contrast_delta"),
+            "crop_ratio": _aggregate_metric(audit_records, "crop_ratio"),
+            "max_trim_margin_ratio": _aggregate_metric(audit_records, "max_trim_margin_ratio"),
+            "deskew_abs_angle_degrees": _aggregate_metric(audit_records, "deskew_abs_angle_degrees"),
+            "despeckle_pixel_ratio": _aggregate_metric(audit_records, "despeckle_pixel_ratio"),
+        },
+        "distributions": {
+            "pixel_change_ratio": _ratio_distribution(audit_records, "pixel_change_ratio"),
+            "crop_ratio": _ratio_distribution(audit_records, "crop_ratio"),
+            "max_trim_margin_ratio": _ratio_distribution(audit_records, "max_trim_margin_ratio"),
+            "despeckle_pixel_ratio": _ratio_distribution(audit_records, "despeckle_pixel_ratio"),
+        },
+        "guardrails": {
+            "enabled": True,
+            "warning_files": len(warning_records),
+            "failed_files": guardrail_failed_files,
+            "failure_reasons": _reason_counts(guardrail_failures),
         },
         "throughput": {
             "processed_files_per_minute": performance["processed_files_per_minute"],
@@ -368,6 +440,54 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
     }
 
 
+def _audit_thresholds(options: ProcessingOptions) -> dict[str, float]:
+    return {
+        "max_size_change_ratio": options.audit_max_size_change_ratio,
+        "max_pixel_change_ratio": options.audit_max_pixel_change_ratio,
+        "max_brightness_delta": options.audit_max_brightness_delta,
+        "max_contrast_delta": options.audit_max_contrast_delta,
+        "max_crop_ratio": options.audit_max_crop_ratio,
+        "max_trim_margin_ratio": options.audit_max_trim_margin_ratio,
+        "max_despeckle_pixel_ratio": options.audit_max_despeckle_pixel_ratio,
+        "max_deskew_degrees": options.deskew_max_degrees,
+    }
+
+
+def _aggregate_metric(records: list[dict[str, Any]], key: str) -> dict[str, float | int | None]:
+    values = [float(record[key]) for record in records if isinstance(record.get(key), int | float)]
+    if not values:
+        return {"count": 0, "average": None, "max": None}
+    return {"count": len(values), "average": round(sum(values) / len(values), 6), "max": round(max(values), 6)}
+
+
+def _ratio_distribution(records: list[dict[str, Any]], key: str) -> dict[str, int]:
+    buckets = {"0": 0, "0-0.01": 0, "0.01-0.05": 0, "0.05-0.10": 0, "0.10-0.25": 0, "0.25+": 0}
+    for record in records:
+        value = record.get(key)
+        if not isinstance(value, int | float):
+            continue
+        if value == 0:
+            buckets["0"] += 1
+        elif value <= 0.01:
+            buckets["0-0.01"] += 1
+        elif value <= 0.05:
+            buckets["0.01-0.05"] += 1
+        elif value <= 0.10:
+            buckets["0.05-0.10"] += 1
+        elif value <= 0.25:
+            buckets["0.10-0.25"] += 1
+        else:
+            buckets["0.25+"] += 1
+    return buckets
+
+
+def _reason_counts(reasons: list[str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for reason in reasons:
+        counts[reason] = counts.get(reason, 0) + 1
+    return counts
+
+
 def _process_image(image: Image.Image, options: ProcessingOptions) -> tuple[Image.Image, list[str], dict[str, Any]]:
     operations: list[str] = []
     processed = ImageOps.exif_transpose(image)
@@ -377,6 +497,7 @@ def _process_image(image: Image.Image, options: ProcessingOptions) -> tuple[Imag
     if processed.mode not in {"L", "RGB"}:
         processed = processed.convert("RGB")
         operations.append("convert_to_rgb")
+    audit_source = processed.copy()
 
     pre_deskew_size = list(processed.size)
     post_deskew_size = list(processed.size)
@@ -446,6 +567,8 @@ def _process_image(image: Image.Image, options: ProcessingOptions) -> tuple[Imag
 
     processed = ImageOps.autocontrast(processed, cutoff=0.5)
     operations.append("autocontrast_cutoff_0_5")
+    processing_audit = _processing_audit(audit_source, processed, options, crop_bbox, dark_border.bbox, skew.angle_degrees, despeckle_pixels_changed)
+    processing_warnings = list(processing_audit["guardrail_failures"])
     crop_info = {
         "original_size": original_size,
         "output_size": list(processed.size),
@@ -463,8 +586,96 @@ def _process_image(image: Image.Image, options: ProcessingOptions) -> tuple[Imag
         "despeckled": despeckled,
         "despeckle_pixels_changed": despeckle_pixels_changed,
         "despeckle_reason": despeckle_reason,
+        "processing_audit": processing_audit,
+        "processing_warnings": processing_warnings,
     }
     return processed, operations, crop_info
+
+
+def _processing_audit(
+    source: Image.Image,
+    processed: Image.Image,
+    options: ProcessingOptions,
+    crop_bbox: tuple[int, int, int, int] | None,
+    dark_border_bbox: tuple[int, int, int, int] | None,
+    skew_angle_degrees: float | None,
+    despeckle_pixels_changed: int,
+) -> dict[str, Any]:
+    source_width, source_height = source.size
+    output_width, output_height = processed.size
+    source_area = max(1, source_width * source_height)
+    output_area = max(1, output_width * output_height)
+    size_change_ratio = abs(output_area - source_area) / source_area
+    crop_ratio = 0.0
+    if crop_bbox:
+        crop_ratio = 1.0 - (((crop_bbox[2] - crop_bbox[0]) * (crop_bbox[3] - crop_bbox[1])) / source_area)
+    trim_margins = _trim_margins(source.size, dark_border_bbox)
+    max_trim_margin_ratio = max(trim_margins.values()) if trim_margins else 0.0
+    source_l = source.convert("L")
+    processed_l = processed.convert("L")
+    brightness_delta, contrast_delta = _tonal_deltas(source_l, processed_l)
+    pixel_change_ratio = _pixel_change_ratio(source_l, processed_l)
+    deskew_abs_angle = round(abs(skew_angle_degrees or 0.0), 6)
+    despeckle_pixel_ratio = despeckle_pixels_changed / source_area
+    metrics = {
+        "size_change_ratio": round(size_change_ratio, 6),
+        "pixel_change_ratio": round(pixel_change_ratio, 6),
+        "brightness_delta": round(brightness_delta, 6),
+        "contrast_delta": round(contrast_delta, 6),
+        "crop_ratio": round(max(0.0, crop_ratio), 6),
+        "trim_margins": trim_margins,
+        "max_trim_margin_ratio": round(max_trim_margin_ratio, 6),
+        "deskew_abs_angle_degrees": deskew_abs_angle,
+        "despeckle_pixel_ratio": round(despeckle_pixel_ratio, 6),
+    }
+    failures = _audit_guardrail_failures(metrics, options)
+    return {**metrics, "guardrail_failures": failures}
+
+
+def _trim_margins(size: tuple[int, int], bbox: tuple[int, int, int, int] | None) -> dict[str, float]:
+    width, height = size
+    if not bbox:
+        return {"left": 0.0, "top": 0.0, "right": 0.0, "bottom": 0.0}
+    left, top, right, bottom = bbox
+    return {
+        "left": round(left / width, 6) if width else 0.0,
+        "top": round(top / height, 6) if height else 0.0,
+        "right": round((width - right) / width, 6) if width else 0.0,
+        "bottom": round((height - bottom) / height, 6) if height else 0.0,
+    }
+
+
+def _tonal_deltas(source: Image.Image, processed: Image.Image) -> tuple[float, float]:
+    comparable = processed.resize(source.size, Image.Resampling.BILINEAR) if processed.size != source.size else processed
+    source_stat = ImageStat.Stat(source)
+    processed_stat = ImageStat.Stat(comparable)
+    return abs(source_stat.mean[0] - processed_stat.mean[0]), abs(source_stat.stddev[0] - processed_stat.stddev[0])
+
+
+def _pixel_change_ratio(source: Image.Image, processed: Image.Image) -> float:
+    comparable = processed.resize(source.size, Image.Resampling.BILINEAR) if processed.size != source.size else processed
+    diff = ImageChops.difference(source, comparable)
+    histogram = diff.point(lambda value: 255 if value > 8 else 0).histogram()
+    changed = sum(histogram[1:])
+    return changed / max(1, source.size[0] * source.size[1])
+
+
+def _audit_guardrail_failures(metrics: dict[str, Any], options: ProcessingOptions) -> list[str]:
+    checks = [
+        ("size_change_ratio", options.audit_max_size_change_ratio),
+        ("pixel_change_ratio", options.audit_max_pixel_change_ratio),
+        ("brightness_delta", options.audit_max_brightness_delta),
+        ("contrast_delta", options.audit_max_contrast_delta),
+        ("crop_ratio", options.audit_max_crop_ratio),
+        ("max_trim_margin_ratio", options.audit_max_trim_margin_ratio),
+        ("despeckle_pixel_ratio", options.audit_max_despeckle_pixel_ratio),
+    ]
+    failures = []
+    for key, threshold in checks:
+        value = metrics.get(key)
+        if isinstance(value, int | float) and value > threshold:
+            failures.append(key)
+    return failures
 
 
 def _detect_skew(image: Image.Image) -> SkewDetection:
