@@ -277,6 +277,10 @@ def _inspect_file(path: Path, root: Path) -> dict[str, Any]:
         "dpi_x": None,
         "dpi_y": None,
         "color_mode": None,
+        "orientation_class": None,
+        "aspect_ratio": None,
+        "exif_orientation": None,
+        "exif_orientation_requires_transpose": False,
         "quality_brightness_mean": None,
         "quality_contrast_stddev": None,
         "quality_sharpness_laplacian_var": None,
@@ -291,6 +295,7 @@ def _inspect_file(path: Path, root: Path) -> dict[str, Any]:
             image.verify()
         with Image.open(path) as image:
             dpi_x, dpi_y = _extract_dpi(image.info.get("dpi"))
+            orientation_metrics = _measure_orientation(image)
             quality_metrics = _measure_quality(image)
             base.update(
                 {
@@ -301,6 +306,7 @@ def _inspect_file(path: Path, root: Path) -> dict[str, Any]:
                     "dpi_x": dpi_x,
                     "dpi_y": dpi_y,
                     "color_mode": image.mode,
+                    **orientation_metrics,
                     **quality_metrics,
                     "error": None,
                 }
@@ -309,6 +315,39 @@ def _inspect_file(path: Path, root: Path) -> dict[str, Any]:
         base["error"] = str(exc)
 
     return base
+
+
+def _measure_orientation(image: Image.Image) -> dict[str, Any]:
+    width, height = image.width, image.height
+    aspect_ratio = round(width / height, 4) if height else None
+    exif_orientation = _extract_exif_orientation(image)
+    return {
+        "orientation_class": _orientation_class(width, height),
+        "aspect_ratio": aspect_ratio,
+        "exif_orientation": exif_orientation,
+        "exif_orientation_requires_transpose": exif_orientation in {2, 3, 4, 5, 6, 7, 8},
+    }
+
+
+def _orientation_class(width: int, height: int) -> str | None:
+    if not width or not height:
+        return None
+    ratio = width / height
+    if 0.95 <= ratio <= 1.05:
+        return "square"
+    if ratio > 1:
+        return "landscape"
+    return "portrait"
+
+
+def _extract_exif_orientation(image: Image.Image) -> int | None:
+    try:
+        value = image.getexif().get(274)
+    except (AttributeError, OSError, ValueError, TypeError):
+        return None
+    if isinstance(value, int) and 1 <= value <= 8:
+        return value
+    return None
 
 
 def _measure_quality(image: Image.Image) -> dict[str, float]:
@@ -636,6 +675,23 @@ def _add_batch_consistency_findings(
                 f"Openable files in batch use multiple DPI values: {values}",
                 profile,
             )
+
+    orientation_values = sorted(
+        {item["orientation_class"] for item in open_files if item["orientation_class"] in {"portrait", "landscape"}}
+    )
+    if len(orientation_values) > 1:
+        oriented_files = [item for item in open_files if item["orientation_class"] in {"portrait", "landscape"}]
+        portrait_count = sum(1 for item in oriented_files if item["orientation_class"] == "portrait")
+        landscape_count = sum(1 for item in oriented_files if item["orientation_class"] == "landscape")
+        minority_count = min(portrait_count, landscape_count)
+        oriented_count = len(oriented_files)
+        if portrait_count >= 2 and landscape_count >= 2 and minority_count / oriented_count >= 0.2:
+            message = (
+                "Openable non-square files mix portrait and landscape orientation classes: "
+                f"portrait={portrait_count}, landscape={landscape_count}. Review for rotated pages or mixed attachments."
+            )
+            for item in oriented_files:
+                _append_finding(item, findings, "batch_orientation_consistency", "P2", message, profile)
 
 
 def _append_finding(

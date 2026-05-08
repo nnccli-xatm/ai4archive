@@ -219,6 +219,11 @@ file record also includes:
   page content.
 - `quality_edge_coverage`: share of thumbnail pixels with enough local
   Laplacian response to look like content edges.
+- `orientation_class`: coarse page shape classification, one of `portrait`,
+  `landscape`, or `square`; near-square images are treated as `square`.
+- `aspect_ratio`: width divided by height, rounded for report display.
+- `exif_orientation` and `exif_orientation_requires_transpose`: best-effort
+  local EXIF orientation signal when Pillow can safely read it.
 
 The default quality thresholds are intentionally conservative:
 
@@ -231,6 +236,11 @@ The default quality thresholds are intentionally conservative:
 - `quality_near_blank_page` P2 when a page is very bright, has contrast at or
   below `6`, foreground coverage at or below `0.003`, edge coverage at or
   below `0.002`, and dark-pixel ratio at or below `0.0005`.
+- `batch_orientation_consistency` P2 when a batch has a supported mix of
+  portrait and landscape openable images after excluding square or near-square
+  pages. The default is conservative and requires at least two files in each
+  orientation class, so a single legitimate landscape attachment is not treated
+  as a critical defect.
 
 These thresholds are defaults in the built-in rules profile so batch-specific
 callers can tune them through JSON without changing report structure. JSON
@@ -246,6 +256,12 @@ for catching possible blank pages or missed scans, but they must not be used by
 themselves as an automatic deletion rule because legitimate separator sheets,
 backsides, faint stamps, page numbers, and very light annotations can look
 nearly blank to aggregate metrics.
+
+Orientation findings are also review prompts only. They help identify possible
+rotated pages, portrait/landscape batches mixed by mistake, or EXIF orientation
+metadata that needs attention, but they are not an automatic rotation decision.
+Actual rotation or deskewing should continue to use `--deskew` or a later,
+explicitly approved handling policy.
 
 The process returns exit code `1` when P0 findings are present, so it can be
 used in batch scripts. Reports are written to the output directory; original

@@ -31,6 +31,10 @@ def write_reports(report: dict[str, Any], output_dir: Path) -> dict[str, Path]:
         "dpi_x",
         "dpi_y",
         "color_mode",
+        "orientation_class",
+        "aspect_ratio",
+        "exif_orientation",
+        "exif_orientation_requires_transpose",
         "quality_brightness_mean",
         "quality_contrast_stddev",
         "quality_sharpness_laplacian_var",
@@ -250,6 +254,10 @@ def _files_table(files: list[dict[str, Any]]) -> str:
             f"<td>{_text(item.get('width'))} x {_text(item.get('height'))}</td>"
             f"<td>{_text(item.get('dpi_x'))} x {_text(item.get('dpi_y'))}</td>"
             f"<td>{_text(item.get('color_mode'))}</td>"
+            f"<td>{_text(item.get('orientation_class'))}</td>"
+            f"<td>{_text(item.get('aspect_ratio'))}</td>"
+            f"<td>{_text(item.get('exif_orientation'))}</td>"
+            f"<td>{_text(item.get('exif_orientation_requires_transpose'))}</td>"
             f"<td>{_text(item.get('quality_brightness_mean'))}</td>"
             f"<td>{_text(item.get('quality_contrast_stddev'))}</td>"
             f"<td>{_text(item.get('quality_sharpness_laplacian_var'))}</td>"
@@ -262,7 +270,8 @@ def _files_table(files: list[dict[str, Any]]) -> str:
         )
     return (
         "<table><thead><tr><th>Path</th><th>Openable</th><th>Format</th><th>Dimensions</th>"
-        "<th>DPI</th><th>Color</th><th>Brightness Mean</th><th>Contrast Stddev</th>"
+        "<th>DPI</th><th>Color</th><th>Orientation</th><th>Aspect Ratio</th>"
+        "<th>EXIF Orientation</th><th>EXIF Transpose Signal</th><th>Brightness Mean</th><th>Contrast Stddev</th>"
         "<th>Sharpness Laplacian Var</th><th>Dark Pixel Ratio</th><th>Foreground Coverage</th>"
         "<th>Edge Coverage</th><th>Bytes</th><th>Error</th></tr></thead><tbody>"
         + "\n".join(rows)

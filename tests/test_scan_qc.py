@@ -624,6 +624,135 @@ class ScanQcTest(unittest.TestCase):
             self.assertIn("Foreground Coverage", html)
             self.assertIn("quality_suspected_blur", html)
 
+    def test_orientation_metrics_are_visible_in_json_csv_and_html(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            Image.new("RGB", (80, 120), "white").save(input_dir / "portrait.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            paths = write_reports(report, output_dir)
+
+            saved = json.loads(paths["json"].read_text(encoding="utf-8"))
+            self.assertEqual(saved["files"][0]["orientation_class"], "portrait")
+            self.assertEqual(saved["files"][0]["aspect_ratio"], 0.6667)
+            self.assertIn("exif_orientation_requires_transpose", saved["files"][0])
+            csv_text = paths["files_csv"].read_text(encoding="utf-8")
+            self.assertIn("orientation_class", csv_text)
+            self.assertIn("aspect_ratio", csv_text)
+            self.assertIn("exif_orientation_requires_transpose", csv_text)
+            html = paths["html"].read_text(encoding="utf-8")
+            self.assertIn("Orientation", html)
+            self.assertIn("Aspect Ratio", html)
+            self.assertIn("EXIF Transpose Signal", html)
+
+    def test_batch_orientation_consistency_flags_mixed_portrait_and_landscape(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            for index in range(2):
+                Image.new("RGB", (80, 120), "white").save(input_dir / f"portrait_{index}.png")
+                Image.new("RGB", (120, 80), "white").save(input_dir / f"landscape_{index}.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            orientation_findings = [
+                finding for finding in report["findings"] if finding["rule"] == "batch_orientation_consistency"
+            ]
+
+            self.assertEqual(len(orientation_findings), 4)
+            self.assertTrue(all(finding["severity"] == "P2" for finding in orientation_findings))
+
+    def test_batch_orientation_consistency_ignores_all_portrait_and_near_square(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            for index in range(3):
+                Image.new("RGB", (80, 120), "white").save(input_dir / f"portrait_{index}.png")
+            Image.new("RGB", (100, 102), "white").save(input_dir / "near_square.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            records = {record["relative_path"]: record for record in report["files"]}
+            rules = {finding["rule"] for finding in report["findings"]}
+
+            self.assertEqual(records["near_square.png"]["orientation_class"], "square")
+            self.assertNotIn("batch_orientation_consistency", rules)
+
+    def test_batch_orientation_consistency_can_be_disabled_and_severity_overridden(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            disabled_out = root / "disabled"
+            severity_out = root / "severity"
+            disabled_profile = root / "disabled.json"
+            severity_profile = root / "severity.json"
+            input_dir.mkdir()
+            for index in range(2):
+                Image.new("RGB", (80, 120), "white").save(input_dir / f"portrait_{index}.png")
+                Image.new("RGB", (120, 80), "white").save(input_dir / f"landscape_{index}.png")
+            disabled_profile.write_text(
+                json.dumps({"rules": {"batch_orientation_consistency": {"enabled": False}}}),
+                encoding="utf-8",
+            )
+            severity_profile.write_text(
+                json.dumps({"rules": {"batch_orientation_consistency": {"severity": "P1"}}}),
+                encoding="utf-8",
+            )
+
+            disabled = scan_batch(
+                ScanConfig("p1", "b1", input_dir, disabled_out, rules_profile=load_rules_profile(disabled_profile))
+            )
+            severity = scan_batch(
+                ScanConfig("p1", "b1", input_dir, severity_out, rules_profile=load_rules_profile(severity_profile))
+            )
+
+            self.assertFalse(any(finding["rule"] == "batch_orientation_consistency" for finding in disabled["findings"]))
+            self.assertTrue(
+                any(
+                    finding["rule"] == "batch_orientation_consistency" and finding["severity"] == "P1"
+                    for finding in severity["findings"]
+                )
+            )
+
+    def test_benchmark_aggregate_includes_orientation_rule_count_without_file_identifiers(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "benchmark"
+            input_dir.mkdir()
+            for index in range(2):
+                Image.new("RGB", (80, 120), "white").save(input_dir / f"portrait_secret_{index}.png")
+                Image.new("RGB", (120, 80), "white").save(input_dir / f"landscape_secret_{index}.png")
+
+            exit_code = main(
+                [
+                    "benchmark",
+                    "--input",
+                    str(input_dir),
+                    "--out",
+                    str(output_dir),
+                    "--workers-list",
+                    "1",
+                    "--scan-only",
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            json_path = output_dir / "benchmark_results.json"
+            payload = json.loads(json_path.read_text(encoding="utf-8"))
+            run = payload["runs"][0]
+            self.assertEqual(run["finding_rule_counts"]["batch_orientation_consistency"], 4)
+            raw_json = json_path.read_text(encoding="utf-8")
+            raw_csv = (output_dir / "benchmark_results.csv").read_text(encoding="utf-8")
+            for forbidden in ["portrait_secret", "landscape_secret", "relative_path", "sha256"]:
+                self.assertNotIn(forbidden, raw_json)
+                self.assertNotIn(forbidden, raw_csv)
+
     def test_hidden_directories_are_skipped(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
