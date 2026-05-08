@@ -362,6 +362,25 @@ archive-scan-qc review-summary \
   --out /path/to/qc-report/review_summary.json
 ```
 
+For DA/T 31-2017-style manual sampling acceptance, export a deterministic
+local sampling list from the scan report:
+
+```bash
+archive-scan-qc acceptance-sampling-export \
+  --report /path/to/qc-report/scan_qc_report.json \
+  --out /path/to/qc-report/acceptance-sampling
+```
+
+This writes `acceptance_sampling_review.json` and
+`acceptance_sampling_review.csv`. The default sample ratio is 5% and cannot be
+lowered; P0/P1/P2 findings and other problematic records are selected first
+where practical, then remaining records are filled by stable deterministic
+ordering. The artifacts are sensitive local evidence because they include
+row-level paths and hashes for operator inspection. They do not embed images,
+thumbnails, OCR text, or image bytes. The JSON also includes aggregate sampling
+counts that can be copied into acceptance notes or future aggregate acceptance
+integration after local policy review.
+
 Use aggregate calibration only after automated QC and review:
 
 ```bash

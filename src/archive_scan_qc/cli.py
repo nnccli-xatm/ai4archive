@@ -18,6 +18,7 @@ from .processing_plan import write_processing_plan
 from .processing_review import write_processing_review_package
 from .reports import write_reports, write_review_export, write_review_summary
 from .rules import RulesProfileError, load_rules_profile
+from .sampling import DEFAULT_SAMPLE_RATIO, write_acceptance_sampling_export
 from .scanner import ScanConfig, scan_batch
 
 
@@ -161,6 +162,8 @@ def main(argv: list[str] | None = None) -> int:
         return _main_calibrate_rules(argv[1:])
     if argv and argv[0] == "acceptance-summary":
         return _main_acceptance_summary(argv[1:])
+    if argv and argv[0] == "acceptance-sampling-export":
+        return _main_acceptance_sampling_export(argv[1:])
     if argv and argv[0] == "delivery-manifest":
         return _main_delivery_manifest(argv[1:])
     if argv and argv[0] == "processing-review-package":
@@ -417,6 +420,32 @@ def _main_acceptance_summary(argv: list[str]) -> int:
     print(f"Acceptance status: {payload['status']}")
     print("Sensitivity: aggregate-only summary; no filenames, paths, hashes, thumbnails, row-level findings, notes, OCR, or image content.")
     return 0 if payload["pass"] else 1
+
+
+def _main_acceptance_sampling_export(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="archive-scan-qc acceptance-sampling-export",
+        description="Write sensitive local acceptance sampling JSON and CSV from scan_qc_report.json.",
+    )
+    parser.add_argument("--report", required=True, type=Path, help="Path to scan_qc_report.json.")
+    parser.add_argument("--out", required=True, type=Path, help="Output directory for acceptance sampling JSON and CSV.")
+    parser.add_argument(
+        "--sample-ratio",
+        default=DEFAULT_SAMPLE_RATIO,
+        type=float,
+        help="Minimum deterministic sample ratio. Defaults to 0.05 and cannot be lower.",
+    )
+    args = parser.parse_args(argv)
+    try:
+        json_path, csv_path, payload = write_acceptance_sampling_export(args.report, args.out, sample_ratio=args.sample_ratio)
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    counts = payload["aggregate_sampling_counts"]
+    print(f"Acceptance sampling JSON: {json_path}")
+    print(f"Acceptance sampling CSV: {csv_path}")
+    print(f"Sampled records: {counts['sampled_records']} of {counts['total_records']}")
+    print("Sensitivity: sensitive local row-level evidence; contains paths/hashes, no images, thumbnails, OCR text, or image bytes.")
+    return 0
 
 
 def _main_processing_review_package(argv: list[str]) -> int:
