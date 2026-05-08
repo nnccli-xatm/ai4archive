@@ -353,6 +353,13 @@ messages, and reviewer notes. Export a local template, complete manual review,
 then write an aggregate review summary:
 
 ```bash
+archive-scan-qc rework-action-list \
+  --report /path/to/qc-report/scan_qc_report.json \
+  --processing-audit-summary /path/to/processed/processing_audit_summary.json \
+  --processing-retry-manifest /path/to/processed/processing_retry_manifest.json \
+  --out /path/to/qc-report/rework_action_list.json \
+  --csv-out /path/to/qc-report/rework_action_list.csv
+
 archive-scan-qc review-export \
   --report /path/to/qc-report/scan_qc_report.json \
   --out /path/to/qc-report/review_template.csv
@@ -361,6 +368,16 @@ archive-scan-qc review-summary \
   --review /path/to/qc-report/review_template.csv \
   --out /path/to/qc-report/review_summary.json
 ```
+
+`rework_action_list.json` and optional CSV are local-only sensitive operator
+work queues. They group row-level QC findings and processing retry evidence
+into practical actions: rescan required, reprocess candidate, manual review,
+duplicate/manifest correction, processing retry, and informational follow-up.
+They deliberately contain row-level paths, hashes, messages, and processing
+errors for local remediation, but never embed thumbnails, image bytes, or source
+images. Use this artifact after automated QC and derivative-processing evidence
+exist, and before completing the review template, `review_summary.json`, or the
+final `acceptance_summary.json`.
 
 Use aggregate calibration only after automated QC and review:
 

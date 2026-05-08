@@ -402,13 +402,30 @@ and `reviewer_notes`. Reviewers update `status` to `pending`, `accepted`,
 `false_positive`, `fixed`, or `needs_rescan`. Use `reviewer_notes` only inside
 the approved local environment for disposition evidence.
 
-After review is complete, create the aggregate-only acceptance artifact:
+Before review is finalized into aggregate acceptance evidence, create the
+local-only operator rework queue and then write the review summary:
 
 ```bash
+archive-scan-qc rework-action-list \
+  --report /approved-work/qc-reports/batch-001/scan_qc_report.json \
+  --processing-audit-summary /approved-work/processed-derivatives/batch-001/processing_audit_summary.json \
+  --processing-retry-manifest /approved-work/processed-derivatives/batch-001/processing_retry_manifest.json \
+  --out /approved-work/qc-reports/batch-001/rework_action_list.json \
+  --csv-out /approved-work/qc-reports/batch-001/rework_action_list.csv
+
 archive-scan-qc review-summary \
   --review /approved-work/qc-reports/batch-001/review_template.csv \
   --out /approved-work/qc-reports/batch-001/review_summary.json
 ```
+
+Run `archive-scan-qc rework-action-list` after automated QC and any derivative
+processing/retry evidence, and before closing the review template into
+`review_summary.json`. The JSON/CSV outputs are operator work queues, not public
+release artifacts. They group row-level findings into rescan required,
+reprocess candidate, manual review, duplicate/manifest correction, processing
+retry, and informational follow-up actions. They are clearly marked local-only
+sensitive evidence because they include paths, hashes, row-level messages, and
+processing errors; they do not embed thumbnails, image bytes, or source images.
 
 `review_summary.json` includes severity, rule, status, severity/status, and
 rule/status counts, remaining P0/P1 counts, and `acceptance_passed`. It contains
