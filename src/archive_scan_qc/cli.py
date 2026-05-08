@@ -29,6 +29,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional regular expression that each source file stem must match.",
     )
+    parser.add_argument(
+        "--manifest-csv",
+        default=None,
+        type=Path,
+        help="Optional batch manifest CSV with a relative_path column.",
+    )
     return parser
 
 
@@ -43,6 +49,7 @@ def main(argv: list[str] | None = None) -> int:
         output_dir=args.out,
         min_dpi=args.min_dpi,
         name_pattern=args.name_pattern,
+        manifest_csv=args.manifest_csv,
     )
     report = scan_batch(config)
     paths = write_reports(report, args.out)

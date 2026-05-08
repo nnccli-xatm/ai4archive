@@ -16,6 +16,7 @@ The current implementation covers:
 - image format, DPI, color mode, width, height, file size, and SHA-256 capture
 - duplicate filename and duplicate file-content checks
 - batch-level format, DPI, and color-mode consistency findings
+- optional batch manifest CSV consistency checks
 - JSON report, standalone HTML report, and CSV file and finding exports
 
 ### Dependency choice
@@ -44,8 +45,12 @@ archive-scan-qc \
   --project demo-project \
   --batch batch-001 \
   --min-dpi 200 \
-  --name-pattern 'A001_\d{4}'
+  --name-pattern 'A001_\d{4}' \
+  --manifest-csv /path/to/manifest.csv
 ```
+
+The optional manifest CSV must include a `relative_path` column whose values
+are expected image paths relative to `--input`.
 
 The command writes:
 
@@ -56,9 +61,10 @@ The command writes:
 
 The JSON report includes a batch `manifest` with project, batch, input
 directory, output directory, rule version, generation time, total file count,
-and P0/P1/P2 finding counts. The HTML report is a single static file with
-inline CSS for manual review; it shows the batch manifest, summary counts, file
-metadata table, and finding table with P0/P1/P2 severity badges.
+P0/P1/P2 finding counts, and manifest usage/missing/unexpected/duplicate
+counts when a manifest is provided. The HTML report is a single static file
+with inline CSS for manual review; it shows the batch manifest, summary counts,
+file metadata table, and finding table with P0/P1/P2 severity badges.
 
 The process returns exit code `1` when P0 findings are present, so it can be
 used in batch scripts. Reports are written to the output directory; original

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from PIL import Image
 
+from archive_scan_qc.cli import main
 from archive_scan_qc.reports import write_reports
 from archive_scan_qc.scanner import ScanConfig, scan_batch
 
@@ -50,6 +51,7 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(saved["manifest"]["rule_version"], "scan-qc.phase1.v1")
             self.assertEqual(saved["manifest"]["total_files"], 2)
             self.assertEqual(saved["manifest"]["p0_findings"], report["summary"]["p0_findings"])
+            self.assertFalse(saved["manifest"]["manifest_used"])
 
             html = paths["html"].read_text(encoding="utf-8")
             self.assertIn("<!doctype html>", html)
@@ -79,6 +81,78 @@ class ScanQcTest(unittest.TestCase):
             self.assertIn("duplicate_name", rules)
             self.assertIn("duplicate_file", rules)
             self.assertGreaterEqual(report["summary"]["p0_findings"], 3)
+
+    def test_manifest_flags_missing_unexpected_and_duplicate_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            manifest_csv = root / "manifest.csv"
+
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0002.jpg", dpi=(300, 300))
+            manifest_csv.write_text(
+                "relative_path\n"
+                "A001_0001.jpg\n"
+                "A001_0001.jpg\n"
+                "A001_0003.jpg\n",
+                encoding="utf-8",
+            )
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir, manifest_csv=manifest_csv))
+            rules = {finding["rule"] for finding in report["findings"]}
+
+            self.assertIn("manifest_missing_file", rules)
+            self.assertIn("manifest_unexpected_file", rules)
+            self.assertIn("manifest_duplicate_entry", rules)
+            self.assertTrue(
+                any(
+                    finding["rule"] == "manifest_unexpected_file" and finding["severity"] == "P1"
+                    for finding in report["findings"]
+                )
+            )
+            self.assertEqual(report["summary"]["manifest_entry_count"], 3)
+            self.assertEqual(report["summary"]["manifest_unique_entry_count"], 2)
+            self.assertEqual(report["summary"]["manifest_missing_count"], 1)
+            self.assertEqual(report["summary"]["manifest_unexpected_count"], 1)
+            self.assertEqual(report["summary"]["manifest_duplicate_count"], 1)
+            self.assertTrue(report["manifest"]["manifest_used"])
+            self.assertEqual(report["manifest"]["manifest_entry_count"], 3)
+
+            paths = write_reports(report, output_dir)
+            html = paths["html"].read_text(encoding="utf-8")
+            self.assertIn("Manifest Entries", html)
+            self.assertIn("Manifest Missing", html)
+            self.assertIn("manifest_unexpected_file", html)
+
+    def test_cli_accepts_manifest_and_returns_one_for_p0_manifest_findings(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            manifest_csv = root / "manifest.csv"
+
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+            manifest_csv.write_text("relative_path\nA001_0002.jpg\n", encoding="utf-8")
+
+            exit_code = main(
+                [
+                    "--input",
+                    str(input_dir),
+                    "--out",
+                    str(output_dir),
+                    "--manifest-csv",
+                    str(manifest_csv),
+                ]
+            )
+
+            self.assertEqual(exit_code, 1)
+            saved = json.loads((output_dir / "scan_qc_report.json").read_text(encoding="utf-8"))
+            self.assertTrue(saved["manifest"]["manifest_used"])
+            self.assertEqual(saved["summary"]["manifest_missing_count"], 1)
+            self.assertEqual(saved["summary"]["manifest_unexpected_count"], 1)
 
 
 if __name__ == "__main__":

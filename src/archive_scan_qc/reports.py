@@ -197,6 +197,8 @@ def _manifest_items(manifest: dict[str, Any]) -> str:
         ("Batch", "batch_id"),
         ("Input Directory", "input_dir"),
         ("Output Directory", "output_dir"),
+        ("Manifest Used", "manifest_used"),
+        ("Manifest CSV", "manifest_csv"),
         ("Rule Version", "rule_version"),
         ("Generated At", "generated_at"),
     ]
@@ -214,6 +216,10 @@ def _summary_cards(summary: dict[str, Any]) -> str:
         ("P0", "p0_findings"),
         ("P1", "p1_findings"),
         ("P2", "p2_findings"),
+        ("Manifest Entries", "manifest_entry_count"),
+        ("Manifest Missing", "manifest_missing_count"),
+        ("Manifest Unexpected", "manifest_unexpected_count"),
+        ("Manifest Duplicates", "manifest_duplicate_count"),
     ]
     return "\n".join(
         f'<div class="card"><span class="label">{label}</span><span class="value">{_text(summary.get(key, 0))}</span></div>'
