@@ -24,6 +24,8 @@ from .concurrency import resolve_worker_count, worker_metadata
 class ProcessingOptions:
     auto_crop: bool = False
     deskew: bool = False
+    trim_dark_border: bool = False
+    despeckle: bool = False
     deskew_max_degrees: float = 5.0
     deskew_min_confidence: float = 0.08
     workers: int | None = None
@@ -33,6 +35,12 @@ class ProcessingOptions:
 class SkewDetection:
     angle_degrees: float | None
     confidence: float
+    reason: str
+
+
+@dataclass(frozen=True)
+class DarkBorderDetection:
+    bbox: tuple[int, int, int, int] | None
     reason: str
 
 
@@ -86,7 +94,9 @@ def process_images(
             "convert_non_l_or_rgb_to_rgb",
             "skew_detect_projection",
             "deskew_conservative" if options.deskew else "deskew_disabled",
+            "dark_border_trim_conservative" if options.trim_dark_border else "dark_border_trim_disabled",
             "auto_crop_conservative" if options.auto_crop else "auto_crop_disabled",
+            "despeckle_isolated_pixels" if options.despeckle else "despeckle_disabled",
             "autocontrast_cutoff_0_5",
             "preserve_source_relative_path",
         ],
@@ -162,8 +172,14 @@ def _process_record(
         "skew_confidence": 0.0,
         "deskewed": False,
         "deskew_reason": None,
+        "dark_border_trimmed": False,
+        "dark_border_bbox": None,
+        "dark_border_reason": None,
         "crop_bbox": None,
         "cropped": False,
+        "despeckled": False,
+        "despeckle_pixels_changed": 0,
+        "despeckle_reason": None,
         "status": "skipped",
         "operations": [],
         "error": None,
@@ -195,8 +211,14 @@ def _process_record(
                 "skew_confidence": process_info["skew_confidence"],
                 "deskewed": process_info["deskewed"],
                 "deskew_reason": process_info["deskew_reason"],
+                "dark_border_trimmed": process_info["dark_border_trimmed"],
+                "dark_border_bbox": process_info["dark_border_bbox"],
+                "dark_border_reason": process_info["dark_border_reason"],
                 "crop_bbox": process_info["crop_bbox"],
                 "cropped": process_info["cropped"],
+                "despeckled": process_info["despeckled"],
+                "despeckle_pixels_changed": process_info["despeckle_pixels_changed"],
+                "despeckle_reason": process_info["despeckle_reason"],
                 "status": "processed",
                 "operations": operations,
             }
@@ -245,6 +267,19 @@ def _process_image(image: Image.Image, options: ProcessingOptions) -> tuple[Imag
         deskewed = True
         deskew_reason = "deskew applied"
 
+    dark_border = DarkBorderDetection(None, "dark border trim disabled")
+    dark_border_trimmed = False
+    if options.trim_dark_border:
+        dark_border = _detect_dark_border_bbox(processed)
+        if dark_border.bbox:
+            processed = processed.crop(dark_border.bbox)
+            operations.append("dark_border_trim_conservative")
+            dark_border_trimmed = True
+        else:
+            operations.append("dark_border_trim_noop")
+    else:
+        operations.append("dark_border_trim_disabled")
+
     crop_bbox: tuple[int, int, int, int] | None = None
     if options.auto_crop:
         crop_bbox = _detect_conservative_crop_bbox(processed)
@@ -255,6 +290,21 @@ def _process_image(image: Image.Image, options: ProcessingOptions) -> tuple[Imag
             operations.append("auto_crop_noop")
     else:
         operations.append("auto_crop_disabled")
+
+    despeckled = False
+    despeckle_pixels_changed = 0
+    despeckle_reason = "despeckle disabled"
+    if options.despeckle:
+        processed, despeckle_pixels_changed = _despeckle_isolated_pixels(processed)
+        if despeckle_pixels_changed:
+            operations.append("despeckle_isolated_pixels")
+            despeckled = True
+            despeckle_reason = "isolated dark pixels replaced"
+        else:
+            operations.append("despeckle_noop")
+            despeckle_reason = "no isolated dark pixels found"
+    else:
+        operations.append("despeckle_disabled")
 
     processed = ImageOps.autocontrast(processed, cutoff=0.5)
     operations.append("autocontrast_cutoff_0_5")
@@ -267,8 +317,14 @@ def _process_image(image: Image.Image, options: ProcessingOptions) -> tuple[Imag
         "skew_confidence": skew.confidence,
         "deskewed": deskewed,
         "deskew_reason": deskew_reason,
+        "dark_border_trimmed": dark_border_trimmed,
+        "dark_border_bbox": list(dark_border.bbox) if dark_border.bbox else None,
+        "dark_border_reason": dark_border.reason,
         "crop_bbox": list(crop_bbox) if crop_bbox else None,
         "cropped": crop_bbox is not None,
+        "despeckled": despeckled,
+        "despeckle_pixels_changed": despeckle_pixels_changed,
+        "despeckle_reason": despeckle_reason,
     }
     return processed, operations, crop_info
 
@@ -379,6 +435,110 @@ def _detect_conservative_crop_bbox(image: Image.Image) -> tuple[int, int, int, i
         return None
 
     return bbox
+
+
+def _detect_dark_border_bbox(image: Image.Image) -> DarkBorderDetection:
+    width, height = image.size
+    if width < 40 or height < 40:
+        return DarkBorderDetection(None, "image too small")
+
+    grayscale = image.convert("L")
+    max_x = max(2, int(width * 0.08))
+    max_y = max(2, int(height * 0.08))
+    min_retain_width = int(width * 0.88)
+    min_retain_height = int(height * 0.88)
+    left = _dark_edge_run(grayscale, "left", max_x)
+    right = _dark_edge_run(grayscale, "right", max_x)
+    top = _dark_edge_run(grayscale, "top", max_y)
+    bottom = _dark_edge_run(grayscale, "bottom", max_y)
+
+    if max(left, right, top, bottom) < 2:
+        return DarkBorderDetection(None, "no confident dark edge border")
+
+    bbox = (left, top, width - right, height - bottom)
+    retained_width = bbox[2] - bbox[0]
+    retained_height = bbox[3] - bbox[1]
+    if retained_width < min_retain_width or retained_height < min_retain_height:
+        return DarkBorderDetection(None, "candidate trim exceeds conservative retain ratio")
+    if retained_width <= 0 or retained_height <= 0:
+        return DarkBorderDetection(None, "invalid trim candidate")
+
+    return DarkBorderDetection(bbox, "dark edge border trimmed")
+
+
+def _dark_edge_run(image: Image.Image, side: str, max_pixels: int) -> int:
+    width, height = image.size
+    pixels = image.load()
+    run = 0
+    for offset in range(max_pixels):
+        if side == "left":
+            values = [pixels[offset, y] for y in range(height)]
+        elif side == "right":
+            values = [pixels[width - 1 - offset, y] for y in range(height)]
+        elif side == "top":
+            values = [pixels[x, offset] for x in range(width)]
+        else:
+            values = [pixels[x, height - 1 - offset] for x in range(width)]
+        dark_ratio = sum(1 for value in values if value <= 45) / len(values)
+        mean = sum(values) / len(values)
+        if dark_ratio >= 0.72 and mean <= 80:
+            run = offset + 1
+        else:
+            break
+    return run
+
+
+def _despeckle_isolated_pixels(image: Image.Image) -> tuple[Image.Image, int]:
+    grayscale = image.convert("L")
+    width, height = grayscale.size
+    if width < 3 or height < 3:
+        return image.copy(), 0
+
+    gray_pixels = grayscale.load()
+    source = image.convert("RGB") if image.mode != "RGB" else image.copy()
+    output = source.copy()
+    source_pixels = source.load()
+    output_pixels = output.load()
+    changed = 0
+    for y in range(1, height - 1):
+        for x in range(1, width - 1):
+            if gray_pixels[x, y] > 60:
+                continue
+            dark_neighbors = 0
+            neighbor_values: list[int] = []
+            neighbor_rgb: list[tuple[int, int, int]] = []
+            for ny in range(y - 1, y + 2):
+                for nx in range(x - 1, x + 2):
+                    if nx == x and ny == y:
+                        continue
+                    value = gray_pixels[nx, ny]
+                    neighbor_values.append(value)
+                    neighbor_rgb.append(source_pixels[nx, ny])
+                    if value <= 90:
+                        dark_neighbors += 1
+            if dark_neighbors > 1:
+                continue
+            wider_dark = 0
+            for ny in range(max(0, y - 2), min(height, y + 3)):
+                for nx in range(max(0, x - 2), min(width, x + 3)):
+                    if nx == x and ny == y:
+                        continue
+                    if gray_pixels[nx, ny] <= 90:
+                        wider_dark += 1
+            if wider_dark > 2:
+                continue
+            median_gray = sorted(neighbor_values)[len(neighbor_values) // 2]
+            if median_gray < 120:
+                continue
+            replacement = tuple(sorted(channel)[len(channel) // 2] for channel in zip(*neighbor_rgb))
+            output_pixels[x, y] = replacement
+            changed += 1
+
+    if image.mode == "L":
+        return output.convert("L"), changed
+    if image.mode == "RGB":
+        return output, changed
+    return output.convert(image.mode), changed
 
 
 def _corner_background_value(image: Image.Image) -> int:

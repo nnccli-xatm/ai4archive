@@ -643,6 +643,135 @@ class ScanQcTest(unittest.TestCase):
             self.assertIn("auto_crop_noop", records["A001_0001.png"]["operations"])
             self.assertIn("auto_crop_noop", records["A001_0002.png"]["operations"])
 
+    def test_disabled_new_retouch_options_keep_derivative_size_compatible(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            Image.new("RGB", (80, 60), "white").save(input_dir / "A001_0001.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions())
+
+            record = manifest["files"][0]
+            self.assertEqual(record["output_size"], [80, 60])
+            self.assertFalse(record["dark_border_trimmed"])
+            self.assertIsNone(record["dark_border_bbox"])
+            self.assertEqual(record["dark_border_reason"], "dark border trim disabled")
+            self.assertFalse(record["despeckled"])
+            self.assertEqual(record["despeckle_pixels_changed"], 0)
+            self.assertEqual(record["despeckle_reason"], "despeckle disabled")
+            self.assertIn("dark_border_trim_disabled", record["operations"])
+            self.assertIn("despeckle_disabled", record["operations"])
+
+    def test_trim_dark_border_trims_edge_border_without_touching_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "A001_0001.png"
+            image = Image.new("RGB", (100, 80), "white")
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((0, 0, 99, 79), outline="black", width=5)
+            draw.rectangle((25, 24, 75, 28), fill=(20, 20, 20))
+            image.save(source)
+            source_bytes = source.read_bytes()
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(trim_dark_border=True))
+
+            with Image.open(process_dir / "images" / "A001_0001.png") as processed:
+                processed_size = processed.size
+            record = manifest["files"][0]
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertTrue(record["dark_border_trimmed"])
+            self.assertEqual(record["dark_border_bbox"], [5, 5, 95, 75])
+            self.assertEqual(record["output_size"], [90, 70])
+            self.assertEqual(processed_size, (90, 70))
+            self.assertEqual(record["dark_border_reason"], "dark edge border trimmed")
+            self.assertIn("dark_border_trim_conservative", record["operations"])
+
+    def test_trim_dark_border_noops_for_blank_and_edge_content(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            Image.new("RGB", (100, 80), "white").save(input_dir / "A001_0001.png")
+            edge_content = Image.new("RGB", (100, 80), "white")
+            draw = ImageDraw.Draw(edge_content)
+            draw.rectangle((0, 20, 18, 25), fill=(10, 10, 10))
+            draw.line((0, 50, 40, 50), fill=(10, 10, 10), width=2)
+            edge_content.save(input_dir / "A001_0002.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(trim_dark_border=True))
+
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            for record in records.values():
+                self.assertFalse(record["dark_border_trimmed"])
+                self.assertIsNone(record["dark_border_bbox"])
+                self.assertEqual(record["dark_border_reason"], "no confident dark edge border")
+                self.assertIn("dark_border_trim_noop", record["operations"])
+            self.assertEqual(records["A001_0001.png"]["output_size"], [100, 80])
+            self.assertEqual(records["A001_0002.png"]["output_size"], [100, 80])
+
+    def test_despeckle_removes_isolated_noise_without_breaking_lines(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "A001_0001.png"
+            image = Image.new("RGB", (80, 60), "white")
+            draw = ImageDraw.Draw(image)
+            draw.line((10, 30, 70, 30), fill=(0, 0, 0), width=2)
+            for point in [(5, 5), (20, 8), (74, 12), (40, 50)]:
+                image.putpixel(point, (0, 0, 0))
+            image.save(source)
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+
+            with Image.open(process_dir / "images" / "A001_0001.png") as processed:
+                black_pixels = _dark_pixel_count(processed)
+                self.assertLess(black_pixels, _dark_pixel_count(image))
+                self.assertLessEqual(abs(processed.convert("L").getpixel((40, 30)) - 0), 5)
+            record = manifest["files"][0]
+            self.assertTrue(record["despeckled"])
+            self.assertEqual(record["despeckle_pixels_changed"], 4)
+            self.assertEqual(record["despeckle_reason"], "isolated dark pixels replaced")
+            self.assertIn("despeckle_isolated_pixels", record["operations"])
+
+    def test_multi_worker_retouch_manifest_order_stays_stable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            for index in range(6):
+                image = Image.new("RGB", (60, 50), "white")
+                image.putpixel((10 + index, 10), (0, 0, 0))
+                image.save(input_dir / f"A001_{index + 1:04d}.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir, workers=3))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(trim_dark_border=True, despeckle=True, workers=3),
+            )
+
+            self.assertEqual([record["source_relative_path"] for record in manifest["files"]], [item["relative_path"] for item in report["files"]])
+            self.assertEqual(manifest["summary"]["performance"]["mode"], "parallel")
+
     def test_cli_process_out_writes_processing_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -717,6 +846,19 @@ class ScanQcTest(unittest.TestCase):
 
             self.assertEqual(raised.exception.code, 2)
 
+    def test_cli_new_retouch_options_require_process_out(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+
+            for option in ["--trim-dark-border", "--despeckle"]:
+                with self.assertRaises(SystemExit) as raised:
+                    main(["--input", str(input_dir), "--out", str(output_dir), option])
+                self.assertEqual(raised.exception.code, 2)
+
 
 def _synthetic_text_page() -> Image.Image:
     image = Image.new("RGB", (240, 180), "white")
@@ -725,6 +867,11 @@ def _synthetic_text_page() -> Image.Image:
     for y in range(42, 132, 18):
         draw.rectangle((48, y, 190, y + 4), fill=(20, 20, 20))
     return image
+
+
+def _dark_pixel_count(image: Image.Image) -> int:
+    grayscale = image.convert("L")
+    return sum(grayscale.histogram()[:31])
 
 
 if __name__ == "__main__":

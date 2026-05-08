@@ -71,6 +71,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Conservatively correct small-angle page skew in derivative images. Requires --process-out.",
     )
     parser.add_argument(
+        "--trim-dark-border",
+        action="store_true",
+        help="Conservatively trim dark scan borders in derivative images. Requires --process-out.",
+    )
+    parser.add_argument(
+        "--despeckle",
+        action="store_true",
+        help="Replace isolated dark speckles in derivative images. Requires --process-out.",
+    )
+    parser.add_argument(
         "--workers",
         default=None,
         type=_positive_int,
@@ -86,6 +96,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--auto-crop requires --process-out")
     if args.deskew and not args.process_out:
         parser.error("--deskew requires --process-out")
+    if args.trim_dark_border and not args.process_out:
+        parser.error("--trim-dark-border requires --process-out")
+    if args.despeckle and not args.process_out:
+        parser.error("--despeckle requires --process-out")
     try:
         rules_profile = load_rules_profile(args.rules_profile) if args.rules_profile else None
     except RulesProfileError as exc:
@@ -114,7 +128,13 @@ def main(argv: list[str] | None = None) -> int:
             report,
             args.input,
             args.process_out,
-            ProcessingOptions(auto_crop=args.auto_crop, deskew=args.deskew, workers=args.workers),
+            ProcessingOptions(
+                auto_crop=args.auto_crop,
+                deskew=args.deskew,
+                trim_dark_border=args.trim_dark_border,
+                despeckle=args.despeckle,
+                workers=args.workers,
+            ),
         )
         if args.process_out
         else None

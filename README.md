@@ -149,15 +149,32 @@ low-confidence estimates, detection failures, very small angles, and angles
 outside that threshold are not rotated; the manifest records `deskewed=false`
 and a `deskew_reason`.
 
-When `--deskew` and `--auto-crop` are enabled together, the derivative pipeline
-runs EXIF transpose, color conversion, skew detection, conservative deskew,
-conservative crop, and then light autocontrast. Deskew runs before crop so the
-manifest has a clear pre/post rotation size and crop can operate on the final
-page orientation. The processing manifest records each image's
+Add `--trim-dark-border` with `--process-out` to conservatively remove only
+dark scan borders that touch the outer image edges. The detector limits trim
+depth, enforces a minimum retained page ratio, and leaves low-confidence cases
+unchanged so marginalia, stamps, body text, and edge annotations are not
+cropped away. The manifest records `dark_border_trimmed`,
+`dark_border_bbox`, and `dark_border_reason`.
+
+Add `--despeckle` with `--process-out` to replace isolated dark speckles in
+derivative images. This pass is intentionally small and Pillow-only: it targets
+single-pixel dark noise surrounded by light background, and skips connected
+dark neighborhoods to protect text strokes, ruled lines, boxes, and seals. The
+manifest records `despeckled`, `despeckle_pixels_changed`, and
+`despeckle_reason`.
+
+When derivative operations are enabled together, the pipeline runs EXIF
+transpose, color conversion, skew detection, conservative deskew, conservative
+dark-border trim, conservative crop, isolated-pixel despeckle, and then light
+autocontrast. Deskew runs before trimming/crop so the manifest has a clear
+pre/post rotation size and edge operations can operate on the final page
+orientation. Despeckle runs before autocontrast so small noise is removed
+before tonal expansion. The processing manifest records each image's
 `skew_angle_degrees`, `skew_confidence`, `deskewed`, `deskew_reason`,
-`pre_deskew_size`, `post_deskew_size`, crop bbox, crop decision, original size,
-output size, operations, and failure reason. Auto crop and deskew are opt-in to
-avoid surprising source batches; original images are still only read.
+`pre_deskew_size`, `post_deskew_size`, dark-border decision, crop bbox, crop
+decision, despeckle decision, original size, output size, operations, and
+failure reason. All retouching options are opt-in to avoid surprising source
+batches; original images are still only read.
 
 For repeatable runs, keep `--out` outside the scanned image tree when possible.
 If `--out` is inside `--input`, the CLI automatically skips that output
@@ -237,7 +254,9 @@ processed files per minute, elapsed seconds, worker mode, and effective worker
 count. For privacy-sensitive sample batches, share only aggregate counts,
 elapsed seconds, throughput, effective worker count, worker mode, and finding
 totals. Do not share source images, filenames, thumbnails, per-file records, or
-generated output directories from private image collections.
+generated output directories from private image collections. Run private sample
+benchmarks locally only, and publish aggregate performance/statistical summaries
+without images, paths, thumbnails, or row-level processing manifests.
 
 ### Test
 
