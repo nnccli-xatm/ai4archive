@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import csv
+import importlib.util
 import io
 import json
 import re
@@ -24,6 +25,17 @@ from archive_scan_qc.scanner import ScanConfig, scan_batch
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+PRIVATE_INTEGRATION_PATH = REPO_ROOT / "scripts" / "run_private_integration.py"
+
+
+def _load_private_integration_module():
+    spec = importlib.util.spec_from_file_location("run_private_integration", PRIVATE_INTEGRATION_PATH)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Could not load run_private_integration.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 class ScanQcTest(unittest.TestCase):
@@ -2367,6 +2379,63 @@ class ScanQcTest(unittest.TestCase):
             manifest = json.loads((output_root / "processed" / "processing_manifest.json").read_text(encoding="utf-8"))
             self.assertTrue(manifest["resume"]["enabled"])
             self.assertEqual(manifest["summary"]["resumed_files"], 1)
+
+    def test_private_integration_summary_is_aggregate_only(self) -> None:
+        private_integration = _load_private_integration_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-source"
+            output_root = root / "private-output"
+            input_dir.mkdir()
+            Image.new("RGB", (80, 60), "white").save(input_dir / "sensitive_original_name.png", dpi=(300, 300))
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = private_integration.main(
+                    [
+                        "--input",
+                        str(input_dir),
+                        "--out",
+                        str(output_root),
+                        "--workers",
+                        "1",
+                        "--process-images",
+                        "--skip-benchmark",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            summary_path = output_root / "private_integration_summary.json"
+            self.assertTrue(summary_path.exists())
+            summary_text = summary_path.read_text(encoding="utf-8")
+            stdout_text = stdout.getvalue()
+            summary = json.loads(summary_text)
+
+            self.assertEqual(summary["aggregate_counts"]["total_files"], 1)
+            self.assertEqual(summary["aggregate_counts"]["openable_files"], 1)
+            self.assertEqual(summary["aggregate_counts"]["processing_processed_files"], 1)
+            self.assertTrue(summary["privacy_self_check"]["passed"])
+            self.assertEqual(summary["privacy_self_check"]["violation_count"], 0)
+            self.assertNotIn(str(input_dir), summary_text)
+            self.assertNotIn(str(output_root), summary_text)
+            self.assertNotIn("sensitive_original_name.png", summary_text)
+            self.assertNotIn("sensitive_original_name.png", stdout_text)
+            self.assertNotIn(str(input_dir), stdout_text)
+            self.assertIn("Sensitive local evidence", summary["privacy"]["row_level_artifacts"])
+
+    def test_private_integration_redaction_self_check_rejects_sensitive_keys_and_values(self) -> None:
+        private_integration = _load_private_integration_module()
+        leaks = private_integration.privacy_self_check(
+            {
+                "summary": {"total_files": 1},
+                "rows": [{"relative_path": "private/page.png", "ok": "safe"}],
+                "note": "/private/input/private/page.png",
+            },
+            forbidden_values={"private input directory": "/private/input"},
+        )
+
+        self.assertTrue(any("relative_path" in leak for leak in leaks))
+        self.assertTrue(any("private input directory" in leak for leak in leaks))
 
 
 def _synthetic_text_page() -> Image.Image:
