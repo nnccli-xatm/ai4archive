@@ -7,6 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 import sys
 
+from ._version import __version__
 from .processing import ProcessingOptions, process_images
 from .reports import write_reports
 from .rules import RulesProfileError, load_rules_profile
@@ -28,6 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="archive-scan-qc",
         description="Run phase-one archive scan QC checks and write JSON/CSV reports.",
     )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--input", required=True, type=Path, help="Image directory to scan.")
     parser.add_argument("--out", required=True, type=Path, help="Report output directory.")
     parser.add_argument("--project", default="default-project", help="Project identifier.")
