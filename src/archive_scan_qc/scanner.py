@@ -13,6 +13,7 @@ import hashlib
 import os
 from pathlib import Path
 import re
+import time
 from typing import Any
 
 from PIL import Image, ImageStat, UnidentifiedImageError
@@ -79,6 +80,8 @@ class SkipStats:
 
 
 def scan_batch(config: ScanConfig) -> dict[str, Any]:
+    started_at = datetime.now(timezone.utc)
+    start_seconds = time.perf_counter()
     input_dir = config.input_dir.resolve()
     if not input_dir.exists():
         raise FileNotFoundError(f"Input directory does not exist: {input_dir}")
@@ -91,7 +94,16 @@ def scan_batch(config: ScanConfig) -> dict[str, Any]:
     findings = _build_findings(files, config, manifest_paths)
     manifest_check = _summarize_manifest_check(files, manifest_paths, config.manifest_csv)
     summary = _summarize(files, findings, manifest_check, skip_stats)
-    generated_at = datetime.now(timezone.utc).isoformat()
+    finished_at = datetime.now(timezone.utc)
+    generated_at = finished_at.isoformat()
+    performance = _performance_summary(
+        started_at,
+        finished_at,
+        time.perf_counter() - start_seconds,
+        total_files=summary["total_files"],
+        openable_files=summary["openable_files"],
+    )
+    summary["performance"] = performance
     project = {
         "project_id": config.project_id,
         "batch_id": config.batch_id,
@@ -122,6 +134,7 @@ def scan_batch(config: ScanConfig) -> dict[str, Any]:
         "skipped_total_count": summary["skipped_total_count"],
         "skipped_file_count": summary["skipped_file_count"],
         "skipped_directory_count": summary["skipped_directory_count"],
+        "performance": performance,
     }
 
     return {
@@ -523,7 +536,7 @@ def _summarize(
     findings: list[dict[str, str]],
     manifest_check: ManifestCheck,
     skip_stats: SkipStats,
-) -> dict[str, int | bool | str | None]:
+) -> dict[str, Any]:
     return {
         "total_files": len(files),
         "openable_files": sum(1 for item in files if item["openable"]),
@@ -546,3 +559,29 @@ def _summarize(
         "skipped_hidden_file_count": skip_stats.hidden_files,
         "skipped_manifest_file_count": skip_stats.manifest_files,
     }
+
+
+def _performance_summary(
+    started_at: datetime,
+    finished_at: datetime,
+    elapsed_seconds: float,
+    *,
+    total_files: int,
+    openable_files: int,
+) -> dict[str, Any]:
+    elapsed_seconds = max(0.0, round(elapsed_seconds, 6))
+    return {
+        "started_at": started_at.isoformat(),
+        "finished_at": finished_at.isoformat(),
+        "elapsed_seconds": elapsed_seconds,
+        "total_files": total_files,
+        "openable_files": openable_files,
+        "files_per_minute": _files_per_minute(total_files, elapsed_seconds),
+        "openable_files_per_minute": _files_per_minute(openable_files, elapsed_seconds),
+    }
+
+
+def _files_per_minute(file_count: int, elapsed_seconds: float) -> float:
+    if elapsed_seconds <= 0:
+        return 0.0
+    return round((file_count / elapsed_seconds) * 60, 2)

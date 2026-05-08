@@ -84,8 +84,16 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Scanned {report['summary']['total_files']} files.")
     print(f"Openable: {report['summary']['openable_files']}")
     print(f"Findings: {report['summary']['total_findings']}")
+    scan_performance = report["summary"]["performance"]
+    print(f"Scan elapsed: {scan_performance['elapsed_seconds']:.3f}s")
+    print(f"Scan files/min: {scan_performance['files_per_minute']:.2f}")
+    print(f"Scan openable files/min: {scan_performance['openable_files_per_minute']:.2f}")
     if processing_manifest:
         print(f"Processed: {processing_manifest['summary']['processed_files']}")
+        processing_performance = processing_manifest["summary"]["performance"]
+        print(f"Processing elapsed: {processing_performance['elapsed_seconds']:.3f}s")
+        print(f"Processing files/min: {processing_performance['processed_files_per_minute']:.2f}")
+        print(f"Processing total files/min: {processing_performance['total_files_per_minute']:.2f}")
         print(f"Processing manifest: {args.process_out / 'processing_manifest.json'}")
     for label, path in paths.items():
         print(f"{label}: {path}")

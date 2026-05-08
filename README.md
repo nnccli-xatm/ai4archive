@@ -141,6 +141,29 @@ The process returns exit code `1` when P0 findings are present, so it can be
 used in batch scripts. Reports are written to the output directory; original
 images are only read.
 
+### Local benchmark metrics
+
+The CLI prints concise timing lines after each run:
+
+- `Scan elapsed`, `Scan files/min`, and `Scan openable files/min`
+- `Processing elapsed`, `Processing files/min`, and
+  `Processing total files/min` when `--process-out` is used
+
+The JSON scan report stores the same scan metrics under
+`summary.performance` and `manifest.performance`: `started_at`, `finished_at`,
+`elapsed_seconds`, `total_files`, `openable_files`, `files_per_minute`, and
+`openable_files_per_minute`. The processing manifest stores processing metrics
+under both `performance` and `summary.performance`: `elapsed_seconds`,
+`total_files`, `processed_files`, `skipped_files`, `failed_files`,
+`processed_files_per_minute`, and `total_files_per_minute`.
+
+Use these aggregate fields for local hardware baselines by running the same
+batch and CLI options on each machine, then comparing files per minute and
+processed files per minute. For privacy-sensitive sample batches, share only
+aggregate counts, elapsed seconds, throughput, and finding totals. Do not share
+source images, filenames, thumbnails, per-file records, or generated output
+directories from private image collections.
+
 ### Test
 
 ```bash

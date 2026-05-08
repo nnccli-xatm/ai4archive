@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import shutil
 import tempfile
@@ -53,6 +55,13 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(saved["manifest"]["total_files"], 2)
             self.assertEqual(saved["manifest"]["p0_findings"], report["summary"]["p0_findings"])
             self.assertFalse(saved["manifest"]["manifest_used"])
+            self.assertIn("performance", saved["summary"])
+            self.assertIn("performance", saved["manifest"])
+            self.assertEqual(saved["summary"]["performance"]["total_files"], 2)
+            self.assertEqual(saved["summary"]["performance"]["openable_files"], 2)
+            self.assertGreaterEqual(saved["summary"]["performance"]["elapsed_seconds"], 0)
+            self.assertGreaterEqual(saved["summary"]["performance"]["files_per_minute"], 0)
+            self.assertGreaterEqual(saved["summary"]["performance"]["openable_files_per_minute"], 0)
 
             html = paths["html"].read_text(encoding="utf-8")
             self.assertIn("<!doctype html>", html)
@@ -285,6 +294,15 @@ class ScanQcTest(unittest.TestCase):
             self.assertTrue(manifest_path.exists())
             self.assertEqual(source.read_bytes(), source_bytes)
             self.assertEqual(manifest["summary"]["processed_files"], 1)
+            self.assertIn("performance", manifest)
+            self.assertIn("performance", manifest["summary"])
+            self.assertEqual(manifest["performance"]["total_files"], 1)
+            self.assertEqual(manifest["performance"]["processed_files"], 1)
+            self.assertEqual(manifest["performance"]["skipped_files"], 0)
+            self.assertEqual(manifest["performance"]["failed_files"], 0)
+            self.assertGreaterEqual(manifest["performance"]["elapsed_seconds"], 0)
+            self.assertGreaterEqual(manifest["performance"]["processed_files_per_minute"], 0)
+            self.assertGreaterEqual(manifest["performance"]["total_files_per_minute"], 0)
             self.assertEqual(manifest["files"][0]["status"], "processed")
             self.assertEqual(manifest["files"][0]["source_relative_path"], "A001_0001.jpg")
             self.assertEqual(manifest["files"][0]["original_size"], [32, 24])
@@ -424,20 +442,27 @@ class ScanQcTest(unittest.TestCase):
             input_dir.mkdir()
             Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
 
-            exit_code = main(
-                [
-                    "--input",
-                    str(input_dir),
-                    "--out",
-                    str(output_dir),
-                    "--process-out",
-                    str(process_dir),
-                ]
-            )
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "--input",
+                        str(input_dir),
+                        "--out",
+                        str(output_dir),
+                        "--process-out",
+                        str(process_dir),
+                    ]
+                )
 
             self.assertEqual(exit_code, 0)
             self.assertTrue((process_dir / "processing_manifest.json").exists())
             self.assertTrue((process_dir / "images" / "A001_0001.jpg").exists())
+            output = stdout.getvalue()
+            self.assertIn("Scan elapsed:", output)
+            self.assertIn("Scan files/min:", output)
+            self.assertIn("Processing elapsed:", output)
+            self.assertIn("Processing files/min:", output)
 
     def test_cli_auto_crop_requires_process_out(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

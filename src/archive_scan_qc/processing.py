@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
+import time
 from typing import Any
 
 from PIL import Image, ImageOps, UnidentifiedImageError
@@ -37,24 +38,41 @@ def process_images(
     process_dir: Path,
     options: ProcessingOptions | None = None,
 ) -> dict[str, Any]:
+    started_at = datetime.now(timezone.utc)
+    start_seconds = time.perf_counter()
     options = options or ProcessingOptions()
     input_dir = input_dir.resolve()
     process_dir = process_dir.resolve()
     image_root = process_dir / "images"
     records = [_process_record(item, input_dir, image_root, options) for item in report["files"]]
+    processed_files = sum(1 for item in records if item["status"] == "processed")
+    skipped_files = sum(1 for item in records if item["status"] == "skipped")
+    failed_files = sum(1 for item in records if item["status"] == "failed")
+    finished_at = datetime.now(timezone.utc)
+    performance = _performance_summary(
+        started_at,
+        finished_at,
+        time.perf_counter() - start_seconds,
+        total_files=len(records),
+        processed_files=processed_files,
+        skipped_files=skipped_files,
+        failed_files=failed_files,
+    )
     manifest = {
         "schema_version": "scan-qc.processing.v1",
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": finished_at.isoformat(),
         "project": report.get("project", {}),
         "source_report_schema_version": report.get("schema_version"),
         "process_dir": str(process_dir),
         "image_root": str(image_root),
         "summary": {
             "total_files": len(records),
-            "processed_files": sum(1 for item in records if item["status"] == "processed"),
-            "skipped_files": sum(1 for item in records if item["status"] == "skipped"),
-            "failed_files": sum(1 for item in records if item["status"] == "failed"),
+            "processed_files": processed_files,
+            "skipped_files": skipped_files,
+            "failed_files": failed_files,
+            "performance": performance,
         },
+        "performance": performance,
         "operations": [
             "exif_transpose",
             "convert_non_l_or_rgb_to_rgb",
@@ -69,6 +87,36 @@ def process_images(
     process_dir.mkdir(parents=True, exist_ok=True)
     (process_dir / "processing_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     return manifest
+
+
+def _performance_summary(
+    started_at: datetime,
+    finished_at: datetime,
+    elapsed_seconds: float,
+    *,
+    total_files: int,
+    processed_files: int,
+    skipped_files: int,
+    failed_files: int,
+) -> dict[str, Any]:
+    elapsed_seconds = max(0.0, round(elapsed_seconds, 6))
+    return {
+        "started_at": started_at.isoformat(),
+        "finished_at": finished_at.isoformat(),
+        "elapsed_seconds": elapsed_seconds,
+        "total_files": total_files,
+        "processed_files": processed_files,
+        "skipped_files": skipped_files,
+        "failed_files": failed_files,
+        "processed_files_per_minute": _files_per_minute(processed_files, elapsed_seconds),
+        "total_files_per_minute": _files_per_minute(total_files, elapsed_seconds),
+    }
+
+
+def _files_per_minute(file_count: int, elapsed_seconds: float) -> float:
+    if elapsed_seconds <= 0:
+        return 0.0
+    return round((file_count / elapsed_seconds) * 60, 2)
 
 
 def _process_record(
