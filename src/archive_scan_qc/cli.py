@@ -8,6 +8,7 @@ from pathlib import Path
 import sys
 
 from ._version import __version__
+from .acceptance import ACCEPTANCE_JSON, write_acceptance_summary
 from .analysis_provider import AnalysisProviderError
 from .calibration import CALIBRATION_JSON, write_rules_calibration_summary
 from .preflight import PreflightConfig, run_preflight, write_preflight_report
@@ -24,6 +25,16 @@ def _positive_int(value: str) -> int:
         raise argparse.ArgumentTypeError("--workers must be a positive integer.") from exc
     if parsed < 1:
         raise argparse.ArgumentTypeError("--workers must be a positive integer.")
+    return parsed
+
+
+def _non_negative_float(value: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("threshold must be a non-negative number.") from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("threshold must be a non-negative number.")
     return parsed
 
 
@@ -145,6 +156,8 @@ def main(argv: list[str] | None = None) -> int:
         return _main_review_summary(argv[1:])
     if argv and argv[0] == "calibrate-rules":
         return _main_calibrate_rules(argv[1:])
+    if argv and argv[0] == "acceptance-summary":
+        return _main_acceptance_summary(argv[1:])
     parser = build_parser()
     args = parser.parse_args(argv)
     _validate_processing_flags(parser, args)
@@ -348,6 +361,53 @@ def _main_calibrate_rules(argv: list[str]) -> int:
         print(f"Suggested draft profile: {suggested_path}")
     print("Sensitivity: aggregate-only summary; source scan_qc_report.json and review templates remain sensitive.")
     return 0
+
+
+def _main_acceptance_summary(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="archive-scan-qc acceptance-summary",
+        description="Write an aggregate-only production acceptance gate summary.",
+    )
+    parser.add_argument("--run-plan-summary", default=None, type=Path, help="Optional aggregate run_plan_summary.json.")
+    parser.add_argument("--review-summary", default=None, type=Path, help="Optional aggregate review_summary.json.")
+    parser.add_argument(
+        "--processing-audit-summary",
+        default=None,
+        type=Path,
+        help="Optional aggregate processing_audit_summary.json.",
+    )
+    parser.add_argument("--benchmark-results", default=None, type=Path, help="Optional aggregate benchmark_results.json.")
+    parser.add_argument(
+        "--min-scan-files-per-minute",
+        default=None,
+        type=_non_negative_float,
+        help="Optional minimum acceptable scan throughput.",
+    )
+    parser.add_argument(
+        "--min-processing-files-per-minute",
+        default=None,
+        type=_non_negative_float,
+        help="Optional minimum acceptable derivative processing throughput.",
+    )
+    parser.add_argument("--out", required=True, type=Path, help=f"Output JSON path or directory for {ACCEPTANCE_JSON}.")
+    args = parser.parse_args(argv)
+    output_path = args.out / ACCEPTANCE_JSON if args.out.suffix == "" else args.out
+    try:
+        path, payload = write_acceptance_summary(
+            output_path=output_path,
+            run_plan_summary_path=args.run_plan_summary,
+            review_summary_path=args.review_summary,
+            processing_audit_summary_path=args.processing_audit_summary,
+            benchmark_results_path=args.benchmark_results,
+            min_scan_files_per_minute=args.min_scan_files_per_minute,
+            min_processing_files_per_minute=args.min_processing_files_per_minute,
+        )
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    print(f"Acceptance summary: {path}")
+    print(f"Acceptance status: {payload['status']}")
+    print("Sensitivity: aggregate-only summary; no filenames, paths, hashes, thumbnails, row-level findings, notes, OCR, or image content.")
+    return 0 if payload["pass"] else 1
 
 
 def _validate_processing_flags(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:

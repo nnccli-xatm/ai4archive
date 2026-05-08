@@ -15,6 +15,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter
 
 from archive_scan_qc import __version__
+from archive_scan_qc.acceptance import build_acceptance_summary
 from archive_scan_qc.benchmark import _recommendations
 from archive_scan_qc.cli import main
 from archive_scan_qc.processing import ProcessingOptions, process_images
@@ -46,6 +47,169 @@ class ScanQcTest(unittest.TestCase):
 
         self.assertEqual(raised.exception.code, 0)
         self.assertEqual(stdout.getvalue().strip(), f"archive-scan-qc {__version__}")
+
+    def test_acceptance_summary_passes_with_clean_aggregate_evidence(self) -> None:
+        payload = build_acceptance_summary(
+            run_plan_summary={
+                "schema_version": "scan-qc.run-plan-summary.v1",
+                "privacy": {"aggregate_only": True},
+                "summary": {
+                    "failed_batches": 0,
+                    "processing_failed_files": 0,
+                    "scan_files_per_minute": 120.0,
+                    "processing_files_per_minute": 80.0,
+                },
+                "batches": [{"workers": 2}],
+            },
+            review_summary={
+                "schema_version": "scan-qc.review-summary.v1",
+                "sensitivity": "Aggregate-only summary.",
+                "total_findings": 0,
+                "status_counts": {"accepted": 0, "resolved": 0, "pending": 0},
+                "remaining_p0": 0,
+                "remaining_p1": 0,
+                "acceptance_passed": True,
+            },
+            processing_audit_summary={
+                "schema_version": "scan-qc.processing-audit.v1",
+                "privacy": {"aggregate_only": True},
+                "counts": {"failed_files": 0},
+                "throughput": {"processed_files_per_minute": 82.0},
+                "workers": {"effective_workers": 2},
+            },
+            benchmark_results={
+                "schema_version": "scan-qc.benchmark.v1",
+                "privacy": {"aggregate_only": True},
+                "runs": [
+                    {
+                        "effective_workers": 2,
+                        "scan": {"files_per_minute": 125.0},
+                        "processing": {"failed_files": 0, "processed_files_per_minute": 84.0, "effective_workers": 2},
+                    }
+                ],
+            },
+            min_scan_files_per_minute=100.0,
+            min_processing_files_per_minute=70.0,
+        )
+
+        self.assertTrue(payload["pass"])
+        self.assertEqual(payload["status"], "pass")
+        self.assertEqual(payload["remaining"], {"p0": 0, "p1": 0})
+        self.assertEqual(payload["failed_batches"], 0)
+        self.assertEqual(payload["processing_failed_files"], 0)
+        self.assertFalse(payload["blocking_items"])
+
+    def test_acceptance_summary_fails_for_remaining_and_performance_thresholds(self) -> None:
+        payload = build_acceptance_summary(
+            run_plan_summary={
+                "schema_version": "scan-qc.run-plan-summary.v1",
+                "privacy": {"aggregate_only": True},
+                "summary": {
+                    "failed_batches": 1,
+                    "processing_failed_files": 2,
+                    "scan_files_per_minute": 9.0,
+                    "processing_files_per_minute": 4.0,
+                },
+            },
+            review_summary={
+                "schema_version": "scan-qc.review-summary.v1",
+                "sensitivity": "Aggregate-only summary.",
+                "remaining_p0": 1,
+                "remaining_p1": 1,
+                "acceptance_passed": False,
+            },
+            min_scan_files_per_minute=10.0,
+            min_processing_files_per_minute=5.0,
+        )
+
+        self.assertFalse(payload["pass"])
+        self.assertEqual(payload["status"], "fail")
+        codes = {item["code"] for item in payload["blocking_items"]}
+        self.assertEqual(
+            codes,
+            {
+                "remaining_p0",
+                "remaining_p1",
+                "failed_batches",
+                "processing_failed_files",
+                "scan_throughput_below_threshold",
+                "processing_throughput_below_threshold",
+            },
+        )
+
+    def test_acceptance_summary_missing_inputs_warns_and_requires_some_input(self) -> None:
+        with self.assertRaisesRegex(ValueError, "At least one aggregate evidence input is required"):
+            build_acceptance_summary()
+
+        payload = build_acceptance_summary(
+            review_summary={
+                "schema_version": "scan-qc.review-summary.v1",
+                "sensitivity": "Aggregate-only summary.",
+                "remaining_p0": 0,
+                "remaining_p1": 0,
+                "acceptance_passed": True,
+            }
+        )
+
+        self.assertTrue(payload["pass"])
+        self.assertTrue(any("run_plan_summary was not provided" in warning for warning in payload["warnings"]))
+        self.assertTrue(any("benchmark_results was not provided" in warning for warning in payload["warnings"]))
+
+    def test_acceptance_summary_does_not_copy_private_values(self) -> None:
+        payload = build_acceptance_summary(
+            run_plan_summary={
+                "schema_version": "scan-qc.run-plan-summary.v1",
+                "privacy": {"aggregate_only": True},
+                "summary": {
+                    "failed_batches": 0,
+                    "processing_failed_files": 0,
+                    "scan_files_per_minute": 100.0,
+                    "failed_batch_ids": ["SECRET_BATCH_CASE_123"],
+                },
+                "batches": [
+                    {
+                        "batch_id": "SECRET_BATCH_CASE_123",
+                        "report_dir": "/private/source/report",
+                        "process_out": "../private/process",
+                        "workers": 1,
+                    }
+                ],
+            },
+            review_summary={
+                "schema_version": "scan-qc.review-summary.v1",
+                "sensitivity": "Aggregate-only summary.",
+                "remaining_p0": 0,
+                "remaining_p1": 0,
+                "status_counts": {"pending": 0},
+                "acceptance_passed": True,
+            },
+            benchmark_results={
+                "schema_version": "scan-qc.benchmark.v1",
+                "privacy": {"aggregate_only": True},
+                "runs": [
+                    {
+                        "scan": {"files_per_minute": 100.0},
+                        "processing": {"failed_files": 0, "processed_files_per_minute": 50.0},
+                        "finding_rule_counts": {"private_rule": 1},
+                    }
+                ],
+            },
+        )
+
+        raw = json.dumps(payload, ensure_ascii=False)
+        for forbidden in [
+            "SECRET_BATCH_CASE_123",
+            "/private/source/report",
+            "../private/process",
+            "relative_path",
+            "absolute_path",
+            "sha256",
+            "reviewer_notes",
+            "ocr_text",
+            "PRIVATE_CASE_0001.png",
+        ]:
+            self.assertNotIn(forbidden, raw)
+        self.assertTrue(payload["privacy"]["aggregate_only"])
 
     def test_collects_metadata_and_writes_reports(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
