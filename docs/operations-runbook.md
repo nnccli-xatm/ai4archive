@@ -394,6 +394,36 @@ and worker summaries, human review status, and recommended next steps. It must
 not include source filenames, source locations, hashes, thumbnails, row-level
 findings, reviewer notes, OCR/text, or image content.
 
+## Delivery Handoff Manifest
+
+After the acceptance gate is complete, create a local delivery handoff manifest
+for evidence review:
+
+```bash
+archive-scan-qc delivery-manifest \
+  --scan-report /approved-work/project/scan_qc_report.json \
+  --processing-audit-summary /approved-work/project/processing_audit_summary.json \
+  --acceptance-summary /approved-work/project/acceptance_summary.json \
+  --review-summary /approved-work/project/review_summary.json \
+  --benchmark-results /approved-work/project/benchmark_results.json \
+  --processing-manifest /approved-work/project/processing_manifest.json \
+  --out /approved-work/project/handoff
+```
+
+The command writes `delivery_handoff_manifest.json` and
+`delivery_handoff_manifest.csv`. Both outputs contain only manifest metadata:
+role, local path, filename, byte size, SHA-256, detected schema version, and
+sensitivity classification. The command rejects missing artifacts and does not
+copy source images, derivative images, reports, manifests, or any other input
+file. It performs no upload.
+
+Treat `review_summary.json`, `processing_audit_summary.json`,
+`benchmark_results.json`, `acceptance_summary.json`, and other known aggregate
+summary schemas as `aggregate_public_safe` after local policy review. Treat
+`scan_qc_report.json`, scan report CSV/HTML exports, review templates,
+`processing_manifest.json`, `processing_retry_manifest.json`, processing review
+packages, and unknown extra artifacts as `sensitive_local_evidence`.
+
 ## Aggregate Rule Calibration
 
 Use rule calibration only as a local aggregate analysis loop. The workflow is:
@@ -497,7 +527,8 @@ python3 scripts/validate_release.py
 
 The validator runs unit tests, compileall, wheel creation, an examples-based
 synthetic preflight followed by an end-to-end dry-run with derivative
-processing, an isolated package install, `archive-scan-qc --version`, and a
+processing, aggregate benchmark, aggregate acceptance, delivery handoff
+manifest, an isolated package install, `archive-scan-qc --version`, and a
 synthetic smoke scan. It uses only temporary generated images and the committed
 non-private files in `examples/`.
 

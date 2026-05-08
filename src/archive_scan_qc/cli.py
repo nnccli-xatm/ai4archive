@@ -11,6 +11,7 @@ from ._version import __version__
 from .acceptance import ACCEPTANCE_JSON, write_acceptance_summary
 from .analysis_provider import AnalysisProviderError
 from .calibration import CALIBRATION_JSON, write_rules_calibration_summary
+from .handoff import write_delivery_handoff_manifest
 from .preflight import PreflightConfig, run_preflight, write_preflight_report
 from .processing import ProcessingOptions, process_images
 from .processing_review import write_processing_review_package
@@ -159,6 +160,8 @@ def main(argv: list[str] | None = None) -> int:
         return _main_calibrate_rules(argv[1:])
     if argv and argv[0] == "acceptance-summary":
         return _main_acceptance_summary(argv[1:])
+    if argv and argv[0] == "delivery-manifest":
+        return _main_delivery_manifest(argv[1:])
     if argv and argv[0] == "processing-review-package":
         return _main_processing_review_package(argv[1:])
     parser = build_parser()
@@ -429,6 +432,64 @@ def _main_processing_review_package(argv: list[str]) -> int:
     print(f"Processing review package HTML: {html_path}")
     print("Sensitivity: local-only row-level evidence; do not use as public aggregate evidence.")
     return 0
+
+
+def _main_delivery_manifest(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="archive-scan-qc delivery-manifest",
+        description="Write deterministic local JSON and CSV handoff manifests for selected delivery evidence.",
+    )
+    parser.add_argument("--scan-report", default=None, type=Path, help="Optional scan_qc_report.json or related scan report.")
+    parser.add_argument(
+        "--processing-audit-summary",
+        default=None,
+        type=Path,
+        help="Optional aggregate processing_audit_summary.json.",
+    )
+    parser.add_argument("--acceptance-summary", default=None, type=Path, help="Optional aggregate acceptance_summary.json.")
+    parser.add_argument("--review-summary", default=None, type=Path, help="Optional aggregate review_summary.json.")
+    parser.add_argument("--benchmark-results", default=None, type=Path, help="Optional aggregate benchmark_results.json or CSV.")
+    parser.add_argument("--processing-manifest", default=None, type=Path, help="Optional sensitive local processing_manifest.json.")
+    parser.add_argument(
+        "--artifact",
+        default=[],
+        action="append",
+        type=Path,
+        help="Additional local evidence file. Repeat as needed; unknown artifacts are marked sensitive.",
+    )
+    parser.add_argument("--out", required=True, type=Path, help="Output directory for delivery handoff JSON and CSV manifests.")
+    args = parser.parse_args(argv)
+
+    artifacts = _delivery_manifest_artifacts(args)
+    try:
+        json_path, csv_path, payload = write_delivery_handoff_manifest(artifacts, args.out)
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    print(f"Delivery handoff manifest JSON: {json_path}")
+    print(f"Delivery handoff manifest CSV: {csv_path}")
+    print(f"Artifacts: {payload['summary']['artifact_count']}")
+    print(f"Aggregate/public-safe: {payload['summary']['aggregate_public_safe_count']}")
+    print(f"Sensitive local evidence: {payload['summary']['sensitive_local_evidence_count']}")
+    print("Source images copied: no")
+    print("Uploads performed: no")
+    return 0
+
+
+def _delivery_manifest_artifacts(args: argparse.Namespace) -> list[tuple[str, Path]]:
+    artifacts: list[tuple[str, Path]] = []
+    for role in [
+        "scan_report",
+        "processing_audit_summary",
+        "acceptance_summary",
+        "review_summary",
+        "benchmark_results",
+        "processing_manifest",
+    ]:
+        path = getattr(args, role)
+        if path is not None:
+            artifacts.append((role, path))
+    artifacts.extend(("artifact", path) for path in args.artifact)
+    return artifacts
 
 
 def _validate_processing_flags(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:

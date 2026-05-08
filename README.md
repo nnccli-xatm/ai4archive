@@ -716,6 +716,36 @@ and recommended next steps. It must not include source filenames, source
 locations, hashes, thumbnails, row-level findings, reviewer notes, OCR/text, or
 image content.
 
+### Delivery handoff manifest
+
+Use `archive-scan-qc delivery-manifest` to build a local evidence index for a
+delivery package review. The command writes deterministic JSON and CSV manifests
+with each selected file's path, name, byte size, SHA-256, detected
+`schema_version` when available, and sensitivity classification. It never copies
+source images, derivative images, or evidence files, and it does not upload
+anything.
+
+```bash
+archive-scan-qc delivery-manifest \
+  --scan-report /approved-work/project/scan_qc_report.json \
+  --processing-audit-summary /approved-work/project/processing_audit_summary.json \
+  --acceptance-summary /approved-work/project/acceptance_summary.json \
+  --review-summary /approved-work/project/review_summary.json \
+  --benchmark-results /approved-work/project/benchmark_results.json \
+  --processing-manifest /approved-work/project/processing_manifest.json \
+  --out /approved-work/project/handoff
+```
+
+The outputs are `delivery_handoff_manifest.json` and
+`delivery_handoff_manifest.csv`. Missing artifact paths are rejected. Known
+aggregate summaries such as `review_summary.json`,
+`processing_audit_summary.json`, `benchmark_results.json`, and
+`acceptance_summary.json` are marked `aggregate_public_safe`. Known row-level or
+local review artifacts such as `scan_qc_report.json`,
+`processing_manifest.json`, retry manifests, scan report CSV/HTML files, review
+templates, and unknown extra artifacts are marked
+`sensitive_local_evidence`.
+
 ### Release validation
 
 ```bash
