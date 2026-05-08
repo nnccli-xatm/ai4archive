@@ -175,13 +175,52 @@ Each scan writes:
 When derivative processing is enabled, `--process-out` also contains:
 
 - `processing_manifest.json`
+- `processing_retry_manifest.json`
+- `processing_audit_summary.json`
 - `images/` with derivative images preserving source relative paths
 
 Archive the command line, rules profile, manifest CSV, JSON report, HTML
-report, CSV exports, processing manifest, package version, Python version,
-Pillow version, platform, and worker setting. Treat row-level reports and
-processing manifests as sensitive because they include filenames, relative
-paths, hashes, and per-file metrics.
+report, CSV exports, processing manifest, retry manifest, audit summary,
+package version, Python version, Pillow version, platform, and worker setting.
+Treat row-level reports, processing manifests, and retry manifests as sensitive
+because they include filenames, relative paths, hashes, and per-file metrics.
+`processing_audit_summary.json` is aggregate-only: it records counts, operation
+flags, worker metadata, timing, throughput, failure totals, and resume counts
+without file lists, paths, hashes, thumbnails, or image content.
+
+## Interrupted Processing Recovery
+
+Use normal reruns when a deliberate full overwrite/reprocess is required. The
+default scan/process command keeps that behavior.
+
+Use `--resume-processing` when a derivative batch was interrupted and the
+existing `--process-out` directory should be reused:
+
+```bash
+archive-scan-qc \
+  --input /approved-work/input-batches/batch-001 \
+  --out /approved-work/qc-reports/batch-001 \
+  --process-out /approved-work/processed-derivatives/batch-001 \
+  --resume-processing \
+  --auto-crop \
+  --deskew \
+  --trim-dark-border \
+  --despeckle \
+  --workers 2 \
+  --project project-code \
+  --batch batch-001 \
+  --manifest-csv /approved-work/manifests/batch-001.csv \
+  --rules-profile /approved-work/rules/project-rules.json
+```
+
+Resume mode reads the existing `processing_manifest.json`. It skips files that
+were previously successful and whose derivative still exists, and it reprocesses
+previous failures, skipped records, and missing derivative outputs. After the
+run, review stdout plus `processing_audit_summary.json` for
+`skipped_due_to_resume`, `reprocessed_files`, `failed_files`, and
+`retry_list_files`. Use `processing_retry_manifest.json` only inside the
+approved private environment to identify remaining failed files for another
+fix-and-resume cycle.
 
 ## Exit Codes
 
@@ -291,6 +330,9 @@ Derivative processing fails for some files:
 - Confirm the source image remained unchanged and readable after scanning.
 - Review `processing_manifest.json` for `status`, `failure_reason`, and
   per-file operation decisions.
+- Review `processing_retry_manifest.json` for the local failed-file retry list.
+- Rerun with `--resume-processing` after fixing source or environment issues so
+  existing successful derivatives are skipped.
 - Rerun with `--workers 1` to simplify local diagnosis.
 
 Unexpected report content after rerun:

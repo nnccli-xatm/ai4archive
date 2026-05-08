@@ -26,6 +26,7 @@ class ProcessingOptions:
     deskew: bool = False
     trim_dark_border: bool = False
     despeckle: bool = False
+    resume_processing: bool = False
     deskew_max_degrees: float = 5.0
     deskew_min_confidence: float = 0.08
     workers: int | None = None
@@ -57,10 +58,13 @@ def process_images(
     process_dir = process_dir.resolve()
     image_root = process_dir / "images"
     process_workers = resolve_worker_count(options.workers, len(report["files"]))
-    records = _process_records(report["files"], input_dir, image_root, options, process_workers)
+    previous_records = _load_previous_records(process_dir) if options.resume_processing else {}
+    records = _process_records(report["files"], input_dir, image_root, options, process_workers, previous_records)
     processed_files = sum(1 for item in records if item["status"] == "processed")
+    resumed_files = sum(1 for item in records if item["status"] == "resumed")
     skipped_files = sum(1 for item in records if item["status"] == "skipped")
     failed_files = sum(1 for item in records if item["status"] == "failed")
+    reprocessed_files = sum(1 for item in records if item.get("reprocessed"))
     finished_at = datetime.now(timezone.utc)
     performance = _performance_summary(
         started_at,
@@ -82,8 +86,12 @@ def process_images(
         "summary": {
             "total_files": len(records),
             "processed_files": processed_files,
+            "resumed_files": resumed_files,
+            "skipped_due_to_resume": resumed_files,
+            "reprocessed_files": reprocessed_files,
             "skipped_files": skipped_files,
             "failed_files": failed_files,
+            "retry_list_files": failed_files,
             "performance": performance,
             "workers": process_workers,
             "worker_mode": performance["mode"],
@@ -100,10 +108,26 @@ def process_images(
             "autocontrast_cutoff_0_5",
             "preserve_source_relative_path",
         ],
+        "resume": {
+            "enabled": options.resume_processing,
+            "previous_manifest_found": (process_dir / "processing_manifest.json").exists(),
+            "skipped_due_to_resume": resumed_files,
+            "reprocessed_files": reprocessed_files,
+        },
         "files": records,
     }
     process_dir.mkdir(parents=True, exist_ok=True)
     (process_dir / "processing_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    retry_manifest = _retry_manifest(manifest)
+    (process_dir / "processing_retry_manifest.json").write_text(
+        json.dumps(retry_manifest, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    audit_summary = _audit_summary(manifest, options)
+    (process_dir / "processing_audit_summary.json").write_text(
+        json.dumps(audit_summary, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
     return manifest
 
 
@@ -113,11 +137,17 @@ def _process_records(
     image_root: Path,
     options: ProcessingOptions,
     workers: int,
+    previous_records: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
     if workers == 1:
-        return [_process_record(item, input_dir, image_root, options) for item in files]
+        return [_process_record(item, input_dir, image_root, options, previous_records.get(item["relative_path"])) for item in files]
     with ThreadPoolExecutor(max_workers=workers) as executor:
-        return list(executor.map(lambda item: _process_record(item, input_dir, image_root, options), files))
+        return list(
+            executor.map(
+                lambda item: _process_record(item, input_dir, image_root, options, previous_records.get(item["relative_path"])),
+                files,
+            )
+        )
 
 
 def _performance_summary(
@@ -157,6 +187,7 @@ def _process_record(
     input_dir: Path,
     image_root: Path,
     options: ProcessingOptions,
+    previous_record: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     relative_path = item["relative_path"]
     base = {
@@ -181,10 +212,25 @@ def _process_record(
         "despeckle_pixels_changed": 0,
         "despeckle_reason": None,
         "status": "skipped",
+        "resumed": False,
+        "reprocessed": False,
         "operations": [],
         "error": None,
         "failure_reason": None,
     }
+    if previous_record and previous_record.get("status") in {"processed", "resumed"} and _previous_output_exists(previous_record, image_root):
+        resumed = dict(previous_record)
+        resumed["status"] = "resumed"
+        resumed["resumed"] = True
+        resumed["reprocessed"] = False
+        resumed["error"] = None
+        resumed["failure_reason"] = None
+        resumed["operations"] = list(previous_record.get("operations", [])) + ["resume_skip_existing_derivative"]
+        return resumed
+
+    if options.resume_processing:
+        base["reprocessed"] = previous_record is not None
+
     if not item.get("openable"):
         base["failure_reason"] = "source image is not openable"
         base["error"] = base["failure_reason"]
@@ -228,6 +274,98 @@ def _process_record(
         base["error"] = str(exc)
         base["failure_reason"] = str(exc)
     return base
+
+
+def _load_previous_records(process_dir: Path) -> dict[str, dict[str, Any]]:
+    manifest_path = process_dir / "processing_manifest.json"
+    if not manifest_path.exists():
+        return {}
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    previous: dict[str, dict[str, Any]] = {}
+    for record in payload.get("files", []):
+        source_relative_path = record.get("source_relative_path")
+        if not isinstance(source_relative_path, str):
+            continue
+        previous[source_relative_path] = record
+    return previous
+
+
+def _previous_output_exists(record: dict[str, Any], image_root: Path) -> bool:
+    output_relative_path = record.get("output_relative_path")
+    if not isinstance(output_relative_path, str) or not output_relative_path:
+        return False
+    output_path = image_root.parent / output_relative_path
+    try:
+        output_path.resolve().relative_to(image_root.parent.resolve())
+    except ValueError:
+        return False
+    return output_path.exists() and output_path.is_file()
+
+
+def _retry_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+    failed_records = [record for record in manifest["files"] if record.get("status") == "failed"]
+    return {
+        "schema_version": "scan-qc.processing.retry.v1",
+        "generated_at": manifest["generated_at"],
+        "source_processing_manifest": "processing_manifest.json",
+        "summary": {
+            "failed_files": len(failed_records),
+            "retry_list_files": len(failed_records),
+        },
+        "files": failed_records,
+    }
+
+
+def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict[str, Any]:
+    summary = manifest["summary"]
+    performance = summary["performance"]
+    return {
+        "schema_version": "scan-qc.processing.audit.v1",
+        "generated_at": manifest["generated_at"],
+        "operations": {
+            "auto_crop": options.auto_crop,
+            "deskew": options.deskew,
+            "trim_dark_border": options.trim_dark_border,
+            "despeckle": options.despeckle,
+            "resume_processing": options.resume_processing,
+        },
+        "workers": {
+            "requested_workers": performance["requested_workers"],
+            "effective_workers": performance["effective_workers"],
+            "worker_cap": performance["worker_cap"],
+            "mode": performance["mode"],
+        },
+        "timing": {
+            "started_at": performance["started_at"],
+            "finished_at": performance["finished_at"],
+            "elapsed_seconds": performance["elapsed_seconds"],
+        },
+        "counts": {
+            "total_files": summary["total_files"],
+            "processed_files": summary["processed_files"],
+            "resumed_files": summary["resumed_files"],
+            "skipped_due_to_resume": summary["skipped_due_to_resume"],
+            "reprocessed_files": summary["reprocessed_files"],
+            "skipped_files": summary["skipped_files"],
+            "failed_files": summary["failed_files"],
+            "retry_list_files": summary["retry_list_files"],
+        },
+        "throughput": {
+            "processed_files_per_minute": performance["processed_files_per_minute"],
+            "total_files_per_minute": performance["total_files_per_minute"],
+        },
+        "privacy": {
+            "aggregate_only": True,
+            "contains_file_list": False,
+            "contains_paths": False,
+            "contains_hashes": False,
+            "contains_thumbnails": False,
+            "contains_image_content": False,
+        },
+    }
 
 
 def _process_image(image: Image.Image, options: ProcessingOptions) -> tuple[Image.Image, list[str], dict[str, Any]]:

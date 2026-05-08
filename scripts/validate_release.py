@@ -197,6 +197,8 @@ def run_examples_dry_run() -> None:
             report_dir / "scan_qc_files.csv",
             report_dir / "scan_qc_findings.csv",
             process_dir / "processing_manifest.json",
+            process_dir / "processing_audit_summary.json",
+            process_dir / "processing_retry_manifest.json",
             process_dir / "images" / "BATCH001_PAGE_0001.png",
             process_dir / "images" / "BATCH001_PAGE_0002.png",
         ]
@@ -206,6 +208,7 @@ def run_examples_dry_run() -> None:
         report = json.loads((report_dir / "scan_qc_report.json").read_text(encoding="utf-8"))
         preflight = json.loads((report_dir / "preflight_report.json").read_text(encoding="utf-8"))
         processing = json.loads((process_dir / "processing_manifest.json").read_text(encoding="utf-8"))
+        audit = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
         if preflight["status"] != "pass" or preflight["manifest"]["missing_count"] != 0:
             raise SystemExit("example dry-run preflight did not complete cleanly")
         if report["summary"]["total_files"] != 2 or report["summary"]["p0_findings"] != 0:
@@ -216,6 +219,8 @@ def run_examples_dry_run() -> None:
             raise SystemExit("example dry-run manifest compatibility check failed")
         if processing["summary"]["processed_files"] != 2 or processing["summary"]["failed_files"] != 0:
             raise SystemExit("example dry-run processing did not complete cleanly")
+        if audit["counts"]["total_files"] != 2 or not audit["privacy"]["aggregate_only"]:
+            raise SystemExit("example dry-run audit summary did not complete cleanly")
 
 
 def run_benchmark_validation() -> None:
