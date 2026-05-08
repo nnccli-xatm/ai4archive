@@ -344,6 +344,11 @@ def _inspect_file(path: Path, root: Path) -> dict[str, Any]:
         "quality_skew_reason": None,
         "quality_dark_border_bbox": None,
         "quality_dark_border_reason": None,
+        "quality_scanline_orientation": None,
+        "quality_scanline_score": 0.0,
+        "quality_scanline_location_ratio": None,
+        "quality_scanline_band_width": 0,
+        "quality_scanline_reason": None,
         "error": None,
     }
 
@@ -430,13 +435,115 @@ def _measure_quality(image: Image.Image) -> dict[str, float]:
 def _measure_processing_quality_candidates(image: Image.Image) -> dict[str, Any]:
     skew = detect_skew(image)
     dark_border = detect_dark_border_bbox(image)
+    scanline = _detect_scanline_candidate(image)
     return {
         "quality_skew_angle_degrees": skew.angle_degrees,
         "quality_skew_confidence": skew.confidence,
         "quality_skew_reason": skew.reason,
         "quality_dark_border_bbox": list(dark_border.bbox) if dark_border.bbox else None,
         "quality_dark_border_reason": dark_border.reason,
+        "quality_scanline_orientation": scanline["orientation"],
+        "quality_scanline_score": scanline["score"],
+        "quality_scanline_location_ratio": scanline["location_ratio"],
+        "quality_scanline_band_width": scanline["band_width"],
+        "quality_scanline_reason": scanline["reason"],
     }
+
+
+def _detect_scanline_candidate(image: Image.Image) -> dict[str, Any]:
+    sample = image.convert("L")
+    sample.thumbnail((900, 900), Image.Resampling.BILINEAR)
+    horizontal = _scanline_axis_candidate(sample, horizontal=True)
+    vertical = _scanline_axis_candidate(sample, horizontal=False)
+    candidate = horizontal if horizontal["score"] >= vertical["score"] else vertical
+    if candidate["score"] < 0.85:
+        return {
+            "orientation": None,
+            "score": round(candidate["score"], 3),
+            "location_ratio": None,
+            "band_width": 0,
+            "reason": "no conservative full-span row or column intensity anomaly",
+        }
+    return {
+        "orientation": candidate["orientation"],
+        "score": round(candidate["score"], 3),
+        "location_ratio": round(candidate["location_ratio"], 4),
+        "band_width": candidate["band_width"],
+        "reason": (
+            f"{candidate['orientation']} dark scanline candidate spans "
+            f"{round(candidate['span_ratio'], 3)} of the cross-axis with local intensity delta "
+            f"{round(candidate['local_delta'], 1)}"
+        ),
+    }
+
+
+def _scanline_axis_candidate(image: Image.Image, *, horizontal: bool) -> dict[str, Any]:
+    width, height = image.size
+    axis_length = height if horizontal else width
+    cross_length = width if horizontal else height
+    if axis_length < 20 or cross_length < 20:
+        return _empty_scanline_axis("horizontal" if horizontal else "vertical")
+
+    pixels = image.load()
+    line_stats: list[tuple[float, float, float]] = []
+    for index in range(axis_length):
+        values = [pixels[x, index] for x in range(width)] if horizontal else [pixels[index, y] for y in range(height)]
+        mean = sum(values) / len(values)
+        dark_ratio = sum(1 for value in values if value <= 80) / len(values)
+        bright_ratio = sum(1 for value in values if value >= 245) / len(values)
+        line_stats.append((mean, dark_ratio, bright_ratio))
+
+    margin = max(2, int(axis_length * 0.03))
+    best = _empty_scanline_axis("horizontal" if horizontal else "vertical")
+    for index in range(margin, axis_length - margin):
+        mean, dark_ratio, _bright_ratio = line_stats[index]
+        neighbor_means = [
+            line_stats[neighbor][0]
+            for offset in range(-6, 7)
+            if offset not in {-1, 0, 1}
+            for neighbor in [index + offset]
+            if 0 <= neighbor < axis_length
+        ]
+        if not neighbor_means:
+            continue
+        local_mean = sum(neighbor_means) / len(neighbor_means)
+        dark_delta = local_mean - mean
+        if dark_ratio < 0.90:
+            continue
+        dark_score = min(1.0, dark_ratio / 0.95) * min(1.0, dark_delta / 55.0)
+        if dark_score <= best["score"]:
+            continue
+        best = {
+            "orientation": "horizontal" if horizontal else "vertical",
+            "score": dark_score,
+            "location_ratio": index / max(1, axis_length - 1),
+            "band_width": _scanline_band_width(line_stats, index),
+            "span_ratio": dark_ratio,
+            "local_delta": dark_delta,
+        }
+    return best
+
+
+def _empty_scanline_axis(orientation: str) -> dict[str, Any]:
+    return {
+        "orientation": orientation,
+        "score": 0.0,
+        "location_ratio": None,
+        "band_width": 0,
+        "span_ratio": 0.0,
+        "local_delta": 0.0,
+    }
+
+
+def _scanline_band_width(line_stats: list[tuple[float, float, float]], center: int) -> int:
+    threshold = 0.85
+    left = center
+    while left > 0 and line_stats[left - 1][1] >= threshold:
+        left -= 1
+    right = center
+    while right + 1 < len(line_stats) and line_stats[right + 1][1] >= threshold:
+        right += 1
+    return right - left + 1
 
 
 def _pixel_ratio_at_or_below(image: Image.Image, threshold: int) -> float:
@@ -713,6 +820,24 @@ def _add_processing_quality_findings(
             "quality_dark_border_candidate",
             "P2",
             "Conservative scan-time detector found a dark edge border candidate; review for border trim.",
+            profile,
+        )
+
+    scanline_orientation = item.get("quality_scanline_orientation")
+    scanline_score = item.get("quality_scanline_score")
+    scanline_location = item.get("quality_scanline_location_ratio")
+    scanline_band_width = item.get("quality_scanline_band_width")
+    if scanline_orientation in {"horizontal", "vertical"} and isinstance(scanline_score, int | float):
+        _append_finding(
+            item,
+            findings,
+            "quality_scanline_candidate",
+            "P2",
+            (
+                f"Conservative scan-time detector found a {scanline_orientation} scanline/streak candidate "
+                f"with score {round(scanline_score, 3)}, location ratio {scanline_location}, "
+                f"and band width {scanline_band_width}; review source image for scanner artifact."
+            ),
             profile,
         )
 

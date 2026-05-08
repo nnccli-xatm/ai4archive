@@ -527,6 +527,10 @@ file record also includes:
 - `quality_dark_border_bbox` and `quality_dark_border_reason`: conservative
   scan-time dark-edge border candidate reused from the processing trim
   detector. The scan report does not crop the source image.
+- `quality_scanline_orientation`, `quality_scanline_score`,
+  `quality_scanline_location_ratio`, `quality_scanline_band_width`, and
+  `quality_scanline_reason`: conservative scan-time row/column anomaly
+  screening for obvious horizontal or vertical scanner lines and streaks.
 - `orientation_class`: coarse page shape classification, one of `portrait`,
   `landscape`, or `square`; near-square images are treated as `square`.
 - `aspect_ratio`: width divided by height, rounded for report display.
@@ -548,6 +552,8 @@ The default quality thresholds are intentionally conservative:
   high-confidence small-angle estimate from `0.5` through `5` degrees.
 - `quality_dark_border_candidate` P2 when the scan-time dark-border detector
   finds a conservative edge-touching trim candidate.
+- `quality_scanline_candidate` P2 when a resized grayscale thumbnail has an
+  obvious full-span horizontal or vertical intensity anomaly.
 - `batch_orientation_consistency` P2 when a batch has a supported mix of
   portrait and landscape openable images after excluding square or near-square
   pages. The default is conservative and requires at least two files in each
