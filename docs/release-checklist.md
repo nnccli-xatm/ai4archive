@@ -15,6 +15,10 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 - Confirm a synthetic review template can be exported and a privacy-safe
   aggregate `review_summary.json` can be generated with no remaining P0/P1
   findings before acceptance.
+- Confirm a synthetic `archive-scan-qc calibrate-rules` run creates
+  `rules_calibration_summary.json` after automated QC and review summary, and
+  that any `--write-suggested-profile` output is marked draft/suggested and
+  does not overwrite the original profile.
 - Confirm CI is green for Python 3.10, 3.11, and 3.12.
 
 ## Package and install checks
@@ -54,6 +58,9 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 - Confirm production runbooks explain the manual review template, allowed
   disposition statuses, aggregate acceptance summary, and which review artifacts
   are sensitive local evidence.
+- Confirm production runbooks explain the threshold calibration loop:
+  automated QC, human review, aggregate calibration recommendation, then human
+  approval before changing a project rules profile.
 
 ## Real sample aggregate validation
 
@@ -78,6 +85,8 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 - Do not upload or attach filled review templates or reviewer notes from
   private collections; share only aggregate `review_summary.json` after policy
   review.
+- Do not upload or attach private `scan_qc_report.json` files for calibration.
+  Share only aggregate `rules_calibration_summary.json` after policy review.
 
 ## Performance record
 

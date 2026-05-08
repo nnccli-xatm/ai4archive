@@ -185,6 +185,41 @@ encode the agreed DPI, filename, brightness, contrast, and blur thresholds
 there. Invalid profile paths, malformed JSON, or wrong field types stop the CLI
 before reports are written.
 
+### Review and rule calibration
+
+After a local scan, treat `scan_qc_report.json`, HTML, CSVs, and review
+templates as sensitive evidence because they include row-level paths, hashes,
+messages, and reviewer notes. Export a local template, complete manual review,
+then write an aggregate review summary:
+
+```bash
+archive-scan-qc review-export \
+  --report /path/to/qc-report/scan_qc_report.json \
+  --out /path/to/qc-report/review_template.csv
+
+archive-scan-qc review-summary \
+  --review /path/to/qc-report/review_template.csv \
+  --out /path/to/qc-report/review_summary.json
+```
+
+Use aggregate calibration only after automated QC and review:
+
+```bash
+archive-scan-qc calibrate-rules \
+  --report /path/to/qc-report/scan_qc_report.json \
+  --review-summary /path/to/qc-report/review_summary.json \
+  --out /path/to/qc-report/rules_calibration_summary.json \
+  --write-suggested-profile /path/to/qc-report/rules-profile.suggested.json
+```
+
+`rules_calibration_summary.json` contains per-rule trigger counts, severity
+distribution, optional review status distribution, conservative threshold
+recommendations, and the current profile field summary. It deliberately omits
+file paths, filenames, hashes, OCR text, image content, thumbnails, row-level
+messages, and reviewer notes. The suggested profile output is draft-only and
+does not overwrite the original profile; a human must approve any production
+rules profile change.
+
 ### Rule and standards traceability
 
 The report includes a `rule_catalog` object and the standalone HTML report

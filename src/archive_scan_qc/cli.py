@@ -8,6 +8,7 @@ from pathlib import Path
 import sys
 
 from ._version import __version__
+from .calibration import CALIBRATION_JSON, write_rules_calibration_summary
 from .preflight import PreflightConfig, run_preflight, write_preflight_report
 from .processing import ProcessingOptions, process_images
 from .reports import write_reports, write_review_export, write_review_summary
@@ -126,6 +127,8 @@ def main(argv: list[str] | None = None) -> int:
         return _main_review_export(argv[1:])
     if argv and argv[0] == "review-summary":
         return _main_review_summary(argv[1:])
+    if argv and argv[0] == "calibrate-rules":
+        return _main_calibrate_rules(argv[1:])
     parser = build_parser()
     args = parser.parse_args(argv)
     _validate_processing_flags(parser, args)
@@ -254,6 +257,63 @@ def _main_review_summary(argv: list[str]) -> int:
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
     print(f"Review summary: {path}")
+    return 0
+
+
+def _main_calibrate_rules(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="archive-scan-qc calibrate-rules",
+        description="Write aggregate-only rule calibration recommendations from local QC evidence.",
+    )
+    parser.add_argument(
+        "--report",
+        required=True,
+        action="append",
+        type=Path,
+        help="Path to scan_qc_report.json. Repeat for multiple local reports.",
+    )
+    parser.add_argument(
+        "--review-summary",
+        default=[],
+        action="append",
+        type=Path,
+        help="Optional aggregate review_summary.json. Repeat for multiple summaries.",
+    )
+    parser.add_argument(
+        "--review",
+        default=[],
+        action="append",
+        type=Path,
+        help="Optional filled local review template CSV or JSON. Sensitive input; only aggregate counts are emitted.",
+    )
+    parser.add_argument(
+        "--out",
+        required=True,
+        type=Path,
+        help=f"Output JSON path or directory for {CALIBRATION_JSON}.",
+    )
+    parser.add_argument(
+        "--write-suggested-profile",
+        default=None,
+        type=Path,
+        help="Optional draft suggested rules profile JSON path. Never overwrites the source profile.",
+    )
+    args = parser.parse_args(argv)
+    output_path = args.out / CALIBRATION_JSON if args.out.suffix == "" else args.out
+    try:
+        summary_path, suggested_path = write_rules_calibration_summary(
+            args.report,
+            output_path,
+            review_summary_paths=args.review_summary,
+            review_paths=args.review,
+            suggested_profile_path=args.write_suggested_profile,
+        )
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    print(f"Rules calibration summary: {summary_path}")
+    if suggested_path:
+        print(f"Suggested draft profile: {suggested_path}")
+    print("Sensitivity: aggregate-only summary; source scan_qc_report.json and review templates remain sensitive.")
     return 0
 
 
