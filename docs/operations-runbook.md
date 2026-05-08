@@ -236,6 +236,44 @@ active rules profile and report `rule_catalog` use the same clause references as
 that document before accepting a release candidate or changing production
 thresholds.
 
+## Human Review And Acceptance Summary
+
+When automated QC produces findings, create a local review template for manual
+disposition:
+
+```bash
+archive-scan-qc review-export \
+  --report /approved-work/qc-reports/batch-001/scan_qc_report.json \
+  --out /approved-work/qc-reports/batch-001/review_template.csv
+```
+
+The template may also be written as JSON by using a `.json` output path. Its
+stable fields are `finding_id`, `rule`, `severity`, `relative_path`, `status`,
+and `reviewer_notes`. Reviewers update `status` to `pending`, `accepted`,
+`false_positive`, `fixed`, or `needs_rescan`. Use `reviewer_notes` only inside
+the approved local environment for disposition evidence.
+
+After review is complete, create the aggregate-only acceptance artifact:
+
+```bash
+archive-scan-qc review-summary \
+  --review /approved-work/qc-reports/batch-001/review_template.csv \
+  --out /approved-work/qc-reports/batch-001/review_summary.json
+```
+
+`review_summary.json` includes severity, rule, status, severity/status, and
+rule/status counts, remaining P0/P1 counts, and `acceptance_passed`. It contains
+no row-level path list, filenames, hashes, messages, or reviewer notes. P0/P1
+findings remain open unless their status is `fixed` or `false_positive`.
+Acceptance passes only when remaining P0 and remaining P1 counts are both zero.
+
+Sensitive local evidence includes source images, derivative images,
+`scan_qc_report.json`, `scan_qc_report.html`, `scan_qc_files.csv`,
+`scan_qc_findings.csv`, `processing_manifest.json`, and review templates. Keep
+these inside the approved environment. `review_summary.json` is designed as the
+shareable aggregate acceptance evidence, but still review it for local policy
+before external release.
+
 ## Exit Codes
 
 For `archive-scan-qc preflight`:

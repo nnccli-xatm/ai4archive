@@ -281,6 +281,39 @@ The command writes:
 - `scan_qc_files.csv`
 - `scan_qc_findings.csv`
 
+### Human review loop
+
+After an automated scan, export findings into a reviewer-editable local
+template:
+
+```bash
+archive-scan-qc review-export \
+  --report /path/to/qc-report/scan_qc_report.json \
+  --out /path/to/qc-report/review_template.csv
+```
+
+Use `.json` for `--out` to write the same template as JSON. The template fields
+are stable: `finding_id`, `rule`, `severity`, `relative_path`, `status`, and
+`reviewer_notes`. Reviewers should update `status` to one of `pending`,
+`accepted`, `false_positive`, `fixed`, or `needs_rescan`, and may add notes for
+local disposition tracking. The review template is sensitive local evidence
+because it contains row-level paths and reviewer notes. Do not upload it to
+public issues, PRs, chats, or release systems.
+
+Create the aggregate acceptance summary from the filled template:
+
+```bash
+archive-scan-qc review-summary \
+  --review /path/to/qc-report/review_template.csv \
+  --out /path/to/qc-report/review_summary.json
+```
+
+`review_summary.json` contains only aggregate severity, rule, and status counts,
+plus remaining P0/P1 counts and `acceptance_passed`. It does not include
+filenames, paths, hashes, messages, or reviewer notes. P0/P1 findings are
+considered remaining until their status is `fixed` or `false_positive`; the
+acceptance threshold passes when remaining P0 and P1 counts are both zero.
+
 The JSON report includes a batch `manifest` with project, batch, input
 directory, output directory, rule version, generation time, total file count,
 P0/P1/P2 finding counts, manifest usage/missing/unexpected/duplicate counts

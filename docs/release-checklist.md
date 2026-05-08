@@ -12,6 +12,9 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   JSON, HTML, CSV, a processing manifest, a processing retry manifest, an
   aggregate processing audit summary, and derivative images from synthetic
   temporary inputs.
+- Confirm a synthetic review template can be exported and a privacy-safe
+  aggregate `review_summary.json` can be generated with no remaining P0/P1
+  findings before acceptance.
 - Confirm CI is green for Python 3.10, 3.11, and 3.12.
 
 ## Package and install checks
@@ -48,6 +51,9 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 - Confirm production runbooks explain `--resume-processing`,
   `processing_audit_summary.json`, and the private
   `processing_retry_manifest.json` retry workflow for interrupted batches.
+- Confirm production runbooks explain the manual review template, allowed
+  disposition statuses, aggregate acceptance summary, and which review artifacts
+  are sensitive local evidence.
 
 ## Real sample aggregate validation
 
@@ -69,6 +75,9 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   manifests from private collections.
 - Do not paste standalone HTML or JSON scan reports from private collections
   into public issues, PRs, chats, or release notes.
+- Do not upload or attach filled review templates or reviewer notes from
+  private collections; share only aggregate `review_summary.json` after policy
+  review.
 
 ## Performance record
 
