@@ -185,6 +185,25 @@ encode the agreed DPI, filename, brightness, contrast, and blur thresholds
 there. Invalid profile paths, malformed JSON, or wrong field types stop the CLI
 before reports are written.
 
+### Rule and standards traceability
+
+The report includes a `rule_catalog` object and the standalone HTML report
+includes a Rule Catalog section. This catalog explains each finding rule's
+default severity, check target, automation status, DA/T 31-2017 clause-numbered
+short reference such as `DA/T 31-2017 10.5.1`, and operator-facing meaning. It
+is static metadata only; it must not contain
+filenames, relative paths, absolute paths, hashes, thumbnails, OCR text, or
+image content.
+
+Use `docs/standards-traceability.md` to explain how specific DA/T 31-2017
+clauses for scan parameters, rotation/deskew, cropping, cleanup with original
+appearance preserved, image readability, missed or duplicate scans, page order,
+catalog-image correspondence, automated plus manual inspection, and acceptance
+scope map to current rules, report fields, preflight, benchmark output, and
+release validation. Treat row-level JSON/HTML/CSV reports as sensitive, but the
+rule catalog and standards mapping are suitable for public PR discussion because
+they contain no private batch data.
+
 The optional `--process-out` directory enables the first local image-processing
 layer. Source images remain read-only. The CLI writes derivative images under
 `--process-out/images`, preserving source relative paths, and writes

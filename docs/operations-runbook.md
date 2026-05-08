@@ -183,6 +183,20 @@ Pillow version, platform, and worker setting. Treat row-level reports and
 processing manifests as sensitive because they include filenames, relative
 paths, hashes, and per-file metrics.
 
+Use the JSON `rule_catalog` object or the HTML Rule Catalog section when
+explaining why a finding exists. The catalog gives the rule title, default
+severity, DA/T 31-2017 clause-numbered short reference such as
+`DA/T 31-2017 10.5.1`, check target, automation status, and a plain-language
+explanation. The catalog is static metadata and is safe to share publicly; the
+row-level reports that contain filenames, paths, hashes, and per-file metrics
+are not.
+
+For standards traceability reviews, use `docs/standards-traceability.md` as the
+crosswalk between DA/T 31-2017 clauses and implementation evidence. Confirm the
+active rules profile and report `rule_catalog` use the same clause references as
+that document before accepting a release candidate or changing production
+thresholds.
+
 ## Exit Codes
 
 For `archive-scan-qc preflight`:
