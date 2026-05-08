@@ -273,6 +273,25 @@ review of `processing_manifest.json` before derivatives are accepted. Use
 `processing_retry_manifest.json` only inside the approved private environment to
 identify remaining failed files for another fix-and-resume cycle.
 
+For manual derivative acceptance review, generate the sensitive local package:
+
+```bash
+archive-scan-qc processing-review-package \
+  --manifest /approved-work/processed-derivatives/batch-001/processing_manifest.json \
+  --out /approved-work/processed-derivatives/batch-001/local-review
+```
+
+The command writes `processing_review_package.json` and standalone
+`processing_review_package.html`. The package groups deskewed,
+dark-border-trimmed, cropped, despeckled, failed, and guardrail-warning records
+and preserves per-operation decisions for local review. It may include row-level
+source/output relative paths, hashes, warnings, failure reasons, and local
+derivative links under the operator processing output tree. Keep it inside the
+approved environment. It is sensitive local evidence, not public aggregate
+evidence, and it must not replace `review_summary.json`,
+`processing_audit_summary.json`, or `acceptance_summary.json` in release
+materials. The HTML does not embed base64 image data.
+
 Use the JSON `rule_catalog` object or the HTML Rule Catalog section when
 explaining why a finding exists. The catalog gives the rule title, default
 severity, DA/T 31-2017 clause-numbered short reference such as
@@ -419,10 +438,10 @@ any threshold, severity, or enablement changes before deployment.
 
 Sensitive local evidence includes source images, derivative images,
 `scan_qc_report.json`, `scan_qc_report.html`, `scan_qc_files.csv`,
-`scan_qc_findings.csv`, `processing_manifest.json`, and review templates. Keep
-these inside the approved environment. `review_summary.json` is designed as the
-shareable aggregate acceptance evidence, but still review it for local policy
-before external release.
+`scan_qc_findings.csv`, `processing_manifest.json`, processing review packages,
+and review templates. Keep these inside the approved environment.
+`review_summary.json` is designed as the shareable aggregate acceptance
+evidence, but still review it for local policy before external release.
 
 ## Exit Codes
 

@@ -258,6 +258,30 @@ def run_examples_dry_run() -> None:
             raise SystemExit("example dry-run processing did not complete cleanly")
         if audit["counts"]["total_files"] != 2 or not audit["privacy"]["aggregate_only"]:
             raise SystemExit("example dry-run audit summary did not complete cleanly")
+        local_review_dir = process_dir / "local-review"
+        _run(
+            [
+                sys.executable,
+                "-m",
+                "archive_scan_qc",
+                "processing-review-package",
+                "--manifest",
+                str(process_dir / "processing_manifest.json"),
+                "--out",
+                str(local_review_dir),
+            ],
+            env=_pythonpath_env(),
+        )
+        local_review_json = local_review_dir / "processing_review_package.json"
+        local_review_html = local_review_dir / "processing_review_package.html"
+        if not local_review_json.exists() or not local_review_html.exists():
+            raise SystemExit("example dry-run processing review package was not written")
+        local_review = json.loads(local_review_json.read_text(encoding="utf-8"))
+        local_review_html_text = local_review_html.read_text(encoding="utf-8")
+        if local_review["privacy"]["aggregate_only"] or not local_review["privacy"]["local_only"]:
+            raise SystemExit("processing review package privacy flags are incorrect")
+        if "data:image" in local_review_html_text.lower() or "<img" in local_review_html_text.lower():
+            raise SystemExit("processing review package embedded image data")
         _run(
             [
                 sys.executable,
