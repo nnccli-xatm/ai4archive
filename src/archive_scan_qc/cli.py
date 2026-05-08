@@ -13,6 +13,7 @@ from .analysis_provider import AnalysisProviderError
 from .calibration import CALIBRATION_JSON, write_rules_calibration_summary
 from .preflight import PreflightConfig, run_preflight, write_preflight_report
 from .processing import ProcessingOptions, process_images
+from .processing_review import write_processing_review_package
 from .reports import write_reports, write_review_export, write_review_summary
 from .rules import RulesProfileError, load_rules_profile
 from .scanner import ScanConfig, scan_batch
@@ -158,6 +159,8 @@ def main(argv: list[str] | None = None) -> int:
         return _main_calibrate_rules(argv[1:])
     if argv and argv[0] == "acceptance-summary":
         return _main_acceptance_summary(argv[1:])
+    if argv and argv[0] == "processing-review-package":
+        return _main_processing_review_package(argv[1:])
     parser = build_parser()
     args = parser.parse_args(argv)
     _validate_processing_flags(parser, args)
@@ -408,6 +411,24 @@ def _main_acceptance_summary(argv: list[str]) -> int:
     print(f"Acceptance status: {payload['status']}")
     print("Sensitivity: aggregate-only summary; no filenames, paths, hashes, thumbnails, row-level findings, notes, OCR, or image content.")
     return 0 if payload["pass"] else 1
+
+
+def _main_processing_review_package(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="archive-scan-qc processing-review-package",
+        description="Write a sensitive local JSON and standalone HTML review package from processing_manifest.json.",
+    )
+    parser.add_argument("--manifest", required=True, type=Path, help="Path to processing_manifest.json.")
+    parser.add_argument("--out", required=True, type=Path, help="Output directory for local review package artifacts.")
+    args = parser.parse_args(argv)
+    try:
+        json_path, html_path = write_processing_review_package(args.manifest, args.out)
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    print(f"Processing review package JSON: {json_path}")
+    print(f"Processing review package HTML: {html_path}")
+    print("Sensitivity: local-only row-level evidence; do not use as public aggregate evidence.")
+    return 0
 
 
 def _validate_processing_flags(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
