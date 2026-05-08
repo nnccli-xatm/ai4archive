@@ -20,6 +20,8 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 - Install the built wheel in a clean virtual environment.
 - Run a synthetic image smoke scan and confirm JSON, HTML, files CSV, and
   findings CSV are created.
+- Confirm `scan_qc_report.json` contains `rule_catalog` and the HTML report
+  contains a Rule Catalog section.
 - Parse `examples/rules-profile.production-sample.json` and
   `examples/manifest.sample.csv` through `archive-scan-qc preflight` and the
   scan/process CLI against synthetic files named `BATCH001_PAGE_0001.png` and
@@ -30,6 +32,11 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 ## Operations readiness
 
 - Review `docs/operations-runbook.md`.
+- Review `docs/standards-traceability.md`.
+- Confirm `src/archive_scan_qc/rule_registry.py`,
+  `docs/standards-traceability.md`, README, and the runbook describe the same
+  DA/T 31-2017 rule mapping and do not include private filenames, paths,
+  hashes, thumbnails, OCR text, or image content.
 - Confirm the runbook's install, offline wheelhouse, domestic-platform,
   resource sizing, directory, report archival, exit-code, privacy,
   troubleshooting, and performance tuning guidance still matches the release.

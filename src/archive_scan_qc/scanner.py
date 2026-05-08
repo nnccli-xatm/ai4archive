@@ -20,6 +20,7 @@ from typing import Any
 from PIL import Image, ImageStat, UnidentifiedImageError
 
 from .concurrency import resolve_worker_count, worker_metadata
+from .rule_registry import rule_catalog
 from .rules import RulesProfile, default_rules_profile
 
 SUPPORTED_EXTENSIONS = {
@@ -174,6 +175,7 @@ def scan_batch(config: ScanConfig) -> dict[str, Any]:
             "Only Python standard-library modules are used for hashing, CSV, JSON, paths, and rule checks.",
         ],
         "summary": summary,
+        "rule_catalog": rule_catalog(),
         "files": files,
         "findings": findings,
     }

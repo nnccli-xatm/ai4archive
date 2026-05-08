@@ -16,6 +16,7 @@ from archive_scan_qc.benchmark import _recommendations
 from archive_scan_qc.cli import main
 from archive_scan_qc.processing import ProcessingOptions, process_images
 from archive_scan_qc.reports import write_reports
+from archive_scan_qc.rule_registry import RULE_REGISTRY
 from archive_scan_qc.rules import RulesProfileError, load_rules_profile
 from archive_scan_qc.scanner import ScanConfig, scan_batch
 
@@ -97,6 +98,8 @@ class ScanQcTest(unittest.TestCase):
             self.assertIn("Quality Metrics", html)
             self.assertIn("Orientation And Blank Pages", html)
             self.assertIn("Findings Summary", html)
+            self.assertIn("Rule Catalog", html)
+            self.assertIn("Image openability", html)
             self.assertIn("Brightness Mean Avg", html)
             self.assertIn("EXIF Transpose Signals", html)
             self.assertIn("Manifest Unique Entries", html)
@@ -107,6 +110,78 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn("<img", html.lower())
             self.assertNotIn("data:image", html.lower())
             self.assertNotIn("src=", html.lower())
+
+    def test_rule_registry_covers_current_finding_rules_and_reports_catalog(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            manifest_csv = root / "manifest.csv"
+            nested_dir = input_dir / "nested"
+            input_dir.mkdir()
+            nested_dir.mkdir()
+
+            duplicate = input_dir / "DUP_0001.jpg"
+            Image.new("RGB", (32, 24), "white").save(duplicate, dpi=(150, 150))
+            shutil.copyfile(duplicate, nested_dir / "DUP_0001.jpg")
+            (input_dir / "broken.jpg").write_text("not an image", encoding="utf-8")
+            Image.new("RGB", (80, 80), (25, 25, 25)).save(input_dir / "dark.png")
+            Image.new("RGB", (80, 80), (253, 253, 253)).save(input_dir / "bright.png")
+            Image.new("RGB", (80, 80), (128, 128, 128)).save(input_dir / "low_contrast.png")
+            _synthetic_text_page().filter(ImageFilter.GaussianBlur(radius=3)).save(input_dir / "blur.png")
+            for index in range(2):
+                Image.new("RGB", (90, 140), "white").save(input_dir / f"portrait_{index}.png", dpi=(300, 300))
+                Image.new("RGB", (140, 90), "white").save(input_dir / f"landscape_{index}.png", dpi=(300, 300))
+            manifest_csv.write_text("relative_path\nDUP_0001.jpg\nmissing.png\nmissing.png\n", encoding="utf-8")
+
+            report = scan_batch(
+                ScanConfig(
+                    "p1",
+                    "b1",
+                    input_dir,
+                    output_dir,
+                    name_pattern=r"A001_\d{4}",
+                    manifest_csv=manifest_csv,
+                )
+            )
+            paths = write_reports(report, output_dir)
+            saved = json.loads(paths["json"].read_text(encoding="utf-8"))
+            html = paths["html"].read_text(encoding="utf-8")
+            actual_rules = {finding["rule"] for finding in report["findings"]}
+
+            self.assertTrue(actual_rules)
+            self.assertLessEqual(actual_rules, set(RULE_REGISTRY))
+            self.assertEqual(set(saved["rule_catalog"]), set(RULE_REGISTRY))
+            self.assertIn("rule_catalog", saved)
+            self.assertIn("Rule Catalog", html)
+            self.assertIn("Minimum scan resolution", html)
+
+    def test_rule_catalog_is_privacy_safe_static_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            private_name = "private_case_001.png"
+            Image.new("RGB", (32, 24), "white").save(input_dir / private_name, dpi=(150, 150))
+
+            report = scan_batch(ScanConfig("private-project", "private-batch", input_dir, output_dir))
+            catalog_text = json.dumps(report["rule_catalog"], ensure_ascii=False)
+            file_hash = report["files"][0]["sha256"]
+
+            self.assertNotIn(private_name, catalog_text)
+            self.assertNotIn(str(input_dir), catalog_text)
+            self.assertNotIn(file_hash, catalog_text)
+            self.assertNotIn("data:image", catalog_text.lower())
+
+    def test_standards_traceability_doc_exists_and_references_public_sources(self) -> None:
+        path = REPO_ROOT / "docs" / "standards-traceability.md"
+        text = path.read_text(encoding="utf-8")
+
+        self.assertIn("https://www.saac.gov.cn/daj/tzgg/201709/17b7764728de403fb1c0f0085de6fa61.shtml", text)
+        self.assertIn("https://std.samr.gov.cn/hb/search/stdHBDetailed?id=8B1827F24605BB19E05397BE0A0AB44A", text)
+        self.assertIn("https://www.ndls.org.cn/standard/detail/701c1aa6791563e848548a7f7199e355", text)
+        self.assertIn("rule_registry.py", text)
 
     def test_html_report_escapes_embedded_data_and_has_no_remote_resources(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

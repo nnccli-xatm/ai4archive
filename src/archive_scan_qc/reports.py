@@ -73,6 +73,7 @@ def _render_html_report(report: dict[str, Any]) -> str:
     dependency_notes = report.get("dependency_notes", [])
     files = report.get("files", [])
     findings = report.get("findings", [])
+    rule_catalog = report.get("rule_catalog", {})
     report_json = json.dumps(report, ensure_ascii=False, indent=2)
     rules_profile = manifest.get("rules_profile") or project.get("rules_profile") or {}
     performance = summary.get("performance") or manifest.get("performance") or {}
@@ -267,6 +268,8 @@ def _render_html_report(report: dict[str, Any]) -> str:
     {_metric_cards(_orientation_metrics(files, findings, summary))}
     <h2>Findings Summary</h2>
     {_findings_summary_tables(findings)}
+    <h2>Rule Catalog</h2>
+    {_rule_catalog_table(rule_catalog)}
     <h2>Summary Details</h2>
     {_key_value_table(summary)}
     <h2>Dependency Notes</h2>
@@ -478,6 +481,39 @@ def _findings_table(findings: list[dict[str, Any]]) -> str:
         )
     return (
         '<div class="table-wrap"><table><thead><tr><th>Severity</th><th>Path</th><th>Rule</th><th>Message</th></tr></thead><tbody>'
+        + "\n".join(rows)
+        + "</tbody></table></div>"
+    )
+
+
+def _rule_catalog_table(rule_catalog: dict[str, Any]) -> str:
+    if not rule_catalog:
+        return '<div class="empty">No rule catalog.</div>'
+    rows = []
+    for rule_id, raw in sorted(rule_catalog.items()):
+        if not isinstance(raw, dict):
+            continue
+        standards = raw.get("standards", [])
+        if isinstance(standards, list):
+            standards_text = "; ".join(str(item) for item in standards)
+        else:
+            standards_text = str(standards)
+        rows.append(
+            "<tr>"
+            f"<td>{_text(rule_id)}</td>"
+            f"<td>{_text(raw.get('title'))}</td>"
+            f"<td>{_text(raw.get('default_severity'))}</td>"
+            f"<td>{_text(standards_text)}</td>"
+            f"<td>{_text(raw.get('check_target'))}</td>"
+            f"<td>{_text(raw.get('automation_status'))}</td>"
+            f"<td>{_text(raw.get('report_explanation'))}</td>"
+            "</tr>"
+        )
+    if not rows:
+        return '<div class="empty">No rule catalog.</div>'
+    return (
+        '<div class="table-wrap"><table><thead><tr><th>Rule</th><th>Title</th><th>Default Severity</th>'
+        "<th>Standards</th><th>Check Target</th><th>Automation</th><th>Report Explanation</th></tr></thead><tbody>"
         + "\n".join(rows)
         + "</tbody></table></div>"
     )
