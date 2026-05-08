@@ -1303,6 +1303,161 @@ class ScanQcTest(unittest.TestCase):
                     main(["--input", str(input_dir), "--out", str(output_dir), option])
                 self.assertEqual(raised.exception.code, 2)
 
+    def test_preflight_success_writes_privacy_safe_report(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            manifest_csv = root / "manifest.csv"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+            manifest_csv.write_text("relative_path\nA001_0001.jpg\n", encoding="utf-8")
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "preflight",
+                        "--input",
+                        str(input_dir),
+                        "--out",
+                        str(output_dir),
+                        "--process-out",
+                        str(process_dir),
+                        "--auto-crop",
+                        "--workers",
+                        "1",
+                        "--project",
+                        "p1",
+                        "--batch",
+                        "b1",
+                        "--manifest-csv",
+                        str(manifest_csv),
+                    ]
+                )
+
+            report_path = output_dir / "preflight_report.json"
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertEqual(exit_code, 0)
+            self.assertTrue(report_path.exists())
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(report["input_summary"]["candidate_file_count"], 1)
+            self.assertEqual(report["manifest"]["missing_count"], 0)
+            self.assertEqual(report["manifest"]["unexpected_count"], 0)
+            self.assertFalse(report["privacy"]["contains_file_list"])
+            self.assertIn("Preflight status: pass", stdout.getvalue())
+
+    def test_preflight_processing_flag_without_process_out_reports_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                exit_code = main(["preflight", "--input", str(input_dir), "--out", str(output_dir), "--deskew"])
+
+            report = json.loads((output_dir / "preflight_report.json").read_text(encoding="utf-8"))
+            self.assertEqual(exit_code, 1)
+            self.assertEqual(report["status"], "fail")
+            self.assertIn("process_output_required", {error["code"] for error in report["errors"]})
+
+    def test_preflight_invalid_rules_profile_writes_failure_report(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            invalid_profile = root / "invalid.json"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "PRIVATE_PRESENT.jpg", dpi=(300, 300))
+            invalid_profile.write_text('{"name": ""}', encoding="utf-8")
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                exit_code = main(
+                    [
+                        "preflight",
+                        "--input",
+                        str(input_dir),
+                        "--out",
+                        str(output_dir),
+                        "--rules-profile",
+                        str(invalid_profile),
+                    ]
+                )
+
+            report_path = output_dir / "preflight_report.json"
+            report_text = report_path.read_text(encoding="utf-8")
+            report = json.loads(report_text)
+            self.assertEqual(exit_code, 1)
+            self.assertTrue(report_path.exists())
+            self.assertEqual(report["status"], "fail")
+            self.assertFalse(report["configuration"]["rules_profile"]["loaded"])
+            self.assertTrue(report["configuration"]["rules_profile"]["provided"])
+            self.assertIn("rules_profile_invalid", {error["code"] for error in report["errors"]})
+            self.assertNotIn("PRIVATE_PRESENT.jpg", report_text)
+            self.assertNotIn(str(input_dir), report_text)
+            self.assertNotIn("sha256", report_text.lower())
+            self.assertFalse(report["privacy"]["contains_file_list"])
+            self.assertFalse(report["privacy"]["contains_hashes"])
+            self.assertFalse(report["privacy"]["contains_thumbnails"])
+            self.assertFalse(report["privacy"]["contains_image_content"])
+
+    def test_preflight_rejects_illegal_manifest_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            manifest_csv = root / "manifest.csv"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+            manifest_csv.write_text(
+                "relative_path\n"
+                " \n"
+                "/private/A001_0001.jpg\n"
+                "../escape.jpg\n"
+                "nested/../escape.jpg\n",
+                encoding="utf-8",
+            )
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                exit_code = main(["preflight", "--input", str(input_dir), "--out", str(output_dir), "--manifest-csv", str(manifest_csv)])
+
+            report = json.loads((output_dir / "preflight_report.json").read_text(encoding="utf-8"))
+            codes = {error["code"] for error in report["errors"]}
+            self.assertEqual(exit_code, 1)
+            self.assertIn("manifest_empty_paths", codes)
+            self.assertIn("manifest_absolute_paths", codes)
+            self.assertIn("manifest_parent_escape_paths", codes)
+            self.assertEqual(report["manifest"]["empty_path_count"], 1)
+            self.assertEqual(report["manifest"]["absolute_path_count"], 1)
+            self.assertEqual(report["manifest"]["parent_escape_count"], 2)
+
+    def test_preflight_manifest_missing_unexpected_are_aggregate_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            manifest_csv = root / "manifest.csv"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "PRIVATE_PRESENT.jpg", dpi=(300, 300))
+            manifest_csv.write_text("relative_path\nPRIVATE_MISSING.jpg\n", encoding="utf-8")
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                exit_code = main(["preflight", "--input", str(input_dir), "--out", str(output_dir), "--manifest-csv", str(manifest_csv)])
+
+            report_text = (output_dir / "preflight_report.json").read_text(encoding="utf-8")
+            report = json.loads(report_text)
+            self.assertEqual(exit_code, 1)
+            self.assertEqual(report["manifest"]["missing_count"], 1)
+            self.assertEqual(report["manifest"]["unexpected_count"], 1)
+            self.assertNotIn("PRIVATE_PRESENT.jpg", report_text)
+            self.assertNotIn("PRIVATE_MISSING.jpg", report_text)
+            self.assertNotIn("sha256", report_text.lower())
+            self.assertFalse(report["privacy"]["contains_hashes"])
+            self.assertFalse(report["privacy"]["contains_thumbnails"])
+
 
 def _synthetic_text_page() -> Image.Image:
     image = Image.new("RGB", (240, 180), "white")
