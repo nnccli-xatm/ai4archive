@@ -15,6 +15,9 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 - Confirm a synthetic review template can be exported and a privacy-safe
   aggregate `review_summary.json` can be generated with no remaining P0/P1
   findings before acceptance.
+- Confirm a synthetic multi-batch `archive-scan-qc run-plan` creates per-batch
+  preflight/scan/processing artifacts plus aggregate `run_plan_summary.json`
+  and `run_plan_summary.csv`.
 - Confirm CI is green for Python 3.10, 3.11, and 3.12.
 
 ## Package and install checks
@@ -54,6 +57,10 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 - Confirm production runbooks explain `--resume-processing`,
   `processing_audit_summary.json`, and the private
   `processing_retry_manifest.json` retry workflow for interrupted batches.
+- Confirm production runbooks explain `archive-scan-qc run-plan`,
+  `--continue-on-error`, failed batch IDs, resume-processing fields in the
+  plan, and the privacy boundary between aggregate project summaries and
+  sensitive batch-level reports.
 - Confirm production runbooks explain the manual review template, allowed
   disposition statuses, aggregate acceptance summary, and which review artifacts
   are sensitive local evidence.
@@ -88,6 +95,10 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 - Do not enable an analysis provider that uploads source images, thumbnails,
   OCR text, derived content, hashes, row-level metadata, or findings to a
   network service.
+- Do not publish run plan files if their input, manifest, rules-profile,
+  report, or processing-output paths reveal private collection locations. Share
+  only aggregate `run_plan_summary.json` or `run_plan_summary.csv` after policy
+  review.
 
 ## Performance record
 
