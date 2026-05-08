@@ -42,6 +42,7 @@ python -m pip install -e .
 archive-scan-qc \
   --input /path/to/scanned-images \
   --out /path/to/qc-report \
+  --process-out /path/to/processed-images \
   --project demo-project \
   --batch batch-001 \
   --min-dpi 200 \
@@ -51,6 +52,14 @@ archive-scan-qc \
 
 The optional manifest CSV must include a `relative_path` column whose values
 are expected image paths relative to `--input`.
+
+The optional `--process-out` directory enables the first local image-processing
+layer. Source images remain read-only. The CLI writes derivative images under
+`--process-out/images`, preserving source relative paths, and writes
+`--process-out/processing_manifest.json` to link each derivative back to the
+source SHA-256. The initial processing pipeline applies EXIF orientation
+normalization, safe RGB/L color conversion, and light automatic contrast
+normalization.
 
 For repeatable runs, keep `--out` outside the scanned image tree when possible.
 If `--out` is inside `--input`, the CLI automatically skips that output

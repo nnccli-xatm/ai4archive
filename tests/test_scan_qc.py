@@ -9,6 +9,7 @@ from pathlib import Path
 from PIL import Image
 
 from archive_scan_qc.cli import main
+from archive_scan_qc.processing import process_images
 from archive_scan_qc.reports import write_reports
 from archive_scan_qc.scanner import ScanConfig, scan_batch
 
@@ -61,7 +62,7 @@ class ScanQcTest(unittest.TestCase):
             self.assertIn("dpi_minimum", html)
             self.assertIn("P0", html)
 
-    def test_flags_unopenable_duplicate_names_and_duplicate_hashes(self) -> None:
+    def test_flags_unopenable_and_duplicate_hashes_without_cross_directory_name_false_positive(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             input_dir = root / "input"
@@ -78,9 +79,9 @@ class ScanQcTest(unittest.TestCase):
             rules = {finding["rule"] for finding in report["findings"]}
 
             self.assertIn("openability", rules)
-            self.assertIn("duplicate_name", rules)
+            self.assertNotIn("duplicate_name", rules)
             self.assertIn("duplicate_file", rules)
-            self.assertGreaterEqual(report["summary"]["p0_findings"], 3)
+            self.assertGreaterEqual(report["summary"]["p0_findings"], 2)
 
     def test_manifest_flags_missing_unexpected_and_duplicate_entries(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -204,6 +205,53 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(scanned_paths, {"A001_0001.jpg"})
             self.assertEqual(report["summary"]["skipped_hidden_directory_count"], 1)
             self.assertEqual(report["summary"]["skipped_directory_count"], 1)
+
+    def test_process_images_writes_derivatives_without_modifying_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "A001_0001.jpg"
+            Image.new("RGB", (32, 24), (120, 120, 120)).save(source, dpi=(300, 300))
+            source_bytes = source.read_bytes()
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir)
+
+            processed = process_dir / "images" / "A001_0001.jpg"
+            manifest_path = process_dir / "processing_manifest.json"
+            self.assertTrue(processed.exists())
+            self.assertTrue(manifest_path.exists())
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(manifest["summary"]["processed_files"], 1)
+            self.assertEqual(manifest["files"][0]["status"], "processed")
+            self.assertEqual(manifest["files"][0]["source_relative_path"], "A001_0001.jpg")
+
+    def test_cli_process_out_writes_processing_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+
+            exit_code = main(
+                [
+                    "--input",
+                    str(input_dir),
+                    "--out",
+                    str(output_dir),
+                    "--process-out",
+                    str(process_dir),
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            self.assertTrue((process_dir / "processing_manifest.json").exists())
+            self.assertTrue((process_dir / "images" / "A001_0001.jpg").exists())
 
 
 if __name__ == "__main__":

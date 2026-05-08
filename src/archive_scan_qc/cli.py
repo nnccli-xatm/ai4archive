@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from .processing import process_images
 from .reports import write_reports
 from .scanner import ScanConfig, scan_batch
 
@@ -35,6 +36,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Optional batch manifest CSV with a relative_path column.",
     )
+    parser.add_argument(
+        "--process-out",
+        default=None,
+        type=Path,
+        help="Optional derivative-image output directory. Originals remain read-only.",
+    )
     return parser
 
 
@@ -53,10 +60,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     report = scan_batch(config)
     paths = write_reports(report, args.out)
+    processing_manifest = process_images(report, args.input, args.process_out) if args.process_out else None
 
     print(f"Scanned {report['summary']['total_files']} files.")
     print(f"Openable: {report['summary']['openable_files']}")
     print(f"Findings: {report['summary']['total_findings']}")
+    if processing_manifest:
+        print(f"Processed: {processing_manifest['summary']['processed_files']}")
+        print(f"Processing manifest: {args.process_out / 'processing_manifest.json'}")
     for label, path in paths.items():
         print(f"{label}: {path}")
     return 1 if report["summary"]["p0_findings"] else 0

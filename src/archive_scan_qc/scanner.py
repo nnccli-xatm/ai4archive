@@ -337,14 +337,15 @@ def _add_per_file_findings(
 
 
 def _add_duplicate_name_findings(files: list[dict[str, Any]], findings: list[dict[str, str]]) -> None:
-    by_name: dict[str, list[dict[str, Any]]] = {}
+    by_name: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for item in files:
-        by_name.setdefault(item["filename"].casefold(), []).append(item)
+        parent = Path(item["relative_path"]).parent.as_posix()
+        by_name.setdefault((parent, item["filename"].casefold()), []).append(item)
     for matches in by_name.values():
         if len(matches) > 1:
             paths = ", ".join(match["relative_path"] for match in matches)
             for item in matches:
-                findings.append(_finding(item, "duplicate_name", "P0", f"Filename is not unique in batch: {paths}"))
+                findings.append(_finding(item, "duplicate_name", "P0", f"Filename is not unique within its directory: {paths}"))
 
 
 def _add_duplicate_hash_findings(files: list[dict[str, Any]], findings: list[dict[str, str]]) -> None:
