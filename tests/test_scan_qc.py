@@ -19,6 +19,9 @@ from archive_scan_qc.rules import RulesProfileError, load_rules_profile
 from archive_scan_qc.scanner import ScanConfig, scan_batch
 
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
 class ScanQcTest(unittest.TestCase):
     def test_version_output_matches_package_version(self) -> None:
         stdout = io.StringIO()
@@ -589,6 +592,55 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(report["manifest"]["rules_profile"]["version"], "2026.1")
             self.assertEqual(report["manifest"]["rules_profile"]["source"], str(profile_path.resolve()))
             self.assertEqual(report["manifest"]["rules_profile"]["thresholds"]["quality"]["dark_mean_threshold"], 30.0)
+
+    def test_examples_rules_profile_manifest_and_cli_are_compatible(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            _synthetic_text_page().save(input_dir / "BATCH001_PAGE_0001.png", dpi=(300, 300))
+            _synthetic_text_page().transpose(Image.Transpose.FLIP_LEFT_RIGHT).save(
+                input_dir / "BATCH001_PAGE_0002.png",
+                dpi=(300, 300),
+            )
+
+            exit_code = main(
+                [
+                    "--input",
+                    str(input_dir),
+                    "--out",
+                    str(output_dir),
+                    "--process-out",
+                    str(process_dir),
+                    "--auto-crop",
+                    "--deskew",
+                    "--trim-dark-border",
+                    "--despeckle",
+                    "--workers",
+                    "1",
+                    "--project",
+                    "test-example",
+                    "--batch",
+                    "synthetic",
+                    "--manifest-csv",
+                    str(REPO_ROOT / "examples" / "manifest.sample.csv"),
+                    "--rules-profile",
+                    str(REPO_ROOT / "examples" / "rules-profile.production-sample.json"),
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            saved = json.loads((output_dir / "scan_qc_report.json").read_text(encoding="utf-8"))
+            processing = json.loads((process_dir / "processing_manifest.json").read_text(encoding="utf-8"))
+            self.assertTrue(saved["manifest"]["manifest_used"])
+            self.assertEqual(saved["summary"]["manifest_missing_count"], 0)
+            self.assertEqual(saved["summary"]["manifest_unexpected_count"], 0)
+            self.assertEqual(saved["manifest"]["rules_profile"]["name"], "production-sample-standard")
+            self.assertEqual(saved["project"]["min_dpi"], 300)
+            self.assertEqual(processing["summary"]["processed_files"], 2)
+            self.assertEqual(processing["summary"]["failed_files"], 0)
 
     def test_rules_profile_can_disable_quality_rule(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

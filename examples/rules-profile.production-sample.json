@@ -1,0 +1,44 @@
+{
+  "name": "production-sample-standard",
+  "version": "2026.1-example",
+  "min_dpi": 300,
+  "name_pattern": "BATCH001_PAGE_\\d{4}",
+  "quality_thresholds": {
+    "dark_mean_threshold": 42,
+    "bright_mean_threshold": 250,
+    "low_contrast_stddev_threshold": 10,
+    "blur_laplacian_variance_threshold": 22,
+    "blur_min_contrast_stddev": 12,
+    "blank_brightness_min": 248,
+    "blank_contrast_max": 6,
+    "blank_foreground_coverage_max": 0.003,
+    "blank_edge_coverage_max": 0.002,
+    "blank_dark_pixel_ratio_max": 0.0005
+  },
+  "rules": {
+    "quality_too_dark": {
+      "enabled": true,
+      "severity": "P1"
+    },
+    "quality_low_contrast": {
+      "enabled": true,
+      "severity": "P2"
+    },
+    "quality_suspected_blur": {
+      "enabled": true,
+      "severity": "P2"
+    },
+    "quality_near_blank_page": {
+      "enabled": true,
+      "severity": "P2"
+    },
+    "batch_orientation_consistency": {
+      "enabled": true,
+      "severity": "P2"
+    },
+    "name_pattern": {
+      "enabled": true,
+      "severity": "P2"
+    }
+  }
+}
