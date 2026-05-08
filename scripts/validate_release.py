@@ -221,6 +221,55 @@ def run_examples_dry_run() -> None:
             raise SystemExit("example dry-run processing did not complete cleanly")
         if audit["counts"]["total_files"] != 2 or not audit["privacy"]["aggregate_only"]:
             raise SystemExit("example dry-run audit summary did not complete cleanly")
+        _run(
+            [
+                sys.executable,
+                "-m",
+                "archive_scan_qc",
+                "review-export",
+                "--report",
+                str(report_dir / "scan_qc_report.json"),
+                "--out",
+                str(report_dir / "review_template.csv"),
+            ],
+            env=_pythonpath_env(),
+        )
+        _run(
+            [
+                sys.executable,
+                "-m",
+                "archive_scan_qc",
+                "review-summary",
+                "--review",
+                str(report_dir / "review_template.csv"),
+                "--out",
+                str(report_dir / "review_summary.json"),
+            ],
+            env=_pythonpath_env(),
+        )
+        _run(
+            [
+                sys.executable,
+                "-m",
+                "archive_scan_qc",
+                "calibrate-rules",
+                "--report",
+                str(report_dir / "scan_qc_report.json"),
+                "--review-summary",
+                str(report_dir / "review_summary.json"),
+                "--out",
+                str(report_dir / "rules_calibration_summary.json"),
+                "--write-suggested-profile",
+                str(report_dir / "rules-profile.suggested.json"),
+            ],
+            env=_pythonpath_env(),
+        )
+        calibration_text = (report_dir / "rules_calibration_summary.json").read_text(encoding="utf-8")
+        suggested_profile = json.loads((report_dir / "rules-profile.suggested.json").read_text(encoding="utf-8"))
+        if "BATCH001_PAGE_0001.png" in calibration_text or "sha256" in calibration_text:
+            raise SystemExit("example rule calibration leaked row-level content")
+        if not suggested_profile.get("draft") or not suggested_profile.get("suggested"):
+            raise SystemExit("example suggested profile was not marked draft/suggested")
 
 
 def run_benchmark_validation() -> None:

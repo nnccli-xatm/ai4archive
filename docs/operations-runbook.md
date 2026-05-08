@@ -311,6 +311,48 @@ no row-level path list, filenames, hashes, messages, or reviewer notes. P0/P1
 findings remain open unless their status is `fixed` or `false_positive`.
 Acceptance passes only when remaining P0 and remaining P1 counts are both zero.
 
+## Aggregate Rule Calibration
+
+Use rule calibration only as a local aggregate analysis loop. The workflow is:
+run automated QC, complete human review, generate `review_summary.json`, run
+aggregate calibration, then submit any rules profile change for human approval.
+Do not use real private samples in public evidence, and do not upload source
+reports or review templates.
+
+```bash
+archive-scan-qc calibrate-rules \
+  --report /approved-work/qc-reports/batch-001/scan_qc_report.json \
+  --review-summary /approved-work/qc-reports/batch-001/review_summary.json \
+  --out /approved-work/qc-reports/batch-001/rules_calibration_summary.json
+```
+
+Multiple `--report` and `--review-summary` arguments may be supplied when
+calibrating across local batches. If the aggregate review summary has not been
+created yet, a filled local review template may be supplied with `--review`;
+that template remains sensitive input and only aggregate counts are emitted.
+
+The output includes per-rule trigger counts, severity distribution, optional
+manual disposition status distribution, conservative recommendations such as
+`keep`, `tighten`, `loosen`, or `need_more_samples`, and a field summary of the
+active rules profile. It must not include source file paths, filenames, hashes,
+OCR text, image content, thumbnails, row-level messages, or reviewer notes.
+`scan_qc_report.json` remains sensitive; `rules_calibration_summary.json` is the
+aggregate evidence artifact after local policy review.
+
+To create a draft profile suggestion without changing the original profile:
+
+```bash
+archive-scan-qc calibrate-rules \
+  --report /approved-work/qc-reports/batch-001/scan_qc_report.json \
+  --review-summary /approved-work/qc-reports/batch-001/review_summary.json \
+  --out /approved-work/qc-reports/batch-001/rules_calibration_summary.json \
+  --write-suggested-profile /approved-work/qc-reports/batch-001/rules-profile.suggested.json
+```
+
+The suggested profile is marked `draft` and `suggested`; it is not a production
+profile. A project lead must compare it with the original profile and approve
+any threshold, severity, or enablement changes before deployment.
+
 Sensitive local evidence includes source images, derivative images,
 `scan_qc_report.json`, `scan_qc_report.html`, `scan_qc_files.csv`,
 `scan_qc_findings.csv`, `processing_manifest.json`, and review templates. Keep
