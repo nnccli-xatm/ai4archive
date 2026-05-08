@@ -2587,6 +2587,90 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn(str(input_dir), stdout_text)
             self.assertIn("Sensitive local evidence", summary["privacy"]["row_level_artifacts"])
 
+    def test_private_integration_summary_scopes_repeated_benchmark_rule_counts(self) -> None:
+        private_integration = _load_private_integration_module()
+        args = private_integration.build_parser().parse_args(
+            ["--input", "/tmp/private-input", "--out", "/tmp/private-output", "--process-images"]
+        )
+        run_plan_summary = _private_run_plan_summary(total_findings=22)
+        benchmark_summary = _private_benchmark_summary(
+            [
+                _private_benchmark_run(1, scan_rate=10.0, processing_rate=5.0, rule_count=22),
+                _private_benchmark_run(2, scan_rate=20.0, processing_rate=7.0, rule_count=22),
+                _private_benchmark_run(3, scan_rate=15.0, processing_rate=6.0, rule_count=22),
+            ],
+            scan_recommendation=20.0,
+            processing_recommendation=7.0,
+        )
+
+        summary = private_integration._public_summary(args, Path("/tmp/private-output"), run_plan_summary, benchmark_summary)
+
+        self.assertEqual(summary["aggregate_counts"]["total_findings"], 22)
+        self.assertNotIn("finding_rule_counts", summary["aggregate_counts"])
+        self.assertEqual(summary["benchmark"]["finding_rule_counts_repeated_runs"], {"duplicate_file": 66})
+        self.assertEqual(summary["benchmark"]["source"], "benchmark repeated worker runs")
+
+    def test_private_integration_summary_uses_best_benchmark_throughput(self) -> None:
+        private_integration = _load_private_integration_module()
+        args = private_integration.build_parser().parse_args(["--input", "/tmp/private-input", "--out", "/tmp/private-output"])
+        benchmark_summary = _private_benchmark_summary(
+            [
+                _private_benchmark_run(1, scan_rate=10.0, processing_rate=4.0),
+                _private_benchmark_run(2, scan_rate=30.0, processing_rate=9.0),
+            ],
+            scan_recommendation=30.0,
+            processing_recommendation=9.0,
+        )
+
+        summary = private_integration._public_summary(
+            args,
+            Path("/tmp/private-output"),
+            _private_run_plan_summary(total_findings=0),
+            benchmark_summary,
+        )
+
+        self.assertEqual(summary["throughput"]["benchmark_scan_files_per_minute"], 30.0)
+        self.assertEqual(summary["throughput"]["benchmark_processing_files_per_minute"], 9.0)
+        self.assertEqual(summary["throughput"]["benchmark_basis"], "best observed recommendation mean files/minute")
+
+    def test_private_integration_acceptance_matches_acceptance_summary_logic(self) -> None:
+        private_integration = _load_private_integration_module()
+        args = private_integration.build_parser().parse_args(["--input", "/tmp/private-input", "--out", "/tmp/private-output"])
+        run_plan_summary = _private_run_plan_summary(total_findings=0, failed_batches=1)
+        benchmark_summary = _private_benchmark_summary([_private_benchmark_run(1, scan_rate=10.0, processing_rate=None)])
+
+        summary = private_integration._public_summary(args, Path("/tmp/private-output"), run_plan_summary, benchmark_summary)
+        expected = build_acceptance_summary(run_plan_summary=run_plan_summary, benchmark_results=benchmark_summary)
+
+        self.assertEqual(summary["acceptance"]["passed"], expected["pass"])
+        self.assertEqual(summary["acceptance"]["status"], expected["status"])
+        self.assertEqual(summary["acceptance"]["summary"]["blocking_items"], expected["blocking_items"])
+        self.assertIn("review_summary was not provided", " ".join(summary["acceptance"]["summary"]["warnings"]))
+
+    def test_private_integration_summary_privacy_self_check_allows_only_aggregate_fields(self) -> None:
+        private_integration = _load_private_integration_module()
+        args = private_integration.build_parser().parse_args(
+            ["--input", "/private/source", "--out", "/private/output", "--process-images"]
+        )
+        summary = private_integration._public_summary(
+            args,
+            Path("/private/output"),
+            _private_run_plan_summary(total_findings=0),
+            _private_benchmark_summary([_private_benchmark_run(1, scan_rate=10.0, processing_rate=5.0)]),
+        )
+
+        leaks = private_integration.privacy_self_check(
+            summary,
+            forbidden_values={"private input directory": "/private/source", "private output root": "/private/output"},
+        )
+        summary_text = json.dumps(summary, ensure_ascii=False)
+
+        self.assertEqual(leaks, [])
+        self.assertNotIn("/private/source", summary_text)
+        self.assertNotIn("/private/output", summary_text)
+        for forbidden in ["relative_path", "filename", "sha256", "thumbnail", "reviewer_notes"]:
+            self.assertNotIn(f'"{forbidden}"', summary_text)
+
     def test_private_integration_redaction_self_check_rejects_sensitive_keys_and_values(self) -> None:
         private_integration = _load_private_integration_module()
         leaks = private_integration.privacy_self_check(
@@ -2600,6 +2684,77 @@ class ScanQcTest(unittest.TestCase):
 
         self.assertTrue(any("relative_path" in leak for leak in leaks))
         self.assertTrue(any("private input directory" in leak for leak in leaks))
+
+
+def _private_run_plan_summary(
+    *,
+    total_findings: int,
+    failed_batches: int = 0,
+    processing_failed_files: int = 0,
+) -> dict[str, object]:
+    return {
+        "schema_version": "scan-qc.run-plan-summary.v1",
+        "privacy": {"aggregate_only": True},
+        "summary": {
+            "total_files": 22,
+            "openable_files": 22,
+            "total_findings": total_findings,
+            "p0_findings": 0,
+            "p1_findings": 0,
+            "p2_findings": total_findings,
+            "processing_processed_files": 22,
+            "processing_failed_files": processing_failed_files,
+            "failed_batches": failed_batches,
+            "preflight_error_count": 0,
+            "scan_files_per_minute": 12.0,
+            "scan_openable_files_per_minute": 12.0,
+            "processing_files_per_minute": 8.0,
+        },
+        "batches": [{"workers": 1}],
+    }
+
+
+def _private_benchmark_summary(
+    runs: list[dict[str, object]],
+    *,
+    scan_recommendation: float | None = None,
+    processing_recommendation: float | None = None,
+) -> dict[str, object]:
+    recommendations: dict[str, object] = {"schema_version": "scan-qc.benchmark.recommendations.v1"}
+    if scan_recommendation is not None:
+        recommendations["scan_only"] = {"files_per_minute": scan_recommendation}
+    if processing_recommendation is not None:
+        recommendations["processing"] = {"files_per_minute": processing_recommendation}
+    return {
+        "schema_version": "scan-qc.benchmark.v1",
+        "privacy": {"aggregate_only": True},
+        "recommendations": recommendations,
+        "runs": runs,
+    }
+
+
+def _private_benchmark_run(
+    run_index: int,
+    *,
+    scan_rate: float,
+    processing_rate: float | None,
+    rule_count: int = 0,
+) -> dict[str, object]:
+    return {
+        "run_index": run_index,
+        "repeat_index": run_index,
+        "requested_workers": run_index,
+        "effective_workers": run_index,
+        "scan_only": False,
+        "finding_rule_counts": {"duplicate_file": rule_count} if rule_count else {},
+        "scan": {"files_per_minute": scan_rate},
+        "processing": {
+            "enabled": processing_rate is not None,
+            "failed_files": 0,
+            "processed_files_per_minute": processing_rate,
+            "effective_workers": run_index if processing_rate is not None else None,
+        },
+    }
 
 
 def _synthetic_text_page() -> Image.Image:

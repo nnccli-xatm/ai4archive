@@ -23,6 +23,7 @@ SRC_DIR = REPO_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
+from archive_scan_qc.acceptance import build_acceptance_summary  # noqa: E402
 from archive_scan_qc.benchmark import run_benchmark  # noqa: E402
 from archive_scan_qc.run_plan import PlanBatch, RunPlan, run_plan  # noqa: E402
 
@@ -201,16 +202,19 @@ def _public_summary(
 ) -> dict[str, Any]:
     run_counts = run_plan_summary["summary"]
     benchmark_runs = benchmark_summary.get("runs", []) if benchmark_summary else []
-    first_benchmark = benchmark_runs[0] if benchmark_runs else None
     finding_rule_counts: dict[str, int] = {}
     for run in benchmark_runs:
         for rule, count in run.get("finding_rule_counts", {}).items():
             finding_rule_counts[rule] = finding_rule_counts.get(rule, 0) + int(count)
+    benchmark_scan_throughput = _benchmark_recommended_throughput(benchmark_summary, "scan_only")
+    benchmark_processing_throughput = _benchmark_recommended_throughput(benchmark_summary, "processing")
 
     failed_batches = int(run_counts["failed_batches"])
-    blocking_findings = int(run_counts["p0_findings"])
     processing_failures = int(run_counts["processing_failed_files"])
-    passed = failed_batches == 0 and blocking_findings == 0 and processing_failures == 0
+    acceptance_summary = build_acceptance_summary(
+        run_plan_summary=run_plan_summary,
+        benchmark_results=benchmark_summary,
+    )
 
     return {
         "schema_version": "scan-qc.private-integration-summary.v1",
@@ -243,35 +247,33 @@ def _public_summary(
             "p0_findings": int(run_counts["p0_findings"]),
             "p1_findings": int(run_counts["p1_findings"]),
             "p2_findings": int(run_counts["p2_findings"]),
-            "finding_rule_counts": dict(sorted(finding_rule_counts.items())),
             "processing_processed_files": int(run_counts["processing_processed_files"]),
             "processing_failed_files": int(run_counts["processing_failed_files"]),
             "failed_batches": failed_batches,
             "preflight_errors": int(run_counts["preflight_error_count"]),
         },
+        "benchmark": {
+            "source": "benchmark repeated worker runs",
+            "run_count": len(benchmark_runs),
+            "finding_rule_counts_repeated_runs": dict(sorted(finding_rule_counts.items())),
+        },
         "throughput": {
             "scan_files_per_minute": float(run_counts["scan_files_per_minute"]),
             "scan_openable_files_per_minute": float(run_counts["scan_openable_files_per_minute"]),
             "processing_files_per_minute": float(run_counts["processing_files_per_minute"]),
-            "benchmark_scan_files_per_minute": (
-                float(first_benchmark["scan"]["files_per_minute"]) if first_benchmark else None
-            ),
-            "benchmark_processing_files_per_minute": (
-                float(first_benchmark["processing"]["processed_files_per_minute"])
-                if first_benchmark and first_benchmark["processing"]["processed_files_per_minute"] is not None
-                else None
-            ),
+            "benchmark_scan_files_per_minute": benchmark_scan_throughput,
+            "benchmark_processing_files_per_minute": benchmark_processing_throughput,
+            "benchmark_basis": "best observed recommendation mean files/minute",
         },
         "acceptance": {
-            "passed": passed,
-            "status": "passed" if passed else "failed",
-            "blocking_p0_findings": blocking_findings,
-            "processing_failures": processing_failures,
-            "failed_batches": failed_batches,
+            "passed": bool(acceptance_summary["pass"]),
+            "status": acceptance_summary["status"],
+            "source": "archive_scan_qc.acceptance.build_acceptance_summary",
+            "summary": acceptance_summary,
         },
         "optional_steps": {
             "review_summary": "not_run",
-            "acceptance_summary": "not_available",
+            "acceptance_summary": "generated_from_available_aggregate_evidence",
         },
         "privacy_self_check": {
             "passed": False,
@@ -279,6 +281,49 @@ def _public_summary(
             "violations": [],
         },
     }
+
+
+def _benchmark_recommended_throughput(benchmark_summary: dict[str, Any] | None, operation: str) -> float | None:
+    if not benchmark_summary:
+        return None
+    recommendations = benchmark_summary.get("recommendations")
+    if not isinstance(recommendations, dict):
+        return _benchmark_best_observed_throughput(benchmark_summary, operation)
+    recommendation = recommendations.get(operation)
+    if not isinstance(recommendation, dict):
+        return _benchmark_best_observed_throughput(benchmark_summary, operation)
+    return _optional_float(recommendation.get("files_per_minute"))
+
+
+def _benchmark_best_observed_throughput(benchmark_summary: dict[str, Any], operation: str) -> float | None:
+    values: list[float] = []
+    for run in benchmark_summary.get("runs", []):
+        if not isinstance(run, dict):
+            continue
+        if operation == "scan_only":
+            scan = run.get("scan")
+            if isinstance(scan, dict):
+                _append_optional_float(values, scan.get("files_per_minute"))
+        elif operation == "processing":
+            processing = run.get("processing")
+            if isinstance(processing, dict):
+                _append_optional_float(values, processing.get("processed_files_per_minute"))
+    return max(values) if values else None
+
+
+def _append_optional_float(values: list[float], value: Any) -> None:
+    parsed = _optional_float(value)
+    if parsed is not None:
+        values.append(parsed)
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _benchmark_args(args: argparse.Namespace, input_dir: Path, output_root: Path) -> argparse.Namespace:
