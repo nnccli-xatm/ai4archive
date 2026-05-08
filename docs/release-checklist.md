@@ -9,7 +9,8 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 - Run `python3 scripts/validate_release.py`.
 - Confirm `archive-scan-qc --version` matches the package version.
 - Confirm the validator's examples-based dry-run created `preflight_report.json`,
-  JSON, HTML, CSV, a processing manifest, and derivative images from synthetic
+  JSON, HTML, CSV, a processing manifest, a processing retry manifest, an
+  aggregate processing audit summary, and derivative images from synthetic
   temporary inputs.
 - Confirm CI is green for Python 3.10, 3.11, and 3.12.
 
@@ -44,6 +45,9 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   examples or aggregate benchmark output.
 - Confirm production runbooks call `archive-scan-qc preflight` before the full
   scan/process command and explain preflight error versus warning semantics.
+- Confirm production runbooks explain `--resume-processing`,
+  `processing_audit_summary.json`, and the private
+  `processing_retry_manifest.json` retry workflow for interrupted batches.
 
 ## Real sample aggregate validation
 
@@ -53,16 +57,16 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   minute, recommended scan/processing workers, effective workers, CPU count,
   platform, and Python version.
 - Keep normal scan reports, processing manifests, filenames, paths, hashes,
-  thumbnails, derivative images, and source images inside the approved private
-  environment.
+  thumbnails, retry manifests, derivative images, and source images inside the
+  approved private environment.
 
 ## Privacy prohibitions
 
 - Do not upload or attach private source images.
 - Do not upload or attach derivative images from private collections.
 - Do not publish filenames, relative paths, source hashes, thumbnails,
-  row-level findings, row-level file metadata, or processing manifests from
-  private collections.
+  row-level findings, row-level file metadata, processing manifests, or retry
+  manifests from private collections.
 - Do not paste standalone HTML or JSON scan reports from private collections
   into public issues, PRs, chats, or release notes.
 

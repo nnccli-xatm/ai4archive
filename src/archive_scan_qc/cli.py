@@ -102,6 +102,11 @@ def _add_scan_arguments(parser: argparse.ArgumentParser, *, include_scan_overrid
         help="Replace isolated dark speckles in derivative images. Requires --process-out.",
     )
     parser.add_argument(
+        "--resume-processing",
+        action="store_true",
+        help="Resume derivative processing by skipping existing successful derivatives. Requires --process-out.",
+    )
+    parser.add_argument(
         "--workers",
         default=None,
         type=_positive_int,
@@ -146,6 +151,7 @@ def main(argv: list[str] | None = None) -> int:
                 deskew=args.deskew,
                 trim_dark_border=args.trim_dark_border,
                 despeckle=args.despeckle,
+                resume_processing=args.resume_processing,
                 workers=args.workers,
             ),
         )
@@ -163,12 +169,18 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Scan openable files/min: {scan_performance['openable_files_per_minute']:.2f}")
     if processing_manifest:
         print(f"Processed: {processing_manifest['summary']['processed_files']}")
+        print(f"Resume enabled: {processing_manifest['resume']['enabled']}")
+        print(f"Resume skipped: {processing_manifest['summary']['skipped_due_to_resume']}")
+        print(f"Reprocessed: {processing_manifest['summary']['reprocessed_files']}")
+        print(f"Processing failed: {processing_manifest['summary']['failed_files']}")
         processing_performance = processing_manifest["summary"]["performance"]
         print(f"Processing elapsed: {processing_performance['elapsed_seconds']:.3f}s")
         print(f"Processing workers: {processing_performance['effective_workers']} ({processing_performance['mode']})")
         print(f"Processing files/min: {processing_performance['processed_files_per_minute']:.2f}")
         print(f"Processing total files/min: {processing_performance['total_files_per_minute']:.2f}")
         print(f"Processing manifest: {args.process_out / 'processing_manifest.json'}")
+        print(f"Processing retry manifest: {args.process_out / 'processing_retry_manifest.json'}")
+        print(f"Processing audit summary: {args.process_out / 'processing_audit_summary.json'}")
     for label, path in paths.items():
         print(f"{label}: {path}")
     return 1 if report["summary"]["p0_findings"] else 0
@@ -194,6 +206,7 @@ def _main_preflight(argv: list[str]) -> int:
             deskew=args.deskew,
             trim_dark_border=args.trim_dark_border,
             despeckle=args.despeckle,
+            resume_processing=args.resume_processing,
         )
     )
     path = write_preflight_report(report, args.out)
@@ -216,6 +229,8 @@ def _validate_processing_flags(parser: argparse.ArgumentParser, args: argparse.N
         parser.error("--trim-dark-border requires --process-out")
     if args.despeckle and not args.process_out:
         parser.error("--despeckle requires --process-out")
+    if args.resume_processing and not args.process_out:
+        parser.error("--resume-processing requires --process-out")
 
 
 def _load_rules_profile(parser: argparse.ArgumentParser, args: argparse.Namespace):

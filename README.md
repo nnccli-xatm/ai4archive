@@ -208,10 +208,26 @@ The optional `--process-out` directory enables the first local image-processing
 layer. Source images remain read-only. The CLI writes derivative images under
 `--process-out/images`, preserving source relative paths, and writes
 `--process-out/processing_manifest.json` to link each derivative back to the
-source SHA-256. The initial processing pipeline applies EXIF orientation
-normalization, safe RGB/L color conversion, and light automatic contrast
-normalization. Add `--auto-crop` with `--process-out` to enable conservative
-Pillow-only page-border cropping for derivative images.
+source SHA-256. It also writes `processing_retry_manifest.json` for local retry
+diagnosis and `processing_audit_summary.json` with aggregate-only counts,
+flags, worker metadata, timing, throughput, failure totals, and resume counts.
+The audit summary omits file lists, paths, hashes, thumbnails, and image
+content so it can be used as the production batch audit artifact without
+exposing private row-level data. The initial processing pipeline applies EXIF
+orientation normalization, safe RGB/L color conversion, and light automatic
+contrast normalization. Add `--auto-crop` with `--process-out` to enable
+conservative Pillow-only page-border cropping for derivative images.
+
+By default, rerunning the same command preserves the previous overwrite/rerun
+semantics and processes every scanned record again. Add `--resume-processing`
+to resume an interrupted derivative batch from an existing
+`--process-out/processing_manifest.json`: files that were previously processed
+successfully and still have their derivative under `--process-out/images` are
+skipped, while previous failures, skipped records, and records with missing
+derivatives are processed again. The new manifest records aggregate
+`resumed_files`, `skipped_due_to_resume`, `reprocessed_files`, `failed_files`,
+and `retry_list_files` counts, and stdout prints the same short resume/audit
+summary.
 
 Add `--deskew` with `--process-out` to enable conservative small-angle deskew
 for derivative images. The processing layer estimates skew for every openable

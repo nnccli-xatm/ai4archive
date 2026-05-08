@@ -1081,6 +1081,137 @@ class ScanQcTest(unittest.TestCase):
             self.assertIn("auto_crop_disabled", manifest["files"][0]["operations"])
             self.assertIn("deskew_disabled", manifest["files"][0]["operations"])
 
+    def test_process_images_writes_audit_summary_and_retry_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "private_success.png", dpi=(300, 300))
+            failed_after_scan = input_dir / "private_failed.png"
+            Image.new("RGB", (32, 24), "white").save(failed_after_scan, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            failed_after_scan.write_text("not an image anymore", encoding="utf-8")
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(workers=1))
+
+            retry_manifest = json.loads((process_dir / "processing_retry_manifest.json").read_text(encoding="utf-8"))
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            self.assertEqual(manifest["summary"]["processed_files"], 1)
+            self.assertEqual(manifest["summary"]["failed_files"], 1)
+            self.assertEqual(manifest["summary"]["retry_list_files"], 1)
+            self.assertEqual(retry_manifest["summary"]["failed_files"], 1)
+            self.assertEqual(retry_manifest["files"][0]["source_relative_path"], "private_failed.png")
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertEqual(audit_summary["counts"]["processed_files"], 1)
+            self.assertEqual(audit_summary["counts"]["failed_files"], 1)
+            self.assertEqual(audit_summary["counts"]["retry_list_files"], 1)
+            for forbidden in ["private_success.png", "private_failed.png", "relative_path", "sha256", str(input_dir)]:
+                self.assertNotIn(forbidden, audit_summary_text)
+
+    def test_resume_processing_skips_existing_successful_derivatives(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            Image.new("RGB", (40, 30), "white").save(input_dir / "A001_0001.png", dpi=(300, 300))
+            Image.new("RGB", (40, 30), "white").save(input_dir / "A001_0002.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            first = process_images(report, input_dir, process_dir, ProcessingOptions(workers=1))
+            first_hashes = {
+                record["source_relative_path"]: record["output_sha256"]
+                for record in first["files"]
+                if record["status"] == "processed"
+            }
+            resumed = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(resume_processing=True, workers=1),
+            )
+
+            self.assertEqual(resumed["summary"]["processed_files"], 0)
+            self.assertEqual(resumed["summary"]["resumed_files"], 2)
+            self.assertEqual(resumed["summary"]["skipped_due_to_resume"], 2)
+            self.assertEqual(resumed["summary"]["reprocessed_files"], 0)
+            records = {record["source_relative_path"]: record for record in resumed["files"]}
+            self.assertEqual({record["status"] for record in resumed["files"]}, {"resumed"})
+            self.assertEqual(records["A001_0001.png"]["output_sha256"], first_hashes["A001_0001.png"])
+            audit = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
+            self.assertTrue(audit["operations"]["resume_processing"])
+            self.assertEqual(audit["counts"]["skipped_due_to_resume"], 2)
+
+    def test_resume_processing_reprocesses_missing_derivative(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            Image.new("RGB", (40, 30), "white").save(input_dir / "A001_0001.png", dpi=(300, 300))
+            Image.new("RGB", (40, 30), (230, 230, 230)).save(input_dir / "A001_0002.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            process_images(report, input_dir, process_dir, ProcessingOptions(workers=1))
+            missing = process_dir / "images" / "A001_0002.png"
+            missing.unlink()
+
+            resumed = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(resume_processing=True, workers=1),
+            )
+
+            records = {record["source_relative_path"]: record for record in resumed["files"]}
+            self.assertEqual(records["A001_0001.png"]["status"], "resumed")
+            self.assertEqual(records["A001_0002.png"]["status"], "processed")
+            self.assertTrue(records["A001_0002.png"]["reprocessed"])
+            self.assertTrue(missing.exists())
+            self.assertEqual(resumed["summary"]["processed_files"], 1)
+            self.assertEqual(resumed["summary"]["skipped_due_to_resume"], 1)
+            self.assertEqual(resumed["summary"]["reprocessed_files"], 1)
+
+    def test_resume_processing_retries_previous_failed_items(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            good = input_dir / "A001_0001.png"
+            failed_then_fixed = input_dir / "A001_0002.png"
+            Image.new("RGB", (40, 30), "white").save(good)
+            Image.new("RGB", (40, 30), "white").save(failed_then_fixed)
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir, workers=1))
+            failed_then_fixed.write_text("not an image anymore", encoding="utf-8")
+            first = process_images(report, input_dir, process_dir, ProcessingOptions(workers=1))
+            self.assertEqual(first["summary"]["failed_files"], 1)
+
+            Image.new("RGB", (40, 30), "white").save(failed_then_fixed)
+            resumed = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(resume_processing=True, workers=1),
+            )
+
+            records = {record["source_relative_path"]: record for record in resumed["files"]}
+            self.assertEqual(records["A001_0001.png"]["status"], "resumed")
+            self.assertEqual(records["A001_0002.png"]["status"], "processed")
+            self.assertTrue(records["A001_0002.png"]["reprocessed"])
+            self.assertEqual(resumed["summary"]["failed_files"], 0)
+            self.assertEqual(resumed["summary"]["retry_list_files"], 0)
+            retry_manifest = json.loads((process_dir / "processing_retry_manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(retry_manifest["summary"]["failed_files"], 0)
+
     def test_multi_worker_processing_manifest_order_and_outputs_are_stable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

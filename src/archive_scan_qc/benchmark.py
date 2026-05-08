@@ -482,9 +482,10 @@ def _print_recommendation_summary(recommendations: dict[str, Any]) -> None:
 
 
 def _remove_sensitive_processing_manifest(process_dir: Path) -> None:
-    manifest_path = process_dir / "processing_manifest.json"
-    if manifest_path.exists():
-        manifest_path.unlink()
+    for filename in ["processing_manifest.json", "processing_retry_manifest.json"]:
+        manifest_path = process_dir / filename
+        if manifest_path.exists():
+            manifest_path.unlink()
 
 
 if __name__ == "__main__":
