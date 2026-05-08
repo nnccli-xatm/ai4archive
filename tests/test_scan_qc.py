@@ -2653,6 +2653,103 @@ class ScanQcTest(unittest.TestCase):
             self.assertFalse(report["privacy"]["contains_hashes"])
             self.assertFalse(report["privacy"]["contains_thumbnails"])
 
+    def test_manifest_sequence_valid_manifest_remains_compatible(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            manifest_csv = root / "manifest.csv"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+            Image.new("RGB", (32, 24), "lightgray").save(input_dir / "A001_0002.jpg", dpi=(300, 300))
+            manifest_csv.write_text("relative_path,sequence\nA001_0001.jpg,1\nA001_0002.jpg,2\n", encoding="utf-8")
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                exit_code = main(["--input", str(input_dir), "--out", str(output_dir), "--manifest-csv", str(manifest_csv), "--workers", "1"])
+
+            report = json.loads((output_dir / "scan_qc_report.json").read_text(encoding="utf-8"))
+            files_csv = (output_dir / "scan_qc_files.csv").read_text(encoding="utf-8")
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(report["summary"]["manifest_sequence_entry_count"], 2)
+            self.assertEqual(report["summary"]["manifest_sequence_invalid_count"], 0)
+            self.assertEqual(report["summary"]["manifest_sequence_duplicate_count"], 0)
+            self.assertEqual(report["summary"]["manifest_sequence_order_mismatch_count"], 0)
+            self.assertEqual(report["files"][0]["manifest_sequence"], 1)
+            self.assertIn("manifest_sequence", files_csv)
+
+    def test_manifest_duplicate_sequence_reports_p0_finding(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            manifest_csv = root / "manifest.csv"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+            Image.new("RGB", (32, 24), "lightgray").save(input_dir / "A001_0002.jpg", dpi=(300, 300))
+            manifest_csv.write_text("relative_path,page_sequence\nA001_0001.jpg,1\nA001_0002.jpg,1\n", encoding="utf-8")
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                exit_code = main(["--input", str(input_dir), "--out", str(output_dir), "--manifest-csv", str(manifest_csv), "--workers", "1"])
+
+            report = json.loads((output_dir / "scan_qc_report.json").read_text(encoding="utf-8"))
+            self.assertEqual(exit_code, 1)
+            self.assertEqual(report["summary"]["manifest_sequence_duplicate_count"], 1)
+            self.assertEqual(_rule_count(report, "manifest_duplicate_sequence"), 2)
+            self.assertEqual(report["rule_catalog"]["manifest_duplicate_sequence"]["default_severity"], "P0")
+
+    def test_manifest_invalid_sequence_reports_p1_finding_and_preflight_count(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            preflight_dir = root / "preflight"
+            manifest_csv = root / "manifest.csv"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+            manifest_csv.write_text("relative_path,page_number\nA001_0001.jpg,front\n", encoding="utf-8")
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                exit_code = main(["--input", str(input_dir), "--out", str(output_dir), "--manifest-csv", str(manifest_csv), "--workers", "1"])
+            with contextlib.redirect_stdout(io.StringIO()):
+                preflight_exit = main(["preflight", "--input", str(input_dir), "--out", str(preflight_dir), "--manifest-csv", str(manifest_csv)])
+
+            report = json.loads((output_dir / "scan_qc_report.json").read_text(encoding="utf-8"))
+            preflight = json.loads((preflight_dir / "preflight_report.json").read_text(encoding="utf-8"))
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(preflight_exit, 1)
+            self.assertEqual(report["summary"]["manifest_sequence_invalid_count"], 1)
+            self.assertEqual(_rule_count(report, "manifest_invalid_sequence"), 1)
+            self.assertEqual(preflight["manifest"]["sequence_invalid_count"], 1)
+            self.assertIn("manifest_invalid_sequence_values", {error["code"] for error in preflight["errors"]})
+
+    def test_manifest_sequence_order_mismatch_and_strict_gap_are_reported(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            manifest_csv = root / "manifest.csv"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+            Image.new("RGB", (32, 24), "lightgray").save(input_dir / "A001_0002.jpg", dpi=(300, 300))
+            manifest_csv.write_text(
+                "relative_path,expected_order,strict_sequence\n"
+                "A001_0002.jpg,1,true\n"
+                "A001_0001.jpg,3,true\n",
+                encoding="utf-8",
+            )
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                exit_code = main(["--input", str(input_dir), "--out", str(output_dir), "--manifest-csv", str(manifest_csv), "--workers", "1"])
+
+            report = json.loads((output_dir / "scan_qc_report.json").read_text(encoding="utf-8"))
+            html = (output_dir / "scan_qc_report.html").read_text(encoding="utf-8")
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(report["summary"]["manifest_sequence_gap_count"], 1)
+            self.assertEqual(report["summary"]["manifest_sequence_order_mismatch_count"], 2)
+            self.assertEqual(_rule_count(report, "manifest_sequence_gap"), 1)
+            self.assertEqual(_rule_count(report, "manifest_order_mismatch"), 2)
+            self.assertIn("Manifest Order Mismatches", html)
+
     def test_run_plan_two_batches_success_and_writes_aggregate_summary(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -3090,6 +3187,13 @@ def _write_minimal_scan_report(
         "findings": findings,
     }
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
+def _rule_count(report: dict[str, object], rule: str) -> int:
+    findings = report.get("findings", [])
+    if not isinstance(findings, list):
+        return 0
+    return sum(1 for finding in findings if isinstance(finding, dict) and finding.get("rule") == rule)
 
 
 def _benchmark_run_stub(

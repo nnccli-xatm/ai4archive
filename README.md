@@ -98,7 +98,14 @@ archive-scan-qc \
 ```
 
 The optional manifest CSV must include a `relative_path` column whose values
-are expected image paths relative to `--input`.
+are expected image paths relative to `--input`. Manifests may also include one
+page/order column named `sequence`, `page_sequence`, `page_number`, or
+`expected_order`. These values are treated as positive integers and are used to
+check duplicate page sequence values, invalid values, and practical order
+mismatches between manifest row order and the deterministic discovered file
+order. Add `strict_sequence`, `sequence_strict`, or `strict_page_sequence` with
+`true`/`1`/`yes` when a project requires contiguous sequence values; preflight
+then reports gaps as blocking aggregate errors.
 
 For project-scale production runs, use a local run plan to drive multiple
 batches through preflight, scan, and optional processing:
@@ -122,8 +129,9 @@ values are resolved relative to the plan file. Relative `report_dir` and
 `run-plan` writes each batch's normal local artifacts in its batch report and
 processing directories, then writes project-level `run_plan_summary.json` and
 `run_plan_summary.csv` under `--out`. The project summary is aggregate-only:
-it includes batch counts, pass/fail counts, P0/P1/P2 totals, processing failure
-totals, preflight error totals, throughput aggregates, and failed batch IDs. It
+it includes batch counts, pass/fail counts, P0/P1/P2 totals, manifest sequence
+validation totals, processing failure totals, preflight error totals, throughput
+aggregates, and failed batch IDs. It
 does not include source filenames, relative or absolute source paths, hashes,
 thumbnails, row-level file metadata, or image content. Batch-level reports and
 processing manifests keep their existing sensitive local evidence behavior.

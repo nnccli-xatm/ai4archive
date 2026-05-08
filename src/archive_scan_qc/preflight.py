@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import csv
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path
 from typing import Any
 
 from .concurrency import resolve_worker_count, worker_metadata
+from .manifest import manifest_summary, read_manifest
 from .rules import RulesProfile, default_rules_profile
 from .scanner import _iter_candidate_files
 
@@ -34,21 +34,6 @@ class PreflightConfig:
     trim_dark_border: bool = False
     despeckle: bool = False
     resume_processing: bool = False
-
-
-@dataclass(frozen=True)
-class _ManifestValidation:
-    used: bool
-    readable: bool
-    has_relative_path_column: bool
-    entry_count: int
-    unique_entry_count: int
-    empty_path_count: int
-    absolute_path_count: int
-    parent_escape_count: int
-    duplicate_count: int
-    missing_count: int
-    unexpected_count: int
 
 
 def run_preflight(config: PreflightConfig) -> dict[str, Any]:
@@ -121,7 +106,8 @@ def run_preflight(config: PreflightConfig) -> dict[str, Any]:
 
     profile = config.rules_profile or default_rules_profile()
     input_paths = {path.relative_to(config.input_dir.resolve()).as_posix() for path in candidate_files}
-    manifest = _validate_manifest(config.manifest_csv, input_paths)
+    file_order = [path.relative_to(config.input_dir.resolve()).as_posix() for path in candidate_files]
+    manifest = read_manifest(config.manifest_csv, input_paths, file_order)
     if manifest.used:
         if not manifest.readable:
             _add(errors, "manifest_unreadable", "Manifest CSV could not be read.")
@@ -139,6 +125,12 @@ def run_preflight(config: PreflightConfig) -> dict[str, Any]:
             _add(errors, "manifest_missing_files", "Manifest references files that are missing from input.")
         if manifest.unexpected_count:
             _add(errors, "manifest_unexpected_files", "Input contains files that are not listed in the manifest.")
+        if manifest.sequence_invalid_count:
+            _add(errors, "manifest_invalid_sequence_values", "Manifest contains non-numeric or invalid sequence values.")
+        if manifest.sequence_duplicate_count:
+            _add(errors, "manifest_duplicate_sequence_values", "Manifest contains duplicate sequence values.")
+        if manifest.sequence_gap_count:
+            _add(errors, "manifest_sequence_gaps", "Manifest strict sequence mode has missing sequence values.")
 
     status = "pass" if not errors else "fail"
     return {
@@ -175,19 +167,7 @@ def run_preflight(config: PreflightConfig) -> dict[str, Any]:
             "candidate_file_count": candidate_count,
             "skipped": skipped,
         },
-        "manifest": {
-            "used": manifest.used,
-            "readable": manifest.readable,
-            "has_relative_path_column": manifest.has_relative_path_column,
-            "entry_count": manifest.entry_count,
-            "unique_entry_count": manifest.unique_entry_count,
-            "empty_path_count": manifest.empty_path_count,
-            "absolute_path_count": manifest.absolute_path_count,
-            "parent_escape_count": manifest.parent_escape_count,
-            "duplicate_count": manifest.duplicate_count,
-            "missing_count": manifest.missing_count,
-            "unexpected_count": manifest.unexpected_count,
-        },
+        "manifest": manifest_summary(manifest),
         "errors": errors,
         "warnings": warnings,
         "privacy": {
@@ -205,59 +185,6 @@ def write_preflight_report(report: dict[str, Any], output_dir: Path) -> Path:
     path = output_dir / "preflight_report.json"
     path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return path
-
-
-def _validate_manifest(manifest_csv: Path | None, input_paths: set[str]) -> _ManifestValidation:
-    if manifest_csv is None:
-        return _ManifestValidation(False, False, False, 0, 0, 0, 0, 0, 0, 0, 0)
-    try:
-        with manifest_csv.open("r", newline="", encoding="utf-8-sig") as handle:
-            reader = csv.DictReader(handle)
-            if not reader.fieldnames or "relative_path" not in reader.fieldnames:
-                return _ManifestValidation(True, True, False, 0, 0, 0, 0, 0, 0, 0, len(input_paths))
-            paths: list[str] = []
-            empty = 0
-            absolute = 0
-            parent_escape = 0
-            for row in reader:
-                raw = row.get("relative_path", "")
-                normalized = raw.strip().replace("\\", "/")
-                if not normalized:
-                    empty += 1
-                    continue
-                if _is_absolute_manifest_path(raw, normalized):
-                    absolute += 1
-                    continue
-                parts = PurePosixPath(normalized).parts
-                if ".." in parts:
-                    parent_escape += 1
-                    continue
-                paths.append(normalized)
-    except OSError:
-        return _ManifestValidation(True, False, False, 0, 0, 0, 0, 0, 0, 0, len(input_paths))
-
-    counts: dict[str, int] = {}
-    for path in paths:
-        counts[path] = counts.get(path, 0) + 1
-    manifest_set = set(paths)
-    return _ManifestValidation(
-        used=True,
-        readable=True,
-        has_relative_path_column=True,
-        entry_count=len(paths) + empty + absolute + parent_escape,
-        unique_entry_count=len(manifest_set),
-        empty_path_count=empty,
-        absolute_path_count=absolute,
-        parent_escape_count=parent_escape,
-        duplicate_count=sum(1 for count in counts.values() if count > 1),
-        missing_count=len(manifest_set - input_paths),
-        unexpected_count=len(input_paths - manifest_set),
-    )
-
-
-def _is_absolute_manifest_path(raw: str, normalized: str) -> bool:
-    stripped = raw.strip()
-    return normalized.startswith("/") or Path(stripped).is_absolute() or PureWindowsPath(stripped).is_absolute()
 
 
 def _is_relative_to(path: Path, parent: Path) -> bool:
