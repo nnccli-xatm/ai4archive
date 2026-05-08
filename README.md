@@ -160,17 +160,23 @@ PYTHONPATH=src python3 scripts/run_private_integration.py \
 ```
 
 The script runs preflight, scan, optional derivative processing, run-plan, and
-an aggregate benchmark. If review-summary or acceptance-summary automation is
-not available for the current local evidence, the public summary records that
-the optional step was skipped or unavailable.
+an aggregate benchmark. The private integration summary uses the main run-plan
+as the source of `aggregate_counts`; repeated benchmark worker runs are reported
+only under benchmark-scoped fields so their per-run finding totals are not
+confused with the main batch finding count. Benchmark throughput fields use the
+best recommendation observed in the benchmark summary, not simply the first run.
+The acceptance field is generated with the same aggregate-only
+`archive_scan_qc.acceptance` logic used by `archive-scan-qc acceptance-summary`;
+when optional review or processing-audit evidence is absent, the summary keeps
+the acceptance warning instead of inventing row-level evidence.
 
 Only stdout and `/placeholder/private-output-root/private_integration_summary.json`
 are intended as aggregate-only public outputs. They include total files,
 openable files, finding counts, processing counts, throughput, failed batch
-count, acceptance status, and the output directory name. The script performs a
-redaction self-check on the public summary and fails if it finds sensitive keys
-or private path values such as source paths, `relative_path`, `filename`,
-`sha256`, `thumbnail`, or `reviewer_notes`.
+count, benchmark repeated-run aggregates, acceptance status, and the output
+directory name. The script performs a redaction self-check on the public summary
+and fails if it finds sensitive keys or private path values such as source
+paths, `relative_path`, `filename`, `sha256`, `thumbnail`, or `reviewer_notes`.
 
 Normal scan reports, processing manifests, retry manifests, and any row-level
 review artifacts remain under `/placeholder/private-output-root` as sensitive
