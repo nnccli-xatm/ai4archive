@@ -4,6 +4,7 @@ import contextlib
 import csv
 import io
 import json
+import re
 import shutil
 import tempfile
 import unittest
@@ -182,6 +183,51 @@ class ScanQcTest(unittest.TestCase):
         self.assertIn("https://std.samr.gov.cn/hb/search/stdHBDetailed?id=8B1827F24605BB19E05397BE0A0AB44A", text)
         self.assertIn("https://www.ndls.org.cn/standard/detail/701c1aa6791563e848548a7f7199e355", text)
         self.assertIn("rule_registry.py", text)
+
+    def test_rule_registry_uses_clause_numbered_standard_references(self) -> None:
+        clause_pattern = re.compile(r"DA/T 31-2017 \d+(?:\.\d+)*")
+        core_rules = {
+            "openability",
+            "dpi_minimum",
+            "duplicate_file",
+            "manifest_missing_file",
+            "manifest_unexpected_file",
+            "manifest_duplicate_entry",
+            "name_pattern",
+            "quality_too_dark",
+            "quality_too_bright",
+            "quality_low_contrast",
+            "quality_suspected_blur",
+            "quality_near_blank_page",
+            "batch_orientation_consistency",
+        }
+
+        for rule_id in core_rules:
+            with self.subTest(rule_id=rule_id):
+                self.assertIn(rule_id, RULE_REGISTRY)
+                standards = RULE_REGISTRY[rule_id].standards
+                self.assertTrue(any(clause_pattern.search(item) for item in standards))
+
+    def test_standards_traceability_doc_lists_required_clause_numbers(self) -> None:
+        path = REPO_ROOT / "docs" / "standards-traceability.md"
+        text = path.read_text(encoding="utf-8")
+        required_clauses = [
+            "DA/T 31-2017 9.5",
+            "DA/T 31-2017 10.2",
+            "DA/T 31-2017 10.3",
+            "DA/T 31-2017 10.4",
+            "DA/T 31-2017 10.5.1",
+            "DA/T 31-2017 10.5.2",
+            "DA/T 31-2017 10.5.3",
+            "DA/T 31-2017 10.5.4",
+            "DA/T 31-2017 11.2",
+            "DA/T 31-2017 12.1.2",
+            "DA/T 31-2017 12.2",
+        ]
+
+        for clause in required_clauses:
+            with self.subTest(clause=clause):
+                self.assertIn(clause, text)
 
     def test_html_report_escapes_embedded_data_and_has_no_remote_resources(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
