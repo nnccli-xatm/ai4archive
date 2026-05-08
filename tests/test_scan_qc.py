@@ -603,6 +603,7 @@ class ScanQcTest(unittest.TestCase):
             "quality_skew_candidate",
             "quality_dark_border_candidate",
             "quality_scanline_candidate",
+            "quality_content_edge_cutoff_candidate",
             "multi_page_image_container",
             "batch_orientation_consistency",
         }
@@ -1376,6 +1377,56 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn("quality_scanline_candidate", rules)
             self.assertIsNone(record["quality_scanline_orientation"])
             self.assertLess(record["quality_scanline_score"], 0.85)
+
+    def test_content_edge_cutoff_flags_edge_touching_content_and_reports_metrics(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            _synthetic_edge_cutoff_page().save(input_dir / "edge_cutoff.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            paths = write_reports(report, output_dir)
+            rules = {finding["rule"] for finding in report["findings"]}
+            record = report["files"][0]
+
+            self.assertIn("quality_content_edge_cutoff_candidate", rules)
+            self.assertEqual(record["quality_content_edge_cutoff_side"], "left")
+            self.assertGreaterEqual(record["quality_content_edge_cutoff_score"], 0.65)
+            self.assertGreater(record["quality_content_edge_cutoff_dark_ratio"], 0)
+            self.assertGreater(record["quality_content_edge_cutoff_span_ratio"], 0)
+            self.assertIn("localized dark content", record["quality_content_edge_cutoff_reason"])
+
+            saved = json.loads(paths["json"].read_text(encoding="utf-8"))
+            self.assertIn("quality_content_edge_cutoff_candidate", saved["rule_catalog"])
+            self.assertIn("quality_content_edge_cutoff_score", paths["files_csv"].read_text(encoding="utf-8"))
+            self.assertIn("quality_content_edge_cutoff_candidate", paths["findings_csv"].read_text(encoding="utf-8"))
+            html = paths["html"].read_text(encoding="utf-8")
+            self.assertIn("Content edge cutoff candidate", html)
+            self.assertIn("Edge Cutoff Score", html)
+            self.assertNotIn("<img", html.lower())
+
+    def test_content_edge_cutoff_stays_quiet_on_normal_margin_and_dark_border(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            _synthetic_text_page().save(input_dir / "normal_margin.png", dpi=(300, 300))
+            _synthetic_dark_border_page().save(input_dir / "dark_border.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            rules_by_path: dict[str, set[str]] = {}
+            for finding in report["findings"]:
+                rules_by_path.setdefault(finding["relative_path"], set()).add(finding["rule"])
+            records = {record["relative_path"]: record for record in report["files"]}
+
+            self.assertNotIn("quality_content_edge_cutoff_candidate", rules_by_path.get("normal_margin.png", set()))
+            self.assertNotIn("quality_content_edge_cutoff_candidate", rules_by_path.get("dark_border.png", set()))
+            self.assertIn("quality_dark_border_candidate", rules_by_path["dark_border.png"])
+            self.assertIsNone(records["normal_margin.png"]["quality_content_edge_cutoff_side"])
+            self.assertIsNone(records["dark_border.png"]["quality_content_edge_cutoff_side"])
 
     def test_quality_metrics_flag_dark_bright_low_contrast_and_blur(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -3293,6 +3344,14 @@ def _synthetic_dark_border_page() -> Image.Image:
     draw = ImageDraw.Draw(image)
     for offset in range(5):
         draw.rectangle((offset, offset, image.width - 1 - offset, image.height - 1 - offset), outline=(8, 8, 8))
+    return image
+
+
+def _synthetic_edge_cutoff_page() -> Image.Image:
+    image = _synthetic_text_page()
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 72, 14, 120), fill=(15, 15, 15))
+    draw.rectangle((0, 126, 28, 131), fill=(15, 15, 15))
     return image
 
 

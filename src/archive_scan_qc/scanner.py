@@ -367,6 +367,12 @@ def _inspect_file(path: Path, root: Path) -> dict[str, Any]:
         "quality_scanline_location_ratio": None,
         "quality_scanline_band_width": 0,
         "quality_scanline_reason": None,
+        "quality_content_edge_cutoff_side": None,
+        "quality_content_edge_cutoff_score": 0.0,
+        "quality_content_edge_cutoff_band_px": 0,
+        "quality_content_edge_cutoff_dark_ratio": 0.0,
+        "quality_content_edge_cutoff_span_ratio": 0.0,
+        "quality_content_edge_cutoff_reason": None,
         "error": None,
     }
 
@@ -455,6 +461,7 @@ def _measure_processing_quality_candidates(image: Image.Image) -> dict[str, Any]
     skew = detect_skew(image)
     dark_border = detect_dark_border_bbox(image)
     scanline = _detect_scanline_candidate(image)
+    content_edge_cutoff = _detect_content_edge_cutoff_candidate(image)
     return {
         "quality_skew_angle_degrees": skew.angle_degrees,
         "quality_skew_confidence": skew.confidence,
@@ -466,6 +473,100 @@ def _measure_processing_quality_candidates(image: Image.Image) -> dict[str, Any]
         "quality_scanline_location_ratio": scanline["location_ratio"],
         "quality_scanline_band_width": scanline["band_width"],
         "quality_scanline_reason": scanline["reason"],
+        "quality_content_edge_cutoff_side": content_edge_cutoff["side"],
+        "quality_content_edge_cutoff_score": content_edge_cutoff["score"],
+        "quality_content_edge_cutoff_band_px": content_edge_cutoff["band_px"],
+        "quality_content_edge_cutoff_dark_ratio": content_edge_cutoff["dark_ratio"],
+        "quality_content_edge_cutoff_span_ratio": content_edge_cutoff["span_ratio"],
+        "quality_content_edge_cutoff_reason": content_edge_cutoff["reason"],
+    }
+
+
+def _detect_content_edge_cutoff_candidate(image: Image.Image) -> dict[str, Any]:
+    sample = image.convert("L")
+    sample.thumbnail((900, 900), Image.Resampling.BILINEAR)
+    width, height = sample.size
+    if width < 40 or height < 40:
+        return _empty_content_edge_cutoff("image too small for edge cutoff screening")
+
+    band_px = max(3, min(18, int(min(width, height) * 0.025)))
+    candidates = [
+        _content_edge_axis_candidate(sample, "left", band_px),
+        _content_edge_axis_candidate(sample, "right", band_px),
+        _content_edge_axis_candidate(sample, "top", band_px),
+        _content_edge_axis_candidate(sample, "bottom", band_px),
+    ]
+    candidate = max(candidates, key=lambda item: item["score"])
+    if candidate["score"] < 0.65:
+        return _empty_content_edge_cutoff("no localized dark content confidently touches the image boundary", band_px)
+    candidate["reason"] = (
+        f"localized dark content touches the {candidate['side']} edge within {band_px}px; "
+        f"dark ratio {candidate['dark_ratio']}, span ratio {candidate['span_ratio']}"
+    )
+    return candidate
+
+
+def _content_edge_axis_candidate(image: Image.Image, side: str, band_px: int) -> dict[str, Any]:
+    width, height = image.size
+    pixels = image.load()
+    vertical = side in {"left", "right"}
+    primary_length = height if vertical else width
+    cross_length = width if vertical else height
+    if primary_length <= 0 or cross_length <= 0:
+        return _empty_content_edge_cutoff("empty image", band_px)
+
+    dark_by_primary = [0] * primary_length
+    dark_total = 0
+    touch_total = 0
+    for primary in range(primary_length):
+        for offset in range(band_px):
+            if side == "left":
+                x, y = offset, primary
+            elif side == "right":
+                x, y = width - 1 - offset, primary
+            elif side == "top":
+                x, y = primary, offset
+            else:
+                x, y = primary, height - 1 - offset
+            if pixels[x, y] <= 100:
+                dark_by_primary[primary] += 1
+                dark_total += 1
+                if offset <= 1:
+                    touch_total += 1
+
+    dark_ratio = dark_total / max(1, primary_length * band_px)
+    touch_ratio = touch_total / max(1, primary_length * min(2, band_px))
+    active = [index for index, count in enumerate(dark_by_primary) if count > 0]
+    active_ratio = len(active) / primary_length
+    span_ratio = ((max(active) - min(active) + 1) / primary_length) if active else 0.0
+
+    localized_content = 0.04 <= span_ratio <= 0.72 and active_ratio <= 0.45
+    enough_dark = dark_total >= 16 and dark_ratio >= 0.035 and touch_ratio >= 0.012
+    score = 0.0
+    if localized_content and enough_dark:
+        dark_score = min(1.0, dark_ratio / 0.12)
+        touch_score = min(1.0, touch_ratio / 0.08)
+        span_score = 1.0 - min(1.0, abs(span_ratio - 0.18) / 0.54)
+        score = (dark_score * 0.45) + (touch_score * 0.35) + (span_score * 0.20)
+
+    return {
+        "side": side if score else None,
+        "score": round(score, 3),
+        "band_px": band_px,
+        "dark_ratio": round(dark_ratio, 6),
+        "span_ratio": round(span_ratio, 6),
+        "reason": None,
+    }
+
+
+def _empty_content_edge_cutoff(reason: str, band_px: int = 0) -> dict[str, Any]:
+    return {
+        "side": None,
+        "score": 0.0,
+        "band_px": band_px,
+        "dark_ratio": 0.0,
+        "span_ratio": 0.0,
+        "reason": reason,
     }
 
 
@@ -919,6 +1020,25 @@ def _add_processing_quality_findings(
                 f"Conservative scan-time detector found a {scanline_orientation} scanline/streak candidate "
                 f"with score {round(scanline_score, 3)}, location ratio {scanline_location}, "
                 f"and band width {scanline_band_width}; review source image for scanner artifact."
+            ),
+            profile,
+        )
+
+    cutoff_side = item.get("quality_content_edge_cutoff_side")
+    cutoff_score = item.get("quality_content_edge_cutoff_score")
+    cutoff_band = item.get("quality_content_edge_cutoff_band_px")
+    cutoff_dark_ratio = item.get("quality_content_edge_cutoff_dark_ratio")
+    cutoff_span_ratio = item.get("quality_content_edge_cutoff_span_ratio")
+    if cutoff_side in {"left", "right", "top", "bottom"} and isinstance(cutoff_score, int | float):
+        _append_finding(
+            item,
+            findings,
+            "quality_content_edge_cutoff_candidate",
+            "P2",
+            (
+                f"Conservative scan-time detector found localized dark content touching the {cutoff_side} image edge "
+                f"with score {round(cutoff_score, 3)}, edge band {cutoff_band}px, dark ratio {cutoff_dark_ratio}, "
+                f"and span ratio {cutoff_span_ratio}; review for possible cropped text, stamps, page numbers, or marginalia."
             ),
             profile,
         )
