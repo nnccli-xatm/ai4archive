@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import compileall
+import json
 import os
 from pathlib import Path
 import shutil
@@ -15,6 +16,9 @@ import venv
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+EXAMPLES_DIR = REPO_ROOT / "examples"
+EXAMPLE_RULES_PROFILE = EXAMPLES_DIR / "rules-profile.production-sample.json"
+EXAMPLE_MANIFEST = EXAMPLES_DIR / "manifest.sample.csv"
 
 
 def _run(command: list[str], *, env: dict[str, str] | None = None, cwd: Path = REPO_ROOT) -> None:
@@ -103,6 +107,84 @@ def run_install_smoke() -> None:
             raise SystemExit("missing smoke-test reports: " + ", ".join(str(path) for path in missing))
 
 
+def run_examples_dry_run() -> None:
+    with tempfile.TemporaryDirectory(prefix="archive-scan-qc-examples-") as temp_dir:
+        temp = Path(temp_dir)
+        input_dir = temp / "input"
+        report_dir = temp / "reports"
+        process_dir = temp / "processed"
+        input_dir.mkdir()
+        _run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "from PIL import Image, ImageDraw; "
+                    "root = r'" + str(input_dir) + "'; "
+                    "img = Image.new('RGB', (240, 180), 'white'); "
+                    "draw = ImageDraw.Draw(img); "
+                    "draw.rectangle((24, 24, 216, 156), outline=(40, 40, 40), width=2); "
+                    "draw.text((36, 44), 'SYNTHETIC PAGE 0001', fill=(20, 20, 20)); "
+                    "draw.line((36, 76, 204, 76), fill=(20, 20, 20), width=2); "
+                    "draw.line((36, 108, 190, 108), fill=(20, 20, 20), width=2); "
+                    "img.save(root + '/BATCH001_PAGE_0001.png', dpi=(300, 300)); "
+                    "img.transpose(Image.Transpose.FLIP_LEFT_RIGHT).save("
+                    "root + '/BATCH001_PAGE_0002.png', dpi=(300, 300))"
+                ),
+            ]
+        )
+        _run(
+            [
+                sys.executable,
+                "-m",
+                "archive_scan_qc",
+                "--input",
+                str(input_dir),
+                "--out",
+                str(report_dir),
+                "--process-out",
+                str(process_dir),
+                "--auto-crop",
+                "--deskew",
+                "--trim-dark-border",
+                "--despeckle",
+                "--workers",
+                "1",
+                "--project",
+                "release-candidate",
+                "--batch",
+                "synthetic-example",
+                "--manifest-csv",
+                str(EXAMPLE_MANIFEST),
+                "--rules-profile",
+                str(EXAMPLE_RULES_PROFILE),
+            ],
+            env=_pythonpath_env(),
+        )
+        expected = [
+            report_dir / "scan_qc_report.json",
+            report_dir / "scan_qc_report.html",
+            report_dir / "scan_qc_files.csv",
+            report_dir / "scan_qc_findings.csv",
+            process_dir / "processing_manifest.json",
+            process_dir / "images" / "BATCH001_PAGE_0001.png",
+            process_dir / "images" / "BATCH001_PAGE_0002.png",
+        ]
+        missing = [path for path in expected if not path.exists()]
+        if missing:
+            raise SystemExit("missing example dry-run artifacts: " + ", ".join(str(path) for path in missing))
+        report = json.loads((report_dir / "scan_qc_report.json").read_text(encoding="utf-8"))
+        processing = json.loads((process_dir / "processing_manifest.json").read_text(encoding="utf-8"))
+        if report["summary"]["total_files"] != 2 or report["summary"]["p0_findings"] != 0:
+            raise SystemExit("example dry-run report did not complete cleanly")
+        if report["manifest"]["rules_profile"]["name"] != "production-sample-standard":
+            raise SystemExit("example dry-run did not load the sample rules profile")
+        if not report["manifest"]["manifest_used"] or report["summary"]["manifest_missing_count"] != 0:
+            raise SystemExit("example dry-run manifest compatibility check failed")
+        if processing["summary"]["processed_files"] != 2 or processing["summary"]["failed_files"] != 0:
+            raise SystemExit("example dry-run processing did not complete cleanly")
+
+
 def run_build_artifacts() -> None:
     build_dir = REPO_ROOT / "dist"
     if build_dir.exists():
@@ -126,6 +208,7 @@ def main(argv: list[str] | None = None) -> int:
     run_compileall()
     if not args.skip_build_artifacts:
         run_build_artifacts()
+    run_examples_dry_run()
     run_install_smoke()
     print("release validation passed")
     return 0

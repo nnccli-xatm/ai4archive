@@ -383,5 +383,22 @@ python3 scripts/validate_release.py
 ```
 
 The local release validation runs unit tests, compileall, wheel creation, an
+examples-based synthetic end-to-end dry-run with derivative processing, an
 isolated install smoke test, `archive-scan-qc --version`, and a synthetic-image
-CLI scan. See `docs/release-checklist.md` before publishing a release.
+CLI scan. The dry-run uses only generated temporary images and the committed
+privacy-safe files in `examples/`.
+
+See `docs/operations-runbook.md` for production installation, directory,
+privacy, troubleshooting, exit-code, and tuning guidance. See
+`docs/release-checklist.md` before publishing a release.
+
+### Privacy-safe examples
+
+The `examples/` directory contains non-private release and deployment samples:
+
+- `rules-profile.production-sample.json`: generic production-style rules
+  profile.
+- `manifest.sample.csv`: manifest with synthetic page names only.
+- `batch-run.sample.sh`: command template that uses placeholder paths.
+
+Do not replace these files with real collection names or private paths.
