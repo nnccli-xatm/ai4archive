@@ -52,6 +52,14 @@ class DarkBorderDetection:
     reason: str
 
 
+def detect_skew(image: Image.Image) -> SkewDetection:
+    return _detect_skew(image)
+
+
+def detect_dark_border_bbox(image: Image.Image) -> DarkBorderDetection:
+    return _detect_dark_border_bbox(image)
+
+
 def process_images(
     report: dict[str, Any],
     input_dir: Path,

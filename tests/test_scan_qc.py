@@ -515,6 +515,8 @@ class ScanQcTest(unittest.TestCase):
             "quality_low_contrast",
             "quality_suspected_blur",
             "quality_near_blank_page",
+            "quality_skew_candidate",
+            "quality_dark_border_candidate",
             "batch_orientation_consistency",
         }
 
@@ -1189,6 +1191,56 @@ class ScanQcTest(unittest.TestCase):
             self.assertGreater(file_record["quality_brightness_mean"], 0)
             self.assertGreater(file_record["quality_contrast_stddev"], 0)
             self.assertGreater(file_record["quality_sharpness_laplacian_var"], 0)
+
+    def test_processing_quality_findings_flag_skew_and_dark_border_without_processing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            _synthetic_text_page().rotate(-3.0, resample=Image.Resampling.BICUBIC, expand=True, fillcolor="white").save(
+                input_dir / "skew.png",
+                dpi=(300, 300),
+            )
+            _synthetic_dark_border_page().save(input_dir / "border.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            paths = write_reports(report, output_dir)
+            rules_by_path: dict[str, set[str]] = {}
+            for finding in report["findings"]:
+                rules_by_path.setdefault(finding["relative_path"], set()).add(finding["rule"])
+            records = {record["relative_path"]: record for record in report["files"]}
+
+            self.assertIn("quality_skew_candidate", rules_by_path["skew.png"])
+            self.assertIn("quality_dark_border_candidate", rules_by_path["border.png"])
+            self.assertAlmostEqual(records["skew.png"]["quality_skew_angle_degrees"], -3.0, delta=0.75)
+            self.assertGreaterEqual(records["skew.png"]["quality_skew_confidence"], 0.08)
+            self.assertIsNotNone(records["border.png"]["quality_dark_border_bbox"])
+            self.assertFalse((root / "processed").exists())
+
+            saved = json.loads(paths["json"].read_text(encoding="utf-8"))
+            self.assertIn("quality_skew_candidate", saved["rule_catalog"])
+            self.assertIn("quality_dark_border_bbox", paths["files_csv"].read_text(encoding="utf-8"))
+            self.assertIn("quality_dark_border_candidate", paths["findings_csv"].read_text(encoding="utf-8"))
+            html = paths["html"].read_text(encoding="utf-8")
+            self.assertIn("Page skew candidate", html)
+            self.assertIn("Dark scan border candidate", html)
+
+    def test_processing_quality_findings_stay_quiet_on_clean_control(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            _synthetic_text_page().save(input_dir / "clean.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            rules = {finding["rule"] for finding in report["findings"]}
+            record = report["files"][0]
+
+            self.assertNotIn("quality_skew_candidate", rules)
+            self.assertNotIn("quality_dark_border_candidate", rules)
+            self.assertIsNone(record["quality_dark_border_bbox"])
 
     def test_quality_metrics_flag_dark_bright_low_contrast_and_blur(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2771,6 +2823,14 @@ def _synthetic_light_noise_page() -> Image.Image:
     draw = ImageDraw.Draw(image)
     for point in [(20, 20), (80, 60), (140, 100), (210, 150)]:
         draw.point(point, fill=(238, 238, 238))
+    return image
+
+
+def _synthetic_dark_border_page() -> Image.Image:
+    image = _synthetic_text_page()
+    draw = ImageDraw.Draw(image)
+    for offset in range(5):
+        draw.rectangle((offset, offset, image.width - 1 - offset, image.height - 1 - offset), outline=(8, 8, 8))
     return image
 
 

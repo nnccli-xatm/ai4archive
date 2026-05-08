@@ -21,6 +21,7 @@ from PIL import Image, ImageStat, UnidentifiedImageError
 
 from .analysis_provider import run_analysis_provider
 from .concurrency import resolve_worker_count, worker_metadata
+from .processing import detect_dark_border_bbox, detect_skew
 from .rule_registry import PROVIDER_RULE_POLICY, rule_catalog
 from .rules import RulesProfile, default_rules_profile
 
@@ -338,6 +339,11 @@ def _inspect_file(path: Path, root: Path) -> dict[str, Any]:
         "quality_dark_pixel_ratio": None,
         "quality_foreground_coverage": None,
         "quality_edge_coverage": None,
+        "quality_skew_angle_degrees": None,
+        "quality_skew_confidence": 0.0,
+        "quality_skew_reason": None,
+        "quality_dark_border_bbox": None,
+        "quality_dark_border_reason": None,
         "error": None,
     }
 
@@ -348,6 +354,7 @@ def _inspect_file(path: Path, root: Path) -> dict[str, Any]:
             dpi_x, dpi_y = _extract_dpi(image.info.get("dpi"))
             orientation_metrics = _measure_orientation(image)
             quality_metrics = _measure_quality(image)
+            processing_quality_metrics = _measure_processing_quality_candidates(image)
             base.update(
                 {
                     "openable": True,
@@ -359,6 +366,7 @@ def _inspect_file(path: Path, root: Path) -> dict[str, Any]:
                     "color_mode": image.mode,
                     **orientation_metrics,
                     **quality_metrics,
+                    **processing_quality_metrics,
                     "error": None,
                 }
             )
@@ -416,6 +424,18 @@ def _measure_quality(image: Image.Image) -> dict[str, float]:
         "quality_dark_pixel_ratio": round(_pixel_ratio_at_or_below(sample, 64), 6),
         "quality_foreground_coverage": round(_pixel_ratio_at_or_below(sample, 230), 6),
         "quality_edge_coverage": round(edge_coverage, 6),
+    }
+
+
+def _measure_processing_quality_candidates(image: Image.Image) -> dict[str, Any]:
+    skew = detect_skew(image)
+    dark_border = detect_dark_border_bbox(image)
+    return {
+        "quality_skew_angle_degrees": skew.angle_degrees,
+        "quality_skew_confidence": skew.confidence,
+        "quality_skew_reason": skew.reason,
+        "quality_dark_border_bbox": list(dark_border.bbox) if dark_border.bbox else None,
+        "quality_dark_border_reason": dark_border.reason,
     }
 
 
@@ -587,6 +607,7 @@ def _add_per_file_findings(
                 profile,
             )
         _add_quality_findings(item, findings, profile)
+        _add_processing_quality_findings(item, findings, profile)
 
 
 def _add_quality_findings(
@@ -659,6 +680,39 @@ def _add_quality_findings(
             "quality_suspected_blur",
             "P2",
             f"Laplacian variance sharpness {sharpness} is below conservative threshold {profile.blur_laplacian_variance_threshold}.",
+            profile,
+        )
+
+
+def _add_processing_quality_findings(
+    item: dict[str, Any],
+    findings: list[dict[str, str]],
+    profile: RulesProfile,
+) -> None:
+    skew_angle = item.get("quality_skew_angle_degrees")
+    skew_confidence = item.get("quality_skew_confidence")
+    if isinstance(skew_angle, int | float) and isinstance(skew_confidence, int | float):
+        if 0.5 <= abs(skew_angle) <= 5.0 and skew_confidence >= 0.08:
+            _append_finding(
+                item,
+                findings,
+                "quality_skew_candidate",
+                "P2",
+                (
+                    f"Conservative scan-time skew estimate is {round(skew_angle, 2)} degrees "
+                    f"with confidence {round(skew_confidence, 3)}; review for deskew."
+                ),
+                profile,
+            )
+
+    dark_border_bbox = item.get("quality_dark_border_bbox")
+    if isinstance(dark_border_bbox, list) and len(dark_border_bbox) == 4:
+        _append_finding(
+            item,
+            findings,
+            "quality_dark_border_candidate",
+            "P2",
+            "Conservative scan-time detector found a dark edge border candidate; review for border trim.",
             profile,
         )
 
