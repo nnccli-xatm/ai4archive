@@ -34,6 +34,9 @@ def write_reports(report: dict[str, Any], output_dir: Path) -> dict[str, Path]:
         "quality_brightness_mean",
         "quality_contrast_stddev",
         "quality_sharpness_laplacian_var",
+        "quality_dark_pixel_ratio",
+        "quality_foreground_coverage",
+        "quality_edge_coverage",
         "file_size",
         "sha256",
         "error",
@@ -219,6 +222,7 @@ def _summary_cards(summary: dict[str, Any]) -> str:
         ("P0", "p0_findings"),
         ("P1", "p1_findings"),
         ("P2", "p2_findings"),
+        ("Blank Page Findings", "blank_page_findings"),
         ("Manifest Entries", "manifest_entry_count"),
         ("Manifest Missing", "manifest_missing_count"),
         ("Manifest Unexpected", "manifest_unexpected_count"),
@@ -249,6 +253,9 @@ def _files_table(files: list[dict[str, Any]]) -> str:
             f"<td>{_text(item.get('quality_brightness_mean'))}</td>"
             f"<td>{_text(item.get('quality_contrast_stddev'))}</td>"
             f"<td>{_text(item.get('quality_sharpness_laplacian_var'))}</td>"
+            f"<td>{_text(item.get('quality_dark_pixel_ratio'))}</td>"
+            f"<td>{_text(item.get('quality_foreground_coverage'))}</td>"
+            f"<td>{_text(item.get('quality_edge_coverage'))}</td>"
             f"<td>{_text(item.get('file_size'))}</td>"
             f"<td>{_text(item.get('error'))}</td>"
             "</tr>"
@@ -256,7 +263,8 @@ def _files_table(files: list[dict[str, Any]]) -> str:
     return (
         "<table><thead><tr><th>Path</th><th>Openable</th><th>Format</th><th>Dimensions</th>"
         "<th>DPI</th><th>Color</th><th>Brightness Mean</th><th>Contrast Stddev</th>"
-        "<th>Sharpness Laplacian Var</th><th>Bytes</th><th>Error</th></tr></thead><tbody>"
+        "<th>Sharpness Laplacian Var</th><th>Dark Pixel Ratio</th><th>Foreground Coverage</th>"
+        "<th>Edge Coverage</th><th>Bytes</th><th>Error</th></tr></thead><tbody>"
         + "\n".join(rows)
         + "</tbody></table>"
     )

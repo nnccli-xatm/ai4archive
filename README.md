@@ -15,10 +15,11 @@ The current implementation covers:
 - file openability checks
 - image format, DPI, color mode, width, height, file size, and SHA-256 capture
 - Pillow-only image quality metrics: grayscale brightness mean, grayscale
-  contrast standard deviation, and Laplacian-variance sharpness approximation
+  contrast standard deviation, Laplacian-variance sharpness approximation,
+  dark-pixel ratio, foreground coverage, and edge coverage
 - duplicate filename and duplicate file-content checks
 - conservative P1/P2 quality findings for over-dark, over-bright,
-  low-contrast, and suspected-blur pages
+  low-contrast, suspected-blur, and near-blank pages
 - batch-level format, DPI, and color-mode consistency findings
 - optional batch manifest CSV consistency checks
 - JSON report, standalone HTML report, and CSV file and finding exports
@@ -93,7 +94,12 @@ Example rules profile:
     "bright_mean_threshold": 248,
     "low_contrast_stddev_threshold": 12,
     "blur_laplacian_variance_threshold": 25,
-    "blur_min_contrast_stddev": 14
+    "blur_min_contrast_stddev": 14,
+    "blank_brightness_min": 248,
+    "blank_contrast_max": 6,
+    "blank_foreground_coverage_max": 0.003,
+    "blank_edge_coverage_max": 0.002,
+    "blank_dark_pixel_ratio_max": 0.0005
   },
   "rules": {
     "quality_too_dark": {
@@ -113,8 +119,10 @@ Example rules profile:
 Configurable top-level fields are `name`, `version`, `min_dpi`, and
 `name_pattern`. `quality_thresholds` accepts
 `dark_mean_threshold`, `bright_mean_threshold`,
-`low_contrast_stddev_threshold`, `blur_laplacian_variance_threshold`, and
-`blur_min_contrast_stddev`. `rules` is keyed by finding rule name; each rule may
+`low_contrast_stddev_threshold`, `blur_laplacian_variance_threshold`,
+`blur_min_contrast_stddev`, `blank_brightness_min`, `blank_contrast_max`,
+`blank_foreground_coverage_max`, `blank_edge_coverage_max`, and
+`blank_dark_pixel_ratio_max`. `rules` is keyed by finding rule name; each rule may
 set `enabled` to `true` or `false` and may override `severity` to `P0`, `P1`, or
 `P2`. Critical integrity P0 rules such as `openability`,
 `manifest_missing_file`, manifest unexpected/duplicate checks, duplicate file
@@ -204,6 +212,13 @@ file record also includes:
 - `quality_sharpness_laplacian_var`: variance of a simple 4-neighbor
   Laplacian approximation on a capped grayscale thumbnail. Lower values mean
   fewer hard edges and can indicate blur.
+- `quality_dark_pixel_ratio`: share of thumbnail pixels at or below a dark
+  grayscale threshold. Very low values mean almost no dark ink or marks.
+- `quality_foreground_coverage`: share of thumbnail pixels at or below a
+  conservative foreground threshold. Very low values indicate little visible
+  page content.
+- `quality_edge_coverage`: share of thumbnail pixels with enough local
+  Laplacian response to look like content edges.
 
 The default quality thresholds are intentionally conservative:
 
@@ -213,6 +228,9 @@ The default quality thresholds are intentionally conservative:
 - `quality_low_contrast` P2 when contrast standard deviation is below `10`.
 - `quality_suspected_blur` P2 when contrast standard deviation is at least
   `12` but Laplacian variance is below `20`.
+- `quality_near_blank_page` P2 when a page is very bright, has contrast at or
+  below `6`, foreground coverage at or below `0.003`, edge coverage at or
+  below `0.002`, and dark-pixel ratio at or below `0.0005`.
 
 These thresholds are defaults in the built-in rules profile so batch-specific
 callers can tune them through JSON without changing report structure. JSON
@@ -222,6 +240,12 @@ report is a single static file with inline CSS for manual review; it shows the
 batch manifest, summary counts, skipped counts, file metadata and quality metric
 table, and finding table with P0/P1/P2 severity badges. It does not embed source
 images, thumbnails, or file content.
+
+Blank and near-blank findings are prompts for human review only. They are useful
+for catching possible blank pages or missed scans, but they must not be used by
+themselves as an automatic deletion rule because legitimate separator sheets,
+backsides, faint stamps, page numbers, and very light annotations can look
+nearly blank to aggregate metrics.
 
 The process returns exit code `1` when P0 findings are present, so it can be
 used in batch scripts. Reports are written to the output directory; original

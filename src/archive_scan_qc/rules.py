@@ -33,6 +33,11 @@ class RulesProfile:
     low_contrast_stddev_threshold: float = 10.0
     blur_laplacian_variance_threshold: float = 20.0
     blur_min_contrast_stddev: float = 12.0
+    blank_brightness_min: float = 248.0
+    blank_contrast_max: float = 6.0
+    blank_foreground_coverage_max: float = 0.003
+    blank_edge_coverage_max: float = 0.002
+    blank_dark_pixel_ratio_max: float = 0.0005
     rules: dict[str, RuleSetting] = field(default_factory=dict)
 
     def is_rule_enabled(self, rule: str) -> bool:
@@ -51,6 +56,11 @@ class RulesProfile:
                 "low_contrast_stddev_threshold": self.low_contrast_stddev_threshold,
                 "blur_laplacian_variance_threshold": self.blur_laplacian_variance_threshold,
                 "blur_min_contrast_stddev": self.blur_min_contrast_stddev,
+                "blank_brightness_min": self.blank_brightness_min,
+                "blank_contrast_max": self.blank_contrast_max,
+                "blank_foreground_coverage_max": self.blank_foreground_coverage_max,
+                "blank_edge_coverage_max": self.blank_edge_coverage_max,
+                "blank_dark_pixel_ratio_max": self.blank_dark_pixel_ratio_max,
             },
         }
 
@@ -111,6 +121,19 @@ def _profile_from_mapping(raw: dict[str, Any], *, source: str) -> RulesProfile:
             quality,
             "blur_min_contrast_stddev",
             profile.blur_min_contrast_stddev,
+        ),
+        blank_brightness_min=_optional_float(quality, "blank_brightness_min", profile.blank_brightness_min),
+        blank_contrast_max=_optional_float(quality, "blank_contrast_max", profile.blank_contrast_max),
+        blank_foreground_coverage_max=_optional_float(
+            quality,
+            "blank_foreground_coverage_max",
+            profile.blank_foreground_coverage_max,
+        ),
+        blank_edge_coverage_max=_optional_float(quality, "blank_edge_coverage_max", profile.blank_edge_coverage_max),
+        blank_dark_pixel_ratio_max=_optional_float(
+            quality,
+            "blank_dark_pixel_ratio_max",
+            profile.blank_dark_pixel_ratio_max,
         ),
         rules=_rules_from_mapping(rules),
     )

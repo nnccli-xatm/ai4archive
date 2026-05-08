@@ -147,6 +147,7 @@ def scan_batch(config: ScanConfig) -> dict[str, Any]:
         "p0_findings": summary["p0_findings"],
         "p1_findings": summary["p1_findings"],
         "p2_findings": summary["p2_findings"],
+        "blank_page_findings": summary["blank_page_findings"],
         "manifest_used": summary["manifest_used"],
         "manifest_csv": project["manifest_csv"],
         "rules_profile": profile.metadata(),
@@ -246,6 +247,11 @@ def _effective_profile(config: ScanConfig) -> RulesProfile:
             else profile.blur_laplacian_variance_threshold
         ),
         blur_min_contrast_stddev=config.blur_min_contrast_stddev if config.rules_profile is None else profile.blur_min_contrast_stddev,
+        blank_brightness_min=profile.blank_brightness_min,
+        blank_contrast_max=profile.blank_contrast_max,
+        blank_foreground_coverage_max=profile.blank_foreground_coverage_max,
+        blank_edge_coverage_max=profile.blank_edge_coverage_max,
+        blank_dark_pixel_ratio_max=profile.blank_dark_pixel_ratio_max,
         rules=profile.rules,
     )
 
@@ -274,6 +280,9 @@ def _inspect_file(path: Path, root: Path) -> dict[str, Any]:
         "quality_brightness_mean": None,
         "quality_contrast_stddev": None,
         "quality_sharpness_laplacian_var": None,
+        "quality_dark_pixel_ratio": None,
+        "quality_foreground_coverage": None,
+        "quality_edge_coverage": None,
         "error": None,
     }
 
@@ -309,33 +318,49 @@ def _measure_quality(image: Image.Image) -> dict[str, float]:
     stat = ImageStat.Stat(sample)
     brightness_mean = float(stat.mean[0])
     contrast_stddev = float(stat.stddev[0])
+    laplacian_variance, edge_coverage = _laplacian_metrics(sample)
     return {
         "quality_brightness_mean": round(brightness_mean, 2),
         "quality_contrast_stddev": round(contrast_stddev, 2),
-        "quality_sharpness_laplacian_var": round(_laplacian_variance(sample), 2),
+        "quality_sharpness_laplacian_var": round(laplacian_variance, 2),
+        "quality_dark_pixel_ratio": round(_pixel_ratio_at_or_below(sample, 64), 6),
+        "quality_foreground_coverage": round(_pixel_ratio_at_or_below(sample, 230), 6),
+        "quality_edge_coverage": round(edge_coverage, 6),
     }
 
 
-def _laplacian_variance(image: Image.Image) -> float:
+def _pixel_ratio_at_or_below(image: Image.Image, threshold: int) -> float:
+    width, height = image.size
+    total = width * height
+    if not total:
+        return 0.0
+    histogram = image.histogram()
+    return sum(histogram[: threshold + 1]) / total
+
+
+def _laplacian_metrics(image: Image.Image) -> tuple[float, float]:
     width, height = image.size
     if width < 3 or height < 3:
-        return 0.0
+        return 0.0, 0.0
 
     pixels = image.load()
     count = 0
     total = 0.0
     total_sq = 0.0
+    edge_count = 0
     for y in range(1, height - 1):
         for x in range(1, width - 1):
             center = pixels[x, y] * 4
             value = center - pixels[x - 1, y] - pixels[x + 1, y] - pixels[x, y - 1] - pixels[x, y + 1]
             total += value
             total_sq += value * value
+            if abs(value) >= 18:
+                edge_count += 1
             count += 1
     if not count:
-        return 0.0
+        return 0.0, 0.0
     mean = total / count
-    return max(0.0, (total_sq / count) - (mean * mean))
+    return max(0.0, (total_sq / count) - (mean * mean)), edge_count / count
 
 
 def _extract_dpi(raw_dpi: Any) -> tuple[int | None, int | None]:
@@ -482,9 +507,34 @@ def _add_quality_findings(
     brightness = item.get("quality_brightness_mean")
     contrast = item.get("quality_contrast_stddev")
     sharpness = item.get("quality_sharpness_laplacian_var")
-    if brightness is None or contrast is None or sharpness is None:
+    dark_pixel_ratio = item.get("quality_dark_pixel_ratio")
+    foreground_coverage = item.get("quality_foreground_coverage")
+    edge_coverage = item.get("quality_edge_coverage")
+    if (
+        brightness is None
+        or contrast is None
+        or sharpness is None
+        or dark_pixel_ratio is None
+        or foreground_coverage is None
+        or edge_coverage is None
+    ):
         return
 
+    if (
+        brightness >= profile.blank_brightness_min
+        and contrast <= profile.blank_contrast_max
+        and foreground_coverage <= profile.blank_foreground_coverage_max
+        and edge_coverage <= profile.blank_edge_coverage_max
+        and dark_pixel_ratio <= profile.blank_dark_pixel_ratio_max
+    ):
+        _append_finding(
+            item,
+            findings,
+            "quality_near_blank_page",
+            "P2",
+            "Page has very bright, very low-content thumbnail metrics; review as possible blank page or missed scan.",
+            profile,
+        )
     if brightness < profile.dark_mean_threshold:
         _append_finding(
             item,
@@ -687,6 +737,7 @@ def _summarize(
         "p0_findings": sum(1 for finding in findings if finding["severity"] == "P0"),
         "p1_findings": sum(1 for finding in findings if finding["severity"] == "P1"),
         "p2_findings": sum(1 for finding in findings if finding["severity"] == "P2"),
+        "blank_page_findings": sum(1 for finding in findings if finding["rule"] == "quality_near_blank_page"),
         "manifest_used": manifest_check.used,
         "manifest_csv": manifest_check.path,
         "manifest_entry_count": manifest_check.entry_count,

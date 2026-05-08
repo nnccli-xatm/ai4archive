@@ -237,6 +237,7 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(run["total_files"], 2)
             self.assertEqual(run["openable_files"], 1)
             self.assertEqual(run["finding_rule_counts"]["openability"], 1)
+            self.assertEqual(run["finding_rule_counts"]["quality_near_blank_page"], 1)
             self.assertTrue(run["scan_only"])
             raw_json = json_path.read_text(encoding="utf-8")
             raw_csv = csv_path.read_text(encoding="utf-8")
@@ -425,6 +426,63 @@ class ScanQcTest(unittest.TestCase):
             self.assertIn("quality_low_contrast", rules_by_path["low_contrast.png"])
             self.assertIn("quality_suspected_blur", rules_by_path["blur.png"])
 
+    def test_blank_page_rule_flags_blank_and_light_noise_but_not_text_page(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            Image.new("RGB", (240, 180), "white").save(input_dir / "blank.png", dpi=(300, 300))
+            _synthetic_light_noise_page().save(input_dir / "light_noise.png", dpi=(300, 300))
+            _synthetic_text_page().save(input_dir / "text.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            rules_by_path: dict[str, set[str]] = {}
+            for finding in report["findings"]:
+                rules_by_path.setdefault(finding["relative_path"], set()).add(finding["rule"])
+            records = {record["relative_path"]: record for record in report["files"]}
+
+            self.assertIn("quality_near_blank_page", rules_by_path["blank.png"])
+            self.assertIn("quality_near_blank_page", rules_by_path["light_noise.png"])
+            self.assertNotIn("quality_near_blank_page", rules_by_path.get("text.png", set()))
+            self.assertEqual(report["summary"]["blank_page_findings"], 2)
+            self.assertLessEqual(records["blank.png"]["quality_foreground_coverage"], 0.003)
+            self.assertGreater(records["text.png"]["quality_foreground_coverage"], 0.003)
+
+    def test_rules_profile_can_disable_blank_rule_and_override_severity(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            disabled_out = root / "disabled"
+            severity_out = root / "severity"
+            disabled_profile = root / "disabled.json"
+            severity_profile = root / "severity.json"
+            input_dir.mkdir()
+            Image.new("RGB", (120, 90), "white").save(input_dir / "blank.png", dpi=(300, 300))
+            disabled_profile.write_text(
+                json.dumps({"rules": {"quality_near_blank_page": {"enabled": False}}}),
+                encoding="utf-8",
+            )
+            severity_profile.write_text(
+                json.dumps({"rules": {"quality_near_blank_page": {"severity": "P1"}}}),
+                encoding="utf-8",
+            )
+
+            disabled = scan_batch(
+                ScanConfig("p1", "b1", input_dir, disabled_out, rules_profile=load_rules_profile(disabled_profile))
+            )
+            severity = scan_batch(
+                ScanConfig("p1", "b1", input_dir, severity_out, rules_profile=load_rules_profile(severity_profile))
+            )
+
+            self.assertFalse(any(finding["rule"] == "quality_near_blank_page" for finding in disabled["findings"]))
+            self.assertTrue(
+                any(
+                    finding["rule"] == "quality_near_blank_page" and finding["severity"] == "P1"
+                    for finding in severity["findings"]
+                )
+            )
+
     def test_default_rules_profile_metadata_preserves_existing_thresholds(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -556,9 +614,14 @@ class ScanQcTest(unittest.TestCase):
 
             saved = json.loads(paths["json"].read_text(encoding="utf-8"))
             self.assertIn("quality_brightness_mean", saved["files"][0])
+            self.assertIn("quality_dark_pixel_ratio", saved["files"][0])
+            self.assertIn("quality_foreground_coverage", saved["files"][0])
+            self.assertIn("quality_edge_coverage", saved["files"][0])
             self.assertIn("quality_contrast_stddev", paths["files_csv"].read_text(encoding="utf-8"))
+            self.assertIn("quality_foreground_coverage", paths["files_csv"].read_text(encoding="utf-8"))
             html = paths["html"].read_text(encoding="utf-8")
             self.assertIn("Brightness Mean", html)
+            self.assertIn("Foreground Coverage", html)
             self.assertIn("quality_suspected_blur", html)
 
     def test_hidden_directories_are_skipped(self) -> None:
@@ -1008,6 +1071,14 @@ def _synthetic_text_page() -> Image.Image:
     draw.rectangle((24, 20, 215, 159), outline=(30, 30, 30), width=2)
     for y in range(42, 132, 18):
         draw.rectangle((48, y, 190, y + 4), fill=(20, 20, 20))
+    return image
+
+
+def _synthetic_light_noise_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), (252, 252, 252))
+    draw = ImageDraw.Draw(image)
+    for point in [(20, 20), (80, 60), (140, 100), (210, 150)]:
+        draw.point(point, fill=(238, 238, 238))
     return image
 
 
