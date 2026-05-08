@@ -70,6 +70,18 @@ validated internal Pillow wheel and install only from that trusted wheelhouse.
 ### Run
 
 ```bash
+archive-scan-qc preflight \
+  --input /path/to/scanned-images \
+  --out /path/to/qc-report \
+  --process-out /path/to/processed-images \
+  --auto-crop \
+  --deskew \
+  --workers 2 \
+  --project demo-project \
+  --batch batch-001 \
+  --manifest-csv /path/to/manifest.csv \
+  --rules-profile /path/to/rules.json
+
 archive-scan-qc \
   --input /path/to/scanned-images \
   --out /path/to/qc-report \
@@ -87,6 +99,20 @@ archive-scan-qc \
 
 The optional manifest CSV must include a `relative_path` column whose values
 are expected image paths relative to `--input`.
+
+Run `archive-scan-qc preflight` before production batches. It validates the
+input directory, output and processing-output configuration, worker count, rules
+profile loading, and manifest structure without opening, copying, modifying, or
+deriving images. It writes `preflight_report.json` under `--out` and prints a
+short stdout summary. The report is aggregate-only: it records counts and config
+state, not per-file path lists, hashes, thumbnails, or image content.
+
+Preflight exits `0` when all required checks pass. It exits non-zero for errors
+that would block or fail a production run, including missing input directories,
+invalid output paths, processing flags without `--process-out`, invalid workers,
+invalid rules profiles, unsafe manifest paths, duplicate manifest entries, or
+manifest missing/unexpected file counts. Warnings identify risky but runnable
+configuration, such as outputs placed under the input tree.
 
 Use `--workers N` to control local scan and derivative-processing concurrency.
 `--workers 1` forces fully serial mode for comparison baselines. When omitted,
@@ -383,10 +409,10 @@ python3 scripts/validate_release.py
 ```
 
 The local release validation runs unit tests, compileall, wheel creation, an
-examples-based synthetic end-to-end dry-run with derivative processing, an
-isolated install smoke test, `archive-scan-qc --version`, and a synthetic-image
-CLI scan. The dry-run uses only generated temporary images and the committed
-privacy-safe files in `examples/`.
+examples-based synthetic preflight followed by an end-to-end dry-run with
+derivative processing, an isolated install smoke test, `archive-scan-qc
+--version`, and a synthetic-image CLI scan. The dry-run uses only generated
+temporary images and the committed privacy-safe files in `examples/`.
 
 See `docs/operations-runbook.md` for production installation, directory,
 privacy, troubleshooting, exit-code, and tuning guidance. See

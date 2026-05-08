@@ -8,8 +8,9 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 - Run `PYTHONPATH=src python3 -m compileall -q src tests`.
 - Run `python3 scripts/validate_release.py`.
 - Confirm `archive-scan-qc --version` matches the package version.
-- Confirm the validator's examples-based dry-run created JSON, HTML, CSV, a
-  processing manifest, and derivative images from synthetic temporary inputs.
+- Confirm the validator's examples-based dry-run created `preflight_report.json`,
+  JSON, HTML, CSV, a processing manifest, and derivative images from synthetic
+  temporary inputs.
 - Confirm CI is green for Python 3.10, 3.11, and 3.12.
 
 ## Package and install checks
@@ -20,8 +21,9 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 - Run a synthetic image smoke scan and confirm JSON, HTML, files CSV, and
   findings CSV are created.
 - Parse `examples/rules-profile.production-sample.json` and
-  `examples/manifest.sample.csv` through the CLI against synthetic files named
-  `BATCH001_PAGE_0001.png` and `BATCH001_PAGE_0002.png`.
+  `examples/manifest.sample.csv` through `archive-scan-qc preflight` and the
+  scan/process CLI against synthetic files named `BATCH001_PAGE_0001.png` and
+  `BATCH001_PAGE_0002.png`.
 - For offline or domestic-platform deployments, install from the approved local
   wheelhouse and verify the Pillow wheel on target hardware.
 
@@ -33,6 +35,8 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   troubleshooting, and performance tuning guidance still matches the release.
 - Confirm public PRs, issues, and release notes reference only synthetic
   examples or aggregate benchmark output.
+- Confirm production runbooks call `archive-scan-qc preflight` before the full
+  scan/process command and explain preflight error versus warning semantics.
 
 ## Real sample aggregate validation
 

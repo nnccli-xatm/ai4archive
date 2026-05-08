@@ -117,6 +117,20 @@ Keep source scans, reports, and derivatives in separate directories.
 Recommended command:
 
 ```bash
+archive-scan-qc preflight \
+  --input /approved-work/input-batches/batch-001 \
+  --out /approved-work/qc-reports/batch-001 \
+  --process-out /approved-work/processed-derivatives/batch-001 \
+  --auto-crop \
+  --deskew \
+  --trim-dark-border \
+  --despeckle \
+  --workers 2 \
+  --project project-code \
+  --batch batch-001 \
+  --manifest-csv /approved-work/manifests/batch-001.csv \
+  --rules-profile /approved-work/rules/project-rules.json
+
 archive-scan-qc \
   --input /approved-work/input-batches/batch-001 \
   --out /approved-work/qc-reports/batch-001 \
@@ -137,10 +151,18 @@ The manifest CSV must contain a `relative_path` column with paths relative to
 possible. If output is inside the input tree, the scanner skips the known output
 directory on reruns, but separate directories are easier to audit.
 
+Run preflight before the full scan/process command for each production batch.
+Preflight does not open images, copy files, modify originals, or create
+derivatives. It writes `preflight_report.json` under `--out` with aggregate
+configuration, candidate count, skipped count, manifest count, error, and warning
+fields only. Do not treat it as a scan report; it is a go/no-go configuration
+and manifest risk check.
+
 ## Reports And Archival Evidence
 
 Each scan writes:
 
+- `preflight_report.json` when `archive-scan-qc preflight` is run
 - `scan_qc_report.json`
 - `scan_qc_report.html`
 - `scan_qc_files.csv`
@@ -158,6 +180,21 @@ processing manifests as sensitive because they include filenames, relative
 paths, hashes, and per-file metrics.
 
 ## Exit Codes
+
+For `archive-scan-qc preflight`:
+
+- `0`: preflight checks passed.
+- `1`: preflight found a fatal production risk, such as missing input, invalid
+  output path, processing flags without `--process-out`, invalid workers,
+  invalid rules profile, unsafe manifest paths, duplicate manifest entries, or
+  manifest missing/unexpected file counts.
+- `2`: CLI argument parsing error from `argparse`.
+
+Warnings in `preflight_report.json` are runnable but risky conditions, such as
+placing outputs under the input tree. Errors are conditions that should be fixed
+before the production scan/process command.
+
+For the scan/process command:
 
 - `0`: scan completed and no P0 findings were present.
 - `1`: scan completed and at least one P0 finding was present, such as
@@ -192,9 +229,10 @@ python3 scripts/validate_release.py
 ```
 
 The validator runs unit tests, compileall, wheel creation, an examples-based
-synthetic end-to-end dry-run with derivative processing, an isolated package
-install, `archive-scan-qc --version`, and a synthetic smoke scan. It uses only
-temporary generated images and the committed non-private files in `examples/`.
+synthetic preflight followed by an end-to-end dry-run with derivative
+processing, an isolated package install, `archive-scan-qc --version`, and a
+synthetic smoke scan. It uses only temporary generated images and the committed
+non-private files in `examples/`.
 
 If build isolation is unavailable in the target environment, use:
 

@@ -138,6 +138,35 @@ def run_examples_dry_run() -> None:
                 sys.executable,
                 "-m",
                 "archive_scan_qc",
+                "preflight",
+                "--input",
+                str(input_dir),
+                "--out",
+                str(report_dir),
+                "--process-out",
+                str(process_dir),
+                "--auto-crop",
+                "--deskew",
+                "--trim-dark-border",
+                "--despeckle",
+                "--workers",
+                "1",
+                "--project",
+                "release-candidate",
+                "--batch",
+                "synthetic-example",
+                "--manifest-csv",
+                str(EXAMPLE_MANIFEST),
+                "--rules-profile",
+                str(EXAMPLE_RULES_PROFILE),
+            ],
+            env=_pythonpath_env(),
+        )
+        _run(
+            [
+                sys.executable,
+                "-m",
+                "archive_scan_qc",
                 "--input",
                 str(input_dir),
                 "--out",
@@ -162,6 +191,7 @@ def run_examples_dry_run() -> None:
             env=_pythonpath_env(),
         )
         expected = [
+            report_dir / "preflight_report.json",
             report_dir / "scan_qc_report.json",
             report_dir / "scan_qc_report.html",
             report_dir / "scan_qc_files.csv",
@@ -174,7 +204,10 @@ def run_examples_dry_run() -> None:
         if missing:
             raise SystemExit("missing example dry-run artifacts: " + ", ".join(str(path) for path in missing))
         report = json.loads((report_dir / "scan_qc_report.json").read_text(encoding="utf-8"))
+        preflight = json.loads((report_dir / "preflight_report.json").read_text(encoding="utf-8"))
         processing = json.loads((process_dir / "processing_manifest.json").read_text(encoding="utf-8"))
+        if preflight["status"] != "pass" or preflight["manifest"]["missing_count"] != 0:
+            raise SystemExit("example dry-run preflight did not complete cleanly")
         if report["summary"]["total_files"] != 2 or report["summary"]["p0_findings"] != 0:
             raise SystemExit("example dry-run report did not complete cleanly")
         if report["manifest"]["rules_profile"]["name"] != "production-sample-standard":

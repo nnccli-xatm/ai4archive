@@ -8,6 +8,7 @@ from pathlib import Path
 import sys
 
 from ._version import __version__
+from .preflight import PreflightConfig, run_preflight, write_preflight_report
 from .processing import ProcessingOptions, process_images
 from .reports import write_reports
 from .rules import RulesProfileError, load_rules_profile
@@ -30,21 +31,38 @@ def build_parser() -> argparse.ArgumentParser:
         description="Run phase-one archive scan QC checks and write JSON/CSV reports.",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    _add_scan_arguments(parser)
+    return parser
+
+
+def build_preflight_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="archive-scan-qc preflight",
+        description="Validate batch configuration before scanning or derivative processing.",
+    )
+    _add_scan_arguments(parser, include_scan_overrides=False)
+    return parser
+
+
+def _add_scan_arguments(parser: argparse.ArgumentParser, *, include_scan_overrides: bool = True) -> None:
     parser.add_argument("--input", required=True, type=Path, help="Image directory to scan.")
     parser.add_argument("--out", required=True, type=Path, help="Report output directory.")
     parser.add_argument("--project", default="default-project", help="Project identifier.")
     parser.add_argument("--batch", default="default-batch", help="Batch identifier.")
-    parser.add_argument(
-        "--min-dpi",
-        default=None,
-        type=int,
-        help="Minimum acceptable horizontal and vertical DPI. Defaults to the active rules profile value.",
-    )
-    parser.add_argument(
-        "--name-pattern",
-        default=None,
-        help="Optional regular expression that each source file stem must match.",
-    )
+    if include_scan_overrides:
+        parser.add_argument(
+            "--min-dpi",
+            default=None,
+            type=int,
+            help="Minimum acceptable horizontal and vertical DPI. Defaults to the active rules profile value.",
+        )
+        parser.add_argument(
+            "--name-pattern",
+            default=None,
+            help="Optional regular expression that each source file stem must match.",
+        )
+    else:
+        parser.set_defaults(min_dpi=None, name_pattern=None)
     parser.add_argument(
         "--manifest-csv",
         default=None,
@@ -89,7 +107,6 @@ def build_parser() -> argparse.ArgumentParser:
         type=_positive_int,
         help="Maximum local worker threads for scan and processing. Use 1 for serial mode.",
     )
-    return parser
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -98,24 +115,12 @@ def main(argv: list[str] | None = None) -> int:
         from .benchmark import main as benchmark_main
 
         return benchmark_main(argv[1:])
+    if argv and argv[0] == "preflight":
+        return _main_preflight(argv[1:])
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.auto_crop and not args.process_out:
-        parser.error("--auto-crop requires --process-out")
-    if args.deskew and not args.process_out:
-        parser.error("--deskew requires --process-out")
-    if args.trim_dark_border and not args.process_out:
-        parser.error("--trim-dark-border requires --process-out")
-    if args.despeckle and not args.process_out:
-        parser.error("--despeckle requires --process-out")
-    try:
-        rules_profile = load_rules_profile(args.rules_profile) if args.rules_profile else None
-    except RulesProfileError as exc:
-        parser.error(str(exc))
-    if rules_profile and args.min_dpi is not None:
-        rules_profile = replace(rules_profile, min_dpi=args.min_dpi)
-    if rules_profile and args.name_pattern is not None:
-        rules_profile = replace(rules_profile, name_pattern=args.name_pattern)
+    _validate_processing_flags(parser, args)
+    rules_profile = _load_rules_profile(parser, args)
 
     config = ScanConfig(
         project_id=args.project,
@@ -167,6 +172,60 @@ def main(argv: list[str] | None = None) -> int:
     for label, path in paths.items():
         print(f"{label}: {path}")
     return 1 if report["summary"]["p0_findings"] else 0
+
+
+def _main_preflight(argv: list[str]) -> int:
+    parser = build_preflight_parser()
+    args = parser.parse_args(argv)
+    rules_profile = _load_rules_profile(parser, args)
+    report = run_preflight(
+        PreflightConfig(
+            project_id=args.project,
+            batch_id=args.batch,
+            input_dir=args.input,
+            output_dir=args.out,
+            process_out=args.process_out,
+            manifest_csv=args.manifest_csv,
+            rules_profile=rules_profile,
+            workers=args.workers,
+            auto_crop=args.auto_crop,
+            deskew=args.deskew,
+            trim_dark_border=args.trim_dark_border,
+            despeckle=args.despeckle,
+        )
+    )
+    path = write_preflight_report(report, args.out)
+    print(f"Preflight status: {report['status']}")
+    print(f"Candidate files: {report['input_summary']['candidate_file_count']}")
+    print(f"Manifest missing: {report['manifest']['missing_count']}")
+    print(f"Manifest unexpected: {report['manifest']['unexpected_count']}")
+    print(f"Errors: {len(report['errors'])}")
+    print(f"Warnings: {len(report['warnings'])}")
+    print(f"Preflight report: {path}")
+    return 0 if report["status"] == "pass" else 1
+
+
+def _validate_processing_flags(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    if args.auto_crop and not args.process_out:
+        parser.error("--auto-crop requires --process-out")
+    if args.deskew and not args.process_out:
+        parser.error("--deskew requires --process-out")
+    if args.trim_dark_border and not args.process_out:
+        parser.error("--trim-dark-border requires --process-out")
+    if args.despeckle and not args.process_out:
+        parser.error("--despeckle requires --process-out")
+
+
+def _load_rules_profile(parser: argparse.ArgumentParser, args: argparse.Namespace):
+    try:
+        rules_profile = load_rules_profile(args.rules_profile) if args.rules_profile else None
+    except RulesProfileError as exc:
+        parser.error(str(exc))
+    if rules_profile and args.min_dpi is not None:
+        rules_profile = replace(rules_profile, min_dpi=args.min_dpi)
+    if rules_profile and args.name_pattern is not None:
+        rules_profile = replace(rules_profile, name_pattern=args.name_pattern)
+    return rules_profile
 
 
 if __name__ == "__main__":
