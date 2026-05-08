@@ -6,7 +6,6 @@ It writes no derivative image files and never modifies originals.
 
 from __future__ import annotations
 
-import csv
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -21,6 +20,7 @@ from PIL import Image, ImageStat, UnidentifiedImageError
 
 from .analysis_provider import run_analysis_provider
 from .concurrency import resolve_worker_count, worker_metadata
+from .manifest import ManifestValidation, read_manifest
 from .processing import detect_dark_border_bbox, detect_skew
 from .rule_registry import PROVIDER_RULE_POLICY, rule_catalog
 from .rules import RulesProfile, default_rules_profile
@@ -47,6 +47,7 @@ PROTECTED_P0_RULES = {
     "manifest_missing_file",
     "manifest_unexpected_file",
     "manifest_duplicate_entry",
+    "manifest_duplicate_sequence",
 }
 
 
@@ -78,6 +79,13 @@ class ManifestCheck:
     missing_count: int
     unexpected_count: int
     duplicate_count: int
+    sequence_field: str | None
+    strict_sequence: bool
+    sequence_entry_count: int
+    sequence_invalid_count: int
+    sequence_duplicate_count: int
+    sequence_gap_count: int
+    sequence_order_mismatch_count: int
 
 
 @dataclass(frozen=True)
@@ -112,14 +120,16 @@ def scan_batch(config: ScanConfig) -> dict[str, Any]:
     profile = _effective_profile(config)
     candidate_files, skip_stats = _iter_candidate_files(input_dir, config.output_dir, config.manifest_csv)
     scan_workers = resolve_worker_count(config.workers, len(candidate_files))
+    file_order = [path.relative_to(input_dir).as_posix() for path in candidate_files]
+    manifest_check = read_manifest(config.manifest_csv, set(file_order), file_order)
     files = _inspect_files(candidate_files, input_dir, scan_workers)
-    manifest_paths = _read_manifest_paths(config.manifest_csv) if config.manifest_csv else None
-    findings = _build_findings(files, profile, manifest_paths)
+    _attach_manifest_sequence(files, manifest_check)
+    findings = _build_findings(files, profile, manifest_check if config.manifest_csv else None)
     analysis_provider = _run_optional_analysis_provider(config, input_dir, files, profile)
     if analysis_provider["enabled"]:
         findings.extend(analysis_provider["findings"])
-    manifest_check = _summarize_manifest_check(files, manifest_paths, config.manifest_csv)
-    summary = _summarize(files, findings, manifest_check, skip_stats)
+    manifest_summary = _summarize_manifest_check(manifest_check)
+    summary = _summarize(files, findings, manifest_summary, skip_stats)
     finished_at = datetime.now(timezone.utc)
     generated_at = finished_at.isoformat()
     performance = _performance_summary(
@@ -159,11 +169,18 @@ def scan_batch(config: ScanConfig) -> dict[str, Any]:
         "manifest_used": summary["manifest_used"],
         "manifest_csv": project["manifest_csv"],
         "rules_profile": profile.metadata(),
+        "manifest_sequence_field": summary["manifest_sequence_field"],
+        "manifest_strict_sequence": summary["manifest_strict_sequence"],
         "manifest_entry_count": summary["manifest_entry_count"],
         "manifest_unique_entry_count": summary["manifest_unique_entry_count"],
         "manifest_missing_count": summary["manifest_missing_count"],
         "manifest_unexpected_count": summary["manifest_unexpected_count"],
         "manifest_duplicate_count": summary["manifest_duplicate_count"],
+        "manifest_sequence_entry_count": summary["manifest_sequence_entry_count"],
+        "manifest_sequence_invalid_count": summary["manifest_sequence_invalid_count"],
+        "manifest_sequence_duplicate_count": summary["manifest_sequence_duplicate_count"],
+        "manifest_sequence_gap_count": summary["manifest_sequence_gap_count"],
+        "manifest_sequence_order_mismatch_count": summary["manifest_sequence_order_mismatch_count"],
         "skipped_total_count": summary["skipped_total_count"],
         "skipped_file_count": summary["skipped_file_count"],
         "skipped_directory_count": summary["skipped_directory_count"],
@@ -492,45 +509,37 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _read_manifest_paths(manifest_csv: Path) -> list[str]:
-    with manifest_csv.open("r", newline="", encoding="utf-8-sig") as handle:
-        reader = csv.DictReader(handle)
-        if not reader.fieldnames or "relative_path" not in reader.fieldnames:
-            raise ValueError("Manifest CSV must include a relative_path column.")
-        paths = []
-        for row in reader:
-            relative_path = _normalize_manifest_path(row.get("relative_path", ""))
-            if relative_path:
-                paths.append(relative_path)
-        return paths
-
-
-def _normalize_manifest_path(path: str) -> str:
-    return path.strip().replace("\\", "/").lstrip("/")
+def _attach_manifest_sequence(files: list[dict[str, Any]], manifest: ManifestValidation) -> None:
+    entries_by_path = {entry.relative_path: entry for entry in manifest.entries}
+    for item in files:
+        entry = entries_by_path.get(item["relative_path"])
+        item["manifest_order_index"] = entry.order_index if entry else None
+        item["manifest_sequence"] = entry.sequence if entry else None
 
 
 def _build_findings(
     files: list[dict[str, Any]],
     profile: RulesProfile,
-    manifest_paths: list[str] | None,
+    manifest: ManifestValidation | None,
 ) -> list[dict[str, str]]:
     findings: list[dict[str, str]] = []
     _add_per_file_findings(files, findings, profile)
     _add_duplicate_name_findings(files, findings, profile)
     _add_duplicate_hash_findings(files, findings, profile)
     _add_batch_consistency_findings(files, findings, profile)
-    if manifest_paths is not None:
-        _add_manifest_findings(files, findings, manifest_paths, profile)
+    if manifest is not None:
+        _add_manifest_findings(files, findings, manifest, profile)
     return findings
 
 
 def _add_manifest_findings(
     files: list[dict[str, Any]],
     findings: list[dict[str, str]],
-    manifest_paths: list[str],
+    manifest: ManifestValidation,
     profile: RulesProfile,
 ) -> None:
     file_paths = {item["relative_path"] for item in files}
+    manifest_paths = [entry.relative_path for entry in manifest.entries]
     manifest_set = set(manifest_paths)
 
     for path in sorted(manifest_set - file_paths):
@@ -561,6 +570,54 @@ def _add_manifest_findings(
             "manifest_duplicate_entry",
             "P0",
             "Manifest contains duplicate relative_path entries.",
+            profile,
+        )
+
+    sequence_counts = _path_counts([str(entry.sequence) for entry in manifest.entries if entry.sequence is not None])
+    duplicate_sequences = {int(sequence) for sequence, count in sequence_counts.items() if count > 1}
+    order_positions = {item["relative_path"]: index for index, item in enumerate(files)}
+    ordered_entries = [entry for entry in manifest.entries if entry.relative_path in order_positions]
+    actual_order = {
+        entry.relative_path: index
+        for index, entry in enumerate(sorted(ordered_entries, key=lambda entry: order_positions[entry.relative_path]))
+    }
+    expected_order = {entry.relative_path: index for index, entry in enumerate(ordered_entries)}
+    for entry in manifest.entries:
+        if entry.sequence_raw and entry.sequence is None:
+            _append_path_finding(
+                findings,
+                entry.relative_path,
+                "manifest_invalid_sequence",
+                "P1",
+                "Manifest sequence value must be a positive integer.",
+                profile,
+            )
+        if entry.sequence in duplicate_sequences:
+            _append_path_finding(
+                findings,
+                entry.relative_path,
+                "manifest_duplicate_sequence",
+                "P0",
+                f"Manifest sequence value {entry.sequence} is used by multiple rows.",
+                profile,
+            )
+        if entry.relative_path in expected_order and expected_order[entry.relative_path] != actual_order.get(entry.relative_path):
+            _append_path_finding(
+                findings,
+                entry.relative_path,
+                "manifest_order_mismatch",
+                "P2",
+                "Manifest row order differs from deterministic discovered/report file order.",
+                profile,
+            )
+
+    if manifest.sequence_gap_count and manifest.entries:
+        _append_path_finding(
+            findings,
+            manifest.entries[0].relative_path,
+            "manifest_sequence_gap",
+            "P1",
+            "Manifest declares strict sequence mode but sequence values contain gaps.",
             profile,
         )
 
@@ -866,24 +923,26 @@ def _path_counts(paths: list[str]) -> dict[str, int]:
 
 
 def _summarize_manifest_check(
-    files: list[dict[str, Any]],
-    manifest_paths: list[str] | None,
-    manifest_csv: Path | None,
+    manifest: ManifestValidation,
 ) -> ManifestCheck:
-    if manifest_paths is None:
-        return ManifestCheck(False, None, 0, 0, 0, 0, 0)
+    if not manifest.used:
+        return ManifestCheck(False, None, 0, 0, 0, 0, 0, None, False, 0, 0, 0, 0, 0)
 
-    file_paths = {item["relative_path"] for item in files}
-    manifest_set = set(manifest_paths)
-    duplicate_count = sum(1 for count in _path_counts(manifest_paths).values() if count > 1)
     return ManifestCheck(
         used=True,
-        path=str(manifest_csv.resolve()) if manifest_csv else None,
-        entry_count=len(manifest_paths),
-        unique_entry_count=len(manifest_set),
-        missing_count=len(manifest_set - file_paths),
-        unexpected_count=len(file_paths - manifest_set),
-        duplicate_count=duplicate_count,
+        path=manifest.path,
+        entry_count=manifest.entry_count,
+        unique_entry_count=manifest.unique_entry_count,
+        missing_count=manifest.missing_count,
+        unexpected_count=manifest.unexpected_count,
+        duplicate_count=manifest.duplicate_count,
+        sequence_field=manifest.sequence_field,
+        strict_sequence=manifest.strict_sequence,
+        sequence_entry_count=manifest.sequence_entry_count,
+        sequence_invalid_count=manifest.sequence_invalid_count,
+        sequence_duplicate_count=manifest.sequence_duplicate_count,
+        sequence_gap_count=manifest.sequence_gap_count,
+        sequence_order_mismatch_count=manifest.sequence_order_mismatch_count,
     )
 
 
@@ -905,11 +964,18 @@ def _summarize(
         "provider_findings": sum(1 for finding in findings if finding.get("source") == "provider"),
         "manifest_used": manifest_check.used,
         "manifest_csv": manifest_check.path,
+        "manifest_sequence_field": manifest_check.sequence_field,
+        "manifest_strict_sequence": manifest_check.strict_sequence,
         "manifest_entry_count": manifest_check.entry_count,
         "manifest_unique_entry_count": manifest_check.unique_entry_count,
         "manifest_missing_count": manifest_check.missing_count,
         "manifest_unexpected_count": manifest_check.unexpected_count,
         "manifest_duplicate_count": manifest_check.duplicate_count,
+        "manifest_sequence_entry_count": manifest_check.sequence_entry_count,
+        "manifest_sequence_invalid_count": manifest_check.sequence_invalid_count,
+        "manifest_sequence_duplicate_count": manifest_check.sequence_duplicate_count,
+        "manifest_sequence_gap_count": manifest_check.sequence_gap_count,
+        "manifest_sequence_order_mismatch_count": manifest_check.sequence_order_mismatch_count,
         "skipped_total_count": skip_stats.total,
         "skipped_file_count": skip_stats.files,
         "skipped_directory_count": skip_stats.directories,

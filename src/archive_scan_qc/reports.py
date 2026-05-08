@@ -29,6 +29,8 @@ def write_reports(report: dict[str, Any], output_dir: Path) -> dict[str, Path]:
     file_fields = [
         "relative_path",
         "filename",
+        "manifest_order_index",
+        "manifest_sequence",
         "openable",
         "format",
         "width",
@@ -477,6 +479,11 @@ def _summary_cards(summary: dict[str, Any]) -> str:
         ("Manifest Missing", "manifest_missing_count"),
         ("Manifest Unexpected", "manifest_unexpected_count"),
         ("Manifest Duplicates", "manifest_duplicate_count"),
+        ("Manifest Sequence Entries", "manifest_sequence_entry_count"),
+        ("Manifest Invalid Sequences", "manifest_sequence_invalid_count"),
+        ("Manifest Duplicate Sequences", "manifest_sequence_duplicate_count"),
+        ("Manifest Sequence Gaps", "manifest_sequence_gap_count"),
+        ("Manifest Order Mismatches", "manifest_sequence_order_mismatch_count"),
         ("Skipped Total", "skipped_total_count"),
         ("Skipped Files", "skipped_file_count"),
         ("Skipped Directories", "skipped_directory_count"),
@@ -516,11 +523,18 @@ def _skip_metrics(summary: dict[str, Any]) -> list[tuple[str, Any]]:
 def _manifest_metrics(summary: dict[str, Any]) -> list[tuple[str, Any]]:
     fields = [
         ("Manifest Used", "manifest_used"),
+        ("Manifest Sequence Field", "manifest_sequence_field"),
+        ("Manifest Strict Sequence", "manifest_strict_sequence"),
         ("Manifest Entries", "manifest_entry_count"),
         ("Manifest Unique Entries", "manifest_unique_entry_count"),
         ("Manifest Missing", "manifest_missing_count"),
         ("Manifest Unexpected", "manifest_unexpected_count"),
         ("Manifest Duplicates", "manifest_duplicate_count"),
+        ("Manifest Sequence Entries", "manifest_sequence_entry_count"),
+        ("Manifest Invalid Sequences", "manifest_sequence_invalid_count"),
+        ("Manifest Duplicate Sequences", "manifest_sequence_duplicate_count"),
+        ("Manifest Sequence Gaps", "manifest_sequence_gap_count"),
+        ("Manifest Order Mismatches", "manifest_sequence_order_mismatch_count"),
     ]
     return [(label, summary.get(key, 0)) for label, key in fields]
 
@@ -591,6 +605,8 @@ def _files_table(files: list[dict[str, Any]]) -> str:
             "<tr>"
             f"<td>{_text(item.get('relative_path'))}</td>"
             f"<td>{_text(item.get('filename'))}</td>"
+            f"<td>{_text(item.get('manifest_order_index'))}</td>"
+            f"<td>{_text(item.get('manifest_sequence'))}</td>"
             f"<td>{_text(item.get('extension'))}</td>"
             f"<td>{_text(item.get('openable'))}</td>"
             f"<td>{_text(item.get('format'))}</td>"
@@ -616,7 +632,7 @@ def _files_table(files: list[dict[str, Any]]) -> str:
             "</tr>"
         )
     return (
-        '<div class="table-wrap"><table><thead><tr><th>Path</th><th>Filename</th><th>Extension</th>'
+        '<div class="table-wrap"><table><thead><tr><th>Path</th><th>Filename</th><th>Manifest Order</th><th>Manifest Sequence</th><th>Extension</th>'
         "<th>Openable</th><th>Format</th><th>Dimensions</th>"
         "<th>DPI</th><th>Color</th><th>Orientation</th><th>Aspect Ratio</th>"
         "<th>EXIF Orientation</th><th>EXIF Transpose Signal</th><th>Brightness Mean</th><th>Contrast Stddev</th>"

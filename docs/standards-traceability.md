@@ -20,9 +20,9 @@ Public references:
 | DA/T 31-2017 10.4 decontaminate while preserving original appearance | Cleanup should improve obvious scan noise without hiding or changing the archive page's evidentiary appearance. | `quality_too_dark`, `quality_too_bright`, `batch_color_mode_consistency`; optional processing manifest records despeckle and contrast-normalization decisions. | Partially automated. Metrics identify review candidates and derivative operations are recorded. | Add threshold calibration evidence to project SOPs. |
 | DA/T 31-2017 10.5.1 complete and readable image | Images that are incomplete, unclear, or distorted should be identified for rescan or review. | `openability`, `dimensions`, `quality_too_dark`, `quality_too_bright`, `quality_low_contrast`, `quality_suspected_blur`, `quality_near_blank_page`; file fields include dimensions, brightness, contrast, sharpness, foreground coverage, and edge coverage. | Automated metadata checks plus conservative screening metrics. | Add project-calibrated thresholds by collection type and scanner model after internal sample review. |
 | DA/T 31-2017 10.5.2 missed/rescanned/extra scans | Missing pages, repeated pages, and extra scans should be corrected promptly. | `duplicate_file`, `manifest_missing_file`, `manifest_unexpected_file`, `quality_near_blank_page`; manifest summary counts and finding counts. | Implemented when a `relative_path` manifest CSV is supplied; duplicate content checks run without a manifest. | Add richer catalog field validation when production catalog exports are available. |
-| DA/T 31-2017 10.5.3 page order consistency | Digital image order should remain aligned with the source archive order and manifest sequence. | `duplicate_name`, `manifest_duplicate_entry`, `name_pattern`; manifest unique-entry counts and row-level findings. | Automated filename/profile and manifest duplicate checks. | Add ordered sequence validation when production manifests expose page sequence fields. |
+| DA/T 31-2017 10.5.3 page order consistency | Digital image order should remain aligned with the source archive order and manifest sequence. | `duplicate_name`, `manifest_duplicate_entry`, `manifest_invalid_sequence`, `manifest_duplicate_sequence`, `manifest_sequence_gap`, `manifest_order_mismatch`, `name_pattern`; manifest sequence counts and row-level findings. | Automated filename/profile checks plus optional manifest page/order validation for `sequence`, `page_sequence`, `page_number`, or `expected_order`. Strict contiguous sequence checks run when the manifest declares `strict_sequence`, `sequence_strict`, or `strict_page_sequence`. | Add richer production catalog field validation when catalog exports provide stable page identifiers beyond file paths and numeric order. |
 | DA/T 31-2017 10.5.4 processing quality inspection | Processing results such as stitching, rotation/deskew, cropping, and cleanup should be checked. | `batch_orientation_consistency`, `quality_skew_candidate`, `quality_dark_border_candidate`; `processing_manifest.json` records transpose, crop, deskew, border trim, despeckle, and output size. | Implemented as automated screening plus derivative operation evidence. | Add stitch-specific rules if multi-image stitching enters scope. |
-| DA/T 31-2017 11.2 catalog-image correspondence | Catalog data and image files should correspond, counts should agree, and images should open normally. | `openability`, `manifest_missing_file`, `manifest_unexpected_file`, `manifest_duplicate_entry`, `duplicate_name`, `name_pattern`; manifest summary counts and row-level findings. | Implemented when a `relative_path` manifest CSV is supplied; openability always runs. | Add production catalog export validation once field contracts are available. |
+| DA/T 31-2017 11.2 catalog-image correspondence | Catalog data and image files should correspond, counts should agree, page order should agree, and images should open normally. | `openability`, `manifest_missing_file`, `manifest_unexpected_file`, `manifest_duplicate_entry`, `manifest_invalid_sequence`, `manifest_duplicate_sequence`, `manifest_order_mismatch`, `duplicate_name`, `name_pattern`; manifest summary counts and row-level findings. | Implemented when a `relative_path` manifest CSV is supplied; sequence checks activate only when a supported optional sequence column is present. Openability always runs. | Add production catalog export validation once field contracts are available. |
 | DA/T 31-2017 12.1.2 automated plus manual inspection | Computer checks and manual review should be combined for quality inspection. | JSON/HTML/CSV reports, `rule_catalog`, quality metrics, severity counts, and review-oriented explanations. | Implemented. Automated results explain what to review; subjective acceptance remains an operator decision. | Add sampled manual-review logs outside this package. |
 | DA/T 31-2017 12.2 acceptance scope | Acceptance artifacts should make quality decisions, catalog correspondence, and delivery evidence reviewable. | `scan_qc_report.json`, standalone HTML, CSV exports, `preflight_report.json`, `benchmark_results.json`, `processing_manifest.json`, performance metadata, rule profile metadata, and `rule_catalog`. | Implemented. JSON/HTML expose the active rule catalog and the rules profile used for the run. | Add signed release bundles or checksums if required by the deployment authority. |
 | Privacy and controlled evidence sharing | Public evidence should use aggregate or static metadata instead of file-level sensitive data. This is an implementation control around delivery evidence, not a quoted DA/T clause. | Benchmark JSON/CSV are aggregate-only. Rule catalog contains static metadata only. Row-level scan reports remain sensitive because they include filenames, paths, hashes, and per-file metrics. | Implemented privacy boundary: catalog and benchmark outputs avoid file content, filenames, paths, hashes, and thumbnails. | Add deployment-specific retention and redaction rules outside the package code. |
@@ -56,3 +56,27 @@ paths, hashes, thumbnails, OCR text, or image content.
 - `scripts/validate_release.py` runs the unit tests, examples-based preflight,
   full scan/process dry-run, benchmark validation, compileall, wheel build, and
   install smoke test.
+
+## Manifest Page Sequence Validation
+
+Manifest validation remains backward compatible: a CSV with only
+`relative_path` continues to work. When a manifest also includes `sequence`,
+`page_sequence`, `page_number`, or `expected_order`, the scanner records the
+recognized field name and aggregate sequence counts in JSON, HTML, CSV, and
+run-plan summaries.
+
+Sequence values must be positive integers. Duplicate values produce protected
+P0 `manifest_duplicate_sequence` findings because two catalog rows cannot
+represent the same declared page order. Invalid values produce P1
+`manifest_invalid_sequence` findings because order evidence is present but not
+machine-checkable. If the manifest declares strict sequence mode with
+`strict_sequence`, `sequence_strict`, or `strict_page_sequence`, missing
+integers inside the observed range produce P1 `manifest_sequence_gap` evidence.
+When manifest row order differs from the deterministic discovered/report file
+order for the same files, P2 `manifest_order_mismatch` findings flag the batch
+for operator review.
+
+This maps DA/T 31-2017 page-order and catalog-image correspondence expectations
+to conservative local checks. The tool validates the order evidence available
+in the manifest; it does not infer unprovided catalog metadata or expose
+private catalog rows in aggregate preflight and run-plan outputs.
