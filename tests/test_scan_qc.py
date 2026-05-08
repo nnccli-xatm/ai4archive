@@ -565,6 +565,7 @@ class ScanQcTest(unittest.TestCase):
             "quality_skew_candidate",
             "quality_dark_border_candidate",
             "quality_scanline_candidate",
+            "multi_page_image_container",
             "batch_orientation_consistency",
         }
 
@@ -1629,6 +1630,45 @@ class ScanQcTest(unittest.TestCase):
             self.assertIn("Orientation", html)
             self.assertIn("Aspect Ratio", html)
             self.assertIn("EXIF Transpose Signal", html)
+
+    def test_multi_page_tiff_reports_frame_count_and_policy_finding(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            frames = [_synthetic_text_page(), _synthetic_text_page().transpose(Image.Transpose.FLIP_LEFT_RIGHT)]
+            frames[0].save(input_dir / "multi_page.tif", save_all=True, append_images=frames[1:], dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            paths = write_reports(report, output_dir)
+
+            saved = json.loads(paths["json"].read_text(encoding="utf-8"))
+            file_record = saved["files"][0]
+            self.assertEqual(file_record["frame_count"], 2)
+            findings = [finding for finding in saved["findings"] if finding["rule"] == "multi_page_image_container"]
+            self.assertEqual(len(findings), 1)
+            self.assertEqual(findings[0]["severity"], "P2")
+            self.assertIn("2 frames/pages", findings[0]["message"])
+            self.assertIn("frame_count", paths["files_csv"].read_text(encoding="utf-8"))
+            self.assertIn("multi_page_image_container", paths["findings_csv"].read_text(encoding="utf-8"))
+            html = paths["html"].read_text(encoding="utf-8")
+            self.assertIn("Frames/Pages", html)
+            self.assertIn("Multi-page image container", html)
+
+    def test_single_page_tiff_reports_one_frame_without_multi_page_finding(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            _synthetic_text_page().save(input_dir / "single_page.tif", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+
+            self.assertEqual(report["files"][0]["frame_count"], 1)
+            rules = {finding["rule"] for finding in report["findings"]}
+            self.assertNotIn("multi_page_image_container", rules)
 
     def test_batch_orientation_consistency_flags_mixed_portrait_and_landscape(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

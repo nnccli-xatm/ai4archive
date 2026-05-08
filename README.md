@@ -539,6 +539,8 @@ file record also includes:
   `quality_scanline_location_ratio`, `quality_scanline_band_width`, and
   `quality_scanline_reason`: conservative scan-time row/column anomaly
   screening for obvious horizontal or vertical scanner lines and streaks.
+- `frame_count`: best-effort image container frame/page count when Pillow
+  exposes it, such as for multi-page TIFF files.
 - `orientation_class`: coarse page shape classification, one of `portrait`,
   `landscape`, or `square`; near-square images are treated as `square`.
 - `aspect_ratio`: width divided by height, rounded for report display.
@@ -562,6 +564,9 @@ The default quality thresholds are intentionally conservative:
   finds a conservative edge-touching trim candidate.
 - `quality_scanline_candidate` P2 when a resized grayscale thumbnail has an
   obvious full-span horizontal or vertical intensity anomaly.
+- `multi_page_image_container` P2 when Pillow reports more than one frame/page
+  in an image container. This is a project policy review prompt for
+  single-page delivery, not a platform adaptation step.
 - `batch_orientation_consistency` P2 when a batch has a supported mix of
   portrait and landscape openable images after excluding square or near-square
   pages. The default is conservative and requires at least two files in each
@@ -571,7 +576,8 @@ The default quality thresholds are intentionally conservative:
 These thresholds are defaults in the built-in rules profile so batch-specific
 callers can tune them through JSON without changing report structure. JSON
 summary and manifest metadata include skipped file and directory counts for
-auditability. The CSV file export includes the quality metric columns. The HTML
+auditability. The CSV file export includes the frame/page count and quality
+metric columns. The HTML
 report is a single static file with inline CSS for manual review; it shows the
 batch manifest, summary counts, skipped counts, file metadata and quality metric
 table, and finding table with P0/P1/P2 severity badges. It does not embed source

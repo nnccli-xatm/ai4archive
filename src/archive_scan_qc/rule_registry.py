@@ -69,6 +69,15 @@ RULE_REGISTRY: dict[str, RuleMetadata] = {
         "automated",
         "The image has missing or invalid width or height metadata and cannot be reliably reviewed.",
     ),
+    "multi_page_image_container": RuleMetadata(
+        "multi_page_image_container",
+        "Multi-page image container",
+        "P2",
+        ("DA/T 31-2017 10.5.2 missed/rescanned/extra scans", "DA/T 31-2017 12.2 acceptance scope"),
+        "image container frame/page metadata",
+        "automated screening",
+        "The image container exposes more than one frame/page and should be reviewed against the project's single-page delivery policy.",
+    ),
     "duplicate_name": RuleMetadata(
         "duplicate_name",
         "Duplicate filename in directory",

@@ -35,6 +35,7 @@ def write_reports(report: dict[str, Any], output_dir: Path) -> dict[str, Path]:
         "format",
         "width",
         "height",
+        "frame_count",
         "dpi_x",
         "dpi_y",
         "color_mode",
@@ -617,6 +618,7 @@ def _files_table(files: list[dict[str, Any]]) -> str:
             f"<td>{_text(item.get('openable'))}</td>"
             f"<td>{_text(item.get('format'))}</td>"
             f"<td>{_text(item.get('width'))} x {_text(item.get('height'))}</td>"
+            f"<td>{_text(item.get('frame_count'))}</td>"
             f"<td>{_text(item.get('dpi_x'))} x {_text(item.get('dpi_y'))}</td>"
             f"<td>{_text(item.get('color_mode'))}</td>"
             f"<td>{_text(item.get('orientation_class'))}</td>"
@@ -644,7 +646,7 @@ def _files_table(files: list[dict[str, Any]]) -> str:
     return (
         '<div class="table-wrap"><table><thead><tr><th>Path</th><th>Filename</th><th>Manifest Order</th><th>Manifest Sequence</th><th>Extension</th>'
         "<th>Openable</th><th>Format</th><th>Dimensions</th>"
-        "<th>DPI</th><th>Color</th><th>Orientation</th><th>Aspect Ratio</th>"
+        "<th>Frames/Pages</th><th>DPI</th><th>Color</th><th>Orientation</th><th>Aspect Ratio</th>"
         "<th>EXIF Orientation</th><th>EXIF Transpose Signal</th><th>Brightness Mean</th><th>Contrast Stddev</th>"
         "<th>Sharpness Laplacian Var</th><th>Dark Pixel Ratio</th><th>Foreground Coverage</th>"
         "<th>Edge Coverage</th><th>Skew Angle</th><th>Skew Confidence</th><th>Dark Border BBox</th>"

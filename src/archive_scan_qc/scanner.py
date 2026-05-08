@@ -343,6 +343,7 @@ def _inspect_file(path: Path, root: Path) -> dict[str, Any]:
         "format": None,
         "width": None,
         "height": None,
+        "frame_count": None,
         "dpi_x": None,
         "dpi_y": None,
         "color_mode": None,
@@ -383,6 +384,7 @@ def _inspect_file(path: Path, root: Path) -> dict[str, Any]:
                     "format": image.format,
                     "width": image.width,
                     "height": image.height,
+                    "frame_count": _extract_frame_count(image),
                     "dpi_x": dpi_x,
                     "dpi_y": dpi_y,
                     "color_mode": image.mode,
@@ -608,6 +610,16 @@ def _extract_dpi(raw_dpi: Any) -> tuple[int | None, int | None]:
     return dpi_x, dpi_y
 
 
+def _extract_frame_count(image: Image.Image) -> int | None:
+    try:
+        frame_count = getattr(image, "n_frames", None)
+    except (OSError, ValueError):
+        return None
+    if isinstance(frame_count, int) and frame_count > 0:
+        return frame_count
+    return None
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -761,6 +773,19 @@ def _add_per_file_findings(
             _append_finding(item, findings, "dpi_minimum", "P0", f"Image DPI is below minimum {profile.min_dpi}.", profile)
         if not item["width"] or not item["height"]:
             _append_finding(item, findings, "dimensions", "P0", "Image width or height is missing.", profile)
+        frame_count = item.get("frame_count")
+        if isinstance(frame_count, int) and frame_count > 1:
+            _append_finding(
+                item,
+                findings,
+                "multi_page_image_container",
+                "P2",
+                (
+                    f"Image container exposes {frame_count} frames/pages; review project policy "
+                    "for single-page scan delivery instead of treating only the first frame as complete."
+                ),
+                profile,
+            )
         if name_regex and not name_regex.fullmatch(Path(item["filename"]).stem):
             _append_finding(
                 item,
