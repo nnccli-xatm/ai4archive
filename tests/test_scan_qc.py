@@ -20,6 +20,7 @@ from archive_scan_qc.benchmark import _recommendations
 from archive_scan_qc.cli import main
 from archive_scan_qc.handoff import write_delivery_handoff_manifest
 from archive_scan_qc.processing import ProcessingOptions, process_images
+from archive_scan_qc.processing_plan import build_processing_plan
 from archive_scan_qc.processing_review import build_processing_review_package
 from archive_scan_qc.reports import build_review_summary, write_reports, write_review_export, write_review_summary
 from archive_scan_qc.rule_registry import RULE_REGISTRY, validate_provider_rule_id
@@ -2447,6 +2448,70 @@ class ScanQcTest(unittest.TestCase):
 
             self.assertEqual([record["source_relative_path"] for record in manifest["files"]], [item["relative_path"] for item in report["files"]])
             self.assertEqual(manifest["summary"]["performance"]["mode"], "parallel")
+
+    def test_processing_plan_covers_candidates_without_derivatives(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            plan_dir = root / "plan"
+            input_dir.mkdir()
+            _synthetic_text_page().rotate(2.0, resample=Image.Resampling.BICUBIC, expand=True, fillcolor="white").save(
+                input_dir / "A001_skew.png"
+            )
+            _synthetic_dark_border_page().save(input_dir / "A001_border.png")
+            Image.new("RGB", (240, 180), "white").save(input_dir / "A001_clean.png")
+            (input_dir / "A001_broken.png").write_text("not an image", encoding="utf-8")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            report_path = write_reports(report, output_dir)["json"]
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "processing-plan",
+                        "--report",
+                        str(report_path),
+                        "--input",
+                        str(input_dir),
+                        "--out",
+                        str(plan_dir),
+                        "--deskew",
+                        "--trim-dark-border",
+                        "--auto-crop",
+                        "--despeckle",
+                    ]
+                )
+
+            plan = json.loads((plan_dir / "processing_plan.json").read_text(encoding="utf-8"))
+            rows = {record["source_relative_path"]: record for record in plan["files"]}
+            self.assertEqual(exit_code, 0)
+            self.assertTrue((plan_dir / "processing_plan.csv").exists())
+            self.assertFalse((plan_dir / "images").exists())
+            self.assertIn("Derivative images written: no", stdout.getvalue())
+            self.assertTrue(plan["privacy"]["contains_paths"])
+            self.assertTrue(plan["privacy"]["contains_hashes"])
+            self.assertFalse(plan["privacy"]["contains_image_content"])
+            self.assertTrue(rows["A001_skew.png"]["deskew_candidate"])
+            self.assertTrue(rows["A001_border.png"]["dark_border_trim_candidate"])
+            self.assertFalse(rows["A001_clean.png"]["deskew_candidate"])
+            self.assertFalse(rows["A001_clean.png"]["dark_border_trim_candidate"])
+            self.assertEqual(rows["A001_broken.png"]["status"], "unopenable")
+            self.assertEqual(plan["summary"]["total_files"], 4)
+            self.assertEqual(plan["summary"]["unopenable_files"], 1)
+
+    def test_processing_plan_artifacts_are_deterministic(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            _synthetic_text_page().save(input_dir / "A001_clean.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            first = build_processing_plan(report, input_dir, ProcessingOptions(auto_crop=True, deskew=True))
+            second = build_processing_plan(report, input_dir, ProcessingOptions(auto_crop=True, deskew=True))
+            self.assertEqual(first, second)
 
     def test_cli_process_out_writes_processing_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

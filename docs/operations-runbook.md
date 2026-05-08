@@ -138,6 +138,24 @@ archive-scan-qc preflight \
 archive-scan-qc \
   --input /approved-work/input-batches/batch-001 \
   --out /approved-work/qc-reports/batch-001 \
+  --workers 2 \
+  --project project-code \
+  --batch batch-001 \
+  --manifest-csv /approved-work/manifests/batch-001.csv \
+  --rules-profile /approved-work/rules/project-rules.json
+
+archive-scan-qc processing-plan \
+  --report /approved-work/qc-reports/batch-001/scan_qc_report.json \
+  --input /approved-work/input-batches/batch-001 \
+  --out /approved-work/qc-reports/batch-001/processing-plan \
+  --auto-crop \
+  --deskew \
+  --trim-dark-border \
+  --despeckle
+
+archive-scan-qc \
+  --input /approved-work/input-batches/batch-001 \
+  --out /approved-work/qc-reports/batch-001 \
   --process-out /approved-work/processed-derivatives/batch-001 \
   --auto-crop \
   --deskew \
@@ -161,6 +179,15 @@ derivatives. It writes `preflight_report.json` under `--out` with aggregate
 configuration, candidate count, skipped count, manifest count, error, and warning
 fields only. Do not treat it as a scan report; it is a go/no-go configuration
 and manifest risk check.
+
+Run `archive-scan-qc processing-plan` after the scan report and before enabling
+`--process-out`. It opens images for in-memory analysis only and writes
+`processing_plan.json` plus `processing_plan.csv` under its `--out` directory.
+The plan records per-file proposed EXIF transpose, deskew, dark-border trim,
+auto-crop, despeckle, skipped, and unopenable decisions so operators can review
+the intended processing before derivative files are created. Treat the plan as
+sensitive local evidence because it contains row-level paths and hashes. It does
+not embed images, thumbnails, or image bytes.
 
 For project-scale production runs, create a local run plan instead of launching
 each batch manually. CSV example:
@@ -218,10 +245,12 @@ Each project run plan additionally writes under its project `--out` root:
 - `run_plan_summary.csv`
 
 Archive the command line, rules profile, manifest CSV, JSON report, HTML
-report, CSV exports, processing manifest, retry manifest, audit summary,
+report, CSV exports, processing plan, processing manifest, retry manifest, audit summary,
 package version, Python version, Pillow version, platform, and worker setting.
 Treat row-level reports, processing manifests, and retry manifests as sensitive
 because they include filenames, relative paths, hashes, and per-file metrics.
+Processing plans are also sensitive local evidence for the same reason and are
+intended for operator review before running `--process-out`.
 `processing_audit_summary.json` is aggregate-only: it records counts, operation
 flags, worker metadata, timing, throughput, failure totals, resume counts,
 guardrail totals, and max/average/distribution metrics for size change, pixel
@@ -624,6 +653,8 @@ Start with these controls:
 
 - `--workers`: primary control for CPU and memory pressure.
 - `--process-out`: enables derivative writing; omit for scan-only checks.
+- `archive-scan-qc processing-plan`: writes local dry-run JSON/CSV for operator
+  review without derivative images.
 - `--auto-crop`: conservative page-border crop.
 - `--deskew`: conservative small-angle deskew.
 - `--trim-dark-border`: dark edge trim before crop.
