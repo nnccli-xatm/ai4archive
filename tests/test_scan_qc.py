@@ -74,6 +74,47 @@ class ScanQcTest(unittest.TestCase):
             self.assertIn("A001_0002.png", html)
             self.assertIn("dpi_minimum", html)
             self.assertIn("P0", html)
+            self.assertIn("Schema Version", html)
+            self.assertIn("Project", html)
+            self.assertIn("Dependency Notes", html)
+            self.assertIn("Rules Profile", html)
+            self.assertIn("Performance Metrics", html)
+            self.assertIn("Skipped Inputs", html)
+            self.assertIn("Manifest Consistency", html)
+            self.assertIn("Quality Metrics", html)
+            self.assertIn("Orientation And Blank Pages", html)
+            self.assertIn("Findings Summary", html)
+            self.assertIn("Brightness Mean Avg", html)
+            self.assertIn("EXIF Transpose Signals", html)
+            self.assertIn("Manifest Unique Entries", html)
+            self.assertIn("SHA256", html)
+            self.assertIn(saved["files"][0]["sha256"], html)
+            self.assertIn("Complete Report Data", html)
+            self.assertIn('id="scan-qc-report-data"', html)
+            self.assertNotIn("<img", html.lower())
+            self.assertNotIn("data:image", html.lower())
+            self.assertNotIn("src=", html.lower())
+
+    def test_html_report_escapes_embedded_data_and_has_no_remote_resources(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+
+            Image.new("RGB", (32, 24), "white").save(input_dir / '<img src=x>.png')
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            paths = write_reports(report, output_dir)
+            html = paths["html"].read_text(encoding="utf-8")
+            lower_html = html.lower()
+
+            self.assertIn("&lt;img", lower_html)
+            self.assertIn("\\u003cimg", lower_html)
+            self.assertNotIn("<img", lower_html)
+            self.assertNotIn("data:image", lower_html)
+            self.assertNotIn('src="http', lower_html)
+            self.assertNotIn("src='http", lower_html)
 
     def test_workers_one_and_default_have_compatible_report_content(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -241,7 +282,15 @@ class ScanQcTest(unittest.TestCase):
             self.assertTrue(run["scan_only"])
             raw_json = json_path.read_text(encoding="utf-8")
             raw_csv = csv_path.read_text(encoding="utf-8")
-            for forbidden in ["private_name_001.png", "private_broken.png", "relative_path", "sha256"]:
+            for forbidden in [
+                "private_name_001.png",
+                "private_broken.png",
+                "filename",
+                "relative_path",
+                "sha256",
+                '"files": [',
+                '"findings": [',
+            ]:
                 self.assertNotIn(forbidden, raw_json)
                 self.assertNotIn(forbidden, raw_csv)
 
