@@ -501,6 +501,13 @@ file record also includes:
   page content.
 - `quality_edge_coverage`: share of thumbnail pixels with enough local
   Laplacian response to look like content edges.
+- `quality_skew_angle_degrees`, `quality_skew_confidence`, and
+  `quality_skew_reason`: conservative scan-time skew estimate reused from the
+  Pillow-only processing detector. Positive values follow Pillow's rotation
+  convention; the scan report does not rotate the source image.
+- `quality_dark_border_bbox` and `quality_dark_border_reason`: conservative
+  scan-time dark-edge border candidate reused from the processing trim
+  detector. The scan report does not crop the source image.
 - `orientation_class`: coarse page shape classification, one of `portrait`,
   `landscape`, or `square`; near-square images are treated as `square`.
 - `aspect_ratio`: width divided by height, rounded for report display.
@@ -518,6 +525,10 @@ The default quality thresholds are intentionally conservative:
 - `quality_near_blank_page` P2 when a page is very bright, has contrast at or
   below `6`, foreground coverage at or below `0.003`, edge coverage at or
   below `0.002`, and dark-pixel ratio at or below `0.0005`.
+- `quality_skew_candidate` P2 when the scan-time skew detector has a
+  high-confidence small-angle estimate from `0.5` through `5` degrees.
+- `quality_dark_border_candidate` P2 when the scan-time dark-border detector
+  finds a conservative edge-touching trim candidate.
 - `batch_orientation_consistency` P2 when a batch has a supported mix of
   portrait and landscape openable images after excluding square or near-square
   pages. The default is conservative and requires at least two files in each
@@ -544,6 +555,12 @@ rotated pages, portrait/landscape batches mixed by mistake, or EXIF orientation
 metadata that needs attention, but they are not an automatic rotation decision.
 Actual rotation or deskewing should continue to use `--deskew` or a later,
 explicitly approved handling policy.
+
+Skew and dark-border candidate findings are available in normal scan reports
+without `--process-out`. They are processing-derived review prompts for pages
+that may need deskew or border trim, not proof that a derivative operation is
+approved. Actual deskewing and border trimming still require the explicit
+processing flags and their audit manifests.
 
 The process returns exit code `1` when P0 findings are present, so it can be
 used in batch scripts. Reports are written to the output directory; original

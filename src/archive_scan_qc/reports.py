@@ -46,6 +46,11 @@ def write_reports(report: dict[str, Any], output_dir: Path) -> dict[str, Path]:
         "quality_dark_pixel_ratio",
         "quality_foreground_coverage",
         "quality_edge_coverage",
+        "quality_skew_angle_degrees",
+        "quality_skew_confidence",
+        "quality_skew_reason",
+        "quality_dark_border_bbox",
+        "quality_dark_border_reason",
         "file_size",
         "sha256",
         "error",
@@ -530,6 +535,7 @@ def _quality_metrics(files: list[dict[str, Any]], findings: list[dict[str, Any]]
         ("Dark Pixel Ratio Avg", "quality_dark_pixel_ratio"),
         ("Foreground Coverage Avg", "quality_foreground_coverage"),
         ("Edge Coverage Avg", "quality_edge_coverage"),
+        ("Skew Confidence Avg", "quality_skew_confidence"),
     ]
     metrics.extend((label, _average(openable, key)) for label, key in fields)
     rule_counts = _counts(item.get("rule") for item in findings)
@@ -539,6 +545,8 @@ def _quality_metrics(files: list[dict[str, Any]], findings: list[dict[str, Any]]
         "quality_too_bright",
         "quality_low_contrast",
         "quality_suspected_blur",
+        "quality_skew_candidate",
+        "quality_dark_border_candidate",
     ]:
         metrics.append((_label_from_key(rule), rule_counts.get(rule, 0)))
     return metrics
@@ -599,6 +607,9 @@ def _files_table(files: list[dict[str, Any]]) -> str:
             f"<td>{_text(item.get('quality_dark_pixel_ratio'))}</td>"
             f"<td>{_text(item.get('quality_foreground_coverage'))}</td>"
             f"<td>{_text(item.get('quality_edge_coverage'))}</td>"
+            f"<td>{_text(item.get('quality_skew_angle_degrees'))}</td>"
+            f"<td>{_text(item.get('quality_skew_confidence'))}</td>"
+            f"<td>{_text(item.get('quality_dark_border_bbox'))}</td>"
             f"<td>{_text(item.get('file_size'))}</td>"
             f"<td>{_text(item.get('sha256'))}</td>"
             f"<td>{_text(item.get('error'))}</td>"
@@ -610,7 +621,8 @@ def _files_table(files: list[dict[str, Any]]) -> str:
         "<th>DPI</th><th>Color</th><th>Orientation</th><th>Aspect Ratio</th>"
         "<th>EXIF Orientation</th><th>EXIF Transpose Signal</th><th>Brightness Mean</th><th>Contrast Stddev</th>"
         "<th>Sharpness Laplacian Var</th><th>Dark Pixel Ratio</th><th>Foreground Coverage</th>"
-        "<th>Edge Coverage</th><th>Bytes</th><th>SHA256</th><th>Error</th></tr></thead><tbody>"
+        "<th>Edge Coverage</th><th>Skew Angle</th><th>Skew Confidence</th><th>Dark Border BBox</th>"
+        "<th>Bytes</th><th>SHA256</th><th>Error</th></tr></thead><tbody>"
         + "\n".join(rows)
         + "</tbody></table></div>"
     )
