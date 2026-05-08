@@ -1,0 +1,8 @@
+.venv-opf/
+models/
+__pycache__/
+*.pyc
+out-ocr-local/
+out-test-pic-local/
+out-ocr-preprocess-local/
+out-ocr-preprocess-local-zh/

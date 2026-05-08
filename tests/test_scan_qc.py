@@ -1,0 +1,1220 @@
+from __future__ import annotations
+
+import contextlib
+import csv
+import io
+import json
+import shutil
+import tempfile
+import unittest
+from pathlib import Path
+
+from PIL import Image, ImageDraw, ImageFilter
+
+from archive_scan_qc.cli import main
+from archive_scan_qc.processing import ProcessingOptions, process_images
+from archive_scan_qc.reports import write_reports
+from archive_scan_qc.rules import RulesProfileError, load_rules_profile
+from archive_scan_qc.scanner import ScanConfig, scan_batch
+
+
+class ScanQcTest(unittest.TestCase):
+    def test_collects_metadata_and_writes_reports(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+            Image.new("RGB", (16, 16), "white").save(input_dir / "A001_0002.png", dpi=(150, 150))
+
+            report = scan_batch(
+                ScanConfig(
+                    project_id="p1",
+                    batch_id="b1",
+                    input_dir=input_dir,
+                    output_dir=output_dir,
+                    min_dpi=200,
+                    name_pattern=r"A001_\d{4}",
+                )
+            )
+            paths = write_reports(report, output_dir)
+
+            self.assertEqual(report["summary"]["total_files"], 2)
+            self.assertEqual(report["summary"]["openable_files"], 2)
+            self.assertTrue(any(finding["rule"] == "dpi_minimum" for finding in report["findings"]))
+            self.assertTrue(paths["json"].exists())
+            self.assertTrue(paths["html"].exists())
+            self.assertTrue(paths["files_csv"].exists())
+            self.assertTrue(paths["findings_csv"].exists())
+
+            saved = json.loads(paths["json"].read_text(encoding="utf-8"))
+            self.assertEqual(saved["project"]["project_id"], "p1")
+            self.assertEqual(saved["manifest"]["project_id"], "p1")
+            self.assertEqual(saved["manifest"]["batch_id"], "b1")
+            self.assertEqual(saved["manifest"]["rule_version"], "scan-qc.phase1.v1")
+            self.assertEqual(saved["manifest"]["total_files"], 2)
+            self.assertEqual(saved["manifest"]["p0_findings"], report["summary"]["p0_findings"])
+            self.assertFalse(saved["manifest"]["manifest_used"])
+            self.assertIn("performance", saved["summary"])
+            self.assertIn("performance", saved["manifest"])
+            self.assertEqual(saved["summary"]["performance"]["total_files"], 2)
+            self.assertEqual(saved["summary"]["performance"]["openable_files"], 2)
+            self.assertIn("effective_workers", saved["summary"]["performance"])
+            self.assertIn(saved["summary"]["performance"]["mode"], {"serial", "parallel"})
+            self.assertGreaterEqual(saved["summary"]["performance"]["elapsed_seconds"], 0)
+            self.assertGreaterEqual(saved["summary"]["performance"]["files_per_minute"], 0)
+            self.assertGreaterEqual(saved["summary"]["performance"]["openable_files_per_minute"], 0)
+
+            html = paths["html"].read_text(encoding="utf-8")
+            self.assertIn("<!doctype html>", html)
+            self.assertIn("Scan QC Report", html)
+            self.assertIn("Total Files", html)
+            self.assertIn("A001_0002.png", html)
+            self.assertIn("dpi_minimum", html)
+            self.assertIn("P0", html)
+
+    def test_workers_one_and_default_have_compatible_report_content(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            serial_out = root / "serial"
+            default_out = root / "default"
+            input_dir.mkdir()
+
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+            Image.new("RGB", (16, 16), "white").save(input_dir / "A001_0002.png", dpi=(150, 150))
+            (input_dir / "broken.jpg").write_text("not an image", encoding="utf-8")
+
+            serial = scan_batch(ScanConfig("p1", "b1", input_dir, serial_out, workers=1))
+            default = scan_batch(ScanConfig("p1", "b1", input_dir, default_out))
+
+            self.assertEqual(serial["files"], default["files"])
+            self.assertEqual(serial["findings"], default["findings"])
+            self.assertEqual(serial["summary"]["total_files"], default["summary"]["total_files"])
+            self.assertEqual(serial["summary"]["total_findings"], default["summary"]["total_findings"])
+            self.assertEqual(serial["summary"]["performance"]["mode"], "serial")
+
+    def test_multi_worker_scan_output_and_findings_order_is_stable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+
+            for name in ["B_0002.png", "a_0001.jpg", "nested/C_0003.png"]:
+                path = input_dir / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                Image.new("RGB", (24, 24), "white").save(path, dpi=(150, 150))
+            (input_dir / "bad.png").write_text("not an image", encoding="utf-8")
+
+            first = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir, workers=4))
+            second = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir, workers=4))
+
+            self.assertEqual([item["relative_path"] for item in first["files"]], sorted(item["relative_path"] for item in first["files"]))
+            self.assertEqual(first["files"], second["files"])
+            self.assertEqual(first["findings"], second["findings"])
+            self.assertEqual(first["summary"]["performance"]["mode"], "parallel")
+
+    def test_flags_unopenable_and_duplicate_hashes_without_cross_directory_name_false_positive(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            nested_dir = input_dir / "nested"
+            nested_dir.mkdir(parents=True)
+
+            source = input_dir / "DUP_0001.jpg"
+            Image.new("RGB", (12, 12), "white").save(source, dpi=(300, 300))
+            shutil.copyfile(source, nested_dir / "DUP_0001.jpg")
+            (input_dir / "broken.jpg").write_text("not an image", encoding="utf-8")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            rules = {finding["rule"] for finding in report["findings"]}
+
+            self.assertIn("openability", rules)
+            self.assertNotIn("duplicate_name", rules)
+            self.assertIn("duplicate_file", rules)
+            self.assertGreaterEqual(report["summary"]["p0_findings"], 2)
+
+    def test_manifest_flags_missing_unexpected_and_duplicate_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            manifest_csv = root / "manifest.csv"
+
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0002.jpg", dpi=(300, 300))
+            manifest_csv.write_text(
+                "relative_path\n"
+                "A001_0001.jpg\n"
+                "A001_0001.jpg\n"
+                "A001_0003.jpg\n",
+                encoding="utf-8",
+            )
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir, manifest_csv=manifest_csv))
+            rules = {finding["rule"] for finding in report["findings"]}
+
+            self.assertIn("manifest_missing_file", rules)
+            self.assertIn("manifest_unexpected_file", rules)
+            self.assertIn("manifest_duplicate_entry", rules)
+            self.assertEqual(report["summary"]["manifest_entry_count"], 3)
+            self.assertEqual(report["summary"]["manifest_unique_entry_count"], 2)
+            self.assertEqual(report["summary"]["manifest_missing_count"], 1)
+            self.assertEqual(report["summary"]["manifest_unexpected_count"], 1)
+            self.assertEqual(report["summary"]["manifest_duplicate_count"], 1)
+            self.assertTrue(report["manifest"]["manifest_used"])
+            self.assertEqual(report["manifest"]["manifest_entry_count"], 3)
+
+            paths = write_reports(report, output_dir)
+            html = paths["html"].read_text(encoding="utf-8")
+            self.assertIn("Manifest Entries", html)
+            self.assertIn("Manifest Missing", html)
+            self.assertIn("manifest_unexpected_file", html)
+
+    def test_cli_accepts_manifest_and_returns_one_for_p0_manifest_findings(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            manifest_csv = root / "manifest.csv"
+
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+            manifest_csv.write_text("relative_path\nA001_0002.jpg\n", encoding="utf-8")
+
+            exit_code = main(
+                [
+                    "--input",
+                    str(input_dir),
+                    "--out",
+                    str(output_dir),
+                    "--manifest-csv",
+                    str(manifest_csv),
+                ]
+            )
+
+            self.assertEqual(exit_code, 1)
+            saved = json.loads((output_dir / "scan_qc_report.json").read_text(encoding="utf-8"))
+            self.assertTrue(saved["manifest"]["manifest_used"])
+            self.assertEqual(saved["summary"]["manifest_missing_count"], 1)
+            self.assertEqual(saved["summary"]["manifest_unexpected_count"], 1)
+
+    def test_benchmark_writes_privacy_safe_json_and_csv(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "benchmark"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "private_name_001.png", dpi=(300, 300))
+            (input_dir / "private_broken.png").write_text("not an image", encoding="utf-8")
+
+            exit_code = main(
+                [
+                    "benchmark",
+                    "--input",
+                    str(input_dir),
+                    "--out",
+                    str(output_dir),
+                    "--workers-list",
+                    "1",
+                    "--scan-only",
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            json_path = output_dir / "benchmark_results.json"
+            csv_path = output_dir / "benchmark_results.csv"
+            self.assertTrue(json_path.exists())
+            self.assertTrue(csv_path.exists())
+            payload = json.loads(json_path.read_text(encoding="utf-8"))
+            self.assertEqual(len(payload["runs"]), 1)
+            run = payload["runs"][0]
+            self.assertEqual(run["total_files"], 2)
+            self.assertEqual(run["openable_files"], 1)
+            self.assertEqual(run["finding_rule_counts"]["openability"], 1)
+            self.assertEqual(run["finding_rule_counts"]["quality_near_blank_page"], 1)
+            self.assertTrue(run["scan_only"])
+            raw_json = json_path.read_text(encoding="utf-8")
+            raw_csv = csv_path.read_text(encoding="utf-8")
+            for forbidden in ["private_name_001.png", "private_broken.png", "relative_path", "sha256"]:
+                self.assertNotIn(forbidden, raw_json)
+                self.assertNotIn(forbidden, raw_csv)
+
+            with csv_path.open("r", newline="", encoding="utf-8") as handle:
+                rows = list(csv.DictReader(handle))
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["total_files"], "2")
+            self.assertEqual(rows[0]["openable_files"], "1")
+
+    def test_benchmark_workers_list_order_is_stable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "benchmark"
+            input_dir.mkdir()
+            for index in range(3):
+                Image.new("RGB", (32, 24), "white").save(input_dir / f"page_{index}.png", dpi=(300, 300))
+
+            exit_code = main(
+                [
+                    "benchmark",
+                    "--input",
+                    str(input_dir),
+                    "--out",
+                    str(output_dir),
+                    "--workers-list",
+                    "1,2",
+                    "--scan-only",
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads((output_dir / "benchmark_results.json").read_text(encoding="utf-8"))
+            self.assertEqual([run["requested_workers"] for run in payload["runs"]], [1, 2])
+            self.assertEqual([run["run_index"] for run in payload["runs"]], [1, 2])
+
+    def test_benchmark_processing_options_generate_aggregate(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "benchmark"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            Image.new("RGB", (40, 30), "white").save(input_dir / "private_processed.png", dpi=(300, 300))
+
+            exit_code = main(
+                [
+                    "benchmark",
+                    "--input",
+                    str(input_dir),
+                    "--out",
+                    str(output_dir),
+                    "--process-out",
+                    str(process_dir),
+                    "--workers-list",
+                    "1",
+                    "--auto-crop",
+                    "--deskew",
+                    "--trim-dark-border",
+                    "--despeckle",
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads((output_dir / "benchmark_results.json").read_text(encoding="utf-8"))
+            run = payload["runs"][0]
+            self.assertFalse(run["scan_only"])
+            self.assertTrue(run["operations"]["auto_crop"])
+            self.assertTrue(run["operations"]["deskew"])
+            self.assertEqual(run["processing"]["processed_files"], 1)
+            self.assertIsNotNone(run["processing"]["elapsed_seconds"])
+            self.assertFalse(any(process_dir.glob("*/processing_manifest.json")))
+
+    def test_benchmark_invalid_workers_and_repeats_are_clear(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "benchmark"
+            input_dir.mkdir()
+
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+                main(["benchmark", "--input", str(input_dir), "--out", str(output_dir), "--workers-list", "1,0"])
+            self.assertEqual(raised.exception.code, 2)
+            self.assertIn("--workers-list must be a positive integer", stderr.getvalue())
+
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+                main(
+                    [
+                        "benchmark",
+                        "--input",
+                        str(input_dir),
+                        "--out",
+                        str(output_dir),
+                        "--workers-list",
+                        "1",
+                        "--repeats",
+                        "0",
+                    ]
+                )
+            self.assertEqual(raised.exception.code, 2)
+            self.assertIn("--repeats must be a positive integer", stderr.getvalue())
+
+    def test_output_dir_inside_input_is_skipped_on_rerun(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = input_dir / "reports"
+            input_dir.mkdir()
+
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+
+            first_report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            write_reports(first_report, output_dir)
+            second_report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+
+            scanned_paths = {item["relative_path"] for item in second_report["files"]}
+            self.assertEqual(scanned_paths, {"A001_0001.jpg"})
+            self.assertEqual(second_report["summary"]["total_files"], 1)
+            self.assertEqual(second_report["summary"]["skipped_output_directory_count"], 1)
+            self.assertFalse(any(path.startswith("reports/") for path in scanned_paths))
+
+    def test_manifest_csv_inside_input_is_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            manifest_csv = input_dir / "manifest.csv"
+
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+            manifest_csv.write_text("relative_path\nA001_0001.jpg\n", encoding="utf-8")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir, manifest_csv=manifest_csv))
+
+            scanned_paths = {item["relative_path"] for item in report["files"]}
+            rules = {finding["rule"] for finding in report["findings"]}
+            self.assertEqual(scanned_paths, {"A001_0001.jpg"})
+            self.assertNotIn("unsupported_format", rules)
+            self.assertEqual(report["summary"]["manifest_unexpected_count"], 0)
+            self.assertEqual(report["summary"]["skipped_manifest_file_count"], 1)
+
+    def test_quality_metrics_do_not_flag_synthetic_normal_page(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            _synthetic_text_page().save(input_dir / "A001_0001.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            rules = {finding["rule"] for finding in report["findings"]}
+            file_record = report["files"][0]
+
+            self.assertNotIn("quality_too_dark", rules)
+            self.assertNotIn("quality_too_bright", rules)
+            self.assertNotIn("quality_low_contrast", rules)
+            self.assertNotIn("quality_suspected_blur", rules)
+            self.assertGreater(file_record["quality_brightness_mean"], 0)
+            self.assertGreater(file_record["quality_contrast_stddev"], 0)
+            self.assertGreater(file_record["quality_sharpness_laplacian_var"], 0)
+
+    def test_quality_metrics_flag_dark_bright_low_contrast_and_blur(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            Image.new("RGB", (80, 80), (25, 25, 25)).save(input_dir / "dark.png")
+            Image.new("RGB", (80, 80), (253, 253, 253)).save(input_dir / "bright.png")
+            Image.new("RGB", (80, 80), (128, 128, 128)).save(input_dir / "low_contrast.png")
+            _synthetic_text_page().filter(ImageFilter.GaussianBlur(radius=3)).save(input_dir / "blur.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            rules_by_path: dict[str, set[str]] = {}
+            for finding in report["findings"]:
+                rules_by_path.setdefault(finding["relative_path"], set()).add(finding["rule"])
+
+            self.assertIn("quality_too_dark", rules_by_path["dark.png"])
+            self.assertIn("quality_too_bright", rules_by_path["bright.png"])
+            self.assertIn("quality_low_contrast", rules_by_path["low_contrast.png"])
+            self.assertIn("quality_suspected_blur", rules_by_path["blur.png"])
+
+    def test_blank_page_rule_flags_blank_and_light_noise_but_not_text_page(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            Image.new("RGB", (240, 180), "white").save(input_dir / "blank.png", dpi=(300, 300))
+            _synthetic_light_noise_page().save(input_dir / "light_noise.png", dpi=(300, 300))
+            _synthetic_text_page().save(input_dir / "text.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            rules_by_path: dict[str, set[str]] = {}
+            for finding in report["findings"]:
+                rules_by_path.setdefault(finding["relative_path"], set()).add(finding["rule"])
+            records = {record["relative_path"]: record for record in report["files"]}
+
+            self.assertIn("quality_near_blank_page", rules_by_path["blank.png"])
+            self.assertIn("quality_near_blank_page", rules_by_path["light_noise.png"])
+            self.assertNotIn("quality_near_blank_page", rules_by_path.get("text.png", set()))
+            self.assertEqual(report["summary"]["blank_page_findings"], 2)
+            self.assertLessEqual(records["blank.png"]["quality_foreground_coverage"], 0.003)
+            self.assertGreater(records["text.png"]["quality_foreground_coverage"], 0.003)
+
+    def test_rules_profile_can_disable_blank_rule_and_override_severity(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            disabled_out = root / "disabled"
+            severity_out = root / "severity"
+            disabled_profile = root / "disabled.json"
+            severity_profile = root / "severity.json"
+            input_dir.mkdir()
+            Image.new("RGB", (120, 90), "white").save(input_dir / "blank.png", dpi=(300, 300))
+            disabled_profile.write_text(
+                json.dumps({"rules": {"quality_near_blank_page": {"enabled": False}}}),
+                encoding="utf-8",
+            )
+            severity_profile.write_text(
+                json.dumps({"rules": {"quality_near_blank_page": {"severity": "P1"}}}),
+                encoding="utf-8",
+            )
+
+            disabled = scan_batch(
+                ScanConfig("p1", "b1", input_dir, disabled_out, rules_profile=load_rules_profile(disabled_profile))
+            )
+            severity = scan_batch(
+                ScanConfig("p1", "b1", input_dir, severity_out, rules_profile=load_rules_profile(severity_profile))
+            )
+
+            self.assertFalse(any(finding["rule"] == "quality_near_blank_page" for finding in disabled["findings"]))
+            self.assertTrue(
+                any(
+                    finding["rule"] == "quality_near_blank_page" and finding["severity"] == "P1"
+                    for finding in severity["findings"]
+                )
+            )
+
+    def test_default_rules_profile_metadata_preserves_existing_thresholds(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.jpg", dpi=(150, 150))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            profile = report["manifest"]["rules_profile"]
+
+            self.assertEqual(profile["name"], "default")
+            self.assertEqual(profile["version"], "scan-qc.phase1.v1")
+            self.assertEqual(profile["source"], "builtin")
+            self.assertEqual(profile["thresholds"]["min_dpi"], 200)
+            self.assertEqual(profile["thresholds"]["quality"]["dark_mean_threshold"], 45.0)
+            self.assertTrue(any(finding["rule"] == "dpi_minimum" and finding["severity"] == "P0" for finding in report["findings"]))
+
+    def test_json_rules_profile_overrides_min_dpi_quality_threshold_and_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            profile_path = root / "rules.json"
+            input_dir.mkdir()
+            Image.new("RGB", (80, 80), (40, 40, 40)).save(input_dir / "A001_0001.jpg", dpi=(250, 250))
+            profile_path.write_text(
+                json.dumps(
+                    {
+                        "name": "project-standard",
+                        "version": "2026.1",
+                        "min_dpi": 300,
+                        "quality_thresholds": {"dark_mean_threshold": 30},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir, rules_profile=load_rules_profile(profile_path)))
+            rules = {finding["rule"] for finding in report["findings"]}
+
+            self.assertIn("dpi_minimum", rules)
+            self.assertNotIn("quality_too_dark", rules)
+            self.assertEqual(report["project"]["min_dpi"], 300)
+            self.assertEqual(report["manifest"]["rules_profile"]["name"], "project-standard")
+            self.assertEqual(report["manifest"]["rules_profile"]["version"], "2026.1")
+            self.assertEqual(report["manifest"]["rules_profile"]["source"], str(profile_path.resolve()))
+            self.assertEqual(report["manifest"]["rules_profile"]["thresholds"]["quality"]["dark_mean_threshold"], 30.0)
+
+    def test_rules_profile_can_disable_quality_rule(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            profile_path = root / "rules.json"
+            input_dir.mkdir()
+            Image.new("RGB", (80, 80), (25, 25, 25)).save(input_dir / "dark.png")
+            profile_path.write_text(
+                json.dumps({"rules": {"quality_too_dark": {"enabled": False}}}),
+                encoding="utf-8",
+            )
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir, rules_profile=load_rules_profile(profile_path)))
+            rules = {finding["rule"] for finding in report["findings"]}
+
+            self.assertNotIn("quality_too_dark", rules)
+            self.assertIn("quality_low_contrast", rules)
+
+    def test_rules_profile_severity_override_applies_but_protected_p0_stays_p0(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            profile_path = root / "rules.json"
+            input_dir.mkdir()
+            Image.new("RGB", (80, 80), (25, 25, 25)).save(input_dir / "dark.png", dpi=(150, 150))
+            profile_path.write_text(
+                json.dumps(
+                    {
+                        "rules": {
+                            "quality_too_dark": {"severity": "P2"},
+                            "dpi_minimum": {"severity": "P2", "enabled": False},
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir, rules_profile=load_rules_profile(profile_path)))
+            severities = {(finding["rule"], finding["severity"]) for finding in report["findings"]}
+
+            self.assertIn(("quality_too_dark", "P2"), severities)
+            self.assertIn(("dpi_minimum", "P0"), severities)
+
+    def test_invalid_rules_profile_errors_are_clear_and_cli_writes_no_report(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            bad_type_path = root / "bad-type.json"
+            bad_json_path = root / "bad-json.json"
+            input_dir.mkdir()
+            bad_type_path.write_text(json.dumps({"min_dpi": "300"}), encoding="utf-8")
+            bad_json_path.write_text("{", encoding="utf-8")
+
+            with self.assertRaisesRegex(RulesProfileError, "min_dpi"):
+                load_rules_profile(bad_type_path)
+            with self.assertRaisesRegex(RulesProfileError, "line 1, column 2"):
+                load_rules_profile(bad_json_path)
+            with self.assertRaisesRegex(RulesProfileError, "does not exist"):
+                load_rules_profile(root / "missing.json")
+
+            with self.assertRaises(SystemExit) as raised:
+                main(["--input", str(input_dir), "--out", str(output_dir), "--rules-profile", str(bad_type_path)])
+
+            self.assertEqual(raised.exception.code, 2)
+            self.assertFalse(output_dir.exists())
+
+    def test_quality_metrics_are_visible_in_json_csv_and_html(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            _synthetic_text_page().filter(ImageFilter.GaussianBlur(radius=3)).save(input_dir / "blur.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            paths = write_reports(report, output_dir)
+
+            saved = json.loads(paths["json"].read_text(encoding="utf-8"))
+            self.assertIn("quality_brightness_mean", saved["files"][0])
+            self.assertIn("quality_dark_pixel_ratio", saved["files"][0])
+            self.assertIn("quality_foreground_coverage", saved["files"][0])
+            self.assertIn("quality_edge_coverage", saved["files"][0])
+            self.assertIn("quality_contrast_stddev", paths["files_csv"].read_text(encoding="utf-8"))
+            self.assertIn("quality_foreground_coverage", paths["files_csv"].read_text(encoding="utf-8"))
+            html = paths["html"].read_text(encoding="utf-8")
+            self.assertIn("Brightness Mean", html)
+            self.assertIn("Foreground Coverage", html)
+            self.assertIn("quality_suspected_blur", html)
+
+    def test_orientation_metrics_are_visible_in_json_csv_and_html(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            Image.new("RGB", (80, 120), "white").save(input_dir / "portrait.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            paths = write_reports(report, output_dir)
+
+            saved = json.loads(paths["json"].read_text(encoding="utf-8"))
+            self.assertEqual(saved["files"][0]["orientation_class"], "portrait")
+            self.assertEqual(saved["files"][0]["aspect_ratio"], 0.6667)
+            self.assertIn("exif_orientation_requires_transpose", saved["files"][0])
+            csv_text = paths["files_csv"].read_text(encoding="utf-8")
+            self.assertIn("orientation_class", csv_text)
+            self.assertIn("aspect_ratio", csv_text)
+            self.assertIn("exif_orientation_requires_transpose", csv_text)
+            html = paths["html"].read_text(encoding="utf-8")
+            self.assertIn("Orientation", html)
+            self.assertIn("Aspect Ratio", html)
+            self.assertIn("EXIF Transpose Signal", html)
+
+    def test_batch_orientation_consistency_flags_mixed_portrait_and_landscape(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            for index in range(2):
+                Image.new("RGB", (80, 120), "white").save(input_dir / f"portrait_{index}.png")
+                Image.new("RGB", (120, 80), "white").save(input_dir / f"landscape_{index}.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            orientation_findings = [
+                finding for finding in report["findings"] if finding["rule"] == "batch_orientation_consistency"
+            ]
+
+            self.assertEqual(len(orientation_findings), 4)
+            self.assertTrue(all(finding["severity"] == "P2" for finding in orientation_findings))
+
+    def test_batch_orientation_consistency_ignores_all_portrait_and_near_square(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            for index in range(3):
+                Image.new("RGB", (80, 120), "white").save(input_dir / f"portrait_{index}.png")
+            Image.new("RGB", (100, 102), "white").save(input_dir / "near_square.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            records = {record["relative_path"]: record for record in report["files"]}
+            rules = {finding["rule"] for finding in report["findings"]}
+
+            self.assertEqual(records["near_square.png"]["orientation_class"], "square")
+            self.assertNotIn("batch_orientation_consistency", rules)
+
+    def test_batch_orientation_consistency_can_be_disabled_and_severity_overridden(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            disabled_out = root / "disabled"
+            severity_out = root / "severity"
+            disabled_profile = root / "disabled.json"
+            severity_profile = root / "severity.json"
+            input_dir.mkdir()
+            for index in range(2):
+                Image.new("RGB", (80, 120), "white").save(input_dir / f"portrait_{index}.png")
+                Image.new("RGB", (120, 80), "white").save(input_dir / f"landscape_{index}.png")
+            disabled_profile.write_text(
+                json.dumps({"rules": {"batch_orientation_consistency": {"enabled": False}}}),
+                encoding="utf-8",
+            )
+            severity_profile.write_text(
+                json.dumps({"rules": {"batch_orientation_consistency": {"severity": "P1"}}}),
+                encoding="utf-8",
+            )
+
+            disabled = scan_batch(
+                ScanConfig("p1", "b1", input_dir, disabled_out, rules_profile=load_rules_profile(disabled_profile))
+            )
+            severity = scan_batch(
+                ScanConfig("p1", "b1", input_dir, severity_out, rules_profile=load_rules_profile(severity_profile))
+            )
+
+            self.assertFalse(any(finding["rule"] == "batch_orientation_consistency" for finding in disabled["findings"]))
+            self.assertTrue(
+                any(
+                    finding["rule"] == "batch_orientation_consistency" and finding["severity"] == "P1"
+                    for finding in severity["findings"]
+                )
+            )
+
+    def test_benchmark_aggregate_includes_orientation_rule_count_without_file_identifiers(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "benchmark"
+            input_dir.mkdir()
+            for index in range(2):
+                Image.new("RGB", (80, 120), "white").save(input_dir / f"portrait_secret_{index}.png")
+                Image.new("RGB", (120, 80), "white").save(input_dir / f"landscape_secret_{index}.png")
+
+            exit_code = main(
+                [
+                    "benchmark",
+                    "--input",
+                    str(input_dir),
+                    "--out",
+                    str(output_dir),
+                    "--workers-list",
+                    "1",
+                    "--scan-only",
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            json_path = output_dir / "benchmark_results.json"
+            payload = json.loads(json_path.read_text(encoding="utf-8"))
+            run = payload["runs"][0]
+            self.assertEqual(run["finding_rule_counts"]["batch_orientation_consistency"], 4)
+            raw_json = json_path.read_text(encoding="utf-8")
+            raw_csv = (output_dir / "benchmark_results.csv").read_text(encoding="utf-8")
+            for forbidden in ["portrait_secret", "landscape_secret", "relative_path", "sha256"]:
+                self.assertNotIn(forbidden, raw_json)
+                self.assertNotIn(forbidden, raw_csv)
+
+    def test_hidden_directories_are_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            hidden_dir = input_dir / ".cache"
+            hidden_dir.mkdir(parents=True)
+
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+            Image.new("RGB", (32, 24), "white").save(hidden_dir / "A001_0002.jpg", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+
+            scanned_paths = {item["relative_path"] for item in report["files"]}
+            self.assertEqual(scanned_paths, {"A001_0001.jpg"})
+            self.assertEqual(report["summary"]["skipped_hidden_directory_count"], 1)
+            self.assertEqual(report["summary"]["skipped_directory_count"], 1)
+
+    def test_process_images_writes_derivatives_without_modifying_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "A001_0001.jpg"
+            Image.new("RGB", (32, 24), (120, 120, 120)).save(source, dpi=(300, 300))
+            source_bytes = source.read_bytes()
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir)
+
+            processed = process_dir / "images" / "A001_0001.jpg"
+            manifest_path = process_dir / "processing_manifest.json"
+            self.assertTrue(processed.exists())
+            self.assertTrue(manifest_path.exists())
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(manifest["summary"]["processed_files"], 1)
+            self.assertIn("performance", manifest)
+            self.assertIn("performance", manifest["summary"])
+            self.assertEqual(manifest["performance"]["total_files"], 1)
+            self.assertEqual(manifest["performance"]["processed_files"], 1)
+            self.assertEqual(manifest["performance"]["skipped_files"], 0)
+            self.assertEqual(manifest["performance"]["failed_files"], 0)
+            self.assertGreaterEqual(manifest["performance"]["elapsed_seconds"], 0)
+            self.assertGreaterEqual(manifest["performance"]["processed_files_per_minute"], 0)
+            self.assertGreaterEqual(manifest["performance"]["total_files_per_minute"], 0)
+            self.assertIn("effective_workers", manifest["performance"])
+            self.assertEqual(manifest["files"][0]["status"], "processed")
+            self.assertEqual(manifest["files"][0]["source_relative_path"], "A001_0001.jpg")
+            self.assertEqual(manifest["files"][0]["original_size"], [32, 24])
+            self.assertEqual(manifest["files"][0]["output_size"], [32, 24])
+            self.assertIsNone(manifest["files"][0]["crop_bbox"])
+            self.assertFalse(manifest["files"][0]["cropped"])
+            self.assertFalse(manifest["files"][0]["deskewed"])
+            self.assertEqual(manifest["files"][0]["deskew_reason"], "deskew disabled")
+            self.assertIn("auto_crop_disabled", manifest["files"][0]["operations"])
+            self.assertIn("deskew_disabled", manifest["files"][0]["operations"])
+
+    def test_multi_worker_processing_manifest_order_and_outputs_are_stable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            for name in ["B_0002.png", "A_0001.png", "nested/C_0003.png"]:
+                path = input_dir / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                Image.new("RGB", (40, 30), "white").save(path)
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir, workers=4))
+            first = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, workers=4))
+            second = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, workers=4))
+
+            self.assertEqual([record["source_relative_path"] for record in first["files"]], [item["relative_path"] for item in report["files"]])
+            self.assertEqual(first["files"], second["files"])
+            self.assertEqual(first["summary"]["performance"]["mode"], "parallel")
+            for record in first["files"]:
+                self.assertEqual(record["status"], "processed")
+                self.assertTrue((process_dir / record["output_relative_path"]).exists())
+
+    def test_multi_worker_processing_failure_does_not_stop_other_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            good = input_dir / "A001_0001.png"
+            broken_after_scan = input_dir / "A001_0002.png"
+            Image.new("RGB", (40, 30), "white").save(good)
+            Image.new("RGB", (40, 30), "white").save(broken_after_scan)
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir, workers=2))
+            broken_after_scan.write_text("not an image anymore", encoding="utf-8")
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(workers=2))
+
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            self.assertEqual(records["A001_0001.png"]["status"], "processed")
+            self.assertEqual(records["A001_0002.png"]["status"], "failed")
+            self.assertEqual(manifest["summary"]["processed_files"], 1)
+            self.assertEqual(manifest["summary"]["failed_files"], 1)
+
+    def test_deskew_corrects_synthetic_light_skew(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "A001_0001.png"
+            image = _synthetic_text_page().rotate(-3.0, resample=Image.Resampling.BICUBIC, expand=True, fillcolor="white")
+            image.save(source)
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(deskew=True))
+
+            record = manifest["files"][0]
+            self.assertEqual(record["status"], "processed")
+            self.assertTrue(record["deskewed"])
+            self.assertAlmostEqual(record["skew_angle_degrees"], -3.0, delta=0.75)
+            self.assertGreaterEqual(record["skew_confidence"], 0.08)
+            self.assertEqual(record["deskew_reason"], "deskew applied")
+            self.assertNotEqual(record["pre_deskew_size"], record["post_deskew_size"])
+            self.assertIn("deskew_conservative", record["operations"])
+
+    def test_deskew_does_not_rotate_blank_or_low_contrast_pages(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            Image.new("RGB", (120, 90), "white").save(input_dir / "A001_0001.png")
+            low_contrast = Image.new("RGB", (160, 120), (245, 245, 245))
+            draw = ImageDraw.Draw(low_contrast)
+            for y in range(30, 90, 12):
+                draw.line((35, y, 125, y), fill=(235, 235, 235), width=2)
+            low_contrast.save(input_dir / "A001_0002.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(deskew=True))
+
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            self.assertFalse(records["A001_0001.png"]["deskewed"])
+            self.assertFalse(records["A001_0002.png"]["deskewed"])
+            self.assertIn(records["A001_0001.png"]["deskew_reason"], {"blank page", "low contrast"})
+            self.assertEqual(records["A001_0002.png"]["deskew_reason"], "low contrast")
+
+    def test_deskew_does_not_rotate_large_angle(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "A001_0001.png"
+            image = _synthetic_text_page().rotate(-8.0, resample=Image.Resampling.BICUBIC, expand=True, fillcolor="white")
+            image.save(source)
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(deskew=True))
+
+            record = manifest["files"][0]
+            self.assertFalse(record["deskewed"])
+            self.assertGreater(abs(record["skew_angle_degrees"]), 5.0)
+            self.assertEqual(record["deskew_reason"], "angle exceeds conservative threshold")
+            self.assertIn("deskew_noop", record["operations"])
+
+    def test_auto_crop_trims_white_margin_around_black_page_border(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "A001_0001.png"
+            image = Image.new("RGB", (80, 60), "white")
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((10, 8, 69, 51), outline="black", width=3)
+            image.save(source)
+            source_bytes = source.read_bytes()
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True))
+
+            with Image.open(process_dir / "images" / "A001_0001.png") as processed:
+                processed_size = processed.size
+            record = manifest["files"][0]
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(record["status"], "processed")
+            self.assertTrue(record["cropped"])
+            self.assertEqual(record["crop_bbox"], [10, 8, 70, 52])
+            self.assertEqual(record["original_size"], [80, 60])
+            self.assertEqual(record["output_size"], [60, 44])
+            self.assertEqual(processed_size, (60, 44))
+            self.assertIn("auto_crop_conservative", record["operations"])
+
+    def test_auto_crop_does_not_overcrop_blank_or_low_contrast_images(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            Image.new("RGB", (80, 60), "white").save(input_dir / "A001_0001.png")
+            low_contrast = Image.new("RGB", (80, 60), (245, 245, 245))
+            draw = ImageDraw.Draw(low_contrast)
+            draw.rectangle((10, 8, 69, 51), outline=(235, 235, 235), width=3)
+            low_contrast.save(input_dir / "A001_0002.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True))
+
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            self.assertFalse(records["A001_0001.png"]["cropped"])
+            self.assertFalse(records["A001_0002.png"]["cropped"])
+            self.assertEqual(records["A001_0001.png"]["output_size"], [80, 60])
+            self.assertEqual(records["A001_0002.png"]["output_size"], [80, 60])
+            self.assertIn("auto_crop_noop", records["A001_0001.png"]["operations"])
+            self.assertIn("auto_crop_noop", records["A001_0002.png"]["operations"])
+
+    def test_disabled_new_retouch_options_keep_derivative_size_compatible(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            Image.new("RGB", (80, 60), "white").save(input_dir / "A001_0001.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions())
+
+            record = manifest["files"][0]
+            self.assertEqual(record["output_size"], [80, 60])
+            self.assertFalse(record["dark_border_trimmed"])
+            self.assertIsNone(record["dark_border_bbox"])
+            self.assertEqual(record["dark_border_reason"], "dark border trim disabled")
+            self.assertFalse(record["despeckled"])
+            self.assertEqual(record["despeckle_pixels_changed"], 0)
+            self.assertEqual(record["despeckle_reason"], "despeckle disabled")
+            self.assertIn("dark_border_trim_disabled", record["operations"])
+            self.assertIn("despeckle_disabled", record["operations"])
+
+    def test_trim_dark_border_trims_edge_border_without_touching_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "A001_0001.png"
+            image = Image.new("RGB", (100, 80), "white")
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((0, 0, 99, 79), outline="black", width=5)
+            draw.rectangle((25, 24, 75, 28), fill=(20, 20, 20))
+            image.save(source)
+            source_bytes = source.read_bytes()
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(trim_dark_border=True))
+
+            with Image.open(process_dir / "images" / "A001_0001.png") as processed:
+                processed_size = processed.size
+            record = manifest["files"][0]
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertTrue(record["dark_border_trimmed"])
+            self.assertEqual(record["dark_border_bbox"], [5, 5, 95, 75])
+            self.assertEqual(record["output_size"], [90, 70])
+            self.assertEqual(processed_size, (90, 70))
+            self.assertEqual(record["dark_border_reason"], "dark edge border trimmed")
+            self.assertIn("dark_border_trim_conservative", record["operations"])
+
+    def test_trim_dark_border_noops_for_blank_and_edge_content(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            Image.new("RGB", (100, 80), "white").save(input_dir / "A001_0001.png")
+            edge_content = Image.new("RGB", (100, 80), "white")
+            draw = ImageDraw.Draw(edge_content)
+            draw.rectangle((0, 20, 18, 25), fill=(10, 10, 10))
+            draw.line((0, 50, 40, 50), fill=(10, 10, 10), width=2)
+            edge_content.save(input_dir / "A001_0002.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(trim_dark_border=True))
+
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            for record in records.values():
+                self.assertFalse(record["dark_border_trimmed"])
+                self.assertIsNone(record["dark_border_bbox"])
+                self.assertEqual(record["dark_border_reason"], "no confident dark edge border")
+                self.assertIn("dark_border_trim_noop", record["operations"])
+            self.assertEqual(records["A001_0001.png"]["output_size"], [100, 80])
+            self.assertEqual(records["A001_0002.png"]["output_size"], [100, 80])
+
+    def test_despeckle_removes_isolated_noise_without_breaking_lines(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "A001_0001.png"
+            image = Image.new("RGB", (80, 60), "white")
+            draw = ImageDraw.Draw(image)
+            draw.line((10, 30, 70, 30), fill=(0, 0, 0), width=2)
+            for point in [(5, 5), (20, 8), (74, 12), (40, 50)]:
+                image.putpixel(point, (0, 0, 0))
+            image.save(source)
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+
+            with Image.open(process_dir / "images" / "A001_0001.png") as processed:
+                black_pixels = _dark_pixel_count(processed)
+                self.assertLess(black_pixels, _dark_pixel_count(image))
+                self.assertLessEqual(abs(processed.convert("L").getpixel((40, 30)) - 0), 5)
+            record = manifest["files"][0]
+            self.assertTrue(record["despeckled"])
+            self.assertEqual(record["despeckle_pixels_changed"], 4)
+            self.assertEqual(record["despeckle_reason"], "isolated dark pixels replaced")
+            self.assertIn("despeckle_isolated_pixels", record["operations"])
+
+    def test_multi_worker_retouch_manifest_order_stays_stable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            for index in range(6):
+                image = Image.new("RGB", (60, 50), "white")
+                image.putpixel((10 + index, 10), (0, 0, 0))
+                image.save(input_dir / f"A001_{index + 1:04d}.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir, workers=3))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(trim_dark_border=True, despeckle=True, workers=3),
+            )
+
+            self.assertEqual([record["source_relative_path"] for record in manifest["files"]], [item["relative_path"] for item in report["files"]])
+            self.assertEqual(manifest["summary"]["performance"]["mode"], "parallel")
+
+    def test_cli_process_out_writes_processing_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "--input",
+                        str(input_dir),
+                        "--out",
+                        str(output_dir),
+                        "--process-out",
+                        str(process_dir),
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            self.assertTrue((process_dir / "processing_manifest.json").exists())
+            self.assertTrue((process_dir / "images" / "A001_0001.jpg").exists())
+            output = stdout.getvalue()
+            self.assertIn("Scan elapsed:", output)
+            self.assertIn("Scan workers:", output)
+            self.assertIn("Scan files/min:", output)
+            self.assertIn("Processing elapsed:", output)
+            self.assertIn("Processing workers:", output)
+            self.assertIn("Processing files/min:", output)
+
+    def test_cli_rejects_invalid_workers_without_writing_reports(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+
+            for value in ["0", "-1", "abc"]:
+                with self.assertRaises(SystemExit) as raised:
+                    main(["--input", str(input_dir), "--out", str(output_dir), "--workers", value])
+                self.assertEqual(raised.exception.code, 2)
+
+            self.assertFalse(output_dir.exists())
+
+    def test_cli_auto_crop_requires_process_out(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+
+            with self.assertRaises(SystemExit) as raised:
+                main(["--input", str(input_dir), "--out", str(output_dir), "--auto-crop"])
+
+            self.assertEqual(raised.exception.code, 2)
+
+    def test_cli_deskew_requires_process_out(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+
+            with self.assertRaises(SystemExit) as raised:
+                main(["--input", str(input_dir), "--out", str(output_dir), "--deskew"])
+
+            self.assertEqual(raised.exception.code, 2)
+
+    def test_cli_new_retouch_options_require_process_out(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+
+            for option in ["--trim-dark-border", "--despeckle"]:
+                with self.assertRaises(SystemExit) as raised:
+                    main(["--input", str(input_dir), "--out", str(output_dir), option])
+                self.assertEqual(raised.exception.code, 2)
+
+
+def _synthetic_text_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((24, 20, 215, 159), outline=(30, 30, 30), width=2)
+    for y in range(42, 132, 18):
+        draw.rectangle((48, y, 190, y + 4), fill=(20, 20, 20))
+    return image
+
+
+def _synthetic_light_noise_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), (252, 252, 252))
+    draw = ImageDraw.Draw(image)
+    for point in [(20, 20), (80, 60), (140, 100), (210, 150)]:
+        draw.point(point, fill=(238, 238, 238))
+    return image
+
+
+def _dark_pixel_count(image: Image.Image) -> int:
+    grayscale = image.convert("L")
+    return sum(grayscale.histogram()[:31])
+
+
+if __name__ == "__main__":
+    unittest.main()
