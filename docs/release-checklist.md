@@ -97,6 +97,10 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 - Keep normal scan reports, processing manifests, filenames, paths, hashes,
   thumbnails, retry manifests, derivative images, and source images inside the
   approved private environment.
+- Generate `archive-scan-qc delivery-manifest` for local handoff review after
+  acceptance. Share only entries classified as aggregate/public-safe after local
+  policy review; keep sensitive local evidence entries inside the approved
+  environment.
 
 ## Privacy prohibitions
 
@@ -119,6 +123,9 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   report, or processing-output paths reveal private collection locations. Share
   only aggregate `run_plan_summary.json` or `run_plan_summary.csv` after policy
   review.
+- Do not publish delivery handoff manifest rows classified as
+  `sensitive_local_evidence`; they can contain local paths and hashes for
+  row-level artifacts.
 
 ## Performance record
 

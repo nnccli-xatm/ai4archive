@@ -767,6 +767,58 @@ def run_acceptance_validation() -> None:
                 raise SystemExit(f"acceptance validation leaked private content: {forbidden}")
 
 
+def run_delivery_manifest_validation() -> None:
+    with tempfile.TemporaryDirectory(prefix="archive-scan-qc-handoff-") as temp_dir:
+        temp = Path(temp_dir)
+        evidence_dir = temp / "evidence"
+        out_dir = temp / "handoff"
+        evidence_dir.mkdir()
+        scan_report = {
+            "schema_version": "scan-qc.phase1.v1",
+            "files": [{"relative_path": "PRIVATE_PAGE_SHOULD_REMAIN_LOCAL.png", "sha256": "abc"}],
+        }
+        acceptance = {
+            "schema_version": "scan-qc.acceptance-summary.v1",
+            "status": "pass",
+            "pass": True,
+        }
+        benchmark = {
+            "schema_version": "scan-qc.benchmark.v1",
+            "privacy": {"aggregate_only": True},
+            "runs": [],
+        }
+        (evidence_dir / "scan_qc_report.json").write_text(json.dumps(scan_report), encoding="utf-8")
+        (evidence_dir / "acceptance_summary.json").write_text(json.dumps(acceptance), encoding="utf-8")
+        (evidence_dir / "benchmark_results.json").write_text(json.dumps(benchmark), encoding="utf-8")
+        _run(
+            [
+                sys.executable,
+                "-m",
+                "archive_scan_qc",
+                "delivery-manifest",
+                "--scan-report",
+                str(evidence_dir / "scan_qc_report.json"),
+                "--acceptance-summary",
+                str(evidence_dir / "acceptance_summary.json"),
+                "--benchmark-results",
+                str(evidence_dir / "benchmark_results.json"),
+                "--out",
+                str(out_dir),
+            ],
+            env=_pythonpath_env(),
+        )
+        payload = json.loads((out_dir / "delivery_handoff_manifest.json").read_text(encoding="utf-8"))
+        if payload["summary"]["artifact_count"] != 3:
+            raise SystemExit("delivery manifest validation recorded the wrong artifact count")
+        by_name = {record["name"]: record for record in payload["artifacts"]}
+        if by_name["scan_qc_report.json"]["sensitivity"] != "sensitive_local_evidence":
+            raise SystemExit("delivery manifest validation did not mark scan report as sensitive")
+        if by_name["acceptance_summary.json"]["sensitivity"] != "aggregate_public_safe":
+            raise SystemExit("delivery manifest validation did not mark acceptance summary as aggregate")
+        if not (out_dir / "delivery_handoff_manifest.csv").exists():
+            raise SystemExit("delivery manifest validation did not write CSV output")
+
+
 def run_build_artifacts() -> None:
     build_dir = REPO_ROOT / "dist"
     if build_dir.exists():
@@ -794,6 +846,7 @@ def main(argv: list[str] | None = None) -> int:
     run_synthetic_integration_validation()
     run_benchmark_validation()
     run_acceptance_validation()
+    run_delivery_manifest_validation()
     run_install_smoke()
     print("release validation passed")
     return 0
