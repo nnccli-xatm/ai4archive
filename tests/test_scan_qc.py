@@ -13,6 +13,7 @@ from PIL import Image, ImageDraw, ImageFilter
 from archive_scan_qc.cli import main
 from archive_scan_qc.processing import ProcessingOptions, process_images
 from archive_scan_qc.reports import write_reports
+from archive_scan_qc.rules import RulesProfileError, load_rules_profile
 from archive_scan_qc.scanner import ScanConfig, scan_batch
 
 
@@ -237,6 +238,124 @@ class ScanQcTest(unittest.TestCase):
             self.assertIn("quality_too_bright", rules_by_path["bright.png"])
             self.assertIn("quality_low_contrast", rules_by_path["low_contrast.png"])
             self.assertIn("quality_suspected_blur", rules_by_path["blur.png"])
+
+    def test_default_rules_profile_metadata_preserves_existing_thresholds(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.jpg", dpi=(150, 150))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            profile = report["manifest"]["rules_profile"]
+
+            self.assertEqual(profile["name"], "default")
+            self.assertEqual(profile["version"], "scan-qc.phase1.v1")
+            self.assertEqual(profile["source"], "builtin")
+            self.assertEqual(profile["thresholds"]["min_dpi"], 200)
+            self.assertEqual(profile["thresholds"]["quality"]["dark_mean_threshold"], 45.0)
+            self.assertTrue(any(finding["rule"] == "dpi_minimum" and finding["severity"] == "P0" for finding in report["findings"]))
+
+    def test_json_rules_profile_overrides_min_dpi_quality_threshold_and_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            profile_path = root / "rules.json"
+            input_dir.mkdir()
+            Image.new("RGB", (80, 80), (40, 40, 40)).save(input_dir / "A001_0001.jpg", dpi=(250, 250))
+            profile_path.write_text(
+                json.dumps(
+                    {
+                        "name": "project-standard",
+                        "version": "2026.1",
+                        "min_dpi": 300,
+                        "quality_thresholds": {"dark_mean_threshold": 30},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir, rules_profile=load_rules_profile(profile_path)))
+            rules = {finding["rule"] for finding in report["findings"]}
+
+            self.assertIn("dpi_minimum", rules)
+            self.assertNotIn("quality_too_dark", rules)
+            self.assertEqual(report["project"]["min_dpi"], 300)
+            self.assertEqual(report["manifest"]["rules_profile"]["name"], "project-standard")
+            self.assertEqual(report["manifest"]["rules_profile"]["version"], "2026.1")
+            self.assertEqual(report["manifest"]["rules_profile"]["source"], str(profile_path.resolve()))
+            self.assertEqual(report["manifest"]["rules_profile"]["thresholds"]["quality"]["dark_mean_threshold"], 30.0)
+
+    def test_rules_profile_can_disable_quality_rule(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            profile_path = root / "rules.json"
+            input_dir.mkdir()
+            Image.new("RGB", (80, 80), (25, 25, 25)).save(input_dir / "dark.png")
+            profile_path.write_text(
+                json.dumps({"rules": {"quality_too_dark": {"enabled": False}}}),
+                encoding="utf-8",
+            )
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir, rules_profile=load_rules_profile(profile_path)))
+            rules = {finding["rule"] for finding in report["findings"]}
+
+            self.assertNotIn("quality_too_dark", rules)
+            self.assertIn("quality_low_contrast", rules)
+
+    def test_rules_profile_severity_override_applies_but_protected_p0_stays_p0(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            profile_path = root / "rules.json"
+            input_dir.mkdir()
+            Image.new("RGB", (80, 80), (25, 25, 25)).save(input_dir / "dark.png", dpi=(150, 150))
+            profile_path.write_text(
+                json.dumps(
+                    {
+                        "rules": {
+                            "quality_too_dark": {"severity": "P2"},
+                            "dpi_minimum": {"severity": "P2", "enabled": False},
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir, rules_profile=load_rules_profile(profile_path)))
+            severities = {(finding["rule"], finding["severity"]) for finding in report["findings"]}
+
+            self.assertIn(("quality_too_dark", "P2"), severities)
+            self.assertIn(("dpi_minimum", "P0"), severities)
+
+    def test_invalid_rules_profile_errors_are_clear_and_cli_writes_no_report(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            bad_type_path = root / "bad-type.json"
+            bad_json_path = root / "bad-json.json"
+            input_dir.mkdir()
+            bad_type_path.write_text(json.dumps({"min_dpi": "300"}), encoding="utf-8")
+            bad_json_path.write_text("{", encoding="utf-8")
+
+            with self.assertRaisesRegex(RulesProfileError, "min_dpi"):
+                load_rules_profile(bad_type_path)
+            with self.assertRaisesRegex(RulesProfileError, "line 1, column 2"):
+                load_rules_profile(bad_json_path)
+            with self.assertRaisesRegex(RulesProfileError, "does not exist"):
+                load_rules_profile(root / "missing.json")
+
+            with self.assertRaises(SystemExit) as raised:
+                main(["--input", str(input_dir), "--out", str(output_dir), "--rules-profile", str(bad_type_path)])
+
+            self.assertEqual(raised.exception.code, 2)
+            self.assertFalse(output_dir.exists())
 
     def test_quality_metrics_are_visible_in_json_csv_and_html(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

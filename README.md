@@ -56,11 +56,68 @@ archive-scan-qc \
   --batch batch-001 \
   --min-dpi 200 \
   --name-pattern 'A001_\d{4}' \
-  --manifest-csv /path/to/manifest.csv
+  --manifest-csv /path/to/manifest.csv \
+  --rules-profile /path/to/rules.json
 ```
 
 The optional manifest CSV must include a `relative_path` column whose values
 are expected image paths relative to `--input`.
+
+The optional `--rules-profile` argument loads a local JSON rules profile. When
+omitted, the built-in default profile preserves the current behavior:
+`min_dpi=200`, no filename pattern, quality thresholds of dark `<45`, bright
+`>250` with contrast `<10`, low contrast `<10`, suspected blur when contrast is
+at least `12` and Laplacian variance is below `20`, and the existing P0/P1/P2
+severities. Explicit CLI `--min-dpi` and `--name-pattern` values override the
+loaded profile for that run.
+
+Example rules profile:
+
+```json
+{
+  "name": "project-archive-standard",
+  "version": "2026.1",
+  "min_dpi": 300,
+  "name_pattern": "A001_\\d{4}",
+  "quality_thresholds": {
+    "dark_mean_threshold": 40,
+    "bright_mean_threshold": 248,
+    "low_contrast_stddev_threshold": 12,
+    "blur_laplacian_variance_threshold": 25,
+    "blur_min_contrast_stddev": 14
+  },
+  "rules": {
+    "quality_too_dark": {
+      "enabled": true,
+      "severity": "P1"
+    },
+    "quality_suspected_blur": {
+      "enabled": false
+    },
+    "name_pattern": {
+      "severity": "P2"
+    }
+  }
+}
+```
+
+Configurable top-level fields are `name`, `version`, `min_dpi`, and
+`name_pattern`. `quality_thresholds` accepts
+`dark_mean_threshold`, `bright_mean_threshold`,
+`low_contrast_stddev_threshold`, `blur_laplacian_variance_threshold`, and
+`blur_min_contrast_stddev`. `rules` is keyed by finding rule name; each rule may
+set `enabled` to `true` or `false` and may override `severity` to `P0`, `P1`, or
+`P2`. Critical integrity P0 rules such as `openability`,
+`manifest_missing_file`, manifest unexpected/duplicate checks, duplicate file
+checks, missing dimensions, and `dpi_minimum` cannot be disabled or downgraded
+by profile settings.
+
+The profile layer is intended for aligning a batch with a national, industry,
+or project-specific archive digitization standard without editing code. Keep
+the profile file under local change control with the standard name/version, and
+encode the agreed DPI, filename, brightness, contrast, and blur thresholds
+there. Invalid profile paths, malformed JSON, or wrong field types stop the CLI
+before reports are written.
 
 The optional `--process-out` directory enables the first local image-processing
 layer. Source images remain read-only. The CLI writes derivative images under
@@ -108,8 +165,11 @@ The command writes:
 
 The JSON report includes a batch `manifest` with project, batch, input
 directory, output directory, rule version, generation time, total file count,
-P0/P1/P2 finding counts, and manifest usage/missing/unexpected/duplicate
-counts when a manifest is provided. Each openable file record also includes:
+P0/P1/P2 finding counts, manifest usage/missing/unexpected/duplicate counts
+when a manifest is provided, and `rules_profile` metadata. That metadata records
+the profile source (`builtin` or the absolute JSON path), profile name/version,
+the effective threshold summary, and per-rule settings for audit. Each openable
+file record also includes:
 
 - `quality_brightness_mean`: mean grayscale value on a 0-255 scale. Lower is
   darker; higher is brighter.
@@ -128,14 +188,14 @@ The default quality thresholds are intentionally conservative:
 - `quality_suspected_blur` P2 when contrast standard deviation is at least
   `12` but Laplacian variance is below `20`.
 
-These thresholds are defaults on `ScanConfig` so batch-specific callers can
-tune them without changing report structure. JSON summary and manifest metadata
-include skipped file and directory counts for auditability. The CSV file export
-includes the quality metric columns. The HTML report is a single static file
-with inline CSS for manual review; it shows the batch manifest, summary counts,
-skipped counts, file metadata and quality metric table, and finding table with
-P0/P1/P2 severity badges. It does not embed source images, thumbnails, or file
-content.
+These thresholds are defaults in the built-in rules profile so batch-specific
+callers can tune them through JSON without changing report structure. JSON
+summary and manifest metadata include skipped file and directory counts for
+auditability. The CSV file export includes the quality metric columns. The HTML
+report is a single static file with inline CSS for manual review; it shows the
+batch manifest, summary counts, skipped counts, file metadata and quality metric
+table, and finding table with P0/P1/P2 severity badges. It does not embed source
+images, thumbnails, or file content.
 
 The process returns exit code `1` when P0 findings are present, so it can be
 used in batch scripts. Reports are written to the output directory; original

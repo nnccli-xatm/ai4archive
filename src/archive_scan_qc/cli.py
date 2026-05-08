@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 from pathlib import Path
 
 from .processing import ProcessingOptions, process_images
 from .reports import write_reports
+from .rules import RulesProfileError, load_rules_profile
 from .scanner import ScanConfig, scan_batch
 
 
@@ -21,9 +23,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--batch", default="default-batch", help="Batch identifier.")
     parser.add_argument(
         "--min-dpi",
-        default=200,
+        default=None,
         type=int,
-        help="Minimum acceptable horizontal and vertical DPI. Defaults to 200.",
+        help="Minimum acceptable horizontal and vertical DPI. Defaults to the active rules profile value.",
     )
     parser.add_argument(
         "--name-pattern",
@@ -35,6 +37,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         type=Path,
         help="Optional batch manifest CSV with a relative_path column.",
+    )
+    parser.add_argument(
+        "--rules-profile",
+        default=None,
+        type=Path,
+        help="Optional JSON rules profile for thresholds, rule enablement, and severity overrides.",
     )
     parser.add_argument(
         "--process-out",
@@ -58,15 +66,24 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    try:
+        rules_profile = load_rules_profile(args.rules_profile) if args.rules_profile else None
+    except RulesProfileError as exc:
+        parser.error(str(exc))
+    if rules_profile and args.min_dpi is not None:
+        rules_profile = replace(rules_profile, min_dpi=args.min_dpi)
+    if rules_profile and args.name_pattern is not None:
+        rules_profile = replace(rules_profile, name_pattern=args.name_pattern)
 
     config = ScanConfig(
         project_id=args.project,
         batch_id=args.batch,
         input_dir=args.input,
         output_dir=args.out,
-        min_dpi=args.min_dpi,
+        min_dpi=args.min_dpi if args.min_dpi is not None else 200,
         name_pattern=args.name_pattern,
         manifest_csv=args.manifest_csv,
+        rules_profile=rules_profile,
     )
     report = scan_batch(config)
     paths = write_reports(report, args.out)

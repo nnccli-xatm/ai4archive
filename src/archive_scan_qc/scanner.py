@@ -18,6 +18,8 @@ from typing import Any
 
 from PIL import Image, ImageStat, UnidentifiedImageError
 
+from .rules import RulesProfile, default_rules_profile
+
 SUPPORTED_EXTENSIONS = {
     ".bmp",
     ".dib",
@@ -29,6 +31,17 @@ SUPPORTED_EXTENSIONS = {
     ".png",
     ".tif",
     ".tiff",
+}
+
+PROTECTED_P0_RULES = {
+    "openability",
+    "dpi_minimum",
+    "dimensions",
+    "duplicate_name",
+    "duplicate_file",
+    "manifest_missing_file",
+    "manifest_unexpected_file",
+    "manifest_duplicate_entry",
 }
 
 
@@ -46,6 +59,7 @@ class ScanConfig:
     low_contrast_stddev_threshold: float = 10.0
     blur_laplacian_variance_threshold: float = 20.0
     blur_min_contrast_stddev: float = 12.0
+    rules_profile: RulesProfile | None = None
 
 
 @dataclass(frozen=True)
@@ -88,10 +102,11 @@ def scan_batch(config: ScanConfig) -> dict[str, Any]:
     if not input_dir.is_dir():
         raise NotADirectoryError(f"Input path is not a directory: {input_dir}")
 
+    profile = _effective_profile(config)
     candidate_files, skip_stats = _iter_candidate_files(input_dir, config.output_dir, config.manifest_csv)
     files = [_inspect_file(path, input_dir) for path in candidate_files]
     manifest_paths = _read_manifest_paths(config.manifest_csv) if config.manifest_csv else None
-    findings = _build_findings(files, config, manifest_paths)
+    findings = _build_findings(files, profile, manifest_paths)
     manifest_check = _summarize_manifest_check(files, manifest_paths, config.manifest_csv)
     summary = _summarize(files, findings, manifest_check, skip_stats)
     finished_at = datetime.now(timezone.utc)
@@ -109,9 +124,10 @@ def scan_batch(config: ScanConfig) -> dict[str, Any]:
         "batch_id": config.batch_id,
         "input_dir": str(input_dir),
         "output_dir": str(config.output_dir.resolve()),
-        "min_dpi": config.min_dpi,
-        "name_pattern": config.name_pattern,
+        "min_dpi": profile.min_dpi,
+        "name_pattern": profile.name_pattern,
         "manifest_csv": str(config.manifest_csv.resolve()) if config.manifest_csv else None,
+        "rules_profile": profile.metadata(),
     }
     manifest = {
         "project_id": project["project_id"],
@@ -126,6 +142,7 @@ def scan_batch(config: ScanConfig) -> dict[str, Any]:
         "p2_findings": summary["p2_findings"],
         "manifest_used": summary["manifest_used"],
         "manifest_csv": project["manifest_csv"],
+        "rules_profile": profile.metadata(),
         "manifest_entry_count": summary["manifest_entry_count"],
         "manifest_unique_entry_count": summary["manifest_unique_entry_count"],
         "manifest_missing_count": summary["manifest_missing_count"],
@@ -191,6 +208,29 @@ def _iter_candidate_files(input_dir: Path, output_dir: Path, manifest_csv: Path 
             hidden_files=hidden_files,
             manifest_files=manifest_files,
         ),
+    )
+
+
+def _effective_profile(config: ScanConfig) -> RulesProfile:
+    profile = config.rules_profile or default_rules_profile()
+    return RulesProfile(
+        name=profile.name,
+        version=profile.version,
+        source=profile.source,
+        min_dpi=config.min_dpi if config.rules_profile is None else profile.min_dpi,
+        name_pattern=config.name_pattern if config.rules_profile is None else profile.name_pattern,
+        dark_mean_threshold=config.dark_mean_threshold if config.rules_profile is None else profile.dark_mean_threshold,
+        bright_mean_threshold=config.bright_mean_threshold if config.rules_profile is None else profile.bright_mean_threshold,
+        low_contrast_stddev_threshold=(
+            config.low_contrast_stddev_threshold if config.rules_profile is None else profile.low_contrast_stddev_threshold
+        ),
+        blur_laplacian_variance_threshold=(
+            config.blur_laplacian_variance_threshold
+            if config.rules_profile is None
+            else profile.blur_laplacian_variance_threshold
+        ),
+        blur_min_contrast_stddev=config.blur_min_contrast_stddev if config.rules_profile is None else profile.blur_min_contrast_stddev,
+        rules=profile.rules,
     )
 
 
@@ -320,16 +360,16 @@ def _normalize_manifest_path(path: str) -> str:
 
 def _build_findings(
     files: list[dict[str, Any]],
-    config: ScanConfig,
+    profile: RulesProfile,
     manifest_paths: list[str] | None,
 ) -> list[dict[str, str]]:
     findings: list[dict[str, str]] = []
-    _add_per_file_findings(files, findings, config)
-    _add_duplicate_name_findings(files, findings)
-    _add_duplicate_hash_findings(files, findings)
-    _add_batch_consistency_findings(files, findings)
+    _add_per_file_findings(files, findings, profile)
+    _add_duplicate_name_findings(files, findings, profile)
+    _add_duplicate_hash_findings(files, findings, profile)
+    _add_batch_consistency_findings(files, findings, profile)
     if manifest_paths is not None:
-        _add_manifest_findings(files, findings, manifest_paths)
+        _add_manifest_findings(files, findings, manifest_paths, profile)
     return findings
 
 
@@ -337,69 +377,91 @@ def _add_manifest_findings(
     files: list[dict[str, Any]],
     findings: list[dict[str, str]],
     manifest_paths: list[str],
+    profile: RulesProfile,
 ) -> None:
     file_paths = {item["relative_path"] for item in files}
     manifest_set = set(manifest_paths)
 
     for path in sorted(manifest_set - file_paths):
-        findings.append(
-            _path_finding(
-                path,
-                "manifest_missing_file",
-                "P0",
-                "Manifest expects this file, but it was not found in the scanned directory.",
-            )
+        _append_path_finding(
+            findings,
+            path,
+            "manifest_missing_file",
+            "P0",
+            "Manifest expects this file, but it was not found in the scanned directory.",
+            profile,
         )
 
     for path in sorted(file_paths - manifest_set):
-        findings.append(
-            _path_finding(
-                path,
-                "manifest_unexpected_file",
-                "P0",
-                "File exists in the scanned directory, but it is not listed in the manifest.",
-            )
+        _append_path_finding(
+            findings,
+            path,
+            "manifest_unexpected_file",
+            "P0",
+            "File exists in the scanned directory, but it is not listed in the manifest.",
+            profile,
         )
 
     duplicate_paths = sorted(path for path, count in _path_counts(manifest_paths).items() if count > 1)
     for path in duplicate_paths:
-        findings.append(
-            _path_finding(
-                path,
-                "manifest_duplicate_entry",
-                "P0",
-                "Manifest contains duplicate relative_path entries.",
-            )
+        _append_path_finding(
+            findings,
+            path,
+            "manifest_duplicate_entry",
+            "P0",
+            "Manifest contains duplicate relative_path entries.",
+            profile,
         )
 
 
 def _add_per_file_findings(
     files: list[dict[str, Any]],
     findings: list[dict[str, str]],
-    config: ScanConfig,
+    profile: RulesProfile,
 ) -> None:
-    name_regex = re.compile(config.name_pattern) if config.name_pattern else None
+    name_regex = re.compile(profile.name_pattern) if profile.name_pattern else None
     for item in files:
         if item["extension"] not in SUPPORTED_EXTENSIONS:
-            findings.append(_finding(item, "unsupported_format", "P1", "File extension is not in the phase-one supported image list."))
+            _append_finding(
+                item,
+                findings,
+                "unsupported_format",
+                "P1",
+                "File extension is not in the phase-one supported image list.",
+                profile,
+            )
         if not item["openable"]:
-            findings.append(_finding(item, "openability", "P0", f"Image could not be opened: {item['error']}"))
+            _append_finding(item, findings, "openability", "P0", f"Image could not be opened: {item['error']}", profile)
             continue
         if item["dpi_x"] is None or item["dpi_y"] is None:
-            findings.append(_finding(item, "dpi_missing", "P1", "Image does not expose horizontal and vertical DPI metadata."))
-        elif item["dpi_x"] < config.min_dpi or item["dpi_y"] < config.min_dpi:
-            findings.append(_finding(item, "dpi_minimum", "P0", f"Image DPI is below minimum {config.min_dpi}."))
+            _append_finding(
+                item,
+                findings,
+                "dpi_missing",
+                "P1",
+                "Image does not expose horizontal and vertical DPI metadata.",
+                profile,
+            )
+        elif item["dpi_x"] < profile.min_dpi or item["dpi_y"] < profile.min_dpi:
+            _append_finding(item, findings, "dpi_minimum", "P0", f"Image DPI is below minimum {profile.min_dpi}.", profile)
         if not item["width"] or not item["height"]:
-            findings.append(_finding(item, "dimensions", "P0", "Image width or height is missing."))
+            _append_finding(item, findings, "dimensions", "P0", "Image width or height is missing.", profile)
         if name_regex and not name_regex.fullmatch(Path(item["filename"]).stem):
-            findings.append(_finding(item, "name_pattern", "P1", "Filename stem does not match configured naming pattern."))
-        _add_quality_findings(item, findings, config)
+            _append_finding(
+                item,
+                findings,
+                "name_pattern",
+                "P1",
+                "Filename stem does not match configured naming pattern.",
+                profile,
+            )
+        _add_quality_findings(item, findings, profile)
 
 
 def _add_quality_findings(
     item: dict[str, Any],
     findings: list[dict[str, str]],
-    config: ScanConfig,
+    profile: RulesProfile,
 ) -> None:
     brightness = item.get("quality_brightness_mean")
     contrast = item.get("quality_contrast_stddev")
@@ -407,45 +469,49 @@ def _add_quality_findings(
     if brightness is None or contrast is None or sharpness is None:
         return
 
-    if brightness < config.dark_mean_threshold:
-        findings.append(
-            _finding(
-                item,
-                "quality_too_dark",
-                "P1",
-                f"Mean grayscale brightness {brightness} is below conservative threshold {config.dark_mean_threshold}.",
-            )
+    if brightness < profile.dark_mean_threshold:
+        _append_finding(
+            item,
+            findings,
+            "quality_too_dark",
+            "P1",
+            f"Mean grayscale brightness {brightness} is below conservative threshold {profile.dark_mean_threshold}.",
+            profile,
         )
-    if brightness > config.bright_mean_threshold and contrast < config.low_contrast_stddev_threshold:
-        findings.append(
-            _finding(
-                item,
-                "quality_too_bright",
-                "P1",
-                f"Mean grayscale brightness {brightness} is above conservative threshold {config.bright_mean_threshold} with very low contrast.",
-            )
+    if brightness > profile.bright_mean_threshold and contrast < profile.low_contrast_stddev_threshold:
+        _append_finding(
+            item,
+            findings,
+            "quality_too_bright",
+            "P1",
+            f"Mean grayscale brightness {brightness} is above conservative threshold {profile.bright_mean_threshold} with very low contrast.",
+            profile,
         )
-    if contrast < config.low_contrast_stddev_threshold:
-        findings.append(
-            _finding(
-                item,
-                "quality_low_contrast",
-                "P2",
-                f"Grayscale standard deviation {contrast} is below conservative threshold {config.low_contrast_stddev_threshold}.",
-            )
+    if contrast < profile.low_contrast_stddev_threshold:
+        _append_finding(
+            item,
+            findings,
+            "quality_low_contrast",
+            "P2",
+            f"Grayscale standard deviation {contrast} is below conservative threshold {profile.low_contrast_stddev_threshold}.",
+            profile,
         )
-    if contrast >= config.blur_min_contrast_stddev and sharpness < config.blur_laplacian_variance_threshold:
-        findings.append(
-            _finding(
-                item,
-                "quality_suspected_blur",
-                "P2",
-                f"Laplacian variance sharpness {sharpness} is below conservative threshold {config.blur_laplacian_variance_threshold}.",
-            )
+    if contrast >= profile.blur_min_contrast_stddev and sharpness < profile.blur_laplacian_variance_threshold:
+        _append_finding(
+            item,
+            findings,
+            "quality_suspected_blur",
+            "P2",
+            f"Laplacian variance sharpness {sharpness} is below conservative threshold {profile.blur_laplacian_variance_threshold}.",
+            profile,
         )
 
 
-def _add_duplicate_name_findings(files: list[dict[str, Any]], findings: list[dict[str, str]]) -> None:
+def _add_duplicate_name_findings(
+    files: list[dict[str, Any]],
+    findings: list[dict[str, str]],
+    profile: RulesProfile,
+) -> None:
     by_name: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for item in files:
         parent = Path(item["relative_path"]).parent.as_posix()
@@ -454,10 +520,21 @@ def _add_duplicate_name_findings(files: list[dict[str, Any]], findings: list[dic
         if len(matches) > 1:
             paths = ", ".join(match["relative_path"] for match in matches)
             for item in matches:
-                findings.append(_finding(item, "duplicate_name", "P0", f"Filename is not unique within its directory: {paths}"))
+                _append_finding(
+                    item,
+                    findings,
+                    "duplicate_name",
+                    "P0",
+                    f"Filename is not unique within its directory: {paths}",
+                    profile,
+                )
 
 
-def _add_duplicate_hash_findings(files: list[dict[str, Any]], findings: list[dict[str, str]]) -> None:
+def _add_duplicate_hash_findings(
+    files: list[dict[str, Any]],
+    findings: list[dict[str, str]],
+    profile: RulesProfile,
+) -> None:
     by_hash: dict[str, list[dict[str, Any]]] = {}
     for item in files:
         by_hash.setdefault(item["sha256"], []).append(item)
@@ -465,23 +542,73 @@ def _add_duplicate_hash_findings(files: list[dict[str, Any]], findings: list[dic
         if len(matches) > 1:
             paths = ", ".join(match["relative_path"] for match in matches)
             for item in matches:
-                findings.append(_finding(item, "duplicate_file", "P0", f"SHA-256 duplicate detected: {paths}"))
+                _append_finding(item, findings, "duplicate_file", "P0", f"SHA-256 duplicate detected: {paths}", profile)
 
 
-def _add_batch_consistency_findings(files: list[dict[str, Any]], findings: list[dict[str, str]]) -> None:
+def _add_batch_consistency_findings(
+    files: list[dict[str, Any]],
+    findings: list[dict[str, str]],
+    profile: RulesProfile,
+) -> None:
     open_files = [item for item in files if item["openable"]]
     for key, rule in (("format", "batch_format_consistency"), ("color_mode", "batch_color_mode_consistency")):
         values = sorted({str(item[key]) for item in open_files if item[key] is not None})
         if len(values) > 1:
             message = f"Openable files in batch use multiple {key} values: {', '.join(values)}"
             for item in open_files:
-                findings.append(_finding(item, rule, "P2", message))
+                _append_finding(item, findings, rule, "P2", message, profile)
 
     dpi_values = sorted({(item["dpi_x"], item["dpi_y"]) for item in open_files if item["dpi_x"] and item["dpi_y"]})
     if len(dpi_values) > 1:
         values = ", ".join(f"{x}x{y}" for x, y in dpi_values)
         for item in open_files:
-            findings.append(_finding(item, "batch_dpi_consistency", "P2", f"Openable files in batch use multiple DPI values: {values}"))
+            _append_finding(
+                item,
+                findings,
+                "batch_dpi_consistency",
+                "P2",
+                f"Openable files in batch use multiple DPI values: {values}",
+                profile,
+            )
+
+
+def _append_finding(
+    item: dict[str, Any],
+    findings: list[dict[str, str]],
+    rule: str,
+    severity: str,
+    message: str,
+    profile: RulesProfile,
+) -> None:
+    if not _rule_enabled(profile, rule):
+        return
+    findings.append(_finding(item, rule, _effective_severity(profile, rule, severity), message))
+
+
+def _append_path_finding(
+    findings: list[dict[str, str]],
+    relative_path: str,
+    rule: str,
+    severity: str,
+    message: str,
+    profile: RulesProfile,
+) -> None:
+    if not _rule_enabled(profile, rule):
+        return
+    findings.append(_path_finding(relative_path, rule, _effective_severity(profile, rule, severity), message))
+
+
+def _rule_enabled(profile: RulesProfile, rule: str) -> bool:
+    if rule in PROTECTED_P0_RULES:
+        return True
+    return profile.is_rule_enabled(rule)
+
+
+def _effective_severity(profile: RulesProfile, rule: str, default: str) -> str:
+    severity = profile.severity_for(rule, default)
+    if rule in PROTECTED_P0_RULES and default == "P0":
+        return "P0"
+    return severity
 
 
 def _finding(item: dict[str, Any], rule: str, severity: str, message: str) -> dict[str, str]:
