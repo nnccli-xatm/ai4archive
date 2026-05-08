@@ -200,6 +200,19 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Resume skipped: {processing_manifest['summary']['skipped_due_to_resume']}")
         print(f"Reprocessed: {processing_manifest['summary']['reprocessed_files']}")
         print(f"Processing failed: {processing_manifest['summary']['failed_files']}")
+        audit_records = [record["processing_audit"] for record in processing_manifest["files"] if isinstance(record.get("processing_audit"), dict)]
+        warning_files = sum(1 for record in processing_manifest["files"] if record.get("processing_warnings"))
+        max_pixel_change = max((record.get("pixel_change_ratio", 0.0) for record in audit_records), default=0.0)
+        max_size_change = max((record.get("size_change_ratio", 0.0) for record in audit_records), default=0.0)
+        avg_pixel_change = (
+            sum(float(record.get("pixel_change_ratio", 0.0)) for record in audit_records) / len(audit_records)
+            if audit_records
+            else 0.0
+        )
+        print(f"Processing warnings: {warning_files}")
+        print(f"Max pixel change ratio: {max_pixel_change:.6f}")
+        print(f"Average pixel change ratio: {avg_pixel_change:.6f}")
+        print(f"Max size change ratio: {max_size_change:.6f}")
         processing_performance = processing_manifest["summary"]["performance"]
         print(f"Processing elapsed: {processing_performance['elapsed_seconds']:.3f}s")
         print(f"Processing workers: {processing_performance['effective_workers']} ({processing_performance['mode']})")

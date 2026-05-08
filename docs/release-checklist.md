@@ -61,6 +61,10 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 - Confirm production runbooks explain `--resume-processing`,
   `processing_audit_summary.json`, and the private
   `processing_retry_manifest.json` retry workflow for interrupted batches.
+- Confirm derivative-processing release evidence includes aggregate audit
+  review: zero or explained `guardrail_failed_files`, acceptable
+  `processing_warning_files`, and stable max/average/distribution values for
+  size, pixel, tonal, crop, trim, deskew, and despeckle changes.
 - Confirm production runbooks explain `archive-scan-qc run-plan`,
   `--continue-on-error`, failed batch IDs, resume-processing fields in the
   plan, and the privacy boundary between aggregate project summaries and

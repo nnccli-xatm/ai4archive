@@ -223,8 +223,11 @@ package version, Python version, Pillow version, platform, and worker setting.
 Treat row-level reports, processing manifests, and retry manifests as sensitive
 because they include filenames, relative paths, hashes, and per-file metrics.
 `processing_audit_summary.json` is aggregate-only: it records counts, operation
-flags, worker metadata, timing, throughput, failure totals, and resume counts
-without file lists, paths, hashes, thumbnails, or image content.
+flags, worker metadata, timing, throughput, failure totals, resume counts,
+guardrail totals, and max/average/distribution metrics for size change, pixel
+change, brightness/contrast delta, crop ratio, dark-border trim margin, deskew
+angle, and despeckle pixel ratio. It does not include file lists, paths, hashes,
+thumbnails, or image content.
 `run_plan_summary.json` and `run_plan_summary.csv` are also aggregate-only:
 they record batch totals, passed and failed counts, P0/P1/P2 counts,
 processing failure counts, preflight error counts, throughput aggregates, and
@@ -261,10 +264,14 @@ Resume mode reads the existing `processing_manifest.json`. It skips files that
 were previously successful and whose derivative still exists, and it reprocesses
 previous failures, skipped records, and missing derivative outputs. After the
 run, review stdout plus `processing_audit_summary.json` for
-`skipped_due_to_resume`, `reprocessed_files`, `failed_files`, and
-`retry_list_files`. Use `processing_retry_manifest.json` only inside the
-approved private environment to identify remaining failed files for another
-fix-and-resume cycle.
+`skipped_due_to_resume`, `reprocessed_files`, `failed_files`,
+`retry_list_files`, `processing_warning_files`, `guardrail_failed_files`, and
+the metric maxima. Treat non-zero guardrail failures, unusually high
+`pixel_change_ratio` or `size_change_ratio` maxima, or distribution movement
+into the highest buckets as over-processing risk that needs local row-level
+review of `processing_manifest.json` before derivatives are accepted. Use
+`processing_retry_manifest.json` only inside the approved private environment to
+identify remaining failed files for another fix-and-resume cycle.
 
 Use the JSON `rule_catalog` object or the HTML Rule Catalog section when
 explaining why a finding exists. The catalog gives the rule title, default
