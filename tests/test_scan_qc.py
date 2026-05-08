@@ -148,6 +148,63 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(saved["summary"]["manifest_missing_count"], 1)
             self.assertEqual(saved["summary"]["manifest_unexpected_count"], 1)
 
+    def test_output_dir_inside_input_is_skipped_on_rerun(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = input_dir / "reports"
+            input_dir.mkdir()
+
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+
+            first_report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            write_reports(first_report, output_dir)
+            second_report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+
+            scanned_paths = {item["relative_path"] for item in second_report["files"]}
+            self.assertEqual(scanned_paths, {"A001_0001.jpg"})
+            self.assertEqual(second_report["summary"]["total_files"], 1)
+            self.assertEqual(second_report["summary"]["skipped_output_directory_count"], 1)
+            self.assertFalse(any(path.startswith("reports/") for path in scanned_paths))
+
+    def test_manifest_csv_inside_input_is_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            manifest_csv = input_dir / "manifest.csv"
+
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+            manifest_csv.write_text("relative_path\nA001_0001.jpg\n", encoding="utf-8")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir, manifest_csv=manifest_csv))
+
+            scanned_paths = {item["relative_path"] for item in report["files"]}
+            rules = {finding["rule"] for finding in report["findings"]}
+            self.assertEqual(scanned_paths, {"A001_0001.jpg"})
+            self.assertNotIn("unsupported_format", rules)
+            self.assertEqual(report["summary"]["manifest_unexpected_count"], 0)
+            self.assertEqual(report["summary"]["skipped_manifest_file_count"], 1)
+
+    def test_hidden_directories_are_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            hidden_dir = input_dir / ".cache"
+            hidden_dir.mkdir(parents=True)
+
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+            Image.new("RGB", (32, 24), "white").save(hidden_dir / "A001_0002.jpg", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+
+            scanned_paths = {item["relative_path"] for item in report["files"]}
+            self.assertEqual(scanned_paths, {"A001_0001.jpg"})
+            self.assertEqual(report["summary"]["skipped_hidden_directory_count"], 1)
+            self.assertEqual(report["summary"]["skipped_directory_count"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

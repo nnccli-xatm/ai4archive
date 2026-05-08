@@ -52,6 +52,12 @@ archive-scan-qc \
 The optional manifest CSV must include a `relative_path` column whose values
 are expected image paths relative to `--input`.
 
+For repeatable runs, keep `--out` outside the scanned image tree when possible.
+If `--out` is inside `--input`, the CLI automatically skips that output
+directory and its children. It also skips the `--manifest-csv` file itself when
+the manifest is stored under `--input`, hidden files, and hidden directories
+such as `.git` or `.cache`.
+
 The command writes:
 
 - `scan_qc_report.json`
@@ -62,9 +68,11 @@ The command writes:
 The JSON report includes a batch `manifest` with project, batch, input
 directory, output directory, rule version, generation time, total file count,
 P0/P1/P2 finding counts, and manifest usage/missing/unexpected/duplicate
-counts when a manifest is provided. The HTML report is a single static file
-with inline CSS for manual review; it shows the batch manifest, summary counts,
-file metadata table, and finding table with P0/P1/P2 severity badges.
+counts when a manifest is provided. JSON summary and manifest metadata include
+skipped file and directory counts for auditability. The HTML report is a single
+static file with inline CSS for manual review; it shows the batch manifest,
+summary counts, skipped counts, file metadata table, and finding table with
+P0/P1/P2 severity badges.
 
 The process returns exit code `1` when P0 findings are present, so it can be
 used in batch scripts. Reports are written to the output directory; original

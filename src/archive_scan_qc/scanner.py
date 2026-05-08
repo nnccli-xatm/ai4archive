@@ -10,6 +10,7 @@ import csv
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
+import os
 from pathlib import Path
 import re
 from typing import Any
@@ -52,6 +53,26 @@ class ManifestCheck:
     duplicate_count: int
 
 
+@dataclass(frozen=True)
+class SkipStats:
+    hidden_directories: int = 0
+    output_directories: int = 0
+    hidden_files: int = 0
+    manifest_files: int = 0
+
+    @property
+    def directories(self) -> int:
+        return self.hidden_directories + self.output_directories
+
+    @property
+    def files(self) -> int:
+        return self.hidden_files + self.manifest_files
+
+    @property
+    def total(self) -> int:
+        return self.directories + self.files
+
+
 def scan_batch(config: ScanConfig) -> dict[str, Any]:
     input_dir = config.input_dir.resolve()
     if not input_dir.exists():
@@ -59,11 +80,12 @@ def scan_batch(config: ScanConfig) -> dict[str, Any]:
     if not input_dir.is_dir():
         raise NotADirectoryError(f"Input path is not a directory: {input_dir}")
 
-    files = [_inspect_file(path, input_dir) for path in _iter_candidate_files(input_dir)]
+    candidate_files, skip_stats = _iter_candidate_files(input_dir, config.output_dir, config.manifest_csv)
+    files = [_inspect_file(path, input_dir) for path in candidate_files]
     manifest_paths = _read_manifest_paths(config.manifest_csv) if config.manifest_csv else None
     findings = _build_findings(files, config, manifest_paths)
     manifest_check = _summarize_manifest_check(files, manifest_paths, config.manifest_csv)
-    summary = _summarize(files, findings, manifest_check)
+    summary = _summarize(files, findings, manifest_check, skip_stats)
     generated_at = datetime.now(timezone.utc).isoformat()
     project = {
         "project_id": config.project_id,
@@ -92,6 +114,9 @@ def scan_batch(config: ScanConfig) -> dict[str, Any]:
         "manifest_missing_count": summary["manifest_missing_count"],
         "manifest_unexpected_count": summary["manifest_unexpected_count"],
         "manifest_duplicate_count": summary["manifest_duplicate_count"],
+        "skipped_total_count": summary["skipped_total_count"],
+        "skipped_file_count": summary["skipped_file_count"],
+        "skipped_directory_count": summary["skipped_directory_count"],
     }
 
     return {
@@ -109,8 +134,50 @@ def scan_batch(config: ScanConfig) -> dict[str, Any]:
     }
 
 
-def _iter_candidate_files(input_dir: Path) -> list[Path]:
-    return sorted(path for path in input_dir.rglob("*") if path.is_file() and not path.name.startswith("."))
+def _iter_candidate_files(input_dir: Path, output_dir: Path, manifest_csv: Path | None) -> tuple[list[Path], SkipStats]:
+    output_dir = output_dir.resolve()
+    manifest_csv = manifest_csv.resolve() if manifest_csv else None
+    files: list[Path] = []
+    hidden_directories = 0
+    output_directories = 0
+    hidden_files = 0
+    manifest_files = 0
+
+    for directory_name, dirnames, filenames in os.walk(input_dir):
+        directory = Path(directory_name)
+        kept_dirnames = []
+        for dirname in dirnames:
+            path = directory / dirname
+            if dirname.startswith("."):
+                hidden_directories += 1
+            elif _is_relative_to(path.resolve(), output_dir):
+                output_directories += 1
+            else:
+                kept_dirnames.append(dirname)
+        dirnames[:] = kept_dirnames
+
+        for filename in filenames:
+            path = directory / filename
+            if filename.startswith("."):
+                hidden_files += 1
+            elif manifest_csv and path.resolve() == manifest_csv:
+                manifest_files += 1
+            else:
+                files.append(path)
+
+    return (
+        sorted(files),
+        SkipStats(
+            hidden_directories=hidden_directories,
+            output_directories=output_directories,
+            hidden_files=hidden_files,
+            manifest_files=manifest_files,
+        ),
+    )
+
+
+def _is_relative_to(path: Path, parent: Path) -> bool:
+    return path == parent or path.is_relative_to(parent)
 
 
 def _inspect_file(path: Path, root: Path) -> dict[str, Any]:
@@ -358,6 +425,7 @@ def _summarize(
     files: list[dict[str, Any]],
     findings: list[dict[str, str]],
     manifest_check: ManifestCheck,
+    skip_stats: SkipStats,
 ) -> dict[str, int | bool | str | None]:
     return {
         "total_files": len(files),
@@ -373,4 +441,11 @@ def _summarize(
         "manifest_missing_count": manifest_check.missing_count,
         "manifest_unexpected_count": manifest_check.unexpected_count,
         "manifest_duplicate_count": manifest_check.duplicate_count,
+        "skipped_total_count": skip_stats.total,
+        "skipped_file_count": skip_stats.files,
+        "skipped_directory_count": skip_stats.directories,
+        "skipped_hidden_directory_count": skip_stats.hidden_directories,
+        "skipped_output_directory_count": skip_stats.output_directories,
+        "skipped_hidden_file_count": skip_stats.hidden_files,
+        "skipped_manifest_file_count": skip_stats.manifest_files,
     }

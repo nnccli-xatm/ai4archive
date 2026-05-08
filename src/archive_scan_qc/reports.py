@@ -220,6 +220,9 @@ def _summary_cards(summary: dict[str, Any]) -> str:
         ("Manifest Missing", "manifest_missing_count"),
         ("Manifest Unexpected", "manifest_unexpected_count"),
         ("Manifest Duplicates", "manifest_duplicate_count"),
+        ("Skipped Total", "skipped_total_count"),
+        ("Skipped Files", "skipped_file_count"),
+        ("Skipped Directories", "skipped_directory_count"),
     ]
     return "\n".join(
         f'<div class="card"><span class="label">{label}</span><span class="value">{_text(summary.get(key, 0))}</span></div>'
