@@ -290,6 +290,16 @@ archive-scan-qc \
   --analysis-provider-command '/approved-tools/local-provider --profile safe'
 ```
 
+For a deterministic contract example that uses only the Python standard
+library, run:
+
+```bash
+archive-scan-qc \
+  --input /path/to/synthetic-images \
+  --out /path/to/qc-report \
+  --analysis-provider-command 'python3 examples/local_analysis_provider.py'
+```
+
 The provider runs as a controlled local child process. The scanner sends JSONL
 on stdin with minimized fields: project/batch identifiers, input/output
 directories, source `relative_path` and absolute local path, openability and
@@ -322,6 +332,18 @@ Reports include provider aggregate metadata and provider finding counts. They
 still must not contain embedded images, thumbnails, OCR text, or file content;
 provider metadata keys that look like OCR/text/content/image/path/hash payloads
 are dropped before serialization.
+
+Future PaddleOCR, ONNX, Paddle, or other model providers should keep the same
+JSONL contract at the process boundary. If GPU acceleration is needed, wrap the
+model in a local sidecar executable or service that is launched by the operator
+inside the approved workstation or secured processing node, then point
+`--analysis-provider-command` at a small local client. The sidecar may open the
+local file path it receives, but it must not send source images, thumbnails,
+OCR text, embeddings, model prompts, filenames, hashes, or derived content to a
+cloud service or external network. Provider stdout must contain only metadata
+and findings in the documented schema; do not emit OCR transcripts, detected
+personal data, image crops, base64 payloads, absolute paths, raw model logs, or
+private filenames.
 
 ### Review and rule calibration
 

@@ -41,9 +41,10 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   `examples/manifest.sample.csv` through `archive-scan-qc preflight` and the
   scan/process CLI against synthetic files named `BATCH001_PAGE_0001.png` and
   `BATCH001_PAGE_0002.png`.
-- Run a synthetic fake provider smoke test with `--analysis-provider-command`
-  and confirm exactly one `source=provider` finding is reported, while omitting
-  the flag preserves the default rules-only path.
+- Run the `examples/local_analysis_provider.py` smoke test with
+  `--analysis-provider-command` and confirm exactly one `source=provider`
+  finding is reported, provider metadata is sanitized, and omitting the flag
+  preserves the default rules-only path.
 - For offline or domestic-platform deployments, install from the approved local
   wheelhouse and verify the Pillow wheel on target hardware.
 
@@ -81,8 +82,9 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   privacy boundary for `acceptance_summary.json`.
 - Confirm README and runbook document the offline provider JSONL contract,
   `provider.<name>.<rule>` namespace, protected built-in P0 rule boundary,
-  provider disable path, and the prohibition on uploads, image bytes,
-  thumbnails, OCR text, and file content.
+  provider disable path, local/GPU sidecar guidance for future PaddleOCR/ONNX/
+  Paddle providers, and the prohibition on uploads, image bytes, thumbnails,
+  OCR text, paths, hashes, filenames, raw model logs, and file content.
 - Confirm production runbooks explain the threshold calibration loop:
   automated QC, human review, aggregate calibration recommendation, then human
   approval before changing a project rules profile.

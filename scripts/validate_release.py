@@ -20,6 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES_DIR = REPO_ROOT / "examples"
 EXAMPLE_RULES_PROFILE = EXAMPLES_DIR / "rules-profile.production-sample.json"
 EXAMPLE_MANIFEST = EXAMPLES_DIR / "manifest.sample.csv"
+EXAMPLE_LOCAL_PROVIDER = EXAMPLES_DIR / "local_analysis_provider.py"
 
 SRC_DIR = REPO_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
@@ -114,22 +115,6 @@ def run_install_smoke() -> None:
                 "synthetic",
             ]
         )
-        provider = temp / "fake_provider.py"
-        provider.write_text(
-            "import json, sys\n"
-            "for line in sys.stdin:\n"
-            "    row = json.loads(line)\n"
-            "    print(json.dumps({"
-            "'type':'finding',"
-            "'relative_path':row['relative_path'],"
-            "'rule':'provider.release.smoke',"
-            "'severity':'P2',"
-            "'confidence':0.5,"
-            "'message':'Synthetic release smoke provider finding.',"
-            "'metadata':{'model':'fake-release-smoke'}"
-            "}))\n",
-            encoding="utf-8",
-        )
         provider_report_dir = temp / "provider-report"
         _run(
             [
@@ -145,12 +130,18 @@ def run_install_smoke() -> None:
                 "--batch",
                 "synthetic-provider",
                 "--analysis-provider-command",
-                f"{python} {provider}",
+                f"{python} {EXAMPLE_LOCAL_PROVIDER}",
             ]
         )
-        provider_report = json.loads((provider_report_dir / "scan_qc_report.json").read_text(encoding="utf-8"))
+        provider_report_text = (provider_report_dir / "scan_qc_report.json").read_text(encoding="utf-8")
+        provider_report = json.loads(provider_report_text)
         if provider_report["summary"]["provider_findings"] != 1:
-            raise SystemExit("provider release smoke did not record the fake provider finding")
+            raise SystemExit("provider release smoke did not record the example provider finding")
+        if provider_report["analysis_provider"]["provider"].get("name") != "local-sample":
+            raise SystemExit("provider release smoke did not record example provider metadata")
+        for forbidden in ["sanitizer_probe_path", "image_probe", "synthetic-value-should-not-appear-in-reports"]:
+            if forbidden in provider_report_text:
+                raise SystemExit(f"provider release smoke leaked sanitized metadata: {forbidden}")
         expected = [
             report_dir / "scan_qc_report.json",
             report_dir / "scan_qc_report.html",
