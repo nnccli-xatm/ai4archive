@@ -218,6 +218,54 @@ def run_examples_dry_run() -> None:
             raise SystemExit("example dry-run processing did not complete cleanly")
 
 
+def run_benchmark_validation() -> None:
+    with tempfile.TemporaryDirectory(prefix="archive-scan-qc-benchmark-") as temp_dir:
+        temp = Path(temp_dir)
+        input_dir = temp / "input"
+        benchmark_dir = temp / "benchmark"
+        input_dir.mkdir()
+        _run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "from PIL import Image, ImageDraw; "
+                    "root = r'" + str(input_dir) + "'; "
+                    "img = Image.new('RGB', (96, 72), 'white'); "
+                    "draw = ImageDraw.Draw(img); "
+                    "draw.text((8, 8), 'SYNTHETIC BENCHMARK', fill=(20, 20, 20)); "
+                    "img.save(root + '/BENCH_0001.png', dpi=(300, 300)); "
+                    "img.save(root + '/BENCH_0002.png', dpi=(300, 300))"
+                ),
+            ]
+        )
+        _run(
+            [
+                sys.executable,
+                "-m",
+                "archive_scan_qc",
+                "benchmark",
+                "--input",
+                str(input_dir),
+                "--out",
+                str(benchmark_dir),
+                "--workers-list",
+                "1,2",
+                "--scan-only",
+            ],
+            env=_pythonpath_env(),
+        )
+        payload_text = (benchmark_dir / "benchmark_results.json").read_text(encoding="utf-8")
+        payload = json.loads(payload_text)
+        if "recommendations" not in payload or not payload["recommendations"]["scan_only"]:
+            raise SystemExit("benchmark validation did not produce scan recommendations")
+        if payload["recommendations"]["scan_only"]["best_requested_workers"] not in {1, 2}:
+            raise SystemExit("benchmark validation produced an unexpected recommended worker count")
+        for forbidden in ["BENCH_0001.png", "BENCH_0002.png", '"files": [', '"findings": [', "relative_path", "sha256"]:
+            if forbidden in payload_text:
+                raise SystemExit(f"benchmark validation leaked row-level content: {forbidden}")
+
+
 def run_build_artifacts() -> None:
     build_dir = REPO_ROOT / "dist"
     if build_dir.exists():
@@ -242,6 +290,7 @@ def main(argv: list[str] | None = None) -> int:
     if not args.skip_build_artifacts:
         run_build_artifacts()
     run_examples_dry_run()
+    run_benchmark_validation()
     run_install_smoke()
     print("release validation passed")
     return 0

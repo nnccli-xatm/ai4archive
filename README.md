@@ -364,6 +364,16 @@ memory/GPU fields. They do not include source images, filenames, relative
 paths, content hashes, thumbnails, per-file quality metrics, per-file finding
 rows, single-file manifests, or image content.
 
+`benchmark_results.json` also includes a top-level `recommendations` object for
+capacity planning. It reports the best scan worker count, the best processing
+worker count when processing was benchmarked, the corresponding mean files per
+minute, effective workers, the selection basis, and diminishing-return notes
+when an adjacent worker step improves throughput by less than the benchmark
+threshold. The recommendation is based only on the aggregate data in the
+current benchmark run; it does not assume a fixed CPU, memory, storage, GPU, or
+private sample path. Keep `benchmark_results.csv` as run-level rows for
+existing consumers.
+
 For private local samples, share only `benchmark_results.json` and/or
 `benchmark_results.csv`. Do not share the image directory, generated derivative
 images, normal scan QC reports, processing manifests, filenames, thumbnails, or
@@ -393,12 +403,18 @@ Use these aggregate fields for local hardware baselines by running the same
 batch and CLI options on each machine with `--workers 1`, `--workers 2`,
 `--workers 4`, and the local CPU-count upper bound. Compare files per minute,
 processed files per minute, elapsed seconds, worker mode, and effective worker
-count. For privacy-sensitive sample batches, share only aggregate counts,
-elapsed seconds, throughput, effective worker count, worker mode, and finding
-totals. Do not share source images, filenames, thumbnails, per-file records, or
-generated output directories from private image collections. Run private sample
-benchmarks locally only, and publish aggregate performance/statistical summaries
-without images, paths, thumbnails, or row-level processing manifests.
+count. Use `recommendations.scan_only` to choose the scan worker setting and
+`recommendations.processing` to choose derivative-processing workers when that
+section is present. Record local CPU utilization, memory high-water mark, disk
+queue or storage notes, and any I/O contention next to the aggregate JSON so the
+highest-throughput worker count can be weighed against operating headroom. For
+privacy-sensitive sample batches, share only aggregate counts, elapsed seconds,
+throughput, effective worker count, worker mode, recommendation fields, and
+finding totals. Do not share source images, filenames, thumbnails, per-file
+records, or generated output directories from private image collections. Run
+private sample benchmarks locally only, and publish aggregate
+performance/statistical summaries without images, paths, thumbnails, or
+row-level processing manifests.
 
 ### Release validation
 

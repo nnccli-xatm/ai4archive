@@ -94,7 +94,11 @@ Recommended production workstation:
 Large images and high worker counts increase memory and disk pressure. Start
 with `--workers 1`, then test `--workers 2`, `--workers 4`, and the local
 upper bound while watching memory, CPU saturation, disk queue length, and
-throughput.
+throughput. For production acceptance, run `archive-scan-qc benchmark` across
+the candidate worker counts and use `benchmark_results.json` `recommendations`
+as the aggregate capacity-planning summary. Treat the recommended workers as
+the throughput optimum from that run, then confirm there is enough CPU, memory,
+and storage headroom before standardizing it.
 
 ## Directory Conventions
 
@@ -218,7 +222,10 @@ Use `examples/` and temporary synthetic images for public PRs, issues, release
 notes, and dry-run evidence. For private performance comparison, share only
 aggregate benchmark fields such as total file count, openable count, finding
 counts, elapsed seconds, files per minute, effective workers, CPU count,
-platform, Python version, and Pillow version.
+platform, Python version, Pillow version, and benchmark recommendation fields.
+Private samples are acceptable for internal capacity planning only because the
+shared artifact is aggregate-only; never include filenames, paths, directory
+listings, hashes, thumbnails, row-level reports, or derivative images.
 
 ## Release Candidate Dry-Run
 
@@ -274,6 +281,10 @@ Throughput is lower than expected:
 - Increase `--workers` gradually and stop when files per minute stops
   improving or memory pressure rises.
 - Benchmark scan-only and processing modes separately.
+- Review `benchmark_results.json` `recommendations.scan_only` and
+  `recommendations.processing`; a diminishing-return note means a higher worker
+  count had less than the benchmark threshold of adjacent throughput gain and
+  should be accepted only with local CPU, memory, and I/O evidence.
 
 Derivative processing fails for some files:
 
@@ -305,3 +316,10 @@ Start with these controls:
 Record both requested and effective workers from stdout or report performance
 metadata. The CLI caps effective workers by CPU count, batch size, and an
 internal safety ceiling.
+
+For capacity planning, prefer the aggregate benchmark recommendations over a
+single manual run. Record the recommended requested workers, effective workers,
+files/min, diminishing-return notes, CPU utilization, memory high-water mark,
+storage type, disk queue or I/O wait observations, and whether scanning and
+processing were benchmarked separately. Share only the aggregate JSON/CSV and
+those operational notes outside the private environment.
