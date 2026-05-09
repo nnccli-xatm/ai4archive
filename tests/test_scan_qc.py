@@ -11,6 +11,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter
@@ -918,6 +919,32 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(serial["summary"]["total_files"], default["summary"]["total_files"])
             self.assertEqual(serial["summary"]["total_findings"], default["summary"]["total_findings"])
             self.assertEqual(serial["summary"]["performance"]["mode"], "serial")
+
+    def test_scan_inspection_opens_each_image_once_for_metrics(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+
+            Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+            Image.new("RGB", (24, 32), "white").save(input_dir / "A001_0002.png", dpi=(300, 300))
+            original_open = Image.open
+            opened_paths: list[str] = []
+
+            def counted_open(fp, *args, **kwargs):
+                opened_paths.append(str(fp))
+                return original_open(fp, *args, **kwargs)
+
+            with mock.patch("archive_scan_qc.scanner.Image.open", side_effect=counted_open):
+                report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir, workers=1))
+
+            self.assertEqual(report["summary"]["openable_files"], 2)
+            self.assertEqual(len(opened_paths), 2)
+            self.assertEqual(
+                sorted(Path(path).name for path in opened_paths),
+                ["A001_0001.jpg", "A001_0002.png"],
+            )
 
     def test_multi_worker_scan_output_and_findings_order_is_stable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

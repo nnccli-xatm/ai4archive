@@ -378,8 +378,7 @@ def _inspect_file(path: Path, root: Path) -> dict[str, Any]:
 
     try:
         with Image.open(path) as image:
-            image.verify()
-        with Image.open(path) as image:
+            image.load()
             dpi_x, dpi_y = _extract_dpi(image.info.get("dpi"))
             orientation_metrics = _measure_orientation(image)
             quality_metrics = _measure_quality(image)
