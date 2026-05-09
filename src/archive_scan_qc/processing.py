@@ -907,58 +907,75 @@ def _despeckle_isolated_pixels(image: Image.Image) -> tuple[Image.Image, int]:
     if width < 3 or height < 3:
         return image.copy(), 0
 
-    candidate_bbox = grayscale.point(lambda value: 255 if value <= 60 else 0, mode="L").getbbox()
+    dark_mask = grayscale.point(lambda value: 255 if value <= 60 else 0, mode="L")
+    candidate_bbox = dark_mask.getbbox()
     if not candidate_bbox:
         return image.copy(), 0
 
     left, top, right, bottom = candidate_bbox
-    x_start = max(1, left)
-    y_start = max(1, top)
-    x_stop = min(width - 1, right)
-    y_stop = min(height - 1, bottom)
-    if x_start >= x_stop or y_start >= y_stop:
+    if left >= width - 1 or top >= height - 1 or right <= 1 or bottom <= 1:
         return image.copy(), 0
 
     gray_pixels = grayscale.load()
-    source = image.convert("RGB") if image.mode != "RGB" else image.copy()
-    output = source.copy()
-    source_pixels = source.load()
-    output_pixels = output.load()
+    candidate_width = right - left
+    candidate_values = dark_mask.crop(candidate_bbox).tobytes()
+    source: Image.Image | None = None
+    output: Image.Image | None = None
+    source_pixels: Any = None
+    output_pixels: Any = None
     changed = 0
-    for y in range(y_start, y_stop):
-        for x in range(x_start, x_stop):
-            if gray_pixels[x, y] > 60:
-                continue
-            dark_neighbors = 0
-            neighbor_values: list[int] = []
-            neighbor_rgb: list[tuple[int, int, int]] = []
-            for ny in range(y - 1, y + 2):
-                for nx in range(x - 1, x + 2):
-                    if nx == x and ny == y:
-                        continue
-                    value = gray_pixels[nx, ny]
-                    neighbor_values.append(value)
-                    neighbor_rgb.append(source_pixels[nx, ny])
-                    if value <= 90:
-                        dark_neighbors += 1
-            if dark_neighbors > 1:
-                continue
-            wider_dark = 0
-            for ny in range(max(0, y - 2), min(height, y + 3)):
-                for nx in range(max(0, x - 2), min(width, x + 3)):
-                    if nx == x and ny == y:
-                        continue
-                    if gray_pixels[nx, ny] <= 90:
-                        wider_dark += 1
-            if wider_dark > 2:
-                continue
-            median_gray = sorted(neighbor_values)[len(neighbor_values) // 2]
-            if median_gray < 120:
-                continue
-            replacement = tuple(sorted(channel)[len(channel) // 2] for channel in zip(*neighbor_rgb))
-            output_pixels[x, y] = replacement
-            changed += 1
+    for index, mask_value in enumerate(candidate_values):
+        if not mask_value:
+            continue
+        x = left + (index % candidate_width)
+        y = top + (index // candidate_width)
+        if x == 0 or y == 0 or x == width - 1 or y == height - 1:
+            continue
 
+        dark_neighbors = 0
+        neighbor_values: list[int] = []
+        for ny in range(y - 1, y + 2):
+            for nx in range(x - 1, x + 2):
+                if nx == x and ny == y:
+                    continue
+                value = gray_pixels[nx, ny]
+                neighbor_values.append(value)
+                if value <= 90:
+                    dark_neighbors += 1
+        if dark_neighbors > 1:
+            continue
+
+        wider_dark = 0
+        for ny in range(max(0, y - 2), min(height, y + 3)):
+            for nx in range(max(0, x - 2), min(width, x + 3)):
+                if nx == x and ny == y:
+                    continue
+                if gray_pixels[nx, ny] <= 90:
+                    wider_dark += 1
+        if wider_dark > 2:
+            continue
+
+        median_gray = sorted(neighbor_values)[len(neighbor_values) // 2]
+        if median_gray < 120:
+            continue
+
+        if output is None:
+            source = image if image.mode == "RGB" else image.convert("RGB")
+            output = source.copy()
+            source_pixels = source.load()
+            output_pixels = output.load()
+        neighbor_rgb = [
+            source_pixels[nx, ny]
+            for ny in range(y - 1, y + 2)
+            for nx in range(x - 1, x + 2)
+            if nx != x or ny != y
+        ]
+        replacement = tuple(sorted(channel)[len(channel) // 2] for channel in zip(*neighbor_rgb))
+        output_pixels[x, y] = replacement
+        changed += 1
+
+    if output is None:
+        return image.copy(), 0
     if image.mode == "L":
         return output.convert("L"), changed
     if image.mode == "RGB":
