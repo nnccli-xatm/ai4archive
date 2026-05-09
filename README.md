@@ -241,6 +241,12 @@ The runner writes
   present, and a conservative recommended worker count.
 - `environment`: Python, platform, machine, processor, CPU count, memory, GPU
   placeholder, and executable name.
+- `runtime_hardware`: privacy-safe aggregate runtime/resource context,
+  including OS/platform family, Python version family, CPU logical count, total
+  memory GB when available, output disk free/total GB, visible NVIDIA GPU count
+  and aggregate GPU memory GB when `nvidia-smi` is available, sanitized
+  telemetry warnings, and `gpu_acceleration_used=false` for the current
+  CPU/Pillow path.
 - `cleanup`: whether generated private artifacts were removed, cleanup
   `elapsed_seconds`, and which known output directories/files were deleted or
   preserved.
@@ -248,7 +254,11 @@ The runner writes
 
 Privacy guarantees: `aggregate_baseline_summary.json` omits source names, source
 paths, relative paths, content hashes, thumbnails, OCR text, image content, and
-row-level findings. When `--cleanup-artifacts` or
+row-level findings. Runtime hardware telemetry is aggregate-only and must not
+include hostnames, usernames, absolute paths, environment variables, command
+output with paths, filenames, hashes, OCR text, or row-level data. Missing
+optional probes such as `psutil` or `nvidia-smi` are recorded as sanitized
+warnings instead of failing validation. When `--cleanup-artifacts` or
 `PUERSAI_HPC_BASELINE_CLEANUP_ARTIFACTS=1` is enabled, the runner preserves
 `aggregate_baseline_summary.json` for reporting and removes known generated
 private artifacts under the output root, including `scan-reports`,
@@ -295,7 +305,7 @@ PYTHONPATH=src python3 scripts/run_production_validation.py \
   --trim-dark-border \
   --despeckle \
   --min-scan-files-per-minute 100 \
-  --min-processing-files-per-minute 60
+  --min-processing-files-per-minute 80
 ```
 
 Full fixed 149-image production validation:
@@ -318,8 +328,9 @@ PYTHONPATH=src python3 scripts/run_production_validation.py \
 The command exits non-zero when the aggregate baseline privacy self-check fails,
 cleanup does not retain only the aggregate baseline summary before acceptance,
 processing failures are present, or the configured throughput thresholds are not
-met. Stdout names only aggregate output files and aggregate counts/rates; do not
-paste private input or output paths into public reports.
+met. Stdout names only aggregate output files, aggregate counts/rates, and
+aggregate runtime/resource fields; do not paste private input or output paths
+into public reports.
 
 Current `puersai-hpc` production baseline after PR #61 uses the full fixed
 private sample of 149 files. The latest aggregate-only result is:
