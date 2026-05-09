@@ -1055,6 +1055,10 @@ templates, and unknown extra artifacts are marked
 PYTHONPATH=src python -m unittest discover -s tests
 PYTHONPATH=src python -m compileall -q src tests
 python3 scripts/validate_release.py
+PYTHONPATH=src python3 scripts/release_readiness_summary.py \
+  --out /placeholder/private-validation-output/readiness \
+  --wheelhouse /placeholder/offline-wheelhouse \
+  --run-capability-probe
 ```
 
 The local release validation runs unit tests, compileall, wheel creation, an
@@ -1063,6 +1067,15 @@ derivative processing, an isolated install smoke test, `archive-scan-qc
 --version`, a synthetic benchmark, a synthetic acceptance smoke, and a
 synthetic-image CLI scan. The dry-run uses only generated temporary images and
 the committed privacy-safe files in `examples/`.
+
+`release_readiness_summary.py` writes `release_readiness_summary.json`, an
+aggregate-only machine-readable readiness artifact for unattended release
+loops. It records pass/fail counts for unit tests, compile/import checks,
+offline dependency checks, package/CLI smoke, and optional capability-probe
+readiness. It does not embed paths, filenames, hashes, OCR text, thumbnails,
+image content, secrets, command output, or row-level findings. Delete any local
+validation outputs after extracting the aggregate summary required for release
+evidence.
 
 See `docs/operations-runbook.md` for production installation, directory,
 privacy, troubleshooting, exit-code, and tuning guidance. See
