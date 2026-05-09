@@ -1059,6 +1059,19 @@ PYTHONPATH=src python3 scripts/release_readiness_summary.py \
   --out /placeholder/private-validation-output/readiness \
   --wheelhouse /placeholder/offline-wheelhouse \
   --run-capability-probe
+PYTHONPATH=src python3 scripts/release_candidate_summary.py \
+  --input /placeholder/private-20-image-sample \
+  --out /placeholder/private-validation-output/release-candidate \
+  --release-readiness-summary /placeholder/private-validation-output/readiness/release_readiness_summary.json \
+  --workers 4 \
+  --benchmark-workers-list 1,2,4,8 \
+  --process-images \
+  --auto-crop \
+  --deskew \
+  --trim-dark-border \
+  --despeckle \
+  --min-scan-files-per-minute 100 \
+  --min-processing-files-per-minute 80
 ```
 
 The local release validation runs unit tests, compileall, wheel creation, an
@@ -1076,6 +1089,13 @@ readiness. It does not embed paths, filenames, hashes, OCR text, thumbnails,
 image content, secrets, command output, or row-level findings. Delete any local
 validation outputs after extracting the aggregate summary required for release
 evidence.
+
+`release_candidate_summary.py` writes `release_candidate_summary.json`, a
+single aggregate-only decision wrapper around production validation evidence and
+release readiness evidence. It records only statuses, counts, rates, threshold
+outcomes, cleanup/privacy status, capability-probe counts, and the CPU/Pillow
+semantics marker. With the default cleanup mode, generated derivative outputs
+are deleted by the production validation wrapper after aggregate extraction.
 
 See `docs/operations-runbook.md` for production installation, directory,
 privacy, troubleshooting, exit-code, and tuning guidance. See
