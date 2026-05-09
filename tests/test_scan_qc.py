@@ -21,7 +21,13 @@ from archive_scan_qc.acceptance import build_acceptance_summary
 from archive_scan_qc.benchmark import _recommendations
 from archive_scan_qc.cli import main
 from archive_scan_qc.handoff import write_delivery_handoff_manifest
-from archive_scan_qc.processing import ProcessingOptions, _deskew_candidate_scores, _horizontal_projection_variance, process_images
+from archive_scan_qc.processing import (
+    ProcessingOptions,
+    _despeckle_candidate_points,
+    _deskew_candidate_scores,
+    _horizontal_projection_variance,
+    process_images,
+)
 from archive_scan_qc.processing_plan import build_processing_plan
 from archive_scan_qc.processing_review import build_processing_review_package
 from archive_scan_qc.reports import build_review_summary, write_reports, write_review_export, write_review_summary
@@ -3293,6 +3299,29 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(record["despeckle_pixels_changed"], 4)
             self.assertEqual(record["despeckle_reason"], "isolated dark pixels replaced")
             self.assertIn("despeckle_isolated_pixels", record["operations"])
+
+    def test_despeckle_candidate_points_prefilter_isolated_speckles_only(self) -> None:
+        mask = Image.new("L", (80, 60), 0)
+        draw = ImageDraw.Draw(mask)
+        draw.line((10, 30, 70, 30), fill=255, width=2)
+        draw.rectangle((15, 12, 20, 17), fill=255)
+        for point in [(5, 5), (20, 8), (74, 12), (40, 50)]:
+            mask.putpixel(point, 255)
+
+        self.assertEqual(
+            sorted(_despeckle_candidate_points(mask)),
+            [(5, 5), (20, 8), (40, 50), (74, 12)],
+        )
+
+    def test_despeckle_candidate_points_dense_content_fast_path(self) -> None:
+        mask = Image.new("L", (120, 80), 0)
+        draw = ImageDraw.Draw(mask)
+        for y in range(12, 70, 9):
+            draw.rectangle((12, y, 108, y + 2), fill=255)
+        for x in range(18, 108, 12):
+            draw.line((x, 10, x, 72), fill=255, width=3)
+
+        self.assertEqual(_despeckle_candidate_points(mask), [])
 
     def test_despeckle_fast_path_preserves_noop_output(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
