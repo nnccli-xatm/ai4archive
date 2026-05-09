@@ -6,6 +6,7 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 
 - Run `PYTHONPATH=src python3 -m unittest discover -s tests`.
 - Run `PYTHONPATH=src python3 -m compileall -q src tests`.
+- Run `PYTHONPATH=src python3 scripts/check_offline_dependencies.py`.
 - Run `python3 scripts/validate_release.py`.
 - Confirm `archive-scan-qc --version` matches the package version.
 - Confirm the validator's examples-based dry-run created `preflight_report.json`,
@@ -47,6 +48,19 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   preserves the default rules-only path.
 - For offline or domestic-platform deployments, install from the approved local
   wheelhouse and verify the Pillow wheel on target hardware.
+- Before isolated production validation, run the read-only offline dependency
+  check against the approved wheelhouse:
+
+  ```bash
+  PYTHONPATH=src python3 scripts/check_offline_dependencies.py \
+    --wheelhouse /mnt/d/ai4archive-wheelhouse
+  ```
+
+  The command does not install packages or use the network. It reports only
+  aggregate Python/package versions and wheel counts by package name. If the
+  release build has not yet been copied into the wheelhouse, rerun with
+  `--wheelhouse-warning-only` to collect warnings without blocking local smoke
+  checks.
 
 ## Operations readiness
 
