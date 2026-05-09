@@ -157,6 +157,7 @@ def _run_batch(project_id: str, batch: PlanBatch, index: int) -> dict[str, Any]:
         "scan_files_per_minute": 0.0,
         "processing_elapsed_seconds": 0.0,
         "processing_files_per_minute": 0.0,
+        "processing_operation_timings": {},
         "workers": batch.workers,
     }
     try:
@@ -254,6 +255,7 @@ def _run_batch(project_id: str, batch: PlanBatch, index: int) -> dict[str, Any]:
                     "processing_resumed_files": processing_summary["resumed_files"],
                     "processing_elapsed_seconds": processing_performance["elapsed_seconds"],
                     "processing_files_per_minute": processing_performance["processed_files_per_minute"],
+                    "processing_operation_timings": processing_performance.get("operation_timings", {}),
                 }
             )
 
@@ -303,6 +305,7 @@ def _build_summary(
     }
     scan_elapsed = round(sum(float(batch["scan_elapsed_seconds"]) for batch in batches), 6)
     processing_elapsed = round(sum(float(batch["processing_elapsed_seconds"]) for batch in batches), 6)
+    operation_timings = _aggregate_processing_operation_timings(batches)
     elapsed = max(0.0, round(time.perf_counter() - start_seconds, 6))
     return {
         "schema_version": "scan-qc.run-plan-summary.v1",
@@ -330,10 +333,41 @@ def _build_summary(
             "scan_files_per_minute": _files_per_minute(totals["total_files"], scan_elapsed),
             "scan_openable_files_per_minute": _files_per_minute(totals["openable_files"], scan_elapsed),
             "processing_files_per_minute": _files_per_minute(totals["processing_processed_files"], processing_elapsed),
+            "processing_operation_timings": operation_timings,
             "failed_batch_ids": [batch["batch_id"] for batch in batches if batch["status"] == "failed"],
         },
         "batches": batches,
     }
+
+
+def _aggregate_processing_operation_timings(batches: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    operation_names = ["auto_crop", "deskew", "trim_dark_border", "despeckle"]
+    totals: dict[str, dict[str, Any]] = {}
+    for operation in operation_names:
+        elapsed_seconds = 0.0
+        file_count = 0
+        enabled = False
+        for batch in batches:
+            batch_timings = batch.get("processing_operation_timings")
+            if not isinstance(batch_timings, dict):
+                continue
+            timing = batch_timings.get(operation)
+            if not isinstance(timing, dict):
+                continue
+            enabled = enabled or timing.get("enabled") is True
+            if isinstance(timing.get("elapsed_seconds"), int | float):
+                elapsed_seconds += float(timing["elapsed_seconds"])
+            if isinstance(timing.get("file_count"), int):
+                file_count += int(timing["file_count"])
+        elapsed_seconds = round(elapsed_seconds, 6)
+        totals[operation] = {
+            "enabled": enabled,
+            "file_count": file_count,
+            "elapsed_seconds": elapsed_seconds,
+            "files_per_minute": _files_per_minute(file_count, elapsed_seconds),
+            "average_seconds_per_file": round(elapsed_seconds / file_count, 6) if file_count else None,
+        }
+    return totals
 
 
 def _write_summary(payload: dict[str, Any], output_root: Path) -> None:

@@ -91,6 +91,9 @@ def process_images(
         failed_files=failed_files,
         workers=worker_metadata(options.workers, process_workers),
     )
+    performance["operation_timings"] = _aggregate_operation_timings(records, options)
+    for record in records:
+        record.pop("operation_timings", None)
     manifest = {
         "schema_version": "scan-qc.processing.v1",
         "generated_at": finished_at.isoformat(),
@@ -228,6 +231,7 @@ def _process_record(
         "despeckle_reason": None,
         "processing_audit": None,
         "processing_warnings": [],
+        "operation_timings": {},
         "status": "skipped",
         "resumed": False,
         "reprocessed": False,
@@ -287,6 +291,7 @@ def _process_record(
                 "despeckle_reason": process_info["despeckle_reason"],
                 "processing_audit": process_info["processing_audit"],
                 "processing_warnings": process_info["processing_warnings"],
+                "operation_timings": process_info["operation_timings"],
                 "status": "processed",
                 "operations": operations,
             }
@@ -316,6 +321,7 @@ def _process_record(
                     "despeckle_reason": process_info["despeckle_reason"],
                     "processing_audit": process_info["processing_audit"],
                     "processing_warnings": process_info["processing_warnings"],
+                    "operation_timings": process_info["operation_timings"],
                     "operations": operations,
                 }
             )
@@ -377,6 +383,7 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
         if isinstance(failure, str)
     ]
     guardrail_failed_files = sum(1 for audit in audit_records if audit.get("guardrail_failures"))
+    operation_timings = performance.get("operation_timings", {})
     return {
         "schema_version": "scan-qc.processing.audit.v1",
         "generated_at": manifest["generated_at"],
@@ -397,6 +404,7 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "started_at": performance["started_at"],
             "finished_at": performance["finished_at"],
             "elapsed_seconds": performance["elapsed_seconds"],
+            "operation_timings": operation_timings,
         },
         "counts": {
             "total_files": summary["total_files"],
@@ -446,6 +454,33 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "contains_image_content": False,
         },
     }
+
+
+def _aggregate_operation_timings(records: list[dict[str, Any]], options: ProcessingOptions) -> dict[str, dict[str, Any]]:
+    enabled = {
+        "auto_crop": options.auto_crop,
+        "deskew": options.deskew,
+        "trim_dark_border": options.trim_dark_border,
+        "despeckle": options.despeckle,
+    }
+    timings: dict[str, dict[str, Any]] = {}
+    for operation, is_enabled in enabled.items():
+        values = [
+            float(record["operation_timings"][operation]["elapsed_seconds"])
+            for record in records
+            if isinstance(record.get("operation_timings"), dict)
+            and isinstance(record["operation_timings"].get(operation), dict)
+            and isinstance(record["operation_timings"][operation].get("elapsed_seconds"), int | float)
+        ]
+        elapsed_seconds = round(sum(values), 6)
+        timings[operation] = {
+            "enabled": is_enabled,
+            "file_count": len(values),
+            "elapsed_seconds": elapsed_seconds,
+            "files_per_minute": _files_per_minute(len(values), elapsed_seconds),
+            "average_seconds_per_file": round(elapsed_seconds / len(values), 6) if values else None,
+        }
+    return timings
 
 
 def _audit_thresholds(options: ProcessingOptions) -> dict[str, float]:
@@ -498,6 +533,7 @@ def _reason_counts(reasons: list[str]) -> dict[str, int]:
 
 def _process_image(image: Image.Image, options: ProcessingOptions) -> tuple[Image.Image, list[str], dict[str, Any]]:
     operations: list[str] = []
+    operation_timings: dict[str, dict[str, float]] = {}
     processed = ImageOps.exif_transpose(image)
     operations.append("exif_transpose")
     original_size = list(processed.size)
@@ -509,69 +545,73 @@ def _process_image(image: Image.Image, options: ProcessingOptions) -> tuple[Imag
 
     pre_deskew_size = list(processed.size)
     post_deskew_size = list(processed.size)
-    skew = _detect_skew(processed)
-    operations.append("skew_detect_projection")
-    deskewed = False
-    deskew_reason = skew.reason
-    if not options.deskew:
-        operations.append("deskew_disabled")
-        deskew_reason = "deskew disabled"
-    elif skew.angle_degrees is None:
-        operations.append("deskew_noop")
-    elif skew.confidence < options.deskew_min_confidence:
-        operations.append("deskew_noop")
-        deskew_reason = "low confidence"
-    elif abs(skew.angle_degrees) > options.deskew_max_degrees:
-        operations.append("deskew_noop")
-        deskew_reason = "angle exceeds conservative threshold"
-    elif abs(skew.angle_degrees) < 0.2:
-        operations.append("deskew_noop")
-        deskew_reason = "angle below correction threshold"
-    else:
-        processed = _rotate_for_deskew(processed, -skew.angle_degrees)
-        operations.append("deskew_conservative")
-        post_deskew_size = list(processed.size)
-        deskewed = True
-        deskew_reason = "deskew applied"
+    with _operation_timer(operation_timings, "deskew", enabled=options.deskew):
+        skew = _detect_skew(processed)
+        operations.append("skew_detect_projection")
+        deskewed = False
+        deskew_reason = skew.reason
+        if not options.deskew:
+            operations.append("deskew_disabled")
+            deskew_reason = "deskew disabled"
+        elif skew.angle_degrees is None:
+            operations.append("deskew_noop")
+        elif skew.confidence < options.deskew_min_confidence:
+            operations.append("deskew_noop")
+            deskew_reason = "low confidence"
+        elif abs(skew.angle_degrees) > options.deskew_max_degrees:
+            operations.append("deskew_noop")
+            deskew_reason = "angle exceeds conservative threshold"
+        elif abs(skew.angle_degrees) < 0.2:
+            operations.append("deskew_noop")
+            deskew_reason = "angle below correction threshold"
+        else:
+            processed = _rotate_for_deskew(processed, -skew.angle_degrees)
+            operations.append("deskew_conservative")
+            post_deskew_size = list(processed.size)
+            deskewed = True
+            deskew_reason = "deskew applied"
 
     dark_border = DarkBorderDetection(None, "dark border trim disabled")
     dark_border_trimmed = False
-    if options.trim_dark_border:
-        dark_border = _detect_dark_border_bbox(processed)
-        if dark_border.bbox:
-            processed = processed.crop(dark_border.bbox)
-            operations.append("dark_border_trim_conservative")
-            dark_border_trimmed = True
+    with _operation_timer(operation_timings, "trim_dark_border", enabled=options.trim_dark_border):
+        if options.trim_dark_border:
+            dark_border = _detect_dark_border_bbox(processed)
+            if dark_border.bbox:
+                processed = processed.crop(dark_border.bbox)
+                operations.append("dark_border_trim_conservative")
+                dark_border_trimmed = True
+            else:
+                operations.append("dark_border_trim_noop")
         else:
-            operations.append("dark_border_trim_noop")
-    else:
-        operations.append("dark_border_trim_disabled")
+            operations.append("dark_border_trim_disabled")
 
     crop_bbox: tuple[int, int, int, int] | None = None
-    if options.auto_crop:
-        crop_bbox = _detect_conservative_crop_bbox(processed)
-        if crop_bbox:
-            processed = processed.crop(crop_bbox)
-            operations.append("auto_crop_conservative")
+    with _operation_timer(operation_timings, "auto_crop", enabled=options.auto_crop):
+        if options.auto_crop:
+            crop_bbox = _detect_conservative_crop_bbox(processed)
+            if crop_bbox:
+                processed = processed.crop(crop_bbox)
+                operations.append("auto_crop_conservative")
+            else:
+                operations.append("auto_crop_noop")
         else:
-            operations.append("auto_crop_noop")
-    else:
-        operations.append("auto_crop_disabled")
+            operations.append("auto_crop_disabled")
 
     despeckled = False
     despeckle_pixels_changed = 0
     despeckle_reason = "despeckle disabled"
-    if options.despeckle:
-        processed, despeckle_pixels_changed = _despeckle_isolated_pixels(processed)
-        if despeckle_pixels_changed:
-            operations.append("despeckle_isolated_pixels")
-            despeckled = True
-            despeckle_reason = "isolated dark pixels replaced"
+    with _operation_timer(operation_timings, "despeckle", enabled=options.despeckle):
+        if options.despeckle:
+            processed, despeckle_pixels_changed = _despeckle_isolated_pixels(processed)
+            if despeckle_pixels_changed:
+                operations.append("despeckle_isolated_pixels")
+                despeckled = True
+                despeckle_reason = "isolated dark pixels replaced"
+            else:
+                operations.append("despeckle_noop")
+                despeckle_reason = "no isolated dark pixels found"
         else:
-            operations.append("despeckle_noop")
-            despeckle_reason = "no isolated dark pixels found"
-    else:
-        operations.append("despeckle_disabled")
+            operations.append("despeckle_disabled")
 
     processed = ImageOps.autocontrast(processed, cutoff=0.5)
     operations.append("autocontrast_cutoff_0_5")
@@ -596,8 +636,26 @@ def _process_image(image: Image.Image, options: ProcessingOptions) -> tuple[Imag
         "despeckle_reason": despeckle_reason,
         "processing_audit": processing_audit,
         "processing_warnings": processing_warnings,
+        "operation_timings": operation_timings,
     }
     return processed, operations, crop_info
+
+
+class _operation_timer:
+    def __init__(self, timings: dict[str, dict[str, float]], operation: str, *, enabled: bool) -> None:
+        self.timings = timings
+        self.operation = operation
+        self.enabled = enabled
+        self.started_at = 0.0
+
+    def __enter__(self) -> None:
+        self.started_at = time.perf_counter()
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        if self.enabled:
+            self.timings[self.operation] = {
+                "elapsed_seconds": max(0.0, round(time.perf_counter() - self.started_at, 6)),
+            }
 
 
 def _processing_audit(

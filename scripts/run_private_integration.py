@@ -209,6 +209,8 @@ def _public_summary(
             finding_rule_counts[rule] = finding_rule_counts.get(rule, 0) + int(count)
     benchmark_scan_throughput = _benchmark_recommended_throughput(benchmark_summary, "scan_only")
     benchmark_processing_throughput = _benchmark_recommended_throughput(benchmark_summary, "processing")
+    processing_operation_timings = run_counts.get("processing_operation_timings", {})
+    benchmark_operation_timings = _benchmark_operation_timings(benchmark_summary)
 
     failed_batches = int(run_counts["failed_batches"])
     processing_failures = int(run_counts["processing_failed_files"])
@@ -268,6 +270,8 @@ def _public_summary(
             "benchmark_scan_files_per_minute": benchmark_scan_throughput,
             "benchmark_processing_files_per_minute": benchmark_processing_throughput,
             "benchmark_basis": "best observed recommendation mean files/minute",
+            "processing_operation_timings": processing_operation_timings if isinstance(processing_operation_timings, dict) else {},
+            "benchmark_processing_operation_timings": benchmark_operation_timings,
         },
         "acceptance": {
             "passed": bool(acceptance_summary["pass"]),
@@ -285,6 +289,51 @@ def _public_summary(
             "violations": [],
         },
     }
+
+
+def _benchmark_operation_timings(benchmark_summary: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    if not benchmark_summary:
+        return {}
+    operation_names = ["auto_crop", "deskew", "trim_dark_border", "despeckle"]
+    totals: dict[str, dict[str, Any]] = {}
+    for operation in operation_names:
+        elapsed_seconds = 0.0
+        file_count = 0
+        enabled = False
+        for run in benchmark_summary.get("runs", []):
+            if not isinstance(run, dict):
+                continue
+            operations = run.get("operations")
+            if isinstance(operations, dict):
+                enabled = enabled or operations.get(operation) is True
+            processing = run.get("processing")
+            if not isinstance(processing, dict):
+                continue
+            operation_timings = processing.get("operation_timings")
+            if not isinstance(operation_timings, dict):
+                continue
+            timing = operation_timings.get(operation)
+            if not isinstance(timing, dict):
+                continue
+            if isinstance(timing.get("elapsed_seconds"), int | float):
+                elapsed_seconds += float(timing["elapsed_seconds"])
+            if isinstance(timing.get("file_count"), int):
+                file_count += int(timing["file_count"])
+        elapsed_seconds = round(elapsed_seconds, 6)
+        totals[operation] = {
+            "enabled": enabled,
+            "file_count": file_count,
+            "elapsed_seconds": elapsed_seconds,
+            "files_per_minute": _files_per_minute(file_count, elapsed_seconds),
+            "average_seconds_per_file": round(elapsed_seconds / file_count, 6) if file_count else None,
+        }
+    return totals
+
+
+def _files_per_minute(file_count: int, elapsed_seconds: float) -> float:
+    if elapsed_seconds <= 0:
+        return 0.0
+    return round((file_count / elapsed_seconds) * 60, 2)
 
 
 def _benchmark_recommended_throughput(benchmark_summary: dict[str, Any] | None, operation: str) -> float | None:
