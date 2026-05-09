@@ -5,6 +5,7 @@ import csv
 import importlib.util
 import io
 import json
+import os
 import re
 import shutil
 import sys
@@ -32,6 +33,7 @@ from archive_scan_qc.scanner import ScanConfig, scan_batch
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PRIVATE_INTEGRATION_PATH = REPO_ROOT / "scripts" / "run_private_integration.py"
+AGGREGATE_BASELINE_PATH = REPO_ROOT / "scripts" / "run_aggregate_baseline.py"
 LOCAL_PROVIDER_EXAMPLE = REPO_ROOT / "examples" / "local_analysis_provider.py"
 
 
@@ -39,6 +41,16 @@ def _load_private_integration_module():
     spec = importlib.util.spec_from_file_location("run_private_integration", PRIVATE_INTEGRATION_PATH)
     if spec is None or spec.loader is None:
         raise RuntimeError("Could not load run_private_integration.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_aggregate_baseline_module():
+    spec = importlib.util.spec_from_file_location("run_aggregate_baseline", AGGREGATE_BASELINE_PATH)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Could not load run_aggregate_baseline.py")
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
@@ -149,6 +161,92 @@ class ScanQcTest(unittest.TestCase):
             temp = Path(temp_dir)
             with self.assertRaisesRegex(ValueError, "missing artifact"):
                 write_delivery_handoff_manifest([("scan_report", temp / "missing.json")], temp / "handoff")
+
+    def test_aggregate_baseline_runner_writes_privacy_safe_public_summary(self) -> None:
+        module = _load_aggregate_baseline_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-input"
+            output_dir = root / "private-output"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "private_page_001.png", dpi=(300, 300))
+
+            args = module.build_parser().parse_args(
+                [
+                    "--input",
+                    str(input_dir),
+                    "--out",
+                    str(output_dir),
+                    "--workers",
+                    "1",
+                    "--benchmark-workers-list",
+                    "1",
+                    "--no-process-images",
+                ]
+            )
+            payload = module.run_aggregate_baseline(args)
+
+            json_path = output_dir / "aggregate_baseline_summary.json"
+            self.assertTrue(json_path.exists())
+            self.assertEqual(payload["schema_version"], "scan-qc.aggregate-baseline.v1")
+            self.assertEqual(payload["target_environment"]["validation_target"], "puersai-hpc")
+            self.assertFalse(payload["target_environment"]["gpu_acceleration_used"])
+            self.assertEqual(payload["worker_settings"]["requested_workers"], 1)
+            self.assertEqual(payload["aggregate_counts"]["total_files"], 1)
+            self.assertEqual(payload["aggregate_counts"]["openable_files"], 1)
+            self.assertIn("environment", payload)
+            self.assertIn("scan", payload["stage_timings"])
+            self.assertIn("processing", payload["stage_timings"])
+            self.assertTrue(payload["privacy_self_check"]["passed"])
+
+            raw_json = json_path.read_text(encoding="utf-8")
+            for forbidden in [
+                str(input_dir),
+                str(output_dir),
+                "private_page_001.png",
+                "relative_path",
+                "source_path",
+                "filename",
+                "sha256",
+                "thumbnail",
+                "ocr",
+                '"files": [',
+                '"findings": [',
+            ]:
+                self.assertNotIn(forbidden, raw_json)
+
+    def test_aggregate_baseline_parser_accepts_puersai_hpc_env_defaults(self) -> None:
+        module = _load_aggregate_baseline_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            previous = {
+                key: os.environ.get(key)
+                for key in [
+                    "PUERSAI_HPC_BASELINE_INPUT",
+                    "PUERSAI_HPC_BASELINE_OUT",
+                    "PUERSAI_HPC_BASELINE_WORKERS",
+                    "PUERSAI_HPC_BASELINE_WORKERS_LIST",
+                ]
+            }
+            try:
+                os.environ["PUERSAI_HPC_BASELINE_INPUT"] = str(input_dir)
+                os.environ["PUERSAI_HPC_BASELINE_OUT"] = str(output_dir)
+                os.environ["PUERSAI_HPC_BASELINE_WORKERS"] = "2"
+                os.environ["PUERSAI_HPC_BASELINE_WORKERS_LIST"] = "1,2"
+                args = module.build_parser().parse_args([])
+            finally:
+                for key, value in previous.items():
+                    if value is None:
+                        os.environ.pop(key, None)
+                    else:
+                        os.environ[key] = value
+
+            self.assertEqual(Path(args.input), input_dir)
+            self.assertEqual(Path(args.out), output_dir)
+            self.assertEqual(args.workers, 2)
+            self.assertEqual(args.benchmark_workers_list, "1,2")
 
     def test_rework_action_list_groups_qc_findings_and_processing_retry(self) -> None:
         report = {

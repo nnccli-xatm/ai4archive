@@ -190,6 +190,56 @@ Normal scan reports, processing manifests, retry manifests, and any row-level
 review artifacts remain under `/placeholder/private-output-root` as sensitive
 local evidence. Do not upload them to public systems.
 
+### Aggregate performance baseline runner
+
+For the P0 aggregate baseline on `puersai-hpc`, use the dedicated wrapper around
+the private integration path:
+
+```bash
+PYTHONPATH=src python3 scripts/run_aggregate_baseline.py \
+  --input /placeholder/private-image-directory \
+  --out /placeholder/private-output-root \
+  --workers 4 \
+  --benchmark-workers-list 4 \
+  --process-images
+```
+
+The same paths and worker settings may be supplied without putting private paths
+in shell history:
+
+```bash
+PUERSAI_HPC_BASELINE_INPUT=/placeholder/private-image-directory \
+PUERSAI_HPC_BASELINE_OUT=/placeholder/private-output-root \
+PUERSAI_HPC_BASELINE_WORKERS=4 \
+PUERSAI_HPC_BASELINE_WORKERS_LIST=4 \
+PYTHONPATH=src python3 scripts/run_aggregate_baseline.py
+```
+
+The runner writes
+`/placeholder/private-output-root/aggregate_baseline_summary.json` with schema
+`scan-qc.aggregate-baseline.v1`. The JSON contains only:
+
+- `schema_version`, `generated_at`, and a non-sensitive `target_environment`
+  label; `gpu_acceleration_used` is currently `false` because the existing
+  CPU/Pillow path is unchanged.
+- `worker_settings` and `operations`.
+- `aggregate_counts`: total/openable files, P0/P1/P2 findings, processing
+  processed/failed counts, failed batches, and preflight error count.
+- `stage_timings`: scan and processing elapsed seconds, scan files/minute, scan
+  openable files/minute, processing processed files/minute, and benchmark rates
+  when benchmark evidence is available.
+- `benchmark`: aggregate repeated-run count and rule-count totals.
+- `environment`: Python, platform, machine, processor, CPU count, memory, GPU
+  placeholder, and executable name.
+- `privacy_self_check`: pass/fail status and aggregate violation count.
+
+Privacy guarantees: `aggregate_baseline_summary.json` omits source names, source
+paths, relative paths, content hashes, thumbnails, OCR text, image content, and
+row-level findings. Sensitive scan reports, processing manifests, derivative
+images, retry manifests, and normal private integration outputs remain local
+under the private output root and must not be uploaded to PRs, Linear comments,
+logs, screenshots, or row-level reports.
+
 Run `archive-scan-qc preflight` before production batches. It validates the
 input directory, output and processing-output configuration, worker count, rules
 profile loading, and manifest structure without opening, copying, modifying, or

@@ -24,6 +24,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from archive_scan_qc.acceptance import build_acceptance_summary  # noqa: E402
+from archive_scan_qc.benchmark import _environment  # noqa: E402
 from archive_scan_qc.benchmark import run_benchmark  # noqa: E402
 from archive_scan_qc.run_plan import PlanBatch, RunPlan, run_plan  # noqa: E402
 
@@ -240,6 +241,7 @@ def _public_summary(
             "benchmark_enabled": benchmark_summary is not None,
             "benchmark_run_count": len(benchmark_runs),
         },
+        "environment": _environment(),
         "aggregate_counts": {
             "total_files": int(run_counts["total_files"]),
             "openable_files": int(run_counts["openable_files"]),
@@ -258,8 +260,10 @@ def _public_summary(
             "finding_rule_counts_repeated_runs": dict(sorted(finding_rule_counts.items())),
         },
         "throughput": {
+            "scan_elapsed_seconds": float(run_counts.get("scan_elapsed_seconds", 0.0)),
             "scan_files_per_minute": float(run_counts["scan_files_per_minute"]),
             "scan_openable_files_per_minute": float(run_counts["scan_openable_files_per_minute"]),
+            "processing_elapsed_seconds": float(run_counts.get("processing_elapsed_seconds", 0.0)),
             "processing_files_per_minute": float(run_counts["processing_files_per_minute"]),
             "benchmark_scan_files_per_minute": benchmark_scan_throughput,
             "benchmark_processing_files_per_minute": benchmark_processing_throughput,
