@@ -809,10 +809,8 @@ def _frange(start: float, stop: float, step: float) -> list[float]:
 
 def _horizontal_projection_variance(image: Image.Image) -> float:
     width, height = image.size
-    pixels = image.load()
-    row_counts = []
-    for y in range(height):
-        row_counts.append(sum(1 for x in range(width) if pixels[x, y] > 0))
+    projection = image.resize((1, height), Image.Resampling.BOX)
+    row_counts = [value * width / 255 for value in projection.tobytes()]
     mean = sum(row_counts) / len(row_counts)
     return sum((count - mean) ** 2 for count in row_counts) / len(row_counts)
 
