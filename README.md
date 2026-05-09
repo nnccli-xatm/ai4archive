@@ -379,6 +379,25 @@ images. Use this artifact after automated QC and derivative-processing evidence
 exist, and before completing the review template, `review_summary.json`, or the
 final `acceptance_summary.json`.
 
+For DA/T 31-2017-style manual sampling acceptance, export a deterministic
+local sampling list from the scan report:
+
+```bash
+archive-scan-qc acceptance-sampling-export \
+  --report /path/to/qc-report/scan_qc_report.json \
+  --out /path/to/qc-report/acceptance-sampling
+```
+
+This writes `acceptance_sampling_review.json` and
+`acceptance_sampling_review.csv`. The default sample ratio is 5% and cannot be
+lowered; P0/P1/P2 findings and other problematic records are selected first
+where practical, then remaining records are filled by stable deterministic
+ordering. The artifacts are sensitive local evidence because they include
+row-level paths and hashes for operator inspection. They do not embed images,
+thumbnails, OCR text, or image bytes. The JSON also includes aggregate sampling
+counts that can be copied into acceptance notes or future aggregate acceptance
+integration after local policy review.
+
 Use aggregate calibration only after automated QC and review:
 
 ```bash
@@ -578,6 +597,13 @@ file record also includes:
   `quality_scanline_location_ratio`, `quality_scanline_band_width`, and
   `quality_scanline_reason`: conservative scan-time row/column anomaly
   screening for obvious horizontal or vertical scanner lines and streaks.
+- `quality_content_edge_cutoff_side`, `quality_content_edge_cutoff_score`,
+  `quality_content_edge_cutoff_band_px`,
+  `quality_content_edge_cutoff_dark_ratio`,
+  `quality_content_edge_cutoff_span_ratio`, and
+  `quality_content_edge_cutoff_reason`: conservative scan-time screening for
+  localized dark content touching an image boundary, which can indicate
+  over-cropped text, stamps, page numbers, or marginalia.
 - `frame_count`: best-effort image container frame/page count when Pillow
   exposes it, such as for multi-page TIFF files.
 - `orientation_class`: coarse page shape classification, one of `portrait`,
@@ -603,6 +629,8 @@ The default quality thresholds are intentionally conservative:
   finds a conservative edge-touching trim candidate.
 - `quality_scanline_candidate` P2 when a resized grayscale thumbnail has an
   obvious full-span horizontal or vertical intensity anomaly.
+- `quality_content_edge_cutoff_candidate` P2 when localized dark content
+  touches a narrow image-edge band without looking like a full dark border.
 - `multi_page_image_container` P2 when Pillow reports more than one frame/page
   in an image container. This is a project policy review prompt for
   single-page delivery, not a platform adaptation step.

@@ -26,6 +26,7 @@ from archive_scan_qc.reports import build_review_summary, write_reports, write_r
 from archive_scan_qc.rework import build_rework_action_list, write_rework_action_list
 from archive_scan_qc.rule_registry import RULE_REGISTRY, validate_provider_rule_id
 from archive_scan_qc.rules import RulesProfileError, load_rules_profile
+from archive_scan_qc.sampling import build_acceptance_sampling_export
 from archive_scan_qc.scanner import ScanConfig, scan_batch
 
 
@@ -746,6 +747,7 @@ class ScanQcTest(unittest.TestCase):
             "quality_skew_candidate",
             "quality_dark_border_candidate",
             "quality_scanline_candidate",
+            "quality_content_edge_cutoff_candidate",
             "multi_page_image_container",
             "batch_orientation_consistency",
         }
@@ -1176,6 +1178,63 @@ class ScanQcTest(unittest.TestCase):
             self.assertIn("Scan QC report JSON is invalid", stderr.getvalue())
             self.assertFalse(output_path.exists())
 
+    def test_acceptance_sampling_default_samples_at_least_five_percent(self) -> None:
+        files = [_sample_file(index) for index in range(40)]
+        payload = build_acceptance_sampling_export({"files": files, "findings": []})
+
+        self.assertEqual(payload["selection"]["sample_ratio"], 0.05)
+        self.assertEqual(payload["selection"]["sampled_records"], 2)
+        self.assertGreaterEqual(payload["aggregate_sampling_counts"]["effective_sample_ratio"], 0.05)
+        self.assertEqual(payload["sensitivity"], "sensitive_local_evidence")
+
+    def test_acceptance_sampling_is_deterministic_and_risk_prioritized(self) -> None:
+        files = [_sample_file(index) for index in range(20)]
+        findings = [
+            {"relative_path": "batch/page-019.tif", "rule": "dpi_minimum", "severity": "P0", "message": "low dpi"},
+            {"relative_path": "batch/page-018.tif", "rule": "quality_too_dark", "severity": "P1", "message": "dark"},
+            {"relative_path": "batch/page-017.tif", "rule": "quality_skew_candidate", "severity": "P2", "message": "skew"},
+        ]
+
+        first = build_acceptance_sampling_export({"files": files, "findings": findings})
+        second = build_acceptance_sampling_export({"files": list(reversed(files)), "findings": findings})
+
+        first_paths = [row["relative_path"] for row in first["samples"]]
+        second_paths = [row["relative_path"] for row in second["samples"]]
+        self.assertEqual(first_paths, second_paths)
+        self.assertEqual(first_paths[:3], ["batch/page-019.tif", "batch/page-018.tif", "batch/page-017.tif"])
+        self.assertEqual(first["samples"][0]["selection_reason"], "risk_weighted_p0_finding")
+        self.assertEqual(first["aggregate_sampling_counts"]["sampled_by_risk_tier"]["p0"], 1)
+
+    def test_acceptance_sampling_cli_writes_json_and_csv_with_privacy_flags(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            report_path = root / "scan_qc_report.json"
+            out_dir = root / "sampling"
+            private_path = "secret-folder/private_case_001.tif"
+            private_hash = "abc123privatehash"
+            _write_minimal_scan_report(
+                report_path,
+                [{"relative_path": private_path, "rule": "dpi_minimum", "severity": "P0", "message": "private message"}],
+                files=[_sample_file(1, relative_path=private_path, sha256=private_hash)],
+            )
+
+            self.assertEqual(main(["acceptance-sampling-export", "--report", str(report_path), "--out", str(out_dir)]), 0)
+
+            json_path = out_dir / "acceptance_sampling_review.json"
+            csv_path = out_dir / "acceptance_sampling_review.csv"
+            payload = json.loads(json_path.read_text(encoding="utf-8"))
+            csv_text = csv_path.read_text(encoding="utf-8")
+            self.assertTrue(payload["privacy"]["sensitive_local_evidence"])
+            self.assertFalse(payload["privacy"]["aggregate_only"])
+            self.assertIn("image bytes", payload["privacy"]["omits"])
+            self.assertIn(private_path, csv_text)
+            self.assertIn(private_hash, csv_text)
+            self.assertNotIn("private message", json_path.read_text(encoding="utf-8"))
+
+    def test_acceptance_sampling_rejects_ratio_below_five_percent(self) -> None:
+        with self.assertRaisesRegex(ValueError, "at least 5.00%"):
+            build_acceptance_sampling_export({"files": [_sample_file(1)], "findings": []}, sample_ratio=0.01)
+
     def test_benchmark_writes_privacy_safe_json_and_csv(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -1519,6 +1578,56 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn("quality_scanline_candidate", rules)
             self.assertIsNone(record["quality_scanline_orientation"])
             self.assertLess(record["quality_scanline_score"], 0.85)
+
+    def test_content_edge_cutoff_flags_edge_touching_content_and_reports_metrics(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            _synthetic_edge_cutoff_page().save(input_dir / "edge_cutoff.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            paths = write_reports(report, output_dir)
+            rules = {finding["rule"] for finding in report["findings"]}
+            record = report["files"][0]
+
+            self.assertIn("quality_content_edge_cutoff_candidate", rules)
+            self.assertEqual(record["quality_content_edge_cutoff_side"], "left")
+            self.assertGreaterEqual(record["quality_content_edge_cutoff_score"], 0.65)
+            self.assertGreater(record["quality_content_edge_cutoff_dark_ratio"], 0)
+            self.assertGreater(record["quality_content_edge_cutoff_span_ratio"], 0)
+            self.assertIn("localized dark content", record["quality_content_edge_cutoff_reason"])
+
+            saved = json.loads(paths["json"].read_text(encoding="utf-8"))
+            self.assertIn("quality_content_edge_cutoff_candidate", saved["rule_catalog"])
+            self.assertIn("quality_content_edge_cutoff_score", paths["files_csv"].read_text(encoding="utf-8"))
+            self.assertIn("quality_content_edge_cutoff_candidate", paths["findings_csv"].read_text(encoding="utf-8"))
+            html = paths["html"].read_text(encoding="utf-8")
+            self.assertIn("Content edge cutoff candidate", html)
+            self.assertIn("Edge Cutoff Score", html)
+            self.assertNotIn("<img", html.lower())
+
+    def test_content_edge_cutoff_stays_quiet_on_normal_margin_and_dark_border(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            input_dir.mkdir()
+            _synthetic_text_page().save(input_dir / "normal_margin.png", dpi=(300, 300))
+            _synthetic_dark_border_page().save(input_dir / "dark_border.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            rules_by_path: dict[str, set[str]] = {}
+            for finding in report["findings"]:
+                rules_by_path.setdefault(finding["relative_path"], set()).add(finding["rule"])
+            records = {record["relative_path"]: record for record in report["files"]}
+
+            self.assertNotIn("quality_content_edge_cutoff_candidate", rules_by_path.get("normal_margin.png", set()))
+            self.assertNotIn("quality_content_edge_cutoff_candidate", rules_by_path.get("dark_border.png", set()))
+            self.assertIn("quality_dark_border_candidate", rules_by_path["dark_border.png"])
+            self.assertIsNone(records["normal_margin.png"]["quality_content_edge_cutoff_side"])
+            self.assertIsNone(records["dark_border.png"]["quality_content_edge_cutoff_side"])
 
     def test_quality_metrics_flag_dark_bright_low_contrast_and_blur(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -3439,6 +3548,14 @@ def _synthetic_dark_border_page() -> Image.Image:
     return image
 
 
+def _synthetic_edge_cutoff_page() -> Image.Image:
+    image = _synthetic_text_page()
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 72, 14, 120), fill=(15, 15, 15))
+    draw.rectangle((0, 126, 28, 131), fill=(15, 15, 15))
+    return image
+
+
 def _synthetic_scanline_page(orientation: str) -> Image.Image:
     image = _synthetic_text_page().resize((360, 270), Image.Resampling.NEAREST)
     draw = ImageDraw.Draw(image)
@@ -3472,6 +3589,26 @@ def _write_minimal_scan_report(
         "findings": findings,
     }
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
+def _sample_file(index: int, *, relative_path: str | None = None, sha256: str | None = None) -> dict[str, object]:
+    path = relative_path or f"batch/page-{index:03d}.tif"
+    return {
+        "relative_path": path,
+        "filename": Path(path).name,
+        "manifest_order_index": index,
+        "manifest_sequence": index + 1,
+        "openable": True,
+        "format": "TIFF",
+        "width": 2400,
+        "height": 3200,
+        "dpi_x": 300,
+        "dpi_y": 300,
+        "color_mode": "RGB",
+        "orientation_class": "portrait",
+        "frame_count": 1,
+        "sha256": sha256 or f"{index:064x}",
+    }
 
 
 def _rule_count(report: dict[str, object], rule: str) -> int:

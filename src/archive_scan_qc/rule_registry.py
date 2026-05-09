@@ -240,6 +240,15 @@ RULE_REGISTRY: dict[str, RuleMetadata] = {
         "automated screening",
         "A conservative full-span row or column anomaly indicates a possible scanner line or streak artifact.",
     ),
+    "quality_content_edge_cutoff_candidate": RuleMetadata(
+        "quality_content_edge_cutoff_candidate",
+        "Content edge cutoff candidate",
+        "P2",
+        ("DA/T 31-2017 10.3 border cropping", "DA/T 31-2017 10.5.1 complete and readable image", "DA/T 31-2017 10.5.4 processing quality inspection"),
+        "source image edge foreground metrics",
+        "automated screening",
+        "Localized dark content touching an image edge may indicate over-cropped text, stamps, page numbers, or marginalia and needs visual review.",
+    ),
     "batch_format_consistency": RuleMetadata(
         "batch_format_consistency",
         "Batch format consistency",

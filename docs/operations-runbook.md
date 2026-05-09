@@ -536,6 +536,29 @@ The suggested profile is marked `draft` and `suggested`; it is not a production
 profile. A project lead must compare it with the original profile and approve
 any threshold, severity, or enablement changes before deployment.
 
+## Acceptance Sampling Export
+
+For manual acceptance sampling, generate a local review list after automated QC:
+
+```bash
+archive-scan-qc acceptance-sampling-export \
+  --report /approved-work/qc-reports/batch-001/scan_qc_report.json \
+  --out /approved-work/qc-reports/batch-001/acceptance-sampling
+```
+
+The command writes `acceptance_sampling_review.json` and
+`acceptance_sampling_review.csv`. The default deterministic sample is at least
+5% of scan records. P0, P1, P2, and other problematic records are prioritized
+before baseline records when practical, matching the manual-inspection
+expectation that high-risk automated findings receive operator attention.
+
+Treat both files as sensitive local evidence. They include row-level local
+evidence fields such as relative paths, hashes, dimensions, DPI, automated rule
+ids, and blank reviewer status fields. They must not include embedded images,
+thumbnails, OCR text, recognized text, or image bytes. The JSON includes an
+`aggregate_sampling_counts` block suitable for copying into acceptance notes or
+future aggregate acceptance integration after local policy review.
+
 Sensitive local evidence includes source images, derivative images,
 `scan_qc_report.json`, `scan_qc_report.html`, `scan_qc_files.csv`,
 `scan_qc_findings.csv`, `processing_manifest.json`, processing review packages,
