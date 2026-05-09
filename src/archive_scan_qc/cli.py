@@ -17,6 +17,7 @@ from .processing import ProcessingOptions, process_images
 from .processing_plan import write_processing_plan
 from .processing_review import write_processing_review_package
 from .reports import write_reports, write_review_export, write_review_summary
+from .rework import write_rework_action_list
 from .rules import RulesProfileError, load_rules_profile
 from .sampling import DEFAULT_SAMPLE_RATIO, write_acceptance_sampling_export
 from .scanner import ScanConfig, scan_batch
@@ -170,6 +171,8 @@ def main(argv: list[str] | None = None) -> int:
         return _main_processing_review_package(argv[1:])
     if argv and argv[0] == "processing-plan":
         return _main_processing_plan(argv[1:])
+    if argv and argv[0] == "rework-action-list":
+        return _main_rework_action_list(argv[1:])
     parser = build_parser()
     args = parser.parse_args(argv)
     _validate_processing_flags(parser, args)
@@ -500,6 +503,45 @@ def _main_processing_plan(argv: list[str]) -> int:
     print(f"Skipped/unopenable files: {summary['skipped_files'] + summary['unopenable_files']}")
     print("Derivative images written: no")
     print("Sensitivity: sensitive local row-level evidence; contains paths/hashes, no thumbnails or image bytes.")
+    return 0
+
+
+def _main_rework_action_list(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="archive-scan-qc rework-action-list",
+        description="Write a sensitive local operator rework action list from QC findings and processing evidence.",
+    )
+    parser.add_argument("--report", required=True, type=Path, help="Path to scan_qc_report.json.")
+    parser.add_argument(
+        "--processing-audit-summary",
+        default=None,
+        type=Path,
+        help="Optional aggregate processing_audit_summary.json.",
+    )
+    parser.add_argument(
+        "--processing-retry-manifest",
+        default=None,
+        type=Path,
+        help="Optional sensitive local processing_retry_manifest.json.",
+    )
+    parser.add_argument("--out", required=True, type=Path, help="Output JSON path for the local rework action list.")
+    parser.add_argument("--csv-out", default=None, type=Path, help="Optional output CSV path for the local rework action list.")
+    args = parser.parse_args(argv)
+    try:
+        json_path, csv_path, payload = write_rework_action_list(
+            args.report,
+            args.out,
+            processing_audit_summary_path=args.processing_audit_summary,
+            processing_retry_manifest_path=args.processing_retry_manifest,
+            csv_path=args.csv_out,
+        )
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    print(f"Rework action list JSON: {json_path}")
+    if csv_path:
+        print(f"Rework action list CSV: {csv_path}")
+    print(f"Actions: {payload['summary']['total_actions']}")
+    print("Sensitivity: LOCAL-ONLY sensitive row-level evidence; contains paths/hashes/messages, no thumbnails or image content.")
     return 0
 
 
