@@ -771,15 +771,9 @@ def _detect_skew(image: Image.Image) -> SkewDetection:
 
     sample = ink.crop(bbox)
     sample.thumbnail((700, 700), Image.Resampling.BILINEAR)
-    background = 0
-    scores: list[tuple[float, float]] = []
-    for correction_angle in _frange(-7.0, 7.0, 0.25):
-        rotated = sample.rotate(correction_angle, resample=Image.Resampling.BILINEAR, expand=True, fillcolor=background)
-        scores.append((correction_angle, _horizontal_projection_variance(rotated)))
-
-    scores.sort(key=lambda item: item[1], reverse=True)
-    best_angle, best_score = scores[0]
-    runner_up = max(score for angle, score in scores if abs(angle - best_angle) >= 1.0)
+    scores = _deskew_candidate_scores(sample)
+    best_angle, best_score = max(scores.items(), key=lambda item: item[1])
+    runner_up = max(score for angle, score in scores.items() if abs(angle - best_angle) >= 1.0)
     confidence = 0.0 if best_score <= 0 else max(0.0, min(1.0, (best_score - runner_up) / best_score))
     skew_angle = round(-best_angle, 2)
     return SkewDetection(skew_angle, round(confidence, 3), "skew detected")
@@ -805,6 +799,41 @@ def _nonzero_ratio(image: Image.Image, bbox: tuple[int, int, int, int]) -> float
 def _frange(start: float, stop: float, step: float) -> list[float]:
     count = int(round((stop - start) / step))
     return [start + index * step for index in range(count + 1)]
+
+
+def _deskew_candidate_scores(sample: Image.Image) -> dict[float, float]:
+    background = 0
+    scores: dict[float, float] = {}
+
+    def score(correction_angle: float) -> float:
+        normalized_angle = round(correction_angle, 2)
+        if normalized_angle not in scores:
+            rotated = sample.rotate(
+                normalized_angle,
+                resample=Image.Resampling.BILINEAR,
+                expand=True,
+                fillcolor=background,
+            )
+            scores[normalized_angle] = _horizontal_projection_variance(rotated)
+        return scores[normalized_angle]
+
+    zero_score = score(0.0)
+    near_scores = {angle: score(angle) for angle in (-1.0, -0.5, 0.5, 1.0)}
+    best_near_score = max(near_scores.values())
+    zero_confidence = 0.0 if zero_score <= 0 else max(0.0, min(1.0, (zero_score - best_near_score) / zero_score))
+    if zero_score >= best_near_score and zero_confidence >= 0.08:
+        return scores
+
+    coarse_angles = _frange(-7.0, 7.0, 1.0)
+    for correction_angle in coarse_angles:
+        score(correction_angle)
+
+    best_coarse_angle = max(coarse_angles, key=lambda angle: scores[round(angle, 2)])
+    refine_start = max(-7.0, best_coarse_angle - 1.0)
+    refine_stop = min(7.0, best_coarse_angle + 1.0)
+    for correction_angle in _frange(refine_start, refine_stop, 0.25):
+        score(correction_angle)
+    return scores
 
 
 def _horizontal_projection_variance(image: Image.Image) -> float:
