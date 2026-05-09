@@ -9,7 +9,11 @@ from importlib import metadata
 import re
 from pathlib import Path
 import sys
-import tomllib
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10
+    tomllib = None
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -50,21 +54,73 @@ def _parse_requirement(value: str) -> Requirement:
 
 
 def _load_requirements() -> tuple[str, list[Requirement]]:
-    with PYPROJECT.open("rb") as handle:
-        pyproject = tomllib.load(handle)
-    project = pyproject["project"]
-    build_system = pyproject["build-system"]
-    requires_python = str(project["requires-python"])
-    requirements = [_parse_requirement(item) for item in project.get("dependencies", [])]
+    if tomllib is not None:
+        with PYPROJECT.open("rb") as handle:
+            pyproject = tomllib.load(handle)
+        project = pyproject["project"]
+        build_system = pyproject["build-system"]
+        requires_python = str(project["requires-python"])
+        dependency_values = list(project.get("dependencies", []))
+        build_requires = list(build_system.get("requires", []))
+    else:
+        requires_python, dependency_values, build_requires = _load_pyproject_requirements_without_tomllib(PYPROJECT)
+
+    requirements = [_parse_requirement(item) for item in dependency_values]
     requirements.extend(
         Requirement(req.name, req.specifiers, req.import_name, "build")
-        for req in (_parse_requirement(item) for item in build_system.get("requires", []))
+        for req in (_parse_requirement(item) for item in build_requires)
     )
     requirements.append(Requirement("ai4archive", tuple(), "archive_scan_qc", "project"))
     deduped: dict[str, Requirement] = {}
     for requirement in requirements:
         deduped.setdefault(requirement.normalized_name, requirement)
     return requires_python, list(deduped.values())
+
+
+def _load_pyproject_requirements_without_tomllib(path: Path) -> tuple[str, list[str], list[str]]:
+    section = ""
+    requires_python = ""
+    project_dependencies: list[str] = []
+    build_requires: list[str] = []
+    current_array: tuple[str, list[str]] | None = None
+
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            section = line.strip("[]")
+            current_array = None
+            continue
+        if current_array is not None:
+            key, values = current_array
+            values.extend(_quoted_values_from_line(line))
+            if line.endswith("]"):
+                current_array = None
+            continue
+        if section == "project" and line.startswith("requires-python"):
+            requires_python = _single_quoted_value(line)
+        elif section == "project" and line.startswith("dependencies"):
+            project_dependencies.extend(_quoted_values_from_line(line))
+            if not line.endswith("]"):
+                current_array = ("dependencies", project_dependencies)
+        elif section == "build-system" and line.startswith("requires"):
+            build_requires.extend(_quoted_values_from_line(line))
+            if not line.endswith("]"):
+                current_array = ("requires", build_requires)
+
+    if not requires_python:
+        raise ValueError("pyproject.toml missing project.requires-python")
+    return requires_python, project_dependencies, build_requires
+
+
+def _single_quoted_value(line: str) -> str:
+    values = _quoted_values_from_line(line)
+    return values[0] if values else ""
+
+
+def _quoted_values_from_line(line: str) -> list[str]:
+    return re.findall(r'"([^"]+)"', line)
 
 
 def _version_tuple(value: str) -> tuple[int, ...]:
