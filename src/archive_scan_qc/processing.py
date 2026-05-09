@@ -909,14 +909,26 @@ def _despeckle_isolated_pixels(image: Image.Image) -> tuple[Image.Image, int]:
     if width < 3 or height < 3:
         return image.copy(), 0
 
+    candidate_bbox = grayscale.point(lambda value: 255 if value <= 60 else 0, mode="L").getbbox()
+    if not candidate_bbox:
+        return image.copy(), 0
+
+    left, top, right, bottom = candidate_bbox
+    x_start = max(1, left)
+    y_start = max(1, top)
+    x_stop = min(width - 1, right)
+    y_stop = min(height - 1, bottom)
+    if x_start >= x_stop or y_start >= y_stop:
+        return image.copy(), 0
+
     gray_pixels = grayscale.load()
     source = image.convert("RGB") if image.mode != "RGB" else image.copy()
     output = source.copy()
     source_pixels = source.load()
     output_pixels = output.load()
     changed = 0
-    for y in range(1, height - 1):
-        for x in range(1, width - 1):
+    for y in range(y_start, y_stop):
+        for x in range(x_start, x_stop):
             if gray_pixels[x, y] > 60:
                 continue
             dark_neighbors = 0
