@@ -21,7 +21,7 @@ from archive_scan_qc.acceptance import build_acceptance_summary
 from archive_scan_qc.benchmark import _recommendations
 from archive_scan_qc.cli import main
 from archive_scan_qc.handoff import write_delivery_handoff_manifest
-from archive_scan_qc.processing import ProcessingOptions, _horizontal_projection_variance, process_images
+from archive_scan_qc.processing import ProcessingOptions, _deskew_candidate_scores, _horizontal_projection_variance, process_images
 from archive_scan_qc.processing_plan import build_processing_plan
 from archive_scan_qc.processing_review import build_processing_review_package
 from archive_scan_qc.reports import build_review_summary, write_reports, write_review_export, write_review_summary
@@ -3057,6 +3057,23 @@ class ScanQcTest(unittest.TestCase):
 
         self.assertAlmostEqual(_horizontal_projection_variance(image), expected, delta=0.03)
 
+    def test_deskew_candidate_scores_fast_path_near_zero_skew(self) -> None:
+        sample = _synthetic_ink_text_page()
+
+        scores = _deskew_candidate_scores(sample)
+
+        self.assertEqual(set(scores), {-1.0, -0.5, 0.0, 0.5, 1.0})
+        self.assertEqual(max(scores, key=scores.get), 0.0)
+
+    def test_deskew_candidate_scores_refines_skewed_page(self) -> None:
+        sample = _synthetic_ink_text_page().rotate(-3.0, resample=Image.Resampling.BILINEAR, expand=True, fillcolor=0)
+
+        scores = _deskew_candidate_scores(sample)
+
+        best_angle = max(scores, key=scores.get)
+        self.assertGreater(len(scores), 5)
+        self.assertAlmostEqual(best_angle, 3.0, delta=0.5)
+
     def test_auto_crop_trims_white_margin_around_black_page_border(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -4178,6 +4195,14 @@ def _synthetic_text_page() -> Image.Image:
     draw.rectangle((24, 20, 215, 159), outline=(30, 30, 30), width=2)
     for y in range(42, 132, 18):
         draw.rectangle((48, y, 190, y + 4), fill=(20, 20, 20))
+    return image
+
+
+def _synthetic_ink_text_page() -> Image.Image:
+    image = Image.new("L", (240, 180), 0)
+    draw = ImageDraw.Draw(image)
+    for y in range(42, 132, 18):
+        draw.rectangle((48, y, 190, y + 4), fill=255)
     return image
 
 
