@@ -258,6 +258,29 @@ remain local under the private output root. Only aggregate results from
 private artifacts to PRs, Linear comments, logs, screenshots, or row-level
 reports.
 
+Current `puersai-hpc` production baseline after PR #61 uses the full fixed
+private sample of 149 files. The latest aggregate-only result is:
+
+- scan: 64.815357 seconds, 137.93 files/minute
+- processing: 80.103532 seconds, 111.61 files/minute
+- totals: 149 total files, 149 openable files, 149 processed files
+- processing failures: 0
+- findings: 24 total, P0=22, P1=0, P2=2
+- privacy self-check: pass
+- cleanup: generated private images and reports removed, with only
+  `aggregate_baseline_summary.json` retained as public aggregate evidence
+
+Latest aggregate operation timings are `auto_crop` 4.719535 seconds, `deskew`
+122.636509 seconds, `trim_dark_border` 1.202172 seconds, and `despeckle`
+108.368089 seconds. These timings make `deskew` and `despeckle` the next
+primary optimization targets; `auto_crop` and `trim_dark_border` are not the
+current bottlenecks on this sample.
+
+Validation policy: small low-risk changes may use the fixed 20-image private
+sample. Core image-processing, quality-rule, privacy-boundary, and release
+changes require the full 149-image private sample. Documentation-only changes
+can be validated by documentation diff review without running private images.
+
 Run `archive-scan-qc preflight` before production batches. It validates the
 input directory, output and processing-output configuration, worker count, rules
 profile loading, and manifest structure without opening, copying, modifying, or
@@ -805,6 +828,11 @@ images, normal scan QC reports, processing manifests, filenames, thumbnails, or
 row-level records from private collections. This makes it practical to compare
 throughput on domestic platforms and different hardware while keeping sample
 identity and content local.
+
+After real-image validation, delete generated images and reports unless they
+must stay inside the approved private evidence store. Public issue, PR, and
+benchmark notes may retain only aggregate summaries; preserve the input test
+data so the fixed 20-image and 149-image samples remain comparable across runs.
 
 The regular scan CLI also prints concise timing lines after each run:
 
