@@ -118,6 +118,122 @@ class ScanQcTest(unittest.TestCase):
         self.assertEqual(payload["processing_failed_files"], 0)
         self.assertFalse(payload["blocking_items"])
 
+    def test_acceptance_summary_passes_with_aggregate_baseline_summary(self) -> None:
+        payload = build_acceptance_summary(
+            aggregate_baseline_summary={
+                "schema_version": "scan-qc.aggregate-baseline.v1",
+                "privacy": {"aggregate_only": True},
+                "worker_settings": {"requested_workers": 4},
+                "aggregate_counts": {"processing_failed_files": 0},
+                "stage_timings": {
+                    "scan": {"files_per_minute": 137.93},
+                    "processing": {"processed_files_per_minute": 111.61},
+                },
+                "cleanup": {
+                    "enabled": True,
+                    "removed_artifacts": ["scan-reports", "processed-images"],
+                    "preserved_artifacts": [],
+                    "retained_public_summary": "aggregate_baseline_summary.json",
+                },
+                "privacy_self_check": {"passed": True, "status": "pass", "violation_count": 0},
+            },
+            min_scan_files_per_minute=120.0,
+            min_processing_files_per_minute=100.0,
+        )
+
+        self.assertTrue(payload["pass"])
+        self.assertEqual(payload["status"], "pass")
+        self.assertEqual(payload["processing_failed_files"], 0)
+        self.assertEqual(payload["throughput"]["scan_files_per_minute"]["best_observed"], 137.93)
+        self.assertEqual(payload["throughput"]["processing_files_per_minute"]["best_observed"], 111.61)
+        self.assertTrue(payload["privacy_self_check"]["passed"])
+        self.assertTrue(payload["cleanup"]["retained_public_summary_only"])
+
+    def test_acceptance_summary_fails_for_aggregate_baseline_regressions(self) -> None:
+        payload = build_acceptance_summary(
+            aggregate_baseline_summary={
+                "schema_version": "scan-qc.aggregate-baseline.v1",
+                "privacy": {"aggregate_only": True},
+                "aggregate_counts": {"processing_failed_files": 1},
+                "stage_timings": {
+                    "scan": {"files_per_minute": 90.0},
+                    "processing": {"processed_files_per_minute": 60.0},
+                },
+                "cleanup": {
+                    "enabled": True,
+                    "removed_artifacts": ["scan-reports"],
+                    "preserved_artifacts": [],
+                    "retained_public_summary": "aggregate_baseline_summary.json",
+                },
+                "privacy_self_check": {"passed": True, "status": "pass", "violation_count": 0},
+            },
+            min_scan_files_per_minute=100.0,
+            min_processing_files_per_minute=70.0,
+        )
+
+        self.assertFalse(payload["pass"])
+        codes = {item["code"] for item in payload["blocking_items"]}
+        self.assertEqual(
+            codes,
+            {
+                "processing_failed_files",
+                "scan_throughput_below_threshold",
+                "processing_throughput_below_threshold",
+            },
+        )
+
+    def test_acceptance_summary_allows_missing_optional_aggregate_baseline_fields(self) -> None:
+        payload = build_acceptance_summary(
+            aggregate_baseline_summary={
+                "schema_version": "scan-qc.aggregate-baseline.v1",
+                "privacy": {"aggregate_only": True},
+                "aggregate_counts": {"processing_failed_files": 0},
+            }
+        )
+
+        self.assertTrue(payload["pass"])
+        self.assertFalse(payload["throughput"]["scan_files_per_minute"]["provided"])
+        self.assertEqual(payload["privacy_self_check"]["provided"], False)
+        self.assertEqual(payload["cleanup"]["provided"], False)
+
+    def test_acceptance_summary_fails_for_aggregate_baseline_privacy_self_check(self) -> None:
+        payload = build_acceptance_summary(
+            aggregate_baseline_summary={
+                "schema_version": "scan-qc.aggregate-baseline.v1",
+                "privacy": {"aggregate_only": True},
+                "aggregate_counts": {"processing_failed_files": 0},
+                "cleanup": {
+                    "enabled": True,
+                    "removed_artifacts": ["scan-reports"],
+                    "preserved_artifacts": [],
+                    "retained_public_summary": "aggregate_baseline_summary.json",
+                },
+                "privacy_self_check": {"passed": False, "status": "failed", "violation_count": 1},
+            }
+        )
+
+        self.assertFalse(payload["pass"])
+        self.assertIn("privacy_self_check_failed", {item["code"] for item in payload["blocking_items"]})
+
+    def test_acceptance_summary_fails_for_aggregate_baseline_cleanup_retention(self) -> None:
+        payload = build_acceptance_summary(
+            aggregate_baseline_summary={
+                "schema_version": "scan-qc.aggregate-baseline.v1",
+                "privacy": {"aggregate_only": True},
+                "aggregate_counts": {"processing_failed_files": 0},
+                "cleanup": {
+                    "enabled": True,
+                    "removed_artifacts": ["scan-reports"],
+                    "preserved_artifacts": ["processed-images"],
+                    "retained_public_summary": "aggregate_baseline_summary.json",
+                },
+                "privacy_self_check": {"passed": True, "status": "pass", "violation_count": 0},
+            }
+        )
+
+        self.assertFalse(payload["pass"])
+        self.assertIn("cleanup_retention_failed", {item["code"] for item in payload["blocking_items"]})
+
     def test_delivery_handoff_manifest_classifies_and_hashes_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp = Path(temp_dir)

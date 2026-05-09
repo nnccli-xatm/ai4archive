@@ -393,6 +393,12 @@ def _main_acceptance_summary(argv: list[str]) -> int:
     )
     parser.add_argument("--benchmark-results", default=None, type=Path, help="Optional aggregate benchmark_results.json.")
     parser.add_argument(
+        "--aggregate-baseline-summary",
+        default=None,
+        type=Path,
+        help="Optional aggregate_baseline_summary.json from scripts/run_aggregate_baseline.py.",
+    )
+    parser.add_argument(
         "--min-scan-files-per-minute",
         default=None,
         type=_non_negative_float,
@@ -414,6 +420,7 @@ def _main_acceptance_summary(argv: list[str]) -> int:
             review_summary_path=args.review_summary,
             processing_audit_summary_path=args.processing_audit_summary,
             benchmark_results_path=args.benchmark_results,
+            aggregate_baseline_summary_path=args.aggregate_baseline_summary,
             min_scan_files_per_minute=args.min_scan_files_per_minute,
             min_processing_files_per_minute=args.min_processing_files_per_minute,
         )

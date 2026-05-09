@@ -722,10 +722,27 @@ def run_acceptance_validation() -> None:
                 }
             ],
         }
+        aggregate_baseline = {
+            "schema_version": "scan-qc.aggregate-baseline.v1",
+            "privacy": {"aggregate_only": True},
+            "aggregate_counts": {"processing_failed_files": 0},
+            "stage_timings": {
+                "scan": {"files_per_minute": 130.0},
+                "processing": {"processed_files_per_minute": 82.0},
+            },
+            "cleanup": {
+                "enabled": True,
+                "removed_artifacts": ["scan-reports", "processed-images"],
+                "preserved_artifacts": [],
+                "retained_public_summary": "aggregate_baseline_summary.json",
+            },
+            "privacy_self_check": {"passed": True, "status": "pass", "violation_count": 0},
+        }
         (evidence_dir / "run_plan_summary.json").write_text(json.dumps(run_plan), encoding="utf-8")
         (evidence_dir / "review_summary.json").write_text(json.dumps(review), encoding="utf-8")
         (evidence_dir / "processing_audit_summary.json").write_text(json.dumps(audit), encoding="utf-8")
         (evidence_dir / "benchmark_results.json").write_text(json.dumps(benchmark), encoding="utf-8")
+        (evidence_dir / "aggregate_baseline_summary.json").write_text(json.dumps(aggregate_baseline), encoding="utf-8")
         _run(
             [
                 sys.executable,
@@ -740,6 +757,8 @@ def run_acceptance_validation() -> None:
                 str(evidence_dir / "processing_audit_summary.json"),
                 "--benchmark-results",
                 str(evidence_dir / "benchmark_results.json"),
+                "--aggregate-baseline-summary",
+                str(evidence_dir / "aggregate_baseline_summary.json"),
                 "--min-scan-files-per-minute",
                 "100",
                 "--min-processing-files-per-minute",

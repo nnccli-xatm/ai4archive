@@ -889,7 +889,8 @@ row-level processing manifests.
 Use `archive-scan-qc acceptance-summary` as the final aggregate-only gate before
 batch delivery. It can combine any approved aggregate evidence files:
 `run_plan_summary.json`, `review_summary.json`,
-`processing_audit_summary.json`, and `benchmark_results.json`.
+`processing_audit_summary.json`, `benchmark_results.json`, and
+`aggregate_baseline_summary.json`.
 
 ```bash
 archive-scan-qc acceptance-summary \
@@ -897,13 +898,17 @@ archive-scan-qc acceptance-summary \
   --review-summary /approved-work/project/review_summary.json \
   --processing-audit-summary /approved-work/project/processing_audit_summary.json \
   --benchmark-results /approved-work/project/benchmark_results.json \
+  --aggregate-baseline-summary /approved-work/project/aggregate_baseline_summary.json \
   --min-scan-files-per-minute 100 \
   --min-processing-files-per-minute 60 \
   --out /approved-work/project/acceptance_summary.json
 ```
 
 The default gate blocks when remaining P0 findings, remaining P1 findings,
-failed batches, or processing failed files are greater than zero. Throughput
+failed batches, or processing failed files are greater than zero. When an
+aggregate baseline summary is supplied, the gate also blocks on a failed privacy
+self-check, cleanup not being enabled, or cleanup retaining generated private
+artifacts instead of only `aggregate_baseline_summary.json`. Throughput
 thresholds are optional and configured with `--min-scan-files-per-minute` and
 `--min-processing-files-per-minute`. Missing optional evidence produces warnings;
 at least one aggregate evidence input is required.
