@@ -1057,6 +1057,7 @@ PYTHONPATH=src python -m compileall -q src tests
 python3 scripts/validate_release.py
 PYTHONPATH=src python3 scripts/release_readiness_summary.py \
   --out /placeholder/private-validation-output/readiness \
+  --wheelhouse /placeholder/offline-wheelhouse \
   --run-capability-probe
 ```
 

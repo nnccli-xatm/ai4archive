@@ -106,6 +106,7 @@ def run_release_readiness_checks(
     run_compile: bool = True,
     run_offline_dependencies: bool = True,
     run_cli_smoke: bool = True,
+    wheelhouse_path: Path | None = None,
     capability_probe_path: Path | None = None,
     run_capability_probe_check: bool = False,
     command_runner: CommandRunner | None = None,
@@ -128,10 +129,13 @@ def run_release_readiness_checks(
         checks.append(_compile_check())
 
     if run_offline_dependencies:
+        command = [sys.executable, str(REPO_ROOT / "scripts" / "check_offline_dependencies.py")]
+        if wheelhouse_path is not None:
+            command.extend(["--wheelhouse", str(wheelhouse_path)])
         checks.append(
             _command_check(
                 "offline_dependency_check",
-                [sys.executable, str(REPO_ROOT / "scripts" / "check_offline_dependencies.py")],
+                command,
                 command_runner=command_runner,
                 env=env,
             )
@@ -224,6 +228,7 @@ def main(argv: list[str] | None = None) -> int:
         description="Write aggregate-only production release readiness evidence without network or model inference."
     )
     parser.add_argument("--out", type=Path, default=Path(RELEASE_READINESS_JSON), help="Output JSON path or directory.")
+    parser.add_argument("--wheelhouse", type=Path, default=None, help="Optional local wheelhouse directory to verify.")
     parser.add_argument("--capability-probe", type=Path, default=None, help="Optional existing capability_probe.json to summarize.")
     parser.add_argument(
         "--run-capability-probe",
@@ -241,6 +246,7 @@ def main(argv: list[str] | None = None) -> int:
         run_compile=not args.skip_compile,
         run_offline_dependencies=not args.skip_offline_dependencies,
         run_cli_smoke=not args.skip_cli_smoke,
+        wheelhouse_path=args.wheelhouse,
         capability_probe_path=args.capability_probe,
         run_capability_probe_check=args.run_capability_probe,
     )

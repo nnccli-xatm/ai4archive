@@ -221,6 +221,7 @@ class ScanQcTest(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="private-readiness-") as temp_dir, mock.patch.object(
             module, "_compile_check", return_value=module.ReadinessCheck("compile_import_check", "pass", False)
         ):
+            private_wheelhouse = Path(temp_dir) / "operator" / "wheelhouse"
             private_probe = Path(temp_dir) / "local" / "capability_probe.json"
             private_probe.parent.mkdir()
             private_probe.write_text(
@@ -240,6 +241,7 @@ class ScanQcTest(unittest.TestCase):
                 encoding="utf-8",
             )
             summary = module.run_release_readiness_checks(
+                wheelhouse_path=private_wheelhouse,
                 capability_probe_path=private_probe,
                 command_runner=runner,
             )
@@ -254,6 +256,7 @@ class ScanQcTest(unittest.TestCase):
         self.assertNotIn("secret-token", raw)
         self.assertNotIn("/private/model/path", raw)
         self.assertNotIn("private-readiness", raw)
+        self.assertNotIn("wheelhouse", raw)
 
     def test_version_output_matches_package_version(self) -> None:
         stdout = io.StringIO()
