@@ -323,6 +323,18 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(payload["aggregate_counts"]["total_files"], 1)
             self.assertEqual(payload["aggregate_counts"]["openable_files"], 1)
             self.assertIn("environment", payload)
+            hardware = payload["runtime_hardware"]
+            self.assertEqual(hardware["schema_version"], "scan-qc.runtime-hardware.v1")
+            self.assertIn(hardware["os_family"], {None, "Darwin", "Linux", "Windows", "Java"})
+            self.assertRegex(hardware["python_version_family"], r"^\d+\.\d+$")
+            self.assertEqual(hardware["gpu_acceleration_used"], False)
+            self.assertIn("cpu_logical_count", hardware)
+            self.assertIn("total_memory_gb", hardware)
+            self.assertIn("output_disk_free_gb", hardware)
+            self.assertIn("output_disk_total_gb", hardware)
+            self.assertIn("gpu_visible_count", hardware)
+            self.assertIn("gpu_memory_total_gb", hardware)
+            self.assertIsInstance(hardware["warnings"], list)
             self.assertIn("scan", payload["stage_timings"])
             self.assertIn("processing", payload["stage_timings"])
             worker_sweep = payload["benchmark"]["worker_sweep"]
@@ -374,10 +386,38 @@ class ScanQcTest(unittest.TestCase):
                 "sha256",
                 "thumbnail",
                 "ocr",
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
                 '"files": [',
                 '"findings": [',
             ]:
                 self.assertNotIn(forbidden, raw_json)
+
+    def test_aggregate_baseline_runtime_hardware_tolerates_missing_nvidia_smi(self) -> None:
+        module = _load_aggregate_baseline_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+            with mock.patch.object(module.subprocess, "run", side_effect=FileNotFoundError):
+                hardware = module._runtime_hardware_summary(output_dir)
+
+        self.assertEqual(hardware["gpu_visible_count"], 0)
+        self.assertEqual(hardware["gpu_memory_total_gb"], 0.0)
+        self.assertFalse(hardware["gpu_acceleration_used"])
+        self.assertTrue(any("nvidia-smi unavailable" in warning for warning in hardware["warnings"]))
+
+    def test_aggregate_baseline_privacy_check_blocks_paths_filenames_and_hashes(self) -> None:
+        module = _load_aggregate_baseline_module()
+        payload = {
+            "safe": "aggregate",
+            "bad_path": "/Users/private/sample",
+            "bad_file": "private_page_001.png",
+            "bad_hash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        }
+
+        leaks = module._aggregate_privacy_leaks(payload)
+
+        self.assertIn("path-like value at bad_path", leaks)
+        self.assertIn("filename-like value at bad_file", leaks)
+        self.assertIn("hash-like value at bad_hash", leaks)
 
     def test_aggregate_baseline_worker_sweep_includes_processing_evidence(self) -> None:
         module = _load_aggregate_baseline_module()
@@ -555,6 +595,9 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(acceptance["status"], "pass")
             self.assertTrue(acceptance["cleanup"]["retained_public_summary_only"])
             self.assertIn("Acceptance status: pass", stdout.getvalue())
+            self.assertIn("Runtime OS family:", stdout.getvalue())
+            self.assertIn("CPU logical count:", stdout.getvalue())
+            self.assertIn("GPU acceleration used: False", stdout.getvalue())
             combined = json.dumps({"baseline": baseline, "acceptance": acceptance}) + stdout.getvalue()
             for forbidden in [str(input_dir), str(output_dir), "private_page_001.png", "relative_path", "sha256"]:
                 self.assertNotIn(forbidden, combined)

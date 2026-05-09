@@ -69,6 +69,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=_non_negative_float,
         help="Optional minimum acceptable derivative processing throughput.",
     )
+    parser.add_argument(
+        "--resource-summary",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Print aggregate runtime/hardware fields to stdout. Default: enabled.",
+    )
     return parser
 
 
@@ -88,7 +94,12 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError) as exc:
         parser.exit(2, f"run_production_validation.py: error: {exc}\n")
 
-    _print_aggregate_result(baseline=baseline, acceptance=acceptance, acceptance_path=acceptance_path)
+    _print_aggregate_result(
+        baseline=baseline,
+        acceptance=acceptance,
+        acceptance_path=acceptance_path,
+        include_resource_summary=args.resource_summary,
+    )
     return 0 if acceptance["pass"] else 1
 
 
@@ -138,7 +149,13 @@ def _build_baseline_args(args: argparse.Namespace) -> argparse.Namespace:
     return build_baseline_parser().parse_args(argv)
 
 
-def _print_aggregate_result(*, baseline: dict[str, Any], acceptance: dict[str, Any], acceptance_path: Path) -> None:
+def _print_aggregate_result(
+    *,
+    baseline: dict[str, Any],
+    acceptance: dict[str, Any],
+    acceptance_path: Path,
+    include_resource_summary: bool = True,
+) -> None:
     counts = baseline["aggregate_counts"]
     scan = baseline["stage_timings"]["scan"]
     processing = baseline["stage_timings"]["processing"]
@@ -154,10 +171,42 @@ def _print_aggregate_result(*, baseline: dict[str, Any], acceptance: dict[str, A
     print(f"Processing files/min: {processed_rate:.2f}" if processed_rate is not None else "Processing files/min: n/a")
     print(f"Privacy self-check: {baseline['privacy_self_check']['status']}")
     print(f"Cleanup retained only aggregate summary: {cleanup['retained_public_summary_only']}")
+    if include_resource_summary:
+        _print_resource_summary(baseline.get("runtime_hardware", {}))
     print(f"Acceptance status: {acceptance['status']}")
     if acceptance["blocking_items"]:
         codes = ", ".join(str(item["code"]) for item in acceptance["blocking_items"])
         print(f"Blocking items: {codes}")
+
+
+def _print_resource_summary(runtime_hardware: dict[str, Any]) -> None:
+    if not runtime_hardware:
+        return
+    print(f"Runtime OS family: {runtime_hardware.get('os_family')}")
+    print(f"Python version family: {runtime_hardware.get('python_version_family')}")
+    print(f"CPU logical count: {runtime_hardware.get('cpu_logical_count')}")
+    print(f"Total memory GB: {_format_optional_float(runtime_hardware.get('total_memory_gb'))}")
+    print(f"Output disk free/total GB: {_format_disk(runtime_hardware)}")
+    print(f"GPU visible count: {runtime_hardware.get('gpu_visible_count')}")
+    print(f"GPU memory total GB: {_format_optional_float(runtime_hardware.get('gpu_memory_total_gb'))}")
+    print(f"GPU acceleration used: {runtime_hardware.get('gpu_acceleration_used')}")
+    warnings = runtime_hardware.get("warnings")
+    if isinstance(warnings, list) and warnings:
+        print(f"Resource telemetry warnings: {len(warnings)}")
+
+
+def _format_disk(runtime_hardware: dict[str, Any]) -> str:
+    free = _format_optional_float(runtime_hardware.get("output_disk_free_gb"))
+    total = _format_optional_float(runtime_hardware.get("output_disk_total_gb"))
+    return f"{free}/{total}"
+
+
+def _format_optional_float(value: Any) -> str:
+    if value is None:
+        return "n/a"
+    if isinstance(value, (int, float)):
+        return f"{float(value):.3f}"
+    return str(value)
 
 
 def _positive_int(value: str) -> int:

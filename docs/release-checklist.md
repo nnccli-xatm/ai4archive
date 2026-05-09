@@ -106,7 +106,7 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
     --trim-dark-border \
     --despeckle \
     --min-scan-files-per-minute 100 \
-    --min-processing-files-per-minute 60
+    --min-processing-files-per-minute 80
   ```
 
   Use the fixed 20-image sample for low-risk tooling validation and the fixed
@@ -121,8 +121,11 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   baseline privacy self-check passes and cleanup retained only
   `aggregate_baseline_summary.json`.
 - Record total files, openable files, finding counts, elapsed seconds, files per
-  minute, recommended scan/processing workers, effective workers, CPU count,
-  platform, and Python version.
+  minute, recommended scan/processing workers, effective workers, OS/platform
+  family, Python version family, CPU logical count, total memory GB when
+  available, output disk free/total GB, visible GPU count, aggregate GPU memory
+  GB when `nvidia-smi` is available, GPU acceleration status, and sanitized
+  telemetry warning count.
 - Keep normal scan reports, processing manifests, filenames, paths, hashes,
   thumbnails, retry manifests, derivative images, and source images inside the
   approved private environment.
@@ -161,8 +164,10 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 - Record worker settings tested, recommended workers from
   `benchmark_results.json` `recommendations`, effective worker count, elapsed
   seconds, files per minute, processed files per minute when processing is
-  enabled, CPU count, memory note when available, platform, Python version, and
-  Pillow version.
+  enabled, OS/platform family, Python version family, CPU logical count, total
+  memory GB when available, output disk free/total GB, visible GPU count,
+  aggregate GPU memory GB when available, GPU acceleration status, telemetry
+  warning count, and Pillow version.
 - Compare against the previous release on the same sample set and hardware.
 - Note any throughput regression or operational limit in release notes.
 

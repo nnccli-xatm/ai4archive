@@ -7,8 +7,10 @@ import argparse
 from datetime import datetime, timezone
 import json
 import os
+import platform
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 import time
 from typing import Any
@@ -268,6 +270,7 @@ def _baseline_summary(args: argparse.Namespace, private_summary: dict[str, Any])
             ),
         },
         "environment": private_summary["environment"],
+        "runtime_hardware": _runtime_hardware_summary(Path(args.out)),
         "cleanup": {
             "enabled": False,
             "removed_artifacts": [],
@@ -286,12 +289,146 @@ def _baseline_summary(args: argparse.Namespace, private_summary: dict[str, Any])
 
 def _update_privacy_self_check(args: argparse.Namespace, baseline: dict[str, Any]) -> None:
     leaks = privacy_self_check(baseline, forbidden_values=_forbidden_values(args, Path(args.input), Path(args.out)))
+    leaks.extend(_aggregate_privacy_leaks(baseline))
     baseline["privacy_self_check"]["passed"] = not leaks
     baseline["privacy_self_check"]["status"] = "pass" if not leaks else "failed"
     baseline["privacy_self_check"]["violation_count"] = len(leaks)
     baseline["privacy_self_check"]["violations"] = leaks
     if leaks:
         raise ValueError("Privacy self-check found sensitive fields in aggregate baseline summary: " + ", ".join(leaks))
+
+
+def _runtime_hardware_summary(output_root: Path) -> dict[str, Any]:
+    warnings: list[str] = []
+    total_memory_gb = _total_memory_gb(warnings)
+    disk = _disk_gb(output_root, warnings)
+    gpu = _nvidia_gpu_summary(warnings)
+    return {
+        "schema_version": "scan-qc.runtime-hardware.v1",
+        "os_family": platform.system() or None,
+        "platform_family": platform.platform(aliased=True, terse=True),
+        "python_version_family": _python_version_family(),
+        "cpu_logical_count": os.cpu_count(),
+        "total_memory_gb": total_memory_gb,
+        "output_disk_free_gb": disk["free_gb"],
+        "output_disk_total_gb": disk["total_gb"],
+        "gpu_visible_count": gpu["visible_count"],
+        "gpu_memory_total_gb": gpu["memory_total_gb"],
+        "gpu_acceleration_used": False,
+        "warnings": warnings,
+    }
+
+
+def _python_version_family() -> str:
+    version = sys.version_info
+    return f"{version.major}.{version.minor}"
+
+
+def _total_memory_gb(warnings: list[str]) -> float | None:
+    try:
+        import psutil  # type: ignore[import-not-found]
+    except ImportError:
+        psutil = None
+        warnings.append("psutil unavailable; total memory collected from stdlib fallback when supported.")
+
+    if psutil is not None:
+        try:
+            return _bytes_to_gb(int(psutil.virtual_memory().total))
+        except Exception:
+            warnings.append("psutil memory probe failed; total memory collected from stdlib fallback when supported.")
+
+    if hasattr(os, "sysconf"):
+        try:
+            return _bytes_to_gb(int(os.sysconf("SC_PAGE_SIZE")) * int(os.sysconf("SC_PHYS_PAGES")))
+        except (OSError, ValueError, TypeError):
+            pass
+    warnings.append("total memory unavailable.")
+    return None
+
+
+def _disk_gb(output_root: Path, warnings: list[str]) -> dict[str, float | None]:
+    try:
+        usage = shutil.disk_usage(output_root.expanduser())
+    except OSError:
+        warnings.append("output disk usage unavailable.")
+        return {"free_gb": None, "total_gb": None}
+    return {"free_gb": _bytes_to_gb(usage.free), "total_gb": _bytes_to_gb(usage.total)}
+
+
+def _nvidia_gpu_summary(warnings: list[str]) -> dict[str, float | int]:
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except FileNotFoundError:
+        warnings.append("nvidia-smi unavailable; GPU count and memory reported as zero.")
+        return {"visible_count": 0, "memory_total_gb": 0.0}
+    except (OSError, subprocess.TimeoutExpired):
+        warnings.append("nvidia-smi probe failed; GPU count and memory reported as zero.")
+        return {"visible_count": 0, "memory_total_gb": 0.0}
+
+    if result.returncode != 0:
+        warnings.append("nvidia-smi returned no usable GPU telemetry; GPU count and memory reported as zero.")
+        return {"visible_count": 0, "memory_total_gb": 0.0}
+
+    memory_mib: list[float] = []
+    for line in result.stdout.splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        try:
+            memory_mib.append(float(text))
+        except ValueError:
+            warnings.append("nvidia-smi output was not parseable; GPU count and memory reported as zero.")
+            return {"visible_count": 0, "memory_total_gb": 0.0}
+    return {"visible_count": len(memory_mib), "memory_total_gb": round(sum(memory_mib) / 1024, 3)}
+
+
+def _bytes_to_gb(value: int) -> float:
+    return round(float(value) / (1024**3), 3)
+
+
+def _aggregate_privacy_leaks(payload: Any) -> list[str]:
+    leaks: list[str] = []
+
+    def visit(value: Any, path: str) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                visit(child, f"{path}.{key}" if path else str(key))
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                visit(child, f"{path}[{index}]")
+        elif isinstance(value, str):
+            lowered = value.lower()
+            if _looks_like_private_path(value):
+                leaks.append(f"path-like value at {path}")
+            if _looks_like_sensitive_filename(lowered):
+                leaks.append(f"filename-like value at {path}")
+            if _looks_like_hash(value):
+                leaks.append(f"hash-like value at {path}")
+
+    visit(payload, "")
+    return leaks
+
+
+def _looks_like_private_path(value: str) -> bool:
+    if "/" in value or "\\" in value:
+        return value.startswith(("/", "~")) or ":\\" in value or "/users/" in value.lower()
+    return False
+
+
+def _looks_like_sensitive_filename(value: str) -> bool:
+    sensitive_extensions = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".jp2", ".pdf")
+    return any(token in value for token in sensitive_extensions)
+
+
+def _looks_like_hash(value: str) -> bool:
+    text = value.strip()
+    return len(text) in {32, 40, 64} and all(char in "0123456789abcdefABCDEF" for char in text)
 
 
 def _elapsed_since(start_seconds: float) -> float:
