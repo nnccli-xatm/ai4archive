@@ -35,6 +35,7 @@ from archive_scan_qc.scanner import ScanConfig, scan_batch
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PRIVATE_INTEGRATION_PATH = REPO_ROOT / "scripts" / "run_private_integration.py"
 AGGREGATE_BASELINE_PATH = REPO_ROOT / "scripts" / "run_aggregate_baseline.py"
+PRODUCTION_VALIDATION_PATH = REPO_ROOT / "scripts" / "run_production_validation.py"
 LOCAL_PROVIDER_EXAMPLE = REPO_ROOT / "examples" / "local_analysis_provider.py"
 
 
@@ -52,6 +53,16 @@ def _load_aggregate_baseline_module():
     spec = importlib.util.spec_from_file_location("run_aggregate_baseline", AGGREGATE_BASELINE_PATH)
     if spec is None or spec.loader is None:
         raise RuntimeError("Could not load run_aggregate_baseline.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_production_validation_module():
+    spec = importlib.util.spec_from_file_location("run_production_validation", PRODUCTION_VALIDATION_PATH)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Could not load run_production_validation.py")
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
@@ -504,6 +515,108 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(args.workers, 2)
             self.assertEqual(args.benchmark_workers_list, "1,2")
             self.assertTrue(args.cleanup_artifacts)
+
+    def test_production_validation_wrapper_writes_aggregate_acceptance_and_cleans_up(self) -> None:
+        module = _load_production_validation_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-input"
+            output_dir = root / "private-output"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "private_page_001.png", dpi=(300, 300))
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = module.main(
+                    [
+                        "--input",
+                        str(input_dir),
+                        "--out",
+                        str(output_dir),
+                        "--workers",
+                        "1",
+                        "--benchmark-workers-list",
+                        "1",
+                        "--process-images",
+                        "--skip-benchmark",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(
+                sorted(child.name for child in output_dir.iterdir()),
+                ["acceptance_summary.json", "aggregate_baseline_summary.json"],
+            )
+            baseline = json.loads((output_dir / "aggregate_baseline_summary.json").read_text(encoding="utf-8"))
+            acceptance = json.loads((output_dir / "acceptance_summary.json").read_text(encoding="utf-8"))
+            self.assertTrue(baseline["privacy_self_check"]["passed"])
+            self.assertTrue(baseline["cleanup"]["enabled"])
+            self.assertEqual(baseline["cleanup"]["preserved_artifacts"], [])
+            self.assertEqual(acceptance["status"], "pass")
+            self.assertTrue(acceptance["cleanup"]["retained_public_summary_only"])
+            self.assertIn("Acceptance status: pass", stdout.getvalue())
+            combined = json.dumps({"baseline": baseline, "acceptance": acceptance}) + stdout.getvalue()
+            for forbidden in [str(input_dir), str(output_dir), "private_page_001.png", "relative_path", "sha256"]:
+                self.assertNotIn(forbidden, combined)
+
+    def test_production_validation_wrapper_exits_nonzero_on_threshold_regression(self) -> None:
+        module = _load_production_validation_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-input"
+            output_dir = root / "private-output"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "private_page_001.png", dpi=(300, 300))
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = module.main(
+                    [
+                        "--input",
+                        str(input_dir),
+                        "--out",
+                        str(output_dir),
+                        "--workers",
+                        "1",
+                        "--benchmark-workers-list",
+                        "1",
+                        "--no-process-images",
+                        "--min-scan-files-per-minute",
+                        "1000000",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 1)
+            acceptance = json.loads((output_dir / "acceptance_summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(acceptance["status"], "fail")
+            self.assertIn("scan_throughput_below_threshold", {item["code"] for item in acceptance["blocking_items"]})
+            self.assertIn("Blocking items: scan_throughput_below_threshold", stdout.getvalue())
+
+    def test_production_validation_wrapper_builds_baseline_args(self) -> None:
+        module = _load_production_validation_module()
+        args = module.build_parser().parse_args(
+            [
+                "--input",
+                "/placeholder/private-20-image-sample",
+                "--out",
+                "/placeholder/private-validation-output",
+                "--workers",
+                "4",
+                "--benchmark-workers-list",
+                "1,2,4,8",
+                "--min-scan-files-per-minute",
+                "100",
+                "--min-processing-files-per-minute",
+                "60",
+            ]
+        )
+        baseline_args = module._build_baseline_args(args)
+
+        self.assertEqual(Path(baseline_args.input), Path("/placeholder/private-20-image-sample"))
+        self.assertEqual(Path(baseline_args.out), Path("/placeholder/private-validation-output"))
+        self.assertEqual(baseline_args.workers, 4)
+        self.assertEqual(baseline_args.benchmark_workers_list, "1,2,4,8")
+        self.assertTrue(baseline_args.cleanup_artifacts)
 
     def test_rework_action_list_groups_qc_findings_and_processing_retry(self) -> None:
         report = {
