@@ -91,6 +91,28 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 
 ## Real sample aggregate validation
 
+- For one-command `puersai-hpc` production validation, run the aggregate wrapper
+  with placeholder-equivalent private paths and configured thresholds:
+
+  ```bash
+  PYTHONPATH=src python3 scripts/run_production_validation.py \
+    --input /placeholder/private-20-image-sample \
+    --out /placeholder/private-validation-output/20-image \
+    --workers 4 \
+    --benchmark-workers-list 1,2,4,8 \
+    --process-images \
+    --auto-crop \
+    --deskew \
+    --trim-dark-border \
+    --despeckle \
+    --min-scan-files-per-minute 100 \
+    --min-processing-files-per-minute 60
+  ```
+
+  Use the fixed 20-image sample for low-risk tooling validation and the fixed
+  149-image sample for full production validation. The wrapper must leave only
+  aggregate public evidence files in the validation output root:
+  `aggregate_baseline_summary.json` and `acceptance_summary.json`.
 - Run `archive-scan-qc benchmark` on approved internal real samples.
 - Share only aggregate `benchmark_results.json` or `benchmark_results.csv`.
 - For optimized scan QC baseline release checks, validate the public

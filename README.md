@@ -273,6 +273,54 @@ scan throughput when processing is disabled. This keeps the recommendation
 conservative instead of assuming `workers=4` or the highest-throughput setting
 is always the best hardware balance.
 
+### One-command production validation
+
+For repeatable operator validation, use the production validation wrapper. It
+runs the aggregate baseline with cleanup, then runs the aggregate acceptance gate
+against the resulting `aggregate_baseline_summary.json`. The wrapper writes only
+aggregate public evidence: `aggregate_baseline_summary.json` and
+`acceptance_summary.json`.
+
+Low-risk fixed 20-image validation:
+
+```bash
+PYTHONPATH=src python3 scripts/run_production_validation.py \
+  --input /placeholder/private-20-image-sample \
+  --out /placeholder/private-validation-output/20-image \
+  --workers 4 \
+  --benchmark-workers-list 1,2,4,8 \
+  --process-images \
+  --auto-crop \
+  --deskew \
+  --trim-dark-border \
+  --despeckle \
+  --min-scan-files-per-minute 100 \
+  --min-processing-files-per-minute 60
+```
+
+Full fixed 149-image production validation:
+
+```bash
+PYTHONPATH=src python3 scripts/run_production_validation.py \
+  --input /placeholder/private-149-image-sample \
+  --out /placeholder/private-validation-output/full-149 \
+  --workers 4 \
+  --benchmark-workers-list 1,2,4,8 \
+  --process-images \
+  --auto-crop \
+  --deskew \
+  --trim-dark-border \
+  --despeckle \
+  --min-scan-files-per-minute 120 \
+  --min-processing-files-per-minute 90
+```
+
+The command exits non-zero when the aggregate baseline privacy self-check fails,
+cleanup does not retain only the aggregate baseline summary before acceptance,
+processing failures are present, or the configured throughput thresholds are not
+met. Stdout names only aggregate output files and aggregate counts/rates; do not
+paste private input or output paths into public reports.
+
 Current `puersai-hpc` production baseline after PR #61 uses the full fixed
 private sample of 149 files. The latest aggregate-only result is:
 
