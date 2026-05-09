@@ -47,6 +47,7 @@ OFFLINE_DEPENDENCY_CHECK_PATH = REPO_ROOT / "scripts" / "check_offline_dependenc
 RELEASE_READINESS_PATH = REPO_ROOT / "scripts" / "release_readiness_summary.py"
 RELEASE_CANDIDATE_PATH = REPO_ROOT / "scripts" / "release_candidate_summary.py"
 LOCAL_PROVIDER_EXAMPLE = REPO_ROOT / "examples" / "local_analysis_provider.py"
+ISSUE_PLAN_PATH = REPO_ROOT / "scripts" / "generate_issue_plan.py"
 
 
 def _load_private_integration_module():
@@ -109,7 +110,47 @@ def _load_release_candidate_module():
     return module
 
 
+def _load_issue_plan_module():
+    spec = importlib.util.spec_from_file_location("generate_issue_plan", ISSUE_PLAN_PATH)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Could not load generate_issue_plan.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 class ScanQcTest(unittest.TestCase):
+    def test_issue_plan_script_writes_one_task_issue_drafts(self) -> None:
+        module = _load_issue_plan_module()
+        with tempfile.TemporaryDirectory(prefix="issue-plan-") as temp_dir:
+            json_path, markdown_path = module.write_issue_plan(Path(temp_dir))
+
+            payload = json.loads(json_path.read_text(encoding="utf-8"))
+            markdown = markdown_path.read_text(encoding="utf-8")
+
+        self.assertEqual(payload["schema_version"], "scan-qc.issue-plan.v1")
+        self.assertEqual(len(payload["issues"]), 7)
+        self.assertIn("archive-scan-qc-retouch-design.md", payload["plan_source"])
+        for issue in payload["issues"]:
+            self.assertLessEqual(len(issue["scope"]), 3)
+            self.assertLessEqual(len(issue["acceptance_criteria"]), 3)
+            self.assertIn("puersai-hpc", json.dumps(issue, ensure_ascii=False))
+            self.assertEqual(issue["test_plan"]["target_machine"], "puersai-hpc")
+            self.assertEqual(issue["test_plan"]["administrator_account"], "ps")
+        self.assertIn("Vectorize deskew and despeckle", markdown)
+
+    def test_issue_plan_outputs_do_not_store_credentials_or_private_paths(self) -> None:
+        module = _load_issue_plan_module()
+        with tempfile.TemporaryDirectory(prefix="issue-plan-") as temp_dir:
+            json_path, markdown_path = module.write_issue_plan(Path(temp_dir))
+            combined = json_path.read_text(encoding="utf-8") + markdown_path.read_text(encoding="utf-8")
+
+        self.assertNotIn("tm123", combined)
+        self.assertNotIn("\\\\PUERSAI-HPC", combined)
+        self.assertNotIn("/Volumes/", combined)
+        self.assertFalse(module.build_issue_plan()["privacy"]["contains_credentials"])
+
     def test_offline_dependency_check_passes_with_complete_wheelhouse(self) -> None:
         module = _load_offline_dependency_check_module()
         with tempfile.TemporaryDirectory(prefix="private-wheelhouse-") as temp_dir:
