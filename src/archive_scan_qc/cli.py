@@ -11,6 +11,7 @@ from ._version import __version__
 from .acceptance import ACCEPTANCE_JSON, write_acceptance_summary
 from .analysis_provider import AnalysisProviderError
 from .calibration import CALIBRATION_JSON, write_rules_calibration_summary
+from .capability_probe import CapabilityProbeConfig, run_capability_probe, write_capability_probe
 from .handoff import write_delivery_handoff_manifest
 from .preflight import PreflightConfig, run_preflight, write_preflight_report
 from .processing import ProcessingOptions, process_images
@@ -155,6 +156,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_plan_main(argv[1:])
     if argv and argv[0] == "preflight":
         return _main_preflight(argv[1:])
+    if argv and argv[0] == "capability-probe":
+        return _main_capability_probe(argv[1:])
     if argv and argv[0] == "review-export":
         return _main_review_export(argv[1:])
     if argv and argv[0] == "review-summary":
@@ -286,6 +289,57 @@ def _main_preflight(argv: list[str]) -> int:
     print(f"Warnings: {len(report['warnings'])}")
     print(f"Preflight report: {path}")
     return 0 if report["status"] == "pass" else 1
+
+
+def _main_capability_probe(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="archive-scan-qc capability-probe",
+        description="Report aggregate optional local GPU/model provider readiness without running inference.",
+    )
+    parser.add_argument(
+        "--analysis-provider-command",
+        default=None,
+        help="Optional local provider command to count as configured. The command is not executed.",
+    )
+    parser.add_argument(
+        "--gpu-acceleration-enabled",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Declare whether GPU acceleration is configured. Defaults to safe environment flag detection.",
+    )
+    parser.add_argument(
+        "--model-acceleration-enabled",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Declare whether model acceleration is configured. Defaults to safe environment flag detection.",
+    )
+    parser.add_argument(
+        "--no-torch-cuda-check",
+        action="store_true",
+        help="Skip importing torch for CUDA visibility even when torch is installed.",
+    )
+    parser.add_argument("--out", default=None, type=Path, help="Optional JSON output path or directory.")
+    args = parser.parse_args(argv)
+
+    report = run_capability_probe(
+        CapabilityProbeConfig(
+            analysis_provider_command=args.analysis_provider_command,
+            gpu_acceleration_enabled=args.gpu_acceleration_enabled,
+            model_acceleration_enabled=args.model_acceleration_enabled,
+            include_torch_cuda=not args.no_torch_cuda_check,
+        )
+    )
+    if args.out:
+        path = write_capability_probe(report, args.out)
+        print(f"Capability probe report: {path}")
+    print(f"Capability probe status: {report['status']}")
+    print(f"Optional provider packages found: {len(report['readiness']['provider_packages_found'])}")
+    print(f"GPU visible count: {report['gpu_provider_visibility']['gpu_visible_count']}")
+    print(f"GPU acceleration configured: {report['readiness']['gpu_acceleration_configured']}")
+    print(f"Model acceleration configured: {report['readiness']['model_acceleration_configured']}")
+    print("Inference run: no")
+    print("Privacy: aggregate-only; no image paths, filenames, hashes, OCR text, thumbnails, secrets, or row-level findings.")
+    return 0
 
 
 def _main_review_export(argv: list[str]) -> int:

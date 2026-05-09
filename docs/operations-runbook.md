@@ -385,6 +385,29 @@ logs, absolute paths, hashes, private filenames, and any cloud or network
 location. Provider stdout should contain only the documented metadata and
 finding records, and metadata should remain aggregate or model/run-level.
 
+## Capability Probe
+
+Run the optional capability probe when validating whether a host has local
+GPU/model readiness for future providers:
+
+```bash
+archive-scan-qc capability-probe \
+  --out /approved-work/validation/capability-probe
+```
+
+The probe is informational and non-blocking. It reports aggregate package
+availability, aggregate GPU visibility, and whether GPU/model acceleration has
+been configured. It does not open private images, execute provider commands, run
+model inference, add dependencies, or contact network services.
+
+Keep it disabled by default by omitting `--analysis-provider-command` from scan
+runs and leaving acceleration environment flags unset. A missing optional
+package or invisible GPU should be interpreted as "future acceleration not
+ready", not as a failure of the required CPU/Pillow production baseline. Report
+only the aggregate fields from `capability_probe.json`: package labels,
+provider/GPU counts, configured booleans, warnings, and the
+`unchanged_cpu_pillow_baseline` semantics marker.
+
 ## Human Review And Acceptance Summary
 
 When automated QC produces findings, create a local review template for manual
