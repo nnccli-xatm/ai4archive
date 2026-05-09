@@ -937,30 +937,17 @@ def _despeckle_isolated_pixels(image: Image.Image) -> tuple[Image.Image, int]:
         return image.copy(), 0
 
     dark_mask = grayscale.point(lambda value: 255 if value <= 60 else 0, mode="L")
-    candidate_bbox = dark_mask.getbbox()
-    if not candidate_bbox:
-        return image.copy(), 0
-
-    left, top, right, bottom = candidate_bbox
-    if left >= width - 1 or top >= height - 1 or right <= 1 or bottom <= 1:
+    candidates = _despeckle_candidate_points(dark_mask)
+    if not candidates:
         return image.copy(), 0
 
     gray_pixels = grayscale.load()
-    candidate_width = right - left
-    candidate_values = dark_mask.crop(candidate_bbox).tobytes()
     source: Image.Image | None = None
     output: Image.Image | None = None
     source_pixels: Any = None
     output_pixels: Any = None
     changed = 0
-    for index, mask_value in enumerate(candidate_values):
-        if not mask_value:
-            continue
-        x = left + (index % candidate_width)
-        y = top + (index // candidate_width)
-        if x == 0 or y == 0 or x == width - 1 or y == height - 1:
-            continue
-
+    for x, y in candidates:
         dark_neighbors = 0
         neighbor_values: list[int] = []
         for ny in range(y - 1, y + 2):
@@ -1010,6 +997,49 @@ def _despeckle_isolated_pixels(image: Image.Image) -> tuple[Image.Image, int]:
     if image.mode == "RGB":
         return output, changed
     return output.convert(image.mode), changed
+
+
+def _despeckle_candidate_points(dark_mask: Image.Image) -> list[tuple[int, int]]:
+    width, height = dark_mask.size
+    if width < 3 or height < 3:
+        return []
+
+    candidate_bbox = dark_mask.getbbox()
+    if not candidate_bbox:
+        return []
+
+    left, top, right, bottom = candidate_bbox
+    if left >= width - 1 or top >= height - 1 or right <= 1 or bottom <= 1:
+        return []
+
+    crop_width = right - left
+    crop_values = dark_mask.crop(candidate_bbox).tobytes()
+    candidates: list[tuple[int, int]] = []
+    for index, mask_value in enumerate(crop_values):
+        if not mask_value:
+            continue
+        local_x = index % crop_width
+        local_y = index // crop_width
+        x = left + local_x
+        y = top + local_y
+        if x == 0 or y == 0 or x == width - 1 or y == height - 1:
+            continue
+
+        dark_neighbors = 0
+        for neighbor_y in range(max(0, local_y - 1), min(bottom - top, local_y + 2)):
+            row_offset = neighbor_y * crop_width
+            for neighbor_x in range(max(0, local_x - 1), min(crop_width, local_x + 2)):
+                if neighbor_x == local_x and neighbor_y == local_y:
+                    continue
+                if crop_values[row_offset + neighbor_x]:
+                    dark_neighbors += 1
+                    if dark_neighbors > 1:
+                        break
+            if dark_neighbors > 1:
+                break
+        if dark_neighbors <= 1:
+            candidates.append((x, y))
+    return candidates
 
 
 def _corner_background_value(image: Image.Image) -> int:
