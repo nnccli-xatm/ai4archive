@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import shutil
 import sys
+import time
 from typing import Any
 
 
@@ -121,24 +122,36 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def run_aggregate_baseline(args: argparse.Namespace) -> dict[str, Any]:
+    start_seconds = time.perf_counter()
     integration_result = run_private_integration(args)
+    integration_elapsed_seconds = _elapsed_since(start_seconds)
     summary = integration_result.summary
     baseline = _baseline_summary(args, summary)
-    leaks = privacy_self_check(baseline, forbidden_values=_forbidden_values(args, Path(args.input), Path(args.out)))
-    baseline["privacy_self_check"]["passed"] = not leaks
-    baseline["privacy_self_check"]["status"] = "pass" if not leaks else "failed"
-    baseline["privacy_self_check"]["violation_count"] = len(leaks)
-    baseline["privacy_self_check"]["violations"] = leaks
-    if leaks:
-        raise ValueError("Privacy self-check found sensitive fields in aggregate baseline summary: " + ", ".join(leaks))
+    baseline["stage_timings"]["run_plan_and_benchmark"] = {
+        "elapsed_seconds": integration_elapsed_seconds,
+    }
 
     output_root = Path(args.out).expanduser().resolve()
     summary_path = output_root / BASELINE_JSON
-    summary_path.write_text(json.dumps(baseline, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     if args.cleanup_artifacts:
+        cleanup_start = time.perf_counter()
         cleanup = cleanup_generated_artifacts(output_root=output_root, input_dir=Path(args.input).expanduser().resolve())
+        cleanup["elapsed_seconds"] = _elapsed_since(cleanup_start)
         baseline["cleanup"] = cleanup
-        summary_path.write_text(json.dumps(baseline, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    baseline["stage_timings"]["report_write"] = {
+        "elapsed_seconds": 0.0,
+    }
+    baseline["stage_timings"]["total_wall_clock"] = {
+        "elapsed_seconds": _elapsed_since(start_seconds),
+    }
+    _update_privacy_self_check(args, baseline)
+
+    report_write_start = time.perf_counter()
+    summary_path.write_text(json.dumps(baseline, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    baseline["stage_timings"]["report_write"]["elapsed_seconds"] = _elapsed_since(report_write_start)
+    baseline["stage_timings"]["total_wall_clock"]["elapsed_seconds"] = _elapsed_since(start_seconds)
+    _update_privacy_self_check(args, baseline)
+    summary_path.write_text(json.dumps(baseline, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return baseline
 
 
@@ -166,6 +179,7 @@ def cleanup_generated_artifacts(*, output_root: Path, input_dir: Path) -> dict[s
         "removed_artifacts": removed,
         "preserved_artifacts": preserved,
         "retained_public_summary": BASELINE_JSON,
+        "elapsed_seconds": 0.0,
     }
 
 
@@ -248,6 +262,7 @@ def _baseline_summary(args: argparse.Namespace, private_summary: dict[str, Any])
             "removed_artifacts": [],
             "preserved_artifacts": [],
             "retained_public_summary": BASELINE_JSON,
+            "elapsed_seconds": 0.0,
         },
         "privacy_self_check": {
             "passed": False,
@@ -256,6 +271,24 @@ def _baseline_summary(args: argparse.Namespace, private_summary: dict[str, Any])
             "violations": [],
         },
     }
+
+
+def _update_privacy_self_check(args: argparse.Namespace, baseline: dict[str, Any]) -> None:
+    leaks = privacy_self_check(baseline, forbidden_values=_forbidden_values(args, Path(args.input), Path(args.out)))
+    baseline["privacy_self_check"]["passed"] = not leaks
+    baseline["privacy_self_check"]["status"] = "pass" if not leaks else "failed"
+    baseline["privacy_self_check"]["violation_count"] = len(leaks)
+    baseline["privacy_self_check"]["violations"] = leaks
+    if leaks:
+        raise ValueError("Privacy self-check found sensitive fields in aggregate baseline summary: " + ", ".join(leaks))
+
+
+def _elapsed_since(start_seconds: float) -> float:
+    return _rounded_elapsed(time.perf_counter() - start_seconds)
+
+
+def _rounded_elapsed(elapsed_seconds: float) -> float:
+    return max(0.0, round(float(elapsed_seconds), 6))
 
 
 def _env_flag(name: str) -> bool:
