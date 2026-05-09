@@ -200,7 +200,7 @@ PYTHONPATH=src python3 scripts/run_aggregate_baseline.py \
   --input /placeholder/private-image-directory \
   --out /placeholder/private-output-root \
   --workers 4 \
-  --benchmark-workers-list 4 \
+  --benchmark-workers-list 1,2,4,8 \
   --process-images \
   --cleanup-artifacts
 ```
@@ -212,7 +212,7 @@ in shell history:
 PUERSAI_HPC_BASELINE_INPUT=/placeholder/private-image-directory \
 PUERSAI_HPC_BASELINE_OUT=/placeholder/private-output-root \
 PUERSAI_HPC_BASELINE_WORKERS=4 \
-PUERSAI_HPC_BASELINE_WORKERS_LIST=4 \
+PUERSAI_HPC_BASELINE_WORKERS_LIST=1,2,4,8 \
 PUERSAI_HPC_BASELINE_CLEANUP_ARTIFACTS=1 \
 PYTHONPATH=src python3 scripts/run_aggregate_baseline.py
 ```
@@ -234,7 +234,11 @@ The runner writes
   benchmark evidence is available. Optional aggregate wrapper timings also
   include `run_plan_and_benchmark.elapsed_seconds`,
   `report_write.elapsed_seconds`, and `total_wall_clock.elapsed_seconds`.
-- `benchmark`: aggregate repeated-run count and rule-count totals.
+- `benchmark`: aggregate repeated-run count, rule-count totals, and
+  `worker_sweep` evidence. The sweep lists each requested worker count with
+  mean scan files/minute, mean processing files/minute when processing is
+  enabled, processing failure count, whether operation timing evidence is
+  present, and a conservative recommended worker count.
 - `environment`: Python, platform, machine, processor, CPU count, memory, GPU
   placeholder, and executable name.
 - `cleanup`: whether generated private artifacts were removed, cleanup
@@ -257,6 +261,17 @@ remain local under the private output root. Only aggregate results from
 `aggregate_baseline_summary.json` should be reported externally; do not upload
 private artifacts to PRs, Linear comments, logs, screenshots, or row-level
 reports.
+
+For the fixed 20-image private orchestrator validation on `puersai-hpc`, run the
+same command against that sample with `--cleanup-artifacts`. After the command
+returns, the private output root should retain only
+`aggregate_baseline_summary.json`; the summary's `cleanup.removed_artifacts`
+field records the removed generated report/image directories. The worker sweep
+recommendation selects the lowest worker count within 90% of the best observed
+aggregate processing throughput when processing evidence has zero failures, or
+scan throughput when processing is disabled. This keeps the recommendation
+conservative instead of assuming `workers=4` or the highest-throughput setting
+is always the best hardware balance.
 
 Current `puersai-hpc` production baseline after PR #61 uses the full fixed
 private sample of 149 files. The latest aggregate-only result is:

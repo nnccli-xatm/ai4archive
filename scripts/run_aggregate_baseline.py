@@ -257,6 +257,15 @@ def _baseline_summary(args: argparse.Namespace, private_summary: dict[str, Any])
             "source": benchmark.get("source"),
             "run_count": int(benchmark.get("run_count", 0)),
             "finding_rule_counts_repeated_runs": benchmark.get("finding_rule_counts_repeated_runs", {}),
+            "worker_sweep": benchmark.get(
+                "worker_sweep",
+                {
+                    "enabled": False,
+                    "operation_timing_presence": False,
+                    "workers": [],
+                    "recommendation": None,
+                },
+            ),
         },
         "environment": private_summary["environment"],
         "cleanup": {

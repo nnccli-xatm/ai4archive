@@ -260,6 +260,7 @@ def _public_summary(
             "source": "benchmark repeated worker runs",
             "run_count": len(benchmark_runs),
             "finding_rule_counts_repeated_runs": dict(sorted(finding_rule_counts.items())),
+            "worker_sweep": _benchmark_worker_sweep(benchmark_summary),
         },
         "throughput": {
             "scan_elapsed_seconds": float(run_counts.get("scan_elapsed_seconds", 0.0)),
@@ -289,6 +290,133 @@ def _public_summary(
             "violations": [],
         },
     }
+
+
+def _benchmark_worker_sweep(benchmark_summary: dict[str, Any] | None) -> dict[str, Any]:
+    if not benchmark_summary:
+        return {
+            "enabled": False,
+            "operation_timing_presence": False,
+            "workers": [],
+            "recommendation": None,
+        }
+
+    runs = [run for run in benchmark_summary.get("runs", []) if isinstance(run, dict)]
+    workers = _benchmark_worker_points(runs)
+    recommendation = _benchmark_worker_recommendation(workers)
+    return {
+        "enabled": True,
+        "operation_timing_presence": any(point["processing"]["operation_timing_presence"] for point in workers),
+        "workers": workers,
+        "recommendation": recommendation,
+    }
+
+
+def _benchmark_worker_points(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[int, list[dict[str, Any]]] = {}
+    first_seen: dict[int, int] = {}
+    for position, run in enumerate(runs):
+        try:
+            requested_workers = int(run["requested_workers"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        grouped.setdefault(requested_workers, []).append(run)
+        first_seen.setdefault(requested_workers, position)
+
+    points: list[dict[str, Any]] = []
+    for requested_workers, worker_runs in grouped.items():
+        scan_rates = _numeric_values(run.get("scan", {}).get("files_per_minute") for run in worker_runs)
+        processing_rates = _numeric_values(
+            run.get("processing", {}).get("processed_files_per_minute") for run in worker_runs
+        )
+        processing_failures = sum(
+            int(run.get("processing", {}).get("failed_files", 0))
+            for run in worker_runs
+            if isinstance(run.get("processing"), dict)
+        )
+        operation_timings = [
+            run.get("processing", {}).get("operation_timings")
+            for run in worker_runs
+            if isinstance(run.get("processing"), dict)
+        ]
+        operation_timing_presence = any(_has_operation_timing(timing) for timing in operation_timings)
+        points.append(
+            {
+                "requested_workers": requested_workers,
+                "run_count": len(worker_runs),
+                "scan": {
+                    "files_per_minute": _mean_or_none(scan_rates),
+                },
+                "processing": {
+                    "processed_files_per_minute": _mean_or_none(processing_rates),
+                    "failed_files": processing_failures,
+                    "operation_timing_presence": operation_timing_presence,
+                },
+            }
+        )
+    return sorted(points, key=lambda point: (first_seen[point["requested_workers"]], point["requested_workers"]))
+
+
+def _benchmark_worker_recommendation(workers: list[dict[str, Any]]) -> dict[str, Any] | None:
+    processing_points = [
+        point
+        for point in workers
+        if point["processing"]["processed_files_per_minute"] is not None
+        and int(point["processing"]["failed_files"]) == 0
+    ]
+    metric = "processing_processed_files_per_minute"
+    candidate_points = processing_points
+    if not candidate_points:
+        candidate_points = [point for point in workers if point["scan"]["files_per_minute"] is not None]
+        metric = "scan_files_per_minute"
+    if not candidate_points:
+        return None
+
+    metric_path = ("processing", "processed_files_per_minute") if metric.startswith("processing") else ("scan", "files_per_minute")
+    best_rate = max(float(point[metric_path[0]][metric_path[1]]) for point in candidate_points)
+    threshold = round(best_rate * 0.90, 6)
+    recommended = min(
+        (point for point in candidate_points if float(point[metric_path[0]][metric_path[1]]) >= threshold),
+        key=lambda point: int(point["requested_workers"]),
+    )
+    return {
+        "requested_workers": int(recommended["requested_workers"]),
+        "metric": metric,
+        "files_per_minute": float(recommended[metric_path[0]][metric_path[1]]),
+        "best_observed_files_per_minute": round(best_rate, 2),
+        "conservative_threshold_ratio": 0.90,
+        "basis": (
+            "Select the lowest worker count within 90% of the best observed aggregate throughput "
+            "with zero processing failures when processing evidence is available; otherwise use scan throughput. "
+            "This favors hardware headroom over assuming the maximum-throughput worker count is always best."
+        ),
+    }
+
+
+def _numeric_values(values: Any) -> list[float]:
+    parsed: list[float] = []
+    for value in values:
+        numeric = _optional_float(value)
+        if numeric is not None:
+            parsed.append(numeric)
+    return parsed
+
+
+def _mean_or_none(values: list[float]) -> float | None:
+    if not values:
+        return None
+    return round(sum(values) / len(values), 2)
+
+
+def _has_operation_timing(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    for timing in value.values():
+        if isinstance(timing, dict) and (
+            isinstance(timing.get("elapsed_seconds"), int | float) or isinstance(timing.get("file_count"), int)
+        ):
+            return True
+    return False
 
 
 def _benchmark_operation_timings(benchmark_summary: dict[str, Any] | None) -> dict[str, dict[str, Any]]:

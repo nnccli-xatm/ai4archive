@@ -198,6 +198,14 @@ class ScanQcTest(unittest.TestCase):
             self.assertIn("environment", payload)
             self.assertIn("scan", payload["stage_timings"])
             self.assertIn("processing", payload["stage_timings"])
+            worker_sweep = payload["benchmark"]["worker_sweep"]
+            self.assertTrue(worker_sweep["enabled"])
+            self.assertFalse(worker_sweep["operation_timing_presence"])
+            self.assertEqual(worker_sweep["recommendation"]["requested_workers"], 1)
+            self.assertEqual(worker_sweep["recommendation"]["metric"], "scan_files_per_minute")
+            self.assertEqual(len(worker_sweep["workers"]), 1)
+            self.assertEqual(worker_sweep["workers"][0]["requested_workers"], 1)
+            self.assertEqual(worker_sweep["workers"][0]["processing"]["failed_files"], 0)
             self.assertEqual(
                 set(payload["stage_timings"]["scan"]),
                 {"elapsed_seconds", "files_per_minute", "openable_files_per_minute", "benchmark_files_per_minute"},
@@ -243,6 +251,49 @@ class ScanQcTest(unittest.TestCase):
                 '"findings": [',
             ]:
                 self.assertNotIn(forbidden, raw_json)
+
+    def test_aggregate_baseline_worker_sweep_includes_processing_evidence(self) -> None:
+        module = _load_aggregate_baseline_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-input"
+            output_dir = root / "private-output"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "private_page_001.png", dpi=(300, 300))
+
+            args = module.build_parser().parse_args(
+                [
+                    "--input",
+                    str(input_dir),
+                    "--out",
+                    str(output_dir),
+                    "--workers",
+                    "1",
+                    "--benchmark-workers-list",
+                    "1,2",
+                    "--process-images",
+                    "--auto-crop",
+                    "--cleanup-artifacts",
+                ]
+            )
+            payload = module.run_aggregate_baseline(args)
+
+            worker_sweep = payload["benchmark"]["worker_sweep"]
+            self.assertTrue(worker_sweep["enabled"])
+            self.assertTrue(worker_sweep["operation_timing_presence"])
+            self.assertEqual([point["requested_workers"] for point in worker_sweep["workers"]], [1, 2])
+            for point in worker_sweep["workers"]:
+                self.assertEqual(point["run_count"], 1)
+                self.assertIsNotNone(point["scan"]["files_per_minute"])
+                self.assertIsNotNone(point["processing"]["processed_files_per_minute"])
+                self.assertEqual(point["processing"]["failed_files"], 0)
+                self.assertTrue(point["processing"]["operation_timing_presence"])
+            recommendation = worker_sweep["recommendation"]
+            self.assertIn(recommendation["requested_workers"], [1, 2])
+            self.assertEqual(recommendation["metric"], "processing_processed_files_per_minute")
+            self.assertIn("90%", recommendation["basis"])
+            self.assertTrue(payload["privacy_self_check"]["passed"])
+            self.assertEqual([child.name for child in output_dir.iterdir()], ["aggregate_baseline_summary.json"])
 
     def test_aggregate_baseline_cleanup_removes_generated_outputs_and_preserves_input(self) -> None:
         module = _load_aggregate_baseline_module()
