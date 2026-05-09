@@ -510,6 +510,46 @@ and findings in the documented schema; do not emit OCR transcripts, detected
 personal data, image crops, base64 payloads, absolute paths, raw model logs, or
 private filenames.
 
+### Optional GPU/model capability probe
+
+Use `capability-probe` when operators need to validate whether a production
+host is ready for future local GPU/model-backed checks without changing the
+current CPU/Pillow scan behavior:
+
+```bash
+PYTHONPATH=src python3 -m archive_scan_qc capability-probe \
+  --out /placeholder/private-validation-output/capability-probe
+```
+
+The probe is read-only and aggregate-only. It checks whether optional local
+provider packages such as ONNX Runtime, Paddle/PaddleOCR, Torch, OpenCV, or
+CuPy are importable, whether `nvidia-smi` or Torch CUDA can see GPUs, and
+whether GPU/model acceleration has been configured. It does not open images,
+run model inference, execute an analysis provider command, add required heavy
+dependencies, or call a network service.
+
+By default, acceleration remains disabled. Omit `--analysis-provider-command`
+from normal scans and do not set `ARCHIVE_SCAN_QC_GPU_ACCELERATION_ENABLED`,
+`SCAN_QC_GPU_ACCELERATION_ENABLED`,
+`ARCHIVE_SCAN_QC_MODEL_ACCELERATION_ENABLED`, or
+`SCAN_QC_MODEL_ACCELERATION_ENABLED` unless an approved local provider is being
+prepared. The probe records only booleans/counts and package labels; it does
+not record command values, environment values, hostnames, usernames, image
+paths, filenames, hashes, OCR text, thumbnails, secrets, or row-level findings.
+
+Interpretation:
+
+- `status: pass` means the probe completed; missing optional providers are
+  non-blocking.
+- `readiness.provider_packages_found` lists optional local packages that are
+  available for future provider work.
+- `gpu_provider_visibility.gpu_visible_count` is aggregate visibility only; it
+  does not mean the current scan uses GPU.
+- `readiness.gpu_acceleration_configured` and
+  `readiness.model_acceleration_configured` show whether acceleration has been
+  explicitly configured. The current required baseline remains
+  `unchanged_cpu_pillow_baseline`.
+
 ### Review and rule calibration
 
 After a local scan, treat `scan_qc_report.json`, HTML, CSVs, and review
