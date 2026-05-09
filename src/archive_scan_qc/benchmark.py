@@ -351,6 +351,7 @@ def _aggregate_run(
             "total_files_per_minute": processing_performance["total_files_per_minute"] if processing_performance else None,
             "effective_workers": processing_performance["effective_workers"] if processing_performance else None,
             "worker_mode": processing_performance["mode"] if processing_performance else None,
+            "operation_timings": _processing_operation_timings(processing_manifest),
         },
         "scan": {
             "elapsed_seconds": scan_performance["elapsed_seconds"],
@@ -358,6 +359,45 @@ def _aggregate_run(
             "openable_files_per_minute": scan_performance["openable_files_per_minute"],
         },
     }
+
+
+def _processing_operation_timings(processing_manifest: dict[str, Any] | None) -> dict[str, Any]:
+    if not processing_manifest:
+        return {}
+    summary_path = processing_manifest.get("summary")
+    if isinstance(summary_path, dict):
+        performance = summary_path.get("performance")
+        if isinstance(performance, dict):
+            timings = performance.get("operation_timings")
+            if isinstance(timings, dict):
+                return timings
+    records = processing_manifest.get("files")
+    if not isinstance(records, list):
+        return {}
+    operation_names = ["auto_crop", "deskew", "trim_dark_border", "despeckle"]
+    timings: dict[str, Any] = {}
+    for operation in operation_names:
+        values = [
+            float(record["operation_timings"][operation]["elapsed_seconds"])
+            for record in records
+            if isinstance(record, dict)
+            and isinstance(record.get("operation_timings"), dict)
+            and isinstance(record["operation_timings"].get(operation), dict)
+            and isinstance(record["operation_timings"][operation].get("elapsed_seconds"), int | float)
+        ]
+        elapsed_seconds = round(sum(values), 6)
+        timings[operation] = {
+            "file_count": len(values),
+            "elapsed_seconds": elapsed_seconds,
+            "files_per_minute": _files_per_minute(len(values), elapsed_seconds),
+        }
+    return timings
+
+
+def _files_per_minute(file_count: int, elapsed_seconds: float) -> float:
+    if elapsed_seconds <= 0:
+        return 0.0
+    return round((file_count / elapsed_seconds) * 60, 2)
 
 
 def _operations(args: argparse.Namespace) -> dict[str, bool]:

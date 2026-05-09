@@ -204,7 +204,13 @@ class ScanQcTest(unittest.TestCase):
             )
             self.assertEqual(
                 set(payload["stage_timings"]["processing"]),
-                {"elapsed_seconds", "processed_files_per_minute", "benchmark_processed_files_per_minute"},
+                {
+                    "elapsed_seconds",
+                    "processed_files_per_minute",
+                    "benchmark_processed_files_per_minute",
+                    "operation_timings",
+                    "benchmark_operation_timings",
+                },
             )
             self.assertIn("run_plan_and_benchmark", payload["stage_timings"])
             self.assertIn("report_write", payload["stage_timings"])
@@ -1578,6 +1584,9 @@ class ScanQcTest(unittest.TestCase):
             self.assertTrue(run["operations"]["deskew"])
             self.assertEqual(run["processing"]["processed_files"], 1)
             self.assertIsNotNone(run["processing"]["elapsed_seconds"])
+            self.assertIn("operation_timings", run["processing"])
+            self.assertEqual(run["processing"]["operation_timings"]["auto_crop"]["file_count"], 1)
+            self.assertEqual(run["processing"]["operation_timings"]["deskew"]["file_count"], 1)
             self.assertFalse(any(process_dir.glob("*/processing_manifest.json")))
 
     def test_benchmark_recommendations_rank_workers_and_flag_diminishing_returns(self) -> None:
@@ -2363,6 +2372,9 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(audit_summary["counts"]["processing_warning_files"], 0)
             self.assertIn("pixel_change_ratio", audit_summary["metrics"])
             self.assertIn("pixel_change_ratio", audit_summary["distributions"])
+            self.assertIn("operation_timings", audit_summary["timing"])
+            self.assertEqual(audit_summary["timing"]["operation_timings"]["auto_crop"]["enabled"], False)
+            self.assertEqual(audit_summary["timing"]["operation_timings"]["deskew"]["file_count"], 0)
             self.assertTrue(audit_summary["guardrails"]["enabled"])
             for forbidden in ["private_success.png", "private_failed.png", "relative_path", "sha256", str(input_dir)]:
                 self.assertNotIn(forbidden, audit_summary_text)
@@ -2763,6 +2775,9 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(record["processing_audit"]["despeckle_pixel_ratio"], 0.000625)
             self.assertEqual(audit_summary["counts"]["processing_warning_files"], 0)
             self.assertEqual(audit_summary["metrics"]["despeckle_pixel_ratio"]["count"], 1)
+            self.assertTrue(audit_summary["timing"]["operation_timings"]["despeckle"]["enabled"])
+            self.assertEqual(audit_summary["timing"]["operation_timings"]["despeckle"]["file_count"], 1)
+            self.assertGreaterEqual(audit_summary["timing"]["operation_timings"]["despeckle"]["elapsed_seconds"], 0.0)
 
     def test_processing_guardrail_fails_overprocessed_derivative_without_touching_source(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -3554,6 +3569,7 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(summary["aggregate_counts"]["processing_processed_files"], 1)
             self.assertTrue(summary["privacy_self_check"]["passed"])
             self.assertEqual(summary["privacy_self_check"]["violation_count"], 0)
+            self.assertIn("processing_operation_timings", summary["throughput"])
             self.assertNotIn(str(input_dir), summary_text)
             self.assertNotIn(str(output_root), summary_text)
             self.assertNotIn("sensitive_original_name.png", summary_text)
@@ -3606,6 +3622,7 @@ class ScanQcTest(unittest.TestCase):
         self.assertEqual(summary["throughput"]["benchmark_scan_files_per_minute"], 30.0)
         self.assertEqual(summary["throughput"]["benchmark_processing_files_per_minute"], 9.0)
         self.assertEqual(summary["throughput"]["benchmark_basis"], "best observed recommendation mean files/minute")
+        self.assertIn("benchmark_processing_operation_timings", summary["throughput"])
 
     def test_private_integration_acceptance_matches_acceptance_summary_logic(self) -> None:
         private_integration = _load_private_integration_module()
@@ -3683,6 +3700,15 @@ def _private_run_plan_summary(
             "scan_files_per_minute": 12.0,
             "scan_openable_files_per_minute": 12.0,
             "processing_files_per_minute": 8.0,
+            "processing_operation_timings": {
+                "deskew": {
+                    "enabled": True,
+                    "file_count": 22,
+                    "elapsed_seconds": 2.0,
+                    "files_per_minute": 660.0,
+                    "average_seconds_per_file": 0.090909,
+                }
+            },
         },
         "batches": [{"workers": 1}],
     }
@@ -3727,6 +3753,13 @@ def _private_benchmark_run(
             "failed_files": 0,
             "processed_files_per_minute": processing_rate,
             "effective_workers": run_index if processing_rate is not None else None,
+            "operation_timings": {
+                "deskew": {
+                    "file_count": 22 if processing_rate is not None else 0,
+                    "elapsed_seconds": 2.0 if processing_rate is not None else 0.0,
+                    "files_per_minute": 660.0 if processing_rate is not None else 0.0,
+                }
+            },
         },
     }
 

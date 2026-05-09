@@ -249,6 +249,8 @@ def _baseline_summary(args: argparse.Namespace, private_summary: dict[str, Any])
                 "elapsed_seconds": float(throughput["processing_elapsed_seconds"]),
                 "processed_files_per_minute": float(throughput["processing_files_per_minute"]),
                 "benchmark_processed_files_per_minute": throughput["benchmark_processing_files_per_minute"],
+                "operation_timings": throughput.get("processing_operation_timings", {}),
+                "benchmark_operation_timings": throughput.get("benchmark_processing_operation_timings", {}),
             },
         },
         "benchmark": {
