@@ -44,6 +44,7 @@ PRIVATE_INTEGRATION_PATH = REPO_ROOT / "scripts" / "run_private_integration.py"
 AGGREGATE_BASELINE_PATH = REPO_ROOT / "scripts" / "run_aggregate_baseline.py"
 PRODUCTION_VALIDATION_PATH = REPO_ROOT / "scripts" / "run_production_validation.py"
 OFFLINE_DEPENDENCY_CHECK_PATH = REPO_ROOT / "scripts" / "check_offline_dependencies.py"
+RELEASE_READINESS_PATH = REPO_ROOT / "scripts" / "release_readiness_summary.py"
 LOCAL_PROVIDER_EXAMPLE = REPO_ROOT / "examples" / "local_analysis_provider.py"
 
 
@@ -81,6 +82,16 @@ def _load_offline_dependency_check_module():
     spec = importlib.util.spec_from_file_location("check_offline_dependencies", OFFLINE_DEPENDENCY_CHECK_PATH)
     if spec is None or spec.loader is None:
         raise RuntimeError("Could not load check_offline_dependencies.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_release_readiness_module():
+    spec = importlib.util.spec_from_file_location("release_readiness_summary", RELEASE_READINESS_PATH)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Could not load release_readiness_summary.py")
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
@@ -142,6 +153,107 @@ class ScanQcTest(unittest.TestCase):
         self.assertIn("wheelhouse-package: setuptools wheels=0 status=missing", failure_output)
         self.assertEqual(warning_code, 0, warning_output)
         self.assertIn("result: pass", warning_output)
+
+    def test_release_readiness_summary_passes_with_aggregate_evidence(self) -> None:
+        module = _load_release_readiness_module()
+        checks = [
+            module.ReadinessCheck("unit_tests", "pass", False),
+            module.ReadinessCheck("compile_import_check", "pass", False),
+            module.ReadinessCheck("offline_dependency_check", "pass", False),
+            module.ReadinessCheck("package_cli_smoke", "pass", False),
+        ]
+        capability_probe = {
+            "status": "pass",
+            "readiness": {
+                "provider_packages_found": ["torch", "onnxruntime"],
+                "blocking": False,
+                "gpu_acceleration_configured": True,
+                "model_acceleration_configured": True,
+            },
+            "gpu_provider_visibility": {"gpu_visible_count": 2},
+        }
+
+        summary = module.build_release_readiness_summary(
+            checks=checks,
+            capability_probe=capability_probe,
+            generated_at="2026-01-01T00:00:00+00:00",
+        )
+
+        self.assertEqual(summary["schema_version"], "scan-qc.release-readiness.v1")
+        self.assertEqual(summary["status"], "pass")
+        self.assertEqual(summary["summary"]["checks_passed"], 4)
+        self.assertEqual(summary["summary"]["blocking_items"], 0)
+        self.assertEqual(summary["capability_probe"]["provider_packages_found_count"], 2)
+        self.assertEqual(summary["capability_probe"]["gpu_visible_count"], 2)
+        self.assertTrue(summary["privacy"]["aggregate_only"])
+        self.assertFalse(summary["privacy"]["contains_paths"])
+        self.assertFalse(summary["network_services_called"])
+        self.assertFalse(summary["model_inference_run"])
+
+    def test_release_readiness_summary_fails_with_blocking_counts_only(self) -> None:
+        module = _load_release_readiness_module()
+        checks = [
+            module.ReadinessCheck("unit_tests", "fail", True),
+            module.ReadinessCheck("compile_import_check", "pass", False),
+            module.ReadinessCheck("offline_dependency_check", "fail", True),
+            module.ReadinessCheck("package_cli_smoke", "pass", False),
+        ]
+
+        summary = module.build_release_readiness_summary(checks=checks, generated_at="2026-01-01T00:00:00+00:00")
+
+        self.assertEqual(summary["status"], "fail")
+        self.assertEqual(summary["summary"]["checks_failed"], 2)
+        self.assertEqual(summary["summary"]["blocking_items"], 2)
+        self.assertEqual(summary["checks"]["unit_tests"]["status"], "fail")
+        self.assertEqual(summary["capability_probe"]["status"], "skipped")
+
+    def test_release_readiness_command_output_omits_sensitive_values(self) -> None:
+        module = _load_release_readiness_module()
+        sensitive_stdout = (
+            "/private/archive/A001_0001.png "
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef "
+            "OCR TEXT secret-token"
+        )
+
+        def runner(command, **kwargs):
+            return mock.Mock(returncode=0, stdout=sensitive_stdout, stderr=sensitive_stdout)
+
+        with tempfile.TemporaryDirectory(prefix="private-readiness-") as temp_dir, mock.patch.object(
+            module, "_compile_check", return_value=module.ReadinessCheck("compile_import_check", "pass", False)
+        ):
+            private_probe = Path(temp_dir) / "local" / "capability_probe.json"
+            private_probe.parent.mkdir()
+            private_probe.write_text(
+                json.dumps(
+                    {
+                        "status": "pass",
+                        "readiness": {
+                            "provider_packages_found": ["torch"],
+                            "blocking": False,
+                            "gpu_acceleration_configured": True,
+                            "model_acceleration_configured": False,
+                            "private_path": "/private/model/path",
+                        },
+                        "gpu_provider_visibility": {"gpu_visible_count": 1},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            summary = module.run_release_readiness_checks(
+                capability_probe_path=private_probe,
+                command_runner=runner,
+            )
+            out_path = module.write_release_readiness_summary(summary, Path(temp_dir) / "out")
+            raw = out_path.read_text(encoding="utf-8")
+
+        self.assertEqual(summary["status"], "pass")
+        self.assertNotIn("/private/archive", raw)
+        self.assertNotIn("A001_0001.png", raw)
+        self.assertNotIn("0123456789abcdef", raw)
+        self.assertNotIn("OCR TEXT", raw)
+        self.assertNotIn("secret-token", raw)
+        self.assertNotIn("/private/model/path", raw)
+        self.assertNotIn("private-readiness", raw)
 
     def test_version_output_matches_package_version(self) -> None:
         stdout = io.StringIO()
