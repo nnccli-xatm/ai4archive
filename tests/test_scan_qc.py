@@ -2941,6 +2941,53 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(record["despeckle_reason"], "isolated dark pixels replaced")
             self.assertIn("despeckle_isolated_pixels", record["operations"])
 
+    def test_despeckle_fast_path_preserves_noop_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "A001_0001.png"
+            image = Image.new("RGB", (80, 60), "white")
+            image.save(source)
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+
+            with Image.open(process_dir / "images" / "A001_0001.png") as processed:
+                self.assertEqual(processed.convert("RGB").tobytes(), image.tobytes())
+            record = manifest["files"][0]
+            self.assertFalse(record["despeckled"])
+            self.assertEqual(record["despeckle_pixels_changed"], 0)
+            self.assertEqual(record["despeckle_reason"], "no isolated dark pixels found")
+            self.assertIn("despeckle_noop", record["operations"])
+
+    def test_despeckle_fast_path_preserves_border_dark_pixels(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "A001_0001.png"
+            image = Image.new("RGB", (80, 60), "white")
+            for point in [(0, 10), (79, 20), (30, 0), (40, 59)]:
+                image.putpixel(point, (0, 0, 0))
+            image.save(source)
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+
+            with Image.open(process_dir / "images" / "A001_0001.png") as processed:
+                grayscale = processed.convert("L")
+                for point in [(0, 10), (79, 20), (30, 0), (40, 59)]:
+                    self.assertLessEqual(grayscale.getpixel(point), 5)
+            record = manifest["files"][0]
+            self.assertFalse(record["despeckled"])
+            self.assertEqual(record["despeckle_pixels_changed"], 0)
+            self.assertEqual(record["despeckle_reason"], "no isolated dark pixels found")
+
     def test_multi_worker_retouch_manifest_order_stays_stable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
