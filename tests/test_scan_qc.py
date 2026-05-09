@@ -216,6 +216,61 @@ class ScanQcTest(unittest.TestCase):
             ]:
                 self.assertNotIn(forbidden, raw_json)
 
+    def test_aggregate_baseline_cleanup_removes_generated_outputs_and_preserves_input(self) -> None:
+        module = _load_aggregate_baseline_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-input"
+            output_dir = root / "private-output"
+            input_dir.mkdir()
+            source_image = input_dir / "private_page_001.png"
+            Image.new("RGB", (32, 24), "white").save(source_image, dpi=(300, 300))
+
+            args = module.build_parser().parse_args(
+                [
+                    "--input",
+                    str(input_dir),
+                    "--out",
+                    str(output_dir),
+                    "--workers",
+                    "1",
+                    "--benchmark-workers-list",
+                    "1",
+                    "--process-images",
+                    "--skip-benchmark",
+                    "--cleanup-artifacts",
+                ]
+            )
+            payload = module.run_aggregate_baseline(args)
+
+            json_path = output_dir / "aggregate_baseline_summary.json"
+            self.assertTrue(json_path.exists())
+            self.assertTrue(source_image.exists())
+            self.assertFalse((output_dir / "private_integration_summary.json").exists())
+            self.assertFalse((output_dir / "scan-reports").exists())
+            self.assertFalse((output_dir / "processed-images").exists())
+            self.assertFalse((output_dir / "run-plan").exists())
+            self.assertEqual(payload["schema_version"], "scan-qc.aggregate-baseline.v1")
+            self.assertTrue(payload["privacy_self_check"]["passed"])
+            self.assertTrue(payload["cleanup"]["enabled"])
+            self.assertIn("processed-images", payload["cleanup"]["removed_artifacts"])
+
+    def test_aggregate_baseline_cleanup_preserves_input_inside_output_root(self) -> None:
+        module = _load_aggregate_baseline_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output_dir = root / "private-output"
+            input_dir = output_dir / "scan-reports"
+            input_dir.mkdir(parents=True)
+            source_image = input_dir / "private_page_001.png"
+            Image.new("RGB", (32, 24), "white").save(source_image, dpi=(300, 300))
+
+            cleanup = module.cleanup_generated_artifacts(output_root=output_dir, input_dir=input_dir)
+
+            self.assertTrue(source_image.exists())
+            self.assertTrue(input_dir.exists())
+            self.assertIn("scan-reports", cleanup["preserved_artifacts"])
+
     def test_aggregate_baseline_parser_accepts_puersai_hpc_env_defaults(self) -> None:
         module = _load_aggregate_baseline_module()
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -229,6 +284,7 @@ class ScanQcTest(unittest.TestCase):
                     "PUERSAI_HPC_BASELINE_OUT",
                     "PUERSAI_HPC_BASELINE_WORKERS",
                     "PUERSAI_HPC_BASELINE_WORKERS_LIST",
+                    "PUERSAI_HPC_BASELINE_CLEANUP_ARTIFACTS",
                 ]
             }
             try:
@@ -236,6 +292,7 @@ class ScanQcTest(unittest.TestCase):
                 os.environ["PUERSAI_HPC_BASELINE_OUT"] = str(output_dir)
                 os.environ["PUERSAI_HPC_BASELINE_WORKERS"] = "2"
                 os.environ["PUERSAI_HPC_BASELINE_WORKERS_LIST"] = "1,2"
+                os.environ["PUERSAI_HPC_BASELINE_CLEANUP_ARTIFACTS"] = "1"
                 args = module.build_parser().parse_args([])
             finally:
                 for key, value in previous.items():
@@ -248,6 +305,7 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(Path(args.out), output_dir)
             self.assertEqual(args.workers, 2)
             self.assertEqual(args.benchmark_workers_list, "1,2")
+            self.assertTrue(args.cleanup_artifacts)
 
     def test_rework_action_list_groups_qc_findings_and_processing_retry(self) -> None:
         report = {
