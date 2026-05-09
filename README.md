@@ -201,7 +201,8 @@ PYTHONPATH=src python3 scripts/run_aggregate_baseline.py \
   --out /placeholder/private-output-root \
   --workers 4 \
   --benchmark-workers-list 4 \
-  --process-images
+  --process-images \
+  --cleanup-artifacts
 ```
 
 The same paths and worker settings may be supplied without putting private paths
@@ -212,6 +213,7 @@ PUERSAI_HPC_BASELINE_INPUT=/placeholder/private-image-directory \
 PUERSAI_HPC_BASELINE_OUT=/placeholder/private-output-root \
 PUERSAI_HPC_BASELINE_WORKERS=4 \
 PUERSAI_HPC_BASELINE_WORKERS_LIST=4 \
+PUERSAI_HPC_BASELINE_CLEANUP_ARTIFACTS=1 \
 PYTHONPATH=src python3 scripts/run_aggregate_baseline.py
 ```
 
@@ -231,14 +233,25 @@ The runner writes
 - `benchmark`: aggregate repeated-run count and rule-count totals.
 - `environment`: Python, platform, machine, processor, CPU count, memory, GPU
   placeholder, and executable name.
+- `cleanup`: whether generated private artifacts were removed and which known
+  output directories/files were deleted or preserved.
 - `privacy_self_check`: pass/fail status and aggregate violation count.
 
 Privacy guarantees: `aggregate_baseline_summary.json` omits source names, source
 paths, relative paths, content hashes, thumbnails, OCR text, image content, and
-row-level findings. Sensitive scan reports, processing manifests, derivative
-images, retry manifests, and normal private integration outputs remain local
-under the private output root and must not be uploaded to PRs, Linear comments,
-logs, screenshots, or row-level reports.
+row-level findings. When `--cleanup-artifacts` or
+`PUERSAI_HPC_BASELINE_CLEANUP_ARTIFACTS=1` is enabled, the runner preserves
+`aggregate_baseline_summary.json` for reporting and removes known generated
+private artifacts under the output root, including `scan-reports`,
+`processed-images`, `run-plan`, `benchmark`, `benchmark-processed`, and
+`private_integration_summary.json`. The cleanup guard preserves the private
+input image directory if it overlaps the output tree and never targets source
+code workspaces. Without cleanup, sensitive scan reports, processing manifests,
+derivative images, retry manifests, and normal private integration outputs
+remain local under the private output root. Only aggregate results from
+`aggregate_baseline_summary.json` should be reported externally; do not upload
+private artifacts to PRs, Linear comments, logs, screenshots, or row-level
+reports.
 
 Run `archive-scan-qc preflight` before production batches. It validates the
 input directory, output and processing-output configuration, worker count, rules

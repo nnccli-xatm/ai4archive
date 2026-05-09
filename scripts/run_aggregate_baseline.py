@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
+import shutil
 import sys
 from typing import Any
 
@@ -28,6 +29,14 @@ from run_private_integration import (  # noqa: E402
 
 
 BASELINE_JSON = "aggregate_baseline_summary.json"
+GENERATED_ARTIFACT_NAMES = [
+    "scan-reports",
+    "processed-images",
+    "run-plan",
+    "benchmark",
+    "benchmark-processed",
+    "private_integration_summary.json",
+]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -77,6 +86,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--benchmark-repeats", default=1, type=_positive_int)
     parser.add_argument("--skip-benchmark", action="store_true")
+    parser.add_argument(
+        "--cleanup-artifacts",
+        action=argparse.BooleanOptionalAction,
+        default=_env_flag("SCAN_QC_BASELINE_CLEANUP_ARTIFACTS")
+        or _env_flag("PUERSAI_HPC_BASELINE_CLEANUP_ARTIFACTS"),
+        help=(
+            "After writing aggregate_baseline_summary.json, delete generated private artifacts under --out. "
+            "Env: SCAN_QC_BASELINE_CLEANUP_ARTIFACTS or PUERSAI_HPC_BASELINE_CLEANUP_ARTIFACTS."
+        ),
+    )
     return parser
 
 
@@ -116,7 +135,46 @@ def run_aggregate_baseline(args: argparse.Namespace) -> dict[str, Any]:
     output_root = Path(args.out).expanduser().resolve()
     summary_path = output_root / BASELINE_JSON
     summary_path.write_text(json.dumps(baseline, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    if args.cleanup_artifacts:
+        cleanup = cleanup_generated_artifacts(output_root=output_root, input_dir=Path(args.input).expanduser().resolve())
+        baseline["cleanup"] = cleanup
+        summary_path.write_text(json.dumps(baseline, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return baseline
+
+
+def cleanup_generated_artifacts(*, output_root: Path, input_dir: Path) -> dict[str, Any]:
+    output_root = output_root.expanduser().resolve()
+    input_dir = input_dir.expanduser().resolve()
+    removed: list[str] = []
+    preserved: list[str] = []
+
+    for name in GENERATED_ARTIFACT_NAMES:
+        candidate = (output_root / name).resolve()
+        if not candidate.exists():
+            continue
+        if _should_preserve_cleanup_candidate(candidate, input_dir):
+            preserved.append(name)
+            continue
+        if candidate.is_dir():
+            shutil.rmtree(candidate)
+        else:
+            candidate.unlink()
+        removed.append(name)
+
+    return {
+        "enabled": True,
+        "removed_artifacts": removed,
+        "preserved_artifacts": preserved,
+        "retained_public_summary": BASELINE_JSON,
+    }
+
+
+def _should_preserve_cleanup_candidate(candidate: Path, input_dir: Path) -> bool:
+    if candidate == input_dir or input_dir in candidate.parents:
+        return True
+    if candidate == REPO_ROOT or REPO_ROOT in candidate.parents:
+        return True
+    return False
 
 
 def _baseline_summary(args: argparse.Namespace, private_summary: dict[str, Any]) -> dict[str, Any]:
@@ -185,6 +243,12 @@ def _baseline_summary(args: argparse.Namespace, private_summary: dict[str, Any])
             "finding_rule_counts_repeated_runs": benchmark.get("finding_rule_counts_repeated_runs", {}),
         },
         "environment": private_summary["environment"],
+        "cleanup": {
+            "enabled": False,
+            "removed_artifacts": [],
+            "preserved_artifacts": [],
+            "retained_public_summary": BASELINE_JSON,
+        },
         "privacy_self_check": {
             "passed": False,
             "status": "not_run",
@@ -192,6 +256,13 @@ def _baseline_summary(args: argparse.Namespace, private_summary: dict[str, Any])
             "violations": [],
         },
     }
+
+
+def _env_flag(name: str) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 if __name__ == "__main__":
