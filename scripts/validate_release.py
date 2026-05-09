@@ -75,6 +75,10 @@ def run_compileall() -> None:
         raise SystemExit("compileall failed")
 
 
+def run_offline_dependency_check() -> None:
+    _run([sys.executable, str(REPO_ROOT / "scripts" / "check_offline_dependencies.py")], env=_pythonpath_env())
+
+
 def run_install_smoke() -> None:
     with tempfile.TemporaryDirectory(prefix="archive-scan-qc-release-") as temp_dir:
         temp = Path(temp_dir)
@@ -850,6 +854,7 @@ def main(argv: list[str] | None = None) -> int:
 
     run_unit_tests()
     run_compileall()
+    run_offline_dependency_check()
     if not args.skip_build_artifacts:
         run_build_artifacts()
     run_examples_dry_run()

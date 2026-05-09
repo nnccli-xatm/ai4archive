@@ -42,6 +42,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PRIVATE_INTEGRATION_PATH = REPO_ROOT / "scripts" / "run_private_integration.py"
 AGGREGATE_BASELINE_PATH = REPO_ROOT / "scripts" / "run_aggregate_baseline.py"
 PRODUCTION_VALIDATION_PATH = REPO_ROOT / "scripts" / "run_production_validation.py"
+OFFLINE_DEPENDENCY_CHECK_PATH = REPO_ROOT / "scripts" / "check_offline_dependencies.py"
 LOCAL_PROVIDER_EXAMPLE = REPO_ROOT / "examples" / "local_analysis_provider.py"
 
 
@@ -75,7 +76,71 @@ def _load_production_validation_module():
     return module
 
 
+def _load_offline_dependency_check_module():
+    spec = importlib.util.spec_from_file_location("check_offline_dependencies", OFFLINE_DEPENDENCY_CHECK_PATH)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Could not load check_offline_dependencies.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 class ScanQcTest(unittest.TestCase):
+    def test_offline_dependency_check_passes_with_complete_wheelhouse(self) -> None:
+        module = _load_offline_dependency_check_module()
+        with tempfile.TemporaryDirectory(prefix="private-wheelhouse-") as temp_dir:
+            wheelhouse = Path(temp_dir) / "operator" / "private" / "wheelhouse"
+            wheelhouse.mkdir(parents=True)
+            for name in ("ai4archive-0.1.0-py3-none-any.whl", "Pillow-10.4.0-cp312-cp312-linux_x86_64.whl", "setuptools-69.0.0-py3-none-any.whl"):
+                (wheelhouse / name).touch()
+
+            exit_code, lines = module.check_dependencies(wheelhouse=wheelhouse)
+
+        output = "\n".join(lines)
+        self.assertEqual(exit_code, 0, output)
+        self.assertIn("result: pass", output)
+        self.assertIn("wheelhouse-package: pillow wheels=1 status=ok", output)
+        self.assertNotIn(str(wheelhouse), output)
+        self.assertNotIn("operator/private", output)
+        self.assertNotIn("private-wheelhouse", output)
+
+    def test_offline_dependency_check_fails_for_missing_runtime_package(self) -> None:
+        module = _load_offline_dependency_check_module()
+
+        def missing_pillow(requirement):
+            if requirement.normalized_name == "pillow":
+                return None
+            return "99.0.0"
+
+        with mock.patch.object(module, "_distribution_version", side_effect=missing_pillow), mock.patch.object(
+            module, "_importable", return_value=True
+        ):
+            exit_code, lines = module.check_dependencies()
+
+        output = "\n".join(lines)
+        self.assertEqual(exit_code, 1)
+        self.assertIn("package: pillow category=runtime version=not-installed", output)
+        self.assertIn("result: fail", output)
+
+    def test_offline_dependency_check_reports_missing_wheelhouse_as_failure_or_warning(self) -> None:
+        module = _load_offline_dependency_check_module()
+        with tempfile.TemporaryDirectory(prefix="private-wheelhouse-") as temp_dir:
+            wheelhouse = Path(temp_dir) / "wheelhouse"
+            wheelhouse.mkdir()
+            (wheelhouse / "Pillow-10.4.0-cp312-cp312-linux_x86_64.whl").touch()
+
+            failure_code, failure_lines = module.check_dependencies(wheelhouse=wheelhouse)
+            warning_code, warning_lines = module.check_dependencies(wheelhouse=wheelhouse, wheelhouse_warning_only=True)
+
+        failure_output = "\n".join(failure_lines)
+        warning_output = "\n".join(warning_lines)
+        self.assertEqual(failure_code, 1, failure_output)
+        self.assertIn("wheelhouse-package: ai4archive wheels=0 status=missing", failure_output)
+        self.assertIn("wheelhouse-package: setuptools wheels=0 status=missing", failure_output)
+        self.assertEqual(warning_code, 0, warning_output)
+        self.assertIn("result: pass", warning_output)
+
     def test_version_output_matches_package_version(self) -> None:
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout), self.assertRaises(SystemExit) as raised:
