@@ -21,7 +21,7 @@ from archive_scan_qc.acceptance import build_acceptance_summary
 from archive_scan_qc.benchmark import _recommendations
 from archive_scan_qc.cli import main
 from archive_scan_qc.handoff import write_delivery_handoff_manifest
-from archive_scan_qc.processing import ProcessingOptions, process_images
+from archive_scan_qc.processing import ProcessingOptions, _horizontal_projection_variance, process_images
 from archive_scan_qc.processing_plan import build_processing_plan
 from archive_scan_qc.processing_review import build_processing_review_package
 from archive_scan_qc.reports import build_review_summary, write_reports, write_review_export, write_review_summary
@@ -2720,6 +2720,19 @@ class ScanQcTest(unittest.TestCase):
             self.assertGreater(abs(record["skew_angle_degrees"]), 5.0)
             self.assertEqual(record["deskew_reason"], "angle exceeds conservative threshold")
             self.assertIn("deskew_noop", record["operations"])
+
+    def test_deskew_projection_variance_uses_row_ink_counts(self) -> None:
+        image = Image.new("L", (12, 8), 0)
+        draw = ImageDraw.Draw(image)
+        draw.line((1, 1, 10, 1), fill=255, width=1)
+        draw.line((2, 4, 8, 4), fill=255, width=1)
+        draw.point((5, 6), fill=255)
+
+        row_counts = [10, 0, 0, 0, 7, 0, 1, 0]
+        mean = sum(row_counts) / len(row_counts)
+        expected = sum((count - mean) ** 2 for count in row_counts) / len(row_counts)
+
+        self.assertAlmostEqual(_horizontal_projection_variance(image), expected, delta=0.03)
 
     def test_auto_crop_trims_white_margin_around_black_page_border(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
