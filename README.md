@@ -580,6 +580,13 @@ file record also includes:
   `quality_scanline_location_ratio`, `quality_scanline_band_width`, and
   `quality_scanline_reason`: conservative scan-time row/column anomaly
   screening for obvious horizontal or vertical scanner lines and streaks.
+- `quality_content_edge_cutoff_side`, `quality_content_edge_cutoff_score`,
+  `quality_content_edge_cutoff_band_px`,
+  `quality_content_edge_cutoff_dark_ratio`,
+  `quality_content_edge_cutoff_span_ratio`, and
+  `quality_content_edge_cutoff_reason`: conservative scan-time screening for
+  localized dark content touching an image boundary, which can indicate
+  over-cropped text, stamps, page numbers, or marginalia.
 - `frame_count`: best-effort image container frame/page count when Pillow
   exposes it, such as for multi-page TIFF files.
 - `orientation_class`: coarse page shape classification, one of `portrait`,
@@ -605,6 +612,8 @@ The default quality thresholds are intentionally conservative:
   finds a conservative edge-touching trim candidate.
 - `quality_scanline_candidate` P2 when a resized grayscale thumbnail has an
   obvious full-span horizontal or vertical intensity anomaly.
+- `quality_content_edge_cutoff_candidate` P2 when localized dark content
+  touches a narrow image-edge band without looking like a full dark border.
 - `multi_page_image_container` P2 when Pillow reports more than one frame/page
   in an image container. This is a project policy review prompt for
   single-page delivery, not a platform adaptation step.

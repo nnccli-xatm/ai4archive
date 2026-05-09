@@ -59,6 +59,12 @@ def write_reports(report: dict[str, Any], output_dir: Path) -> dict[str, Path]:
         "quality_scanline_location_ratio",
         "quality_scanline_band_width",
         "quality_scanline_reason",
+        "quality_content_edge_cutoff_side",
+        "quality_content_edge_cutoff_score",
+        "quality_content_edge_cutoff_band_px",
+        "quality_content_edge_cutoff_dark_ratio",
+        "quality_content_edge_cutoff_span_ratio",
+        "quality_content_edge_cutoff_reason",
         "file_size",
         "sha256",
         "error",
@@ -568,6 +574,7 @@ def _quality_metrics(files: list[dict[str, Any]], findings: list[dict[str, Any]]
         "quality_skew_candidate",
         "quality_dark_border_candidate",
         "quality_scanline_candidate",
+        "quality_content_edge_cutoff_candidate",
     ]:
         metrics.append((_label_from_key(rule), rule_counts.get(rule, 0)))
     return metrics
@@ -638,6 +645,11 @@ def _files_table(files: list[dict[str, Any]]) -> str:
             f"<td>{_text(item.get('quality_scanline_score'))}</td>"
             f"<td>{_text(item.get('quality_scanline_location_ratio'))}</td>"
             f"<td>{_text(item.get('quality_scanline_band_width'))}</td>"
+            f"<td>{_text(item.get('quality_content_edge_cutoff_side'))}</td>"
+            f"<td>{_text(item.get('quality_content_edge_cutoff_score'))}</td>"
+            f"<td>{_text(item.get('quality_content_edge_cutoff_band_px'))}</td>"
+            f"<td>{_text(item.get('quality_content_edge_cutoff_dark_ratio'))}</td>"
+            f"<td>{_text(item.get('quality_content_edge_cutoff_span_ratio'))}</td>"
             f"<td>{_text(item.get('file_size'))}</td>"
             f"<td>{_text(item.get('sha256'))}</td>"
             f"<td>{_text(item.get('error'))}</td>"
@@ -651,6 +663,8 @@ def _files_table(files: list[dict[str, Any]]) -> str:
         "<th>Sharpness Laplacian Var</th><th>Dark Pixel Ratio</th><th>Foreground Coverage</th>"
         "<th>Edge Coverage</th><th>Skew Angle</th><th>Skew Confidence</th><th>Dark Border BBox</th>"
         "<th>Scanline Orientation</th><th>Scanline Score</th><th>Scanline Location</th><th>Scanline Band Width</th>"
+        "<th>Edge Cutoff Side</th><th>Edge Cutoff Score</th><th>Edge Cutoff Band Px</th>"
+        "<th>Edge Cutoff Dark Ratio</th><th>Edge Cutoff Span Ratio</th>"
         "<th>Bytes</th><th>SHA256</th><th>Error</th></tr></thead><tbody>"
         + "\n".join(rows)
         + "</tbody></table></div>"
