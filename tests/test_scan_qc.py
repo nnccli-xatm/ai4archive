@@ -198,9 +198,31 @@ class ScanQcTest(unittest.TestCase):
             self.assertIn("environment", payload)
             self.assertIn("scan", payload["stage_timings"])
             self.assertIn("processing", payload["stage_timings"])
+            self.assertEqual(
+                set(payload["stage_timings"]["scan"]),
+                {"elapsed_seconds", "files_per_minute", "openable_files_per_minute", "benchmark_files_per_minute"},
+            )
+            self.assertEqual(
+                set(payload["stage_timings"]["processing"]),
+                {"elapsed_seconds", "processed_files_per_minute", "benchmark_processed_files_per_minute"},
+            )
+            self.assertIn("run_plan_and_benchmark", payload["stage_timings"])
+            self.assertIn("report_write", payload["stage_timings"])
+            self.assertIn("total_wall_clock", payload["stage_timings"])
+            self.assertGreaterEqual(payload["stage_timings"]["run_plan_and_benchmark"]["elapsed_seconds"], 0.0)
+            self.assertGreaterEqual(payload["stage_timings"]["report_write"]["elapsed_seconds"], 0.0)
+            self.assertGreaterEqual(payload["stage_timings"]["total_wall_clock"]["elapsed_seconds"], 0.0)
+            self.assertGreaterEqual(
+                payload["stage_timings"]["total_wall_clock"]["elapsed_seconds"],
+                payload["stage_timings"]["scan"]["elapsed_seconds"],
+            )
             self.assertTrue(payload["privacy_self_check"]["passed"])
 
             raw_json = json_path.read_text(encoding="utf-8")
+            saved_payload = json.loads(raw_json)
+            self.assertTrue(saved_payload["privacy_self_check"]["passed"])
+            self.assertIn("total_wall_clock", saved_payload["stage_timings"])
+            self.assertIn("report_write", saved_payload["stage_timings"])
             for forbidden in [
                 str(input_dir),
                 str(output_dir),
@@ -253,7 +275,10 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(payload["schema_version"], "scan-qc.aggregate-baseline.v1")
             self.assertTrue(payload["privacy_self_check"]["passed"])
             self.assertTrue(payload["cleanup"]["enabled"])
+            self.assertGreaterEqual(payload["cleanup"]["elapsed_seconds"], 0.0)
+            self.assertEqual(payload["cleanup"]["elapsed_seconds"], json.loads(json_path.read_text(encoding="utf-8"))["cleanup"]["elapsed_seconds"])
             self.assertIn("processed-images", payload["cleanup"]["removed_artifacts"])
+            self.assertEqual([child.name for child in output_dir.iterdir()], ["aggregate_baseline_summary.json"])
 
     def test_aggregate_baseline_cleanup_preserves_input_inside_output_root(self) -> None:
         module = _load_aggregate_baseline_module()

@@ -227,14 +227,17 @@ The runner writes
 - `worker_settings` and `operations`.
 - `aggregate_counts`: total/openable files, P0/P1/P2 findings, processing
   processed/failed counts, failed batches, and preflight error count.
-- `stage_timings`: scan and processing elapsed seconds, scan files/minute, scan
-  openable files/minute, processing processed files/minute, and benchmark rates
-  when benchmark evidence is available.
+- `stage_timings`: unchanged scan and processing elapsed seconds, scan
+  files/minute, scan openable files/minute, processing processed files/minute,
+  and benchmark rates when benchmark evidence is available. Optional aggregate
+  wrapper timings also include `run_plan_and_benchmark.elapsed_seconds`,
+  `report_write.elapsed_seconds`, and `total_wall_clock.elapsed_seconds`.
 - `benchmark`: aggregate repeated-run count and rule-count totals.
 - `environment`: Python, platform, machine, processor, CPU count, memory, GPU
   placeholder, and executable name.
-- `cleanup`: whether generated private artifacts were removed and which known
-  output directories/files were deleted or preserved.
+- `cleanup`: whether generated private artifacts were removed, cleanup
+  `elapsed_seconds`, and which known output directories/files were deleted or
+  preserved.
 - `privacy_self_check`: pass/fail status and aggregate violation count.
 
 Privacy guarantees: `aggregate_baseline_summary.json` omits source names, source
