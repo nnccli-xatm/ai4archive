@@ -235,6 +235,8 @@ def check_dependencies(
             if not wheelhouse_warning_only:
                 failed = True
         for requirement in requirements:
+            if requirement.category == "project":
+                continue
             count = counts.get(requirement.normalized_name, 0)
             status = "ok" if count else "missing"
             lines.append(f"wheelhouse-package: {requirement.normalized_name} wheels={count} status={status}")
