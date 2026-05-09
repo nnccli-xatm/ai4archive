@@ -93,6 +93,11 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 
 - Run `archive-scan-qc benchmark` on approved internal real samples.
 - Share only aggregate `benchmark_results.json` or `benchmark_results.csv`.
+- For optimized scan QC baseline release checks, validate the public
+  `aggregate_baseline_summary.json` with `archive-scan-qc acceptance-summary`
+  using configured scan and processing throughput thresholds. Confirm the
+  baseline privacy self-check passes and cleanup retained only
+  `aggregate_baseline_summary.json`.
 - Record total files, openable files, finding counts, elapsed seconds, files per
   minute, recommended scan/processing workers, effective workers, CPU count,
   platform, and Python version.
