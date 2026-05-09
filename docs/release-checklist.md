@@ -134,6 +134,29 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   using configured scan and processing throughput thresholds. Confirm the
   baseline privacy self-check passes and cleanup retained only
   `aggregate_baseline_summary.json`.
+- Build the aggregate release-candidate decision artifact from the production
+  validation summaries and release readiness summary:
+
+  ```bash
+  PYTHONPATH=src python3 scripts/release_candidate_summary.py \
+    --input /placeholder/private-20-image-sample \
+    --out /placeholder/private-validation-output/release-candidate \
+    --release-readiness-summary /placeholder/private-validation-output/readiness/release_readiness_summary.json \
+    --workers 4 \
+    --benchmark-workers-list 1,2,4,8 \
+    --process-images \
+    --auto-crop \
+    --deskew \
+    --trim-dark-border \
+    --despeckle \
+    --min-scan-files-per-minute 100 \
+    --min-processing-files-per-minute 80
+  ```
+
+  Share only `release_candidate_summary.json` from this step. It contains
+  aggregate production validation status, throughput, failure and severity
+  counts, privacy and cleanup status, release readiness status, blocking counts,
+  capability-probe counts, and the CPU/Pillow semantics marker.
 - Record total files, openable files, finding counts, elapsed seconds, files per
   minute, recommended scan/processing workers, effective workers, OS/platform
   family, Python version family, CPU logical count, total memory GB when
