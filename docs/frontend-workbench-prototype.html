@@ -203,6 +203,12 @@
       background: #f1fbf5;
     }
 
+    .status-banner.warn {
+      border-color: #e4bf62;
+      color: #875300;
+      background: #fff8e6;
+    }
+
     .grid {
       display: grid;
       grid-template-columns: 1.1fr .9fr;
@@ -766,6 +772,7 @@
           <button id="downloadReviewButton" class="secondary" type="button" disabled>Download JSON</button>
         </div>
       </div>
+      <div id="reviewCompletionGate" class="status-banner" role="status" aria-live="polite" style="margin-bottom:12px">No review targets loaded. Completion gate warnings use aggregate counts only and do not block export.</div>
       <div id="decisionSummary" class="decision-strip"></div>
       <div class="review-filter-bar" aria-label="Review target filters">
         <label>Decision
@@ -1447,6 +1454,7 @@
       previewZoomStatus: document.getElementById("previewZoomStatus"),
       decisionSummary: document.getElementById("decisionSummary"),
       reviewTargetList: document.getElementById("reviewTargetList"),
+      reviewCompletionGate: document.getElementById("reviewCompletionGate"),
       reviewDecisionFilter: document.getElementById("reviewDecisionFilter"),
       reviewScopeFilter: document.getElementById("reviewScopeFilter"),
       reviewSeverityFilter: document.getElementById("reviewSeverityFilter"),
@@ -2595,6 +2603,7 @@
     function renderReview() {
       const summary = reviewCompletionSummary();
       const counts = summary.counts;
+      renderReviewCompletionGate(summary);
       els.decisionSummary.innerHTML = `
         <div class="decision-card">
           <span>Total Targets</span>
@@ -2624,6 +2633,28 @@
       els.exportReviewButton.disabled = !hasLoadedArtifact;
       els.downloadReviewButton.disabled = !state.exportSummary;
       els.exportReview.value = state.exportSummary;
+    }
+
+    function reviewDecisionCountText(counts) {
+      return REVIEW_DECISIONS
+        .map(([value, label]) => `${label}: ${counts[value] || 0}`)
+        .join("; ");
+    }
+
+    function renderReviewCompletionGate(summary) {
+      els.reviewCompletionGate.className = "status-banner";
+      const countText = reviewDecisionCountText(summary.counts);
+      if (summary.total === 0) {
+        els.reviewCompletionGate.textContent = `No review targets loaded. Completion gate warnings use aggregate counts only and do not block export. Decision-status counts: ${countText}.`;
+        return;
+      }
+      if (summary.complete) {
+        els.reviewCompletionGate.classList.add("ok");
+        els.reviewCompletionGate.textContent = `Review completion gate: complete. Total targets: ${summary.total}. Reviewed targets: ${summary.reviewed}. Pending targets: ${summary.pending}. Decision-status counts: ${countText}. Export remains privacy-safe and schema-stable.`;
+        return;
+      }
+      els.reviewCompletionGate.classList.add("warn");
+      els.reviewCompletionGate.textContent = `Review completion gate warning: not complete. Total targets: ${summary.total}. Reviewed targets: ${summary.reviewed}. Pending targets: ${summary.pending}. Decision-status counts: ${countText}. Export is advisory and remains available.`;
     }
 
     function renderReviewTargetList() {
