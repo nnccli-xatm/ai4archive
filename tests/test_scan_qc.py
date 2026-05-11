@@ -34,6 +34,8 @@ from archive_scan_qc.handoff import write_delivery_handoff_manifest
 from archive_scan_qc.processing import (
     ProcessingOptions,
     _despeckle_candidate_points,
+    _despeckle_candidate_points_fallback,
+    _despeckle_candidate_points_numpy,
     _deskew_candidate_scores,
     _horizontal_projection_variance,
     process_images,
@@ -5351,6 +5353,51 @@ class ScanQcTest(unittest.TestCase):
             sorted(_despeckle_candidate_points(mask)),
             [(5, 5), (20, 8), (40, 50), (74, 12)],
         )
+
+    @unittest.skipUnless(importlib.util.find_spec("numpy"), "NumPy optional fast path unavailable")
+    def test_despeckle_candidate_points_numpy_matches_fallback_synthetic_masks(self) -> None:
+        masks: list[Image.Image] = []
+
+        clean = Image.new("L", (80, 60), 0)
+        masks.append(clean)
+
+        isolated = Image.new("L", (80, 60), 0)
+        for point in [(5, 5), (20, 8), (74, 12), (40, 50)]:
+            isolated.putpixel(point, 255)
+        masks.append(isolated)
+
+        clustered = Image.new("L", (80, 60), 0)
+        draw = ImageDraw.Draw(clustered)
+        draw.rectangle((15, 12, 20, 17), fill=255)
+        draw.line((10, 30, 70, 30), fill=255, width=2)
+        clustered.putpixel((40, 50), 255)
+        masks.append(clustered)
+
+        edges = Image.new("L", (80, 60), 0)
+        for point in [(0, 10), (79, 20), (30, 0), (40, 59), (4, 4)]:
+            edges.putpixel(point, 255)
+        masks.append(edges)
+
+        dense = Image.new("L", (120, 80), 0)
+        draw = ImageDraw.Draw(dense)
+        for y in range(12, 70, 9):
+            draw.rectangle((12, y, 108, y + 2), fill=255)
+        for x in range(18, 108, 12):
+            draw.line((x, 10, x, 72), fill=255, width=3)
+        masks.append(dense)
+
+        for mask in masks:
+            self.assertEqual(
+                _despeckle_candidate_points_numpy(mask),
+                _despeckle_candidate_points_fallback(mask),
+            )
+
+    def test_despeckle_candidate_points_falls_back_when_numpy_unavailable(self) -> None:
+        mask = Image.new("L", (20, 20), 0)
+        mask.putpixel((10, 10), 255)
+
+        with mock.patch("archive_scan_qc.processing._load_numpy", return_value=None):
+            self.assertEqual(_despeckle_candidate_points(mask), [(10, 10)])
 
     def test_despeckle_candidate_points_dense_content_fast_path(self) -> None:
         mask = Image.new("L", (120, 80), 0)
