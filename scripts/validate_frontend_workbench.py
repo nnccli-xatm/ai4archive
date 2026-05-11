@@ -551,6 +551,19 @@ def validate_executable_aggregate_fixtures(html: str) -> list[str]:
     if not script_match:
         return ["missing executable workbench script"]
 
+    if str(ROOT / "src") not in sys.path:
+        sys.path.insert(0, str(ROOT / "src"))
+    from archive_scan_qc.workbench_summary import build_workbench_public_summary
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        unsupported_private_input = Path(tmp_dir) / "private_scan_alpha.tif"
+        unsupported_private_input.write_text("PRIVATE_OCR_TEXT", encoding="utf-8")
+        actual_workbench_summary = build_workbench_public_summary(
+            files=[unsupported_private_input],
+            generated_at="2026-05-11T02:20:00Z",
+        )
+    actual_workbench_summary_json = json.dumps(actual_workbench_summary, sort_keys=True)
+
     runner = f"""
 const vm = require("node:vm");
 const workbenchScript = {script_match.group("script")!r};
@@ -580,6 +593,7 @@ function element(id) {{
 }}
 
 const context = {{
+  actualGeneratedWorkbenchFixture: {actual_workbench_summary_json},
   assert,
   assertPublicSafe,
   countFor,
@@ -1389,6 +1403,21 @@ vm.runInContext(workbenchScript + `
   assert(els.aggregateHandoff.innerHTML.includes("Artifacts Missing"), "workbench public blocked did not render missing artifact count");
   assert(!els.aggregateHandoff.innerHTML.includes("unsupported_inputs"), "workbench public blocked rendered unsupported input object details");
   assertPublicSafe(els.aggregateHandoff.innerHTML, "workbench public blocked rendering");
+
+  const actualGeneratedWorkbenchModel = inferArtifact(actualGeneratedWorkbenchFixture);
+  assert(actualGeneratedWorkbenchModel.sourceType === "aggregate-handoff", "actual generated workbench summary did not load as aggregate handoff");
+  assert(actualGeneratedWorkbenchModel.aggregateHandoff.artifactType === "Workbench public summary", "actual generated workbench summary did not classify as workbench public summary");
+  assert(actualGeneratedWorkbenchModel.aggregateHandoff.status === "fail", "actual generated workbench summary status was not fail");
+  assert(actualGeneratedWorkbenchModel.aggregateHandoff.validationIndex.unknownInputs === 1, "actual generated workbench summary unsupported input count was not preserved");
+  assert(countFor(actualGeneratedWorkbenchModel.aggregateHandoff.blockingCodeCounts, "unsupported_private_looking_input_rejected") === 1, "actual generated workbench summary unsupported aggregate code was not preserved");
+  assert(!actualGeneratedWorkbenchModel.artifactCompatibility.diagnostics.some(item => item.code === "aggregate_status_fields_missing"), "actual generated workbench summary reported missing aggregate status fields");
+  state.model = actualGeneratedWorkbenchModel;
+  renderAggregateHandoff();
+  assert(els.aggregateHandoff.innerHTML.includes("unsupported_private_looking_input_rejected"), "actual generated workbench summary did not render unsupported aggregate code");
+  assert(!els.aggregateHandoff.innerHTML.includes("[object Object]"), "actual generated workbench summary rendered workflow object directly");
+  assert(!els.aggregateHandoff.innerHTML.includes("private_scan_alpha.tif"), "actual generated workbench summary rendered private input basename");
+  assert(!els.aggregateHandoff.innerHTML.includes("PRIVATE_OCR_TEXT"), "actual generated workbench summary rendered private OCR-like content");
+  assertPublicSafe(els.aggregateHandoff.innerHTML, "actual generated workbench summary rendering");
 
   const reviewModel = inferArtifact(reviewFixture);
   assert(reviewModel.sourceType === "aggregate-handoff", "review fixture did not load as aggregate handoff");
