@@ -270,6 +270,15 @@ The runner writes
   label; `gpu_acceleration_used` is currently `false` because the existing
   CPU/Pillow path is unchanged.
 - `worker_settings` and `operations`.
+- `despeckle_backend`: requested backend, effective aggregate backend mode,
+  NumPy availability, backend counts, fallback counts, and warning codes. If
+  `--despeckle-backend numpy` produces
+  `despeckle_numpy_unavailable_fallback` or
+  `despeckle_numpy_requested_all_fallback`, the run proves fallback safety only.
+  Treat it as NumPy performance evidence only when `numpy_available=true` and
+  `backend_counts.numpy` is non-zero.
+- `warning_item_count`, `warning_counts_by_code`, and `warning_items` with
+  public-safe aggregate warning codes.
 - `aggregate_counts`: total/openable files, P0/P1/P2 findings, processing
   processed/failed counts, failed batches, and preflight error count.
 - `stage_timings`: unchanged scan and processing elapsed seconds, scan

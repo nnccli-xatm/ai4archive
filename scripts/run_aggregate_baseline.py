@@ -77,6 +77,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--deskew", action="store_true")
     parser.add_argument("--trim-dark-border", action="store_true")
     parser.add_argument("--despeckle", action="store_true")
+    parser.add_argument(
+        "--despeckle-backend",
+        choices=("fallback", "numpy"),
+        default="fallback",
+        help="Despeckle processing backend. Defaults to conservative fallback; numpy is opt-in.",
+    )
     parser.add_argument("--resume-processing", action="store_true")
     parser.add_argument("--manifest-csv", default=None, type=Path)
     parser.add_argument("--rules-profile", default=None, type=Path)
@@ -226,8 +232,27 @@ def _baseline_summary(args: argparse.Namespace, private_summary: dict[str, Any])
             "deskew": bool(args.deskew),
             "trim_dark_border": bool(args.trim_dark_border),
             "despeckle": bool(args.despeckle),
+            "despeckle_backend_requested": private_summary.get("despeckle_backend", {}).get(
+                "requested_backend",
+                getattr(args, "despeckle_backend", "fallback"),
+            ),
             "resume_processing": bool(args.resume_processing),
         },
+        "despeckle_backend": private_summary.get(
+            "despeckle_backend",
+            {
+                "requested_backend": getattr(args, "despeckle_backend", "fallback"),
+                "effective_backend_mode": "unknown",
+                "numpy_available": False,
+                "backend_counts": {"numpy": 0, "fallback": 0, "not_applicable": 0, "unknown": 0},
+                "fallback_count": 0,
+                "requested_numpy_fallback_count": 0,
+                "warning_codes": [],
+            },
+        ),
+        "warning_item_count": int(private_summary.get("warning_item_count", 0)),
+        "warning_counts_by_code": private_summary.get("warning_counts_by_code", {}),
+        "warning_items": private_summary.get("warning_items", []),
         "aggregate_counts": {
             "total_files": int(counts["total_files"]),
             "openable_files": int(counts["openable_files"]),

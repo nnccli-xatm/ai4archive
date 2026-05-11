@@ -263,6 +263,16 @@ timing block also reports count-only backend mode fields for the optional NumPy
 candidate filter or the Python/Pillow fallback; fallback is expected and
 non-blocking when NumPy is unavailable. It does not include file lists, paths,
 hashes, thumbnails, or image content.
+Private integration and aggregate baseline summaries also promote the
+despeckle backend capability as public-safe aggregate fields:
+`requested_backend`, `effective_backend_mode`, `numpy_available`,
+`backend_counts`, `fallback_count`, `requested_numpy_fallback_count`, and
+warning codes. Treat `--despeckle-backend numpy` with
+`despeckle_numpy_unavailable_fallback` or
+`despeckle_numpy_requested_all_fallback` as fallback safety validation, not
+NumPy performance validation. Actual NumPy performance evidence requires
+`requested_backend=numpy`, `numpy_available=true`, and non-zero
+`backend_counts.numpy` in the aggregate summary.
 `run_plan_summary.json` and `run_plan_summary.csv` are also aggregate-only:
 they record batch totals, passed and failed counts, P0/P1/P2 counts,
 processing failure counts, preflight error counts, throughput aggregates, and
