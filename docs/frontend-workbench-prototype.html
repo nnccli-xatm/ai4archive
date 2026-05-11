@@ -1156,7 +1156,17 @@
             unsupported_inputs: 0,
             processing_resumed_files: 2,
             processing_duplicate_reused_files: 3,
-            processing_existing_derivative_reused_files: 4
+            processing_existing_derivative_reused_files: 4,
+            processing_operation_timings: {
+              despeckle: {
+                backend_mode: "numpy",
+                numpy_available: true,
+                backend_counts: {
+                  numpy: 7,
+                  fallback: 0
+                }
+              }
+            }
           },
           artifact_presence: PUBLIC_SAFE_READINESS_ROWS,
           privacy: PUBLIC_SAFE_PRIVACY,
@@ -1971,6 +1981,7 @@
         reviewDecisionVerification: aggregateReviewDecisionVerificationSummary(payload),
         providerProbe: aggregateProviderProbe(payload.capability_probe_summary),
         processingReview: aggregateProcessingReview(payload),
+        despeckleBackend: aggregateDespeckleBackend(payload),
         privacy: aggregatePrivacy(payload),
         counts: aggregateCounts(productionCounts, payload),
         throughput: aggregateThroughput(payload.throughput || productionThroughput),
@@ -2267,6 +2278,45 @@
         name,
         count: firstNumber(value)
       }));
+    }
+
+    function objectValue(value) {
+      return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    }
+
+    function aggregateDespeckleBackend(payload) {
+      const summary = objectValue(payload.summary);
+      const throughput = objectValue(payload.throughput);
+      const timing = objectValue(payload.timing);
+      const performance = objectValue(summary.performance || payload.performance);
+      const candidates = [
+        objectValue(summary.processing_operation_timings).despeckle,
+        objectValue(throughput.processing_operation_timings).despeckle,
+        objectValue(payload.processing_operation_timings).despeckle,
+        objectValue(timing.operation_timings).despeckle,
+        objectValue(performance.operation_timings).despeckle,
+        objectValue(summary.operation_timings).despeckle,
+        objectValue(payload.operation_timings).despeckle
+      ].filter(item => item && typeof item === "object" && !Array.isArray(item));
+      const source = candidates.find(item =>
+        item.backend_mode !== undefined ||
+        item.numpy_available !== undefined ||
+        (item.backend_counts && typeof item.backend_counts === "object" && !Array.isArray(item.backend_counts))
+      );
+      if (!source) {
+        return {
+          recognized: false,
+          backendMode: "Not provided",
+          numpyAvailable: null,
+          backendCounts: []
+        };
+      }
+      return {
+        recognized: true,
+        backendMode: text(source.backend_mode, "unknown"),
+        numpyAvailable: firstBoolean(source.numpy_available),
+        backendCounts: aggregateCodeCounts(source.backend_counts)
+      };
     }
 
     function aggregateDeepInspectionCandidateSummary(payload) {
@@ -2720,6 +2770,10 @@
         ["Cropped Count", aggregate.processingReview.croppedCount],
         ["Despeckled Count", aggregate.processingReview.despeckledCount]
       ];
+      const despeckleBackendRows = [
+        ["Backend Mode", aggregate.despeckleBackend.backendMode],
+        ["NumPy Available", aggregate.despeckleBackend.numpyAvailable === null ? "Not provided" : aggregate.despeckleBackend.numpyAvailable]
+      ];
       const providerProbeRows = [
         ["Provider Count", aggregate.providerProbe.providerCount],
         ["Configured Provider Count", aggregate.providerProbe.configuredProviderCount],
@@ -2736,6 +2790,7 @@
         ${compatibility ? artifactCompatibilityPanel(compatibility) : ""}
         ${readiness ? artifactReadinessPanel(readiness) : ""}
         ${aggregate.processingReview.recognized ? processingReviewPanel(aggregate.processingReview, processingReviewRows) : ""}
+        ${despeckleBackendPanel(aggregate.despeckleBackend, despeckleBackendRows)}
         ${aggregate.deepInspectionCandidate ? deepInspectionCandidatePanel(aggregate.deepInspectionCandidate) : ""}
         ${aggregate.reviewDecisionVerification ? reviewDecisionVerificationPanel(aggregate.reviewDecisionVerification) : ""}
         <div class="metric-grid">
@@ -2800,6 +2855,19 @@
             ${aggregate.ruleStatusCounts.length ? aggregateNestedCountTable(aggregate.ruleStatusCounts) : `<div class="empty">No rule/status counts were present.</div>`}
           </div>
         </div>`;
+    }
+
+    function despeckleBackendPanel(backend, rows) {
+      return `
+        <section class="subpanel">
+          <h3>Despeckle Backend Summary</h3>
+          <p class="muted">Public-safe aggregate backend status. Shows only backend mode, NumPy availability, and aggregate backend counts from operation timing summaries.</p>
+          <div class="table-wrap">
+            <table><tbody>${rows.map(([label, value]) => kv(label, value)).join("")}</tbody></table>
+          </div>
+          <h3>Backend Counts</h3>
+          ${backend.backendCounts.length ? aggregateCountTable(backend.backendCounts, "Backend") : `<div class="empty">No despeckle backend counts were present.</div>`}
+        </section>`;
     }
 
     function deepInspectionCandidatePanel(candidate) {

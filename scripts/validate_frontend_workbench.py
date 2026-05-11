@@ -192,6 +192,10 @@ REQUIRED_STRINGS = {
     "Warning Count",
     "Scan Workers",
     "Processing Workers",
+    "Despeckle Backend Summary",
+    "Backend Mode",
+    "NumPy Available",
+    "Backend Counts",
     "Provider Capability Probe",
     "Provider Count",
     "Configured Provider Count",
@@ -1350,7 +1354,17 @@ vm.runInContext(workbenchScript + `
       unsupported_inputs: 0,
       processing_resumed_files: 2,
       processing_duplicate_reused_files: 3,
-      processing_existing_derivative_reused_files: 4
+      processing_existing_derivative_reused_files: 4,
+      processing_operation_timings: {{
+        despeckle: {{
+          backend_mode: "numpy",
+          numpy_available: true,
+          backend_counts: {{
+            numpy: 7,
+            fallback: 0
+          }}
+        }}
+      }}
     }},
     artifact_presence: completeChecklistFixture.artifact_readiness_checklist,
     privacy: {{
@@ -1524,6 +1538,10 @@ vm.runInContext(workbenchScript + `
   assert(workbenchPublicPassModel.aggregateHandoff.counts.processingResumedFiles === 2, "workbench public pass processing resumed count was not preserved");
   assert(workbenchPublicPassModel.aggregateHandoff.counts.processingDuplicateReusedFiles === 3, "workbench public pass duplicate reuse count was not preserved");
   assert(workbenchPublicPassModel.aggregateHandoff.counts.processingExistingDerivativeReusedFiles === 4, "workbench public pass existing derivative reuse count was not preserved");
+  assert(workbenchPublicPassModel.aggregateHandoff.despeckleBackend.backendMode === "numpy", "workbench public pass despeckle backend mode was not preserved");
+  assert(workbenchPublicPassModel.aggregateHandoff.despeckleBackend.numpyAvailable === true, "workbench public pass despeckle numpy availability was not preserved");
+  assert(countFor(workbenchPublicPassModel.aggregateHandoff.despeckleBackend.backendCounts, "numpy") === 7, "workbench public pass despeckle numpy backend count was not preserved");
+  assert(countFor(workbenchPublicPassModel.aggregateHandoff.despeckleBackend.backendCounts, "fallback") === 0, "workbench public pass despeckle fallback backend count was not preserved");
   assert(workbenchPublicPassModel.aggregateHandoff.warningCodeCounts[0].name === "aggregate_warning_review_backlog", "workbench public pass warning code count label was not preserved");
   assert(workbenchPublicPassModel.artifactCompatibility.schemaRecognized === true, "workbench public pass schema was not recognized");
   assert(!workbenchPublicPassModel.artifactCompatibility.diagnostics.some(item => item.code === "aggregate_status_fields_missing"), "workbench public pass reported missing aggregate status fields");
@@ -1537,6 +1555,11 @@ vm.runInContext(workbenchScript + `
   assert(els.aggregateHandoff.innerHTML.includes("Processing Resumed"), "workbench public pass did not render resumed processing count");
   assert(els.aggregateHandoff.innerHTML.includes("Processing Duplicate Reused"), "workbench public pass did not render duplicate reuse count");
   assert(els.aggregateHandoff.innerHTML.includes("Processing Existing Derivative Reused"), "workbench public pass did not render existing derivative reuse count");
+  assert(els.aggregateHandoff.innerHTML.includes("Despeckle Backend Summary"), "workbench public pass did not render despeckle backend summary");
+  assert(els.aggregateHandoff.innerHTML.includes("Backend Mode"), "workbench public pass did not render despeckle backend mode label");
+  assert(els.aggregateHandoff.innerHTML.includes("numpy"), "workbench public pass did not render despeckle backend mode value");
+  assert(els.aggregateHandoff.innerHTML.includes("NumPy Available"), "workbench public pass did not render numpy availability label");
+  assert(els.aggregateHandoff.innerHTML.includes("Backend Counts"), "workbench public pass did not render despeckle backend counts");
   assert(els.aggregateHandoff.innerHTML.includes("Warning Code"), "workbench public pass did not render warning code counts");
   assertPublicSafe(els.aggregateHandoff.innerHTML, "workbench public pass rendering");
 
@@ -1549,6 +1572,9 @@ vm.runInContext(workbenchScript + `
   assert(workbenchPublicBlockedModel.aggregateHandoff.blockingItemCount === 3, "workbench public blocked blocking count was not preserved");
   assert(countFor(workbenchPublicBlockedModel.aggregateHandoff.blockingCodeCounts, "unsupported_input") === 1, "workbench public blocked unsupported input count was not preserved");
   assert(workbenchPublicBlockedModel.aggregateHandoff.validationIndex.unknownInputs === 1, "workbench public blocked unsupported input aggregate count was not preserved");
+  assert(workbenchPublicBlockedModel.aggregateHandoff.despeckleBackend.backendMode === "Not provided", "workbench public blocked missing despeckle backend mode did not stay non-blocking");
+  assert(workbenchPublicBlockedModel.aggregateHandoff.despeckleBackend.numpyAvailable === null, "workbench public blocked missing numpy availability did not stay non-blocking");
+  assert(workbenchPublicBlockedModel.aggregateHandoff.despeckleBackend.backendCounts.length === 0, "workbench public blocked missing backend counts did not stay non-blocking");
   assert(!workbenchPublicBlockedModel.artifactCompatibility.diagnostics.some(item => item.code === "aggregate_status_fields_missing"), "workbench public blocked reported missing aggregate status fields");
   state.model = workbenchPublicBlockedModel;
   renderAggregateHandoff();
@@ -1557,6 +1583,7 @@ vm.runInContext(workbenchScript + `
   assert(els.aggregateHandoff.innerHTML.includes("acceptance_status: fail"), "workbench public blocked did not render workflow state");
   assert(!els.aggregateHandoff.innerHTML.includes("[object Object]"), "workbench public blocked rendered workflow object directly");
   assert(els.aggregateHandoff.innerHTML.includes("Artifacts Missing"), "workbench public blocked did not render missing artifact count");
+  assert(els.aggregateHandoff.innerHTML.includes("Not provided"), "workbench public blocked did not render absent despeckle backend fields as unknown");
   assert(!els.aggregateHandoff.innerHTML.includes("unsupported_inputs"), "workbench public blocked rendered unsupported input object details");
   assertPublicSafe(els.aggregateHandoff.innerHTML, "workbench public blocked rendering");
 
