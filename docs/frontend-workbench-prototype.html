@@ -362,6 +362,20 @@
       font-size: 22px;
     }
 
+    .review-target-list {
+      margin-bottom: 12px;
+    }
+
+    .review-target-list table {
+      min-width: 520px;
+    }
+
+    .review-target-list th,
+    .review-target-list td {
+      padding-top: 8px;
+      padding-bottom: 8px;
+    }
+
     .readiness-summary {
       display: grid;
       grid-template-columns: minmax(220px, .8fr) minmax(260px, 1.2fr);
@@ -578,6 +592,7 @@
         </div>
       </div>
       <div id="decisionSummary" class="decision-strip"></div>
+      <div id="reviewTargetList" class="review-target-list" aria-live="polite"></div>
       <div id="reviewImportStatus" class="status-banner" role="status" aria-live="polite" style="margin-bottom:12px">No review-decision summary imported. Imports restore only scope, synthetic/local ID, and decision status; private filenames, paths, hashes, OCR text, thumbnails, image content, row-level findings, reviewer notes, manifests, and derivative image references are ignored.</div>
       <textarea id="reviewExport" aria-label="Privacy-safe review-decision JSON summary" readonly placeholder="Privacy-safe review-decision JSON summary will appear after a reviewer decision changes or after export is prepared."></textarea>
     </section>
@@ -1130,6 +1145,7 @@
       clearPreview: document.getElementById("clearPreviewButton"),
       previewPrivacyCopy: document.getElementById("previewPrivacyCopy"),
       decisionSummary: document.getElementById("decisionSummary"),
+      reviewTargetList: document.getElementById("reviewTargetList"),
       exportReview: document.getElementById("reviewExport"),
       reviewImportFile: document.getElementById("reviewImportFile"),
       reviewImportStatus: document.getElementById("reviewImportStatus"),
@@ -2264,11 +2280,37 @@
           <strong>${escapeHtml(counts[value] || 0)}</strong>
         </div>
       `).join("");
+      renderReviewTargetList();
       const hasLoadedArtifact = state.model.sourceType !== "empty";
       renderReviewImportStatus();
       els.exportReviewButton.disabled = !hasLoadedArtifact;
       els.downloadReviewButton.disabled = !state.exportSummary;
       els.exportReview.value = state.exportSummary;
+    }
+
+    function renderReviewTargetList() {
+      const targets = (state.model.reviewTargets || []).filter(target => target.scope === "processing_review");
+      if (!targets.length) {
+        els.reviewTargetList.innerHTML = "";
+        return;
+      }
+      els.reviewTargetList.innerHTML = `
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Scope</th><th>Local ID</th><th>Severity/Status</th><th>Decision State</th></tr></thead>
+            <tbody>
+              ${targets.map(target => `
+                <tr>
+                  <td class="mono">${escapeHtml(target.scope)}</td>
+                  <td class="mono">${escapeHtml(target.localId)}</td>
+                  <td>${severityBadge(target.severity || target.status || "local-review")}</td>
+                  <td>${decisionSelect(target.scope, target.localId)}</td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>`;
+      bindDecisionControls(els.reviewTargetList);
     }
 
     function renderReviewImportStatus() {
@@ -2360,7 +2402,7 @@
       return [
         ...state.model.batches.map(batch => ({ scope: "batch", localId: batch.localId, severity: batch.p0 > 0 ? "P0" : batch.p1 > 0 ? "P1" : batch.p2 > 0 ? "P2" : "none" })),
         ...state.model.findings.map(finding => ({ scope: "finding", localId: finding.localId, severity: finding.severity })),
-        ...((state.model.reviewTargets || []).map(target => ({ scope: target.scope, localId: target.localId, severity: target.severity })))
+        ...((state.model.reviewTargets || []).map(target => ({ scope: target.scope, localId: target.localId, severity: target.severity, status: target.status })))
       ];
     }
 
