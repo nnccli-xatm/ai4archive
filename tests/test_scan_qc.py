@@ -527,6 +527,91 @@ class ScanQcTest(unittest.TestCase):
         self.assertEqual(summary["checks_failed"], 0)
         self.assertFalse(summary["privacy"]["private_indicators_found"])
 
+    def test_evidence_bundle_verifier_allows_aggregate_baseline_counter_paths_without_status(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            baseline = _aggregate_baseline_bundle_payload()
+            baseline.pop("status")
+            baseline["aggregate_counts"] = {
+                "total_files": 20,
+                "openable_files": 20,
+                "total_findings": 2,
+                "p0_findings": 0,
+                "p1_findings": 0,
+                "p2_findings": {"accepted": 2, "remaining": 0},
+                "processing_failed_files": 0,
+            }
+            baseline["benchmark"] = {
+                "source": "benchmark repeated worker runs",
+                "worker_sweep": {
+                    "workers": [
+                        {"workers": 1, "processing": {"failed_files": 0}},
+                        {"workers": 2, "processing": {"failed_files": {"observed": 0}}},
+                    ]
+                },
+            }
+            _write_json(root / "release_candidate_summary.json", _release_candidate_bundle_payload())
+            _write_json(root / "aggregate_baseline_summary.json", baseline)
+
+            summary = build_evidence_bundle_summary(root, generated_at="2026-01-01T00:00:00+00:00")
+
+        self.assertEqual(summary["status"], "pass")
+        self.assertEqual(summary["checks_failed"], 0)
+        self.assertFalse(summary["privacy"]["private_indicators_found"])
+        self.assertEqual(summary["artifacts"]["aggregate_baseline_summary.json"]["reported_status"], "pass")
+
+    def test_evidence_bundle_verifier_rejects_private_benchmark_source_values(self) -> None:
+        private_sources = [
+            "/private/archive/A001_0001.png",
+            "A001_0001.png",
+            "benchmark repeated worker runs 0123456789abcdef0123456789abcdef",
+        ]
+        for private_source in private_sources:
+            with self.subTest(private_source=private_source), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                baseline = _aggregate_baseline_bundle_payload()
+                baseline["aggregate_counts"] = {"processing_failed_files": 0}
+                baseline["benchmark"] = {"source": private_source}
+                _write_json(root / "release_candidate_summary.json", _release_candidate_bundle_payload())
+                _write_json(root / "aggregate_baseline_summary.json", baseline)
+
+                summary = build_evidence_bundle_summary(root, generated_at="2026-01-01T00:00:00+00:00")
+                raw = json.dumps(summary)
+
+            self.assertEqual(summary["status"], "fail")
+            codes = {item["code"] for item in summary["blocking_items"]}
+            self.assertTrue({"private_key_present", "private_value_present", "private_absolute_path_pattern_present", "private_filename_pattern_present", "private_hash_pattern_present"} & codes)
+            self.assertNotIn(private_source, raw)
+
+    def test_evidence_bundle_verifier_rejects_private_counter_path_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            baseline = _aggregate_baseline_bundle_payload()
+            baseline["aggregate_counts"] = {
+                "p0_findings": "A001_0001.png",
+                "p1_findings": 0,
+                "p2_findings": 0,
+                "processing_failed_files": 0,
+            }
+            baseline["benchmark"] = {
+                "source": "benchmark repeated worker runs",
+                "worker_sweep": {
+                    "workers": [
+                        {"workers": 1, "processing": {"failed_files": "A001_0001.png"}},
+                    ]
+                },
+            }
+            _write_json(root / "release_candidate_summary.json", _release_candidate_bundle_payload())
+            _write_json(root / "aggregate_baseline_summary.json", baseline)
+
+            summary = build_evidence_bundle_summary(root, generated_at="2026-01-01T00:00:00+00:00")
+            raw = json.dumps(summary)
+
+        self.assertEqual(summary["status"], "fail")
+        codes = {item["code"] for item in summary["blocking_items"]}
+        self.assertTrue({"private_key_present", "private_value_present", "private_filename_pattern_present"} & codes)
+        self.assertNotIn("A001_0001.png", raw)
+
     def test_evidence_bundle_verifier_blocks_missing_required_but_allows_optional(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
