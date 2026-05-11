@@ -275,6 +275,17 @@ REQUIRED_DEMO_FIXTURE_LABELS = {
     "Privacy summary missing diagnostic",
 }
 
+REQUIRED_PREVIEW_LIFECYCLE_STRINGS = {
+    "clear function": "function clearPreviewState",
+    "load function": "function loadPreviewFile",
+    "create object URL": "URL.createObjectURL(file)",
+    "clear revocation": "URL.revokeObjectURL(state.preview.objectUrl)",
+    "replacement revocation": "if (state.preview.objectUrl)",
+    "beforeunload revocation": 'window.addEventListener("beforeunload"',
+    "export exclusion": "Preview is excluded from review-decision export JSON.",
+    "local tab copy": "browser tab only",
+}
+
 FORBIDDEN_DEMO_FIXTURE_FIELDS = {
     "absolute_path",
     "derivative_image",
@@ -291,6 +302,13 @@ FORBIDDEN_DEMO_FIXTURE_FIELDS = {
     "sha256",
     "thumbnail",
 }
+
+PRIVATE_OUTPUT_PATTERNS = (
+    re.compile(r"blob:[^\s\"'<>]+", re.IGNORECASE),
+    re.compile(r"/Users/[A-Za-z0-9._/-]+"),
+    re.compile(r"/private/[A-Za-z0-9._/-]+"),
+    re.compile(r"\b[A-Za-z]:\\\\[^\s\"'<>]+"),
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -330,6 +348,7 @@ def new_summary(workbench: Path) -> dict[str, Any]:
             "required_checklist_fields": len(REQUIRED_CHECKLIST_FIELDS),
             "required_compatibility_fields": len(REQUIRED_COMPATIBILITY_FIELDS),
             "required_demo_fixture_labels": len(REQUIRED_DEMO_FIXTURE_LABELS),
+            "required_preview_lifecycle_strings": len(REQUIRED_PREVIEW_LIFECYCLE_STRINGS),
             "forbidden_pattern_checks": len(FORBIDDEN_PATTERNS),
             "forbidden_export_field_checks": len(FORBIDDEN_EXPORT_FIELDS),
             "forbidden_aggregate_payload_field_checks": len(FORBIDDEN_AGGREGATE_PAYLOAD_FIELDS),
@@ -346,6 +365,7 @@ def new_summary(workbench: Path) -> dict[str, Any]:
             "readiness_checklist": False,
             "demo_fixtures": False,
             "executable_fixtures": False,
+            "preview_lifecycle": False,
         },
         "privacy": {
             "forbidden_pattern_checks_passed": False,
@@ -353,6 +373,7 @@ def new_summary(workbench: Path) -> dict[str, Any]:
             "review_import_forbidden_field_checks_passed": False,
             "aggregate_payload_forbidden_field_checks_passed": False,
             "demo_fixture_forbidden_field_checks_passed": False,
+            "preview_lifecycle_public_safe": False,
             "forbidden_field_check_count": (
                 len(FORBIDDEN_EXPORT_FIELDS) * 2
                 + len(FORBIDDEN_AGGREGATE_PAYLOAD_FIELDS)
@@ -372,7 +393,14 @@ def safe_workbench_path(workbench: Path) -> str:
 
 
 def add_error(summary: dict[str, Any], code: str, message: str) -> None:
-    summary["errors"].append({"code": code, "message": message})
+    summary["errors"].append({"code": code, "message": sanitize_public_message(message)})
+
+
+def sanitize_public_message(message: str) -> str:
+    safe = message
+    for pattern in PRIVATE_OUTPUT_PATTERNS:
+        safe = pattern.sub("[redacted-private-value]", safe)
+    return safe
 
 
 def validate_executable_aggregate_fixtures(html: str) -> list[str]:
@@ -845,6 +873,172 @@ vm.runInContext(workbenchScript + `
     return []
 
 
+def validate_executable_preview_lifecycle(html: str) -> list[str]:
+    script_match = re.search(r"<script>(?P<script>.*?)</script>", html, re.DOTALL)
+    if not script_match:
+        return ["missing executable workbench script"]
+
+    runner = f"""
+const vm = require("node:vm");
+const workbenchScript = {script_match.group("script")!r};
+const elements = new Map();
+const createdUrls = [];
+const revokedUrls = [];
+const eventHandlers = {{}};
+
+function element(id) {{
+  if (!elements.has(id)) {{
+    elements.set(id, {{
+      id,
+      value: "",
+      innerHTML: "",
+      textContent: "",
+      className: "",
+      disabled: false,
+      files: [],
+      dataset: {{}},
+      classList: {{
+        add() {{}},
+        remove() {{}}
+      }},
+      addEventListener(type, handler) {{
+        eventHandlers[id + ":" + type] = handler;
+      }},
+      querySelectorAll() {{
+        return [];
+      }},
+      click() {{}}
+    }});
+  }}
+  return elements.get(id);
+}}
+
+const context = {{
+  assert,
+  assertPublicSafe,
+  console,
+  createdUrls,
+  revokedUrls,
+  eventHandlers,
+  Blob: function Blob() {{}},
+  Date,
+  Map,
+  Number,
+  Set,
+  String,
+  JSON,
+  Array,
+  URL: {{
+    createObjectURL(file) {{
+      const url = "blob:synthetic-preview-" + file.name + "-" + createdUrls.length;
+      createdUrls.push(url);
+      return url;
+    }},
+    revokeObjectURL(url) {{
+      revokedUrls.push(url);
+    }}
+  }},
+  document: {{
+    getElementById: element,
+    createElement: element
+  }},
+  window: {{
+    addEventListener(type, handler) {{
+      eventHandlers["window:" + type] = handler;
+    }}
+  }}
+}};
+
+function assert(condition, message) {{
+  if (!condition) throw new Error(message);
+}}
+
+function assertPublicSafe(value, label) {{
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  [
+    "blob:synthetic-preview",
+    "private_scan",
+    "/Users/",
+    "OCR_SECRET",
+    "manifest_row",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  ].forEach(token => assert(!text.includes(token), label + " leaked " + token));
+}}
+
+vm.createContext(context);
+vm.runInContext(workbenchScript + `
+  const firstFile = {{ name: "private_scan_alpha.tif", type: "image/tiff" }};
+  const secondFile = {{ name: "private_scan_beta.png", type: "image/png" }};
+
+  loadPreviewFile(firstFile);
+  assert(state.preview.fileName === firstFile.name, "first preview filename was not tracked locally");
+  assert(state.preview.objectUrl === "blob:synthetic-preview-private_scan_alpha.tif-0", "first object URL was not created");
+  assert(createdUrls.length === 1, "first preview did not call createObjectURL once");
+  assert(revokedUrls.length === 0, "first preview unexpectedly revoked a URL");
+  assert(els.preview.innerHTML.includes("blob:synthetic-preview-private_scan_alpha.tif-0"), "preview image did not render object URL locally");
+
+  state.model = {{
+    sourceType: "scan-report",
+    metrics: {{ totalBatches: 0, totalFindings: 0, p0: 0, p1: 0, p2: 0 }},
+    batches: [],
+    findings: []
+  }};
+  const exportWhilePreviewLoaded = JSON.stringify(buildReviewSummary());
+  assertPublicSafe(exportWhilePreviewLoaded, "review export");
+
+  state.model = inferArtifact(cloneDemoPayload(DEMO_FIXTURES.find(item => item.id === "recognized-review-pass").payload));
+  renderAggregateHandoff();
+  assertPublicSafe(els.aggregateHandoff.innerHTML, "aggregate handoff");
+
+  loadDemoFixture("complete-readiness-checklist");
+  assertPublicSafe(JSON.stringify(DEMO_FIXTURES), "demo fixtures");
+  assertPublicSafe(els.aggregateHandoff.innerHTML, "demo fixture render");
+  assertPublicSafe(els.status.textContent, "demo fixture status");
+
+  loadPreviewFile(secondFile);
+  assert(state.preview.fileName === secondFile.name, "replacement preview filename was not tracked locally");
+  assert(state.preview.objectUrl === "blob:synthetic-preview-private_scan_beta.png-1", "replacement object URL was not created");
+  assert(createdUrls.length === 2, "replacement preview did not call createObjectURL");
+  assert(revokedUrls.includes("blob:synthetic-preview-private_scan_alpha.tif-0"), "replacement did not revoke first object URL");
+
+  clearPreviewState();
+  assert(state.preview.fileName === "", "clear did not reset preview filename");
+  assert(state.preview.objectUrl === "", "clear did not reset preview object URL");
+  assert(els.previewFile.value === "", "clear did not reset preview file input");
+  assert(revokedUrls.includes("blob:synthetic-preview-private_scan_beta.png-1"), "clear did not revoke replacement object URL");
+  assert(!els.preview.innerHTML.includes("blob:synthetic-preview"), "clear left object URL in preview markup");
+  assert(!els.previewPrivacyCopy.innerHTML.includes("private_scan"), "clear left private filename in preview status");
+
+  loadPreviewFile(firstFile);
+  assert(typeof eventHandlers["window:beforeunload"] === "function", "beforeunload revocation handler was not registered");
+  eventHandlers["window:beforeunload"]();
+  assert(revokedUrls.includes("blob:synthetic-preview-private_scan_alpha.tif-2"), "beforeunload did not revoke active object URL");
+`, context);
+"""
+
+    with tempfile.NamedTemporaryFile("w", suffix=".js", encoding="utf-8", delete=False) as handle:
+        handle.write(runner)
+        runner_path = Path(handle.name)
+
+    try:
+        completed = subprocess.run(
+            ["node", str(runner_path)],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return ["Node.js is required for executable preview lifecycle checks but was not found on PATH"]
+    finally:
+        runner_path.unlink(missing_ok=True)
+
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or completed.stdout.strip() or f"node exited {completed.returncode}"
+        return [f"executable preview lifecycle check failed: {detail}"]
+    return []
+
+
 def validate_workbench(workbench: Path = WORKBENCH) -> dict[str, Any]:
     summary = new_summary(workbench)
     errors = summary["errors"]
@@ -876,7 +1070,7 @@ def validate_workbench(workbench: Path = WORKBENCH) -> dict[str, Any]:
     for label, pattern in FORBIDDEN_PATTERNS.items():
         match = pattern.search(html)
         if match:
-            add_error(summary, "forbidden_pattern_found", f"found forbidden {label}: {match.group(0)!r}")
+            add_error(summary, "forbidden_pattern_found", f"found forbidden {label}")
     summary["privacy"]["forbidden_pattern_checks_passed"] = not any(
         error["code"] == "forbidden_pattern_found" for error in errors
     )
@@ -1006,6 +1200,29 @@ def validate_workbench(workbench: Path = WORKBENCH) -> dict[str, Any]:
         error["code"] in {"forbidden_demo_fixture_field", "demo_fixture_preview_state"} for error in errors
     )
 
+    preview_start = html.find("function renderPreview")
+    preview_end = html.find("async function loadFile", preview_start)
+    if preview_start == -1 or preview_end == -1:
+        add_error(summary, "missing_preview_lifecycle_block", "missing local preview lifecycle functions")
+    else:
+        preview_block = html[preview_start:preview_end]
+        for label, required in sorted(REQUIRED_PREVIEW_LIFECYCLE_STRINGS.items()):
+            search_area = html if label in {"beforeunload revocation", "local tab copy"} else preview_block
+            if required not in search_area:
+                add_error(
+                    summary,
+                    "missing_preview_lifecycle_string",
+                    f"preview lifecycle missing {label}: {required!r}",
+                )
+
+    for error in validate_executable_preview_lifecycle(html):
+        add_error(summary, "preview_lifecycle_failure", error)
+    summary["coverage"]["preview_lifecycle"] = not any(
+        error["code"] in {"missing_preview_lifecycle_block", "missing_preview_lifecycle_string", "preview_lifecycle_failure"}
+        for error in errors
+    )
+    summary["privacy"]["preview_lifecycle_public_safe"] = summary["coverage"]["preview_lifecycle"]
+
     render_start = html.find("function renderAggregateHandoff")
     render_end = html.find("function workerRange", render_start)
     if render_start == -1 or render_end == -1:
@@ -1093,6 +1310,15 @@ def run_json_self_tests() -> int:
         return 1
     if failure["errors"] != [{"code": "missing_workbench", "message": "Missing workbench: missing-workbench.html"}]:
         print("JSON self-test failed: synthetic failure error shape changed.", file=sys.stderr)
+        return 1
+
+    with tempfile.TemporaryDirectory(prefix="frontend-workbench-json-self-test-") as temp_dir:
+        unsafe_path = Path(temp_dir) / "unsafe-workbench.html"
+        unsafe_path.write_text("<html><script>const leaked = '/Users/example/private_scan.tif blob:synthetic-preview-secret';</script></html>", encoding="utf-8")
+        unsafe_failure = validate_workbench(unsafe_path)
+    unsafe_serialized = json.dumps(unsafe_failure, sort_keys=True)
+    if "blob:synthetic-preview-secret" in unsafe_serialized or "/Users/example/" in unsafe_serialized:
+        print("JSON self-test failed: synthetic failure echoed private-looking details.", file=sys.stderr)
         return 1
 
     json.loads(json.dumps(success, sort_keys=True))
