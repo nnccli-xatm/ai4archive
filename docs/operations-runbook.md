@@ -258,8 +258,11 @@ intended for operator review before running `--process-out`.
 flags, worker metadata, timing, throughput, failure totals, resume counts,
 guardrail totals, and max/average/distribution metrics for size change, pixel
 change, brightness/contrast delta, crop ratio, dark-border trim margin, deskew
-angle, and despeckle pixel ratio. It does not include file lists, paths, hashes,
-thumbnails, or image content.
+angle, and despeckle pixel ratio. When `--despeckle` is enabled, the aggregate
+timing block also reports count-only backend mode fields for the optional NumPy
+candidate filter or the Python/Pillow fallback; fallback is expected and
+non-blocking when NumPy is unavailable. It does not include file lists, paths,
+hashes, thumbnails, or image content.
 `run_plan_summary.json` and `run_plan_summary.csv` are also aggregate-only:
 they record batch totals, passed and failed counts, P0/P1/P2 counts,
 processing failure counts, preflight error counts, throughput aggregates, and

@@ -375,7 +375,42 @@ def _aggregate_processing_operation_timings(batches: list[dict[str, Any]]) -> di
             "files_per_minute": _files_per_minute(file_count, elapsed_seconds),
             "average_seconds_per_file": round(elapsed_seconds / file_count, 6) if file_count else None,
         }
+        if operation == "despeckle":
+            totals[operation].update(_aggregate_despeckle_backend_timings(batches, enabled))
     return totals
+
+
+def _aggregate_despeckle_backend_timings(batches: list[dict[str, Any]], enabled: bool) -> dict[str, Any]:
+    backend_counts = {"numpy": 0, "fallback": 0, "not_applicable": 0, "unknown": 0}
+    for batch in batches:
+        batch_timings = batch.get("processing_operation_timings")
+        if not isinstance(batch_timings, dict):
+            continue
+        timing = batch_timings.get("despeckle")
+        if not isinstance(timing, dict):
+            continue
+        counts = timing.get("backend_counts")
+        if not isinstance(counts, dict):
+            continue
+        for mode in backend_counts:
+            value = counts.get(mode)
+            if isinstance(value, int):
+                backend_counts[mode] += value
+
+    active_modes = [mode for mode in ("numpy", "fallback", "not_applicable", "unknown") if backend_counts[mode]]
+    if not enabled:
+        backend_mode = "disabled"
+    elif len(active_modes) == 1:
+        backend_mode = active_modes[0]
+    elif active_modes:
+        backend_mode = "mixed"
+    else:
+        backend_mode = "unknown"
+    return {
+        "backend_mode": backend_mode,
+        "numpy_available": backend_counts["numpy"] > 0,
+        "backend_counts": backend_counts,
+    }
 
 
 def _write_summary(payload: dict[str, Any], output_root: Path) -> None:

@@ -372,6 +372,7 @@ def _process_record(
         "despeckled": False,
         "despeckle_pixels_changed": 0,
         "despeckle_reason": None,
+        "despeckle_backend_mode": None,
         "processing_audit": None,
         "processing_warnings": [],
         "operation_timings": {},
@@ -438,6 +439,7 @@ def _process_record(
                 "despeckled": process_info["despeckled"],
                 "despeckle_pixels_changed": process_info["despeckle_pixels_changed"],
                 "despeckle_reason": process_info["despeckle_reason"],
+                "despeckle_backend_mode": process_info["despeckle_backend_mode"],
                 "processing_audit": process_info["processing_audit"],
                 "processing_warnings": process_info["processing_warnings"],
                 "operation_timings": process_info["operation_timings"],
@@ -469,6 +471,7 @@ def _process_record(
                     "despeckled": process_info["despeckled"],
                     "despeckle_pixels_changed": process_info["despeckle_pixels_changed"],
                     "despeckle_reason": process_info["despeckle_reason"],
+                    "despeckle_backend_mode": process_info["despeckle_backend_mode"],
                     "processing_audit": process_info["processing_audit"],
                     "processing_warnings": process_info["processing_warnings"],
                     "operation_timings": process_info["operation_timings"],
@@ -671,7 +674,36 @@ def _aggregate_operation_timings(records: list[dict[str, Any]], options: Process
             "files_per_minute": _files_per_minute(len(values), elapsed_seconds),
             "average_seconds_per_file": round(elapsed_seconds / len(values), 6) if values else None,
         }
+        if operation == "despeckle":
+            timings[operation].update(_aggregate_despeckle_backend(records, is_enabled))
     return timings
+
+
+def _aggregate_despeckle_backend(records: list[dict[str, Any]], enabled: bool) -> dict[str, Any]:
+    backend_counts = {"numpy": 0, "fallback": 0, "not_applicable": 0, "unknown": 0}
+    for record in records:
+        timing = record.get("operation_timings")
+        timing_mode = timing.get("despeckle", {}).get("backend_mode") if isinstance(timing, dict) else None
+        mode = timing_mode if isinstance(timing_mode, str) else record.get("despeckle_backend_mode")
+        if mode in backend_counts:
+            backend_counts[mode] += 1
+        elif record.get("status") in {"processed", "failed"} and enabled:
+            backend_counts["unknown"] += 1
+
+    active_modes = [mode for mode in ("numpy", "fallback", "not_applicable", "unknown") if backend_counts[mode]]
+    if not enabled:
+        backend_mode = "disabled"
+    elif len(active_modes) == 1:
+        backend_mode = active_modes[0]
+    elif active_modes:
+        backend_mode = "mixed"
+    else:
+        backend_mode = "unknown"
+    return {
+        "backend_mode": backend_mode,
+        "numpy_available": backend_counts["numpy"] > 0,
+        "backend_counts": backend_counts,
+    }
 
 
 def _audit_thresholds(options: ProcessingOptions) -> dict[str, float]:
@@ -724,7 +756,7 @@ def _reason_counts(reasons: list[str]) -> dict[str, int]:
 
 def _process_image(image: Image.Image, options: ProcessingOptions) -> tuple[Image.Image, list[str], dict[str, Any]]:
     operations: list[str] = []
-    operation_timings: dict[str, dict[str, float]] = {}
+    operation_timings: dict[str, dict[str, Any]] = {}
     processed = ImageOps.exif_transpose(image)
     operations.append("exif_transpose")
     original_size = list(processed.size)
@@ -791,9 +823,10 @@ def _process_image(image: Image.Image, options: ProcessingOptions) -> tuple[Imag
     despeckled = False
     despeckle_pixels_changed = 0
     despeckle_reason = "despeckle disabled"
+    despeckle_backend_mode = "disabled"
     with _operation_timer(operation_timings, "despeckle", enabled=options.despeckle):
         if options.despeckle:
-            processed, despeckle_pixels_changed = _despeckle_isolated_pixels(processed)
+            processed, despeckle_pixels_changed, despeckle_backend_mode = _despeckle_isolated_pixels(processed)
             if despeckle_pixels_changed:
                 operations.append("despeckle_isolated_pixels")
                 despeckled = True
@@ -803,6 +836,9 @@ def _process_image(image: Image.Image, options: ProcessingOptions) -> tuple[Imag
                 despeckle_reason = "no isolated dark pixels found"
         else:
             operations.append("despeckle_disabled")
+    if options.despeckle and "despeckle" in operation_timings:
+        operation_timings["despeckle"]["backend_mode"] = despeckle_backend_mode
+        operation_timings["despeckle"]["numpy_available"] = despeckle_backend_mode == "numpy"
 
     processed = ImageOps.autocontrast(processed, cutoff=0.5)
     operations.append("autocontrast_cutoff_0_5")
@@ -825,6 +861,7 @@ def _process_image(image: Image.Image, options: ProcessingOptions) -> tuple[Imag
         "despeckled": despeckled,
         "despeckle_pixels_changed": despeckle_pixels_changed,
         "despeckle_reason": despeckle_reason,
+        "despeckle_backend_mode": despeckle_backend_mode,
         "processing_audit": processing_audit,
         "processing_warnings": processing_warnings,
         "operation_timings": operation_timings,
@@ -833,7 +870,7 @@ def _process_image(image: Image.Image, options: ProcessingOptions) -> tuple[Imag
 
 
 class _operation_timer:
-    def __init__(self, timings: dict[str, dict[str, float]], operation: str, *, enabled: bool) -> None:
+    def __init__(self, timings: dict[str, dict[str, Any]], operation: str, *, enabled: bool) -> None:
         self.timings = timings
         self.operation = operation
         self.enabled = enabled
@@ -1121,16 +1158,16 @@ def _dark_edge_run(image: Image.Image, side: str, max_pixels: int) -> int:
     return run
 
 
-def _despeckle_isolated_pixels(image: Image.Image) -> tuple[Image.Image, int]:
+def _despeckle_isolated_pixels(image: Image.Image) -> tuple[Image.Image, int, str]:
     grayscale = image.convert("L")
     width, height = grayscale.size
     if width < 3 or height < 3:
-        return image.copy(), 0
+        return image.copy(), 0, "not_applicable"
 
     dark_mask = grayscale.point(lambda value: 255 if value <= 60 else 0, mode="L")
-    candidates = _despeckle_candidate_points(dark_mask)
+    candidates, backend_mode = _despeckle_candidate_points_with_backend(dark_mask)
     if not candidates:
-        return image.copy(), 0
+        return image.copy(), 0, backend_mode
 
     gray_pixels = grayscale.load()
     source: Image.Image | None = None
@@ -1182,19 +1219,24 @@ def _despeckle_isolated_pixels(image: Image.Image) -> tuple[Image.Image, int]:
         changed += 1
 
     if output is None:
-        return image.copy(), 0
+        return image.copy(), 0, backend_mode
     if image.mode == "L":
-        return output.convert("L"), changed
+        return output.convert("L"), changed, backend_mode
     if image.mode == "RGB":
-        return output, changed
-    return output.convert(image.mode), changed
+        return output, changed, backend_mode
+    return output.convert(image.mode), changed, backend_mode
 
 
 def _despeckle_candidate_points(dark_mask: Image.Image) -> list[tuple[int, int]]:
+    candidates, _backend_mode = _despeckle_candidate_points_with_backend(dark_mask)
+    return candidates
+
+
+def _despeckle_candidate_points_with_backend(dark_mask: Image.Image) -> tuple[list[tuple[int, int]], str]:
     numpy_candidates = _despeckle_candidate_points_numpy(dark_mask)
     if numpy_candidates is not None:
-        return numpy_candidates
-    return _despeckle_candidate_points_fallback(dark_mask)
+        return numpy_candidates, "numpy"
+    return _despeckle_candidate_points_fallback(dark_mask), "fallback"
 
 
 def _despeckle_candidate_points_numpy(dark_mask: Image.Image) -> list[tuple[int, int]] | None:
