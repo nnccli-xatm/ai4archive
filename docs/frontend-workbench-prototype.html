@@ -2273,13 +2273,31 @@
     }
 
     function renderReview() {
-      const counts = decisionCounts();
-      els.decisionSummary.innerHTML = REVIEW_DECISIONS.map(([value, label]) => `
+      const summary = reviewCompletionSummary();
+      const counts = summary.counts;
+      els.decisionSummary.innerHTML = `
+        <div class="decision-card">
+          <span>Total Targets</span>
+          <strong>${escapeHtml(summary.total)}</strong>
+        </div>
+        <div class="decision-card">
+          <span>Reviewed Targets</span>
+          <strong>${escapeHtml(summary.reviewed)}</strong>
+        </div>
+        <div class="decision-card">
+          <span>Pending Targets</span>
+          <strong>${escapeHtml(summary.pending)}</strong>
+        </div>
+        <div class="decision-card">
+          <span>Completion Status</span>
+          <strong>${escapeHtml(summary.complete ? "complete" : "not complete")}</strong>
+        </div>
+        ${REVIEW_DECISIONS.filter(([value]) => value !== "pending").map(([value, label]) => `
         <div class="decision-card">
           <span>${escapeHtml(label)}</span>
           <strong>${escapeHtml(counts[value] || 0)}</strong>
         </div>
-      `).join("");
+      `).join("")}`;
       renderReviewTargetList();
       const hasLoadedArtifact = state.model.sourceType !== "empty";
       renderReviewImportStatus();
@@ -2414,9 +2432,22 @@
       return counts;
     }
 
-    function reviewComplete() {
+    function reviewCompletionSummary() {
       const targets = reviewTargets();
-      return targets.length > 0 && targets.every(target => getDecision(target.scope, target.localId) !== "pending");
+      const counts = decisionCounts();
+      const pending = counts.pending || 0;
+      const reviewed = Math.max(0, targets.length - pending);
+      return {
+        total: targets.length,
+        reviewed,
+        pending,
+        complete: targets.length > 0 && pending === 0,
+        counts
+      };
+    }
+
+    function reviewComplete() {
+      return reviewCompletionSummary().complete;
     }
 
     function buildReviewSummary() {
@@ -2440,10 +2471,11 @@
           total_findings: state.model.metrics.totalFindings,
           p0: state.model.metrics.p0,
           p1: state.model.metrics.p1,
-          p2: state.model.metrics.p2
+          p2: state.model.metrics.p2,
+          review_completion: reviewCompletionSummary()
         },
         review_counts: decisionCounts(),
-        reviewed_targets: decisions.length,
+        reviewed_targets: reviewCompletionSummary().reviewed,
         decisions
       };
     }

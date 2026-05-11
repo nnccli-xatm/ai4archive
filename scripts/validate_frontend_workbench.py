@@ -75,6 +75,11 @@ REQUIRED_STRINGS = {
     "preview object URL",
     "Human Review Decisions",
     "reviewTargetList",
+    "Total Targets",
+    "Reviewed Targets",
+    "Pending Targets",
+    "Completion Status",
+    "not complete",
     "Severity/Status",
     "Decision State",
     "Import privacy-safe summary",
@@ -1633,13 +1638,24 @@ vm.runInContext(workbenchScript + `
   render();
 
   assert(reviewTargets().length === 3, "synthetic scan report did not create expected review targets");
+  assert(els.decisionSummary.innerHTML.includes("Total Targets"), "review completion summary did not render total targets");
+  assert(els.decisionSummary.innerHTML.includes("Pending Targets"), "review completion summary did not render pending targets");
+  assert(els.decisionSummary.innerHTML.includes("not complete"), "initial review completion summary did not render not-complete status");
   state.decisions.set(decisionKey("batch", "B0001"), "accepted_issue");
   state.decisions.set(decisionKey("finding", "F0001"), "false_positive");
   state.decisions.set(decisionKey("finding", "F0002"), "needs_rescan");
+  renderReview();
+  assert(els.decisionSummary.innerHTML.includes("Reviewed Targets"), "review completion summary did not render reviewed targets");
+  assert(els.decisionSummary.innerHTML.includes("complete"), "review completion summary did not update to complete");
   const exported = buildReviewSummary();
   assert(exported.schema === "scan-qc-review-decisions.local.v1", "review export schema changed");
   assert(exported.source_type === "scan-report", "review export source type was not preserved");
   assert(exported.source_target_count === 3, "review export target count was not preserved");
+  assert(exported.reviewed_targets === 3, "review export reviewed target count was not preserved");
+  assert(exported.aggregate_counts.review_completion.total === 3, "review export completion total was not preserved");
+  assert(exported.aggregate_counts.review_completion.reviewed === 3, "review export completion reviewed count was not preserved");
+  assert(exported.aggregate_counts.review_completion.pending === 0, "review export completion pending count was not preserved");
+  assert(exported.aggregate_counts.review_completion.complete === true, "review export completion status was not preserved");
   assert(exported.review_counts.accepted_issue === 1, "review export accepted count was not preserved");
   assert(exported.review_counts.false_positive === 1, "review export false-positive count was not preserved");
   assert(exported.review_counts.needs_rescan === 1, "review export needs-rescan count was not preserved");
@@ -1655,6 +1671,7 @@ vm.runInContext(workbenchScript + `
   assert(getDecision("batch", "B0001") === "accepted_issue", "batch decision was not restored");
   assert(getDecision("finding", "F0001") === "false_positive", "finding decision was not restored");
   assert(getDecision("finding", "F0002") === "needs_rescan", "second finding decision was not restored");
+  assert(buildReviewSummary().aggregate_counts.review_completion.complete === true, "imported decisions did not restore completion status");
   assert(els.reviewImportStatus.textContent.includes("Imported 3 review decisions; skipped 0."), "valid import status did not render aggregate counts");
   assertPublicSafe(els.reviewImportStatus.textContent, "valid import status");
 
@@ -1682,6 +1699,48 @@ vm.runInContext(workbenchScript + `
   assert(els.reviewImportStatus.textContent.includes("Validation codes:"), "invalid import status did not render validation codes");
   assertPublicSafe(els.reviewImportStatus.textContent, "invalid import status");
   assertPublicSafe(state.exportSummary, "post-import export summary");
+
+  const runPlan = {{
+    schema_version: "scan-qc-run-plan-summary.v1",
+    generated_at: "2026-05-11T00:00:00Z",
+    summary: {{ total_batches: 2, total_files: 10, total_findings: 0 }},
+    batches: [
+      {{ batch_id: "synthetic-batch-a", total_files: 5, openable_files: 5, total_findings: 0, p0_findings: 0, p1_findings: 0, p2_findings: 0 }},
+      {{ batch_id: "synthetic-batch-b", total_files: 5, openable_files: 5, total_findings: 0, p0_findings: 0, p1_findings: 0, p2_findings: 0 }}
+    ]
+  }};
+  state.model = inferArtifact(runPlan);
+  resetReviewState();
+  render();
+  assert(reviewTargets().length === 2, "run-plan synthetic targets were not exposed");
+  state.decisions.set(decisionKey("batch", "B0001"), "fixed_externally");
+  renderReview();
+  let runPlanSummary = buildReviewSummary().aggregate_counts.review_completion;
+  assert(runPlanSummary.total === 2, "run-plan completion total changed");
+  assert(runPlanSummary.reviewed === 1, "run-plan reviewed target count did not update");
+  assert(runPlanSummary.pending === 1, "run-plan pending target count did not update");
+  assert(runPlanSummary.complete === false, "run-plan completion finished too early");
+  state.decisions.set(decisionKey("batch", "B0002"), "blocked");
+  renderReview();
+  runPlanSummary = buildReviewSummary().aggregate_counts.review_completion;
+  assert(runPlanSummary.complete === true, "run-plan completion did not finish after all targets changed");
+  assert(buildReviewSummary().review_counts.fixed_externally === 1, "run-plan fixed count was not preserved");
+  assert(buildReviewSummary().review_counts.blocked === 1, "run-plan blocked count was not preserved");
+
+  const processingReview = cloneDemoPayload(DEMO_FIXTURES.find(item => item.id === "processing-review-package-summary").payload);
+  state.model = inferArtifact(processingReview);
+  resetReviewState();
+  render();
+  assert(reviewTargets().length === 6, "processing-review synthetic targets were not exposed");
+  state.decisions.set(decisionKey("processing_review", "PR0001"), "accepted_issue");
+  state.decisions.set(decisionKey("processing_review", "PR0002"), "false_positive");
+  renderReview();
+  const processingSummary = buildReviewSummary().aggregate_counts.review_completion;
+  assert(processingSummary.total === 6, "processing-review completion total changed");
+  assert(processingSummary.reviewed === 2, "processing-review reviewed target count did not update");
+  assert(processingSummary.pending === 4, "processing-review pending target count did not update");
+  assert(processingSummary.complete === false, "processing-review completion finished too early");
+  assertPublicSafe(els.decisionSummary.innerHTML, "review completion summary");
 `, context);
 """
 
