@@ -60,6 +60,12 @@ REQUIRED_STRINGS = {
     "Processing Resumed",
     "Processing Duplicate Reused",
     "Processing Existing Derivative Reused",
+    "Processing Operation Timing Hotspots",
+    "Elapsed Seconds",
+    "Files/Min",
+    "Avg Sec/File",
+    "aggregateProcessingOperationTimings",
+    "processingOperationTimingPanel",
     "synthetic review IDs only",
     "row-level private notes",
     "processing_review",
@@ -1356,7 +1362,32 @@ vm.runInContext(workbenchScript + `
       processing_duplicate_reused_files: 3,
       processing_existing_derivative_reused_files: 4,
       processing_operation_timings: {{
+        auto_crop: {{
+          enabled: true,
+          file_count: 7,
+          elapsed_seconds: 0.5,
+          files_per_minute: 840,
+          average_seconds_per_file: 0.071429
+        }},
+        deskew: {{
+          enabled: true,
+          file_count: 7,
+          elapsed_seconds: 3.5,
+          files_per_minute: 120,
+          average_seconds_per_file: 0.5
+        }},
+        trim_dark_border: {{
+          enabled: false,
+          file_count: 0,
+          elapsed_seconds: 0,
+          files_per_minute: 0
+        }},
         despeckle: {{
+          enabled: true,
+          file_count: 7,
+          elapsed_seconds: 1.25,
+          files_per_minute: 336,
+          average_seconds_per_file: 0.178571,
           backend_mode: "numpy",
           numpy_available: true,
           backend_counts: {{
@@ -1538,6 +1569,11 @@ vm.runInContext(workbenchScript + `
   assert(workbenchPublicPassModel.aggregateHandoff.counts.processingResumedFiles === 2, "workbench public pass processing resumed count was not preserved");
   assert(workbenchPublicPassModel.aggregateHandoff.counts.processingDuplicateReusedFiles === 3, "workbench public pass duplicate reuse count was not preserved");
   assert(workbenchPublicPassModel.aggregateHandoff.counts.processingExistingDerivativeReusedFiles === 4, "workbench public pass existing derivative reuse count was not preserved");
+  assert(workbenchPublicPassModel.aggregateHandoff.processingOperationTimings.length === 4, "workbench public pass operation timings were not preserved");
+  assert(workbenchPublicPassModel.aggregateHandoff.processingOperationTimings[0].operation === "deskew", "workbench public pass operation timings were not sorted by elapsed hotspot");
+  assert(workbenchPublicPassModel.aggregateHandoff.processingOperationTimings[0].elapsedSeconds === 3.5, "workbench public pass deskew elapsed seconds were not preserved");
+  assert(workbenchPublicPassModel.aggregateHandoff.processingOperationTimings[1].operation === "despeckle", "workbench public pass despeckle hotspot order was not preserved");
+  assert(workbenchPublicPassModel.aggregateHandoff.processingOperationTimings[1].averageSecondsPerFile === 0.178571, "workbench public pass average seconds per file was not preserved");
   assert(workbenchPublicPassModel.aggregateHandoff.despeckleBackend.backendMode === "numpy", "workbench public pass despeckle backend mode was not preserved");
   assert(workbenchPublicPassModel.aggregateHandoff.despeckleBackend.numpyAvailable === true, "workbench public pass despeckle numpy availability was not preserved");
   assert(countFor(workbenchPublicPassModel.aggregateHandoff.despeckleBackend.backendCounts, "numpy") === 7, "workbench public pass despeckle numpy backend count was not preserved");
@@ -1555,6 +1591,10 @@ vm.runInContext(workbenchScript + `
   assert(els.aggregateHandoff.innerHTML.includes("Processing Resumed"), "workbench public pass did not render resumed processing count");
   assert(els.aggregateHandoff.innerHTML.includes("Processing Duplicate Reused"), "workbench public pass did not render duplicate reuse count");
   assert(els.aggregateHandoff.innerHTML.includes("Processing Existing Derivative Reused"), "workbench public pass did not render existing derivative reuse count");
+  assert(els.aggregateHandoff.innerHTML.includes("Processing Operation Timing Hotspots"), "workbench public pass did not render operation timing hotspots");
+  assert(els.aggregateHandoff.innerHTML.indexOf("Deskew") < els.aggregateHandoff.innerHTML.indexOf("Despeckle"), "workbench public pass did not render largest elapsed operation first");
+  assert(els.aggregateHandoff.innerHTML.includes("Elapsed Seconds"), "workbench public pass did not render elapsed seconds column");
+  assert(els.aggregateHandoff.innerHTML.includes("Avg Sec/File"), "workbench public pass did not render per-file average column");
   assert(els.aggregateHandoff.innerHTML.includes("Despeckle Backend Summary"), "workbench public pass did not render despeckle backend summary");
   assert(els.aggregateHandoff.innerHTML.includes("Backend Mode"), "workbench public pass did not render despeckle backend mode label");
   assert(els.aggregateHandoff.innerHTML.includes("numpy"), "workbench public pass did not render despeckle backend mode value");
