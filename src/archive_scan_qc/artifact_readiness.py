@@ -32,15 +32,26 @@ _REQUIRED_ARTIFACTS = {
     "public_safe_validation_index.json",
     "workbench_public_summary.json",
 }
-_READINESS_ARTIFACTS = (
-    WorkbenchArtifact(
-        "workbench_public_summary.json",
-        "workbench_public_summary",
-        "Workbench public summary",
-        "scan-qc.workbench-public-summary.",
-    ),
-    *KNOWN_WORKBENCH_ARTIFACTS,
+_WORKBENCH_PUBLIC_SUMMARY_ARTIFACT = WorkbenchArtifact(
+    "workbench_public_summary.json",
+    "workbench_public_summary",
+    "Workbench public summary",
+    "scan-qc.workbench-public-summary.",
 )
+
+
+def _readiness_artifacts() -> tuple[WorkbenchArtifact, ...]:
+    artifacts: list[WorkbenchArtifact] = []
+    seen: set[str] = set()
+    for artifact in (_WORKBENCH_PUBLIC_SUMMARY_ARTIFACT, *KNOWN_WORKBENCH_ARTIFACTS):
+        if artifact.name in seen:
+            continue
+        seen.add(artifact.name)
+        artifacts.append(artifact)
+    return tuple(artifacts)
+
+
+_READINESS_ARTIFACTS = _readiness_artifacts()
 
 
 def write_artifact_readiness_checklist(
