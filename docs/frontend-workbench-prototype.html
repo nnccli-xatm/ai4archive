@@ -832,6 +832,7 @@
         remainingP0: firstNullableNumber(payload.remaining_p0, payload.remaining && payload.remaining.p0),
         remainingP1: firstNullableNumber(payload.remaining_p1, payload.remaining && payload.remaining.p1),
         reviewStatusCounts: aggregateStatusCounts(payload.status_counts || (payload.human_review && payload.human_review.status_counts)),
+        severityStatusCounts: aggregateNestedStatusCounts(payload.severity_status_counts),
         ruleCounts: aggregateStatusCounts(payload.rule_counts),
         ruleStatusCounts: aggregateNestedStatusCounts(payload.rule_status_counts),
         acceptancePassed: firstBoolean(payload.acceptance_passed, payload.pass),
@@ -840,7 +841,7 @@
         warningCodes: aggregateWarningCodes(payload.warnings),
         artifactSummary: aggregateArtifactSummary(payload),
         privacy: aggregatePrivacy(payload),
-        counts: aggregateCounts(productionCounts),
+        counts: aggregateCounts(productionCounts, payload),
         throughput: aggregateThroughput(payload.throughput || productionThroughput),
         workers: aggregateWorkers(payload.workers),
         generatedAt: text(payload.generated_at, "")
@@ -923,6 +924,7 @@
 
     function aggregatePrivacy(payload) {
       const privacy = payload.privacy || {};
+      const selfCheck = payload.privacy_self_check || {};
       const sensitivity = text(payload.sensitivity, "");
       const sensitivityAggregateOnly = sensitivity.toLowerCase().includes("aggregate-only") || sensitivity.toLowerCase().includes("aggregate only");
       return {
@@ -937,7 +939,9 @@
         containsThumbnails: Boolean(privacy.contains_thumbnails),
         containsImageContent: Boolean(privacy.contains_image_content),
         containsRowLevelFindings: Boolean(privacy.contains_row_level_findings),
-        redactsPrivateValues: Boolean(privacy.redacts_private_values || payload.sensitive_values_omitted)
+        redactsPrivateValues: Boolean(privacy.redacts_private_values || payload.sensitive_values_omitted),
+        privacySelfCheckStatus: text(selfCheck.status, "Not provided"),
+        privacySelfCheckViolations: firstNullableNumber(selfCheck.violation_count)
       };
     }
 
@@ -970,12 +974,13 @@
       });
     }
 
-    function aggregateCounts(counts) {
+    function aggregateCounts(counts, payload = {}) {
       return {
         totalFiles: firstNumber(counts.total_files),
         openableFiles: firstNumber(counts.openable_files),
         processedFiles: firstNumber(counts.processed_files),
-        processingFailedFiles: firstNumber(counts.processing_failed_files),
+        failedBatches: firstNumber(payload.failed_batches, counts.failed_batches),
+        processingFailedFiles: firstNumber(payload.processing_failed_files, counts.processing_failed_files),
         batches: firstNumber(counts.total_batches)
       };
     }
@@ -1103,11 +1108,15 @@
         ["Contains thumbnails", aggregate.privacy.containsThumbnails],
         ["Contains image content", aggregate.privacy.containsImageContent],
         ["Contains row-level findings", aggregate.privacy.containsRowLevelFindings],
-        ["Redacts private values", aggregate.privacy.redactsPrivateValues]
+        ["Redacts private values", aggregate.privacy.redactsPrivateValues],
+        ["Privacy self-check status", aggregate.privacy.privacySelfCheckStatus],
+        ["Privacy self-check violations", aggregate.privacy.privacySelfCheckViolations ?? "Not provided"]
       ];
       els.aggregateHandoff.innerHTML = `
+        <p class="muted">Aggregate-only status from locally reviewed public-safe summary artifacts. This view displays counts, statuses, and codes only, never private filenames, paths, hashes, OCR text, thumbnails, image content, row-level findings, reviewer notes, manifests, or derivative image references.</p>
         <div class="metric-grid">
-          ${aggregateMetric("Status", statusBadge(aggregate.status), true)}
+          ${aggregateMetric("Artifact Type", aggregate.artifactType)}
+          ${aggregateMetric("Aggregate-only Status", statusBadge(aggregate.status), true)}
           ${aggregateMetric(aggregate.readyFlagLabel, aggregate.readyFlag ? "true" : "false")}
           ${aggregateMetric("Checks Passed", aggregate.checksPassed)}
           ${aggregateMetric("Checks Failed", aggregate.checksFailed)}
@@ -1120,6 +1129,7 @@
           ${aggregateMetric("Total Files", aggregate.counts.totalFiles)}
           ${aggregateMetric("Openable Files", aggregate.counts.openableFiles)}
           ${aggregateMetric("Processed Files", aggregate.counts.processedFiles)}
+          ${aggregateMetric("Failed Batches", aggregate.counts.failedBatches)}
           ${aggregateMetric("Processing Failed", aggregate.counts.processingFailedFiles)}
           ${aggregateMetric("Scan Throughput", aggregate.throughput.scanFilesPerMinute ? `${aggregate.throughput.scanFilesPerMinute} files/min` : "Not provided")}
           ${aggregateMetric("Processing Throughput", aggregate.throughput.processingFilesPerMinute ? `${aggregate.throughput.processingFilesPerMinute} files/min` : "Not provided")}
@@ -1132,6 +1142,8 @@
             ${aggregate.artifactSummary.length ? aggregateArtifactTable(aggregate.artifactSummary) : `<div class="empty">No artifact presence/status section was present.</div>`}
             <h3>Review Status Counts</h3>
             ${aggregate.reviewStatusCounts.length ? aggregateCountTable(aggregate.reviewStatusCounts, "Status") : `<div class="empty">No review status counts were present.</div>`}
+            <h3>Severity Status Counts</h3>
+            ${aggregate.severityStatusCounts.length ? aggregateNestedCountTable(aggregate.severityStatusCounts, "Severity") : `<div class="empty">No severity/status counts were present.</div>`}
             <h3>Blocking And Warning Codes</h3>
             ${aggregateCodeList("Blocking codes", aggregate.blockingCodes)}
             ${aggregateCodeList("Warning codes", aggregate.warningCodes)}
@@ -1202,11 +1214,11 @@
         </div>`;
     }
 
-    function aggregateNestedCountTable(items) {
+    function aggregateNestedCountTable(items, nameLabel = "Rule") {
       return `
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Rule</th><th>Status Counts</th></tr></thead>
+            <thead><tr><th>${escapeHtml(nameLabel)}</th><th>Status Counts</th></tr></thead>
             <tbody>
               ${items.map(item => `
                 <tr>
