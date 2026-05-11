@@ -355,6 +355,10 @@ REQUIRED_PREVIEW_LIFECYCLE_STRINGS = {
     "local tab copy": "browser tab only",
     "original slot": "originalPreviewFile",
     "processed slot": "processedPreviewFile",
+    "preview slot child width cap": ".preview-slot > *",
+    "preview file input width cap": '.preview-slot input[type="file"]',
+    "preview max width cap": "max-width: 100%",
+    "preview min width reset": "min-width: 0",
 }
 
 FORBIDDEN_DEMO_FIXTURE_FIELDS = {
@@ -2001,6 +2005,10 @@ def validate_workbench(workbench: Path = WORKBENCH) -> dict[str, Any]:
                 "local tab copy",
                 "original export exclusion",
                 "original slot",
+                "preview file input width cap",
+                "preview max width cap",
+                "preview min width reset",
+                "preview slot child width cap",
                 "processed export exclusion",
                 "processed slot",
             } else preview_block
