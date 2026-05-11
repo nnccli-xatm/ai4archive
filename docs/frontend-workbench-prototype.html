@@ -1,0 +1,862 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Scan QC Workbench Prototype</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f5f7fa;
+      --panel: #ffffff;
+      --panel-2: #eef3f8;
+      --text: #17202a;
+      --muted: #5f6f82;
+      --border: #d7dee8;
+      --line: #e7ebf0;
+      --accent: #126e82;
+      --accent-2: #1f7a4d;
+      --p0: #b42318;
+      --p1: #b54708;
+      --p2: #175cd3;
+      --ok: #16803c;
+      --warn: #9a6700;
+      --fail: #b42318;
+      --idle: #667085;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    header {
+      background: #213343;
+      color: #f7fbff;
+      border-bottom: 1px solid #182736;
+    }
+
+    .topbar {
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 18px 24px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 16px;
+      align-items: center;
+    }
+
+    h1, h2, h3, p { margin: 0; }
+
+    h1 {
+      font-size: 24px;
+      font-weight: 720;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      font-size: 16px;
+      margin-bottom: 12px;
+    }
+
+    h3 {
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    .subtitle {
+      margin-top: 4px;
+      color: #bdd0df;
+      max-width: 880px;
+    }
+
+    .privacy-note {
+      max-width: 420px;
+      padding: 10px 12px;
+      border: 1px solid rgba(255, 255, 255, .18);
+      border-radius: 8px;
+      color: #d9e7f2;
+      background: rgba(255, 255, 255, .07);
+    }
+
+    main {
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 18px 24px 32px;
+    }
+
+    .load-panel {
+      display: grid;
+      grid-template-columns: minmax(260px, 1fr) minmax(320px, 1.2fr);
+      gap: 14px;
+      margin-bottom: 16px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+    }
+
+    .file-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-top: 12px;
+    }
+
+    input[type="file"], select, button {
+      font: inherit;
+    }
+
+    input[type="file"], select {
+      max-width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #fff;
+      padding: 8px;
+    }
+
+    button {
+      border: 1px solid #0f5d6f;
+      background: var(--accent);
+      color: white;
+      border-radius: 6px;
+      padding: 8px 12px;
+      cursor: pointer;
+    }
+
+    button.secondary {
+      color: var(--text);
+      background: #fff;
+      border-color: var(--border);
+    }
+
+    button:focus-visible, input:focus-visible, select:focus-visible {
+      outline: 3px solid rgba(18, 110, 130, .25);
+      outline-offset: 2px;
+    }
+
+    .status-banner {
+      min-height: 42px;
+      border: 1px solid var(--border);
+      background: #fff;
+      border-radius: 8px;
+      padding: 10px 12px;
+      color: var(--muted);
+    }
+
+    .status-banner.error {
+      border-color: #f0b3ad;
+      color: var(--fail);
+      background: #fff4f2;
+    }
+
+    .status-banner.ok {
+      border-color: #a9dbc0;
+      color: #0f6532;
+      background: #f1fbf5;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1.1fr .9fr;
+      gap: 16px;
+      align-items: start;
+    }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(120px, 1fr));
+      gap: 10px;
+    }
+
+    .metric {
+      min-height: 84px;
+      border: 1px solid var(--line);
+      background: #fbfcfe;
+      border-radius: 8px;
+      padding: 12px;
+    }
+
+    .metric span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .metric strong {
+      display: block;
+      margin-top: 8px;
+      font-size: 26px;
+      line-height: 1;
+    }
+
+    .workflow {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(112px, 1fr));
+      gap: 8px;
+    }
+
+    .step {
+      min-height: 96px;
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--idle);
+      border-radius: 8px;
+      background: #fff;
+      padding: 10px;
+    }
+
+    .step.done { border-left-color: var(--ok); }
+    .step.failed { border-left-color: var(--fail); }
+    .step.blocked { border-left-color: var(--warn); }
+    .step.pending { border-left-color: var(--idle); }
+
+    .step-title {
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+
+    .step small {
+      color: var(--muted);
+      overflow-wrap: anywhere;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+
+    .filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 760px;
+    }
+
+    th, td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      background: #f8fafc;
+      position: sticky;
+      top: 0;
+    }
+
+    tr:last-child td { border-bottom: 0; }
+
+    .clickable-row { cursor: pointer; }
+    .clickable-row:hover { background: #f7fbfd; }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 12px;
+      font-weight: 700;
+      background: var(--panel-2);
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .badge.p0 { background: #fee4e2; color: var(--p0); }
+    .badge.p1 { background: #ffead5; color: var(--p1); }
+    .badge.p2 { background: #dbeafe; color: var(--p2); }
+    .badge.pass { background: #dcfae6; color: var(--ok); }
+    .badge.fail { background: #fee4e2; color: var(--fail); }
+    .badge.warn { background: #fef0c7; color: var(--warn); }
+
+    .preview {
+      display: grid;
+      min-height: 360px;
+      border: 1px dashed #b8c4d2;
+      border-radius: 8px;
+      background:
+        linear-gradient(45deg, #f7f9fb 25%, transparent 25%),
+        linear-gradient(-45deg, #f7f9fb 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #f7f9fb 75%),
+        linear-gradient(-45deg, transparent 75%, #f7f9fb 75%);
+      background-size: 28px 28px;
+      background-position: 0 0, 0 14px, 14px -14px, -14px 0;
+      place-items: center;
+      text-align: center;
+      padding: 24px;
+    }
+
+    .preview strong {
+      display: block;
+      font-size: 18px;
+      margin-bottom: 8px;
+    }
+
+    .empty {
+      color: var(--muted);
+      background: #fbfcfe;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+    }
+
+    .stack {
+      display: grid;
+      gap: 16px;
+    }
+
+    .muted { color: var(--muted); }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .truncate { max-width: 280px; overflow-wrap: anywhere; }
+
+    @media (max-width: 1100px) {
+      .load-panel, .grid, .topbar { grid-template-columns: 1fr; }
+      .metric-grid { grid-template-columns: repeat(3, minmax(120px, 1fr)); }
+      .workflow { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
+    }
+
+    @media (max-width: 640px) {
+      main, .topbar { padding-left: 14px; padding-right: 14px; }
+      .metric-grid { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
+      .workflow { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="topbar">
+      <div>
+        <h1>Scan QC Workbench Prototype</h1>
+        <p class="subtitle">Static operator and reviewer workbench for existing aggregate and scan report JSON artifacts.</p>
+      </div>
+      <p class="privacy-note">Local prototype only. Do not commit or share loaded private images, paths, hashes, OCR text, thumbnails, or row-level evidence.</p>
+    </div>
+  </header>
+
+  <main>
+    <section class="load-panel" aria-labelledby="load-title" data-region="artifact-loader">
+      <div class="panel">
+        <h2 id="load-title">Load Artifact</h2>
+        <p class="muted">Choose a <span class="mono">run_plan_summary.json</span> or <span class="mono">scan_qc_report.json</span>. Files are parsed in this browser only.</p>
+        <div class="file-row">
+          <input id="artifactFile" type="file" accept="application/json,.json">
+          <button id="clearButton" class="secondary" type="button">Clear</button>
+        </div>
+      </div>
+      <div id="statusBanner" class="status-banner" role="status" aria-live="polite">No artifact loaded. Overview, workflow, batches, findings, and preview will appear after loading JSON.</div>
+    </section>
+
+    <section class="panel" aria-labelledby="overview-title" data-region="overview-metrics">
+      <h2 id="overview-title">Overview Metrics</h2>
+      <div id="metricGrid" class="metric-grid"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="workflow-title" data-region="workflow-steps" style="margin-top:16px">
+      <h2 id="workflow-title">Workflow Steps</h2>
+      <div id="workflowGrid" class="workflow"></div>
+    </section>
+
+    <div class="grid" style="margin-top:16px">
+      <div class="stack">
+        <section class="panel" aria-labelledby="batch-title" data-region="batch-list">
+          <div class="toolbar">
+            <h2 id="batch-title">Batch List</h2>
+            <div class="filters">
+              <label>Status
+                <select id="statusFilter">
+                  <option value="all">All</option>
+                  <option value="passed">Passed</option>
+                  <option value="failed">Failed</option>
+                  <option value="warning">Warning</option>
+                </select>
+              </label>
+              <label>Severity
+                <select id="severityFilter">
+                  <option value="all">All</option>
+                  <option value="P0">P0</option>
+                  <option value="P1">P1</option>
+                  <option value="P2">P2</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <div id="batchList"></div>
+        </section>
+
+        <section class="panel" aria-labelledby="finding-title" data-region="findings-list">
+          <div class="toolbar">
+            <h2 id="finding-title">Findings List</h2>
+            <div class="filters">
+              <label>Finding Severity
+                <select id="findingSeverityFilter">
+                  <option value="all">All</option>
+                  <option value="P0">P0</option>
+                  <option value="P1">P1</option>
+                  <option value="P2">P2</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <div id="findingsList"></div>
+        </section>
+      </div>
+
+      <aside class="stack">
+        <section class="panel" aria-labelledby="detail-title" data-region="batch-detail">
+          <h2 id="detail-title">Batch Detail</h2>
+          <div id="batchDetail" class="empty">Select a batch or load a scan report to see summary details.</div>
+        </section>
+
+        <section class="panel" aria-labelledby="preview-title" data-region="image-preview">
+          <h2 id="preview-title">Image Preview</h2>
+          <div id="imagePreview" class="preview">
+            <div>
+              <strong>No preview loaded</strong>
+              <p class="muted">This static prototype does not read directories or process images. A future local service can provide controlled preview URLs.</p>
+            </div>
+          </div>
+        </section>
+      </aside>
+    </div>
+  </main>
+
+  <script>
+    "use strict";
+
+    const SAMPLE_EMPTY = {
+      sourceType: "empty",
+      projectId: "No project loaded",
+      generatedAt: "",
+      metrics: {
+        totalBatches: 0,
+        passedBatches: 0,
+        failedBatches: 0,
+        totalFiles: 0,
+        totalFindings: 0,
+        p0: 0,
+        p1: 0,
+        p2: 0,
+        preflightErrors: 0,
+        processingFailed: 0
+      },
+      batches: [],
+      findings: [],
+      detail: null
+    };
+
+    const state = {
+      model: SAMPLE_EMPTY,
+      selectedBatchId: null
+    };
+
+    const els = {
+      file: document.getElementById("artifactFile"),
+      clear: document.getElementById("clearButton"),
+      status: document.getElementById("statusBanner"),
+      metrics: document.getElementById("metricGrid"),
+      workflow: document.getElementById("workflowGrid"),
+      batchList: document.getElementById("batchList"),
+      findingsList: document.getElementById("findingsList"),
+      batchDetail: document.getElementById("batchDetail"),
+      preview: document.getElementById("imagePreview"),
+      statusFilter: document.getElementById("statusFilter"),
+      severityFilter: document.getElementById("severityFilter"),
+      findingSeverityFilter: document.getElementById("findingSeverityFilter")
+    };
+
+    function text(value, fallback = "Not provided") {
+      if (value === null || value === undefined || value === "") return fallback;
+      return String(value);
+    }
+
+    function number(value) {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+
+    function escapeHtml(value) {
+      return text(value, "").replace(/[&<>"']/g, char => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        "\"": "&quot;",
+        "'": "&#39;"
+      }[char]));
+    }
+
+    function inferArtifact(payload) {
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+        throw new Error("JSON root must be an object.");
+      }
+      if (Array.isArray(payload.batches) || String(payload.schema_version || "").includes("run-plan")) {
+        return buildRunPlanModel(payload);
+      }
+      if (payload.summary || Array.isArray(payload.findings) || Array.isArray(payload.files)) {
+        return buildScanReportModel(payload);
+      }
+      throw new Error("Unsupported artifact. Load run_plan_summary.json or scan_qc_report.json.");
+    }
+
+    function buildRunPlanModel(payload) {
+      const summary = payload.summary || {};
+      const batches = Array.isArray(payload.batches) ? payload.batches.map((batch, index) => ({
+        id: text(batch.batch_id, `batch-${index + 1}`),
+        status: normalizeStatus(batch.status),
+        failureStage: text(batch.failure_stage, ""),
+        failureReason: text(batch.failure_reason, ""),
+        reportDir: text(batch.report_dir, ""),
+        processOut: text(batch.process_out, ""),
+        totalFiles: number(batch.total_files),
+        openableFiles: number(batch.openable_files),
+        totalFindings: number(batch.total_findings),
+        p0: number(batch.p0_findings),
+        p1: number(batch.p1_findings),
+        p2: number(batch.p2_findings),
+        preflightErrors: number(batch.preflight_error_count),
+        processingFailed: number(batch.processing_failed_files)
+      })) : [];
+
+      return {
+        sourceType: "run-plan",
+        projectId: text(payload.project_id, "Unknown project"),
+        generatedAt: text(payload.generated_at || payload.finished_at, ""),
+        metrics: {
+          totalBatches: number(summary.total_batches || batches.length),
+          passedBatches: number(summary.passed_batches),
+          failedBatches: number(summary.failed_batches),
+          totalFiles: sum(batches, "totalFiles"),
+          totalFindings: number(summary.total_findings || sum(batches, "totalFindings")),
+          p0: number(summary.p0_findings || sum(batches, "p0")),
+          p1: number(summary.p1_findings || sum(batches, "p1")),
+          p2: number(summary.p2_findings || sum(batches, "p2")),
+          preflightErrors: number(summary.preflight_error_count || sum(batches, "preflightErrors")),
+          processingFailed: number(summary.processing_failed_files || sum(batches, "processingFailed"))
+        },
+        batches,
+        findings: [],
+        detail: { kind: "run-plan", rawSummary: summary }
+      };
+    }
+
+    function buildScanReportModel(payload) {
+      const summary = payload.summary || {};
+      const project = payload.project || {};
+      const manifest = payload.manifest || {};
+      const findings = Array.isArray(payload.findings) ? payload.findings.map((finding, index) => ({
+        id: `F${String(index + 1).padStart(4, "0")}`,
+        batchId: text(manifest.batch_id, "scan-report"),
+        rule: text(finding.rule, "unknown_rule"),
+        severity: text(finding.severity, "P2"),
+        source: text(finding.source, "rules"),
+        confidence: text(finding.confidence, ""),
+        message: text(finding.message, "No message"),
+        relativePath: text(finding.relative_path, "Private path hidden")
+      })) : [];
+
+      const batch = {
+        id: text(manifest.batch_id, "scan-report"),
+        status: number(summary.p0_findings) > 0 ? "failed" : "passed",
+        failureStage: number(summary.p0_findings) > 0 ? "scan" : "",
+        failureReason: number(summary.p0_findings) > 0 ? "P0 findings present" : "",
+        reportDir: "",
+        processOut: "",
+        totalFiles: number(summary.total_files),
+        openableFiles: number(summary.openable_files),
+        totalFindings: number(summary.total_findings || findings.length),
+        p0: number(summary.p0_findings),
+        p1: number(summary.p1_findings),
+        p2: number(summary.p2_findings),
+        preflightErrors: 0,
+        processingFailed: 0
+      };
+
+      return {
+        sourceType: "scan-report",
+        projectId: text(project.project_id, "Unknown project"),
+        generatedAt: text(payload.generated_at, ""),
+        metrics: {
+          totalBatches: 1,
+          passedBatches: batch.status === "passed" ? 1 : 0,
+          failedBatches: batch.status === "failed" ? 1 : 0,
+          totalFiles: batch.totalFiles,
+          totalFindings: batch.totalFindings,
+          p0: batch.p0,
+          p1: batch.p1,
+          p2: batch.p2,
+          preflightErrors: 0,
+          processingFailed: 0
+        },
+        batches: [batch],
+        findings,
+        detail: {
+          kind: "scan-report",
+          manifest,
+          performance: summary.performance || {},
+          ruleCatalog: payload.rule_catalog || {}
+        }
+      };
+    }
+
+    function normalizeStatus(value) {
+      const status = text(value, "pending").toLowerCase();
+      if (["pass", "passed", "success", "complete", "completed"].includes(status)) return "passed";
+      if (["fail", "failed", "error"].includes(status)) return "failed";
+      if (["warning", "warn", "blocked"].includes(status)) return "warning";
+      return status || "pending";
+    }
+
+    function sum(items, key) {
+      return items.reduce((total, item) => total + number(item[key]), 0);
+    }
+
+    function render() {
+      renderStatus();
+      renderMetrics();
+      renderWorkflow();
+      renderBatches();
+      renderFindings();
+      renderDetail();
+      renderPreview();
+    }
+
+    function renderStatus(kind = "idle", message = "") {
+      els.status.className = "status-banner";
+      if (kind === "error") els.status.classList.add("error");
+      if (kind === "ok") els.status.classList.add("ok");
+      if (message) {
+        els.status.textContent = message;
+        return;
+      }
+      if (state.model.sourceType === "empty") {
+        els.status.textContent = "No artifact loaded. Overview, workflow, batches, findings, and preview will appear after loading JSON.";
+        return;
+      }
+      els.status.classList.add("ok");
+      els.status.textContent = `Loaded ${state.model.sourceType} for ${state.model.projectId}. Missing optional fields are shown as empty values.`;
+    }
+
+    function renderMetrics() {
+      const metrics = state.model.metrics;
+      const cards = [
+        ["Project", state.model.projectId],
+        ["Batches", metrics.totalBatches],
+        ["Passed", metrics.passedBatches],
+        ["Failed", metrics.failedBatches],
+        ["Files", metrics.totalFiles],
+        ["Findings", metrics.totalFindings],
+        ["P0", metrics.p0],
+        ["P1", metrics.p1],
+        ["P2", metrics.p2],
+        ["Preflight Errors", metrics.preflightErrors],
+        ["Processing Failed", metrics.processingFailed],
+        ["Generated", state.model.generatedAt || "Not provided"]
+      ];
+      els.metrics.innerHTML = cards.map(([label, value]) => `
+        <div class="metric">
+          <span>${escapeHtml(label)}</span>
+          <strong>${escapeHtml(value)}</strong>
+        </div>
+      `).join("");
+    }
+
+    function renderWorkflow() {
+      const hasData = state.model.sourceType !== "empty";
+      const m = state.model.metrics;
+      const steps = [
+        ["Configure Batches", hasData ? "done" : "pending", hasData ? "Artifact loaded" : "Waiting for JSON artifact"],
+        ["Preflight", m.preflightErrors > 0 ? "failed" : hasData ? "done" : "pending", m.preflightErrors > 0 ? `${m.preflightErrors} errors` : "Aggregate status only"],
+        ["QC Scan", m.p0 > 0 ? "failed" : hasData ? "done" : "pending", m.p0 > 0 ? "P0 review required" : "Summary available"],
+        ["Processing Copy", m.processingFailed > 0 ? "failed" : hasData ? "blocked" : "pending", hasData ? "Optional backend artifact only" : "No processing state"],
+        ["Review Export", m.totalFindings > 0 ? "blocked" : hasData ? "done" : "pending", m.totalFindings > 0 ? "Findings require review" : "No findings loaded"],
+        ["Acceptance Summary", m.failedBatches > 0 || m.p0 > 0 ? "blocked" : hasData ? "done" : "pending", "Read-only prototype state"],
+        ["Handoff Manifest", hasData ? "blocked" : "pending", "Use existing CLI/report artifacts"]
+      ];
+      els.workflow.innerHTML = steps.map(([title, status, note]) => `
+        <div class="step ${status}">
+          <div class="step-title">${escapeHtml(title)}</div>
+          <span class="badge ${status === "failed" ? "fail" : status === "done" ? "pass" : status === "blocked" ? "warn" : ""}">${escapeHtml(status)}</span>
+          <br><small>${escapeHtml(note)}</small>
+        </div>
+      `).join("");
+    }
+
+    function renderBatches() {
+      const statusFilter = els.statusFilter.value;
+      const severityFilter = els.severityFilter.value;
+      let batches = state.model.batches.slice();
+      if (statusFilter !== "all") batches = batches.filter(batch => batch.status === statusFilter);
+      if (severityFilter !== "all") batches = batches.filter(batch => number(batch[severityFilter.toLowerCase()]) > 0);
+      if (!batches.length) {
+        els.batchList.innerHTML = `<div class="empty">No batches match the current filters.</div>`;
+        return;
+      }
+      els.batchList.innerHTML = `
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Batch</th><th>Status</th><th>Files</th><th>Findings</th><th>P0/P1/P2</th><th>Failure</th><th>Report</th></tr></thead>
+            <tbody>
+              ${batches.map(batch => `
+                <tr class="clickable-row" data-batch-id="${escapeHtml(batch.id)}">
+                  <td class="mono">${escapeHtml(batch.id)}</td>
+                  <td>${statusBadge(batch.status)}</td>
+                  <td>${escapeHtml(batch.openableFiles)} / ${escapeHtml(batch.totalFiles)}</td>
+                  <td>${escapeHtml(batch.totalFindings)}</td>
+                  <td><span class="badge p0">${batch.p0}</span> <span class="badge p1">${batch.p1}</span> <span class="badge p2">${batch.p2}</span></td>
+                  <td class="truncate">${escapeHtml([batch.failureStage, batch.failureReason].filter(Boolean).join(": ") || "None")}</td>
+                  <td class="truncate mono">${escapeHtml(batch.reportDir || "Not provided")}</td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>`;
+      els.batchList.querySelectorAll("[data-batch-id]").forEach(row => {
+        row.addEventListener("click", () => {
+          state.selectedBatchId = row.getAttribute("data-batch-id");
+          renderDetail();
+        });
+      });
+    }
+
+    function renderFindings() {
+      let findings = state.model.findings.slice();
+      const severity = els.findingSeverityFilter.value;
+      if (severity !== "all") findings = findings.filter(finding => finding.severity === severity);
+      if (!findings.length) {
+        els.findingsList.innerHTML = `<div class="empty">No scan report findings loaded for the current filter. Run-plan summaries expose aggregate counts only.</div>`;
+        return;
+      }
+      els.findingsList.innerHTML = `
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>ID</th><th>Severity</th><th>Rule</th><th>Source</th><th>Confidence</th><th>Message</th><th>Relative Path</th></tr></thead>
+            <tbody>
+              ${findings.map(finding => `
+                <tr>
+                  <td class="mono">${escapeHtml(finding.id)}</td>
+                  <td>${severityBadge(finding.severity)}</td>
+                  <td class="mono">${escapeHtml(finding.rule)}</td>
+                  <td>${escapeHtml(finding.source)}</td>
+                  <td>${escapeHtml(finding.confidence)}</td>
+                  <td class="truncate">${escapeHtml(finding.message)}</td>
+                  <td class="truncate mono">${escapeHtml(finding.relativePath)}</td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>`;
+    }
+
+    function renderDetail() {
+      const batch = state.model.batches.find(item => item.id === state.selectedBatchId) || state.model.batches[0];
+      if (!batch) {
+        els.batchDetail.innerHTML = "Select a batch or load a scan report to see summary details.";
+        els.batchDetail.className = "empty";
+        return;
+      }
+      els.batchDetail.className = "";
+      const perf = state.model.detail && state.model.detail.performance ? state.model.detail.performance : {};
+      els.batchDetail.innerHTML = `
+        <div class="table-wrap">
+          <table>
+            <tbody>
+              ${kv("Batch", batch.id)}
+              ${kv("Status", batch.status)}
+              ${kv("Openable Files", `${batch.openableFiles} / ${batch.totalFiles}`)}
+              ${kv("Findings", batch.totalFindings)}
+              ${kv("Preflight Errors", batch.preflightErrors)}
+              ${kv("Processing Failed", batch.processingFailed)}
+              ${kv("Failure Stage", batch.failureStage || "None")}
+              ${kv("Failure Reason", batch.failureReason || "None")}
+              ${kv("Scan Throughput", perf.files_per_minute ? `${perf.files_per_minute} files/min` : "Not provided")}
+            </tbody>
+          </table>
+        </div>`;
+    }
+
+    function renderPreview() {
+      els.preview.innerHTML = `
+        <div>
+          <strong>Preview placeholder</strong>
+          <p class="muted">No image is loaded or transformed in this static prototype. Use existing local reports for review, and keep private source media in controlled storage.</p>
+        </div>`;
+    }
+
+    function kv(label, value) {
+      return `<tr><th>${escapeHtml(label)}</th><td class="truncate">${escapeHtml(value)}</td></tr>`;
+    }
+
+    function statusBadge(status) {
+      const cls = status === "passed" ? "pass" : status === "failed" ? "fail" : status === "warning" ? "warn" : "";
+      return `<span class="badge ${cls}">${escapeHtml(status)}</span>`;
+    }
+
+    function severityBadge(severity) {
+      const cls = String(severity).toLowerCase();
+      return `<span class="badge ${cls}">${escapeHtml(severity)}</span>`;
+    }
+
+    async function loadFile(file) {
+      if (!file) return;
+      try {
+        const content = await file.text();
+        const payload = JSON.parse(content);
+        state.model = inferArtifact(payload);
+        state.selectedBatchId = state.model.batches[0] ? state.model.batches[0].id : null;
+        render();
+        renderStatus("ok", `Loaded ${file.name}: ${state.model.sourceType} artifact with ${state.model.metrics.totalFindings} findings.`);
+      } catch (error) {
+        state.model = SAMPLE_EMPTY;
+        state.selectedBatchId = null;
+        render();
+        renderStatus("error", `Could not load JSON: ${error.message}`);
+      }
+    }
+
+    els.file.addEventListener("change", event => loadFile(event.target.files[0]));
+    els.clear.addEventListener("click", () => {
+      els.file.value = "";
+      state.model = SAMPLE_EMPTY;
+      state.selectedBatchId = null;
+      render();
+    });
+    [els.statusFilter, els.severityFilter].forEach(el => el.addEventListener("change", renderBatches));
+    els.findingSeverityFilter.addEventListener("change", renderFindings);
+
+    render();
+  </script>
+</body>
+</html>
