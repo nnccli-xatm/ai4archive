@@ -19,6 +19,11 @@ from .deep_inspection_provider import (
     load_deep_inspection_provider_config,
     write_deep_inspection_provider_probe,
 )
+from .deep_inspection_candidates import (
+    build_deep_inspection_candidate_summary,
+    load_deep_inspection_candidate_inputs,
+    write_deep_inspection_candidate_summary,
+)
 from .evidence_bundle import EVIDENCE_BUNDLE_JSON, write_evidence_bundle_summary
 from .final_handoff import FINAL_HANDOFF_JSON, write_final_handoff_summary
 from .handoff import write_delivery_handoff_manifest
@@ -170,6 +175,8 @@ def main(argv: list[str] | None = None) -> int:
         return _main_capability_probe(argv[1:])
     if argv and argv[0] == "deep-inspection-provider-probe":
         return _main_deep_inspection_provider_probe(argv[1:])
+    if argv and argv[0] == "deep-inspection-candidate-summary":
+        return _main_deep_inspection_candidate_summary(argv[1:])
     if argv and argv[0] == "review-export":
         return _main_review_export(argv[1:])
     if argv and argv[0] == "review-summary":
@@ -387,6 +394,59 @@ def _main_deep_inspection_provider_probe(argv: list[str]) -> int:
     print(f"Missing requirements: {len(report['missing_requirements'])}")
     print("No inference run: true")
     print("Privacy: aggregate-only; no images, OCR text, paths, hashes, thumbnails, filenames, or row-level evidence.")
+    return 0
+
+
+def _main_deep_inspection_candidate_summary(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="archive-scan-qc deep-inspection-candidate-summary",
+        description=(
+            "Write an aggregate-only dry-run summary of already-detected QC targets that could be "
+            "candidates for later optional deep inspection. No inference, OCR, image processing, "
+            "directory scanning, provider subprocesses, or network calls are run."
+        ),
+    )
+    parser.add_argument("--scan-report", default=None, type=Path, help="Optional scan_qc_report.json input.")
+    parser.add_argument(
+        "--processing-review-package",
+        default=None,
+        type=Path,
+        help="Optional processing_review_package.json input.",
+    )
+    parser.add_argument(
+        "--provider-probe",
+        default=None,
+        type=Path,
+        help="Optional deep_inspection_provider_probe.json input for aggregate provider counts.",
+    )
+    parser.add_argument(
+        "--provider-config",
+        default=None,
+        type=Path,
+        help="Optional provider metadata config. It is parsed only for aggregate configured/provider counts.",
+    )
+    parser.add_argument("--out", required=True, type=Path, help="Output JSON path or directory.")
+    args = parser.parse_args(argv)
+    try:
+        inputs = load_deep_inspection_candidate_inputs(
+            scan_report_path=args.scan_report,
+            processing_review_package_path=args.processing_review_package,
+            provider_probe_path=args.provider_probe,
+            provider_config_path=args.provider_config,
+        )
+        summary = build_deep_inspection_candidate_summary(**inputs)
+        path = write_deep_inspection_candidate_summary(summary, args.out)
+    except (OSError, ValueError, json.JSONDecodeError, DeepInspectionProviderConfigError) as exc:
+        parser.error(str(exc))
+    print(f"Deep-inspection candidate summary: {path}")
+    print(f"Candidate total: {summary['candidate_total']}")
+    print(f"Provider configured: {str(summary['provider_configured']).lower()}")
+    print(f"Provider count: {summary['provider_count']}")
+    print("No inference run: true")
+    print(
+        "Privacy: aggregate-only; no filenames, paths, hashes, OCR text, thumbnails, image content, "
+        "row-level IDs, reviewer notes, manifests, derivative image references, or source roots."
+    )
     return 0
 
 
