@@ -1129,6 +1129,7 @@ class ScanQcTest(unittest.TestCase):
         self.assertEqual(summary["privacy"]["unsupported_private_input_count"], 1)
         self.assertIn("unsupported_private_input_rejected", summary["blocking_counts_by_code"])
         self.assertEqual(summary["artifact_presence"]["final_production_handoff_summary.json"]["status"], "pass")
+        self.assertNotIn("scan_qc_report.json", raw)
         self.assertNotIn("/Users/private/archive/page_0001.png", raw)
         self.assertNotIn("SECRET123", raw)
 
