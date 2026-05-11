@@ -1165,6 +1165,21 @@ outcomes, cleanup/privacy status, capability-probe counts, and the CPU/Pillow
 semantics marker. With the default cleanup mode, generated derivative outputs
 are deleted by the production validation wrapper after aggregate extraction.
 
+After `release_candidate_summary.json` and
+`aggregate_evidence_bundle_summary.json` are available, run:
+
+```bash
+archive-scan-qc final-handoff-summary \
+  --evidence-dir /placeholder/private-validation-output/release-candidate
+```
+
+The command writes `final_production_handoff_summary.json`, a public-safe final
+handoff status with `ready_for_handoff`, check counts, blocking item count,
+artifact status summary, and privacy status. It reads aggregate summaries only
+and reports blockers by code/count without copying private paths, filenames,
+hashes, OCR text, thumbnails, source roots, row-level findings, or derivative
+image evidence.
+
 See `docs/operations-runbook.md` for production installation, directory,
 privacy, troubleshooting, exit-code, and tuning guidance. See
 `docs/release-checklist.md` before publishing a release.

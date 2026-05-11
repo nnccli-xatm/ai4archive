@@ -20,6 +20,7 @@ from .deep_inspection_provider import (
     write_deep_inspection_provider_probe,
 )
 from .evidence_bundle import EVIDENCE_BUNDLE_JSON, write_evidence_bundle_summary
+from .final_handoff import FINAL_HANDOFF_JSON, write_final_handoff_summary
 from .handoff import write_delivery_handoff_manifest
 from .preflight import PreflightConfig, run_preflight, write_preflight_report
 from .processing import ProcessingOptions, process_images
@@ -182,6 +183,8 @@ def main(argv: list[str] | None = None) -> int:
         return _main_delivery_manifest(argv[1:])
     if argv and argv[0] == "evidence-bundle-verify":
         return _main_evidence_bundle_verify(argv[1:])
+    if argv and argv[0] == "final-handoff-summary":
+        return _main_final_handoff_summary(argv[1:])
     if argv and argv[0] == "processing-review-package":
         return _main_processing_review_package(argv[1:])
     if argv and argv[0] == "processing-plan":
@@ -572,6 +575,26 @@ def _main_evidence_bundle_verify(argv: list[str]) -> int:
     print(f"Checks failed: {payload['checks_failed']}")
     print("Privacy: aggregate-only verifier output; private indicators are reported by code only, with source values omitted.")
     return 0 if payload["status"] == "pass" else 1
+
+
+def _main_final_handoff_summary(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="archive-scan-qc final-handoff-summary",
+        description="Write final public-safe handoff status JSON from aggregate evidence summaries only.",
+    )
+    parser.add_argument("--evidence-dir", required=True, type=Path, help="Directory containing aggregate evidence summary JSON.")
+    parser.add_argument("--out", default=None, type=Path, help=f"Output JSON path or directory for {FINAL_HANDOFF_JSON}.")
+    args = parser.parse_args(argv)
+    try:
+        path, payload = write_final_handoff_summary(args.evidence_dir, args.out)
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    print(f"Final production handoff summary: {path}")
+    print(f"Handoff status: {payload['status']}")
+    print(f"Ready for handoff: {payload['ready_for_handoff']}")
+    print(f"Blocking items: {payload['blocking_item_count']}")
+    print("Privacy: aggregate-only handoff summary; blockers are reported by aggregate code/count only.")
+    return 0 if payload["ready_for_handoff"] else 1
 
 
 def _main_processing_review_package(argv: list[str]) -> int:
