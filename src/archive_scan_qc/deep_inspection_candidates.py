@@ -147,6 +147,8 @@ def _add_scan_report_candidates(
 
 def _add_processing_review_candidates(processing_review_package: dict[str, Any], candidates_by_reason: Counter[str]) -> int:
     candidate_count = 0
+    counted_failed = 0
+    counted_guardrail_warnings = 0
     summary = processing_review_package.get("summary")
     if isinstance(summary, dict):
         for status, count in _safe_counts(summary.get("status_counts")).items():
@@ -161,14 +163,24 @@ def _add_processing_review_candidates(processing_review_package: dict[str, Any],
             if count:
                 candidates_by_reason[reason] += count
                 candidate_count += count
+                if key == "failed_files":
+                    counted_failed += count
+                else:
+                    counted_guardrail_warnings += count
     groups = processing_review_package.get("groups")
     if isinstance(groups, dict):
+        counted_by_group = {
+            "failed": counted_failed,
+            "guardrail_warnings": counted_guardrail_warnings,
+        }
         for group_name in ("failed", "guardrail_warnings"):
             group = groups.get(group_name)
             if isinstance(group, dict):
                 count = _safe_int(group.get("count"))
-                if count:
-                    candidates_by_reason[f"processing_review_group:{group_name}"] += count
+                incremental_count = max(0, count - counted_by_group[group_name])
+                if incremental_count:
+                    candidates_by_reason[f"processing_review_group:{group_name}"] += incremental_count
+                    candidate_count += incremental_count
     return candidate_count
 
 
