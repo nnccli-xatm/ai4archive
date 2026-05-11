@@ -41,6 +41,7 @@ class WorkbenchArtifact:
 
 
 KNOWN_WORKBENCH_ARTIFACTS = (
+    WorkbenchArtifact(WORKBENCH_SUMMARY_JSON, "workbench_public_summary", "Workbench public summary", "scan-qc.workbench-public-summary."),
     WorkbenchArtifact("run_plan_summary.json", "run_plan", "Run-plan summary", "scan-qc.run-plan-summary."),
     WorkbenchArtifact(
         "aggregate_baseline_summary.json",
@@ -406,6 +407,18 @@ def _metrics(payload: dict[str, Any], expected: WorkbenchArtifact) -> dict[str, 
         summary = payload.get("summary")
         if isinstance(summary, dict):
             for key in ("artifacts_present", "artifacts_passed", "artifacts_failed", "artifacts_missing"):
+                metrics[key] = _safe_int(summary.get(key))
+    if expected.name == WORKBENCH_SUMMARY_JSON:
+        summary = payload.get("summary")
+        if isinstance(summary, dict):
+            for key in (
+                "known_artifacts",
+                "artifacts_present",
+                "artifacts_passed",
+                "artifacts_failed",
+                "artifacts_missing",
+                "unsupported_inputs",
+            ):
                 metrics[key] = _safe_int(summary.get(key))
     if expected.name == "deep_inspection_candidate_summary.json":
         for key in ("candidate_total", "provider_count"):
