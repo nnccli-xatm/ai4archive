@@ -231,11 +231,32 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   reports blockers by aggregate code/count, and does not read source images,
   row-level reports, manifests, OCR text, thumbnails, hashes, private roots, or
   derivative images.
+- Index approved aggregate artifacts and generate the public-safe artifact
+  readiness checklist for operator handoff/workbench inspection:
+
+  ```bash
+  archive-scan-qc public-safe-validation-index \
+    --input-dir /placeholder/private-validation-output/release-candidate
+
+  archive-scan-qc artifact-readiness-checklist \
+    --evidence-dir /placeholder/private-validation-output/release-candidate
+  ```
+
+  Share `artifact_readiness_checklist.json` when the release or workbench
+  handoff needs artifact-level readiness rows, aggregate missing counts, and
+  blocking/warning counts by code. Keep local private artifacts private:
+  source images, row-level findings, processing manifests, CSV row reports, OCR
+  text, thumbnails, hashes, private filenames or roots, derivative images,
+  reviewer notes, provider commands, raw model output, prompts, embeddings,
+  environment values, network/cloud locations, and preview state are not
+  shareable checklist inputs or outputs.
 - Optionally open `docs/frontend-workbench-prototype.html` locally and load
-  `final_production_handoff_summary.json` for static inspection of aggregate
-  readiness and code/count diagnostics. Do not load or publish private source
-  artifacts, object URLs, row-level findings, reviewer notes, prompts, provider
-  commands, raw model output, or actual sample data through the workbench.
+  `final_production_handoff_summary.json`,
+  `artifact_readiness_checklist.json`, or `workbench_public_summary.json` for
+  static inspection of aggregate readiness and code/count diagnostics. Do not
+  load or publish private source artifacts, object URLs, row-level findings,
+  reviewer notes, prompts, provider commands, raw model output, or actual
+  sample data through the workbench.
 
 ## Privacy prohibitions
 

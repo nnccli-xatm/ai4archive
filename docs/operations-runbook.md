@@ -569,13 +569,20 @@ archive-scan-qc evidence-bundle-verify \
 
 archive-scan-qc final-handoff-summary \
   --evidence-dir /placeholder/private-validation-output
+
+archive-scan-qc public-safe-validation-index \
+  --input-dir /placeholder/private-validation-output
+
+archive-scan-qc artifact-readiness-checklist \
+  --evidence-dir /placeholder/private-validation-output
 ```
 
 Optional inspection can then happen in the static workbench by loading
-`final_production_handoff_summary.json`. The workbench displays only aggregate
-status, readiness, compatibility diagnostics, and code/count summaries; it must
-not be used to publish loaded private files, local preview state, object URLs,
-or row-level evidence.
+`final_production_handoff_summary.json`,
+`artifact_readiness_checklist.json`, or `workbench_public_summary.json`. The
+workbench displays only aggregate status, readiness, compatibility diagnostics,
+and code/count summaries; it must not be used to publish loaded private files,
+local preview state, object URLs, or row-level evidence.
 
 `review_decision_verification_summary.json` is designed to contribute aggregate
 decision counts, privacy status, blocking and warning counts by code, and final
@@ -585,13 +592,19 @@ commands, raw model output, object URLs, or actual sample data.
 
 `aggregate_evidence_bundle_summary.json` and
 `final_production_handoff_summary.json` are public-safe aggregate summaries
-after local policy review. They report artifact presence, schema/status/count
-checks, aggregate blocker and warning codes, privacy indicators, and the final
-go/no-go handoff status. Local/source artifacts remain sensitive, including
-source and derivative images, scan reports, scan CSV/HTML exports, review
-templates, reviewer notes, processing manifests, retry manifests, delivery
-manifest rows for sensitive evidence, provider logs, and any artifact that
-contains row-level paths, hashes, messages, or local roots.
+after local policy review. `artifact_readiness_checklist.json` is also
+public-safe after local policy review when generated from aggregate fixtures or
+approved aggregate outputs only. It records expected artifact rows, present and
+missing counts, pass/fail readiness, aggregate blocking/warning code counts,
+and privacy indicators. Share it when operators need artifact-level readiness
+for a release/workbench handoff; otherwise the concise final handoff summary is
+enough. Local/source artifacts remain sensitive, including source and
+derivative images, scan reports, scan CSV/HTML exports, review templates,
+reviewer notes, processing manifests, retry manifests, delivery manifest rows
+for sensitive evidence, provider logs, provider commands, prompts, raw model
+output, embeddings, environment values, network/cloud locations, local preview
+state, and any artifact that contains row-level paths, hashes, messages, or
+local roots.
 
 ## Delivery Handoff Manifest
 
