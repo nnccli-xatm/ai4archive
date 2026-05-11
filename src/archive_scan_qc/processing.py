@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
+import shutil
 import time
 from typing import Any
 
@@ -157,6 +158,8 @@ def _process_records(
     workers: int,
     previous_records: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
+    if not options.resume_processing:
+        return _process_records_reusing_duplicates(files, input_dir, image_root, options, workers)
     if workers == 1:
         return [_process_record(item, input_dir, image_root, options, previous_records.get(item["relative_path"])) for item in files]
     with ThreadPoolExecutor(max_workers=workers) as executor:
@@ -166,6 +169,125 @@ def _process_records(
                 files,
             )
         )
+
+
+def _process_records_reusing_duplicates(
+    files: list[dict[str, Any]],
+    input_dir: Path,
+    image_root: Path,
+    options: ProcessingOptions,
+    workers: int,
+) -> list[dict[str, Any]]:
+    first_by_sha: dict[str, int] = {}
+    unique_items: list[dict[str, Any]] = []
+    unique_positions: list[int] = []
+    duplicate_sources: dict[int, int] = {}
+
+    for position, item in enumerate(files):
+        source_sha = item.get("sha256")
+        if not item.get("openable") or not isinstance(source_sha, str) or not source_sha:
+            unique_positions.append(position)
+            unique_items.append(item)
+            continue
+        first_position = first_by_sha.get(source_sha)
+        if first_position is None:
+            first_by_sha[source_sha] = position
+            unique_positions.append(position)
+            unique_items.append(item)
+        else:
+            duplicate_sources[position] = first_position
+
+    if workers == 1:
+        unique_records = [_process_record(item, input_dir, image_root, options) for item in unique_items]
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            unique_records = list(executor.map(lambda item: _process_record(item, input_dir, image_root, options), unique_items))
+
+    records: list[dict[str, Any] | None] = [None] * len(files)
+    for position, record in zip(unique_positions, unique_records):
+        records[position] = record
+    for position, source_position in duplicate_sources.items():
+        source_record = records[source_position]
+        if source_record is None or source_record.get("status") != "processed":
+            records[position] = _process_record(files[position], input_dir, image_root, options)
+        else:
+            records[position] = _reuse_duplicate_record(files[position], input_dir, image_root, options, source_record)
+    return [record for record in records if record is not None]
+
+
+def _reuse_duplicate_record(
+    item: dict[str, Any],
+    input_dir: Path,
+    image_root: Path,
+    options: ProcessingOptions,
+    source_record: dict[str, Any],
+) -> dict[str, Any]:
+    relative_path = item["relative_path"]
+    source = input_dir / relative_path
+    if not source.is_file() or _sha256(source) != item.get("sha256"):
+        return _process_record(item, input_dir, image_root, options)
+
+    target = image_root / relative_path
+    source_output_relative = source_record.get("output_relative_path")
+    if not isinstance(source_output_relative, str) or not source_output_relative:
+        record = dict(source_record)
+        record.update(
+            {
+                "source_relative_path": relative_path,
+                "source_sha256": item.get("sha256"),
+                "output_relative_path": None,
+                "output_sha256": None,
+                "status": "failed",
+                "resumed": False,
+                "reprocessed": False,
+                "operation_timings": {},
+                "error": "duplicate derivative source output is missing",
+                "failure_reason": "duplicate derivative source output is missing",
+            }
+        )
+        return record
+    source_output = image_root.parent / source_output_relative
+    try:
+        target.resolve().relative_to(image_root.parent.resolve())
+        if source_output.resolve() == target.resolve():
+            raise ValueError("duplicate derivative target matches source derivative")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source_output, target)
+    except (OSError, ValueError) as exc:
+        record = dict(source_record)
+        record.update(
+            {
+                "source_relative_path": relative_path,
+                "source_sha256": item.get("sha256"),
+                "output_relative_path": None,
+                "output_sha256": None,
+                "status": "failed",
+                "resumed": False,
+                "reprocessed": False,
+                "operation_timings": {},
+                "error": str(exc),
+                "failure_reason": str(exc),
+            }
+        )
+        return record
+
+    record = dict(source_record)
+    record.update(
+        {
+            "source_relative_path": relative_path,
+            "source_sha256": item.get("sha256"),
+            "output_relative_path": target.relative_to(image_root.parent).as_posix(),
+            "output_sha256": _sha256(target),
+            "status": "processed",
+            "resumed": False,
+            "reprocessed": False,
+            "operation_timings": {},
+            "operations": list(source_record.get("operations", [])) + ["reuse_duplicate_derivative"],
+            "error": None,
+            "failure_reason": None,
+        }
+    )
+    return record
 
 
 def _performance_summary(

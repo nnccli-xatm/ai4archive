@@ -3307,6 +3307,32 @@ class ScanQcTest(unittest.TestCase):
                 self.assertEqual(record["status"], "processed")
                 self.assertTrue((process_dir / record["output_relative_path"]).exists())
 
+    def test_processing_reuses_duplicate_source_derivative(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            nested_dir = input_dir / "nested"
+            nested_dir.mkdir(parents=True)
+
+            source = input_dir / "A001_0001.png"
+            Image.new("RGB", (40, 30), "white").save(source, dpi=(300, 300))
+            shutil.copyfile(source, nested_dir / "A001_0002.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir, workers=2))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, workers=2))
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            first = records["A001_0001.png"]
+            duplicate = records["nested/A001_0002.png"]
+            self.assertEqual(first["status"], "processed")
+            self.assertEqual(duplicate["status"], "processed")
+            self.assertIn("reuse_duplicate_derivative", duplicate["operations"])
+            self.assertEqual(first["output_sha256"], duplicate["output_sha256"])
+            self.assertEqual(manifest["summary"]["performance"]["operation_timings"]["auto_crop"]["file_count"], 1)
+            self.assertTrue((process_dir / duplicate["output_relative_path"]).exists())
+
     def test_multi_worker_processing_failure_does_not_stop_other_files(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
