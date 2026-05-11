@@ -973,6 +973,7 @@ class ScanQcTest(unittest.TestCase):
         self.assertIn("artifact_status_failed", {item["code"] for item in summary["blocking_items"]})
         self.assertIn("aggregate_artifact_missing", {item["code"] for item in summary["blocking_items"]})
         self.assertEqual(summary["summary"]["artifacts_missing"], 1)
+        self.assertTrue(summary["privacy"]["aggregate_only"])
 
     def test_public_safe_validation_index_omits_private_values_from_privacy_failures(self) -> None:
         forbidden_private_values = [
@@ -1005,6 +1006,7 @@ class ScanQcTest(unittest.TestCase):
 
         self.assertEqual(exit_code, 1)
         self.assertEqual(summary["status"], "fail")
+        self.assertTrue(summary["privacy"]["aggregate_only"])
         self.assertTrue(summary["privacy"]["private_indicators_found"])
         self.assertIn("private_value_present", {item["code"] for item in summary["blocking_items"]})
         self.assertIn("private_local_preview_object_url_present", {item["code"] for item in summary["blocking_items"]})

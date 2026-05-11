@@ -128,7 +128,7 @@ def build_public_safe_validation_index(
         "artifacts": artifacts,
         "blocking_items": blocking_items,
         "privacy": {
-            "aggregate_only": status == "pass",
+            "aggregate_only": True,
             "private_indicators_found": privacy_failure_count > 0,
             "private_indicator_count": privacy_failure_count,
             "contains_paths": False,
