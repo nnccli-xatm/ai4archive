@@ -96,12 +96,15 @@ REQUIRED_STRINGS = {
     "aggregateWarningCodes",
     "aggregateNestedStatusCounts",
     "aggregateWorkers",
+    "aggregatePrivacyOmissions",
+    "privacyOmits",
     "Privacy self-check status",
     "Privacy self-check violations",
     "Aggregate-only status from locally reviewed public-safe summary artifacts.",
     "Artifact Presence And Status",
     "Privacy Status",
     "Sensitivity",
+    "Omitted private evidence",
     "Ready for handoff",
     "Ready for release candidate",
     "Blocking Items",
@@ -142,6 +145,40 @@ FORBIDDEN_EXPORT_FIELDS = {
     "thumbnail",
     "absolute_path",
     "image_bytes",
+    "manifest",
+    "reviewer_notes",
+    "derivative_image",
+}
+
+REQUIRED_AGGREGATE_FIELDS = {
+    "acceptance pass/fail": "acceptancePassed",
+    "artifact type": "aggregateArtifactType",
+    "blocking codes": "blockingCodes",
+    "blocking item count": "blockingItemCount",
+    "privacy/sensitivity": "aggregatePrivacy",
+    "remaining p0": "remainingP0",
+    "remaining p1": "remainingP1",
+    "review status counts": "reviewStatusCounts",
+    "rule counts": "ruleCounts",
+    "rule status counts": "ruleStatusCounts",
+    "severity status counts": "severityStatusCounts",
+    "throughput": "aggregateThroughput",
+    "warning codes": "warningCodes",
+    "warning count": "warningCount",
+    "workers": "aggregateWorkers",
+}
+
+FORBIDDEN_AGGREGATE_PAYLOAD_FIELDS = {
+    "content hash": "hash",
+    "derivative image": "derivative_image",
+    "image content": "image_content",
+    "manifest rows": "manifest",
+    "ocr text": "ocr_text",
+    "private filename": "filename",
+    "private path": "path",
+    "reviewer notes": "reviewer_notes",
+    "row-level findings": "findings",
+    "thumbnail": "thumbnail",
 }
 
 
@@ -183,6 +220,41 @@ def main() -> int:
         for field in sorted(FORBIDDEN_EXPORT_FIELDS):
             if re.search(rf"\b{re.escape(field)}\b\s*:", import_block):
                 errors.append(f"review import reads forbidden field {field!r}")
+
+    aggregate_start = html.find("function buildAggregateHandoffModel")
+    aggregate_end = html.find("function normalizeStatus", aggregate_start)
+    if aggregate_start == -1 or aggregate_end == -1:
+        errors.append("missing aggregate summary model builder")
+    else:
+        aggregate_block = html[aggregate_start:aggregate_end]
+        for label, required in sorted(REQUIRED_AGGREGATE_FIELDS.items()):
+            if required not in aggregate_block:
+                errors.append(f"aggregate summary builder missing {label}: {required!r}")
+        for label, field in sorted(FORBIDDEN_AGGREGATE_PAYLOAD_FIELDS.items()):
+            pattern = rf"\bpayload\.{re.escape(field)}\b|\bpayload\[['\"]{re.escape(field)}['\"]\]"
+            if re.search(pattern, aggregate_block):
+                errors.append(f"aggregate summary builder reads forbidden {label} field {field!r}")
+
+    render_start = html.find("function renderAggregateHandoff")
+    render_end = html.find("function workerRange", render_start)
+    if render_start == -1 or render_end == -1:
+        errors.append("missing aggregate summary renderer")
+    else:
+        render_block = html[render_start:render_end]
+        expected_labels = {
+            "Acceptance Passed",
+            "Blocking And Warning Codes",
+            "Omitted private evidence",
+            "Privacy Status",
+            "Processing Workers",
+            "Review Status Counts",
+            "Rule Counts",
+            "Rule Status Counts",
+            "Scan Workers",
+        }
+        for label in sorted(expected_labels):
+            if label not in render_block:
+                errors.append(f"aggregate summary renderer missing label {label!r}")
 
     if "http://" in html or "https://" in html:
         errors.append("workbench should not depend on external network URLs")

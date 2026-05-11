@@ -930,19 +930,30 @@
       return {
         aggregateOnly: Boolean(privacy.aggregate_only) || sensitivityAggregateOnly,
         sensitivity: sensitivity || "Not provided",
+        omissions: aggregatePrivacyOmissions(privacy.omits),
         privateIndicatorsFound: Boolean(privacy.private_indicators_found),
         privateIndicatorCount: firstNumber(privacy.private_indicator_count),
-        containsPaths: Boolean(privacy.contains_paths),
-        containsFilenames: Boolean(privacy.contains_filenames),
-        containsHashes: Boolean(privacy.contains_hashes),
-        containsOcrText: Boolean(privacy.contains_ocr_text),
-        containsThumbnails: Boolean(privacy.contains_thumbnails),
-        containsImageContent: Boolean(privacy.contains_image_content),
-        containsRowLevelFindings: Boolean(privacy.contains_row_level_findings),
+        containsPaths: Boolean(privacy.contains_paths) && !privacyOmits(privacy.omits, "source location strings"),
+        containsFilenames: Boolean(privacy.contains_filenames) && !privacyOmits(privacy.omits, "source file identifiers"),
+        containsHashes: Boolean(privacy.contains_hashes) && !privacyOmits(privacy.omits, "content hashes"),
+        containsOcrText: Boolean(privacy.contains_ocr_text) && !privacyOmits(privacy.omits, "recognized text"),
+        containsThumbnails: Boolean(privacy.contains_thumbnails) && !privacyOmits(privacy.omits, "thumbnails"),
+        containsImageContent: Boolean(privacy.contains_image_content) && !privacyOmits(privacy.omits, "image content"),
+        containsRowLevelFindings: Boolean(privacy.contains_row_level_findings) && !privacyOmits(privacy.omits, "row-level findings"),
         redactsPrivateValues: Boolean(privacy.redacts_private_values || payload.sensitive_values_omitted),
         privacySelfCheckStatus: text(selfCheck.status, "Not provided"),
         privacySelfCheckViolations: firstNullableNumber(selfCheck.violation_count)
       };
+    }
+
+    function aggregatePrivacyOmissions(items) {
+      if (!Array.isArray(items)) return "Not provided";
+      const labels = items.map(item => text(item, "")).filter(Boolean);
+      return labels.length ? labels.join(", ") : "Not provided";
+    }
+
+    function privacyOmits(items, value) {
+      return Array.isArray(items) && items.map(item => text(item, "").toLowerCase()).includes(value);
     }
 
     function aggregateStatusCounts(source) {
@@ -1099,6 +1110,7 @@
       const privacyRows = [
         ["Aggregate only", aggregate.privacy.aggregateOnly],
         ["Sensitivity", aggregate.privacy.sensitivity],
+        ["Omitted private evidence", aggregate.privacy.omissions],
         ["Private indicators found", aggregate.privacy.privateIndicatorsFound],
         ["Private indicator count", aggregate.privacy.privateIndicatorCount],
         ["Contains paths", aggregate.privacy.containsPaths],
