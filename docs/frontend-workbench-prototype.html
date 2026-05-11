@@ -3028,8 +3028,8 @@
       const hasPreview = Boolean(previewState.objectUrl);
       previewEls.clear.disabled = !hasPreview;
       previewEls.privacyCopy.innerHTML = `
-        <span>Selected ${slot} preview filename: ${escapeHtml(previewState.fileName || "none")}</span>
-        <span>${label} preview is excluded from review-decision export JSON.</span>`;
+        <span>${label} preview status: ${hasPreview ? "selected" : "not selected"}</span>
+        <span>${label} preview local state is excluded from review-decision export JSON.</span>`;
       if (hasPreview) {
         const zoomStyle = state.previewDisplay.mode === "zoom" ? ` style="--preview-zoom: ${state.previewDisplay.zoom}"` : "";
         previewEls.preview.className = state.previewDisplay.mode === "zoom" ? "preview has-image preview-zoom" : "preview has-image";
