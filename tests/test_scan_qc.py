@@ -5178,6 +5178,54 @@ class ScanQcTest(unittest.TestCase):
             self.assertTrue(audit_summary["timing"]["operation_timings"]["despeckle"]["enabled"])
             self.assertEqual(audit_summary["timing"]["operation_timings"]["despeckle"]["file_count"], 1)
             self.assertGreaterEqual(audit_summary["timing"]["operation_timings"]["despeckle"]["elapsed_seconds"], 0.0)
+            self.assertIn(audit_summary["timing"]["operation_timings"]["despeckle"]["backend_mode"], {"numpy", "fallback"})
+            self.assertEqual(sum(audit_summary["timing"]["operation_timings"]["despeckle"]["backend_counts"].values()), 1)
+
+    def test_processing_audit_reports_numpy_despeckle_backend_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            image = Image.new("RGB", (20, 20), "white")
+            image.putpixel((10, 10), (0, 0, 0))
+            image.save(input_dir / "synthetic.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            with mock.patch("archive_scan_qc.processing._despeckle_candidate_points_numpy", return_value=[(10, 10)]):
+                manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, workers=1))
+            audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
+            despeckle_timing = audit_summary["timing"]["operation_timings"]["despeckle"]
+
+            self.assertEqual(manifest["files"][0]["despeckle_backend_mode"], "numpy")
+            self.assertEqual(despeckle_timing["backend_mode"], "numpy")
+            self.assertTrue(despeckle_timing["numpy_available"])
+            self.assertEqual(despeckle_timing["backend_counts"]["numpy"], 1)
+            self.assertEqual(despeckle_timing["backend_counts"]["fallback"], 0)
+
+    def test_processing_audit_reports_fallback_despeckle_backend_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            image = Image.new("RGB", (20, 20), "white")
+            image.putpixel((10, 10), (0, 0, 0))
+            image.save(input_dir / "synthetic.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            with mock.patch("archive_scan_qc.processing._load_numpy", return_value=None):
+                manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, workers=1))
+            audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
+            despeckle_timing = audit_summary["timing"]["operation_timings"]["despeckle"]
+
+            self.assertEqual(manifest["files"][0]["despeckle_backend_mode"], "fallback")
+            self.assertEqual(despeckle_timing["backend_mode"], "fallback")
+            self.assertFalse(despeckle_timing["numpy_available"])
+            self.assertEqual(despeckle_timing["backend_counts"]["numpy"], 0)
+            self.assertEqual(despeckle_timing["backend_counts"]["fallback"], 1)
 
     def test_processing_guardrail_fails_overprocessed_derivative_without_touching_source(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -5916,12 +5964,14 @@ class ScanQcTest(unittest.TestCase):
             batch_two = root / "PRIVATE_BATCH_TWO"
             batch_one.mkdir()
             batch_two.mkdir()
-            Image.new("RGB", (48, 36), "white").save(batch_one / "SECRET_ONE.png", dpi=(300, 300))
+            batch_one_image = Image.new("RGB", (48, 36), "white")
+            batch_one_image.putpixel((12, 12), (0, 0, 0))
+            batch_one_image.save(batch_one / "SECRET_ONE.png", dpi=(300, 300))
             Image.new("RGB", (48, 36), "white").save(batch_two / "SECRET_TWO.png", dpi=(300, 300))
             plan_path.write_text(
-                "batch_id,input_dir,report_dir,process_out,workers,auto_crop,resume_processing\n"
-                f"batch-one,{batch_one},reports-one,processed-one,1,true,false\n"
-                f"batch-two,{batch_two},reports-two,processed-two,1,false,true\n",
+                "batch_id,input_dir,report_dir,process_out,workers,auto_crop,despeckle,resume_processing\n"
+                f"batch-one,{batch_one},reports-one,processed-one,1,true,true,false\n"
+                f"batch-two,{batch_two},reports-two,processed-two,1,false,false,true\n",
                 encoding="utf-8",
             )
 
@@ -5943,6 +5993,10 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(summary["summary"]["failed_batches"], 0)
             self.assertEqual(summary["summary"]["processing_failed_files"], 0)
             self.assertEqual(summary["batches"][1]["processing_resumed_files"], 0)
+            despeckle_timing = summary["summary"]["processing_operation_timings"]["despeckle"]
+            self.assertEqual(despeckle_timing["file_count"], 1)
+            self.assertIn(despeckle_timing["backend_mode"], {"numpy", "fallback"})
+            self.assertEqual(sum(despeckle_timing["backend_counts"].values()), 1)
 
     def test_run_plan_continue_on_error_records_preflight_failure(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
