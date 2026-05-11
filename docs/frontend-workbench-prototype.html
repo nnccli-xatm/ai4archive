@@ -221,6 +221,7 @@
     }
 
     .metric {
+      min-width: 0;
       min-height: 84px;
       border: 1px solid var(--line);
       background: #fbfcfe;
@@ -239,6 +240,7 @@
       margin-top: 8px;
       font-size: 26px;
       line-height: 1;
+      overflow-wrap: anywhere;
     }
 
     .workflow {
@@ -410,6 +412,39 @@
       color: var(--muted);
       padding: 8px 10px;
       white-space: nowrap;
+    }
+
+    .review-bulk-bar {
+      display: grid;
+      grid-template-columns: minmax(180px, 240px) auto minmax(220px, 1fr);
+      gap: 8px;
+      align-items: end;
+      margin-bottom: 12px;
+    }
+
+    .review-bulk-bar label {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .review-bulk-bar select {
+      width: 100%;
+      min-width: 0;
+    }
+
+    .review-bulk-status {
+      min-height: 38px;
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+      color: var(--muted);
+      padding: 8px 10px;
+      overflow-wrap: anywhere;
     }
 
     .review-target-list table {
@@ -642,6 +677,8 @@
       .workflow { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
       .decision-strip { grid-template-columns: repeat(3, minmax(112px, 1fr)); }
       .review-filter-bar { grid-template-columns: repeat(2, minmax(132px, 1fr)); }
+      .review-bulk-bar { grid-template-columns: minmax(180px, 1fr) auto; }
+      .review-bulk-status { grid-column: 1 / -1; }
       .readiness-summary { grid-template-columns: 1fr; }
     }
 
@@ -651,6 +688,8 @@
       .workflow { grid-template-columns: 1fr; }
       .decision-strip { grid-template-columns: repeat(2, minmax(112px, 1fr)); }
       .review-filter-bar { grid-template-columns: 1fr; }
+      .review-bulk-bar { grid-template-columns: 1fr; }
+      .review-bulk-bar button { width: 100%; }
       .review-filter-count { justify-content: flex-start; white-space: normal; }
       .review-select { min-width: 0; width: 100%; }
       table, .review-target-list table { min-width: 100%; }
@@ -768,6 +807,19 @@
           </select>
         </label>
         <div id="reviewFilterCount" class="review-filter-count" role="status" aria-live="polite">Showing 0 of 0 targets</div>
+      </div>
+      <div class="review-bulk-bar" aria-label="Filtered bulk review decision actions">
+        <label>Bulk visible decision
+          <select id="bulkReviewDecision">
+            <option value="accepted_issue">Accepted issue</option>
+            <option value="false_positive">False positive</option>
+            <option value="fixed_externally">Fixed externally</option>
+            <option value="needs_rescan">Needs rescan</option>
+            <option value="blocked">Blocked</option>
+          </select>
+        </label>
+        <button id="applyBulkReviewDecisionButton" class="secondary" type="button" disabled>Apply to Visible Targets</button>
+        <div id="bulkReviewStatus" class="review-bulk-status" role="status" aria-live="polite">No filtered bulk decision applied. Bulk actions update only visible targets in this browser tab.</div>
       </div>
       <div id="reviewTargetList" class="review-target-list" aria-live="polite"></div>
       <div id="reviewImportStatus" class="status-banner" role="status" aria-live="polite" style="margin-bottom:12px">No review-decision summary imported. Imports restore only scope, synthetic/local ID, and decision status; private filenames, paths, hashes, OCR text, thumbnails, image content, row-level findings, reviewer notes, manifests, and derivative image references are ignored.</div>
@@ -1399,6 +1451,9 @@
       reviewSeverityFilter: document.getElementById("reviewSeverityFilter"),
       reviewStatusFilter: document.getElementById("reviewStatusFilter"),
       reviewFilterCount: document.getElementById("reviewFilterCount"),
+      bulkReviewDecision: document.getElementById("bulkReviewDecision"),
+      applyBulkReviewDecisionButton: document.getElementById("applyBulkReviewDecisionButton"),
+      bulkReviewStatus: document.getElementById("bulkReviewStatus"),
       exportReview: document.getElementById("reviewExport"),
       reviewImportFile: document.getElementById("reviewImportFile"),
       reviewImportStatus: document.getElementById("reviewImportStatus"),
@@ -2575,6 +2630,7 @@
       const targets = reviewTargets();
       const visibleTargets = filteredReviewTargets(targets);
       els.reviewFilterCount.textContent = `Showing ${visibleTargets.length} of ${targets.length} targets`;
+      els.applyBulkReviewDecisionButton.disabled = !visibleTargets.length;
       if (!targets.length) {
         els.reviewTargetList.innerHTML = "";
         return;
@@ -2613,6 +2669,29 @@
     function setReviewFilter(name, value) {
       state.reviewFilters[name] = value;
       renderReviewTargetList();
+    }
+
+    function applyBulkVisibleReviewDecision(decision) {
+      if (!allowedReviewDecision(decision) || decision === "pending") {
+        els.bulkReviewStatus.textContent = "No filtered bulk decision applied. Choose a non-pending review decision.";
+        return { visible: filteredReviewTargets(reviewTargets()).length, updated: 0 };
+      }
+      const visibleTargets = filteredReviewTargets(reviewTargets());
+      let updated = 0;
+      visibleTargets.forEach(target => {
+        const key = decisionKey(target.scope, target.localId);
+        if (state.decisions.get(key) !== decision) {
+          state.decisions.set(key, decision);
+          updated += 1;
+        }
+      });
+      state.importStatus = null;
+      state.exportSummary = JSON.stringify(buildReviewSummary(), null, 2);
+      els.bulkReviewStatus.textContent = `Applied ${decisionLabel(decision)} to visible targets. Visible targets: ${visibleTargets.length}. Updated targets: ${updated}.`;
+      renderWorkflow();
+      renderDetail();
+      renderReview();
+      return { visible: visibleTargets.length, updated };
     }
 
     function resetReviewFilters() {
@@ -2830,6 +2909,7 @@
       state.importStatus = null;
       resetReviewFilters();
       els.reviewImportFile.value = "";
+      els.bulkReviewStatus.textContent = "No filtered bulk decision applied. Bulk actions update only visible targets in this browser tab.";
     }
 
     function allowedReviewDecision(value) {
@@ -3105,6 +3185,7 @@
     els.reviewScopeFilter.addEventListener("change", event => setReviewFilter("scope", event.target.value));
     els.reviewSeverityFilter.addEventListener("change", event => setReviewFilter("severity", event.target.value));
     els.reviewStatusFilter.addEventListener("change", event => setReviewFilter("status", event.target.value));
+    els.applyBulkReviewDecisionButton.addEventListener("click", () => applyBulkVisibleReviewDecision(els.bulkReviewDecision.value));
     [els.statusFilter, els.severityFilter].forEach(el => el.addEventListener("change", renderBatches));
     els.findingSeverityFilter.addEventListener("change", renderFindings);
 
