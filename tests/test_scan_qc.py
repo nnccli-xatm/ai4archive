@@ -4631,7 +4631,57 @@ class ScanQcTest(unittest.TestCase):
             audit = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
             self.assertTrue(audit["operations"]["resume_processing"])
             self.assertEqual(audit["counts"]["skipped_due_to_resume"], 2)
+            self.assertEqual(audit["counts"]["existing_derivative_reused_files"], 2)
             self.assertEqual(audit["metrics"]["pixel_change_ratio"]["count"], 2)
+
+    def test_resume_processing_reprocesses_when_processing_options_change(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            Image.new("RGB", (40, 30), "white").save(input_dir / "A001_0001.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            process_images(report, input_dir, process_dir, ProcessingOptions(workers=1))
+            resumed = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(resume_processing=True, auto_crop=True, workers=1),
+            )
+
+            self.assertEqual(resumed["summary"]["processed_files"], 1)
+            self.assertEqual(resumed["summary"]["resumed_files"], 0)
+            self.assertEqual(resumed["summary"]["reprocessed_files"], 1)
+            self.assertEqual(resumed["files"][0]["status"], "processed")
+            self.assertIn("processing_options_fingerprint", resumed["files"][0])
+
+    def test_resume_processing_reprocesses_when_source_no_longer_matches_report_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "A001_0001.png"
+            Image.new("RGB", (40, 30), "white").save(source, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            process_images(report, input_dir, process_dir, ProcessingOptions(workers=1))
+            Image.new("RGB", (40, 30), (220, 220, 220)).save(source, dpi=(300, 300))
+            resumed = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(resume_processing=True, workers=1),
+            )
+
+            self.assertEqual(resumed["summary"]["processed_files"], 1)
+            self.assertEqual(resumed["summary"]["resumed_files"], 0)
+            self.assertEqual(resumed["summary"]["reprocessed_files"], 1)
+            self.assertEqual(resumed["files"][0]["status"], "processed")
 
     def test_resume_processing_reprocesses_missing_derivative(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -4748,7 +4798,34 @@ class ScanQcTest(unittest.TestCase):
             self.assertIn("reuse_duplicate_derivative", duplicate["operations"])
             self.assertEqual(first["output_sha256"], duplicate["output_sha256"])
             self.assertEqual(manifest["summary"]["performance"]["operation_timings"]["auto_crop"]["file_count"], 1)
+            self.assertEqual(manifest["summary"]["duplicate_reused_files"], 1)
             self.assertTrue((process_dir / duplicate["output_relative_path"]).exists())
+
+    def test_processing_skips_current_duplicate_derivative_copy_on_repeat_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            nested_dir = input_dir / "nested"
+            nested_dir.mkdir(parents=True)
+
+            source = input_dir / "A001_0001.png"
+            Image.new("RGB", (40, 30), "white").save(source, dpi=(300, 300))
+            shutil.copyfile(source, nested_dir / "A001_0002.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir, workers=1))
+            process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, workers=1))
+            with mock.patch("archive_scan_qc.processing.shutil.copyfile", wraps=shutil.copyfile) as copyfile:
+                repeated = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, workers=1))
+
+            records = {record["source_relative_path"]: record for record in repeated["files"]}
+            duplicate = records["nested/A001_0002.png"]
+            self.assertEqual(copyfile.call_count, 0)
+            self.assertIn("reuse_duplicate_derivative", duplicate["operations"])
+            self.assertNotIn("_existing_derivative_reused", duplicate)
+            self.assertEqual(repeated["summary"]["duplicate_reused_files"], 1)
+            self.assertEqual(repeated["summary"]["existing_derivative_reused_files"], 1)
 
     def test_multi_worker_processing_failure_does_not_stop_other_files(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

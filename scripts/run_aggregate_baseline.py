@@ -237,6 +237,11 @@ def _baseline_summary(args: argparse.Namespace, private_summary: dict[str, Any])
             "p2_findings": int(counts["p2_findings"]),
             "processing_processed_files": int(counts["processing_processed_files"]),
             "processing_failed_files": int(counts["processing_failed_files"]),
+            "processing_resumed_files": int(counts.get("processing_resumed_files", 0)),
+            "processing_duplicate_reused_files": int(counts.get("processing_duplicate_reused_files", 0)),
+            "processing_existing_derivative_reused_files": int(
+                counts.get("processing_existing_derivative_reused_files", 0)
+            ),
             "failed_batches": int(counts["failed_batches"]),
             "preflight_errors": int(counts["preflight_errors"]),
         },
