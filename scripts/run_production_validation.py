@@ -45,6 +45,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--deskew", action="store_true")
     parser.add_argument("--trim-dark-border", action="store_true")
     parser.add_argument("--despeckle", action="store_true")
+    parser.add_argument(
+        "--despeckle-backend",
+        choices=("fallback", "numpy"),
+        default="fallback",
+        help="Despeckle processing backend. Defaults to conservative fallback; numpy is opt-in.",
+    )
     parser.add_argument("--resume-processing", action="store_true")
     parser.add_argument("--manifest-csv", default=None, type=Path)
     parser.add_argument("--rules-profile", default=None, type=Path)
@@ -126,6 +132,7 @@ def _build_baseline_args(args: argparse.Namespace) -> argparse.Namespace:
         ("--rules-profile", args.rules_profile),
         ("--min-dpi", args.min_dpi),
         ("--name-pattern", args.name_pattern),
+        ("--despeckle-backend", args.despeckle_backend),
     ]
     for flag, value in optional_values:
         if value is not None:

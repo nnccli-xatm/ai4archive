@@ -26,6 +26,7 @@ if str(SRC_DIR) not in sys.path:
 from archive_scan_qc.acceptance import build_acceptance_summary  # noqa: E402
 from archive_scan_qc.benchmark import _environment  # noqa: E402
 from archive_scan_qc.benchmark import run_benchmark  # noqa: E402
+from archive_scan_qc.processing import _load_numpy  # noqa: E402
 from archive_scan_qc.run_plan import PlanBatch, RunPlan, run_plan  # noqa: E402
 
 
@@ -219,6 +220,8 @@ def _public_summary(
     benchmark_processing_throughput = _benchmark_recommended_throughput(benchmark_summary, "processing")
     processing_operation_timings = run_counts.get("processing_operation_timings", {})
     benchmark_operation_timings = _benchmark_operation_timings(benchmark_summary)
+    despeckle_backend = _despeckle_backend_capability(args, processing_operation_timings)
+    warning_items = _aggregate_warning_items(despeckle_backend)
 
     failed_batches = int(run_counts["failed_batches"])
     processing_failures = int(run_counts["processing_failed_files"])
@@ -250,7 +253,12 @@ def _public_summary(
             "workers": int(args.workers),
             "benchmark_enabled": benchmark_summary is not None,
             "benchmark_run_count": len(benchmark_runs),
+            "despeckle_backend_requested": despeckle_backend["requested_backend"],
         },
+        "despeckle_backend": despeckle_backend,
+        "warning_item_count": len(warning_items),
+        "warning_counts_by_code": _counts_by_code(warning_items),
+        "warning_items": warning_items,
         "environment": _environment(),
         "aggregate_counts": {
             "total_files": int(run_counts["total_files"]),
@@ -303,6 +311,77 @@ def _public_summary(
             "violations": [],
         },
     }
+
+
+def _despeckle_backend_capability(args: argparse.Namespace, processing_operation_timings: Any) -> dict[str, Any]:
+    requested_backend = getattr(args, "despeckle_backend", "fallback")
+    numpy_available = _load_numpy() is not None
+    despeckle_enabled = bool(getattr(args, "despeckle", False))
+    processing_enabled = bool(getattr(args, "process_images", False))
+    timing = (
+        processing_operation_timings.get("despeckle", {})
+        if isinstance(processing_operation_timings, dict)
+        else {}
+    )
+    backend_counts = _backend_counts(timing.get("backend_counts") if isinstance(timing, dict) else None)
+    effective_backend_mode = timing.get("backend_mode") if isinstance(timing, dict) else None
+    if effective_backend_mode not in {"numpy", "fallback", "mixed", "disabled", "not_applicable", "unknown"}:
+        if not processing_enabled or not despeckle_enabled:
+            effective_backend_mode = "disabled"
+        else:
+            effective_backend_mode = "unknown"
+    fallback_count = int(backend_counts["fallback"])
+    processed_backend_count = int(sum(backend_counts.values()))
+    requested_numpy_fallback_count = fallback_count if requested_backend == "numpy" else 0
+    warning_codes: list[str] = []
+    if requested_backend == "numpy" and despeckle_enabled and processing_enabled and not numpy_available:
+        warning_codes.append("despeckle_numpy_unavailable_fallback")
+    if (
+        requested_backend == "numpy"
+        and despeckle_enabled
+        and processing_enabled
+        and processed_backend_count > 0
+        and backend_counts["numpy"] == 0
+        and fallback_count == processed_backend_count
+    ):
+        warning_codes.append("despeckle_numpy_requested_all_fallback")
+    return {
+        "requested_backend": requested_backend,
+        "effective_backend_mode": effective_backend_mode,
+        "numpy_available": numpy_available,
+        "backend_counts": backend_counts,
+        "fallback_count": fallback_count,
+        "requested_numpy_fallback_count": requested_numpy_fallback_count,
+        "warning_codes": warning_codes,
+    }
+
+
+def _backend_counts(value: Any) -> dict[str, int]:
+    result = {"numpy": 0, "fallback": 0, "not_applicable": 0, "unknown": 0}
+    if not isinstance(value, dict):
+        return result
+    for key in result:
+        count = value.get(key)
+        if isinstance(count, int) and count >= 0:
+            result[key] = count
+    return result
+
+
+def _aggregate_warning_items(despeckle_backend: dict[str, Any]) -> list[dict[str, str]]:
+    return [
+        {"code": code, "source": "despeckle_backend"}
+        for code in despeckle_backend.get("warning_codes", [])
+        if isinstance(code, str)
+    ]
+
+
+def _counts_by_code(items: list[dict[str, str]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in items:
+        code = item.get("code")
+        if isinstance(code, str) and code:
+            counts[code] = counts.get(code, 0) + 1
+    return dict(sorted(counts.items()))
 
 
 def _benchmark_worker_sweep(benchmark_summary: dict[str, Any] | None) -> dict[str, Any]:

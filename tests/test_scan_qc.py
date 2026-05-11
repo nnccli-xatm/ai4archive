@@ -2318,6 +2318,96 @@ class ScanQcTest(unittest.TestCase):
         self.assertFalse(hardware["gpu_acceleration_used"])
         self.assertTrue(any("nvidia-smi unavailable" in warning for warning in hardware["warnings"]))
 
+    def test_private_integration_reports_numpy_despeckle_backend_available(self) -> None:
+        module = _load_private_integration_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-input"
+            output_dir = root / "private-output"
+            input_dir.mkdir()
+            image = Image.new("RGB", (20, 20), "white")
+            image.putpixel((10, 10), (0, 0, 0))
+            image.save(input_dir / "private_page_001.png", dpi=(300, 300))
+
+            args = module.build_parser().parse_args(
+                [
+                    "--input",
+                    str(input_dir),
+                    "--out",
+                    str(output_dir),
+                    "--workers",
+                    "1",
+                    "--process-images",
+                    "--despeckle",
+                    "--despeckle-backend",
+                    "numpy",
+                    "--skip-benchmark",
+                ]
+            )
+            with (
+                mock.patch.object(module, "_load_numpy", return_value=object()),
+                mock.patch("archive_scan_qc.processing._despeckle_candidate_points_numpy", return_value=[(10, 10)]),
+            ):
+                payload = module.run_private_integration(args).summary
+
+        backend = payload["despeckle_backend"]
+        self.assertEqual(backend["requested_backend"], "numpy")
+        self.assertEqual(backend["effective_backend_mode"], "numpy")
+        self.assertTrue(backend["numpy_available"])
+        self.assertEqual(backend["backend_counts"]["numpy"], 1)
+        self.assertEqual(backend["fallback_count"], 0)
+        self.assertEqual(payload["warning_item_count"], 0)
+
+    def test_aggregate_baseline_warns_when_requested_numpy_despeckle_falls_back(self) -> None:
+        module = _load_aggregate_baseline_module()
+        private_module = sys.modules["run_private_integration"]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-input"
+            output_dir = root / "private-output"
+            input_dir.mkdir()
+            image = Image.new("RGB", (20, 20), "white")
+            image.putpixel((10, 10), (0, 0, 0))
+            image.save(input_dir / "private_page_001.png", dpi=(300, 300))
+
+            args = module.build_parser().parse_args(
+                [
+                    "--input",
+                    str(input_dir),
+                    "--out",
+                    str(output_dir),
+                    "--workers",
+                    "1",
+                    "--benchmark-workers-list",
+                    "1",
+                    "--process-images",
+                    "--despeckle",
+                    "--despeckle-backend",
+                    "numpy",
+                    "--skip-benchmark",
+                    "--cleanup-artifacts",
+                ]
+            )
+            with (
+                mock.patch.object(private_module, "_load_numpy", return_value=None),
+                mock.patch("archive_scan_qc.processing._load_numpy", return_value=None),
+            ):
+                payload = module.run_aggregate_baseline(args)
+
+        backend = payload["despeckle_backend"]
+        self.assertEqual(backend["requested_backend"], "numpy")
+        self.assertEqual(backend["effective_backend_mode"], "fallback")
+        self.assertFalse(backend["numpy_available"])
+        self.assertEqual(backend["backend_counts"]["numpy"], 0)
+        self.assertEqual(backend["backend_counts"]["fallback"], 1)
+        self.assertEqual(backend["fallback_count"], 1)
+        self.assertEqual(backend["requested_numpy_fallback_count"], 1)
+        self.assertIn("despeckle_numpy_unavailable_fallback", backend["warning_codes"])
+        self.assertIn("despeckle_numpy_requested_all_fallback", backend["warning_codes"])
+        self.assertEqual(payload["warning_counts_by_code"]["despeckle_numpy_unavailable_fallback"], 1)
+        self.assertEqual(payload["warning_counts_by_code"]["despeckle_numpy_requested_all_fallback"], 1)
+        self.assertTrue(payload["privacy_self_check"]["passed"])
+
     def test_capability_probe_reports_missing_optional_providers_as_non_blocking(self) -> None:
         def missing_package(module_name: str) -> bool:
             return False
