@@ -35,6 +35,7 @@
       color: var(--text);
       font-size: 14px;
       line-height: 1.45;
+      overflow-x: hidden;
     }
 
     header {
@@ -208,9 +209,14 @@
       align-items: start;
     }
 
+    .grid > *,
+    .load-panel > * {
+      min-width: 0;
+    }
+
     .metric-grid {
       display: grid;
-      grid-template-columns: repeat(6, minmax(120px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
       gap: 10px;
     }
 
@@ -292,6 +298,11 @@
       width: 100%;
       border-collapse: collapse;
       min-width: 760px;
+      table-layout: fixed;
+    }
+
+    .grid table {
+      min-width: 100%;
     }
 
     th, td {
@@ -299,6 +310,7 @@
       border-bottom: 1px solid var(--line);
       text-align: left;
       vertical-align: top;
+      overflow-wrap: anywhere;
     }
 
     th {
@@ -364,6 +376,40 @@
 
     .review-target-list {
       margin-bottom: 12px;
+    }
+
+    .review-filter-bar {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(132px, 1fr)) auto;
+      gap: 8px;
+      align-items: end;
+      margin-bottom: 12px;
+    }
+
+    .review-filter-bar label {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .review-filter-bar select {
+      width: 100%;
+      min-width: 0;
+    }
+
+    .review-filter-count {
+      min-height: 38px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+      color: var(--muted);
+      padding: 8px 10px;
+      white-space: nowrap;
     }
 
     .review-target-list table {
@@ -595,6 +641,7 @@
       .metric-grid { grid-template-columns: repeat(3, minmax(120px, 1fr)); }
       .workflow { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
       .decision-strip { grid-template-columns: repeat(3, minmax(112px, 1fr)); }
+      .review-filter-bar { grid-template-columns: repeat(2, minmax(132px, 1fr)); }
       .readiness-summary { grid-template-columns: 1fr; }
     }
 
@@ -603,6 +650,10 @@
       .metric-grid { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
       .workflow { grid-template-columns: 1fr; }
       .decision-strip { grid-template-columns: repeat(2, minmax(112px, 1fr)); }
+      .review-filter-bar { grid-template-columns: 1fr; }
+      .review-filter-count { justify-content: flex-start; white-space: normal; }
+      .review-select { min-width: 0; width: 100%; }
+      table, .review-target-list table { min-width: 100%; }
       .preview-slots { grid-template-columns: 1fr; }
     }
   </style>
@@ -676,6 +727,48 @@
         </div>
       </div>
       <div id="decisionSummary" class="decision-strip"></div>
+      <div class="review-filter-bar" aria-label="Review target filters">
+        <label>Decision
+          <select id="reviewDecisionFilter">
+            <option value="all">All decisions</option>
+            <option value="pending">Pending</option>
+            <option value="accepted_issue">Accepted issue</option>
+            <option value="false_positive">False positive</option>
+            <option value="fixed_externally">Fixed externally</option>
+            <option value="needs_rescan">Needs rescan</option>
+            <option value="blocked">Blocked</option>
+          </select>
+        </label>
+        <label>Scope
+          <select id="reviewScopeFilter">
+            <option value="all">All scopes</option>
+            <option value="batch">Batch</option>
+            <option value="finding">Finding</option>
+            <option value="processing_review">Processing review</option>
+          </select>
+        </label>
+        <label>Severity
+          <select id="reviewSeverityFilter">
+            <option value="all">All severities</option>
+            <option value="P0">P0</option>
+            <option value="P1">P1</option>
+            <option value="P2">P2</option>
+            <option value="none">None</option>
+          </select>
+        </label>
+        <label>Status
+          <select id="reviewStatusFilter">
+            <option value="all">All statuses</option>
+            <option value="processed">Processed</option>
+            <option value="failed">Failed</option>
+            <option value="skipped">Skipped</option>
+            <option value="blocked">Blocked</option>
+            <option value="warning">Warning</option>
+            <option value="local-review">Local review</option>
+          </select>
+        </label>
+        <div id="reviewFilterCount" class="review-filter-count" role="status" aria-live="polite">Showing 0 of 0 targets</div>
+      </div>
       <div id="reviewTargetList" class="review-target-list" aria-live="polite"></div>
       <div id="reviewImportStatus" class="status-banner" role="status" aria-live="polite" style="margin-bottom:12px">No review-decision summary imported. Imports restore only scope, synthetic/local ID, and decision status; private filenames, paths, hashes, OCR text, thumbnails, image content, row-level findings, reviewer notes, manifests, and derivative image references are ignored.</div>
       <textarea id="reviewExport" aria-label="Privacy-safe review-decision JSON summary" readonly placeholder="Privacy-safe review-decision JSON summary will appear after a reviewer decision changes or after export is prepared."></textarea>
@@ -828,6 +921,12 @@
       decisions: new Map(),
       exportSummary: "",
       importStatus: null,
+      reviewFilters: {
+        decision: "all",
+        scope: "all",
+        severity: "all",
+        status: "all"
+      },
       previews: {
         original: {
           label: "Original",
@@ -1295,6 +1394,11 @@
       previewZoomStatus: document.getElementById("previewZoomStatus"),
       decisionSummary: document.getElementById("decisionSummary"),
       reviewTargetList: document.getElementById("reviewTargetList"),
+      reviewDecisionFilter: document.getElementById("reviewDecisionFilter"),
+      reviewScopeFilter: document.getElementById("reviewScopeFilter"),
+      reviewSeverityFilter: document.getElementById("reviewSeverityFilter"),
+      reviewStatusFilter: document.getElementById("reviewStatusFilter"),
+      reviewFilterCount: document.getElementById("reviewFilterCount"),
       exportReview: document.getElementById("reviewExport"),
       reviewImportFile: document.getElementById("reviewImportFile"),
       reviewImportStatus: document.getElementById("reviewImportStatus"),
@@ -1515,7 +1619,7 @@
         generatedAt: text(payload.generated_at, "")
       };
       const artifactReadiness = buildArtifactReadinessChecklist(payload, aggregate);
-      const processingReviewTargets = buildProcessingReviewTargets(aggregate.processingReview.reviewTargetCount);
+      const processingReviewTargets = buildProcessingReviewTargets(aggregate.processingReview);
 
       return {
         sourceType: "aggregate-handoff",
@@ -1908,12 +2012,23 @@
       };
     }
 
-    function buildProcessingReviewTargets(count) {
-      const safeCount = Math.max(0, Math.min(firstNumber(count), 200));
-      return Array.from({ length: safeCount }, (_, index) => ({
+    function buildProcessingReviewTargets(processingReview) {
+      const safeCount = Math.max(0, Math.min(firstNumber(processingReview.reviewTargetCount), 200));
+      const failedCount = Math.min(safeCount, firstNumber(processingReview.failedCount));
+      const warningCount = Math.min(Math.max(0, safeCount - failedCount), firstNumber(processingReview.warningCount));
+      const skippedCount = Math.min(Math.max(0, safeCount - failedCount - warningCount), firstNumber(processingReview.skippedCount));
+      const processedCount = Math.max(0, safeCount - failedCount - warningCount - skippedCount);
+      const targetGroups = [
+        { count: failedCount, severity: "P1", status: "failed" },
+        { count: warningCount, severity: "P2", status: "warning" },
+        { count: skippedCount, severity: "P2", status: "skipped" },
+        { count: processedCount, severity: "none", status: "processed" }
+      ];
+      return targetGroups.flatMap(group => Array.from({ length: group.count }, () => group)).map((group, index) => ({
         scope: "processing_review",
         localId: `PR${String(index + 1).padStart(4, "0")}`,
-        severity: "local-review"
+        severity: group.severity,
+        status: group.status
       }));
     }
 
@@ -2456,21 +2571,29 @@
     }
 
     function renderReviewTargetList() {
-      const targets = (state.model.reviewTargets || []).filter(target => target.scope === "processing_review");
+      syncReviewFilterControls();
+      const targets = reviewTargets();
+      const visibleTargets = filteredReviewTargets(targets);
+      els.reviewFilterCount.textContent = `Showing ${visibleTargets.length} of ${targets.length} targets`;
       if (!targets.length) {
         els.reviewTargetList.innerHTML = "";
+        return;
+      }
+      if (!visibleTargets.length) {
+        els.reviewTargetList.innerHTML = `<div class="empty">No review targets match the current filters.</div>`;
         return;
       }
       els.reviewTargetList.innerHTML = `
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Scope</th><th>Local ID</th><th>Severity/Status</th><th>Decision State</th></tr></thead>
+            <thead><tr><th>Scope</th><th>Local ID</th><th>Severity</th><th>Status</th><th>Decision State</th></tr></thead>
             <tbody>
-              ${targets.map(target => `
+              ${visibleTargets.map(target => `
                 <tr>
                   <td class="mono">${escapeHtml(target.scope)}</td>
                   <td class="mono">${escapeHtml(target.localId)}</td>
-                  <td>${severityBadge(target.severity || target.status || "local-review")}</td>
+                  <td>${severityBadge(target.severity || "none")}</td>
+                  <td>${statusBadge(target.status || "local-review")}</td>
                   <td>${decisionSelect(target.scope, target.localId)}</td>
                 </tr>
               `).join("")}
@@ -2478,6 +2601,39 @@
           </table>
         </div>`;
       bindDecisionControls(els.reviewTargetList);
+    }
+
+    function syncReviewFilterControls() {
+      els.reviewDecisionFilter.value = state.reviewFilters.decision;
+      els.reviewScopeFilter.value = state.reviewFilters.scope;
+      els.reviewSeverityFilter.value = state.reviewFilters.severity;
+      els.reviewStatusFilter.value = state.reviewFilters.status;
+    }
+
+    function setReviewFilter(name, value) {
+      state.reviewFilters[name] = value;
+      renderReviewTargetList();
+    }
+
+    function resetReviewFilters() {
+      state.reviewFilters = {
+        decision: "all",
+        scope: "all",
+        severity: "all",
+        status: "all"
+      };
+    }
+
+    function filteredReviewTargets(targets) {
+      return targets.filter(target => {
+        const decision = getDecision(target.scope, target.localId);
+        const severity = target.severity || "none";
+        const status = target.status || "local-review";
+        return (state.reviewFilters.decision === "all" || state.reviewFilters.decision === decision)
+          && (state.reviewFilters.scope === "all" || state.reviewFilters.scope === target.scope)
+          && (state.reviewFilters.severity === "all" || state.reviewFilters.severity === severity)
+          && (state.reviewFilters.status === "all" || state.reviewFilters.status === status);
+      });
     }
 
     function renderReviewImportStatus() {
@@ -2672,6 +2828,7 @@
       state.decisions = new Map();
       state.exportSummary = "";
       state.importStatus = null;
+      resetReviewFilters();
       els.reviewImportFile.value = "";
     }
 
@@ -2944,6 +3101,10 @@
       URL.revokeObjectURL(link.href);
     });
     els.loadDemoFixtureButton.addEventListener("click", () => loadDemoFixture(els.demoFixtureSelect.value));
+    els.reviewDecisionFilter.addEventListener("change", event => setReviewFilter("decision", event.target.value));
+    els.reviewScopeFilter.addEventListener("change", event => setReviewFilter("scope", event.target.value));
+    els.reviewSeverityFilter.addEventListener("change", event => setReviewFilter("severity", event.target.value));
+    els.reviewStatusFilter.addEventListener("change", event => setReviewFilter("status", event.target.value));
     [els.statusFilter, els.severityFilter].forEach(el => el.addEventListener("change", renderBatches));
     els.findingSeverityFilter.addEventListener("change", renderFindings);
 

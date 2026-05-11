@@ -92,7 +92,17 @@ REQUIRED_STRINGS = {
     "Pending Targets",
     "Completion Status",
     "not complete",
-    "Severity/Status",
+    "Review target filters",
+    "reviewDecisionFilter",
+    "reviewScopeFilter",
+    "reviewSeverityFilter",
+    "reviewStatusFilter",
+    "reviewFilterCount",
+    "Showing 0 of 0 targets",
+    "Showing ${visibleTargets.length} of ${targets.length} targets",
+    "No review targets match the current filters.",
+    "Severity",
+    "Status",
     "Decision State",
     "Import privacy-safe summary",
     "reviewImportFile",
@@ -1281,7 +1291,7 @@ vm.runInContext(workbenchScript + `
   renderReview();
   assert(els.reviewTargetList.innerHTML.includes("processing_review"), "processing review target list did not render scope");
   assert(els.reviewTargetList.innerHTML.includes("PR0001"), "processing review target list did not render first synthetic local ID");
-  assert(els.reviewTargetList.innerHTML.includes("local-review"), "processing review target list did not render status");
+  assert(els.reviewTargetList.innerHTML.includes("failed"), "processing review target list did not render status");
   assert(els.reviewTargetList.innerHTML.includes('data-review-scope="processing_review"'), "processing review target list did not render decision control scope");
   assert(els.reviewTargetList.innerHTML.includes('data-review-id="PR0001"'), "processing review target list did not render first decision control ID");
   assertPublicSafe(els.reviewTargetList.innerHTML, "processing review target list");
@@ -1814,14 +1824,39 @@ vm.runInContext(workbenchScript + `
   resetReviewState();
   render();
   assert(reviewTargets().length === 6, "processing-review synthetic targets were not exposed");
+  assert(els.reviewFilterCount.textContent === "Showing 6 of 6 targets", "initial filtered count did not show visible and total targets");
+  assert(els.reviewTargetList.innerHTML.includes("PR0001"), "processing-review target list did not render first target");
+  assert(els.reviewTargetList.innerHTML.includes("failed"), "processing-review target list did not render synthetic target status");
+  assert(els.reviewTargetList.innerHTML.includes("P1"), "processing-review target list did not render synthetic target severity");
+  setReviewFilter("status", "failed");
+  assert(els.reviewStatusFilter.value === "failed", "status filter control did not sync");
+  assert(els.reviewFilterCount.textContent === "Showing 1 of 6 targets", "status filter did not update visible/total count");
+  assert(els.reviewTargetList.innerHTML.includes("PR0001"), "status filter hid matching failed target");
+  assert(!els.reviewTargetList.innerHTML.includes("PR0002"), "status filter left non-matching target visible");
+  assert(buildReviewSummary().aggregate_counts.review_completion.total === 6, "filter changed export completion total");
+  setReviewFilter("status", "all");
+  setReviewFilter("severity", "P2");
+  assert(els.reviewFilterCount.textContent === "Showing 3 of 6 targets", "severity filter did not update visible/total count");
+  setReviewFilter("scope", "batch");
+  assert(els.reviewFilterCount.textContent === "Showing 0 of 6 targets", "combined filters did not update visible/total count");
+  assert(els.reviewTargetList.innerHTML.includes("No review targets match the current filters."), "empty filtered state did not render");
+  setReviewFilter("scope", "all");
+  setReviewFilter("severity", "all");
   state.decisions.set(decisionKey("processing_review", "PR0001"), "accepted_issue");
   state.decisions.set(decisionKey("processing_review", "PR0002"), "false_positive");
   renderReview();
+  setReviewFilter("decision", "accepted_issue");
+  assert(els.reviewFilterCount.textContent === "Showing 1 of 6 targets", "decision filter did not update visible/total count");
+  assert(els.reviewTargetList.innerHTML.includes("PR0001"), "decision filter hid matching accepted target");
+  assert(!els.reviewTargetList.innerHTML.includes("PR0002"), "decision filter left non-matching false-positive target visible");
   const processingSummary = buildReviewSummary().aggregate_counts.review_completion;
   assert(processingSummary.total === 6, "processing-review completion total changed");
   assert(processingSummary.reviewed === 2, "processing-review reviewed target count did not update");
   assert(processingSummary.pending === 4, "processing-review pending target count did not update");
   assert(processingSummary.complete === false, "processing-review completion finished too early");
+  assert(buildReviewSummary().source_target_count === 6, "filter changed review export target count");
+  assert(buildReviewSummary().decisions.length === 6, "filter removed decisions from privacy-safe export");
+  assertPublicSafe(JSON.stringify(buildReviewSummary()), "filtered review export summary");
   assertPublicSafe(els.decisionSummary.innerHTML, "review completion summary");
 `, context);
 """
