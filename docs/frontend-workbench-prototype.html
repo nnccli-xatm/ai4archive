@@ -1104,6 +1104,14 @@
         privacy_status: "public-safe",
         generated_at: "2026-05-11T00:05:30Z"
       },
+      "review_decision_verification_summary.json": {
+        present: true,
+        status: "pass",
+        blocking_count: 0,
+        warning_count: 0,
+        privacy_status: "public-safe",
+        generated_at: "2026-05-11T00:05:45Z"
+      },
       "public_safe_validation_index.json": {
         present: true,
         status: "pass",
@@ -1206,6 +1214,77 @@
           },
           privacy: PUBLIC_SAFE_PRIVACY,
           privacy_self_check: { status: "passed", violation_count: 0 },
+          sensitive_values_omitted: true,
+          sensitivity: "aggregate-only public summary"
+        }
+      },
+      {
+        id: "review-decision-verification-pass",
+        label: "Passing review decision verification summary",
+        payload: {
+          schema_version: "scan-qc.review-decision-verification-summary.v1",
+          generated_at: "2026-05-11T00:09:30Z",
+          status: "pass",
+          checks_passed: 1,
+          checks_failed: 0,
+          decision_summary: {
+            total_decisions: 18,
+            pending: 0,
+            accepted: 12,
+            rejected: 4,
+            rework: 2,
+            completion_status: "complete",
+            decision_counts: {
+              pending: 0,
+              accepted_issue: 12,
+              false_positive: 4,
+              fixed_externally: 1,
+              needs_rescan: 1,
+              blocked: 0
+            }
+          },
+          blocking_count: 0,
+          warning_count: 1,
+          blocking_counts_by_code: {},
+          warning_counts_by_code: { aggregate_warning_review_backlog: 1 },
+          privacy: { status: "pass", aggregate_only: true, sensitive_field_count: 0, source_values_omitted: true },
+          sensitive_values_omitted: true,
+          sensitivity: "aggregate-only public summary"
+        }
+      },
+      {
+        id: "review-decision-verification-blocked",
+        label: "Blocked review decision verification summary",
+        payload: {
+          schema_version: "scan-qc.review-decision-verification-summary.v1",
+          generated_at: "2026-05-11T00:09:45Z",
+          status: "blocked",
+          checks_passed: 6,
+          checks_failed: 2,
+          decision_summary: {
+            total_decisions: 18,
+            pending: 3,
+            accepted: 10,
+            rejected: 3,
+            rework: 2,
+            completion_status: "incomplete",
+            decision_counts: {
+              pending: 3,
+              accepted_issue: 10,
+              false_positive: 3,
+              fixed_externally: 1,
+              needs_rescan: 1,
+              blocked: 0
+            }
+          },
+          blocking_count: 2,
+          warning_count: 1,
+          blocking_counts_by_code: {
+            review_decision_pending: 1,
+            review_decision_rework_unresolved: 1
+          },
+          warning_counts_by_code: { aggregate_warning_review_backlog: 1 },
+          privacy: { status: "pass", aggregate_only: true, sensitive_field_count: 0, source_values_omitted: true },
           sensitive_values_omitted: true,
           sensitivity: "aggregate-only public summary"
         }
@@ -1768,6 +1847,7 @@
         schema.includes("public-safe-validation-index") ||
         schema.includes("release-candidate-summary") ||
         schema.includes("deep-inspection-candidates") ||
+        schema.includes("review-decision-verification-summary") ||
         schema.includes("provider-capability-probe-summary") ||
         schema.includes("review-summary") ||
         schema.includes("acceptance-summary") ||
@@ -1807,7 +1887,7 @@
         workflowState: aggregateWorkflowState(payload.workflow_state || payload.workflow_status || (payload.summary && (payload.summary.workflow_state || payload.summary.workflow_status))),
         checksPassed: firstNumber(payload.checks_passed, checks.passed, payload.summary && payload.summary.checks_passed),
         checksFailed: firstNumber(payload.checks_failed, checks.failed, payload.summary && payload.summary.checks_failed),
-        blockingItemCount: firstNumber(payload.blocking_item_count, decision.blocking_item_count, payload.summary && payload.summary.blocking_item_count, Array.isArray(payload.blocking_items) ? payload.blocking_items.length : undefined),
+        blockingItemCount: firstNumber(payload.blocking_item_count, payload.blocking_count, decision.blocking_item_count, payload.summary && payload.summary.blocking_item_count, payload.summary && payload.summary.blocking_count, Array.isArray(payload.blocking_items) ? payload.blocking_items.length : undefined),
         remainingP0: firstNullableNumber(payload.remaining_p0, payload.remaining && payload.remaining.p0, payload.human_review && payload.human_review.remaining_p0),
         remainingP1: firstNullableNumber(payload.remaining_p1, payload.remaining && payload.remaining.p1, payload.human_review && payload.human_review.remaining_p1),
         reviewStatusCounts: aggregateStatusCounts(payload.status_counts || (payload.human_review && payload.human_review.status_counts)),
@@ -1823,6 +1903,7 @@
         validationIndex: aggregateValidationIndexSummary(payload),
         artifactSummary: aggregateArtifactSummary(payload),
         deepInspectionCandidate: aggregateDeepInspectionCandidateSummary(payload),
+        reviewDecisionVerification: aggregateReviewDecisionVerificationSummary(payload),
         providerProbe: aggregateProviderProbe(payload.capability_probe_summary),
         processingReview: aggregateProcessingReview(payload),
         privacy: aggregatePrivacy(payload),
@@ -1866,6 +1947,7 @@
       if (schema.includes("artifact-readiness-checklist") || payload.artifact_readiness_checklist !== undefined || payload.public_safe_artifact_readiness !== undefined) return "Public-safe artifact readiness checklist";
       if (schema.includes("public-safe-validation-index")) return "Public-safe validation index";
       if (schema.includes("deep-inspection-candidates")) return "Deep-inspection candidate summary";
+      if (schema.includes("review-decision-verification-summary")) return "Review decision verification summary";
       if (schema.includes("provider-capability-probe-summary") || payload.capability_probe_summary !== undefined) return "Provider capability probe summary";
       if (schema.includes("review-summary") || payload.status_counts !== undefined || payload.severity_status_counts !== undefined || payload.rule_status_counts !== undefined) return "Review summary";
       if (schema.includes("final-production-handoff-summary") || payload.ready_for_handoff !== undefined) return "Final production handoff summary";
@@ -1884,6 +1966,7 @@
       "release_candidate_summary.json",
       "final_production_handoff_summary.json",
       "deep_inspection_candidate_summary.json",
+      "review_decision_verification_summary.json",
       "public_safe_validation_index.json"
     ];
 
@@ -1895,6 +1978,7 @@
       "Release candidate summary": "release_candidate_summary.json",
       "Final production handoff summary": "final_production_handoff_summary.json",
       "Deep-inspection candidate summary": "deep_inspection_candidate_summary.json",
+      "Review decision verification summary": "review_decision_verification_summary.json",
       "Public-safe validation index": "public_safe_validation_index.json"
     };
 
@@ -1906,6 +1990,7 @@
       "scan-qc-final-production-handoff-summary.v1",
       "scan-qc-release-candidate-summary.v1",
       "scan-qc.deep-inspection-candidates.v1",
+      "scan-qc.review-decision-verification-summary.v1",
       "scan-qc.public-safe-validation-index.v1",
       "scan-qc-artifact-readiness-checklist.v1",
       "scan-qc-provider-capability-probe-summary.v1",
@@ -1920,9 +2005,9 @@
       const statusFields = [
         ["schema_version", hasOwn(payload, "schema_version")],
         ["generated_at", generatedPresent],
-        ["status or pass flag", isProcessingReview || aggregate.artifactType === "Deep-inspection candidate summary" || hasOwn(payload, "status") || hasOwn(payload, "acceptance_passed") || hasOwn(payload, "pass") || hasOwn(payload, "ready_for_handoff") || hasOwn(payload, "ready_for_release_candidate") || hasOwn(payload, "ready")],
-        ["blocking count/code aggregate", isProcessingReview || aggregate.artifactType === "Deep-inspection candidate summary" || hasOwn(payload, "blocking_item_count") || hasOwn(payload, "blocking_items") || Boolean(payload.summary && hasOwn(payload.summary, "blocking_item_count"))],
-        ["warning count/code aggregate", isProcessingReview || aggregate.artifactType === "Deep-inspection candidate summary" || hasOwn(payload, "warnings") || hasOwn(payload, "warning_items") || hasOwn(payload, "warning_count") || hasOwn(payload, "warning_item_count") || Boolean(payload.summary && (hasOwn(payload.summary, "warning_count") || hasOwn(payload.summary, "warning_item_count")))],
+        ["status or pass flag", isProcessingReview || aggregate.artifactType === "Deep-inspection candidate summary" || aggregate.artifactType === "Review decision verification summary" || hasOwn(payload, "status") || hasOwn(payload, "acceptance_passed") || hasOwn(payload, "pass") || hasOwn(payload, "ready_for_handoff") || hasOwn(payload, "ready_for_release_candidate") || hasOwn(payload, "ready")],
+        ["blocking count/code aggregate", isProcessingReview || aggregate.artifactType === "Deep-inspection candidate summary" || aggregate.artifactType === "Review decision verification summary" || hasOwn(payload, "blocking_item_count") || hasOwn(payload, "blocking_items") || Boolean(payload.summary && hasOwn(payload.summary, "blocking_item_count"))],
+        ["warning count/code aggregate", isProcessingReview || aggregate.artifactType === "Deep-inspection candidate summary" || aggregate.artifactType === "Review decision verification summary" || hasOwn(payload, "warnings") || hasOwn(payload, "warning_items") || hasOwn(payload, "warning_count") || hasOwn(payload, "warning_item_count") || Boolean(payload.summary && (hasOwn(payload.summary, "warning_count") || hasOwn(payload.summary, "warning_item_count")))],
         ["privacy summary", hasOwn(payload, "privacy") || hasOwn(payload, "privacy_self_check") || hasOwn(payload, "sensitivity")]
       ];
       const missingStatusFields = statusFields.filter(([, present]) => !present).map(([label]) => label);
@@ -2145,6 +2230,47 @@
         if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) return candidate;
       }
       return null;
+    }
+
+    function aggregateReviewDecisionVerificationSummary(payload) {
+      const schema = String(payload.schema_version || "");
+      if (!schema.includes("review-decision-verification-summary")) return null;
+      const summary = payload.summary && typeof payload.summary === "object" && !Array.isArray(payload.summary) ? payload.summary : {};
+      const decisionSummary = payload.decision_summary && typeof payload.decision_summary === "object" && !Array.isArray(payload.decision_summary) ? payload.decision_summary : {};
+      const decisionCounts = payload.decision_counts && typeof payload.decision_counts === "object" && !Array.isArray(payload.decision_counts) ? payload.decision_counts : {};
+      const nestedDecisionCounts = decisionSummary.decision_counts && typeof decisionSummary.decision_counts === "object" && !Array.isArray(decisionSummary.decision_counts) ? decisionSummary.decision_counts : {};
+      const completion = payload.completion && typeof payload.completion === "object" && !Array.isArray(payload.completion) ? payload.completion : {};
+      const checks = payload.checks && typeof payload.checks === "object" && !Array.isArray(payload.checks) ? payload.checks : {};
+      const privacy = payload.privacy || {};
+      const totalDecisions = firstNumber(payload.total_decisions, summary.total_decisions, decisionSummary.total_decisions, decisionCounts.total, nestedDecisionCounts.total, completion.total_decisions);
+      const pendingCount = firstNumber(payload.pending_count, summary.pending_count, decisionSummary.pending, decisionSummary.pending_count, decisionCounts.pending, nestedDecisionCounts.pending, completion.pending_count);
+      const acceptedCount = firstNumber(payload.accepted_count, summary.accepted_count, decisionSummary.accepted, decisionSummary.accepted_count, decisionCounts.accepted, decisionCounts.accept, decisionCounts.accepted_issue, nestedDecisionCounts.accepted_issue);
+      const rejectedCount = firstNumber(payload.rejected_count, summary.rejected_count, decisionSummary.rejected, decisionSummary.rejected_count, decisionCounts.rejected, decisionCounts.reject, decisionCounts.false_positive, nestedDecisionCounts.false_positive);
+      const nestedReworkCount = firstNumber(
+        nestedDecisionCounts.rework,
+        nestedDecisionCounts.needs_rework,
+        number(nestedDecisionCounts.fixed_externally) + number(nestedDecisionCounts.needs_rescan) + number(nestedDecisionCounts.blocked)
+      );
+      const reworkCount = firstNumber(payload.rework_count, summary.rework_count, decisionSummary.rework, decisionSummary.rework_count, decisionCounts.rework, decisionCounts.needs_rework, nestedReworkCount);
+      const complete = firstBoolean(payload.complete, payload.review_complete, summary.complete, decisionSummary.complete, completion.complete);
+      const completionStatus = text(payload.completion_status || summary.completion_status || decisionSummary.completion_status || completion.status, complete === null ? "Not provided" : complete ? "complete" : "not complete");
+      return {
+        recognized: true,
+        status: normalizeAggregateStatus(payload.status || summary.status || (completionStatus === "complete" ? "pass" : completionStatus === "incomplete" ? "blocked" : complete === true && pendingCount === 0 ? "pass" : complete === false ? "blocked" : "")),
+        checksPassed: firstNumber(payload.checks_passed, summary.checks_passed, checks.passed),
+        checksFailed: firstNumber(payload.checks_failed, summary.checks_failed, checks.failed),
+        totalDecisions,
+        pendingCount,
+        acceptedCount,
+        rejectedCount,
+        reworkCount,
+        completionStatus,
+        blockingCount: firstNumber(payload.blocking_item_count, payload.blocking_count, summary.blocking_item_count, summary.blocking_count),
+        warningCount: firstNumber(payload.warning_item_count, payload.warning_count, summary.warning_item_count, summary.warning_count),
+        blockingCodeCounts: aggregateCodeCounts(payload.blocking_counts_by_code || payload.blocking_item_counts_by_code || summary.blocking_counts_by_code || summary.blocking_item_counts_by_code),
+        warningCodeCounts: aggregateCodeCounts(payload.warning_counts_by_code || summary.warning_counts_by_code),
+        privacyStatus: text(payload.privacy_status || summary.privacy_status || privacy.status, aggregatePrivacyStatusLabel(aggregatePrivacy(payload)))
+      };
     }
 
     function aggregateValidationIndexSummary(payload) {
@@ -2484,6 +2610,7 @@
         ${readiness ? artifactReadinessPanel(readiness) : ""}
         ${aggregate.processingReview.recognized ? processingReviewPanel(aggregate.processingReview, processingReviewRows) : ""}
         ${aggregate.deepInspectionCandidate ? deepInspectionCandidatePanel(aggregate.deepInspectionCandidate) : ""}
+        ${aggregate.reviewDecisionVerification ? reviewDecisionVerificationPanel(aggregate.reviewDecisionVerification) : ""}
         <div class="metric-grid">
           ${aggregateMetric("Artifact Type", aggregate.artifactType)}
           ${aggregateMetric("Aggregate-only Status", statusBadge(aggregate.status), true)}
@@ -2575,6 +2702,41 @@
           </div>
           ${aggregateCodeList("Passed check codes", candidate.checkCodesPassed)}
           ${aggregateCodeList("Failed check codes", candidate.checkCodesFailed)}
+        </section>`;
+    }
+
+    function reviewDecisionVerificationPanel(summary) {
+      const rows = [
+        ["Status", statusBadge(summary.status), true],
+        ["Checks Passed", summary.checksPassed],
+        ["Checks Failed", summary.checksFailed],
+        ["Total Decisions", summary.totalDecisions],
+        ["Pending Decisions", summary.pendingCount],
+        ["Accepted Decisions", summary.acceptedCount],
+        ["Rejected Decisions", summary.rejectedCount],
+        ["Rework Decisions", summary.reworkCount],
+        ["Completion Status", summary.completionStatus],
+        ["Blocking Count", summary.blockingCount],
+        ["Warning Count", summary.warningCount],
+        ["Privacy Status", summary.privacyStatus]
+      ];
+      return `
+        <section class="subpanel">
+          <h3>Review Decision Verification Summary</h3>
+          <p class="muted">Aggregate-only decision verification. Counts, statuses, and aggregate codes are shown without source field names, source values, local IDs, paths, filenames, hashes, OCR text, thumbnails, object URLs, reviewer notes, prompts, provider commands, raw model output, or row-level findings.</p>
+          <div class="table-wrap">
+            <table><tbody>${rows.map(([label, value, html]) => html ? `<tr><th>${escapeHtml(label)}</th><td class="truncate">${value}</td></tr>` : kv(label, value)).join("")}</tbody></table>
+          </div>
+          <div class="grid" style="margin-top:12px">
+            <div>
+              <h3>Blocking Counts By Code</h3>
+              ${summary.blockingCodeCounts.length ? aggregateCountTable(summary.blockingCodeCounts, "Blocking Code") : `<div class="empty">No blocking counts by aggregate code were present.</div>`}
+            </div>
+            <div>
+              <h3>Warning Counts By Code</h3>
+              ${summary.warningCodeCounts.length ? aggregateCountTable(summary.warningCodeCounts, "Warning Code") : `<div class="empty">No warning counts by aggregate code were present.</div>`}
+            </div>
+          </div>
         </section>`;
     }
 

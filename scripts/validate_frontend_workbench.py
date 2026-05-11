@@ -334,6 +334,7 @@ REQUIRED_AGGREGATE_FIELDS = {
     "provider capability probe": "aggregateProviderProbe",
     "processing review summary": "aggregateProcessingReview",
     "processing review targets": "buildProcessingReviewTargets",
+    "review decision verification summary": "aggregateReviewDecisionVerificationSummary",
 }
 
 REQUIRED_CHECKLIST_FIELDS = {
@@ -382,6 +383,8 @@ REQUIRED_DEMO_FIXTURE_LABELS = {
     "Recognized passing review summary",
     "Passing workbench public summary",
     "Blocked workbench public summary",
+    "Passing review decision verification summary",
+    "Blocked review decision verification summary",
     "Passing acceptance summary",
     "Complete public-safe readiness checklist",
     "Passing final production handoff",
@@ -805,6 +808,14 @@ vm.runInContext(workbenchScript + `
         warning_count: 0,
         privacy_status: "public-safe",
         generated_at: "2026-05-11T00:05:30Z"
+      }},
+      "review_decision_verification_summary.json": {{
+        present: true,
+        status: "pass",
+        blocking_count: 0,
+        warning_count: 0,
+        privacy_status: "public-safe",
+        generated_at: "2026-05-11T00:05:45Z"
       }},
       "public_safe_validation_index.json": {{
         present: true,
@@ -1359,6 +1370,90 @@ vm.runInContext(workbenchScript + `
     sensitivity: "aggregate-only public summary"
   }};
 
+  const reviewDecisionVerificationPassFixture = {{
+    schema_version: "scan-qc.review-decision-verification-summary.v1",
+    generated_at: "2026-05-11T02:12:00Z",
+    status: "pass",
+    checks_passed: 1,
+    checks_failed: 0,
+    source: {{
+      schema: "scan-qc-review-decisions.local.v1",
+      source_type: "aggregate-handoff"
+    }},
+    decision_summary: {{
+      total_decisions: 18,
+      pending: 0,
+      accepted: 12,
+      rejected: 4,
+      rework: 2,
+      completion_status: "complete",
+      decision_counts: {{
+        pending: 0,
+        accepted_issue: 12,
+        false_positive: 4,
+        fixed_externally: 1,
+        needs_rescan: 1,
+        blocked: 0
+      }}
+    }},
+    blocking_count: 0,
+    warning_count: 1,
+    blocking_counts_by_code: {{}},
+    warning_counts_by_code: {{ aggregate_warning_review_backlog: 1 }},
+    privacy: {{
+      status: "pass",
+      aggregate_only: true,
+      sensitive_field_count: 0,
+      source_values_omitted: true
+    }},
+    sensitive_values_omitted: true,
+    sensitivity: "aggregate-only public summary"
+  }};
+
+  const reviewDecisionVerificationBlockedFixture = {{
+    schema_version: "scan-qc.review-decision-verification-summary.v1",
+    generated_at: "2026-05-11T02:13:00Z",
+    status: "blocked",
+    checks_passed: 6,
+    checks_failed: 2,
+    source: {{
+      schema: "scan-qc-review-decisions.local.v1",
+      source_type: "aggregate-handoff"
+    }},
+    decision_summary: {{
+      total_decisions: 18,
+      pending: 3,
+      accepted: 10,
+      rejected: 3,
+      rework: 2,
+      completion_status: "incomplete",
+      decision_counts: {{
+        pending: 3,
+        accepted_issue: 10,
+        false_positive: 3,
+        fixed_externally: 1,
+        needs_rescan: 1,
+        blocked: 0
+      }}
+    }},
+    blocking_count: 2,
+    warning_count: 1,
+    blocking_counts_by_code: {{
+      review_decision_pending: 1,
+      review_decision_rework_unresolved: 1
+    }},
+    warning_counts_by_code: {{ aggregate_warning_review_backlog: 1 }},
+    privacy_status: "public-safe",
+    privacy: {{
+      status: "pass",
+      aggregate_only: true,
+      sensitive_field_count: 0,
+      source_values_omitted: true
+    }},
+    sensitive_values_omitted: true,
+    sensitivity: "aggregate-only public summary"
+  }};
+
   const workbenchPublicPassModel = inferArtifact(workbenchPublicPassFixture);
   assert(workbenchPublicPassModel.sourceType === "aggregate-handoff", "workbench public pass fixture did not load as aggregate handoff");
   assert(workbenchPublicPassModel.aggregateHandoff.artifactType === "Workbench public summary", "workbench public pass fixture did not classify as workbench public summary");
@@ -1400,6 +1495,46 @@ vm.runInContext(workbenchScript + `
   assert(els.aggregateHandoff.innerHTML.includes("Artifacts Missing"), "workbench public blocked did not render missing artifact count");
   assert(!els.aggregateHandoff.innerHTML.includes("unsupported_inputs"), "workbench public blocked rendered unsupported input object details");
   assertPublicSafe(els.aggregateHandoff.innerHTML, "workbench public blocked rendering");
+
+  const reviewDecisionVerificationPassModel = inferArtifact(reviewDecisionVerificationPassFixture);
+  assert(reviewDecisionVerificationPassModel.sourceType === "aggregate-handoff", "review decision verification pass fixture did not load as aggregate handoff");
+  assert(reviewDecisionVerificationPassModel.aggregateHandoff.artifactType === "Review decision verification summary", "review decision verification pass fixture did not classify correctly");
+  assert(reviewDecisionVerificationPassModel.aggregateHandoff.status === "pass", "review decision verification pass status was not pass");
+  assert(reviewDecisionVerificationPassModel.aggregateHandoff.reviewDecisionVerification.checksPassed === 1, "review decision verification pass checks passed were not preserved");
+  assert(reviewDecisionVerificationPassModel.aggregateHandoff.reviewDecisionVerification.totalDecisions === 18, "review decision verification pass total decisions were not preserved");
+  assert(reviewDecisionVerificationPassModel.aggregateHandoff.reviewDecisionVerification.pendingCount === 0, "review decision verification pass pending count was not preserved");
+  assert(reviewDecisionVerificationPassModel.aggregateHandoff.reviewDecisionVerification.acceptedCount === 12, "review decision verification pass accepted count was not preserved");
+  assert(reviewDecisionVerificationPassModel.aggregateHandoff.reviewDecisionVerification.rejectedCount === 4, "review decision verification pass rejected count was not preserved");
+  assert(reviewDecisionVerificationPassModel.aggregateHandoff.reviewDecisionVerification.reworkCount === 2, "review decision verification pass rework count was not preserved");
+  assert(reviewDecisionVerificationPassModel.artifactCompatibility.schemaRecognized === true, "review decision verification pass schema was not recognized");
+  assert(!reviewDecisionVerificationPassModel.artifactCompatibility.diagnostics.some(item => item.code === "aggregate_status_fields_missing"), "review decision verification pass reported missing aggregate status fields");
+  state.model = reviewDecisionVerificationPassModel;
+  renderAggregateHandoff();
+  assert(els.aggregateHandoff.innerHTML.includes("Review Decision Verification Summary"), "review decision verification pass did not render summary panel");
+  assert(els.aggregateHandoff.innerHTML.includes("Total Decisions"), "review decision verification pass did not render total decisions");
+  assert(els.aggregateHandoff.innerHTML.includes("Privacy Status"), "review decision verification pass did not render privacy status");
+  assert(!els.aggregateHandoff.innerHTML.includes("source_field"), "review decision verification pass rendered source field details");
+  assert(!els.aggregateHandoff.innerHTML.includes("source_type"), "review decision verification pass rendered source type details");
+  assert(!els.aggregateHandoff.innerHTML.includes("scan-qc-review-decisions.local.v1"), "review decision verification pass rendered source schema details");
+  assertPublicSafe(els.aggregateHandoff.innerHTML, "review decision verification pass rendering");
+
+  const reviewDecisionVerificationBlockedModel = inferArtifact(reviewDecisionVerificationBlockedFixture);
+  assert(reviewDecisionVerificationBlockedModel.sourceType === "aggregate-handoff", "review decision verification blocked fixture did not load as aggregate handoff");
+  assert(reviewDecisionVerificationBlockedModel.aggregateHandoff.artifactType === "Review decision verification summary", "review decision verification blocked fixture did not classify correctly");
+  assert(reviewDecisionVerificationBlockedModel.aggregateHandoff.status === "fail", "review decision verification blocked status was not normalized to fail");
+  assert(reviewDecisionVerificationBlockedModel.aggregateHandoff.reviewDecisionVerification.checksFailed === 2, "review decision verification blocked checks failed were not preserved");
+  assert(reviewDecisionVerificationBlockedModel.aggregateHandoff.reviewDecisionVerification.pendingCount === 3, "review decision verification blocked pending count was not preserved");
+  assert(reviewDecisionVerificationBlockedModel.aggregateHandoff.reviewDecisionVerification.blockingCount === 2, "review decision verification blocked blocking count was not preserved");
+  assert(countFor(reviewDecisionVerificationBlockedModel.aggregateHandoff.reviewDecisionVerification.blockingCodeCounts, "review_decision_pending") === 1, "review decision verification blocked code count was not preserved");
+  assert(!reviewDecisionVerificationBlockedModel.artifactCompatibility.diagnostics.some(item => item.code === "aggregate_status_fields_missing"), "review decision verification blocked reported missing aggregate status fields");
+  state.model = reviewDecisionVerificationBlockedModel;
+  renderAggregateHandoff();
+  assert(els.aggregateHandoff.innerHTML.includes("review_decision_pending"), "review decision verification blocked did not render blocking code count");
+  assert(els.aggregateHandoff.innerHTML.includes("Warning Counts By Code"), "review decision verification blocked did not render warning code counts");
+  assert(!els.aggregateHandoff.innerHTML.includes("local_id"), "review decision verification blocked rendered local ID details");
+  assert(!els.aggregateHandoff.innerHTML.includes("source_type"), "review decision verification blocked rendered source type details");
+  assert(!els.aggregateHandoff.innerHTML.includes("scan-qc-review-decisions.local.v1"), "review decision verification blocked rendered source schema details");
+  assertPublicSafe(els.aggregateHandoff.innerHTML, "review decision verification blocked rendering");
 
   const actualGeneratedWorkbenchModel = inferArtifact(actualGeneratedWorkbenchFixture);
   assert(actualGeneratedWorkbenchModel.sourceType === "aggregate-handoff", "actual generated workbench summary did not load as aggregate handoff");
@@ -1453,13 +1588,14 @@ vm.runInContext(workbenchScript + `
   assert(completeChecklistModel.sourceType === "aggregate-handoff", "complete checklist fixture did not load as aggregate handoff");
   assert(completeChecklistModel.artifactReadiness.ready === true, "complete checklist fixture was not ready");
   assert(completeChecklistModel.artifactReadiness.missingCount === 0, "complete checklist fixture reported missing artifacts");
-  assert(completeChecklistModel.artifactReadiness.rows.length === 9, "complete checklist fixture did not cover nine expected artifacts");
+  assert(completeChecklistModel.artifactReadiness.rows.length === 10, "complete checklist fixture did not cover ten expected artifacts");
   state.model = completeChecklistModel;
   renderAggregateHandoff();
   assert(els.aggregateHandoff.innerHTML.includes("Public-Safe Artifact Readiness Checklist"), "complete checklist did not render checklist heading");
   assert(els.aggregateHandoff.innerHTML.includes("Ready for public handoff"), "complete checklist did not render ready summary");
   assert(els.aggregateHandoff.innerHTML.includes("final_production_handoff_summary.json"), "complete checklist did not render final handoff artifact");
   assert(els.aggregateHandoff.innerHTML.includes("deep_inspection_candidate_summary.json"), "complete checklist did not render deep-inspection candidate artifact");
+  assert(els.aggregateHandoff.innerHTML.includes("review_decision_verification_summary.json"), "complete checklist did not render review decision verification artifact");
   assert(!els.aggregateHandoff.innerHTML.includes("blob:aggregate-fixture"), "complete checklist rendered object URL state");
 
   const deepInspectionCandidateModel = inferArtifact(deepInspectionCandidateFixture);
