@@ -137,6 +137,14 @@ REQUIRED_STRINGS = {
     "needs_rescan",
     "scan-qc-review-decisions.local.v1",
     "Prepare Privacy-Safe Summary",
+    "reviewCompletionGate",
+    "Review completion gate warning",
+    "Completion gate warnings use aggregate counts only",
+    "Export is advisory and remains available.",
+    "Export remains privacy-safe and schema-stable.",
+    "Decision-status counts",
+    "renderReviewCompletionGate",
+    "reviewDecisionCountText",
     "generated_in_browser",
     "source_target_count",
     "parseReviewDecisionSummary",
@@ -1742,12 +1750,26 @@ vm.runInContext(workbenchScript + `
   assert(els.decisionSummary.innerHTML.includes("Total Targets"), "review completion summary did not render total targets");
   assert(els.decisionSummary.innerHTML.includes("Pending Targets"), "review completion summary did not render pending targets");
   assert(els.decisionSummary.innerHTML.includes("not complete"), "initial review completion summary did not render not-complete status");
+  assert(els.reviewCompletionGate.textContent.includes("Review completion gate warning: not complete."), "initial review completion gate warning did not render");
+  assert(els.reviewCompletionGate.textContent.includes("Total targets: 3."), "initial completion gate did not render total target count");
+  assert(els.reviewCompletionGate.textContent.includes("Reviewed targets: 0."), "initial completion gate did not render reviewed target count");
+  assert(els.reviewCompletionGate.textContent.includes("Pending targets: 3."), "initial completion gate did not render pending target count");
+  assert(els.reviewCompletionGate.textContent.includes("Pending: 3"), "initial completion gate did not render pending decision count");
+  assert(els.reviewCompletionGate.textContent.includes("Export is advisory and remains available."), "completion gate warning changed export behavior wording");
+  assertPublicSafe(els.reviewCompletionGate.textContent, "initial review completion gate");
   state.decisions.set(decisionKey("batch", "B0001"), "accepted_issue");
   state.decisions.set(decisionKey("finding", "F0001"), "false_positive");
   state.decisions.set(decisionKey("finding", "F0002"), "needs_rescan");
   renderReview();
   assert(els.decisionSummary.innerHTML.includes("Reviewed Targets"), "review completion summary did not render reviewed targets");
   assert(els.decisionSummary.innerHTML.includes("complete"), "review completion summary did not update to complete");
+  assert(els.reviewCompletionGate.textContent.includes("Review completion gate: complete."), "review completion gate did not render complete state");
+  assert(els.reviewCompletionGate.textContent.includes("Reviewed targets: 3."), "complete gate did not render reviewed target count");
+  assert(els.reviewCompletionGate.textContent.includes("Pending targets: 0."), "complete gate did not render zero pending target count");
+  assert(els.reviewCompletionGate.textContent.includes("Accepted issue: 1"), "complete gate did not render accepted count");
+  assert(els.reviewCompletionGate.textContent.includes("False positive: 1"), "complete gate did not render false-positive count");
+  assert(els.reviewCompletionGate.textContent.includes("Needs rescan: 1"), "complete gate did not render needs-rescan count");
+  assertPublicSafe(els.reviewCompletionGate.textContent, "complete review completion gate");
   const exported = buildReviewSummary();
   assert(exported.schema === "scan-qc-review-decisions.local.v1", "review export schema changed");
   assert(exported.source_type === "scan-report", "review export source type was not preserved");
@@ -1826,10 +1848,15 @@ vm.runInContext(workbenchScript + `
   assert(runPlanSummary.reviewed === 1, "run-plan reviewed target count did not update");
   assert(runPlanSummary.pending === 1, "run-plan pending target count did not update");
   assert(runPlanSummary.complete === false, "run-plan completion finished too early");
+  assert(els.reviewCompletionGate.textContent.includes("Review completion gate warning: not complete."), "run-plan incomplete gate warning did not render");
+  assert(els.reviewCompletionGate.textContent.includes("Total targets: 2."), "run-plan gate did not render total targets");
+  assert(els.reviewCompletionGate.textContent.includes("Reviewed targets: 1."), "run-plan gate did not render reviewed targets");
+  assert(els.reviewCompletionGate.textContent.includes("Pending targets: 1."), "run-plan gate did not render pending targets");
   state.decisions.set(decisionKey("batch", "B0002"), "blocked");
   renderReview();
   runPlanSummary = buildReviewSummary().aggregate_counts.review_completion;
   assert(runPlanSummary.complete === true, "run-plan completion did not finish after all targets changed");
+  assert(els.reviewCompletionGate.textContent.includes("Review completion gate: complete."), "run-plan complete gate did not render");
   assert(buildReviewSummary().review_counts.fixed_externally === 1, "run-plan fixed count was not preserved");
   assert(buildReviewSummary().review_counts.blocked === 1, "run-plan blocked count was not preserved");
 
@@ -1890,10 +1917,17 @@ vm.runInContext(workbenchScript + `
   assert(processingSummary.reviewed === 2, "processing-review reviewed target count did not update");
   assert(processingSummary.pending === 4, "processing-review pending target count did not update");
   assert(processingSummary.complete === false, "processing-review completion finished too early");
+  assert(els.reviewCompletionGate.textContent.includes("Review completion gate warning: not complete."), "processing-review incomplete gate warning did not render");
+  assert(els.reviewCompletionGate.textContent.includes("Total targets: 6."), "processing-review gate did not render total targets");
+  assert(els.reviewCompletionGate.textContent.includes("Reviewed targets: 2."), "processing-review gate did not render reviewed targets");
+  assert(els.reviewCompletionGate.textContent.includes("Pending targets: 4."), "processing-review gate did not render pending targets");
+  assert(els.reviewCompletionGate.textContent.includes("Accepted issue: 1"), "processing-review gate did not render accepted count");
+  assert(els.reviewCompletionGate.textContent.includes("False positive: 1"), "processing-review gate did not render false-positive count");
   assert(buildReviewSummary().source_target_count === 6, "filter changed review export target count");
   assert(buildReviewSummary().decisions.length === 6, "filter removed decisions from privacy-safe export");
   assertPublicSafe(JSON.stringify(buildReviewSummary()), "filtered review export summary");
   assertPublicSafe(els.decisionSummary.innerHTML, "review completion summary");
+  assertPublicSafe(els.reviewCompletionGate.textContent, "review completion gate");
 `, context);
 """
 
