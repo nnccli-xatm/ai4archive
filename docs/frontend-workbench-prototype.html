@@ -117,6 +117,20 @@
       margin-top: 12px;
     }
 
+    .demo-gallery {
+      display: grid;
+      gap: 10px;
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+    }
+
+    .demo-gallery label {
+      display: grid;
+      gap: 6px;
+      color: var(--muted);
+    }
+
     input[type="file"], select, button {
       font: inherit;
     }
@@ -515,6 +529,16 @@
           <input id="artifactFile" type="file" accept="application/json,.json">
           <button id="clearButton" class="secondary" type="button">Clear</button>
         </div>
+        <div class="demo-gallery" aria-label="Public-safe demo fixture gallery">
+          <h3>Public-Safe Demo Fixture Gallery</h3>
+          <p class="muted">Synthetic aggregate-only fixtures for browser validation. Demo fixtures exclude private filenames, paths, hashes, OCR text, thumbnails, image content, manifests, row-level findings, reviewer notes, derivative image references, and local preview state.</p>
+          <label>Demo fixture
+            <select id="demoFixtureSelect"></select>
+          </label>
+          <div class="file-row" style="margin-top:0">
+            <button id="loadDemoFixtureButton" type="button">Load Demo Fixture</button>
+          </div>
+        </div>
       </div>
       <div id="statusBanner" class="status-banner" role="status" aria-live="polite">No artifact loaded. Overview, workflow, batches, findings, and preview will appear after loading JSON.</div>
     </section>
@@ -680,6 +704,218 @@
       ["blocked", "Blocked"]
     ];
 
+    const PUBLIC_SAFE_OMISSIONS = [
+      "source location strings",
+      "source file identifiers",
+      "content hashes",
+      "recognized text",
+      "thumbnails",
+      "image content",
+      "row-level findings"
+    ];
+
+    const PUBLIC_SAFE_PRIVACY = {
+      aggregate_only: true,
+      omits: PUBLIC_SAFE_OMISSIONS,
+      contains_paths: false,
+      contains_filenames: false,
+      contains_hashes: false,
+      contains_ocr_text: false,
+      contains_thumbnails: false,
+      contains_image_content: false,
+      contains_row_level_findings: false,
+      redacts_private_values: true,
+      private_indicators_found: false,
+      private_indicator_count: 0
+    };
+
+    const PUBLIC_SAFE_READINESS_ROWS = {
+      "run_plan_summary.json": {
+        present: true,
+        status: "pass",
+        blocking_count: 0,
+        warning_count: 0,
+        privacy_status: "public-safe",
+        generated_at: "2026-05-11T00:00:00Z"
+      },
+      "review_summary.json": {
+        present: true,
+        status: "pass",
+        blocking_count: 0,
+        warning_count: 0,
+        privacy_status: "public-safe",
+        generated_at: "2026-05-11T00:01:00Z"
+      },
+      "acceptance_summary.json": {
+        present: true,
+        status: "pass",
+        blocking_count: 0,
+        warning_count: 0,
+        privacy_status: "public-safe",
+        generated_at: "2026-05-11T00:02:00Z"
+      },
+      "aggregate_evidence_bundle_summary.json": {
+        present: true,
+        status: "pass",
+        blocking_count: 0,
+        warning_count: 0,
+        privacy_status: "public-safe",
+        generated_at: "2026-05-11T00:03:00Z"
+      },
+      "release_candidate_summary.json": {
+        present: true,
+        status: "pass",
+        blocking_count: 0,
+        warning_count: 0,
+        privacy_status: "public-safe",
+        generated_at: "2026-05-11T00:04:00Z"
+      },
+      "final_production_handoff_summary.json": {
+        present: true,
+        status: "pass",
+        blocking_count: 0,
+        warning_count: 0,
+        privacy_status: "public-safe",
+        generated_at: "2026-05-11T00:05:00Z"
+      }
+    };
+
+    const DEMO_FIXTURES = [
+      {
+        id: "recognized-review-pass",
+        label: "Recognized passing review summary",
+        payload: {
+          schema_version: "scan-qc-review-summary.v1",
+          generated_at: "2026-05-11T00:00:00Z",
+          status: "pass",
+          blocking_item_count: 0,
+          blocking_items: [],
+          warnings: [],
+          remaining_p0: 0,
+          remaining_p1: 0,
+          total_findings: 12,
+          status_counts: {
+            accepted_issue: 4,
+            false_positive: 7,
+            fixed_externally: 1
+          },
+          severity_status_counts: {
+            P1: { accepted_issue: 2, false_positive: 2 },
+            P2: { accepted_issue: 2, false_positive: 5, fixed_externally: 1 }
+          },
+          rule_counts: {
+            aggregate_skew_check: 5,
+            aggregate_blur_check: 7
+          },
+          rule_status_counts: {
+            aggregate_skew_check: { false_positive: 5 },
+            aggregate_blur_check: { accepted_issue: 4, false_positive: 2, fixed_externally: 1 }
+          },
+          privacy: PUBLIC_SAFE_PRIVACY,
+          privacy_self_check: { status: "passed", violation_count: 0 },
+          sensitivity: "aggregate-only public summary"
+        }
+      },
+      {
+        id: "acceptance-pass",
+        label: "Passing acceptance summary",
+        payload: {
+          schema_version: "scan-qc-acceptance-summary.v1",
+          generated_at: "2026-05-11T00:10:00Z",
+          status: "pass",
+          acceptance_passed: true,
+          pass: true,
+          blocking_item_count: 0,
+          blocking_items: [],
+          warnings: [{ code: "aggregate_warning_review_backlog" }],
+          human_review: {
+            remaining_p0: 0,
+            remaining_p1: 1,
+            total_findings: 10,
+            status_counts: {
+              accepted_issue: 3,
+              false_positive: 7
+            }
+          },
+          privacy: PUBLIC_SAFE_PRIVACY,
+          privacy_self_check: { status: "passed", violation_count: 0 },
+          sensitivity: "aggregate-only public summary"
+        }
+      },
+      {
+        id: "complete-readiness-checklist",
+        label: "Complete public-safe readiness checklist",
+        payload: {
+          schema_version: "scan-qc-artifact-readiness-checklist.v1",
+          generated_at: "2026-05-11T00:20:00Z",
+          status: "pass",
+          privacy: PUBLIC_SAFE_PRIVACY,
+          privacy_self_check: { status: "passed", violation_count: 0 },
+          sensitivity: "aggregate-only public summary",
+          artifact_readiness_checklist: PUBLIC_SAFE_READINESS_ROWS
+        }
+      },
+      {
+        id: "unsupported-schema-warning",
+        label: "Unsupported schema compatibility warning",
+        payload: {
+          schema_version: "scan-qc-artifact-readiness-checklist.v99",
+          generated_at: "2026-05-11T00:30:00Z",
+          status: "pass",
+          privacy: PUBLIC_SAFE_PRIVACY,
+          privacy_self_check: { status: "passed", violation_count: 0 },
+          sensitivity: "aggregate-only public summary",
+          artifact_readiness_checklist: {
+            "run_plan_summary.json": PUBLIC_SAFE_READINESS_ROWS["run_plan_summary.json"]
+          }
+        }
+      },
+      {
+        id: "privacy-diagnostic-fail",
+        label: "Privacy summary failing diagnostic",
+        payload: {
+          schema_version: "scan-qc-acceptance-summary.v1",
+          generated_at: "2026-05-11T00:40:00Z",
+          status: "fail",
+          acceptance_passed: false,
+          blocking_item_count: 1,
+          blocking_items: [{ code: "aggregate_privacy_hold" }],
+          warnings: [{ code: "aggregate_warning_privacy_recheck" }],
+          privacy: {
+            aggregate_only: true,
+            redacts_private_values: false,
+            private_indicators_found: true,
+            private_indicator_count: 1,
+            contains_paths: true,
+            contains_filenames: false,
+            contains_hashes: false,
+            contains_ocr_text: false,
+            contains_thumbnails: false,
+            contains_image_content: false,
+            contains_row_level_findings: false
+          },
+          privacy_self_check: { status: "failed", violation_count: 1 },
+          sensitivity: "aggregate-only public summary"
+        }
+      },
+      {
+        id: "privacy-diagnostic-missing",
+        label: "Privacy summary missing diagnostic",
+        payload: {
+          schema_version: "scan-qc-review-summary.v1",
+          generated_at: "2026-05-11T00:50:00Z",
+          status: "pass",
+          blocking_item_count: 0,
+          blocking_items: [],
+          warnings: [],
+          total_findings: 1,
+          status_counts: {
+            accepted_issue: 1
+          }
+        }
+      }
+    ];
+
     const els = {
       file: document.getElementById("artifactFile"),
       clear: document.getElementById("clearButton"),
@@ -700,6 +936,8 @@
       reviewImportStatus: document.getElementById("reviewImportStatus"),
       exportReviewButton: document.getElementById("exportReviewButton"),
       downloadReviewButton: document.getElementById("downloadReviewButton"),
+      demoFixtureSelect: document.getElementById("demoFixtureSelect"),
+      loadDemoFixtureButton: document.getElementById("loadDemoFixtureButton"),
       statusFilter: document.getElementById("statusFilter"),
       severityFilter: document.getElementById("severityFilter"),
       findingSeverityFilter: document.getElementById("findingSeverityFilter")
@@ -1959,6 +2197,37 @@
       }
     }
 
+    function cloneDemoPayload(payload) {
+      return JSON.parse(JSON.stringify(payload));
+    }
+
+    function populateDemoFixtureGallery() {
+      els.demoFixtureSelect.innerHTML = DEMO_FIXTURES.map(item => `
+        <option value="${escapeHtml(item.id)}">${escapeHtml(item.label)}</option>
+      `).join("");
+    }
+
+    function loadDemoFixture(id) {
+      const fixture = DEMO_FIXTURES.find(item => item.id === id);
+      if (!fixture) {
+        renderStatus("error", "Could not load demo fixture: selected fixture was not found.");
+        return;
+      }
+      try {
+        state.model = inferArtifact(cloneDemoPayload(fixture.payload));
+        state.selectedBatchId = state.model.batches[0] ? state.model.batches[0].id : null;
+        resetReviewState();
+        render();
+        renderStatus("ok", `Loaded public-safe demo fixture: ${fixture.label}.`);
+      } catch (error) {
+        state.model = SAMPLE_EMPTY;
+        state.selectedBatchId = null;
+        resetReviewState();
+        render();
+        renderStatus("error", `Could not load demo fixture: ${error.message}`);
+      }
+    }
+
     els.file.addEventListener("change", event => loadFile(event.target.files[0]));
     els.reviewImportFile.addEventListener("change", event => importReviewDecisionFile(event.target.files[0]));
     els.previewFile.addEventListener("change", event => loadPreviewFile(event.target.files[0]));
@@ -1990,9 +2259,11 @@
       link.click();
       URL.revokeObjectURL(link.href);
     });
+    els.loadDemoFixtureButton.addEventListener("click", () => loadDemoFixture(els.demoFixtureSelect.value));
     [els.statusFilter, els.severityFilter].forEach(el => el.addEventListener("change", renderBatches));
     els.findingSeverityFilter.addEventListener("change", renderFindings);
 
+    populateDemoFixtureGallery();
     render();
   </script>
 </body>
