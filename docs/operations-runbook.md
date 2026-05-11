@@ -74,6 +74,9 @@ For UOS, Kylin, openKylin, aarch64, and LoongArch environments:
   count, elapsed seconds, and files per minute in the release evidence.
 - Do not rely on GPU availability for the current CLI; current scan and
   derivative processing are CPU-based.
+- Treat model/deep-inspection providers as disabled unless an approved local
+  provider implementation has passed the aggregate-only provider probe and a
+  separate privacy review.
 
 ## Resource Guidance
 
