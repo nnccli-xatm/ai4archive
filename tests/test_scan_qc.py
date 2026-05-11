@@ -527,6 +527,105 @@ class ScanQcTest(unittest.TestCase):
         self.assertEqual(summary["checks_failed"], 0)
         self.assertFalse(summary["privacy"]["private_indicators_found"])
 
+    def test_evidence_bundle_verifier_allows_public_aggregate_summary_keys(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            release_candidate = _release_candidate_bundle_payload()
+            release_candidate["aggregate_counts"] = {
+                "total_files": 20,
+                "openable_files": 20,
+                "processing_processed_files": 20,
+                "processing_failed_files": 0,
+                "p0_findings": 22,
+                "p1_findings": 0,
+                "p2_findings": 2,
+                "total_findings": 24,
+            }
+            release_candidate["artifact_presence"] = {
+                "release_candidate_summary.json": {"present": True, "required": True, "status": "pass"},
+                "release_readiness_summary.json": {"present": True, "required": False, "status": "pass"},
+            }
+            release_candidate["artifact_status_summary"] = {
+                "release_candidate_summary.json": {"status": "pass", "checks_failed": 0},
+                "release_readiness_summary.json": {"status": "pass", "checks_failed": 0},
+            }
+            aggregate_baseline = _aggregate_baseline_bundle_payload()
+            aggregate_baseline.pop("status")
+            aggregate_baseline["aggregate_counts"] = {
+                "total_files": 20,
+                "openable_files": 20,
+                "processing_processed_files": 20,
+                "processing_failed_files": 0,
+                "p0_findings": 22,
+                "p1_findings": 0,
+                "p2_findings": 2,
+                "total_findings": 24,
+            }
+            aggregate_baseline["benchmark"] = {"source": "aggregate_worker_sweep"}
+
+            _write_json(root / "release_candidate_summary.json", release_candidate)
+            _write_json(root / "release_readiness_summary.json", _release_readiness_bundle_payload())
+            _write_json(root / "acceptance_summary.json", _acceptance_bundle_payload())
+            _write_json(root / "aggregate_baseline_summary.json", aggregate_baseline)
+            _write_json(root / "deep_inspection_provider_probe.json", build_deep_inspection_provider_probe())
+
+            exit_code = main(["evidence-bundle-verify", "--evidence-dir", str(root), "--out", str(root / "bundle.json")])
+            _write_json(root / "aggregate_evidence_bundle_summary.json", json.loads((root / "bundle.json").read_text(encoding="utf-8")))
+            handoff_exit_code = main(["final-handoff-summary", "--evidence-dir", str(root), "--out", str(root / "handoff.json")])
+            bundle = json.loads((root / "bundle.json").read_text(encoding="utf-8"))
+            handoff = json.loads((root / "handoff.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(bundle["status"], "pass")
+        self.assertEqual(bundle["checks_failed"], 0)
+        self.assertEqual(handoff_exit_code, 0)
+        self.assertEqual(handoff["status"], "pass")
+        self.assertTrue(handoff["ready_for_handoff"])
+
+    def test_evidence_bundle_verifier_infers_pass_for_real_aggregate_baseline_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            baseline = _aggregate_baseline_bundle_payload()
+            baseline.pop("status")
+            baseline["benchmark"] = {"source": "aggregate_worker_sweep"}
+            baseline["privacy"]["guarantees"] = [
+                "No source names, source paths, relative paths, hashes, previews, OCR text, image content, or row-level findings.",
+            ]
+
+            _write_json(root / "release_candidate_summary.json", _release_candidate_bundle_payload())
+            _write_json(root / "aggregate_baseline_summary.json", baseline)
+
+            exit_code = main(["evidence-bundle-verify", "--evidence-dir", str(root), "--out", str(root / "bundle.json")])
+            bundle = json.loads((root / "bundle.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(bundle["artifacts"]["aggregate_baseline_summary.json"]["reported_status"], "pass")
+        self.assertEqual(bundle["artifacts"]["aggregate_baseline_summary.json"]["status"], "pass")
+
+    def test_evidence_bundle_verifier_still_blocks_private_indicators(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            payload = _release_candidate_bundle_payload()
+            payload["aggregate_counts"] = {"processing_processed_files": 20, "processing_failed_files": 0}
+            payload["source_image_reference"] = {
+                "relative_path": "batch/page_0001.tif",
+                "sha256": "a" * 64,
+                "ocr_text": "PRIVATE OCR TEXT",
+            }
+            payload["files"] = [{"filename": "page_0001.tif"}]
+            _write_json(root / "release_candidate_summary.json", payload)
+
+            exit_code = main(["evidence-bundle-verify", "--evidence-dir", str(root), "--out", str(root / "bundle.json")])
+            raw = (root / "bundle.json").read_text(encoding="utf-8")
+            summary = json.loads(raw)
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(summary["status"], "fail")
+        self.assertIn("private_key_present", {item["code"] for item in summary["blocking_items"]})
+        self.assertNotIn("batch/page_0001.tif", raw)
+        self.assertNotIn("PRIVATE OCR TEXT", raw)
+        self.assertNotIn("page_0001.tif", raw)
+
     def test_evidence_bundle_verifier_blocks_missing_required_but_allows_optional(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

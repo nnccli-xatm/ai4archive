@@ -39,7 +39,10 @@ _PRIVATE_KEYS = (
     "token",
 )
 _ALLOWED_KEY_EXCEPTIONS = {
+    "aggregate_counts",
     "aggregate_only",
+    "artifact_presence",
+    "artifact_status_summary",
     "contains_environment_values",
     "contains_file_list",
     "contains_filenames",
@@ -67,6 +70,16 @@ _ALLOWED_KEY_EXCEPTIONS = {
     "total_files",
     "total_findings",
 }
+_AGGREGATE_COUNTER_RE = re.compile(
+    r"^(?:"
+    r".*_(?:file|files|finding|findings)_count|"
+    r".*_(?:files|findings)|"
+    r"(?:file|files|finding|findings)_.*|"
+    r"(?:p[0-9]+)_findings|"
+    r"(?:total|openable|processed|failed|skipped)_files|"
+    r"total_findings"
+    r")$"
+)
 _PRIVATE_VALUE_PATTERNS = (
     ("absolute_path", re.compile(r"(^|[\s\"'])((/[A-Za-z0-9_.~ -]+)+|[A-Za-z]:\\[^\"'\s]+)")),
     ("filename", re.compile(r"\b[^/\\\s\"']+\.(?:png|jpe?g|tiff?|bmp|gif|jp2|pdf|csv)\b", re.IGNORECASE)),
@@ -189,8 +202,7 @@ def _verify_artifact(path: Path, expected: ExpectedArtifact) -> tuple[dict[str, 
         failed += 1
         blockers.append(_blocker(expected.name, "schema_version_unexpected"))
 
-    reported_status = _path_value(payload, expected.status_path)
-    normalized_status = str(reported_status).lower() if reported_status is not None else None
+    normalized_status = _artifact_status(payload, expected)
     base["reported_status"] = normalized_status
     if normalized_status in _FAIL_STATUSES:
         failed += 1
@@ -223,7 +235,7 @@ def _privacy_failures(payload: dict[str, Any], raw: str) -> list[str]:
         failures.append("privacy_flag_contains_private_evidence")
 
     for path, key, value in _walk(payload):
-        if _private_key(key):
+        if _private_key(path, key, value):
             failures.append("private_key_present")
             break
         if isinstance(value, str) and _private_value(value):
@@ -252,11 +264,57 @@ def _count_failures(payload: dict[str, Any]) -> list[str]:
     return failures
 
 
-def _private_key(key: str) -> bool:
+def _private_key(path: tuple[str, ...], key: str, value: Any) -> bool:
     normalized = key.lower()
-    if normalized in _ALLOWED_KEY_EXCEPTIONS:
+    if _aggregate_safe_key(path, normalized, value):
         return False
     return any(token in normalized for token in _PRIVATE_KEYS)
+
+
+def _aggregate_safe_key(path: tuple[str, ...], normalized: str, value: Any) -> bool:
+    if normalized in _ALLOWED_KEY_EXCEPTIONS:
+        return True
+    if normalized in {"source", "source_inputs"} and _aggregate_safe_source_key(path, value):
+        return True
+    if normalized.endswith("_status_summary") or normalized.endswith("_presence"):
+        return True
+    if _AGGREGATE_COUNTER_RE.match(normalized) and isinstance(value, (int, float, bool, type(None))):
+        return True
+    if len(path) >= 2 and path[-2] in {"aggregate_counts", "summary"} and isinstance(value, (int, float, bool, type(None))):
+        return True
+    return False
+
+
+def _aggregate_safe_source_key(path: tuple[str, ...], value: Any) -> bool:
+    if path in {("benchmark", "source"), ("privacy", "source_inputs")}:
+        return isinstance(value, (str, list, tuple))
+    return False
+
+
+def _artifact_status(payload: dict[str, Any], expected: ExpectedArtifact) -> str | None:
+    reported_status = _path_value(payload, expected.status_path)
+    if reported_status is not None:
+        return str(reported_status).lower()
+    if expected.name == "aggregate_baseline_summary.json" and _aggregate_baseline_passed(payload):
+        return "pass"
+    if expected.name == "acceptance_summary.json" and payload.get("pass") is True:
+        return "pass"
+    return None
+
+
+def _aggregate_baseline_passed(payload: dict[str, Any]) -> bool:
+    privacy = payload.get("privacy")
+    privacy_self_check = payload.get("privacy_self_check")
+    counts = payload.get("aggregate_counts")
+    if not isinstance(privacy, dict) or privacy.get("aggregate_only") is not True:
+        return False
+    if isinstance(privacy_self_check, dict):
+        self_check_passed = privacy_self_check.get("passed") is True or privacy_self_check.get("status") == "pass"
+        if not self_check_passed:
+            return False
+    if isinstance(counts, dict) and counts.get("processing_failed_files") not in (None, 0):
+        return False
+    return True
 
 
 def _private_value(value: str) -> bool:
