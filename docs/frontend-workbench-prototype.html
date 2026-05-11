@@ -452,6 +452,22 @@
       color: var(--muted);
     }
 
+    .preview-slots {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .preview-slot {
+      display: grid;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .preview-slot h3 {
+      margin-bottom: 0;
+    }
+
     .preview {
       display: grid;
       min-height: 360px;
@@ -520,6 +536,7 @@
       .metric-grid { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
       .workflow { grid-template-columns: 1fr; }
       .decision-strip { grid-template-columns: repeat(2, minmax(112px, 1fr)); }
+      .preview-slots { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -649,22 +666,44 @@
         </section>
 
         <section class="panel" aria-labelledby="preview-title" data-region="image-preview">
-          <h2 id="preview-title">Image Preview</h2>
+          <h2 id="preview-title">Image Previews</h2>
           <div class="preview-controls">
-            <p class="preview-copy">Local image preview scaffold: an operator may choose one local image for this browser tab only. The workbench creates a temporary object URL, revokes it on clear, reload, or new selection, and never uploads, scans, transforms, or derives image paths from report JSON.</p>
-            <div class="file-row">
-              <input id="previewFile" type="file" accept="image/*" aria-describedby="previewPrivacyCopy">
-              <button id="clearPreviewButton" class="secondary" type="button" disabled>Clear Preview</button>
-            </div>
-            <div id="previewPrivacyCopy" class="preview-state" role="status" aria-live="polite">
-              <span>Selected preview filename: none</span>
-              <span>Preview is excluded from review-decision export JSON.</span>
-            </div>
+            <p class="preview-copy">Local image preview scaffold: an operator may choose separate original/source and processed/QC output images for this browser tab only. The workbench creates temporary object URLs, revokes each one on clear, reload, or new selection, and never uploads, scans, transforms, or derives image paths from report JSON.</p>
           </div>
-          <div id="imagePreview" class="preview">
-            <div>
-              <strong>No preview loaded</strong>
-              <p class="muted">This static prototype does not read directories or process images. A future local service can provide controlled preview URLs.</p>
+          <div class="preview-slots">
+            <div class="preview-slot" data-preview-slot="original">
+              <h3>Original/Source Image</h3>
+              <div class="file-row">
+                <input id="originalPreviewFile" type="file" accept="image/*" aria-describedby="originalPreviewPrivacyCopy">
+                <button id="clearOriginalPreviewButton" class="secondary" type="button" disabled>Clear Original Preview</button>
+              </div>
+              <div id="originalPreviewPrivacyCopy" class="preview-state" role="status" aria-live="polite">
+                <span>Selected original preview filename: none</span>
+                <span>Original preview is excluded from review-decision export JSON.</span>
+              </div>
+              <div id="originalImagePreview" class="preview">
+                <div>
+                  <strong>Original preview placeholder</strong>
+                  <p class="muted">No source image is loaded or transformed in this static prototype.</p>
+                </div>
+              </div>
+            </div>
+            <div class="preview-slot" data-preview-slot="processed">
+              <h3>Processed/QC Output Image</h3>
+              <div class="file-row">
+                <input id="processedPreviewFile" type="file" accept="image/*" aria-describedby="processedPreviewPrivacyCopy">
+                <button id="clearProcessedPreviewButton" class="secondary" type="button" disabled>Clear Processed Preview</button>
+              </div>
+              <div id="processedPreviewPrivacyCopy" class="preview-state" role="status" aria-live="polite">
+                <span>Selected processed preview filename: none</span>
+                <span>Processed preview is excluded from review-decision export JSON.</span>
+              </div>
+              <div id="processedImagePreview" class="preview">
+                <div>
+                  <strong>Processed preview placeholder</strong>
+                  <p class="muted">No QC output image is loaded or transformed in this static prototype.</p>
+                </div>
+              </div>
             </div>
           </div>
         </section>
@@ -705,9 +744,17 @@
       decisions: new Map(),
       exportSummary: "",
       importStatus: null,
-      preview: {
-        fileName: "",
-        objectUrl: ""
+      previews: {
+        original: {
+          label: "Original",
+          fileName: "",
+          objectUrl: ""
+        },
+        processed: {
+          label: "Processed",
+          fileName: "",
+          objectUrl: ""
+        }
       }
     };
 
@@ -1140,10 +1187,20 @@
       batchList: document.getElementById("batchList"),
       findingsList: document.getElementById("findingsList"),
       batchDetail: document.getElementById("batchDetail"),
-      preview: document.getElementById("imagePreview"),
-      previewFile: document.getElementById("previewFile"),
-      clearPreview: document.getElementById("clearPreviewButton"),
-      previewPrivacyCopy: document.getElementById("previewPrivacyCopy"),
+      previewSlots: {
+        original: {
+          preview: document.getElementById("originalImagePreview"),
+          file: document.getElementById("originalPreviewFile"),
+          clear: document.getElementById("clearOriginalPreviewButton"),
+          privacyCopy: document.getElementById("originalPreviewPrivacyCopy")
+        },
+        processed: {
+          preview: document.getElementById("processedImagePreview"),
+          file: document.getElementById("processedPreviewFile"),
+          clear: document.getElementById("clearProcessedPreviewButton"),
+          privacyCopy: document.getElementById("processedPreviewPrivacyCopy")
+        }
+      },
       decisionSummary: document.getElementById("decisionSummary"),
       reviewTargetList: document.getElementById("reviewTargetList"),
       exportReview: document.getElementById("reviewExport"),
@@ -2347,23 +2404,34 @@
       els.reviewImportStatus.textContent = `Imported ${state.importStatus.imported} review decisions; skipped ${state.importStatus.skipped}. Last import: ${state.importStatus.importedAt}.${validation}${warnings}`;
     }
 
-    function renderPreview() {
-      const hasPreview = Boolean(state.preview.objectUrl);
-      els.clearPreview.disabled = !hasPreview;
-      els.previewPrivacyCopy.innerHTML = `
-        <span>Selected preview filename: ${escapeHtml(state.preview.fileName || "none")}</span>
-        <span>Preview is excluded from review-decision export JSON.</span>`;
+    function previewSlotLabel(slot) {
+      return state.previews[slot].label;
+    }
+
+    function renderPreviewSlot(slot) {
+      const previewState = state.previews[slot];
+      const previewEls = els.previewSlots[slot];
+      const label = previewSlotLabel(slot);
+      const hasPreview = Boolean(previewState.objectUrl);
+      previewEls.clear.disabled = !hasPreview;
+      previewEls.privacyCopy.innerHTML = `
+        <span>Selected ${slot} preview filename: ${escapeHtml(previewState.fileName || "none")}</span>
+        <span>${label} preview is excluded from review-decision export JSON.</span>`;
       if (hasPreview) {
-        els.preview.className = "preview has-image";
-        els.preview.innerHTML = `<img src="${escapeHtml(state.preview.objectUrl)}" alt="Operator-selected local preview">`;
+        previewEls.preview.className = "preview has-image";
+        previewEls.preview.innerHTML = `<img src="${escapeHtml(previewState.objectUrl)}" alt="Operator-selected local ${slot} preview">`;
         return;
       }
-      els.preview.className = "preview";
-      els.preview.innerHTML = `
+      previewEls.preview.className = "preview";
+      previewEls.preview.innerHTML = `
         <div>
-          <strong>Preview placeholder</strong>
-          <p class="muted">No image is loaded or transformed in this static prototype. Use the separate image picker only for a controlled local tab preview.</p>
+          <strong>${label} preview placeholder</strong>
+          <p class="muted">No ${slot} image is loaded or transformed in this static prototype. Use the separate image picker only for a controlled local tab preview.</p>
         </div>`;
+    }
+
+    function renderPreview() {
+      Object.keys(state.previews).forEach(renderPreviewSlot);
     }
 
     function kv(label, value) {
@@ -2638,31 +2706,33 @@
       }
     }
 
-    function clearPreviewState() {
-      if (state.preview.objectUrl) {
-        URL.revokeObjectURL(state.preview.objectUrl);
+    function clearPreviewState(slot) {
+      const previewState = state.previews[slot];
+      if (previewState.objectUrl) {
+        URL.revokeObjectURL(previewState.objectUrl);
       }
-      state.preview = {
-        fileName: "",
-        objectUrl: ""
-      };
-      els.previewFile.value = "";
-      renderPreview();
+      previewState.fileName = "";
+      previewState.objectUrl = "";
+      els.previewSlots[slot].file.value = "";
+      renderPreviewSlot(slot);
     }
 
-    function loadPreviewFile(file) {
+    function clearAllPreviewState() {
+      Object.keys(state.previews).forEach(clearPreviewState);
+    }
+
+    function loadPreviewFile(slot, file) {
       if (!file) {
-        clearPreviewState();
+        clearPreviewState(slot);
         return;
       }
-      if (state.preview.objectUrl) {
-        URL.revokeObjectURL(state.preview.objectUrl);
+      const previewState = state.previews[slot];
+      if (previewState.objectUrl) {
+        URL.revokeObjectURL(previewState.objectUrl);
       }
-      state.preview = {
-        fileName: file.name,
-        objectUrl: URL.createObjectURL(file)
-      };
-      renderPreview();
+      previewState.fileName = file.name;
+      previewState.objectUrl = URL.createObjectURL(file);
+      renderPreviewSlot(slot);
     }
 
     async function loadFile(file) {
@@ -2717,19 +2787,23 @@
 
     els.file.addEventListener("change", event => loadFile(event.target.files[0]));
     els.reviewImportFile.addEventListener("change", event => importReviewDecisionFile(event.target.files[0]));
-    els.previewFile.addEventListener("change", event => loadPreviewFile(event.target.files[0]));
-    els.clearPreview.addEventListener("click", clearPreviewState);
+    els.previewSlots.original.file.addEventListener("change", event => loadPreviewFile("original", event.target.files[0]));
+    els.previewSlots.processed.file.addEventListener("change", event => loadPreviewFile("processed", event.target.files[0]));
+    els.previewSlots.original.clear.addEventListener("click", () => clearPreviewState("original"));
+    els.previewSlots.processed.clear.addEventListener("click", () => clearPreviewState("processed"));
     window.addEventListener("beforeunload", () => {
-      if (state.preview.objectUrl) {
-        URL.revokeObjectURL(state.preview.objectUrl);
-      }
+      Object.values(state.previews).forEach(previewState => {
+        if (previewState.objectUrl) {
+          URL.revokeObjectURL(previewState.objectUrl);
+        }
+      });
     });
     els.clear.addEventListener("click", () => {
       els.file.value = "";
       state.model = SAMPLE_EMPTY;
       state.selectedBatchId = null;
       resetReviewState();
-      clearPreviewState();
+      clearAllPreviewState();
       render();
     });
     els.exportReviewButton.addEventListener("click", () => {
