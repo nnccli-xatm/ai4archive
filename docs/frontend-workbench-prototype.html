@@ -678,6 +678,7 @@
       },
       batches: [],
       findings: [],
+      reviewTargets: [],
       detail: null,
       aggregateHandoff: null,
       artifactReadiness: null
@@ -1016,6 +1017,44 @@
         }
       },
       {
+        id: "processing-review-package-summary",
+        label: "Synthetic processing-review package summary",
+        payload: {
+          schema_version: "scan-qc.processing-review.v1",
+          generated_at: "2026-05-11T01:30:00Z",
+          sensitivity: "local-only processing review summary; private row values omitted from this workbench view",
+          privacy: {
+            local_only: true,
+            aggregate_only: false,
+            contains_row_level_paths: true,
+            contains_hashes: true,
+            contains_image_links: true,
+            embeds_image_data: false,
+            public_evidence: false
+          },
+          summary: {
+            total_files: 6,
+            processed_files: 4,
+            failed_files: 1,
+            skipped_files: 1,
+            guardrail_warning_files: 2,
+            status_counts: {
+              processed: 4,
+              failed: 1,
+              skipped: 1
+            },
+            deskewed_files: 2,
+            dark_border_trimmed_files: 1,
+            cropped_files: 1,
+            despeckled_files: 3
+          },
+          groups: {
+            failed: { count: 1 },
+            guardrail_warnings: { count: 2 }
+          }
+        }
+      },
+      {
         id: "unsupported-schema-warning",
         label: "Unsupported schema compatibility warning",
         payload: {
@@ -1179,7 +1218,8 @@
         findings: [],
         detail: { kind: "run-plan", rawSummary: summary },
         aggregateHandoff: null,
-        artifactReadiness: null
+        artifactReadiness: null,
+        reviewTargets: []
       };
     }
 
@@ -1242,13 +1282,15 @@
           ruleCatalog: payload.rule_catalog || {}
         },
         aggregateHandoff: null,
-        artifactReadiness: null
+        artifactReadiness: null,
+        reviewTargets: []
       };
     }
 
     function isAggregateHandoffArtifact(payload) {
       const schema = String(payload.schema_version || "");
       return schema.includes("aggregate-evidence-bundle") ||
+        schema.includes("processing-review") ||
         schema.includes("final-production-handoff-summary") ||
         schema.includes("public-safe-validation-index") ||
         schema.includes("release-candidate-summary") ||
@@ -1277,7 +1319,7 @@
       const productionThroughput = production.throughput || {};
       const decision = payload.decision || {};
       const checks = payload.checks || {};
-      const aggregateStatus = payload.status || production.status || (payload.acceptance_passed === true || payload.pass === true ? "pass" : payload.acceptance_passed === false || payload.pass === false ? "fail" : "");
+      const aggregateStatus = payload.status || production.status || (schema.includes("processing-review") ? "local-review" : "") || (payload.acceptance_passed === true || payload.pass === true ? "pass" : payload.acceptance_passed === false || payload.pass === false ? "fail" : "");
       const aggregate = {
         artifactType: aggregateArtifactType(schema, payload),
         schemaVersion: schema || "Unknown aggregate schema",
@@ -1300,6 +1342,7 @@
         validationIndex: aggregateValidationIndexSummary(payload),
         artifactSummary: aggregateArtifactSummary(payload),
         providerProbe: aggregateProviderProbe(payload.capability_probe_summary),
+        processingReview: aggregateProcessingReview(payload),
         privacy: aggregatePrivacy(payload),
         counts: aggregateCounts(productionCounts, payload),
         throughput: aggregateThroughput(payload.throughput || productionThroughput),
@@ -1307,6 +1350,7 @@
         generatedAt: text(payload.generated_at, "")
       };
       const artifactReadiness = buildArtifactReadinessChecklist(payload, aggregate);
+      const processingReviewTargets = buildProcessingReviewTargets(aggregate.processingReview.reviewTargetCount);
 
       return {
         sourceType: "aggregate-handoff",
@@ -1317,7 +1361,7 @@
           passedBatches: 0,
           failedBatches: aggregate.status === "fail" ? 1 : 0,
           totalFiles: firstNumber(aggregate.counts.totalFiles, aggregate.counts.processedFiles),
-          totalFindings: firstNumber(payload.total_findings, payload.human_review && payload.human_review.total_findings),
+          totalFindings: firstNumber(payload.total_findings, payload.human_review && payload.human_review.total_findings, aggregate.processingReview.reviewTargetCount),
           p0: firstNumber(aggregate.remainingP0),
           p1: firstNumber(aggregate.remainingP1),
           p2: 0,
@@ -1329,11 +1373,13 @@
         detail: { kind: "aggregate-handoff" },
         aggregateHandoff: aggregate,
         artifactCompatibility: buildArtifactCompatibilityDiagnostics(payload, aggregate),
-        artifactReadiness
+        artifactReadiness,
+        reviewTargets: processingReviewTargets
       };
     }
 
     function aggregateArtifactType(schema, payload) {
+      if (schema.includes("processing-review")) return "Processing-review package summary";
       if (schema.includes("artifact-readiness-checklist") || payload.artifact_readiness_checklist !== undefined || payload.public_safe_artifact_readiness !== undefined) return "Public-safe artifact readiness checklist";
       if (schema.includes("public-safe-validation-index")) return "Public-safe validation index";
       if (schema.includes("provider-capability-probe-summary") || payload.capability_probe_summary !== undefined) return "Provider capability probe summary";
@@ -1372,35 +1418,39 @@
       "scan-qc-release-candidate-summary.v1",
       "scan-qc.public-safe-validation-index.v1",
       "scan-qc-artifact-readiness-checklist.v1",
-      "scan-qc-provider-capability-probe-summary.v1"
+      "scan-qc-provider-capability-probe-summary.v1",
+      "scan-qc.processing-review.v1"
     ];
 
     function buildArtifactCompatibilityDiagnostics(payload, aggregate) {
       const schema = text(payload.schema_version, "");
       const recognizedSchema = SUPPORTED_PUBLIC_SAFE_SCHEMA_PREFIXES.includes(schema);
       const generatedPresent = hasOwn(payload, "generated_at") && Boolean(text(payload.generated_at, ""));
+      const isProcessingReview = aggregate.artifactType === "Processing-review package summary";
       const statusFields = [
         ["schema_version", hasOwn(payload, "schema_version")],
         ["generated_at", generatedPresent],
-        ["status or pass flag", hasOwn(payload, "status") || hasOwn(payload, "acceptance_passed") || hasOwn(payload, "pass") || hasOwn(payload, "ready_for_handoff") || hasOwn(payload, "ready_for_release_candidate")],
-        ["blocking count/code aggregate", hasOwn(payload, "blocking_item_count") || hasOwn(payload, "blocking_items") || Boolean(payload.summary && hasOwn(payload.summary, "blocking_item_count"))],
-        ["warning count/code aggregate", hasOwn(payload, "warnings")],
+        ["status or pass flag", isProcessingReview || hasOwn(payload, "status") || hasOwn(payload, "acceptance_passed") || hasOwn(payload, "pass") || hasOwn(payload, "ready_for_handoff") || hasOwn(payload, "ready_for_release_candidate")],
+        ["blocking count/code aggregate", isProcessingReview || hasOwn(payload, "blocking_item_count") || hasOwn(payload, "blocking_items") || Boolean(payload.summary && hasOwn(payload.summary, "blocking_item_count"))],
+        ["warning count/code aggregate", isProcessingReview || hasOwn(payload, "warnings")],
         ["privacy summary", hasOwn(payload, "privacy") || hasOwn(payload, "privacy_self_check") || hasOwn(payload, "sensitivity")]
       ];
       const missingStatusFields = statusFields.filter(([, present]) => !present).map(([label]) => label);
       const privacyPresent = hasOwn(payload, "privacy") || hasOwn(payload, "privacy_self_check") || hasOwn(payload, "sensitivity");
       const privacyFailing = aggregate.privacy.privateIndicatorsFound ||
         aggregate.privacy.privateIndicatorCount > 0 ||
-        aggregate.privacy.containsPaths ||
-        aggregate.privacy.containsFilenames ||
-        aggregate.privacy.containsHashes ||
-        aggregate.privacy.containsOcrText ||
-        aggregate.privacy.containsThumbnails ||
-        aggregate.privacy.containsImageContent ||
-        aggregate.privacy.containsRowLevelFindings ||
+        (!isProcessingReview && (
+          aggregate.privacy.containsPaths ||
+          aggregate.privacy.containsFilenames ||
+          aggregate.privacy.containsHashes ||
+          aggregate.privacy.containsOcrText ||
+          aggregate.privacy.containsThumbnails ||
+          aggregate.privacy.containsImageContent ||
+          aggregate.privacy.containsRowLevelFindings
+        )) ||
         text(aggregate.privacy.privacySelfCheckStatus, "").toLowerCase() === "failed" ||
         Number(aggregate.privacy.privacySelfCheckViolations) > 0;
-      const privacyPassing = privacyPresent && !privacyFailing && (aggregate.privacy.aggregateOnly || aggregate.privacy.redactsPrivateValues || isChecklistPrivacySafe(aggregate.privacy.privacySelfCheckStatus));
+      const privacyPassing = privacyPresent && !privacyFailing && (isProcessingReview ? aggregate.privacy.localOnly : (aggregate.privacy.aggregateOnly || aggregate.privacy.redactsPrivateValues || isChecklistPrivacySafe(aggregate.privacy.privacySelfCheckStatus)));
       const diagnostics = [];
 
       if (!recognizedSchema) {
@@ -1509,6 +1559,7 @@
 
     function aggregatePrivacyStatusLabel(privacy) {
       if (!privacy) return "not provided";
+      if (privacy.localOnly) return "local-only";
       if (privacy.privateIndicatorsFound || privacy.privateIndicatorCount > 0) return "private indicators found";
       if (privacy.aggregateOnly && privacy.redactsPrivateValues) return "public-safe";
       if (privacy.aggregateOnly) return "aggregate-only";
@@ -1598,13 +1649,15 @@
       const selfCheck = payload.privacy_self_check || {};
       const sensitivity = text(payload.sensitivity, "");
       const sensitivityAggregateOnly = sensitivity.toLowerCase().includes("aggregate-only") || sensitivity.toLowerCase().includes("aggregate only");
+      const sensitivityLocalOnly = sensitivity.toLowerCase().includes("local-only") || sensitivity.toLowerCase().includes("local only");
       return {
         aggregateOnly: Boolean(privacy.aggregate_only) || sensitivityAggregateOnly,
+        localOnly: Boolean(privacy.local_only) || sensitivityLocalOnly,
         sensitivity: sensitivity || "Not provided",
         omissions: aggregatePrivacyOmissions(privacy.omits),
         privateIndicatorsFound: Boolean(privacy.private_indicators_found),
         privateIndicatorCount: firstNumber(privacy.private_indicator_count),
-        containsPaths: Boolean(privacy.contains_paths) && !privacyOmits(privacy.omits, "source location strings"),
+        containsPaths: Boolean(privacy.contains_paths || privacy.contains_row_level_paths) && !privacyOmits(privacy.omits, "source location strings"),
         containsFilenames: Boolean(privacy.contains_filenames) && !privacyOmits(privacy.omits, "source file identifiers"),
         containsHashes: Boolean(privacy.contains_hashes) && !privacyOmits(privacy.omits, "content hashes"),
         containsOcrText: Boolean(privacy.contains_ocr_text) && !privacyOmits(privacy.omits, "recognized text"),
@@ -1657,14 +1710,46 @@
     }
 
     function aggregateCounts(counts, payload = {}) {
+      const summary = payload.summary && typeof payload.summary === "object" && !Array.isArray(payload.summary) ? payload.summary : {};
       return {
-        totalFiles: firstNumber(counts.total_files),
+        totalFiles: firstNumber(counts.total_files, summary.total_files),
         openableFiles: firstNumber(counts.openable_files),
-        processedFiles: firstNumber(counts.processed_files),
+        processedFiles: firstNumber(counts.processed_files, summary.processed_files),
         failedBatches: firstNumber(payload.failed_batches, counts.failed_batches),
-        processingFailedFiles: firstNumber(payload.processing_failed_files, counts.processing_failed_files),
+        processingFailedFiles: firstNumber(payload.processing_failed_files, counts.processing_failed_files, summary.failed_files),
         batches: firstNumber(counts.total_batches)
       };
+    }
+
+    function aggregateProcessingReview(payload) {
+      const summary = payload.summary && typeof payload.summary === "object" && !Array.isArray(payload.summary) ? payload.summary : {};
+      const groups = payload.groups && typeof payload.groups === "object" && !Array.isArray(payload.groups) ? payload.groups : {};
+      const warningGroup = groups.guardrail_warnings && typeof groups.guardrail_warnings === "object" ? groups.guardrail_warnings : {};
+      const failedGroup = groups.failed && typeof groups.failed === "object" ? groups.failed : {};
+      const reviewTargetCount = firstNumber(summary.total_files);
+      return {
+        recognized: String(payload.schema_version || "").includes("processing-review"),
+        processedCount: firstNumber(summary.processed_files),
+        failedCount: firstNumber(summary.failed_files, failedGroup.count),
+        warningCount: firstNumber(summary.guardrail_warning_files, warningGroup.count),
+        reviewTargetCount,
+        skippedCount: firstNumber(summary.skipped_files),
+        deskewedCount: firstNumber(summary.deskewed_files),
+        darkBorderTrimmedCount: firstNumber(summary.dark_border_trimmed_files),
+        croppedCount: firstNumber(summary.cropped_files),
+        despeckledCount: firstNumber(summary.despeckled_files),
+        statusCounts: aggregateStatusCounts(summary.status_counts),
+        localOnly: Boolean(payload.privacy && payload.privacy.local_only) || text(payload.sensitivity, "").toLowerCase().includes("local")
+      };
+    }
+
+    function buildProcessingReviewTargets(count) {
+      const safeCount = Math.max(0, Math.min(firstNumber(count), 200));
+      return Array.from({ length: safeCount }, (_, index) => ({
+        scope: "processing_review",
+        localId: `PR${String(index + 1).padStart(4, "0")}`,
+        severity: "local-review"
+      }));
     }
 
     function aggregateThroughput(throughput) {
@@ -1780,6 +1865,7 @@
       }
       const privacyRows = [
         ["Aggregate only", aggregate.privacy.aggregateOnly],
+        ["Local-only status", aggregate.privacy.localOnly],
         ["Sensitivity", aggregate.privacy.sensitivity],
         ["Omitted private evidence", aggregate.privacy.omissions],
         ["Private indicators found", aggregate.privacy.privateIndicatorsFound],
@@ -1808,6 +1894,18 @@
         ["Validation Blocking Item Count", aggregate.validationIndex.blockingItemCount],
         ["Privacy Aggregate-only Status", aggregatePrivacyStatusLabel(aggregate.privacy)]
       ];
+      const processingReviewRows = [
+        ["Processed Count", aggregate.processingReview.processedCount],
+        ["Failed Count", aggregate.processingReview.failedCount],
+        ["Warning Count", aggregate.processingReview.warningCount],
+        ["Review Target Count", aggregate.processingReview.reviewTargetCount],
+        ["Sensitivity/Local-only Status", aggregate.processingReview.localOnly ? "local-only" : "not provided"],
+        ["Skipped Count", aggregate.processingReview.skippedCount],
+        ["Deskewed Count", aggregate.processingReview.deskewedCount],
+        ["Dark Border Trimmed Count", aggregate.processingReview.darkBorderTrimmedCount],
+        ["Cropped Count", aggregate.processingReview.croppedCount],
+        ["Despeckled Count", aggregate.processingReview.despeckledCount]
+      ];
       const providerProbeRows = [
         ["Provider Count", aggregate.providerProbe.providerCount],
         ["Configured Provider Count", aggregate.providerProbe.configuredProviderCount],
@@ -1823,6 +1921,7 @@
         <p class="muted">Aggregate-only status from locally reviewed public-safe summary artifacts. This view displays counts, statuses, and codes only, never private filenames, paths, hashes, OCR text, thumbnails, image content, row-level findings, reviewer notes, manifests, or derivative image references.</p>
         ${compatibility ? artifactCompatibilityPanel(compatibility) : ""}
         ${readiness ? artifactReadinessPanel(readiness) : ""}
+        ${aggregate.processingReview.recognized ? processingReviewPanel(aggregate.processingReview, processingReviewRows) : ""}
         <div class="metric-grid">
           ${aggregateMetric("Artifact Type", aggregate.artifactType)}
           ${aggregateMetric("Aggregate-only Status", statusBadge(aggregate.status), true)}
@@ -1834,6 +1933,7 @@
           ${aggregateMetric("Remaining P1", aggregate.remainingP1 ?? "Not provided")}
           ${aggregateMetric("Acceptance Passed", aggregate.acceptancePassed === null ? "Not provided" : aggregate.acceptancePassed)}
           ${aggregateMetric("Warning Count", aggregate.warningCount)}
+          ${aggregateMetric("Review Target Count", aggregate.processingReview.reviewTargetCount || reviewTargets().length)}
           ${aggregateMetric("Generated", aggregate.generatedAt || "Not provided")}
           ${aggregateMetric("Total Files", aggregate.counts.totalFiles)}
           ${aggregateMetric("Openable Files", aggregate.counts.openableFiles)}
@@ -1889,6 +1989,19 @@
             <tbody>${rows.map(([label, value]) => kv(label, value)).join("")}</tbody>
           </table>
         </div>`;
+    }
+
+    function processingReviewPanel(processingReview, rows) {
+      return `
+        <h3>Processing-Review Package Summary</h3>
+        <p class="muted">Local processing-review package summary view uses package-level counts and synthetic review IDs only; it does not parse or display processing manifests, derivative image references, preview filenames, paths, hashes, OCR text, thumbnails, image content, row-level private notes, or per-file records.</p>
+        <div class="table-wrap" style="margin-top:12px">
+          <table>
+            <tbody>${rows.map(([label, value]) => kv(label, value)).join("")}</tbody>
+          </table>
+        </div>
+        <h3>Processing Status Counts</h3>
+        ${processingReview.statusCounts.length ? aggregateCountTable(processingReview.statusCounts, "Status") : `<div class="empty">No processing status counts were present.</div>`}`;
     }
 
     function artifactCompatibilityPanel(compatibility) {
@@ -2246,7 +2359,8 @@
     function reviewTargets() {
       return [
         ...state.model.batches.map(batch => ({ scope: "batch", localId: batch.localId, severity: batch.p0 > 0 ? "P0" : batch.p1 > 0 ? "P1" : batch.p2 > 0 ? "P2" : "none" })),
-        ...state.model.findings.map(finding => ({ scope: "finding", localId: finding.localId, severity: finding.severity }))
+        ...state.model.findings.map(finding => ({ scope: "finding", localId: finding.localId, severity: finding.severity })),
+        ...((state.model.reviewTargets || []).map(target => ({ scope: target.scope, localId: target.localId, severity: target.severity })))
       ];
     }
 
