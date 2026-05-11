@@ -170,6 +170,20 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   acceptance. Share only entries classified as aggregate/public-safe after local
   policy review; keep sensitive local evidence entries inside the approved
   environment.
+- Run the aggregate evidence bundle verifier against the directory that contains
+  the release-candidate, readiness, acceptance, provider probe, and production
+  validation aggregate summaries:
+
+  ```bash
+  archive-scan-qc evidence-bundle-verify \
+    --evidence-dir /placeholder/private-validation-output/release-candidate
+  ```
+
+  Share only `aggregate_evidence_bundle_summary.json` after it passes. The
+  verifier checks JSON parseability, schema/status/count fields, artifact
+  presence, and privacy indicators, and reports private evidence findings by
+  code without copying private paths, filenames, hashes, OCR text, thumbnails,
+  image content, row-level findings, secrets, or sample roots into the summary.
 
 ## Privacy prohibitions
 

@@ -26,6 +26,7 @@ from archive_scan_qc.deep_inspection_provider import (
     build_deep_inspection_provider_probe,
     parse_deep_inspection_provider_config,
 )
+from archive_scan_qc.evidence_bundle import build_evidence_bundle_summary
 from archive_scan_qc.handoff import write_delivery_handoff_manifest
 from archive_scan_qc.processing import (
     ProcessingOptions,
@@ -507,6 +508,66 @@ class ScanQcTest(unittest.TestCase):
             "stdout",
         ]:
             self.assertNotIn(forbidden, raw)
+
+    def test_evidence_bundle_verifier_passes_aggregate_handoff_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_json(root / "release_candidate_summary.json", _release_candidate_bundle_payload())
+            _write_json(root / "release_readiness_summary.json", _release_readiness_bundle_payload())
+            _write_json(root / "acceptance_summary.json", _acceptance_bundle_payload())
+            _write_json(root / "aggregate_baseline_summary.json", _aggregate_baseline_bundle_payload())
+            _write_json(root / "capability_probe.json", run_capability_probe(CapabilityProbeConfig(include_torch_cuda=False)))
+            _write_json(root / "deep_inspection_provider_probe.json", build_deep_inspection_provider_probe())
+
+            summary = build_evidence_bundle_summary(root, generated_at="2026-01-01T00:00:00+00:00")
+
+        self.assertEqual(summary["status"], "pass")
+        self.assertGreater(summary["checks_passed"], 0)
+        self.assertEqual(summary["checks_failed"], 0)
+        self.assertFalse(summary["privacy"]["private_indicators_found"])
+
+    def test_evidence_bundle_verifier_blocks_missing_required_but_allows_optional(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            summary = build_evidence_bundle_summary(root, generated_at="2026-01-01T00:00:00+00:00")
+
+        self.assertEqual(summary["status"], "fail")
+        self.assertIn("required_artifact_missing", {item["code"] for item in summary["blocking_items"]})
+        self.assertEqual(summary["artifact_presence"]["release_readiness_summary.json"]["status"], "optional_missing")
+
+    def test_evidence_bundle_verifier_flags_failed_privacy_and_malformed_json(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            bad = _release_candidate_bundle_payload()
+            bad["privacy"]["contains_paths"] = True
+            _write_json(root / "release_candidate_summary.json", bad)
+            (root / "release_readiness_summary.json").write_text("{not-json", encoding="utf-8")
+
+            summary = build_evidence_bundle_summary(root, generated_at="2026-01-01T00:00:00+00:00")
+
+        codes = {item["code"] for item in summary["blocking_items"]}
+        self.assertEqual(summary["status"], "fail")
+        self.assertIn("privacy_flag_contains_private_evidence", codes)
+        self.assertIn("malformed_json", codes)
+
+    def test_evidence_bundle_verifier_omits_private_token_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            payload = _release_candidate_bundle_payload()
+            payload["operator_warning"] = "source sample at /Users/private/archive/page_0001.png uses token SECRET123"
+            _write_json(root / "release_candidate_summary.json", payload)
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(["evidence-bundle-verify", "--evidence-dir", str(root), "--out", str(root / "bundle.json")])
+            raw = (root / "bundle.json").read_text(encoding="utf-8")
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("private_value_present", raw)
+        self.assertNotIn("/Users/private/archive/page_0001.png", raw)
+        self.assertNotIn("SECRET123", raw)
+        self.assertNotIn("page_0001.png", raw)
+        self.assertIn("Evidence bundle status: fail", stdout.getvalue())
 
     def test_version_output_matches_package_version(self) -> None:
         stdout = io.StringIO()
@@ -5077,6 +5138,74 @@ def _write_fake_provider(path: Path, records: list[dict[str, object]]) -> None:
         "    print(json.dumps(record, ensure_ascii=False))\n",
         encoding="utf-8",
     )
+
+
+def _write_json(path: Path, payload: dict[str, object]) -> None:
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
+def _release_candidate_bundle_payload() -> dict[str, object]:
+    return {
+        "schema_version": "scan-qc.release-candidate-summary.v1",
+        "status": "pass",
+        "ready_for_release_candidate": True,
+        "privacy": {
+            "aggregate_only": True,
+            "contains_paths": False,
+            "contains_filenames": False,
+            "contains_hashes": False,
+            "contains_ocr_text": False,
+            "contains_thumbnails": False,
+            "contains_image_content": False,
+            "contains_secrets": False,
+            "contains_row_level_findings": False,
+        },
+        "production_validation": {"status": "pass", "counts": {"total_files": 2, "total_findings": 0}},
+        "release_readiness": {"status": "pass", "blocking_item_count": 0},
+        "decision": {"blocking_item_count": 0},
+    }
+
+
+def _release_readiness_bundle_payload() -> dict[str, object]:
+    return {
+        "schema_version": "scan-qc.release-readiness.v1",
+        "status": "pass",
+        "privacy": {
+            "aggregate_only": True,
+            "contains_paths": False,
+            "contains_filenames": False,
+            "contains_hashes": False,
+            "contains_ocr_text": False,
+            "contains_thumbnails": False,
+            "contains_image_content": False,
+            "contains_secrets": False,
+            "contains_row_level_findings": False,
+        },
+        "summary": {"checks_total": 2, "checks_passed": 2, "checks_failed": 0, "blocking_items": 0},
+        "checks": {"unit_tests": {"status": "pass", "blocking": False}},
+    }
+
+
+def _acceptance_bundle_payload() -> dict[str, object]:
+    return {
+        "schema_version": "scan-qc.acceptance-summary.v1",
+        "status": "pass",
+        "pass": True,
+        "privacy": {"aggregate_only": True},
+        "blocking_items": [],
+        "privacy_self_check": {"provided": True, "passed": True, "status": "pass", "violation_count": 0},
+    }
+
+
+def _aggregate_baseline_bundle_payload() -> dict[str, object]:
+    return {
+        "schema_version": "scan-qc.aggregate-baseline.v1",
+        "status": "pass",
+        "privacy": {"aggregate_only": True},
+        "aggregate_counts": {"total_files": 2, "openable_files": 2, "total_findings": 0},
+        "privacy_self_check": {"passed": True, "status": "pass", "violation_count": 0},
+        "cleanup": {"enabled": True, "retained_public_summary_only": True},
+    }
 
 
 def _dark_pixel_count(image: Image.Image) -> int:
