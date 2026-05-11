@@ -67,6 +67,16 @@ REQUIRED_STRINGS = {
     "Avg Sec/File",
     "aggregateProcessingOperationTimings",
     "processingOperationTimingPanel",
+    "despeckle_backend",
+    "aggregateDespeckleBackend",
+    "Despeckle Backend Summary",
+    "Requested Backend",
+    "Effective Backend Mode",
+    "Fallback Count",
+    "Requested NumPy Fallback Count",
+    "Despeckle Backend Warning Codes",
+    "despeckle_numpy_unavailable_fallback",
+    "despeckle_numpy_requested_all_fallback",
     "synthetic review IDs only",
     "row-level private notes",
     "processing_review",
@@ -349,6 +359,7 @@ REQUIRED_AGGREGATE_FIELDS = {
     "processing review summary": "aggregateProcessingReview",
     "processing review targets": "buildProcessingReviewTargets",
     "review decision verification summary": "aggregateReviewDecisionVerificationSummary",
+    "despeckle backend capability": "aggregateDespeckleBackend",
 }
 
 REQUIRED_CHECKLIST_FIELDS = {
@@ -2134,9 +2145,25 @@ vm.runInContext(workbenchScript + `
   loadDemoFixture("workbench-public-summary-pass");
   assert(els.aggregateHandoff.innerHTML.includes("Workbench public summary"), "demo load path did not render passing workbench public summary");
   assert(els.aggregateHandoff.innerHTML.includes("acceptance_status: pass"), "demo load path did not render passing workbench workflow state");
+  assert(state.model.aggregateHandoff.despeckleBackend.requestedBackend === "numpy", "passing workbench did not preserve requested despeckle backend");
+  assert(state.model.aggregateHandoff.despeckleBackend.effectiveBackendMode === "numpy", "passing workbench did not preserve effective despeckle backend");
+  assert(state.model.aggregateHandoff.despeckleBackend.numpyAvailable === true, "passing workbench did not preserve NumPy availability");
+  assert(state.model.aggregateHandoff.despeckleBackend.backendCounts.some(item => item.name === "numpy" && item.count === 7), "passing workbench did not preserve NumPy backend count");
+  assert(state.model.aggregateHandoff.despeckleBackend.fallbackCount === 0, "passing workbench did not preserve zero fallback count");
+  assert(els.aggregateHandoff.innerHTML.includes("Despeckle Backend Summary"), "demo load path did not render despeckle backend section");
+  assert(els.aggregateHandoff.innerHTML.includes("Requested Backend"), "demo load path did not render requested backend label");
+  assert(els.aggregateHandoff.innerHTML.includes("Effective Backend Mode"), "demo load path did not render effective backend label");
+  assert(els.aggregateHandoff.innerHTML.includes("Requested NumPy Fallback Count"), "demo load path did not render requested NumPy fallback label");
   loadDemoFixture("workbench-public-summary-blocked");
   assert(els.aggregateHandoff.innerHTML.includes("unsupported_input"), "demo load path did not render blocked workbench unsupported input aggregate code");
   assert(els.aggregateHandoff.innerHTML.includes("Blocking Code"), "demo load path did not render blocked workbench aggregate code counts");
+  assert(state.model.aggregateHandoff.despeckleBackend.requestedBackend === "numpy", "blocked workbench did not preserve requested despeckle backend");
+  assert(state.model.aggregateHandoff.despeckleBackend.effectiveBackendMode === "fallback", "blocked workbench did not preserve all-fallback effective backend");
+  assert(state.model.aggregateHandoff.despeckleBackend.numpyAvailable === false, "blocked workbench did not preserve unavailable NumPy status");
+  assert(state.model.aggregateHandoff.despeckleBackend.backendCounts.some(item => item.name === "fallback" && item.count === 7), "blocked workbench did not preserve fallback backend count");
+  assert(state.model.aggregateHandoff.despeckleBackend.requestedNumpyFallbackCount === 7, "blocked workbench did not preserve requested NumPy fallback count");
+  assert(els.aggregateHandoff.innerHTML.includes("despeckle_numpy_unavailable_fallback"), "demo load path did not render unavailable NumPy warning");
+  assert(els.aggregateHandoff.innerHTML.includes("despeckle_numpy_requested_all_fallback"), "demo load path did not render all-fallback NumPy warning");
   loadDemoFixture("complete-readiness-checklist");
   assert(els.aggregateHandoff.innerHTML.includes("Public-Safe Artifact Readiness Checklist"), "demo load path did not render readiness checklist");
   loadDemoFixture("final-handoff-pass");
@@ -2992,10 +3019,16 @@ def validate_workbench(workbench: Path = WORKBENCH) -> dict[str, Any]:
             "Provider Capability Probe",
             "Provider Count",
             "Configured Provider Count",
+            "Despeckle Backend Summary",
+            "Despeckle Backend Warning Codes",
+            "Effective Backend Mode",
+            "Fallback Count",
             "Visible GPU Count",
             "Visible Model Count",
             "Optional Package Missing Count",
             "Probe Privacy Status",
+            "Requested Backend",
+            "Requested NumPy Fallback Count",
             "Public-Safe Artifact Compatibility Diagnostics",
             "Recognized Artifact Type",
             "Review Status Counts",
