@@ -49,6 +49,25 @@ class DriverState:
         }
 
 
+def build_status_report(plan: list[PlannedIssue], state: DriverState) -> dict[str, Any]:
+    completed_count = len(state.completed_keys)
+    total_planned = len(plan)
+    remaining_count = max(total_planned - completed_count - (1 if state.active_key is not None else 0), 0)
+    if state.active_key is not None:
+        driver_status = "active"
+    elif completed_count >= total_planned and state.next_index >= total_planned:
+        driver_status = "complete"
+    else:
+        driver_status = "idle"
+    return {
+        **state.as_json(),
+        "total_planned": total_planned,
+        "completed_count": completed_count,
+        "remaining_count": remaining_count,
+        "driver_status": driver_status,
+    }
+
+
 class LinearClient:
     def __init__(self, api_key: str, endpoint: str = LINEAR_GRAPHQL_URL) -> None:
         self.api_key = api_key
@@ -258,7 +277,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("action", choices=["next", "complete", "run", "status"])
     parser.add_argument("--plan", required=True, type=Path, help="JSON plan with an issues array.")
     parser.add_argument("--state-file", default=Path(DEFAULT_STATE_FILE), type=Path)
-    parser.add_argument("--team-key", required=True, help="Linear team key, for example AI4.")
+    parser.add_argument("--team-key", help="Linear team key, for example AI4.")
     parser.add_argument("--todo-state", default="Todo")
     parser.add_argument("--done-state", default="Done")
     parser.add_argument("--repo-root", default=Path.cwd(), type=Path, help="Working directory for validation commands.")
@@ -273,9 +292,11 @@ def main(argv: list[str] | None = None) -> int:
         plan = load_plan(args.plan)
         state = load_state(args.state_file)
         if args.action == "status":
-            print(json.dumps(state.as_json(), ensure_ascii=False, indent=2))
+            print(json.dumps(build_status_report(plan, state), ensure_ascii=False, indent=2))
             return 0
 
+        if not args.team_key:
+            raise ValueError("--team-key is required unless action is status.")
         linear = _linear_client(args.dry_run)
         team_id = "dry-run-team" if args.dry_run else linear.team_id(args.team_key)
         todo_state_id = "dry-run-todo" if args.dry_run else linear.state_id(team_id, args.todo_state)
