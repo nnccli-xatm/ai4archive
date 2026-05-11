@@ -1051,6 +1051,27 @@ enable any model provider in production until a separate reviewed implementation
 proves the same privacy boundary and explicitly documents any local-only
 inference behavior.
 
+Before any later optional model/deep-inspection execution, use the candidate
+summary dry run to estimate already-detected QC targets without exposing local
+evidence:
+
+```bash
+archive-scan-qc deep-inspection-candidate-summary \
+  --scan-report /approved-work/project/scan_qc_report.json \
+  --processing-review-package /approved-work/project/processing_review_package.json \
+  --provider-probe /approved-work/project/deep_inspection_provider_probe.json \
+  --out /approved-work/project/deep_inspection_candidate_summary.json
+```
+
+The output is aggregate-only and includes `schema_version`, `status`,
+`candidate_total`, `candidates_by_reason`, `candidates_by_severity`,
+`provider_configured`, `provider_count`, `checks_passed`, `checks_failed`,
+`privacy_status`, and `no_inference_run: true`. It does not run inference, OCR,
+image processing, directory scanning, provider subprocesses, or network calls.
+It must not include private filenames, paths, hashes, OCR text, thumbnails,
+image content, row-level findings or IDs, reviewer notes, manifests, derivative
+image references, or source roots.
+
 ### Production acceptance gate
 
 Use `archive-scan-qc acceptance-summary` as the final aggregate-only gate before
