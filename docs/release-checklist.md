@@ -192,7 +192,7 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 
   ```bash
   archive-scan-qc review-decisions-verify \
-    --review-decisions /placeholder/private-review-decisions/review_decisions.json \
+    --summary /placeholder/private-review-decisions/review_decisions.json \
     --out /placeholder/private-validation-output/review_decision_verification_summary.json
   ```
 

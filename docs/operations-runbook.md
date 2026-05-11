@@ -558,7 +558,7 @@ reading implementation PRs or exposing local evidence:
 
 ```bash
 archive-scan-qc review-decisions-verify \
-  --review-decisions /placeholder/private-review-decisions/review_decisions.json \
+  --summary /placeholder/private-review-decisions/review_decisions.json \
   --out /placeholder/private-validation-output/review_decision_verification_summary.json
 
 archive-scan-qc evidence-bundle-verify \
