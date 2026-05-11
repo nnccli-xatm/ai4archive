@@ -63,11 +63,17 @@ REQUIRED_STRINGS = {
     "type=\"file\"",
     "No artifact loaded",
     "Could not load JSON",
-    "Preview placeholder",
+    "Original preview placeholder",
+    "Processed preview placeholder",
     "Local image preview scaffold",
-    "Selected preview filename: none",
-    "Clear Preview",
-    "Preview is excluded from review-decision export JSON.",
+    "Original/Source Image",
+    "Processed/QC Output Image",
+    "Selected original preview filename: none",
+    "Selected processed preview filename: none",
+    "Clear Original Preview",
+    "Clear Processed Preview",
+    "Original preview is excluded from review-decision export JSON.",
+    "Processed preview is excluded from review-decision export JSON.",
     "URL.createObjectURL",
     "URL.revokeObjectURL",
     "beforeunload",
@@ -338,13 +344,21 @@ REQUIRED_DEMO_FIXTURE_LABELS = {
 
 REQUIRED_PREVIEW_LIFECYCLE_STRINGS = {
     "clear function": "function clearPreviewState",
+    "clear all function": "function clearAllPreviewState",
     "load function": "function loadPreviewFile",
     "create object URL": "URL.createObjectURL(file)",
-    "clear revocation": "URL.revokeObjectURL(state.preview.objectUrl)",
-    "replacement revocation": "if (state.preview.objectUrl)",
+    "clear revocation": "URL.revokeObjectURL(previewState.objectUrl)",
+    "replacement revocation": "if (previewState.objectUrl)",
     "beforeunload revocation": 'window.addEventListener("beforeunload"',
-    "export exclusion": "Preview is excluded from review-decision export JSON.",
+    "original export exclusion": "Original preview is excluded from review-decision export JSON.",
+    "processed export exclusion": "Processed preview is excluded from review-decision export JSON.",
     "local tab copy": "browser tab only",
+    "original slot": "originalPreviewFile",
+    "processed slot": "processedPreviewFile",
+    "preview slot child width cap": ".preview-slot > *",
+    "preview file input width cap": '.preview-slot input[type="file"]',
+    "preview max width cap": "max-width: 100%",
+    "preview min width reset": "min-width: 0",
 }
 
 FORBIDDEN_DEMO_FIXTURE_FIELDS = {
@@ -1458,15 +1472,26 @@ function assertPublicSafe(value, label) {{
 
 vm.createContext(context);
 vm.runInContext(workbenchScript + `
-  const firstFile = {{ name: "private_scan_alpha.tif", type: "image/tiff" }};
-  const secondFile = {{ name: "private_scan_beta.png", type: "image/png" }};
+  const originalFirstFile = {{ name: "private_scan_original_alpha.tif", type: "image/tiff" }};
+  const originalSecondFile = {{ name: "private_scan_original_beta.png", type: "image/png" }};
+  const processedFirstFile = {{ name: "private_scan_processed_alpha.webp", type: "image/webp" }};
+  const processedSecondFile = {{ name: "private_scan_processed_beta.jpg", type: "image/jpeg" }};
 
-  loadPreviewFile(firstFile);
-  assert(state.preview.fileName === firstFile.name, "first preview filename was not tracked locally");
-  assert(state.preview.objectUrl === "blob:synthetic-preview-private_scan_alpha.tif-0", "first object URL was not created");
-  assert(createdUrls.length === 1, "first preview did not call createObjectURL once");
-  assert(revokedUrls.length === 0, "first preview unexpectedly revoked a URL");
-  assert(els.preview.innerHTML.includes("blob:synthetic-preview-private_scan_alpha.tif-0"), "preview image did not render object URL locally");
+  loadPreviewFile("original", originalFirstFile);
+  assert(state.previews.original.fileName === originalFirstFile.name, "first original preview filename was not tracked locally");
+  assert(state.previews.original.objectUrl === "blob:synthetic-preview-private_scan_original_alpha.tif-0", "first original object URL was not created");
+  assert(state.previews.processed.objectUrl === "", "original preview load should not populate processed preview");
+  assert(createdUrls.length === 1, "first original preview did not call createObjectURL once");
+  assert(revokedUrls.length === 0, "first original preview unexpectedly revoked a URL");
+  assert(els.previewSlots.original.preview.innerHTML.includes("blob:synthetic-preview-private_scan_original_alpha.tif-0"), "original preview image did not render object URL locally");
+
+  loadPreviewFile("processed", processedFirstFile);
+  assert(state.previews.processed.fileName === processedFirstFile.name, "first processed preview filename was not tracked locally");
+  assert(state.previews.processed.objectUrl === "blob:synthetic-preview-private_scan_processed_alpha.webp-1", "first processed object URL was not created");
+  assert(state.previews.original.objectUrl === "blob:synthetic-preview-private_scan_original_alpha.tif-0", "processed load should not replace original preview");
+  assert(createdUrls.length === 2, "first processed preview did not call createObjectURL once");
+  assert(revokedUrls.length === 0, "first processed preview unexpectedly revoked a URL");
+  assert(els.previewSlots.processed.preview.innerHTML.includes("blob:synthetic-preview-private_scan_processed_alpha.webp-1"), "processed preview image did not render object URL locally");
 
   state.model = {{
     sourceType: "scan-report",
@@ -1486,24 +1511,42 @@ vm.runInContext(workbenchScript + `
   assertPublicSafe(els.aggregateHandoff.innerHTML, "demo fixture render");
   assertPublicSafe(els.status.textContent, "demo fixture status");
 
-  loadPreviewFile(secondFile);
-  assert(state.preview.fileName === secondFile.name, "replacement preview filename was not tracked locally");
-  assert(state.preview.objectUrl === "blob:synthetic-preview-private_scan_beta.png-1", "replacement object URL was not created");
-  assert(createdUrls.length === 2, "replacement preview did not call createObjectURL");
-  assert(revokedUrls.includes("blob:synthetic-preview-private_scan_alpha.tif-0"), "replacement did not revoke first object URL");
+  loadPreviewFile("original", originalSecondFile);
+  assert(state.previews.original.fileName === originalSecondFile.name, "replacement original preview filename was not tracked locally");
+  assert(state.previews.original.objectUrl === "blob:synthetic-preview-private_scan_original_beta.png-2", "replacement original object URL was not created");
+  assert(state.previews.processed.objectUrl === "blob:synthetic-preview-private_scan_processed_alpha.webp-1", "original replacement should not replace processed preview");
+  assert(createdUrls.length === 3, "replacement original preview did not call createObjectURL");
+  assert(revokedUrls.includes("blob:synthetic-preview-private_scan_original_alpha.tif-0"), "original replacement did not revoke first original object URL");
 
-  clearPreviewState();
-  assert(state.preview.fileName === "", "clear did not reset preview filename");
-  assert(state.preview.objectUrl === "", "clear did not reset preview object URL");
-  assert(els.previewFile.value === "", "clear did not reset preview file input");
-  assert(revokedUrls.includes("blob:synthetic-preview-private_scan_beta.png-1"), "clear did not revoke replacement object URL");
-  assert(!els.preview.innerHTML.includes("blob:synthetic-preview"), "clear left object URL in preview markup");
-  assert(!els.previewPrivacyCopy.innerHTML.includes("private_scan"), "clear left private filename in preview status");
+  loadPreviewFile("processed", processedSecondFile);
+  assert(state.previews.processed.fileName === processedSecondFile.name, "replacement processed preview filename was not tracked locally");
+  assert(state.previews.processed.objectUrl === "blob:synthetic-preview-private_scan_processed_beta.jpg-3", "replacement processed object URL was not created");
+  assert(createdUrls.length === 4, "replacement processed preview did not call createObjectURL");
+  assert(revokedUrls.includes("blob:synthetic-preview-private_scan_processed_alpha.webp-1"), "processed replacement did not revoke first processed object URL");
 
-  loadPreviewFile(firstFile);
+  clearPreviewState("original");
+  assert(state.previews.original.fileName === "", "clear did not reset original preview filename");
+  assert(state.previews.original.objectUrl === "", "clear did not reset original preview object URL");
+  assert(state.previews.processed.objectUrl === "blob:synthetic-preview-private_scan_processed_beta.jpg-3", "clearing original should not clear processed preview");
+  assert(els.previewSlots.original.file.value === "", "clear did not reset original preview file input");
+  assert(revokedUrls.includes("blob:synthetic-preview-private_scan_original_beta.png-2"), "clear did not revoke replacement original object URL");
+  assert(!els.previewSlots.original.preview.innerHTML.includes("blob:synthetic-preview"), "clear left object URL in original preview markup");
+  assert(!els.previewSlots.original.privacyCopy.innerHTML.includes("private_scan"), "clear left private filename in original preview status");
+
+  clearPreviewState("processed");
+  assert(state.previews.processed.fileName === "", "clear did not reset processed preview filename");
+  assert(state.previews.processed.objectUrl === "", "clear did not reset processed preview object URL");
+  assert(els.previewSlots.processed.file.value === "", "clear did not reset processed preview file input");
+  assert(revokedUrls.includes("blob:synthetic-preview-private_scan_processed_beta.jpg-3"), "clear did not revoke replacement processed object URL");
+  assert(!els.previewSlots.processed.preview.innerHTML.includes("blob:synthetic-preview"), "clear left object URL in processed preview markup");
+  assert(!els.previewSlots.processed.privacyCopy.innerHTML.includes("private_scan"), "clear left private filename in processed preview status");
+
+  loadPreviewFile("original", originalFirstFile);
+  loadPreviewFile("processed", processedFirstFile);
   assert(typeof eventHandlers["window:beforeunload"] === "function", "beforeunload revocation handler was not registered");
   eventHandlers["window:beforeunload"]();
-  assert(revokedUrls.includes("blob:synthetic-preview-private_scan_alpha.tif-2"), "beforeunload did not revoke active object URL");
+  assert(revokedUrls.includes("blob:synthetic-preview-private_scan_original_alpha.tif-4"), "beforeunload did not revoke active original object URL");
+  assert(revokedUrls.includes("blob:synthetic-preview-private_scan_processed_alpha.webp-5"), "beforeunload did not revoke active processed object URL");
 `, context);
 """
 
@@ -1957,7 +2000,18 @@ def validate_workbench(workbench: Path = WORKBENCH) -> dict[str, Any]:
     else:
         preview_block = html[preview_start:preview_end]
         for label, required in sorted(REQUIRED_PREVIEW_LIFECYCLE_STRINGS.items()):
-            search_area = html if label in {"beforeunload revocation", "local tab copy"} else preview_block
+            search_area = html if label in {
+                "beforeunload revocation",
+                "local tab copy",
+                "original export exclusion",
+                "original slot",
+                "preview file input width cap",
+                "preview max width cap",
+                "preview min width reset",
+                "preview slot child width cap",
+                "processed export exclusion",
+                "processed slot",
+            } else preview_block
             if required not in search_area:
                 add_error(
                     summary,
