@@ -125,10 +125,11 @@ REQUIRED_STRINGS = {
     "Target count mismatch",
     "Load a scan, run-plan, or aggregate handoff artifact before importing decisions.",
     "Validation codes",
-    "private_field_omitted",
+    "duplicate_decision",
+    "ignored_private_field",
+    "ignored_extra_field",
     "unsupported_decision_status",
     "unknown_review_target",
-    "unsupported_field_omitted",
     "invalid_decision_entry",
     "accepted_issue",
     "false_positive",
@@ -1787,13 +1788,18 @@ vm.runInContext(workbenchScript + `
     "bad-entry"
   ];
   applyReviewDecisionSummary(invalidPayload);
-  assert(state.importStatus.imported === 1, "invalid/private-bearing summary imported wrong count");
-  assert(state.importStatus.skipped === 7, "invalid/private-bearing summary skipped wrong count");
+  assert(state.importStatus.imported === 3, "invalid/private-bearing summary imported wrong count");
+  assert(state.importStatus.skipped === 5, "invalid/private-bearing summary skipped wrong count");
+  assert(getDecision("batch", "B0001") === "fixed_externally", "valid entry in conflict import was not applied");
+  assert(getDecision("finding", "F0001") === "false_positive", "valid entry with ignored private field was not applied");
+  assert(getDecision("finding", "F0002") === "needs_rescan", "first valid duplicate target decision was not preserved");
+  assert(buildReviewSummary().aggregate_counts.review_completion.complete === true, "conflict import did not preserve completion recalculation");
   [
-    "private_field_omitted=3",
+    "duplicate_decision=2",
+    "ignored_private_field=3",
+    "ignored_extra_field=1",
     "unknown_review_target=1",
     "unsupported_decision_status=1",
-    "unsupported_field_omitted=1",
     "invalid_decision_entry=1"
   ].forEach(code => assert(state.importStatus.validationCodes.includes(code), "missing aggregate validation code " + code));
   assert(els.reviewImportStatus.textContent.includes("Validation codes:"), "invalid import status did not render validation codes");
