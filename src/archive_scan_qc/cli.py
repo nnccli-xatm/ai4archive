@@ -31,6 +31,7 @@ from .rework import write_rework_action_list
 from .rules import RulesProfileError, load_rules_profile
 from .sampling import DEFAULT_SAMPLE_RATIO, write_acceptance_sampling_export
 from .scanner import ScanConfig, scan_batch
+from .validation_index import VALIDATION_INDEX_JSON, write_public_safe_validation_index
 
 
 def _positive_int(value: str) -> int:
@@ -185,6 +186,8 @@ def main(argv: list[str] | None = None) -> int:
         return _main_evidence_bundle_verify(argv[1:])
     if argv and argv[0] == "final-handoff-summary":
         return _main_final_handoff_summary(argv[1:])
+    if argv and argv[0] == "public-safe-validation-index":
+        return _main_public_safe_validation_index(argv[1:])
     if argv and argv[0] == "processing-review-package":
         return _main_processing_review_package(argv[1:])
     if argv and argv[0] == "processing-plan":
@@ -595,6 +598,35 @@ def _main_final_handoff_summary(argv: list[str]) -> int:
     print(f"Blocking items: {payload['blocking_item_count']}")
     print("Privacy: aggregate-only handoff summary; blockers are reported by aggregate code/count only.")
     return 0 if payload["ready_for_handoff"] else 1
+
+
+def _main_public_safe_validation_index(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="archive-scan-qc public-safe-validation-index",
+        description="Index known public-safe aggregate validation JSON outputs without reading private artifacts.",
+    )
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--input-dir", default=None, type=Path, help="Directory containing known public-safe aggregate JSON files.")
+    source.add_argument(
+        "--file",
+        default=[],
+        action="append",
+        type=Path,
+        help="Explicit known public-safe aggregate JSON file. Repeat for multiple files.",
+    )
+    parser.add_argument("--out", default=None, type=Path, help=f"Output JSON path or directory for {VALIDATION_INDEX_JSON}.")
+    args = parser.parse_args(argv)
+    try:
+        path, payload = write_public_safe_validation_index(input_dir=args.input_dir, files=args.file, output_path=args.out)
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    print(f"Public-safe validation index: {path}")
+    print(f"Validation index status: {payload['status']}")
+    print(f"Artifacts present: {payload['summary']['artifacts_present']}")
+    print(f"Checks passed: {payload['checks_passed']}")
+    print(f"Checks failed: {payload['checks_failed']}")
+    print("Privacy: public-safe aggregate index only; private indicators are reported by filename/category/code/count only.")
+    return 0 if payload["status"] == "pass" else 1
 
 
 def _main_processing_review_package(argv: list[str]) -> int:
