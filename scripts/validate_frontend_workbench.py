@@ -35,6 +35,18 @@ REQUIRED_STRINGS = {
     "aggregate_evidence_bundle_summary.json",
     "final_production_handoff_summary.json",
     "release_candidate_summary.json",
+    "public_safe_validation_index.json",
+    "scan-qc.public-safe-validation-index.v1",
+    "Public-safe validation index",
+    "Public-Safe Validation Index",
+    "Artifacts Present",
+    "Artifacts Failed",
+    "Artifacts Missing",
+    "Unknown Inputs",
+    "Validation Checks Passed",
+    "Validation Checks Failed",
+    "Validation Blocking Item Count",
+    "Privacy Aggregate-only Status",
     "JSON.parse",
     "type=\"file\"",
     "No artifact loaded",
@@ -285,6 +297,8 @@ REQUIRED_DEMO_FIXTURE_LABELS = {
     "Passing final production handoff",
     "Blocked final production handoff",
     "Disabled provider capability probe",
+    "Passing public-safe validation index",
+    "Blocked public-safe validation index",
     "Unsupported schema compatibility warning",
     "Privacy summary failing diagnostic",
     "Privacy summary missing diagnostic",
@@ -636,6 +650,14 @@ vm.runInContext(workbenchScript + `
         warning_count: 0,
         privacy_status: "public-safe",
         generated_at: "2026-05-11T00:05:00Z"
+      }},
+      "public_safe_validation_index.json": {{
+        present: true,
+        status: "pass",
+        blocking_count: 0,
+        warning_count: 0,
+        privacy_status: "public-safe",
+        generated_at: "2026-05-11T00:06:00Z"
       }}
     }}
   }};
@@ -735,6 +757,78 @@ vm.runInContext(workbenchScript + `
       violation_count: 0
     }},
     sensitivity: "aggregate-only public summary"
+  }};
+
+  const validationIndexPassFixture = {{
+    schema_version: "scan-qc.public-safe-validation-index.v1",
+    generated_at: "2026-05-11T01:12:00Z",
+    status: "pass",
+    summary: {{
+      known_artifacts: 5,
+      artifacts_present: 5,
+      artifacts_passed: 5,
+      artifacts_failed: 0,
+      artifacts_missing: 0,
+      unknown_inputs: 0,
+      checks_passed: 12,
+      checks_failed: 0,
+      blocking_item_count: 0
+    }},
+    checks_passed: 12,
+    checks_failed: 0,
+    artifact_presence: {{
+      "frontend_workbench_validation.json": {{ present: true, category: "frontend_workbench_validation", status: "pass", reported_status: "pass" }},
+      "release_readiness_summary.json": {{ present: true, category: "release_readiness", status: "pass", reported_status: "pass" }},
+      "release_candidate_summary.json": {{ present: true, category: "release_candidate", status: "pass", reported_status: "pass" }},
+      "aggregate_evidence_bundle_summary.json": {{ present: true, category: "aggregate_evidence_bundle", status: "pass", reported_status: "pass" }},
+      "final_production_handoff_summary.json": {{ present: true, category: "final_production_handoff", status: "pass", reported_status: "pass" }}
+    }},
+    blocking_items: [],
+    privacy: {{
+      aggregate_only: true,
+      redacts_private_values: true,
+      private_indicators_found: false,
+      private_indicator_count: 0
+    }},
+    sensitive_values_omitted: true
+  }};
+
+  const validationIndexBlockedFixture = {{
+    schema_version: "scan-qc.public-safe-validation-index.v1",
+    generated_at: "2026-05-11T01:14:00Z",
+    status: "fail",
+    summary: {{
+      known_artifacts: 5,
+      artifacts_present: 3,
+      artifacts_passed: 2,
+      artifacts_failed: 1,
+      artifacts_missing: 2,
+      unknown_inputs: 1,
+      checks_passed: 7,
+      checks_failed: 4,
+      blocking_item_count: 3
+    }},
+    checks_passed: 7,
+    checks_failed: 4,
+    artifact_presence: {{
+      "frontend_workbench_validation.json": {{ present: true, category: "frontend_workbench_validation", status: "pass", reported_status: "pass" }},
+      "release_readiness_summary.json": {{ present: true, category: "release_readiness", status: "fail", reported_status: "fail" }},
+      "release_candidate_summary.json": {{ present: false, category: "release_candidate", status: "missing", reported_status: null }},
+      "aggregate_evidence_bundle_summary.json": {{ present: true, category: "aggregate_evidence_bundle", status: "pass", reported_status: "pass" }},
+      "final_production_handoff_summary.json": {{ present: false, category: "final_production_handoff", status: "missing", reported_status: null }}
+    }},
+    blocking_items: [
+      {{ category: "release_readiness", code: "artifact_status_failed" }},
+      {{ category: "release_candidate", code: "aggregate_artifact_missing" }},
+      {{ category: "unknown", code: "unknown_public_safe_artifact" }}
+    ],
+    privacy: {{
+      aggregate_only: true,
+      redacts_private_values: true,
+      private_indicators_found: false,
+      private_indicator_count: 0
+    }},
+    sensitive_values_omitted: true
   }};
 
   const missingChecklistFixture = {{
@@ -919,7 +1013,7 @@ vm.runInContext(workbenchScript + `
   assert(completeChecklistModel.sourceType === "aggregate-handoff", "complete checklist fixture did not load as aggregate handoff");
   assert(completeChecklistModel.artifactReadiness.ready === true, "complete checklist fixture was not ready");
   assert(completeChecklistModel.artifactReadiness.missingCount === 0, "complete checklist fixture reported missing artifacts");
-  assert(completeChecklistModel.artifactReadiness.rows.length === 6, "complete checklist fixture did not cover six expected artifacts");
+  assert(completeChecklistModel.artifactReadiness.rows.length === 7, "complete checklist fixture did not cover seven expected artifacts");
   state.model = completeChecklistModel;
   renderAggregateHandoff();
   assert(els.aggregateHandoff.innerHTML.includes("Public-Safe Artifact Readiness Checklist"), "complete checklist did not render checklist heading");
@@ -960,6 +1054,40 @@ vm.runInContext(workbenchScript + `
   assert(els.aggregateHandoff.innerHTML.includes("aggregate_handoff_artifact_blocker"), "blocked final handoff did not render second blocker code");
   assert(els.aggregateHandoff.innerHTML.includes("aggregate_warning_handoff_recheck"), "blocked final handoff did not render warning code");
   assert(els.aggregateHandoff.innerHTML.includes("Not ready for public handoff"), "blocked final handoff did not render not-ready checklist summary");
+
+  const validationIndexPassModel = inferArtifact(validationIndexPassFixture);
+  assert(validationIndexPassModel.sourceType === "aggregate-handoff", "passing validation index fixture did not load as aggregate handoff");
+  assert(validationIndexPassModel.aggregateHandoff.artifactType === "Public-safe validation index", "passing validation index fixture did not classify as validation index");
+  assert(validationIndexPassModel.aggregateHandoff.status === "pass", "passing validation index status was not pass");
+  assert(validationIndexPassModel.aggregateHandoff.validationIndex.artifactsPresent === 5, "passing validation index artifacts_present was not preserved");
+  assert(validationIndexPassModel.aggregateHandoff.validationIndex.artifactsFailed === 0, "passing validation index artifacts_failed was not preserved");
+  assert(validationIndexPassModel.aggregateHandoff.validationIndex.artifactsMissing === 0, "passing validation index artifacts_missing was not preserved");
+  assert(validationIndexPassModel.aggregateHandoff.validationIndex.unknownInputs === 0, "passing validation index unknown_inputs was not preserved");
+  assert(validationIndexPassModel.aggregateHandoff.validationIndex.checksPassed === 12, "passing validation index checks_passed was not preserved");
+  assert(validationIndexPassModel.aggregateHandoff.validationIndex.checksFailed === 0, "passing validation index checks_failed was not preserved");
+  assert(validationIndexPassModel.aggregateHandoff.validationIndex.blockingItemCount === 0, "passing validation index blocking count was not preserved");
+  state.model = validationIndexPassModel;
+  renderAggregateHandoff();
+  assert(els.aggregateHandoff.innerHTML.includes("Public-Safe Validation Index"), "passing validation index did not render index section");
+  assert(els.aggregateHandoff.innerHTML.includes("Artifacts Present"), "passing validation index did not render artifacts_present");
+  assert(els.aggregateHandoff.innerHTML.includes("Privacy Aggregate-only Status"), "passing validation index did not render aggregate-only privacy status");
+  assert(els.aggregateHandoff.innerHTML.includes("frontend_workbench_validation.json"), "passing validation index did not render known public-safe filename");
+
+  const validationIndexBlockedModel = inferArtifact(validationIndexBlockedFixture);
+  assert(validationIndexBlockedModel.sourceType === "aggregate-handoff", "blocked validation index fixture did not load as aggregate handoff");
+  assert(validationIndexBlockedModel.aggregateHandoff.artifactType === "Public-safe validation index", "blocked validation index fixture did not classify as validation index");
+  assert(validationIndexBlockedModel.aggregateHandoff.status === "fail", "blocked validation index status was not fail");
+  assert(validationIndexBlockedModel.aggregateHandoff.validationIndex.artifactsFailed === 1, "blocked validation index artifacts_failed was not preserved");
+  assert(validationIndexBlockedModel.aggregateHandoff.validationIndex.artifactsMissing === 2, "blocked validation index artifacts_missing was not preserved");
+  assert(validationIndexBlockedModel.aggregateHandoff.validationIndex.unknownInputs === 1, "blocked validation index unknown_inputs was not preserved");
+  assert(validationIndexBlockedModel.aggregateHandoff.validationIndex.checksFailed === 4, "blocked validation index checks_failed was not preserved");
+  assert(validationIndexBlockedModel.aggregateHandoff.validationIndex.blockingItemCount === 3, "blocked validation index blocking count was not preserved");
+  assert(validationIndexBlockedModel.aggregateHandoff.blockingCodes.includes("artifact_status_failed"), "blocked validation index blocker code was not preserved");
+  state.model = validationIndexBlockedModel;
+  renderAggregateHandoff();
+  assert(els.aggregateHandoff.innerHTML.includes("aggregate_artifact_missing"), "blocked validation index did not render missing artifact blocker code");
+  assert(els.aggregateHandoff.innerHTML.includes("unknown_public_safe_artifact"), "blocked validation index did not render unknown input blocker code");
+  assert(!els.aggregateHandoff.innerHTML.includes("source_value"), "blocked validation index rendered source values");
 
   const missingChecklistModel = inferArtifact(missingChecklistFixture);
   assert(missingChecklistModel.artifactReadiness.ready === false, "missing checklist fixture was unexpectedly ready");
@@ -1027,6 +1155,8 @@ vm.runInContext(workbenchScript + `
     "Complete public-safe readiness checklist",
     "Passing final production handoff",
     "Blocked final production handoff",
+    "Passing public-safe validation index",
+    "Blocked public-safe validation index",
     "Disabled provider capability probe",
     "Unsupported schema compatibility warning",
     "Privacy summary failing diagnostic",
@@ -1070,6 +1200,12 @@ vm.runInContext(workbenchScript + `
   loadDemoFixture("final-handoff-blocked");
   assert(els.aggregateHandoff.innerHTML.includes("aggregate_handoff_acceptance_blocker"), "demo load path did not render blocked final handoff");
   assert(els.aggregateHandoff.innerHTML.includes("Not ready for public handoff"), "demo load path did not render blocked final handoff readiness");
+  loadDemoFixture("validation-index-pass");
+  assert(els.aggregateHandoff.innerHTML.includes("Public-safe validation index"), "demo load path did not render passing validation index type");
+  assert(els.aggregateHandoff.innerHTML.includes("Artifacts Present"), "demo load path did not render passing validation index summary");
+  loadDemoFixture("validation-index-blocked");
+  assert(els.aggregateHandoff.innerHTML.includes("unknown_public_safe_artifact"), "demo load path did not render blocked validation index blocker");
+  assert(els.aggregateHandoff.innerHTML.includes("Artifacts Missing"), "demo load path did not render blocked validation index missing count");
   loadDemoFixture("provider-capability-probe-disabled");
   assert(els.aggregateHandoff.innerHTML.includes("Provider capability probe summary"), "demo load path did not render provider probe type");
   assert(els.aggregateHandoff.innerHTML.includes("Provider Capability Probe"), "demo load path did not render provider probe section");
