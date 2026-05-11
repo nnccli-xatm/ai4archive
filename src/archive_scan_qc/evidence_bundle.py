@@ -68,6 +68,7 @@ _ALLOWED_KEY_EXCEPTIONS = {
     "python_version_family",
     "retained_public_summary",
     "scan_processing_semantics",
+    "source_values_omitted",
     "total_files",
     "total_findings",
 }
@@ -124,6 +125,8 @@ _AGGREGATE_BENCHMARK_SOURCES = {
     "run_aggregate_baseline",
     "archive_scan_qc.acceptance.build_acceptance_summary",
 }
+_REVIEW_DECISION_SOURCE_SCHEMA = "scan-qc-review-decisions.local.v1"
+_REVIEW_DECISION_SOURCE_TYPE = "aggregate_handoff"
 
 
 @dataclass(frozen=True)
@@ -142,6 +145,7 @@ EXPECTED_ARTIFACTS = (
     ExpectedArtifact("capability_probe.json", False, "scan-qc.capability-probe."),
     ExpectedArtifact("deep_inspection_provider_probe.json", False, "scan-qc.deep-inspection-provider."),
     ExpectedArtifact("deep_inspection_candidate_summary.json", False, "scan-qc.deep-inspection-candidates."),
+    ExpectedArtifact("review_decision_verification_summary.json", False, "scan-qc.review-decision-verification-summary."),
 )
 
 
@@ -269,6 +273,13 @@ def _verify_artifact(path: Path, expected: ExpectedArtifact) -> tuple[dict[str, 
         failed += len(candidate_failures)
         blockers.extend(_blocker(expected.name, code) for code in candidate_failures)
 
+    review_decision_failures = (
+        _review_decision_verification_failures(payload) if expected.name == "review_decision_verification_summary.json" else []
+    )
+    if review_decision_failures:
+        failed += len(review_decision_failures)
+        blockers.extend(_blocker(expected.name, code) for code in review_decision_failures)
+
     base["status"] = "pass" if failed == 0 else "fail"
     base["checks"] = sorted({item["code"] for item in blockers if item["artifact"] == expected.name}) or ["json_parseable", "schema_status_counts_privacy_ok"]
     if expected.name == "deep_inspection_candidate_summary.json":
@@ -277,6 +288,16 @@ def _verify_artifact(path: Path, expected: ExpectedArtifact) -> tuple[dict[str, 
         base["provider_count"] = _coerce_int(payload.get("provider_count")) or 0
         base["checks_passed_count"] = _candidate_check_count(payload.get("checks_passed"))
         base["checks_failed_count"] = _candidate_check_count(payload.get("checks_failed"))
+    if expected.name == "review_decision_verification_summary.json":
+        base["checks_passed_count"] = _coerce_int(payload.get("checks_passed")) or 0
+        base["checks_failed_count"] = _coerce_int(payload.get("checks_failed")) or 0
+        base["blocking_count"] = _coerce_int(payload.get("blocking_count")) or 0
+        base["warning_count"] = _coerce_int(payload.get("warning_count")) or 0
+        base["decision_summary"] = _review_decision_summary(payload.get("decision_summary"))
+        base["blocking_counts_by_code"] = _safe_count_map(payload.get("blocking_counts_by_code"))
+        base["warning_counts_by_code"] = _safe_count_map(payload.get("warning_counts_by_code"))
+        privacy = payload.get("privacy")
+        base["privacy_status"] = privacy.get("status") if isinstance(privacy, dict) and isinstance(privacy.get("status"), str) else None
     return base, passed, failed, blockers, len(privacy_failures)
 
 
@@ -348,12 +369,66 @@ def _deep_inspection_candidate_failures(payload: dict[str, Any]) -> list[str]:
     return sorted(set(failures))
 
 
+def _review_decision_verification_failures(payload: dict[str, Any]) -> list[str]:
+    failures: list[str] = []
+    if not _non_negative_int(payload.get("checks_passed")):
+        failures.append("checks_passed_not_non_negative_integer")
+    checks_failed = payload.get("checks_failed")
+    if not _non_negative_int(checks_failed):
+        failures.append("checks_failed_not_non_negative_integer")
+    elif checks_failed > 0:
+        failures.append("checks_failed_present")
+    blocking_count = payload.get("blocking_count")
+    if not _non_negative_int(blocking_count):
+        failures.append("blocking_count_not_non_negative_integer")
+    elif blocking_count > 0:
+        failures.append("review_decision_blocking_count_present")
+    if not _count_map(payload.get("blocking_counts_by_code")):
+        failures.append("blocking_counts_by_code_invalid")
+    if not _count_map(payload.get("warning_counts_by_code")):
+        failures.append("warning_counts_by_code_invalid")
+    if not _review_decision_summary(payload.get("decision_summary")):
+        failures.append("decision_summary_invalid")
+    privacy = payload.get("privacy")
+    if not isinstance(privacy, dict) or privacy.get("status") != "pass" or privacy.get("aggregate_only") is not True:
+        failures.append("review_decision_privacy_not_public_safe")
+    return sorted(set(failures))
+
+
 def _non_negative_int(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
 def _count_map(value: Any) -> bool:
     return isinstance(value, dict) and all(isinstance(key, str) and _non_negative_int(count) for key, count in value.items())
+
+
+def _safe_count_map(value: Any) -> dict[str, int]:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        key: count
+        for key, count in sorted(value.items())
+        if isinstance(key, str) and isinstance(count, int) and not isinstance(count, bool) and count >= 0
+    }
+
+
+def _review_decision_summary(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    decision_counts = _safe_count_map(value.get("decision_counts"))
+    summary = {
+        "total_decisions": _coerce_int(value.get("total_decisions")) or 0,
+        "pending": _coerce_int(value.get("pending")) or 0,
+        "accepted": _coerce_int(value.get("accepted")) or 0,
+        "rejected": _coerce_int(value.get("rejected")) or 0,
+        "rework": _coerce_int(value.get("rework")) or 0,
+        "completion_status": value.get("completion_status") if isinstance(value.get("completion_status"), str) else None,
+        "decision_counts": decision_counts,
+    }
+    if summary["completion_status"] is None:
+        return {}
+    return summary
 
 
 def _candidate_check_count(value: Any) -> int:
@@ -372,6 +447,10 @@ def _private_key(path: tuple[str, ...], key: str, value: Any) -> bool:
 
 
 def _aggregate_key_exception(path: tuple[str, ...], normalized: str, value: Any) -> bool:
+    if path == ("source",) and _review_decision_source_metadata(value):
+        return True
+    if path in {("source", "schema"), ("source", "source_type")} and isinstance(value, str):
+        return True
     if normalized in _ALLOWED_NUMERIC_KEYS and _is_number(value):
         return True
     if normalized.endswith(_ALLOWED_NUMERIC_KEY_SUFFIXES) and (_is_number(value) or _aggregate_count_structure(value)):
@@ -419,6 +498,15 @@ def _numeric_count_value(value: Any) -> bool:
 
 def _aggregate_benchmark_source_key(path: tuple[str, ...], value: Any) -> bool:
     return path == ("benchmark", "source") and isinstance(value, str) and value in _AGGREGATE_BENCHMARK_SOURCES
+
+
+def _review_decision_source_metadata(value: Any) -> bool:
+    return (
+        isinstance(value, dict)
+        and set(value) == {"schema", "source_type"}
+        and value.get("schema") == _REVIEW_DECISION_SOURCE_SCHEMA
+        and value.get("source_type") == _REVIEW_DECISION_SOURCE_TYPE
+    )
 
 
 def _aggregate_baseline_infers_pass(payload: dict[str, Any]) -> bool:
