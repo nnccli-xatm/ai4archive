@@ -459,7 +459,7 @@
     <section class="load-panel" aria-labelledby="load-title" data-region="artifact-loader">
       <div class="panel">
         <h2 id="load-title">Load Artifact</h2>
-        <p class="muted">Choose a <span class="mono">run_plan_summary.json</span> or <span class="mono">scan_qc_report.json</span>. Files are parsed in this browser only.</p>
+        <p class="muted">Choose a <span class="mono">run_plan_summary.json</span>, <span class="mono">scan_qc_report.json</span>, <span class="mono">aggregate_evidence_bundle_summary.json</span>, <span class="mono">final_production_handoff_summary.json</span>, or <span class="mono">release_candidate_summary.json</span>. Files are parsed in this browser only.</p>
         <div class="file-row">
           <input id="artifactFile" type="file" accept="application/json,.json">
           <button id="clearButton" class="secondary" type="button">Clear</button>
@@ -476,6 +476,16 @@
     <section class="panel" aria-labelledby="workflow-title" data-region="workflow-steps" style="margin-top:16px">
       <h2 id="workflow-title">Workflow Steps</h2>
       <div id="workflowGrid" class="workflow"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="aggregate-title" data-region="aggregate-handoff" style="margin-top:16px">
+      <div class="toolbar">
+        <div>
+          <h2 id="aggregate-title">Aggregate Handoff Artifact</h2>
+          <p class="muted">Public-safe final handoff summaries only. This view never displays private filenames, paths, hashes, OCR text, thumbnails, row-level findings, reviewer notes, manifests, or derivative image references.</p>
+        </div>
+      </div>
+      <div id="aggregateHandoff"></div>
     </section>
 
     <section class="panel" aria-labelledby="review-title" data-region="review-decisions" style="margin-top:16px">
@@ -589,7 +599,8 @@
       },
       batches: [],
       findings: [],
-      detail: null
+      detail: null,
+      aggregateHandoff: null
     };
 
     const state = {
@@ -618,6 +629,7 @@
       status: document.getElementById("statusBanner"),
       metrics: document.getElementById("metricGrid"),
       workflow: document.getElementById("workflowGrid"),
+      aggregateHandoff: document.getElementById("aggregateHandoff"),
       batchList: document.getElementById("batchList"),
       findingsList: document.getElementById("findingsList"),
       batchDetail: document.getElementById("batchDetail"),
@@ -661,10 +673,13 @@
       if (Array.isArray(payload.batches) || String(payload.schema_version || "").includes("run-plan")) {
         return buildRunPlanModel(payload);
       }
+      if (isAggregateHandoffArtifact(payload)) {
+        return buildAggregateHandoffModel(payload);
+      }
       if (payload.summary || Array.isArray(payload.findings) || Array.isArray(payload.files)) {
         return buildScanReportModel(payload);
       }
-      throw new Error("Unsupported artifact. Load run_plan_summary.json or scan_qc_report.json.");
+      throw new Error("Unsupported artifact. Load run_plan_summary.json, scan_qc_report.json, aggregate_evidence_bundle_summary.json, final_production_handoff_summary.json, or release_candidate_summary.json.");
     }
 
     function buildRunPlanModel(payload) {
@@ -705,7 +720,8 @@
         },
         batches,
         findings: [],
-        detail: { kind: "run-plan", rawSummary: summary }
+        detail: { kind: "run-plan", rawSummary: summary },
+        aggregateHandoff: null
       };
     }
 
@@ -766,7 +782,133 @@
           manifest,
           performance: summary.performance || {},
           ruleCatalog: payload.rule_catalog || {}
-        }
+        },
+        aggregateHandoff: null
+      };
+    }
+
+    function isAggregateHandoffArtifact(payload) {
+      const schema = String(payload.schema_version || "");
+      return schema.includes("aggregate-evidence-bundle") ||
+        schema.includes("final-production-handoff-summary") ||
+        schema.includes("release-candidate-summary") ||
+        payload.ready_for_handoff !== undefined ||
+        payload.ready_for_release_candidate !== undefined ||
+        payload.artifact_status_summary !== undefined ||
+        payload.artifact_presence !== undefined;
+    }
+
+    function buildAggregateHandoffModel(payload) {
+      const schema = text(payload.schema_version, "");
+      const production = payload.production_validation || {};
+      const productionCounts = production.counts || {};
+      const productionThroughput = production.throughput || {};
+      const decision = payload.decision || {};
+      const checks = payload.checks || {};
+      const aggregate = {
+        artifactType: aggregateArtifactType(schema, payload),
+        schemaVersion: schema || "Unknown aggregate schema",
+        status: normalizeAggregateStatus(payload.status || production.status),
+        readyFlagLabel: payload.ready_for_handoff !== undefined ? "Ready for handoff" : payload.ready_for_release_candidate !== undefined ? "Ready for release candidate" : "Ready flag",
+        readyFlag: payload.ready_for_handoff !== undefined ? Boolean(payload.ready_for_handoff) : payload.ready_for_release_candidate !== undefined ? Boolean(payload.ready_for_release_candidate) : normalizeAggregateStatus(payload.status || production.status) === "pass",
+        checksPassed: firstNumber(payload.checks_passed, checks.passed),
+        checksFailed: firstNumber(payload.checks_failed, checks.failed),
+        blockingItemCount: firstNumber(payload.blocking_item_count, decision.blocking_item_count),
+        artifactSummary: aggregateArtifactSummary(payload),
+        privacy: aggregatePrivacy(payload),
+        counts: aggregateCounts(productionCounts),
+        throughput: aggregateThroughput(productionThroughput),
+        generatedAt: text(payload.generated_at, "")
+      };
+
+      return {
+        sourceType: "aggregate-handoff",
+        projectId: aggregate.artifactType,
+        generatedAt: aggregate.generatedAt,
+        metrics: {
+          totalBatches: 0,
+          passedBatches: 0,
+          failedBatches: aggregate.status === "fail" ? 1 : 0,
+          totalFiles: firstNumber(aggregate.counts.totalFiles, aggregate.counts.processedFiles),
+          totalFindings: 0,
+          p0: 0,
+          p1: 0,
+          p2: 0,
+          preflightErrors: 0,
+          processingFailed: firstNumber(aggregate.counts.processingFailedFiles)
+        },
+        batches: [],
+        findings: [],
+        detail: { kind: "aggregate-handoff" },
+        aggregateHandoff: aggregate
+      };
+    }
+
+    function aggregateArtifactType(schema, payload) {
+      if (schema.includes("final-production-handoff-summary") || payload.ready_for_handoff !== undefined) return "Final production handoff summary";
+      if (schema.includes("aggregate-evidence-bundle") || payload.artifact_presence !== undefined) return "Aggregate evidence bundle summary";
+      if (schema.includes("release-candidate-summary") || payload.ready_for_release_candidate !== undefined) return "Release candidate summary";
+      return "Aggregate handoff summary";
+    }
+
+    function normalizeAggregateStatus(value) {
+      const status = text(value, "unknown").toLowerCase();
+      if (["pass", "passed", "ready", "success"].includes(status)) return "pass";
+      if (["fail", "failed", "blocked", "error"].includes(status)) return "fail";
+      return status;
+    }
+
+    function firstNumber(...values) {
+      for (const value of values) {
+        if (value === null || value === undefined || value === "") continue;
+        const parsed = Number(value);
+        if (Number.isFinite(parsed)) return parsed;
+      }
+      return 0;
+    }
+
+    function aggregateArtifactSummary(payload) {
+      const source = payload.artifact_status_summary || payload.artifact_presence || {};
+      return Object.entries(source).map(([name, item]) => ({
+        name,
+        present: Boolean(item && item.present),
+        required: Boolean(item && item.required),
+        status: text(item && item.status, "unknown"),
+        reportedStatus: text(item && item.reported_status, "")
+      }));
+    }
+
+    function aggregatePrivacy(payload) {
+      const privacy = payload.privacy || {};
+      return {
+        aggregateOnly: Boolean(privacy.aggregate_only),
+        privateIndicatorsFound: Boolean(privacy.private_indicators_found),
+        privateIndicatorCount: firstNumber(privacy.private_indicator_count),
+        containsPaths: Boolean(privacy.contains_paths),
+        containsFilenames: Boolean(privacy.contains_filenames),
+        containsHashes: Boolean(privacy.contains_hashes),
+        containsOcrText: Boolean(privacy.contains_ocr_text),
+        containsThumbnails: Boolean(privacy.contains_thumbnails),
+        containsImageContent: Boolean(privacy.contains_image_content),
+        containsRowLevelFindings: Boolean(privacy.contains_row_level_findings),
+        redactsPrivateValues: Boolean(privacy.redacts_private_values || payload.sensitive_values_omitted)
+      };
+    }
+
+    function aggregateCounts(counts) {
+      return {
+        totalFiles: firstNumber(counts.total_files),
+        openableFiles: firstNumber(counts.openable_files),
+        processedFiles: firstNumber(counts.processed_files),
+        processingFailedFiles: firstNumber(counts.processing_failed_files),
+        batches: firstNumber(counts.total_batches)
+      };
+    }
+
+    function aggregateThroughput(throughput) {
+      return {
+        scanFilesPerMinute: firstNumber(throughput.scan_files_per_minute, throughput.files_per_minute),
+        processingFilesPerMinute: firstNumber(throughput.processing_files_per_minute)
       };
     }
 
@@ -786,6 +928,7 @@
       renderStatus();
       renderMetrics();
       renderWorkflow();
+      renderAggregateHandoff();
       renderBatches();
       renderFindings();
       renderDetail();
@@ -842,8 +985,8 @@
         ["QC Scan", m.p0 > 0 ? "failed" : hasData ? "done" : "pending", m.p0 > 0 ? "P0 review required" : "Summary available"],
         ["Processing Copy", m.processingFailed > 0 ? "failed" : hasData ? "blocked" : "pending", hasData ? "Optional backend artifact only" : "No processing state"],
         ["Review Export", reviewComplete() ? "done" : m.totalFindings > 0 || state.model.batches.length > 0 ? "blocked" : hasData ? "done" : "pending", reviewComplete() ? "Review summary ready" : m.totalFindings > 0 ? "Findings require review" : "No findings loaded"],
-        ["Acceptance Summary", m.failedBatches > 0 || m.p0 > 0 ? "blocked" : hasData ? "done" : "pending", "Read-only prototype state"],
-        ["Handoff Manifest", hasData ? "blocked" : "pending", "Use existing CLI/report artifacts"]
+        ["Acceptance Summary", m.failedBatches > 0 || m.p0 > 0 ? "blocked" : hasData ? "done" : "pending", state.model.sourceType === "aggregate-handoff" ? "Aggregate status loaded" : "Read-only prototype state"],
+        ["Handoff Manifest", state.model.sourceType === "aggregate-handoff" ? (state.model.aggregateHandoff.readyFlag ? "done" : "blocked") : hasData ? "blocked" : "pending", state.model.sourceType === "aggregate-handoff" ? state.model.aggregateHandoff.readyFlagLabel : "Use existing CLI/report artifacts"]
       ];
       els.workflow.innerHTML = steps.map(([title, status, note]) => `
         <div class="step ${status}">
@@ -852,6 +995,84 @@
           <br><small>${escapeHtml(note)}</small>
         </div>
       `).join("");
+    }
+
+    function renderAggregateHandoff() {
+      const aggregate = state.model.aggregateHandoff;
+      if (!aggregate) {
+        els.aggregateHandoff.innerHTML = `<div class="empty">Load aggregate_evidence_bundle_summary.json, final_production_handoff_summary.json, or release_candidate_summary.json to inspect public-safe handoff status.</div>`;
+        return;
+      }
+      const privacyRows = [
+        ["Aggregate only", aggregate.privacy.aggregateOnly],
+        ["Private indicators found", aggregate.privacy.privateIndicatorsFound],
+        ["Private indicator count", aggregate.privacy.privateIndicatorCount],
+        ["Contains paths", aggregate.privacy.containsPaths],
+        ["Contains filenames", aggregate.privacy.containsFilenames],
+        ["Contains hashes", aggregate.privacy.containsHashes],
+        ["Contains OCR text", aggregate.privacy.containsOcrText],
+        ["Contains thumbnails", aggregate.privacy.containsThumbnails],
+        ["Contains image content", aggregate.privacy.containsImageContent],
+        ["Contains row-level findings", aggregate.privacy.containsRowLevelFindings],
+        ["Redacts private values", aggregate.privacy.redactsPrivateValues]
+      ];
+      els.aggregateHandoff.innerHTML = `
+        <div class="metric-grid">
+          ${aggregateMetric("Status", statusBadge(aggregate.status), true)}
+          ${aggregateMetric(aggregate.readyFlagLabel, aggregate.readyFlag ? "true" : "false")}
+          ${aggregateMetric("Checks Passed", aggregate.checksPassed)}
+          ${aggregateMetric("Checks Failed", aggregate.checksFailed)}
+          ${aggregateMetric("Blocking Items", aggregate.blockingItemCount)}
+          ${aggregateMetric("Generated", aggregate.generatedAt || "Not provided")}
+          ${aggregateMetric("Total Files", aggregate.counts.totalFiles)}
+          ${aggregateMetric("Openable Files", aggregate.counts.openableFiles)}
+          ${aggregateMetric("Processed Files", aggregate.counts.processedFiles)}
+          ${aggregateMetric("Processing Failed", aggregate.counts.processingFailedFiles)}
+          ${aggregateMetric("Scan Throughput", aggregate.throughput.scanFilesPerMinute ? `${aggregate.throughput.scanFilesPerMinute} files/min` : "Not provided")}
+          ${aggregateMetric("Processing Throughput", aggregate.throughput.processingFilesPerMinute ? `${aggregate.throughput.processingFilesPerMinute} files/min` : "Not provided")}
+        </div>
+        <div class="grid" style="margin-top:12px">
+          <div>
+            <h3>Artifact Presence And Status</h3>
+            ${aggregate.artifactSummary.length ? aggregateArtifactTable(aggregate.artifactSummary) : `<div class="empty">No artifact presence/status section was present.</div>`}
+          </div>
+          <div>
+            <h3>Privacy Status</h3>
+            <div class="table-wrap">
+              <table>
+                <tbody>${privacyRows.map(([label, value]) => kv(label, value)).join("")}</tbody>
+              </table>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    function aggregateMetric(label, value, raw = false) {
+      return `
+        <div class="metric">
+          <span>${escapeHtml(label)}</span>
+          <strong>${raw ? value : escapeHtml(value)}</strong>
+        </div>`;
+    }
+
+    function aggregateArtifactTable(items) {
+      return `
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Artifact</th><th>Present</th><th>Required</th><th>Status</th><th>Reported Status</th></tr></thead>
+            <tbody>
+              ${items.map(item => `
+                <tr>
+                  <td class="mono">${escapeHtml(item.name)}</td>
+                  <td>${escapeHtml(item.present)}</td>
+                  <td>${escapeHtml(item.required)}</td>
+                  <td>${statusBadge(item.status)}</td>
+                  <td>${escapeHtml(item.reportedStatus || "Not provided")}</td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>`;
     }
 
     function renderBatches() {
