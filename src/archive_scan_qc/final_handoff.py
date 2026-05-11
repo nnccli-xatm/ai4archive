@@ -13,6 +13,7 @@ from .evidence_bundle import EVIDENCE_BUNDLE_JSON, _privacy_failures
 FINAL_HANDOFF_JSON = "final_production_handoff_summary.json"
 RELEASE_CANDIDATE_JSON = "release_candidate_summary.json"
 DEEP_INSPECTION_CANDIDATE_JSON = "deep_inspection_candidate_summary.json"
+REVIEW_DECISION_VERIFICATION_JSON = "review_decision_verification_summary.json"
 SCHEMA_VERSION = "scan-qc.final-production-handoff-summary.v1"
 
 _PASS_STATUSES = {"pass", "passed", "ok", "success"}
@@ -33,13 +34,15 @@ def build_final_handoff_summary(evidence_dir: Path, *, generated_at: str | None 
     evidence = _load_aggregate_artifact(evidence_dir / EVIDENCE_BUNDLE_JSON, required=True)
     release_candidate = _load_aggregate_artifact(evidence_dir / RELEASE_CANDIDATE_JSON, required=False)
     deep_inspection_candidate = _load_aggregate_artifact(evidence_dir / DEEP_INSPECTION_CANDIDATE_JSON, required=False)
+    review_decision_verification = _load_aggregate_artifact(evidence_dir / REVIEW_DECISION_VERIFICATION_JSON, required=False)
 
     artifacts = {
         EVIDENCE_BUNDLE_JSON: _artifact_summary(evidence),
         RELEASE_CANDIDATE_JSON: _artifact_summary(release_candidate),
         DEEP_INSPECTION_CANDIDATE_JSON: _artifact_summary(deep_inspection_candidate),
+        REVIEW_DECISION_VERIFICATION_JSON: _artifact_summary(review_decision_verification),
     }
-    blockers = _blocking_items(evidence, release_candidate, deep_inspection_candidate)
+    blockers = _blocking_items(evidence, release_candidate, deep_inspection_candidate, review_decision_verification)
     checks_passed = (
         _sum_int(evidence.payload, "checks_passed")
         + _release_candidate_check_passed(release_candidate)
@@ -61,7 +64,7 @@ def build_final_handoff_summary(evidence_dir: Path, *, generated_at: str | None 
         "artifact_status_summary": artifacts,
         "privacy": {
             "aggregate_only": status == "pass",
-            "source_inputs": [EVIDENCE_BUNDLE_JSON, RELEASE_CANDIDATE_JSON, DEEP_INSPECTION_CANDIDATE_JSON],
+            "source_inputs": [EVIDENCE_BUNDLE_JSON, RELEASE_CANDIDATE_JSON, DEEP_INSPECTION_CANDIDATE_JSON, REVIEW_DECISION_VERIFICATION_JSON],
             "private_indicators_found": any(item["code"].startswith("private_") or item["code"].startswith("privacy_") for item in blockers),
             "private_indicator_count": sum(
                 1 for item in blockers if item["code"].startswith("private_") or item["code"].startswith("privacy_")
@@ -155,6 +158,8 @@ def _load_aggregate_artifact(path: Path, *, required: bool) -> _LoadedArtifact:
         blockers.append(_blocker(name, "release_candidate_not_ready"))
     if name == DEEP_INSPECTION_CANDIDATE_JSON:
         blockers.extend(_blocker(name, code) for code in _deep_inspection_candidate_blocker_codes(payload))
+    if name == REVIEW_DECISION_VERIFICATION_JSON:
+        blockers.extend(_blocker(name, code) for code in _review_decision_verification_blocker_codes(payload))
 
     return _LoadedArtifact(
         name=name,
@@ -199,6 +204,17 @@ def _artifact_summary(artifact: _LoadedArtifact) -> dict[str, Any]:
                 "checks_passed": _candidate_check_count(payload.get("checks_passed")),
                 "checks_failed": _candidate_check_count(payload.get("checks_failed")),
                 "no_inference_run": payload.get("no_inference_run") is True,
+            }
+        )
+    if artifact.name == REVIEW_DECISION_VERIFICATION_JSON and payload:
+        summary.update(
+            {
+                "decision_summary": _review_decision_summary(payload.get("decision_summary")),
+                "blocking_counts_by_code": _safe_count_map(payload.get("blocking_counts_by_code")),
+                "warning_counts_by_code": _safe_count_map(payload.get("warning_counts_by_code")),
+                "blocking_count": _safe_int(payload.get("blocking_count")),
+                "warning_count": _safe_int(payload.get("warning_count")),
+                "privacy_status": _review_decision_privacy_status(payload),
             }
         )
     return summary
@@ -255,6 +271,8 @@ def _blocker(artifact: str, code: str) -> dict[str, str]:
 def _expected_schema_prefix(name: str) -> str | None:
     if name == DEEP_INSPECTION_CANDIDATE_JSON:
         return "scan-qc.deep-inspection-candidates."
+    if name == REVIEW_DECISION_VERIFICATION_JSON:
+        return "scan-qc.review-decision-verification-summary."
     return None
 
 
@@ -270,6 +288,51 @@ def _deep_inspection_candidate_blocker_codes(payload: dict[str, Any]) -> list[st
     if payload.get("no_inference_run") is not True:
         codes.append("inference_run_not_allowed")
     return sorted(set(codes))
+
+
+def _review_decision_verification_blocker_codes(payload: dict[str, Any]) -> list[str]:
+    codes: list[str] = []
+    checks_failed = payload.get("checks_failed")
+    if not isinstance(checks_failed, int) or isinstance(checks_failed, bool) or checks_failed < 0:
+        codes.append("checks_failed_not_integer")
+    elif checks_failed > 0:
+        codes.append("checks_failed_present")
+    blocking_count = payload.get("blocking_count")
+    if not isinstance(blocking_count, int) or isinstance(blocking_count, bool) or blocking_count < 0:
+        codes.append("blocking_count_not_integer")
+    elif blocking_count > 0:
+        codes.append("review_decision_blocking_count_present")
+    if not _safe_count_map(payload.get("blocking_counts_by_code")) and payload.get("blocking_counts_by_code") != {}:
+        codes.append("blocking_counts_by_code_invalid")
+    if _review_decision_privacy_status(payload) != "pass":
+        codes.append("review_decision_privacy_not_public_safe")
+    if not _review_decision_summary(payload.get("decision_summary")):
+        codes.append("decision_summary_invalid")
+    return sorted(set(codes))
+
+
+def _review_decision_summary(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    completion_status = value.get("completion_status")
+    if not isinstance(completion_status, str):
+        return {}
+    return {
+        "total_decisions": _safe_int(value.get("total_decisions")),
+        "pending": _safe_int(value.get("pending")),
+        "accepted": _safe_int(value.get("accepted")),
+        "rejected": _safe_int(value.get("rejected")),
+        "rework": _safe_int(value.get("rework")),
+        "completion_status": completion_status,
+        "decision_counts": _safe_count_map(value.get("decision_counts")),
+    }
+
+
+def _review_decision_privacy_status(payload: dict[str, Any]) -> str | None:
+    privacy = payload.get("privacy")
+    if isinstance(privacy, dict) and isinstance(privacy.get("status"), str):
+        return privacy["status"]
+    return None
 
 
 def _safe_int(value: Any) -> int:

@@ -603,6 +603,7 @@ class ScanQcTest(unittest.TestCase):
             _write_json(root / "capability_probe.json", run_capability_probe(CapabilityProbeConfig(include_torch_cuda=False)))
             _write_json(root / "deep_inspection_provider_probe.json", build_deep_inspection_provider_probe())
             _write_json(root / "deep_inspection_candidate_summary.json", _deep_inspection_candidate_bundle_payload())
+            _write_json(root / "review_decision_verification_summary.json", _review_decision_verification_bundle_payload())
 
             summary = build_evidence_bundle_summary(root, generated_at="2026-01-01T00:00:00+00:00")
 
@@ -611,6 +612,10 @@ class ScanQcTest(unittest.TestCase):
         self.assertEqual(summary["checks_failed"], 0)
         self.assertFalse(summary["privacy"]["private_indicators_found"])
         self.assertEqual(summary["artifacts"]["deep_inspection_candidate_summary.json"]["candidate_total"], 3)
+        review_decisions = summary["artifacts"]["review_decision_verification_summary.json"]
+        self.assertEqual(review_decisions["status"], "pass")
+        self.assertEqual(review_decisions["decision_summary"]["total_decisions"], 3)
+        self.assertEqual(review_decisions["privacy_status"], "pass")
 
     def test_evidence_bundle_verifier_allows_missing_optional_deep_inspection_candidate_summary(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -643,6 +648,35 @@ class ScanQcTest(unittest.TestCase):
         self.assertIn("inference_run_not_allowed", codes)
         self.assertIn("checks_failed_present", codes)
         self.assertNotIn("privacy_guard_failed", raw)
+
+    def test_evidence_bundle_verifier_blocks_review_decision_verification_by_code_count_only(self) -> None:
+        forbidden_private_values = [
+            "/Users/private/archive",
+            "page_0001.png",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "OCR TEXT",
+            "reviewer note",
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            payload = _review_decision_verification_bundle_payload(blocked=True)
+            payload["operator_warning"] = " ".join(forbidden_private_values)
+            _write_json(root / "release_candidate_summary.json", _release_candidate_bundle_payload())
+            _write_json(root / "review_decision_verification_summary.json", payload)
+
+            exit_code = main(["evidence-bundle-verify", "--evidence-dir", str(root), "--out", str(root / "bundle.json")])
+            raw = (root / "bundle.json").read_text(encoding="utf-8")
+            summary = json.loads(raw)
+
+        self.assertEqual(exit_code, 1)
+        codes = {item["code"] for item in summary["blocking_items"] if item["artifact"] == "review_decision_verification_summary.json"}
+        self.assertIn("artifact_status_failed", codes)
+        self.assertIn("checks_failed_present", codes)
+        self.assertIn("review_decision_blocking_count_present", codes)
+        self.assertIn("review_decision_privacy_not_public_safe", codes)
+        self.assertEqual(summary["artifacts"]["review_decision_verification_summary.json"]["blocking_counts_by_code"]["unknown_decision_value"], 1)
+        for value in forbidden_private_values:
+            self.assertNotIn(value, raw)
 
     def test_evidence_bundle_verifier_allows_real_artifact_aggregate_metric_keys(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -812,6 +846,7 @@ class ScanQcTest(unittest.TestCase):
             _write_json(root / "aggregate_evidence_bundle_summary.json", _aggregate_evidence_bundle_payload(status="pass"))
             _write_json(root / "release_candidate_summary.json", _release_candidate_bundle_payload())
             _write_json(root / "deep_inspection_candidate_summary.json", _deep_inspection_candidate_bundle_payload())
+            _write_json(root / "review_decision_verification_summary.json", _review_decision_verification_bundle_payload())
 
             summary = build_final_handoff_summary(root, generated_at="2026-01-01T00:00:00+00:00")
 
@@ -823,6 +858,10 @@ class ScanQcTest(unittest.TestCase):
         self.assertEqual(candidate["status"], "pass")
         self.assertEqual(candidate["candidate_total"], 3)
         self.assertEqual(candidate["candidates_by_severity"]["P1"], 1)
+        review_decisions = summary["artifact_status_summary"]["review_decision_verification_summary.json"]
+        self.assertEqual(review_decisions["status"], "pass")
+        self.assertEqual(review_decisions["decision_summary"]["accepted"], 1)
+        self.assertEqual(review_decisions["privacy_status"], "pass")
         self.assertTrue(summary["privacy"]["aggregate_only"])
 
     def test_final_handoff_summary_blocks_deep_inspection_candidate_aggregate_failures_by_code_only(self) -> None:
@@ -854,6 +893,38 @@ class ScanQcTest(unittest.TestCase):
         self.assertIn("privacy_status_not_aggregate_public_safe", codes)
         self.assertIn("inference_run_not_allowed", codes)
         self.assertIn("private_value_present", codes)
+        for value in forbidden_private_values:
+            self.assertNotIn(value, raw)
+
+    def test_final_handoff_summary_blocks_review_decision_verification_by_code_count_only(self) -> None:
+        forbidden_private_values = [
+            "/Users/private/archive",
+            "page_0001.png",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "OCR TEXT",
+            "provider command",
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            payload = _review_decision_verification_bundle_payload(blocked=True)
+            payload["operator_warning"] = " ".join(forbidden_private_values)
+            _write_json(root / "aggregate_evidence_bundle_summary.json", _aggregate_evidence_bundle_payload(status="pass"))
+            _write_json(root / "review_decision_verification_summary.json", payload)
+
+            exit_code = main(["final-handoff-summary", "--evidence-dir", str(root), "--out", str(root / "handoff.json")])
+            raw = (root / "handoff.json").read_text(encoding="utf-8")
+            summary = json.loads(raw)
+
+        self.assertEqual(exit_code, 1)
+        self.assertFalse(summary["ready_for_handoff"])
+        codes = {item["code"] for item in summary["blocking_items"] if item["artifact"] == "review_decision_verification_summary.json"}
+        self.assertIn("aggregate_status_failed", codes)
+        self.assertIn("checks_failed_present", codes)
+        self.assertIn("review_decision_blocking_count_present", codes)
+        self.assertIn("review_decision_privacy_not_public_safe", codes)
+        review_decisions = summary["artifact_status_summary"]["review_decision_verification_summary.json"]
+        self.assertEqual(review_decisions["blocking_counts_by_code"]["unknown_decision_value"], 1)
+        self.assertEqual(review_decisions["warning_counts_by_code"]["ignored_extra_decision_field"], 2)
         for value in forbidden_private_values:
             self.assertNotIn(value, raw)
 
@@ -6293,6 +6364,60 @@ def _deep_inspection_candidate_bundle_payload() -> dict[str, object]:
         "no_inference_run": True,
         "dry_run_only": True,
     }
+
+
+def _review_decision_verification_bundle_payload(*, blocked: bool = False) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "schema_version": "scan-qc.review-decision-verification-summary.v1",
+        "status": "pass",
+        "checks_passed": 1,
+        "checks_failed": 0,
+        "decision_summary": {
+            "total_decisions": 3,
+            "pending": 0,
+            "accepted": 1,
+            "rejected": 1,
+            "rework": 1,
+            "completion_status": "complete",
+            "decision_counts": {
+                "pending": 0,
+                "accepted_issue": 1,
+                "false_positive": 1,
+                "fixed_externally": 0,
+                "needs_rescan": 1,
+                "blocked": 0,
+            },
+        },
+        "blocking_counts_by_code": {},
+        "warning_counts_by_code": {},
+        "blocking_count": 0,
+        "warning_count": 0,
+        "privacy": {
+            "status": "pass",
+            "aggregate_only": True,
+            "sensitive_field_count": 0,
+            "source_values_omitted": True,
+        },
+    }
+    if blocked:
+        payload.update(
+            {
+                "status": "blocked",
+                "checks_passed": 0,
+                "checks_failed": 1,
+                "blocking_counts_by_code": {"unknown_decision_value": 1},
+                "warning_counts_by_code": {"ignored_extra_decision_field": 2},
+                "blocking_count": 1,
+                "warning_count": 2,
+                "privacy": {
+                    "status": "blocked",
+                    "aggregate_only": False,
+                    "sensitive_field_count": 1,
+                    "source_values_omitted": True,
+                },
+            }
+        )
+    return payload
 
 
 def _review_summary_bundle_payload() -> dict[str, object]:
