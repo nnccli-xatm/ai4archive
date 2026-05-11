@@ -270,6 +270,8 @@ REQUIRED_DEMO_FIXTURE_LABELS = {
     "Recognized passing review summary",
     "Passing acceptance summary",
     "Complete public-safe readiness checklist",
+    "Passing final production handoff",
+    "Blocked final production handoff",
     "Unsupported schema compatibility warning",
     "Privacy summary failing diagnostic",
     "Privacy summary missing diagnostic",
@@ -355,7 +357,7 @@ def new_summary(workbench: Path) -> dict[str, Any]:
             "forbidden_demo_fixture_field_checks": len(FORBIDDEN_DEMO_FIXTURE_FIELDS),
         },
         "fixture_groups": {
-            "aggregate_executable_fixture_groups": 6,
+            "aggregate_executable_fixture_groups": 8,
             "demo_fixture_labels_required": len(REQUIRED_DEMO_FIXTURE_LABELS),
         },
         "coverage": {
@@ -364,6 +366,7 @@ def new_summary(workbench: Path) -> dict[str, Any]:
             "compatibility_diagnostics": False,
             "readiness_checklist": False,
             "demo_fixtures": False,
+            "final_handoff_fixtures": False,
             "executable_fixtures": False,
             "preview_lifecycle": False,
         },
@@ -623,6 +626,103 @@ vm.runInContext(workbenchScript + `
     }}
   }};
 
+  const finalHandoffPassFixture = {{
+    schema_version: "scan-qc-final-production-handoff-summary.v1",
+    generated_at: "2026-05-11T01:00:00Z",
+    status: "pass",
+    ready_for_handoff: true,
+    checks_passed: 6,
+    checks_failed: 0,
+    blocking_item_count: 0,
+    blocking_items: [],
+    warnings: [],
+    artifact_status_summary: {{
+      "run_plan_summary.json": {{ present: true, required: true, status: "pass", reported_status: "current", privacy_status: "public-safe" }},
+      "review_summary.json": {{ present: true, required: true, status: "pass", reported_status: "current", privacy_status: "public-safe" }},
+      "acceptance_summary.json": {{ present: true, required: true, status: "pass", reported_status: "current", privacy_status: "public-safe" }},
+      "aggregate_evidence_bundle_summary.json": {{ present: true, required: true, status: "pass", reported_status: "current", privacy_status: "public-safe" }},
+      "release_candidate_summary.json": {{ present: true, required: true, status: "pass", reported_status: "current", privacy_status: "public-safe" }},
+      "final_production_handoff_summary.json": {{ present: true, required: true, status: "pass", reported_status: "current", privacy_status: "public-safe" }}
+    }},
+    privacy: {{
+      aggregate_only: true,
+      omits: [
+        "source location strings",
+        "source file identifiers",
+        "content hashes",
+        "recognized text",
+        "thumbnails",
+        "image content",
+        "row-level findings"
+      ],
+      contains_paths: false,
+      contains_filenames: false,
+      contains_hashes: false,
+      contains_ocr_text: false,
+      contains_thumbnails: false,
+      contains_image_content: false,
+      contains_row_level_findings: false,
+      redacts_private_values: true,
+      private_indicators_found: false,
+      private_indicator_count: 0
+    }},
+    privacy_self_check: {{
+      status: "passed",
+      violation_count: 0
+    }},
+    sensitivity: "aggregate-only public summary"
+  }};
+
+  const finalHandoffBlockedFixture = {{
+    schema_version: "scan-qc-final-production-handoff-summary.v1",
+    generated_at: "2026-05-11T01:10:00Z",
+    status: "fail",
+    ready_for_handoff: false,
+    checks_passed: 4,
+    checks_failed: 2,
+    blocking_item_count: 2,
+    blocking_items: [
+      {{ code: "aggregate_handoff_acceptance_blocker" }},
+      {{ code: "aggregate_handoff_artifact_blocker" }}
+    ],
+    warnings: [{{ code: "aggregate_warning_handoff_recheck" }}],
+    artifact_status_summary: {{
+      "run_plan_summary.json": {{ present: true, required: true, status: "pass", reported_status: "current", privacy_status: "public-safe" }},
+      "review_summary.json": {{ present: true, required: true, status: "pass", reported_status: "current", privacy_status: "public-safe" }},
+      "acceptance_summary.json": {{ present: true, required: true, status: "fail", reported_status: "blocked", privacy_status: "public-safe" }},
+      "aggregate_evidence_bundle_summary.json": {{ present: true, required: true, status: "pass", reported_status: "current", privacy_status: "public-safe" }},
+      "release_candidate_summary.json": {{ present: true, required: true, status: "blocked", reported_status: "blocked", privacy_status: "public-safe" }},
+      "final_production_handoff_summary.json": {{ present: true, required: true, status: "fail", reported_status: "blocked", privacy_status: "public-safe" }}
+    }},
+    privacy: {{
+      aggregate_only: true,
+      omits: [
+        "source location strings",
+        "source file identifiers",
+        "content hashes",
+        "recognized text",
+        "thumbnails",
+        "image content",
+        "row-level findings"
+      ],
+      contains_paths: false,
+      contains_filenames: false,
+      contains_hashes: false,
+      contains_ocr_text: false,
+      contains_thumbnails: false,
+      contains_image_content: false,
+      contains_row_level_findings: false,
+      redacts_private_values: true,
+      private_indicators_found: false,
+      private_indicator_count: 0
+    }},
+    privacy_self_check: {{
+      status: "passed",
+      violation_count: 0
+    }},
+    sensitivity: "aggregate-only public summary"
+  }};
+
   const missingChecklistFixture = {{
     schema_version: "scan-qc-artifact-readiness-checklist.v1",
     generated_at: "2026-05-11T00:00:00Z",
@@ -763,6 +863,40 @@ vm.runInContext(workbenchScript + `
   assert(els.aggregateHandoff.innerHTML.includes("final_production_handoff_summary.json"), "complete checklist did not render final handoff artifact");
   assert(!els.aggregateHandoff.innerHTML.includes("blob:aggregate-fixture"), "complete checklist rendered object URL state");
 
+  const finalHandoffPassModel = inferArtifact(finalHandoffPassFixture);
+  assert(finalHandoffPassModel.sourceType === "aggregate-handoff", "passing final handoff fixture did not load as aggregate handoff");
+  assert(finalHandoffPassModel.aggregateHandoff.artifactType === "Final production handoff summary", "passing final handoff fixture did not classify as final handoff");
+  assert(finalHandoffPassModel.aggregateHandoff.status === "pass", "passing final handoff status was not pass");
+  assert(finalHandoffPassModel.aggregateHandoff.readyFlag === true, "passing final handoff ready flag was not true");
+  assert(finalHandoffPassModel.aggregateHandoff.checksPassed === 6, "passing final handoff checks passed were not preserved");
+  assert(finalHandoffPassModel.aggregateHandoff.checksFailed === 0, "passing final handoff checks failed were not preserved");
+  assert(finalHandoffPassModel.aggregateHandoff.blockingItemCount === 0, "passing final handoff blocking count was not zero");
+  state.model = finalHandoffPassModel;
+  renderAggregateHandoff();
+  assert(els.aggregateHandoff.innerHTML.includes("Final production handoff summary"), "passing final handoff did not render final handoff type");
+  assert(els.aggregateHandoff.innerHTML.includes("Ready for handoff"), "passing final handoff did not render ready flag label");
+  assert(els.aggregateHandoff.innerHTML.includes("Checks Passed"), "passing final handoff did not render checks passed");
+  assert(els.aggregateHandoff.innerHTML.includes("Checks Failed"), "passing final handoff did not render checks failed");
+  assert(els.aggregateHandoff.innerHTML.includes("Artifact Presence And Status"), "passing final handoff did not render artifact status summary");
+  assert(els.aggregateHandoff.innerHTML.includes("Privacy Status"), "passing final handoff did not render privacy status");
+
+  const finalHandoffBlockedModel = inferArtifact(finalHandoffBlockedFixture);
+  assert(finalHandoffBlockedModel.sourceType === "aggregate-handoff", "blocked final handoff fixture did not load as aggregate handoff");
+  assert(finalHandoffBlockedModel.aggregateHandoff.artifactType === "Final production handoff summary", "blocked final handoff fixture did not classify as final handoff");
+  assert(finalHandoffBlockedModel.aggregateHandoff.status === "fail", "blocked final handoff status was not fail");
+  assert(finalHandoffBlockedModel.aggregateHandoff.readyFlag === false, "blocked final handoff ready flag was not false");
+  assert(finalHandoffBlockedModel.aggregateHandoff.checksPassed === 4, "blocked final handoff checks passed were not preserved");
+  assert(finalHandoffBlockedModel.aggregateHandoff.checksFailed === 2, "blocked final handoff checks failed were not preserved");
+  assert(finalHandoffBlockedModel.aggregateHandoff.blockingItemCount === 2, "blocked final handoff blocking count was not preserved");
+  assert(finalHandoffBlockedModel.aggregateHandoff.blockingCodes.includes("aggregate_handoff_acceptance_blocker"), "blocked final handoff blocker code was not preserved");
+  assert(finalHandoffBlockedModel.artifactReadiness.ready === false, "blocked final handoff readiness was unexpectedly ready");
+  state.model = finalHandoffBlockedModel;
+  renderAggregateHandoff();
+  assert(els.aggregateHandoff.innerHTML.includes("aggregate_handoff_acceptance_blocker"), "blocked final handoff did not render blocker code");
+  assert(els.aggregateHandoff.innerHTML.includes("aggregate_handoff_artifact_blocker"), "blocked final handoff did not render second blocker code");
+  assert(els.aggregateHandoff.innerHTML.includes("aggregate_warning_handoff_recheck"), "blocked final handoff did not render warning code");
+  assert(els.aggregateHandoff.innerHTML.includes("Not ready for public handoff"), "blocked final handoff did not render not-ready checklist summary");
+
   const missingChecklistModel = inferArtifact(missingChecklistFixture);
   assert(missingChecklistModel.artifactReadiness.ready === false, "missing checklist fixture was unexpectedly ready");
   assert(missingChecklistModel.artifactReadiness.missingCount >= 1, "missing checklist fixture did not count missing artifacts");
@@ -805,6 +939,8 @@ vm.runInContext(workbenchScript + `
     "Recognized passing review summary",
     "Passing acceptance summary",
     "Complete public-safe readiness checklist",
+    "Passing final production handoff",
+    "Blocked final production handoff",
     "Unsupported schema compatibility warning",
     "Privacy summary failing diagnostic",
     "Privacy summary missing diagnostic"
@@ -841,6 +977,12 @@ vm.runInContext(workbenchScript + `
   assert(els.aggregateHandoff.innerHTML.includes("Review summary"), "demo load path did not render review summary");
   loadDemoFixture("complete-readiness-checklist");
   assert(els.aggregateHandoff.innerHTML.includes("Public-Safe Artifact Readiness Checklist"), "demo load path did not render readiness checklist");
+  loadDemoFixture("final-handoff-pass");
+  assert(els.aggregateHandoff.innerHTML.includes("Final production handoff summary"), "demo load path did not render passing final handoff");
+  assert(els.aggregateHandoff.innerHTML.includes("Ready for handoff"), "demo load path did not render passing final handoff ready flag");
+  loadDemoFixture("final-handoff-blocked");
+  assert(els.aggregateHandoff.innerHTML.includes("aggregate_handoff_acceptance_blocker"), "demo load path did not render blocked final handoff");
+  assert(els.aggregateHandoff.innerHTML.includes("Not ready for public handoff"), "demo load path did not render blocked final handoff readiness");
   loadDemoFixture("unsupported-schema-warning");
   assert(els.aggregateHandoff.innerHTML.includes("unsupported_public_safe_schema_version"), "demo load path did not render unsupported schema diagnostic");
   loadDemoFixture("privacy-diagnostic-fail");
@@ -1195,6 +1337,17 @@ def validate_workbench(workbench: Path = WORKBENCH) -> dict[str, Any]:
             )
     summary["coverage"]["demo_fixtures"] = not any(
         error["code"] in {"missing_demo_fixture_gallery", "missing_demo_fixture_label"} for error in errors
+    )
+    summary["coverage"]["final_handoff_fixtures"] = (
+        summary["coverage"]["demo_fixtures"]
+        and not any(
+            error["code"] == "missing_demo_fixture_label"
+            and (
+                "Passing final production handoff" in error["message"]
+                or "Blocked final production handoff" in error["message"]
+            )
+            for error in errors
+        )
     )
     summary["privacy"]["demo_fixture_forbidden_field_checks_passed"] = not any(
         error["code"] in {"forbidden_demo_fixture_field", "demo_fixture_preview_state"} for error in errors

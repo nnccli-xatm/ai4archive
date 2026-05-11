@@ -856,6 +856,61 @@
         }
       },
       {
+        id: "final-handoff-pass",
+        label: "Passing final production handoff",
+        payload: {
+          schema_version: "scan-qc-final-production-handoff-summary.v1",
+          generated_at: "2026-05-11T01:00:00Z",
+          status: "pass",
+          ready_for_handoff: true,
+          checks_passed: 6,
+          checks_failed: 0,
+          blocking_item_count: 0,
+          blocking_items: [],
+          warnings: [],
+          artifact_status_summary: {
+            "run_plan_summary.json": { present: true, required: true, status: "pass", reported_status: "current", privacy_status: "public-safe" },
+            "review_summary.json": { present: true, required: true, status: "pass", reported_status: "current", privacy_status: "public-safe" },
+            "acceptance_summary.json": { present: true, required: true, status: "pass", reported_status: "current", privacy_status: "public-safe" },
+            "aggregate_evidence_bundle_summary.json": { present: true, required: true, status: "pass", reported_status: "current", privacy_status: "public-safe" },
+            "release_candidate_summary.json": { present: true, required: true, status: "pass", reported_status: "current", privacy_status: "public-safe" },
+            "final_production_handoff_summary.json": { present: true, required: true, status: "pass", reported_status: "current", privacy_status: "public-safe" }
+          },
+          privacy: PUBLIC_SAFE_PRIVACY,
+          privacy_self_check: { status: "passed", violation_count: 0 },
+          sensitivity: "aggregate-only public summary"
+        }
+      },
+      {
+        id: "final-handoff-blocked",
+        label: "Blocked final production handoff",
+        payload: {
+          schema_version: "scan-qc-final-production-handoff-summary.v1",
+          generated_at: "2026-05-11T01:10:00Z",
+          status: "fail",
+          ready_for_handoff: false,
+          checks_passed: 4,
+          checks_failed: 2,
+          blocking_item_count: 2,
+          blocking_items: [
+            { code: "aggregate_handoff_acceptance_blocker" },
+            { code: "aggregate_handoff_artifact_blocker" }
+          ],
+          warnings: [{ code: "aggregate_warning_handoff_recheck" }],
+          artifact_status_summary: {
+            "run_plan_summary.json": { present: true, required: true, status: "pass", reported_status: "current", privacy_status: "public-safe" },
+            "review_summary.json": { present: true, required: true, status: "pass", reported_status: "current", privacy_status: "public-safe" },
+            "acceptance_summary.json": { present: true, required: true, status: "fail", reported_status: "blocked", privacy_status: "public-safe" },
+            "aggregate_evidence_bundle_summary.json": { present: true, required: true, status: "pass", reported_status: "current", privacy_status: "public-safe" },
+            "release_candidate_summary.json": { present: true, required: true, status: "blocked", reported_status: "blocked", privacy_status: "public-safe" },
+            "final_production_handoff_summary.json": { present: true, required: true, status: "fail", reported_status: "blocked", privacy_status: "public-safe" }
+          },
+          privacy: PUBLIC_SAFE_PRIVACY,
+          privacy_self_check: { status: "passed", violation_count: 0 },
+          sensitivity: "aggregate-only public summary"
+        }
+      },
+      {
         id: "unsupported-schema-warning",
         label: "Unsupported schema compatibility warning",
         payload: {
@@ -1170,8 +1225,8 @@
     function aggregateArtifactType(schema, payload) {
       if (schema.includes("artifact-readiness-checklist") || payload.artifact_readiness_checklist !== undefined || payload.public_safe_artifact_readiness !== undefined) return "Public-safe artifact readiness checklist";
       if (schema.includes("review-summary") || payload.status_counts !== undefined || payload.severity_status_counts !== undefined || payload.rule_status_counts !== undefined) return "Review summary";
-      if (schema.includes("acceptance-summary") || payload.blocking_items !== undefined || payload.human_review !== undefined || payload.pass !== undefined) return "Acceptance summary";
       if (schema.includes("final-production-handoff-summary") || payload.ready_for_handoff !== undefined) return "Final production handoff summary";
+      if (schema.includes("acceptance-summary") || payload.blocking_items !== undefined || payload.human_review !== undefined || payload.pass !== undefined) return "Acceptance summary";
       if (schema.includes("aggregate-evidence-bundle") || payload.artifact_presence !== undefined) return "Aggregate evidence bundle summary";
       if (schema.includes("release-candidate-summary") || payload.ready_for_release_candidate !== undefined) return "Release candidate summary";
       return "Aggregate handoff summary";
