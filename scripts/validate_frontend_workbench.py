@@ -57,6 +57,9 @@ REQUIRED_STRINGS = {
     "Local-only status",
     "Sensitivity/Local-only Status",
     "Processing Status Counts",
+    "Processing Resumed",
+    "Processing Duplicate Reused",
+    "Processing Existing Derivative Reused",
     "synthetic review IDs only",
     "row-level private notes",
     "processing_review",
@@ -836,6 +839,9 @@ vm.runInContext(workbenchScript + `
     checks_passed: 6,
     checks_failed: 0,
     blocking_item_count: 0,
+    processing_resumed_files: 2,
+    processing_duplicate_reused_files: 3,
+    processing_existing_derivative_reused_files: 4,
     blocking_items: [],
     warnings: [],
     artifact_status_summary: {{
@@ -1294,6 +1300,9 @@ vm.runInContext(workbenchScript + `
       processed_files: 4,
       failed_files: 1,
       skipped_files: 1,
+      processing_resumed_files: 2,
+      processing_duplicate_reused_files: 3,
+      processing_existing_derivative_reused_files: 4,
       guardrail_warning_files: 2,
       status_counts: {{
         processed: 4,
@@ -1338,7 +1347,10 @@ vm.runInContext(workbenchScript + `
       artifacts_passed: 9,
       artifacts_failed: 0,
       artifacts_missing: 0,
-      unsupported_inputs: 0
+      unsupported_inputs: 0,
+      processing_resumed_files: 2,
+      processing_duplicate_reused_files: 3,
+      processing_existing_derivative_reused_files: 4
     }},
     artifact_presence: completeChecklistFixture.artifact_readiness_checklist,
     privacy: {{
@@ -1509,6 +1521,9 @@ vm.runInContext(workbenchScript + `
   assert(workbenchPublicPassModel.aggregateHandoff.checksPassed === 14, "workbench public pass checks passed were not preserved");
   assert(workbenchPublicPassModel.aggregateHandoff.checksFailed === 0, "workbench public pass checks failed were not preserved");
   assert(workbenchPublicPassModel.aggregateHandoff.validationIndex.artifactsPresent === 9, "workbench public pass artifact present count was not preserved");
+  assert(workbenchPublicPassModel.aggregateHandoff.counts.processingResumedFiles === 2, "workbench public pass processing resumed count was not preserved");
+  assert(workbenchPublicPassModel.aggregateHandoff.counts.processingDuplicateReusedFiles === 3, "workbench public pass duplicate reuse count was not preserved");
+  assert(workbenchPublicPassModel.aggregateHandoff.counts.processingExistingDerivativeReusedFiles === 4, "workbench public pass existing derivative reuse count was not preserved");
   assert(workbenchPublicPassModel.aggregateHandoff.warningCodeCounts[0].name === "aggregate_warning_review_backlog", "workbench public pass warning code count label was not preserved");
   assert(workbenchPublicPassModel.artifactCompatibility.schemaRecognized === true, "workbench public pass schema was not recognized");
   assert(!workbenchPublicPassModel.artifactCompatibility.diagnostics.some(item => item.code === "aggregate_status_fields_missing"), "workbench public pass reported missing aggregate status fields");
@@ -1519,6 +1534,9 @@ vm.runInContext(workbenchScript + `
   assert(els.aggregateHandoff.innerHTML.includes("acceptance_status: pass"), "workbench public pass did not render workflow state value");
   assert(!els.aggregateHandoff.innerHTML.includes("[object Object]"), "workbench public pass rendered workflow object directly");
   assert(els.aggregateHandoff.innerHTML.includes("workbench_public_summary.json"), "workbench public pass did not render known artifact card");
+  assert(els.aggregateHandoff.innerHTML.includes("Processing Resumed"), "workbench public pass did not render resumed processing count");
+  assert(els.aggregateHandoff.innerHTML.includes("Processing Duplicate Reused"), "workbench public pass did not render duplicate reuse count");
+  assert(els.aggregateHandoff.innerHTML.includes("Processing Existing Derivative Reused"), "workbench public pass did not render existing derivative reuse count");
   assert(els.aggregateHandoff.innerHTML.includes("Warning Code"), "workbench public pass did not render warning code counts");
   assertPublicSafe(els.aggregateHandoff.innerHTML, "workbench public pass rendering");
 
@@ -1682,6 +1700,9 @@ vm.runInContext(workbenchScript + `
   assert(finalHandoffPassModel.aggregateHandoff.checksPassed === 6, "passing final handoff checks passed were not preserved");
   assert(finalHandoffPassModel.aggregateHandoff.checksFailed === 0, "passing final handoff checks failed were not preserved");
   assert(finalHandoffPassModel.aggregateHandoff.blockingItemCount === 0, "passing final handoff blocking count was not zero");
+  assert(finalHandoffPassModel.aggregateHandoff.counts.processingResumedFiles === 2, "passing final handoff processing resumed count was not preserved");
+  assert(finalHandoffPassModel.aggregateHandoff.counts.processingDuplicateReusedFiles === 3, "passing final handoff duplicate reuse count was not preserved");
+  assert(finalHandoffPassModel.aggregateHandoff.counts.processingExistingDerivativeReusedFiles === 4, "passing final handoff existing derivative reuse count was not preserved");
   assert(finalHandoffPassModel.aggregateHandoff.deepInspectionCandidate.candidateTotal === 3, "nested final handoff deep-inspection candidate total was not preserved");
   assert(finalHandoffPassModel.aggregateHandoff.reviewDecisionVerification.totalDecisions === 19, "nested final handoff review decision total was not preserved");
   assert(finalHandoffPassModel.aggregateHandoff.reviewDecisionVerification.acceptedCount === 11, "nested final handoff review decision accepted count was not preserved");
@@ -1696,6 +1717,7 @@ vm.runInContext(workbenchScript + `
   assert(els.aggregateHandoff.innerHTML.includes("Ready for handoff"), "passing final handoff did not render ready flag label");
   assert(els.aggregateHandoff.innerHTML.includes("Checks Passed"), "passing final handoff did not render checks passed");
   assert(els.aggregateHandoff.innerHTML.includes("Checks Failed"), "passing final handoff did not render checks failed");
+  assert(els.aggregateHandoff.innerHTML.includes("Processing Existing Derivative Reused"), "passing final handoff did not render existing derivative reuse count");
   assert(els.aggregateHandoff.innerHTML.includes("Artifact Presence And Status"), "passing final handoff did not render artifact status summary");
   assert(els.aggregateHandoff.innerHTML.includes("Deep-Inspection Candidate Summary"), "passing final handoff did not render nested deep-inspection candidate summary");
   assert(els.aggregateHandoff.innerHTML.includes("processing_review_status_failed"), "passing final handoff did not render nested deep-inspection candidate reason code");
@@ -1834,6 +1856,9 @@ vm.runInContext(workbenchScript + `
   assert(processingReviewModel.aggregateHandoff.processingReview.failedCount === 1, "processing review failed count was not preserved");
   assert(processingReviewModel.aggregateHandoff.processingReview.warningCount === 2, "processing review warning count was not preserved");
   assert(processingReviewModel.aggregateHandoff.processingReview.reviewTargetCount === 6, "processing review target count was not preserved");
+  assert(processingReviewModel.aggregateHandoff.processingReview.resumedCount === 2, "processing review resumed count was not preserved");
+  assert(processingReviewModel.aggregateHandoff.processingReview.duplicateReusedCount === 3, "processing review duplicate reuse count was not preserved");
+  assert(processingReviewModel.aggregateHandoff.processingReview.existingDerivativeReusedCount === 4, "processing review existing derivative reuse count was not preserved");
   assert(processingReviewModel.aggregateHandoff.processingReview.localOnly === true, "processing review local-only status was not preserved");
   assert(processingReviewModel.reviewTargets.length === 6, "processing review synthetic targets were not created from summary count");
   assert(processingReviewModel.reviewTargets[0].scope === "processing_review", "processing review target scope changed");
@@ -1845,6 +1870,8 @@ vm.runInContext(workbenchScript + `
   assert(els.aggregateHandoff.innerHTML.includes("Failed Count"), "processing review did not render failed count");
   assert(els.aggregateHandoff.innerHTML.includes("Review Target Count"), "processing review did not render target count");
   assert(els.aggregateHandoff.innerHTML.includes("Sensitivity/Local-only Status"), "processing review did not render local-only sensitivity");
+  assert(els.aggregateHandoff.innerHTML.includes("Processing Duplicate Reused"), "processing review did not render duplicate reuse count");
+  assert(els.aggregateHandoff.innerHTML.includes("Processing Existing Derivative Reused"), "processing review did not render existing derivative reuse count");
   assert(els.aggregateHandoff.innerHTML.includes("Processing Status Counts"), "processing review did not render status counts");
   renderReview();
   assert(els.reviewTargetList.innerHTML.includes("processing_review"), "processing review target list did not render scope");
@@ -2398,15 +2425,21 @@ vm.runInContext(workbenchScript + `
   const runPlan = {{
     schema_version: "scan-qc-run-plan-summary.v1",
     generated_at: "2026-05-11T00:00:00Z",
-    summary: {{ total_batches: 2, total_files: 10, total_findings: 0 }},
+    summary: {{ total_batches: 2, total_files: 10, total_findings: 0, processing_resumed_files: 2, processing_duplicate_reused_files: 3, processing_existing_derivative_reused_files: 4 }},
     batches: [
       {{ batch_id: "synthetic-batch-a", total_files: 5, openable_files: 5, total_findings: 0, p0_findings: 0, p1_findings: 0, p2_findings: 0 }},
       {{ batch_id: "synthetic-batch-b", total_files: 5, openable_files: 5, total_findings: 0, p0_findings: 0, p1_findings: 0, p2_findings: 0 }}
     ]
   }};
   state.model = inferArtifact(runPlan);
+  assert(state.model.metrics.processingResumed === 2, "run-plan processing resumed count was not preserved");
+  assert(state.model.metrics.processingDuplicateReused === 3, "run-plan duplicate reuse count was not preserved");
+  assert(state.model.metrics.processingExistingDerivativeReused === 4, "run-plan existing derivative reuse count was not preserved");
   resetReviewState();
   render();
+  assert(els.metrics.innerHTML.includes("Processing Resumed"), "run-plan metrics did not render processing resumed count");
+  assert(els.metrics.innerHTML.includes("Processing Duplicate Reused"), "run-plan metrics did not render duplicate reuse count");
+  assert(els.metrics.innerHTML.includes("Processing Existing Derivative Reused"), "run-plan metrics did not render existing derivative reuse count");
   assert(reviewTargets().length === 2, "run-plan synthetic targets were not exposed");
   state.decisions.set(decisionKey("batch", "B0001"), "fixed_externally");
   renderReview();
