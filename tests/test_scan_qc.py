@@ -1757,6 +1757,47 @@ class ScanQcTest(unittest.TestCase):
         self.assertNotIn("/Users/private/archive/page_0001.png", raw)
         self.assertNotIn("SECRET123", raw)
 
+    def test_workbench_summary_accepts_explicit_public_summary_input(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_json(root / "workbench_public_summary.json", _workbench_public_summary_payload())
+
+            summary = build_workbench_public_summary(
+                files=[root / "workbench_public_summary.json"],
+                generated_at="2026-01-01T00:00:00+00:00",
+            )
+
+        self.assertEqual(summary["status"], "pass")
+        self.assertEqual(summary["summary"]["unsupported_inputs"], 0)
+        self.assertNotIn("unsupported_aggregate_input_rejected", summary["blocking_counts_by_code"])
+        presence = summary["artifact_presence"]["workbench_public_summary.json"]
+        self.assertTrue(presence["present"])
+        self.assertEqual(presence["status"], "pass")
+        self.assertEqual(presence["reported_status"], "pass")
+        self.assertTrue(presence["ready"])
+        metrics = summary["artifacts"]["workbench_public_summary.json"]["metrics"]
+        self.assertEqual(metrics["known_artifacts"], 17)
+        self.assertEqual(metrics["artifacts_present"], 16)
+        self.assertEqual(metrics["artifacts_failed"], 0)
+
+    def test_workbench_summary_directory_mode_recognizes_public_summary_input(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_json(root / "workbench_public_summary.json", _workbench_public_summary_payload())
+
+            summary = build_workbench_public_summary(
+                evidence_dir=root,
+                generated_at="2026-01-01T00:00:00+00:00",
+            )
+
+        self.assertEqual(summary["status"], "pass")
+        self.assertEqual(summary["summary"]["unsupported_inputs"], 0)
+        presence = summary["artifact_presence"]["workbench_public_summary.json"]
+        self.assertTrue(presence["present"])
+        self.assertEqual(presence["status"], "pass")
+        metrics = summary["artifacts"]["workbench_public_summary.json"]["metrics"]
+        self.assertEqual(metrics["artifacts_passed"], 16)
+
     def test_workbench_summary_directory_mode_ignores_unknown_private_files(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -7273,6 +7314,37 @@ def _artifact_readiness_bundle_payload(*, ready: bool) -> dict[str, object]:
             "blocking_count": 0 if ready else 1,
             "warning_count": 0,
             "stale_count": 0,
+        },
+        "privacy": {
+            "aggregate_only": True,
+            "contains_paths": False,
+            "contains_filenames": False,
+            "contains_hashes": False,
+            "contains_ocr_text": False,
+            "contains_thumbnails": False,
+            "contains_image_content": False,
+            "contains_secrets": False,
+            "contains_row_level_findings": False,
+        },
+    }
+
+
+def _workbench_public_summary_payload() -> dict[str, object]:
+    return {
+        "schema_version": "scan-qc.workbench-public-summary.v1",
+        "status": "pass",
+        "ready": True,
+        "checks_passed": 16,
+        "checks_failed": 0,
+        "blocking_item_count": 0,
+        "warning_item_count": 0,
+        "summary": {
+            "known_artifacts": 17,
+            "artifacts_present": 16,
+            "artifacts_passed": 16,
+            "artifacts_failed": 0,
+            "artifacts_missing": 1,
+            "unsupported_inputs": 0,
         },
         "privacy": {
             "aggregate_only": True,
