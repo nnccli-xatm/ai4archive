@@ -35,6 +35,7 @@ class ProcessingOptions:
     deskew: bool = False
     trim_dark_border: bool = False
     despeckle: bool = False
+    despeckle_backend: str = "fallback"
     resume_processing: bool = False
     deskew_max_degrees: float = 5.0
     deskew_min_confidence: float = 0.08
@@ -535,6 +536,7 @@ def _processing_options_fingerprint(options: ProcessingOptions) -> str:
         "deskew": options.deskew,
         "trim_dark_border": options.trim_dark_border,
         "despeckle": options.despeckle,
+        "despeckle_backend": options.despeckle_backend,
         "deskew_max_degrees": options.deskew_max_degrees,
         "deskew_min_confidence": options.deskew_min_confidence,
         "audit_max_size_change_ratio": options.audit_max_size_change_ratio,
@@ -826,7 +828,10 @@ def _process_image(image: Image.Image, options: ProcessingOptions) -> tuple[Imag
     despeckle_backend_mode = "disabled"
     with _operation_timer(operation_timings, "despeckle", enabled=options.despeckle):
         if options.despeckle:
-            processed, despeckle_pixels_changed, despeckle_backend_mode = _despeckle_isolated_pixels(processed)
+            processed, despeckle_pixels_changed, despeckle_backend_mode = _despeckle_isolated_pixels(
+                processed,
+                backend=options.despeckle_backend,
+            )
             if despeckle_pixels_changed:
                 operations.append("despeckle_isolated_pixels")
                 despeckled = True
@@ -1158,14 +1163,14 @@ def _dark_edge_run(image: Image.Image, side: str, max_pixels: int) -> int:
     return run
 
 
-def _despeckle_isolated_pixels(image: Image.Image) -> tuple[Image.Image, int, str]:
+def _despeckle_isolated_pixels(image: Image.Image, *, backend: str = "fallback") -> tuple[Image.Image, int, str]:
     grayscale = image.convert("L")
     width, height = grayscale.size
     if width < 3 or height < 3:
         return image.copy(), 0, "not_applicable"
 
     dark_mask = grayscale.point(lambda value: 255 if value <= 60 else 0, mode="L")
-    candidates, backend_mode = _despeckle_candidate_points_with_backend(dark_mask)
+    candidates, backend_mode = _despeckle_candidate_points_with_backend(dark_mask, backend=backend)
     if not candidates:
         return image.copy(), 0, backend_mode
 
@@ -1227,15 +1232,18 @@ def _despeckle_isolated_pixels(image: Image.Image) -> tuple[Image.Image, int, st
     return output.convert(image.mode), changed, backend_mode
 
 
-def _despeckle_candidate_points(dark_mask: Image.Image) -> list[tuple[int, int]]:
-    candidates, _backend_mode = _despeckle_candidate_points_with_backend(dark_mask)
+def _despeckle_candidate_points(dark_mask: Image.Image, *, backend: str = "fallback") -> list[tuple[int, int]]:
+    candidates, _backend_mode = _despeckle_candidate_points_with_backend(dark_mask, backend=backend)
     return candidates
 
 
-def _despeckle_candidate_points_with_backend(dark_mask: Image.Image) -> tuple[list[tuple[int, int]], str]:
-    numpy_candidates = _despeckle_candidate_points_numpy(dark_mask)
-    if numpy_candidates is not None:
-        return numpy_candidates, "numpy"
+def _despeckle_candidate_points_with_backend(dark_mask: Image.Image, *, backend: str = "fallback") -> tuple[list[tuple[int, int]], str]:
+    if backend not in {"fallback", "numpy"}:
+        raise ValueError("despeckle backend must be fallback or numpy")
+    if backend == "numpy":
+        numpy_candidates = _despeckle_candidate_points_numpy(dark_mask)
+        if numpy_candidates is not None:
+            return numpy_candidates, "numpy"
     return _despeckle_candidate_points_fallback(dark_mask), "fallback"
 
 

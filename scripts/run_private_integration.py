@@ -74,6 +74,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--deskew", action="store_true", help="Enable conservative deskew during processing.")
     parser.add_argument("--trim-dark-border", action="store_true", help="Enable conservative dark-border trim.")
     parser.add_argument("--despeckle", action="store_true", help="Enable conservative despeckle.")
+    parser.add_argument(
+        "--despeckle-backend",
+        choices=("fallback", "numpy"),
+        default="fallback",
+        help="Despeckle processing backend. Defaults to conservative fallback; numpy is opt-in.",
+    )
     parser.add_argument("--resume-processing", action="store_true", help="Resume derivative processing.")
     parser.add_argument("--manifest-csv", default=None, type=Path, help="Optional private manifest CSV.")
     parser.add_argument("--rules-profile", default=None, type=Path, help="Optional private rules profile JSON.")
@@ -126,6 +132,7 @@ def run_private_integration(args: argparse.Namespace) -> PrivateIntegrationResul
 
     report_dir = output_root / "scan-reports"
     process_out = output_root / "processed-images" if args.process_images else None
+    despeckle_backend = getattr(args, "despeckle_backend", "fallback")
 
     plan = RunPlan(
         project_id=args.project,
@@ -144,6 +151,7 @@ def run_private_integration(args: argparse.Namespace) -> PrivateIntegrationResul
                 deskew=args.deskew,
                 trim_dark_border=args.trim_dark_border,
                 despeckle=args.despeckle,
+                despeckle_backend=despeckle_backend,
                 resume_processing=args.resume_processing,
             )
         ],
@@ -514,6 +522,7 @@ def _optional_float(value: Any) -> float | None:
 
 def _benchmark_args(args: argparse.Namespace, input_dir: Path, output_root: Path) -> argparse.Namespace:
     workers_list = _workers_list(args.benchmark_workers_list) if args.benchmark_workers_list else [args.workers]
+    despeckle_backend = getattr(args, "despeckle_backend", "fallback")
     return argparse.Namespace(
         input=input_dir,
         out=output_root / "benchmark",
@@ -527,6 +536,7 @@ def _benchmark_args(args: argparse.Namespace, input_dir: Path, output_root: Path
         deskew=args.deskew,
         trim_dark_border=args.trim_dark_border,
         despeckle=args.despeckle,
+        despeckle_backend=despeckle_backend,
         min_dpi=args.min_dpi,
         name_pattern=args.name_pattern,
         manifest_csv=args.manifest_csv,

@@ -63,6 +63,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--deskew", action="store_true", help="Enable conservative deskew during processing.")
     parser.add_argument("--trim-dark-border", action="store_true", help="Enable conservative dark-border trim during processing.")
     parser.add_argument("--despeckle", action="store_true", help="Enable conservative despeckle during processing.")
+    parser.add_argument(
+        "--despeckle-backend",
+        choices=("fallback", "numpy"),
+        default="fallback",
+        help="Despeckle processing backend. Defaults to conservative fallback; numpy is opt-in.",
+    )
     parser.add_argument("--min-dpi", default=None, type=int, help="Minimum acceptable DPI.")
     parser.add_argument("--name-pattern", default=None, help="Optional filename-stem regex.")
     parser.add_argument("--manifest-csv", default=None, type=Path, help="Optional manifest CSV with relative_path.")
@@ -93,6 +99,7 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
 
     started_at = datetime.now(timezone.utc).isoformat()
     results: list[dict[str, Any]] = []
+    despeckle_backend = getattr(args, "despeckle_backend", "fallback")
     payload = _payload(started_at, results)
     _write_results(payload, output_dir)
 
@@ -126,6 +133,7 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
                         deskew=args.deskew,
                         trim_dark_border=args.trim_dark_border,
                         despeckle=args.despeckle,
+                        despeckle_backend=despeckle_backend,
                         workers=workers,
                     ),
                 )
@@ -400,12 +408,13 @@ def _files_per_minute(file_count: int, elapsed_seconds: float) -> float:
     return round((file_count / elapsed_seconds) * 60, 2)
 
 
-def _operations(args: argparse.Namespace) -> dict[str, bool]:
+def _operations(args: argparse.Namespace) -> dict[str, bool | str]:
     return {
         "deskew": args.deskew,
         "auto_crop": args.auto_crop,
         "trim_dark_border": args.trim_dark_border,
         "despeckle": args.despeckle,
+        "despeckle_backend": getattr(args, "despeckle_backend", "fallback"),
     }
 
 
