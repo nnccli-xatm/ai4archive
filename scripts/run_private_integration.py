@@ -253,6 +253,11 @@ def _public_summary(
             "p2_findings": int(run_counts["p2_findings"]),
             "processing_processed_files": int(run_counts["processing_processed_files"]),
             "processing_failed_files": int(run_counts["processing_failed_files"]),
+            "processing_resumed_files": int(run_counts.get("processing_resumed_files", 0)),
+            "processing_duplicate_reused_files": int(run_counts.get("processing_duplicate_reused_files", 0)),
+            "processing_existing_derivative_reused_files": int(
+                run_counts.get("processing_existing_derivative_reused_files", 0)
+            ),
             "failed_batches": failed_batches,
             "preflight_errors": int(run_counts["preflight_error_count"]),
         },

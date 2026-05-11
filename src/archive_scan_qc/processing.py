@@ -81,6 +81,8 @@ def process_images(
     skipped_files = sum(1 for item in records if item["status"] == "skipped")
     failed_files = sum(1 for item in records if item["status"] == "failed")
     reprocessed_files = sum(1 for item in records if item.get("reprocessed"))
+    duplicate_reused_files = sum(1 for item in records if item.get("duplicate_derivative_reused"))
+    existing_derivative_reused_files = sum(1 for item in records if item.get("_existing_derivative_reused"))
     finished_at = datetime.now(timezone.utc)
     performance = _performance_summary(
         started_at,
@@ -95,6 +97,7 @@ def process_images(
     performance["operation_timings"] = _aggregate_operation_timings(records, options)
     for record in records:
         record.pop("operation_timings", None)
+        record.pop("_existing_derivative_reused", None)
     manifest = {
         "schema_version": "scan-qc.processing.v1",
         "generated_at": finished_at.isoformat(),
@@ -108,6 +111,8 @@ def process_images(
             "resumed_files": resumed_files,
             "skipped_due_to_resume": resumed_files,
             "reprocessed_files": reprocessed_files,
+            "duplicate_reused_files": duplicate_reused_files,
+            "existing_derivative_reused_files": existing_derivative_reused_files,
             "skipped_files": skipped_files,
             "failed_files": failed_files,
             "retry_list_files": failed_files,
@@ -132,6 +137,8 @@ def process_images(
             "previous_manifest_found": (process_dir / "processing_manifest.json").exists(),
             "skipped_due_to_resume": resumed_files,
             "reprocessed_files": reprocessed_files,
+            "duplicate_reused_files": duplicate_reused_files,
+            "existing_derivative_reused_files": existing_derivative_reused_files,
         },
         "files": records,
     }
@@ -251,8 +258,12 @@ def _reuse_duplicate_record(
         target.resolve().relative_to(image_root.parent.resolve())
         if source_output.resolve() == target.resolve():
             raise ValueError("duplicate derivative target matches source derivative")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source_output, target)
+        existing_derivative_reused = False
+        if target.exists() and target.is_file() and _sha256(target) == source_record.get("output_sha256"):
+            existing_derivative_reused = True
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source_output, target)
     except (OSError, ValueError) as exc:
         record = dict(source_record)
         record.update(
@@ -281,6 +292,8 @@ def _reuse_duplicate_record(
             "status": "processed",
             "resumed": False,
             "reprocessed": False,
+            "duplicate_derivative_reused": True,
+            "_existing_derivative_reused": existing_derivative_reused,
             "operation_timings": {},
             "operations": list(source_record.get("operations", [])) + ["reuse_duplicate_derivative"],
             "error": None,
@@ -357,15 +370,21 @@ def _process_record(
         "status": "skipped",
         "resumed": False,
         "reprocessed": False,
+        "duplicate_derivative_reused": False,
+        "_existing_derivative_reused": False,
+        "processing_options_fingerprint": _processing_options_fingerprint(options),
         "operations": [],
         "error": None,
         "failure_reason": None,
     }
-    if previous_record and previous_record.get("status") in {"processed", "resumed"} and _previous_output_exists(previous_record, image_root):
+    if previous_record and _previous_record_is_current(previous_record, item, input_dir, image_root, options):
         resumed = dict(previous_record)
         resumed["status"] = "resumed"
         resumed["resumed"] = True
         resumed["reprocessed"] = False
+        resumed["duplicate_derivative_reused"] = bool(previous_record.get("duplicate_derivative_reused"))
+        resumed["_existing_derivative_reused"] = True
+        resumed["processing_options_fingerprint"] = _processing_options_fingerprint(options)
         resumed["error"] = None
         resumed["failure_reason"] = None
         resumed["operations"] = list(previous_record.get("operations", [])) + ["resume_skip_existing_derivative"]
@@ -415,6 +434,7 @@ def _process_record(
                 "processing_warnings": process_info["processing_warnings"],
                 "operation_timings": process_info["operation_timings"],
                 "status": "processed",
+                "processing_options_fingerprint": _processing_options_fingerprint(options),
                 "operations": operations,
             }
         )
@@ -467,16 +487,55 @@ def _load_previous_records(process_dir: Path) -> dict[str, dict[str, Any]]:
     return previous
 
 
-def _previous_output_exists(record: dict[str, Any], image_root: Path) -> bool:
+def _previous_record_is_current(
+    record: dict[str, Any],
+    item: dict[str, Any],
+    input_dir: Path,
+    image_root: Path,
+    options: ProcessingOptions,
+) -> bool:
+    if record.get("status") not in {"processed", "resumed"}:
+        return False
+    if record.get("source_sha256") != item.get("sha256"):
+        return False
+    if record.get("processing_options_fingerprint") != _processing_options_fingerprint(options):
+        return False
     output_relative_path = record.get("output_relative_path")
-    if not isinstance(output_relative_path, str) or not output_relative_path:
+    output_sha256 = record.get("output_sha256")
+    if not isinstance(output_relative_path, str) or not isinstance(output_sha256, str) or not output_sha256:
         return False
     output_path = image_root.parent / output_relative_path
     try:
         output_path.resolve().relative_to(image_root.parent.resolve())
     except ValueError:
         return False
-    return output_path.exists() and output_path.is_file()
+    if not output_path.exists() or not output_path.is_file() or _sha256(output_path) != output_sha256:
+        return False
+    source_relative_path = item.get("relative_path")
+    if not isinstance(source_relative_path, str) or not source_relative_path:
+        return False
+    source_path = input_dir / source_relative_path
+    return source_path.exists() and source_path.is_file() and _sha256(source_path) == item.get("sha256")
+
+
+def _processing_options_fingerprint(options: ProcessingOptions) -> str:
+    identity = {
+        "auto_crop": options.auto_crop,
+        "deskew": options.deskew,
+        "trim_dark_border": options.trim_dark_border,
+        "despeckle": options.despeckle,
+        "deskew_max_degrees": options.deskew_max_degrees,
+        "deskew_min_confidence": options.deskew_min_confidence,
+        "audit_max_size_change_ratio": options.audit_max_size_change_ratio,
+        "audit_max_pixel_change_ratio": options.audit_max_pixel_change_ratio,
+        "audit_max_brightness_delta": options.audit_max_brightness_delta,
+        "audit_max_contrast_delta": options.audit_max_contrast_delta,
+        "audit_max_crop_ratio": options.audit_max_crop_ratio,
+        "audit_max_trim_margin_ratio": options.audit_max_trim_margin_ratio,
+        "audit_max_despeckle_pixel_ratio": options.audit_max_despeckle_pixel_ratio,
+    }
+    payload = json.dumps(identity, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _retry_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
@@ -534,6 +593,8 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "resumed_files": summary["resumed_files"],
             "skipped_due_to_resume": summary["skipped_due_to_resume"],
             "reprocessed_files": summary["reprocessed_files"],
+            "duplicate_reused_files": summary["duplicate_reused_files"],
+            "existing_derivative_reused_files": summary["existing_derivative_reused_files"],
             "skipped_files": summary["skipped_files"],
             "failed_files": summary["failed_files"],
             "retry_list_files": summary["retry_list_files"],

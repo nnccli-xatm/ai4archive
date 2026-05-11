@@ -153,6 +153,8 @@ def _run_batch(project_id: str, batch: PlanBatch, index: int) -> dict[str, Any]:
         "processing_failed_files": 0,
         "processing_processed_files": 0,
         "processing_resumed_files": 0,
+        "processing_duplicate_reused_files": 0,
+        "processing_existing_derivative_reused_files": 0,
         "scan_elapsed_seconds": 0.0,
         "scan_files_per_minute": 0.0,
         "processing_elapsed_seconds": 0.0,
@@ -253,6 +255,8 @@ def _run_batch(project_id: str, batch: PlanBatch, index: int) -> dict[str, Any]:
                     "processing_failed_files": processing_summary["failed_files"],
                     "processing_processed_files": processing_summary["processed_files"],
                     "processing_resumed_files": processing_summary["resumed_files"],
+                    "processing_duplicate_reused_files": processing_summary.get("duplicate_reused_files", 0),
+                    "processing_existing_derivative_reused_files": processing_summary.get("existing_derivative_reused_files", 0),
                     "processing_elapsed_seconds": processing_performance["elapsed_seconds"],
                     "processing_files_per_minute": processing_performance["processed_files_per_minute"],
                     "processing_operation_timings": processing_performance.get("operation_timings", {}),
@@ -302,6 +306,10 @@ def _build_summary(
         "processing_failed_files": sum(int(batch["processing_failed_files"]) for batch in batches),
         "processing_processed_files": sum(int(batch["processing_processed_files"]) for batch in batches),
         "processing_resumed_files": sum(int(batch["processing_resumed_files"]) for batch in batches),
+        "processing_duplicate_reused_files": sum(int(batch["processing_duplicate_reused_files"]) for batch in batches),
+        "processing_existing_derivative_reused_files": sum(
+            int(batch["processing_existing_derivative_reused_files"]) for batch in batches
+        ),
     }
     scan_elapsed = round(sum(float(batch["scan_elapsed_seconds"]) for batch in batches), 6)
     processing_elapsed = round(sum(float(batch["processing_elapsed_seconds"]) for batch in batches), 6)
@@ -393,6 +401,8 @@ def _write_summary(payload: dict[str, Any], output_root: Path) -> None:
         "processing_failed_files",
         "processing_processed_files",
         "processing_resumed_files",
+        "processing_duplicate_reused_files",
+        "processing_existing_derivative_reused_files",
         "scan_elapsed_seconds",
         "scan_files_per_minute",
         "processing_elapsed_seconds",
