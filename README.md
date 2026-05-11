@@ -97,6 +97,51 @@ archive-scan-qc \
   --rules-profile /path/to/rules.json
 ```
 
+### Frontend issue driver
+
+Use `scripts/frontend_issue_driver.py` when a frontend development plan has
+already been broken into ordered Linear issues and should be submitted one at a
+time. The script reads a local JSON plan, creates only the next unstarted issue
+in Linear with the configured Todo state, keeps a local progress file, and
+marks the active issue Done only after its validation commands pass.
+
+Example plan:
+
+```json
+{
+  "issues": [
+    {
+      "key": "report-shell",
+      "title": "Build report shell",
+      "description": "Create the standalone report layout.",
+      "validation": ["python -m unittest discover -s tests"]
+    }
+  ]
+}
+```
+
+Run the next issue:
+
+```bash
+LINEAR_API_KEY=... python3 scripts/frontend_issue_driver.py next \
+  --plan frontend-issues.json \
+  --team-key AI4
+```
+
+After implementation and validation are ready, complete the active issue and
+advance the state:
+
+```bash
+LINEAR_API_KEY=... python3 scripts/frontend_issue_driver.py complete \
+  --plan frontend-issues.json \
+  --team-key AI4 \
+  --repo-root .
+```
+
+Use `run` only for plans whose validation commands fully automate the work
+between issues. Use `--dry-run` to confirm plan parsing and state transitions
+without changing Linear or running validation commands.
+
 The optional manifest CSV must include a `relative_path` column whose values
 are expected image paths relative to `--input`. Manifests may also include one
 page/order column named `sequence`, `page_sequence`, `page_number`, or
