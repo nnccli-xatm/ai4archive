@@ -2004,7 +2004,7 @@
         artifactSummary: aggregateArtifactSummary(payload),
         deepInspectionCandidate: aggregateDeepInspectionCandidateSummary(payload),
         reviewDecisionVerification: aggregateReviewDecisionVerificationSummary(payload),
-        providerProbe: aggregateProviderProbe(payload.capability_probe_summary),
+        providerProbe: aggregateProviderProbe(providerProbeSource(payload)),
         processingReview: aggregateProcessingReview(payload),
         processingOperationTimings: aggregateProcessingOperationTimings(payload),
         despeckleBackend: aggregateDespeckleBackend(payload),
@@ -2407,11 +2407,16 @@
     function deepInspectionCandidateSource(payload) {
       const schema = String(payload.schema_version || "");
       if (schema.includes("deep-inspection-candidates")) return payload;
+      const promoted = payload.summary && payload.summary.deep_inspection_readiness;
+      if (promoted && typeof promoted === "object" && !Array.isArray(promoted)) return promoted;
       const containers = [payload.artifacts, payload.artifact_status_summary, payload.artifact_presence];
       for (const container of containers) {
         if (!container || typeof container !== "object" || Array.isArray(container)) continue;
         const candidate = container["deep_inspection_candidate_summary.json"];
-        if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) return candidate;
+        if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
+          const metrics = candidate.metrics && typeof candidate.metrics === "object" && !Array.isArray(candidate.metrics) ? candidate.metrics : {};
+          return { ...metrics, ...candidate };
+        }
       }
       return null;
     }
@@ -2514,13 +2519,31 @@
         providerCount: firstNumber(probe.provider_count),
         configuredProviderCount: firstNumber(probe.configured_provider_count),
         disabledProviderCount: firstNumber(probe.disabled_provider_count),
-        providersConfigured: firstBoolean(probe.providers_configured),
-        visibleGpuCount: firstNumber(probe.visible_gpu_count),
+        providersConfigured: firstBoolean(probe.providers_configured, probe.provider_configured),
+        visibleGpuCount: firstNumber(probe.visible_gpu_count, probe.gpu_visible_count),
         visibleModelCount: firstNumber(probe.visible_model_count),
-        optionalPackageVisibleCount: firstNumber(probe.optional_package_visible_count),
+        optionalPackageVisibleCount: firstNumber(probe.optional_package_visible_count, probe.provider_packages_found_count),
         optionalPackageMissingCount: firstNumber(probe.optional_package_missing_count),
         privacyStatus: text(probe.privacy_status, "Not provided")
       };
+    }
+
+    function providerProbeSource(payload) {
+      if (payload.capability_probe_summary && typeof payload.capability_probe_summary === "object" && !Array.isArray(payload.capability_probe_summary)) return payload.capability_probe_summary;
+      const promoted = payload.summary && payload.summary.provider_capability_readiness;
+      if (promoted && typeof promoted === "object" && !Array.isArray(promoted)) return promoted;
+      const containers = [payload.artifacts, payload.artifact_status_summary, payload.artifact_presence];
+      for (const container of containers) {
+        if (!container || typeof container !== "object" || Array.isArray(container)) continue;
+        for (const name of ["capability_probe.json", "deep_inspection_provider_probe.json"]) {
+          const candidate = container[name];
+          if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
+            const metrics = candidate.metrics && typeof candidate.metrics === "object" && !Array.isArray(candidate.metrics) ? candidate.metrics : {};
+            return { ...metrics, ...candidate };
+          }
+        }
+      }
+      return null;
     }
 
     function aggregatePrivacy(payload) {
