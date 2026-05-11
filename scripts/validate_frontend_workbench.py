@@ -79,16 +79,14 @@ REQUIRED_STRINGS = {
     "Local image preview scaffold",
     "Original/Source Image",
     "Processed/QC Output Image",
-    "Selected original preview filename: none",
-    "Selected processed preview filename: none",
+    "preview status:",
     "Clear Original Preview",
     "Clear Processed Preview",
     "Fit to Panel",
     "Reset Zoom",
     "Preview zoom level",
     "Preview display: fit to panel",
-    "Original preview is excluded from review-decision export JSON.",
-    "Processed preview is excluded from review-decision export JSON.",
+    "preview local state is excluded from review-decision export JSON.",
     "URL.createObjectURL",
     "URL.revokeObjectURL",
     "beforeunload",
@@ -409,8 +407,7 @@ REQUIRED_PREVIEW_LIFECYCLE_STRINGS = {
     "clear revocation": "URL.revokeObjectURL(previewState.objectUrl)",
     "replacement revocation": "if (previewState.objectUrl)",
     "beforeunload revocation": 'window.addEventListener("beforeunload"',
-    "original export exclusion": "Original preview is excluded from review-decision export JSON.",
-    "processed export exclusion": "Processed preview is excluded from review-decision export JSON.",
+    "export exclusion": "preview local state is excluded from review-decision export JSON.",
     "local tab copy": "browser tab only",
     "original slot": "originalPreviewFile",
     "processed slot": "processedPreviewFile",
@@ -1860,6 +1857,16 @@ function assertPublicSafe(value, label) {{
 
 vm.createContext(context);
 vm.runInContext(workbenchScript + `
+  function assertPreviewStatusSafe(slot, expectedStatus) {{
+    const statusHtml = els.previewSlots[slot].privacyCopy.innerHTML;
+    assert(statusHtml.includes(previewSlotLabel(slot) + " preview status: " + expectedStatus), slot + " preview status did not render aggregate selected state");
+    assert(statusHtml.includes(previewSlotLabel(slot) + " preview local state is excluded from review-decision export JSON."), slot + " preview export exclusion copy changed");
+    assertPublicSafe(statusHtml, slot + " preview status");
+    if (state.previews[slot].fileName) {{
+      assert(!statusHtml.includes(state.previews[slot].fileName), slot + " preview status rendered local filename");
+    }}
+  }}
+
   const originalFirstFile = {{ name: "private_scan_original_alpha.tif", type: "image/tiff" }};
   const originalSecondFile = {{ name: "private_scan_original_beta.png", type: "image/png" }};
   const processedFirstFile = {{ name: "private_scan_processed_alpha.webp", type: "image/webp" }};
@@ -1872,6 +1879,8 @@ vm.runInContext(workbenchScript + `
   assert(createdUrls.length === 1, "first original preview did not call createObjectURL once");
   assert(revokedUrls.length === 0, "first original preview unexpectedly revoked a URL");
   assert(els.previewSlots.original.preview.innerHTML.includes("blob:synthetic-preview-private_scan_original_alpha.tif-0"), "original preview image did not render object URL locally");
+  assertPreviewStatusSafe("original", "selected");
+  assertPreviewStatusSafe("processed", "not selected");
 
   loadPreviewFile("processed", processedFirstFile);
   assert(state.previews.processed.fileName === processedFirstFile.name, "first processed preview filename was not tracked locally");
@@ -1880,6 +1889,8 @@ vm.runInContext(workbenchScript + `
   assert(createdUrls.length === 2, "first processed preview did not call createObjectURL once");
   assert(revokedUrls.length === 0, "first processed preview unexpectedly revoked a URL");
   assert(els.previewSlots.processed.preview.innerHTML.includes("blob:synthetic-preview-private_scan_processed_alpha.webp-1"), "processed preview image did not render object URL locally");
+  assertPreviewStatusSafe("original", "selected");
+  assertPreviewStatusSafe("processed", "selected");
 
   assert(state.previewDisplay.mode === "fit", "preview display should default to fit mode");
   assert(els.previewZoomStatus.textContent === "Preview display: fit to panel", "fit preview status did not render");
@@ -1910,6 +1921,8 @@ vm.runInContext(workbenchScript + `
   }};
   const exportWhilePreviewLoaded = JSON.stringify(buildReviewSummary());
   assertPublicSafe(exportWhilePreviewLoaded, "review export");
+  assert(!exportWhilePreviewLoaded.includes(originalFirstFile.name), "review export leaked original preview filename");
+  assert(!exportWhilePreviewLoaded.includes(processedFirstFile.name), "review export leaked processed preview filename");
   assert(!exportWhilePreviewLoaded.includes("previewDisplay"), "review export leaked preview display state object");
   assert(!exportWhilePreviewLoaded.includes("preview_display_mode"), "review export leaked preview display mode field");
   assert(!exportWhilePreviewLoaded.includes("preview_zoom_level"), "review export leaked preview zoom level field");
@@ -1929,12 +1942,14 @@ vm.runInContext(workbenchScript + `
   assert(state.previews.processed.objectUrl === "blob:synthetic-preview-private_scan_processed_alpha.webp-1", "original replacement should not replace processed preview");
   assert(createdUrls.length === 3, "replacement original preview did not call createObjectURL");
   assert(revokedUrls.includes("blob:synthetic-preview-private_scan_original_alpha.tif-0"), "original replacement did not revoke first original object URL");
+  assertPreviewStatusSafe("original", "selected");
 
   loadPreviewFile("processed", processedSecondFile);
   assert(state.previews.processed.fileName === processedSecondFile.name, "replacement processed preview filename was not tracked locally");
   assert(state.previews.processed.objectUrl === "blob:synthetic-preview-private_scan_processed_beta.jpg-3", "replacement processed object URL was not created");
   assert(createdUrls.length === 4, "replacement processed preview did not call createObjectURL");
   assert(revokedUrls.includes("blob:synthetic-preview-private_scan_processed_alpha.webp-1"), "processed replacement did not revoke first processed object URL");
+  assertPreviewStatusSafe("processed", "selected");
 
   clearPreviewState("original");
   assert(state.previews.original.fileName === "", "clear did not reset original preview filename");
@@ -1943,7 +1958,7 @@ vm.runInContext(workbenchScript + `
   assert(els.previewSlots.original.file.value === "", "clear did not reset original preview file input");
   assert(revokedUrls.includes("blob:synthetic-preview-private_scan_original_beta.png-2"), "clear did not revoke replacement original object URL");
   assert(!els.previewSlots.original.preview.innerHTML.includes("blob:synthetic-preview"), "clear left object URL in original preview markup");
-  assert(!els.previewSlots.original.privacyCopy.innerHTML.includes("private_scan"), "clear left private filename in original preview status");
+  assertPreviewStatusSafe("original", "not selected");
 
   clearPreviewState("processed");
   assert(state.previews.processed.fileName === "", "clear did not reset processed preview filename");
@@ -1951,7 +1966,7 @@ vm.runInContext(workbenchScript + `
   assert(els.previewSlots.processed.file.value === "", "clear did not reset processed preview file input");
   assert(revokedUrls.includes("blob:synthetic-preview-private_scan_processed_beta.jpg-3"), "clear did not revoke replacement processed object URL");
   assert(!els.previewSlots.processed.preview.innerHTML.includes("blob:synthetic-preview"), "clear left object URL in processed preview markup");
-  assert(!els.previewSlots.processed.privacyCopy.innerHTML.includes("private_scan"), "clear left private filename in processed preview status");
+  assertPreviewStatusSafe("processed", "not selected");
 
   loadPreviewFile("original", originalFirstFile);
   loadPreviewFile("processed", processedFirstFile);
