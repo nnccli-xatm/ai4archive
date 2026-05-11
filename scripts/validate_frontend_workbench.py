@@ -1019,9 +1019,9 @@ vm.runInContext(workbenchScript + `
     generated_at: "2026-05-11T01:12:00Z",
     status: "pass",
     summary: {{
-      known_artifacts: 5,
-      artifacts_present: 5,
-      artifacts_passed: 5,
+      known_artifacts: 6,
+      artifacts_present: 6,
+      artifacts_passed: 6,
       artifacts_failed: 0,
       artifacts_missing: 0,
       unknown_inputs: 0,
@@ -1036,7 +1036,52 @@ vm.runInContext(workbenchScript + `
       "release_readiness_summary.json": {{ present: true, category: "release_readiness", status: "pass", reported_status: "pass" }},
       "release_candidate_summary.json": {{ present: true, category: "release_candidate", status: "pass", reported_status: "pass" }},
       "aggregate_evidence_bundle_summary.json": {{ present: true, category: "aggregate_evidence_bundle", status: "pass", reported_status: "pass" }},
+      "review_decision_verification_summary.json": {{ present: true, category: "review_decision_verification", status: "pass", reported_status: "pass" }},
       "final_production_handoff_summary.json": {{ present: true, category: "final_production_handoff", status: "pass", reported_status: "pass" }}
+    }},
+    artifacts: {{
+      "review_decision_verification_summary.json": {{
+        present: true,
+        status: "pass",
+        reported_status: "pass",
+        checks_passed: 3,
+        checks_failed: 0,
+        counts: {{ blocking_count: 0, warning_count: 1, blocking_counts_by_code: {{}}, warning_counts_by_code: {{ ignored_extra_decision_field: 1 }} }},
+        privacy: {{ status: "pass", failure_count: 0, failure_codes: [] }},
+        local_id: "PRIVATE-LOCAL-ID",
+        source_type: "review_decision_export",
+        source_schema: "scan-qc-review-decisions.local.v1"
+      }},
+      "aggregate_evidence_bundle_summary.json": {{
+        present: true,
+        status: "pass",
+        review_decision_verification: {{
+          present: true,
+          status: "pass",
+          checks_passed: 4,
+          checks_failed: 0,
+          blocking_count: 0,
+          warning_count: 0,
+          blocking_counts_by_code: {{}},
+          warning_counts_by_code: {{}},
+          privacy_status: "pass"
+        }}
+      }},
+      "final_production_handoff_summary.json": {{
+        present: true,
+        status: "pass",
+        review_decision_verification: {{
+          present: true,
+          status: "pass",
+          checks_passed: 5,
+          checks_failed: 0,
+          blocking_count: 0,
+          warning_count: 0,
+          blocking_counts_by_code: {{}},
+          warning_counts_by_code: {{}},
+          privacy_status: "pass"
+        }}
+      }}
     }},
     blocking_items: [],
     privacy: {{
@@ -1684,19 +1729,30 @@ vm.runInContext(workbenchScript + `
   assert(validationIndexPassModel.sourceType === "aggregate-handoff", "passing validation index fixture did not load as aggregate handoff");
   assert(validationIndexPassModel.aggregateHandoff.artifactType === "Public-safe validation index", "passing validation index fixture did not classify as validation index");
   assert(validationIndexPassModel.aggregateHandoff.status === "pass", "passing validation index status was not pass");
-  assert(validationIndexPassModel.aggregateHandoff.validationIndex.artifactsPresent === 5, "passing validation index artifacts_present was not preserved");
+  assert(validationIndexPassModel.aggregateHandoff.validationIndex.artifactsPresent === 6, "passing validation index artifacts_present was not preserved");
   assert(validationIndexPassModel.aggregateHandoff.validationIndex.artifactsFailed === 0, "passing validation index artifacts_failed was not preserved");
   assert(validationIndexPassModel.aggregateHandoff.validationIndex.artifactsMissing === 0, "passing validation index artifacts_missing was not preserved");
   assert(validationIndexPassModel.aggregateHandoff.validationIndex.unknownInputs === 0, "passing validation index unknown_inputs was not preserved");
   assert(validationIndexPassModel.aggregateHandoff.validationIndex.checksPassed === 12, "passing validation index checks_passed was not preserved");
   assert(validationIndexPassModel.aggregateHandoff.validationIndex.checksFailed === 0, "passing validation index checks_failed was not preserved");
   assert(validationIndexPassModel.aggregateHandoff.validationIndex.blockingItemCount === 0, "passing validation index blocking count was not preserved");
+  assert(validationIndexPassModel.aggregateHandoff.validationIndexReviewDecisionCoverage.length === 3, "passing validation index did not preserve review decision handoff coverage");
+  assert(validationIndexPassModel.aggregateHandoff.validationIndexReviewDecisionCoverage[0].warningCodeCounts[0].name === "ignored_extra_decision_field", "passing validation index did not preserve direct review decision warning code counts");
+  assert(validationIndexPassModel.aggregateHandoff.validationIndexReviewDecisionCoverage[1].checksPassed === 4, "passing validation index did not preserve aggregate evidence nested review decision checks");
+  assert(validationIndexPassModel.aggregateHandoff.validationIndexReviewDecisionCoverage[2].checksPassed === 5, "passing validation index did not preserve final handoff nested review decision checks");
   state.model = validationIndexPassModel;
   renderAggregateHandoff();
   assert(els.aggregateHandoff.innerHTML.includes("Public-Safe Validation Index"), "passing validation index did not render index section");
+  assert(els.aggregateHandoff.innerHTML.includes("Review-Decision Handoff Coverage"), "passing validation index did not render review decision handoff coverage");
+  assert(els.aggregateHandoff.innerHTML.includes("aggregate_evidence_bundle_summary.json nested review decision verification"), "passing validation index did not render aggregate evidence nested review decision coverage");
+  assert(els.aggregateHandoff.innerHTML.includes("final_production_handoff_summary.json nested review decision verification"), "passing validation index did not render final handoff nested review decision coverage");
+  assert(els.aggregateHandoff.innerHTML.includes("ignored_extra_decision_field"), "passing validation index did not render direct review decision warning code count");
   assert(els.aggregateHandoff.innerHTML.includes("Artifacts Present"), "passing validation index did not render artifacts_present");
   assert(els.aggregateHandoff.innerHTML.includes("Privacy Aggregate-only Status"), "passing validation index did not render aggregate-only privacy status");
   assert(els.aggregateHandoff.innerHTML.includes("frontend_workbench_validation.json"), "passing validation index did not render known public-safe filename");
+  assert(!els.aggregateHandoff.innerHTML.includes("PRIVATE-LOCAL-ID"), "passing validation index rendered nested review decision local ID");
+  assert(!els.aggregateHandoff.innerHTML.includes("source_type"), "passing validation index rendered nested review decision source type");
+  assert(!els.aggregateHandoff.innerHTML.includes("scan-qc-review-decisions.local.v1"), "passing validation index rendered nested review decision source schema");
 
   const validationIndexBlockedModel = inferArtifact(validationIndexBlockedFixture);
   assert(validationIndexBlockedModel.sourceType === "aggregate-handoff", "blocked validation index fixture did not load as aggregate handoff");

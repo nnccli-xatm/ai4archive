@@ -1428,9 +1428,9 @@
           generated_at: "2026-05-11T01:12:00Z",
           status: "pass",
           summary: {
-            known_artifacts: 5,
-            artifacts_present: 5,
-            artifacts_passed: 5,
+            known_artifacts: 6,
+            artifacts_present: 6,
+            artifacts_passed: 6,
             artifacts_failed: 0,
             artifacts_missing: 0,
             unknown_inputs: 0,
@@ -1445,7 +1445,49 @@
             "release_readiness_summary.json": { present: true, category: "release_readiness", status: "pass", reported_status: "pass" },
             "release_candidate_summary.json": { present: true, category: "release_candidate", status: "pass", reported_status: "pass" },
             "aggregate_evidence_bundle_summary.json": { present: true, category: "aggregate_evidence_bundle", status: "pass", reported_status: "pass" },
+            "review_decision_verification_summary.json": { present: true, category: "review_decision_verification", status: "pass", reported_status: "pass" },
             "final_production_handoff_summary.json": { present: true, category: "final_production_handoff", status: "pass", reported_status: "pass" }
+          },
+          artifacts: {
+            "review_decision_verification_summary.json": {
+              present: true,
+              status: "pass",
+              reported_status: "pass",
+              checks_passed: 3,
+              checks_failed: 0,
+              counts: { blocking_count: 0, warning_count: 1, blocking_counts_by_code: {}, warning_counts_by_code: { ignored_extra_decision_field: 1 } },
+              privacy: { status: "pass", failure_count: 0, failure_codes: [] }
+            },
+            "aggregate_evidence_bundle_summary.json": {
+              present: true,
+              status: "pass",
+              review_decision_verification: {
+                present: true,
+                status: "pass",
+                checks_passed: 4,
+                checks_failed: 0,
+                blocking_count: 0,
+                warning_count: 0,
+                blocking_counts_by_code: {},
+                warning_counts_by_code: {},
+                privacy_status: "pass"
+              }
+            },
+            "final_production_handoff_summary.json": {
+              present: true,
+              status: "pass",
+              review_decision_verification: {
+                present: true,
+                status: "pass",
+                checks_passed: 5,
+                checks_failed: 0,
+                blocking_count: 0,
+                warning_count: 0,
+                blocking_counts_by_code: {},
+                warning_counts_by_code: {},
+                privacy_status: "pass"
+              }
+            }
           },
           blocking_items: [],
           privacy: PUBLIC_SAFE_PRIVACY,
@@ -1902,6 +1944,7 @@
         blockingCodeCounts: aggregateCodeCounts(payload.blocking_counts_by_code || payload.blocking_item_counts_by_code || (payload.summary && (payload.summary.blocking_counts_by_code || payload.summary.blocking_item_counts_by_code))),
         warningCodeCounts: aggregateCodeCounts(payload.warning_counts_by_code || (payload.summary && payload.summary.warning_counts_by_code)),
         validationIndex: aggregateValidationIndexSummary(payload),
+        validationIndexReviewDecisionCoverage: validationIndexReviewDecisionCoverage(payload),
         artifactSummary: aggregateArtifactSummary(payload),
         deepInspectionCandidate: aggregateDeepInspectionCandidateSummary(payload),
         reviewDecisionVerification: aggregateReviewDecisionVerificationSummary(payload),
@@ -2236,9 +2279,14 @@
     function aggregateReviewDecisionVerificationSummary(payload) {
       const source = reviewDecisionVerificationSource(payload);
       if (!source) return null;
+      return reviewDecisionVerificationSummaryFromSource(source);
+    }
+
+    function reviewDecisionVerificationSummaryFromSource(source) {
       const summary = source.summary && typeof source.summary === "object" && !Array.isArray(source.summary) ? source.summary : {};
       const decisionSummary = source.decision_summary && typeof source.decision_summary === "object" && !Array.isArray(source.decision_summary) ? source.decision_summary : {};
       const decisionCounts = source.decision_counts && typeof source.decision_counts === "object" && !Array.isArray(source.decision_counts) ? source.decision_counts : {};
+      const counts = source.counts && typeof source.counts === "object" && !Array.isArray(source.counts) ? source.counts : {};
       const nestedDecisionCounts = decisionSummary.decision_counts && typeof decisionSummary.decision_counts === "object" && !Array.isArray(decisionSummary.decision_counts) ? decisionSummary.decision_counts : {};
       const completion = source.completion && typeof source.completion === "object" && !Array.isArray(source.completion) ? source.completion : {};
       const checks = source.checks && typeof source.checks === "object" && !Array.isArray(source.checks) ? source.checks : {};
@@ -2266,10 +2314,10 @@
         rejectedCount,
         reworkCount,
         completionStatus,
-        blockingCount: firstNumber(source.blocking_item_count, source.blocking_count, summary.blocking_item_count, summary.blocking_count),
-        warningCount: firstNumber(source.warning_item_count, source.warning_count, summary.warning_item_count, summary.warning_count),
-        blockingCodeCounts: aggregateCodeCounts(source.blocking_counts_by_code || source.blocking_item_counts_by_code || summary.blocking_counts_by_code || summary.blocking_item_counts_by_code),
-        warningCodeCounts: aggregateCodeCounts(source.warning_counts_by_code || summary.warning_counts_by_code),
+        blockingCount: firstNumber(source.blocking_item_count, source.blocking_count, summary.blocking_item_count, summary.blocking_count, counts.blocking_count, counts.blocking_item_count),
+        warningCount: firstNumber(source.warning_item_count, source.warning_count, summary.warning_item_count, summary.warning_count, counts.warning_count, counts.warning_item_count),
+        blockingCodeCounts: aggregateCodeCounts(source.blocking_counts_by_code || source.blocking_item_counts_by_code || summary.blocking_counts_by_code || summary.blocking_item_counts_by_code || counts.blocking_counts_by_code || counts.blocking_item_counts_by_code),
+        warningCodeCounts: aggregateCodeCounts(source.warning_counts_by_code || summary.warning_counts_by_code || counts.warning_counts_by_code),
         privacyStatus: text(source.privacy_status || summary.privacy_status || privacy.status, aggregatePrivacyStatusLabel(aggregatePrivacy(source)))
       };
     }
@@ -2284,6 +2332,26 @@
         if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) return candidate;
       }
       return null;
+    }
+
+    function validationIndexReviewDecisionCoverage(payload) {
+      if (aggregateArtifactType(text(payload.schema_version, ""), payload) !== "Public-safe validation index") return [];
+      const artifacts = payload.artifacts && typeof payload.artifacts === "object" && !Array.isArray(payload.artifacts) ? payload.artifacts : {};
+      const direct = artifacts["review_decision_verification_summary.json"];
+      const evidence = artifacts["aggregate_evidence_bundle_summary.json"];
+      const handoff = artifacts["final_production_handoff_summary.json"];
+      const coverageSources = [
+        ["review_decision_verification_summary.json", direct],
+        ["aggregate_evidence_bundle_summary.json nested review decision verification", evidence && evidence.review_decision_verification],
+        ["final_production_handoff_summary.json nested review decision verification", handoff && handoff.review_decision_verification]
+      ];
+      return coverageSources
+        .filter(([, source]) => source && typeof source === "object" && !Array.isArray(source))
+        .map(([label, source]) => ({
+          label,
+          present: firstBoolean(source.present, true),
+          ...reviewDecisionVerificationSummaryFromSource(source)
+        }));
     }
 
     function aggregateValidationIndexSummary(payload) {
@@ -2648,7 +2716,7 @@
           ${aggregateMetric("Scan Workers", workerRange(aggregate.workers.scanMin, aggregate.workers.scanMax))}
           ${aggregateMetric("Processing Workers", workerRange(aggregate.workers.processingMin, aggregate.workers.processingMax))}
         </div>
-        ${["Public-safe validation index", "Workbench public summary"].includes(aggregate.artifactType) ? validationIndexPanel(validationIndexRows) : ""}
+        ${["Public-safe validation index", "Workbench public summary"].includes(aggregate.artifactType) ? validationIndexPanel(validationIndexRows, aggregate.validationIndexReviewDecisionCoverage) : ""}
         <div class="grid" style="margin-top:12px">
           <div>
             <h3>Artifact Presence And Status</h3>
@@ -2753,7 +2821,7 @@
         </section>`;
     }
 
-    function validationIndexPanel(rows) {
+    function validationIndexPanel(rows, reviewDecisionCoverage = []) {
       return `
         <h3>Public-Safe Validation Index</h3>
         <p class="muted">Validation index view shows aggregate summary counts, artifact presence/category/status, and blocking item codes/counts only. Source values and private evidence are not displayed.</p>
@@ -2761,7 +2829,36 @@
           <table>
             <tbody>${rows.map(([label, value]) => kv(label, value)).join("")}</tbody>
           </table>
-        </div>`;
+        </div>
+        ${reviewDecisionCoverage.length ? `
+          <section class="subpanel">
+            <h3>Review-Decision Handoff Coverage</h3>
+            <p class="muted">Coverage from the validation index is aggregate-only: artifact presence/status, privacy status, check counts, blocking/warning counts, and blocking/warning code counts.</p>
+            ${reviewDecisionCoverage.map(item => `
+              <h3>${escapeHtml(item.label)}</h3>
+              <div class="table-wrap">
+                <table><tbody>
+                  ${kv("Present", item.present)}
+                  <tr><th>Status</th><td class="truncate">${statusBadge(item.status)}</td></tr>
+                  ${kv("Privacy Status", item.privacyStatus)}
+                  ${kv("Checks Passed", item.checksPassed)}
+                  ${kv("Checks Failed", item.checksFailed)}
+                  ${kv("Blocking Count", item.blockingCount)}
+                  ${kv("Warning Count", item.warningCount)}
+                </tbody></table>
+              </div>
+              <div class="grid" style="margin-top:12px">
+                <div>
+                  <h3>Blocking Counts By Code</h3>
+                  ${item.blockingCodeCounts.length ? aggregateCountTable(item.blockingCodeCounts, "Blocking Code") : `<div class="empty">No blocking counts by aggregate code were present.</div>`}
+                </div>
+                <div>
+                  <h3>Warning Counts By Code</h3>
+                  ${item.warningCodeCounts.length ? aggregateCountTable(item.warningCodeCounts, "Warning Code") : `<div class="empty">No warning counts by aggregate code were present.</div>`}
+                </div>
+              </div>
+            `).join("")}
+          </section>` : ""}`;
     }
 
     function processingReviewPanel(processingReview, rows) {
