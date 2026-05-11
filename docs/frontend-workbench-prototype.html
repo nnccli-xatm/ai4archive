@@ -2170,7 +2170,8 @@
         els.reviewImportStatus.classList.add("ok");
       }
       const warnings = state.importStatus.warnings.length ? ` Warnings: ${state.importStatus.warnings.join(" ")}` : "";
-      els.reviewImportStatus.textContent = `Imported ${state.importStatus.imported} review decisions; skipped ${state.importStatus.skipped}. Last import: ${state.importStatus.importedAt}.${warnings}`;
+      const validation = state.importStatus.validationCodes.length ? ` Validation codes: ${state.importStatus.validationCodes.join(", ")}.` : "";
+      els.reviewImportStatus.textContent = `Imported ${state.importStatus.imported} review decisions; skipped ${state.importStatus.skipped}. Last import: ${state.importStatus.importedAt}.${validation}${warnings}`;
     }
 
     function renderPreview() {
@@ -2267,7 +2268,6 @@
       const decisions = targets.map(target => ({
         scope: target.scope,
         local_id: target.localId,
-        severity: target.severity,
         decision: getDecision(target.scope, target.localId)
       }));
       return {
@@ -2303,8 +2303,51 @@
       return REVIEW_DECISIONS.some(([decision]) => decision === value);
     }
 
+    const REVIEW_IMPORT_ALLOWED_FIELDS = new Set(["scope", "local_id", "decision"]);
+    const REVIEW_IMPORT_PRIVATE_FIELDS = new Set([
+      "absolute_path",
+      "derivative_image",
+      "filename",
+      "hash",
+      ["image", "bytes"].join("_"),
+      "image_content",
+      "manifest",
+      ["ocr", "text"].join("_"),
+      "path",
+      "preview_filename",
+      "preview_object_url",
+      "reviewer_notes",
+      "sha256",
+      "thumbnail"
+    ]);
+
     function importableTargetKeys() {
       return new Set(reviewTargets().map(target => decisionKey(target.scope, target.localId)));
+    }
+
+    function reviewImportValidationCode(item) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        return "invalid_decision_entry";
+      }
+      const keys = Object.keys(item);
+      if (keys.some(key => REVIEW_IMPORT_PRIVATE_FIELDS.has(key))) {
+        return "private_field_omitted";
+      }
+      if (keys.some(key => !REVIEW_IMPORT_ALLOWED_FIELDS.has(key))) {
+        return "unsupported_field_omitted";
+      }
+      return "";
+    }
+
+    function addValidationCode(counts, code) {
+      if (!code) return;
+      counts[code] = (counts[code] || 0) + 1;
+    }
+
+    function formatValidationCodes(counts) {
+      return Object.entries(counts)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([code, count]) => `${code}=${count}`);
     }
 
     function parseReviewDecisionSummary(payload) {
@@ -2334,8 +2377,11 @@
       const targetKeys = importableTargetKeys();
       let imported = 0;
       let skipped = 0;
+      const validationCodeCounts = {};
       parsed.decisions.forEach(item => {
-        if (!item || typeof item !== "object") {
+        const validationCode = reviewImportValidationCode(item);
+        if (validationCode) {
+          addValidationCode(validationCodeCounts, validationCode);
           skipped += 1;
           return;
         }
@@ -2343,7 +2389,13 @@
         const localId = text(item.local_id, "");
         const decision = text(item.decision, "");
         const key = decisionKey(scope, localId);
-        if (!targetKeys.has(key) || !allowedReviewDecision(decision)) {
+        if (!targetKeys.has(key)) {
+          addValidationCode(validationCodeCounts, "unknown_review_target");
+          skipped += 1;
+          return;
+        }
+        if (!allowedReviewDecision(decision)) {
+          addValidationCode(validationCodeCounts, "unsupported_decision_status");
           skipped += 1;
           return;
         }
@@ -2358,6 +2410,7 @@
         kind: imported > 0 ? "ok" : "warning",
         imported,
         skipped,
+        validationCodes: formatValidationCodes(validationCodeCounts),
         warnings: parsed.warnings,
         importedAt: new Date().toISOString()
       };
@@ -2371,6 +2424,7 @@
           kind: "error",
           imported: 0,
           skipped: 0,
+          validationCodes: [],
           warnings: ["Load a scan, run-plan, or aggregate handoff artifact before importing decisions."],
           importedAt: new Date().toISOString()
         };
@@ -2386,6 +2440,7 @@
           kind: "error",
           imported: 0,
           skipped: 0,
+          validationCodes: [],
           warnings: [error.message],
           importedAt: new Date().toISOString()
         };
