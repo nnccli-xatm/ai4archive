@@ -35,6 +35,14 @@ REQUIRED_STRINGS = {
     "aggregate_evidence_bundle_summary.json",
     "final_production_handoff_summary.json",
     "release_candidate_summary.json",
+    "deep_inspection_candidate_summary.json",
+    "scan-qc.deep-inspection-candidates.v1",
+    "Deep-inspection candidate summary",
+    "Deep-Inspection Candidate Summary",
+    "Candidate Total",
+    "Candidates By Reason",
+    "Candidates By Severity",
+    "No Inference Run",
     "public_safe_validation_index.json",
     "scan-qc.public-safe-validation-index.v1",
     "scan-qc.processing-review.v1",
@@ -313,6 +321,8 @@ REQUIRED_AGGREGATE_FIELDS = {
     "warning count": "warningCount",
     "workers": "aggregateWorkers",
     "compatibility diagnostics": "buildArtifactCompatibilityDiagnostics",
+    "deep inspection candidate summary": "aggregateDeepInspectionCandidateSummary",
+    "deep inspection candidate source": "deepInspectionCandidateSource",
     "provider capability probe": "aggregateProviderProbe",
     "processing review summary": "aggregateProcessingReview",
     "processing review targets": "buildProcessingReviewTargets",
@@ -366,6 +376,7 @@ REQUIRED_DEMO_FIXTURE_LABELS = {
     "Complete public-safe readiness checklist",
     "Passing final production handoff",
     "Blocked final production handoff",
+    "Deep-inspection candidate summary",
     "Disabled provider capability probe",
     "Passing public-safe validation index",
     "Blocked public-safe validation index",
@@ -756,6 +767,14 @@ vm.runInContext(workbenchScript + `
         privacy_status: "public-safe",
         generated_at: "2026-05-11T00:05:00Z"
       }},
+      "deep_inspection_candidate_summary.json": {{
+        present: true,
+        status: "pass",
+        blocking_count: 0,
+        warning_count: 0,
+        privacy_status: "public-safe",
+        generated_at: "2026-05-11T00:05:30Z"
+      }},
       "public_safe_validation_index.json": {{
         present: true,
         status: "pass",
@@ -783,6 +802,7 @@ vm.runInContext(workbenchScript + `
       "acceptance_summary.json": {{ present: true, required: true, status: "pass", reported_status: "current", privacy_status: "public-safe" }},
       "aggregate_evidence_bundle_summary.json": {{ present: true, required: true, status: "pass", reported_status: "current", privacy_status: "public-safe" }},
       "release_candidate_summary.json": {{ present: true, required: true, status: "pass", reported_status: "current", privacy_status: "public-safe" }},
+      "deep_inspection_candidate_summary.json": {{ present: true, required: false, status: "pass", reported_status: "pass", candidate_total: 3, candidates_by_reason: {{ processing_review_status_failed: 1, quality_scanline_candidate: 2 }}, candidates_by_severity: {{ P1: 1, P2: 2 }}, provider_configured: false, provider_count: 0, checks_passed: 5, checks_failed: 0, privacy_status: "aggregate_public_safe", no_inference_run: true, source_root: "/Users/private/archive", provider_command: "python /private/model.py", environment: {{ SECRET_TOKEN: "PRIVATE_OCR_TEXT" }} }},
       "final_production_handoff_summary.json": {{ present: true, required: true, status: "pass", reported_status: "current", privacy_status: "public-safe" }}
     }},
     privacy: {{
@@ -803,6 +823,93 @@ vm.runInContext(workbenchScript + `
       contains_thumbnails: false,
       contains_image_content: false,
       contains_row_level_findings: false,
+      redacts_private_values: true,
+      private_indicators_found: false,
+      private_indicator_count: 0
+    }},
+    privacy_self_check: {{
+      status: "passed",
+      violation_count: 0
+    }},
+    sensitivity: "aggregate-only public summary"
+  }};
+
+  const deepInspectionCandidateFixture = {{
+    schema_version: "scan-qc.deep-inspection-candidates.v1",
+    generated_at: "2026-05-11T01:18:00Z",
+    status: "pass",
+    candidate_total: 3,
+    candidates_by_reason: {{
+      processing_review_status_failed: 1,
+      quality_scanline_candidate: 2
+    }},
+    candidates_by_severity: {{
+      P1: 1,
+      P2: 2
+    }},
+    provider_configured: false,
+    provider_count: 0,
+    checks_passed: ["candidate_total_non_negative", "privacy_aggregate_only", "no_inference_run"],
+    checks_failed: [],
+    privacy_status: "aggregate_public_safe",
+    no_inference_run: true,
+    privacy: {{
+      aggregate_only: true,
+      redacts_private_values: true,
+      private_indicators_found: false,
+      private_indicator_count: 0
+    }},
+    privacy_self_check: {{
+      status: "passed",
+      violation_count: 0
+    }},
+    sensitivity: "aggregate-only public summary",
+    file_name: "private_scan_alpha.tif",
+    source_path: "/Users/private/archive/private_scan_alpha.tif",
+    content_hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    ocr_text: "PRIVATE_OCR_TEXT",
+    thumbnail: "blob:synthetic-preview",
+    row_findings: [{{ path: "/private/source/page.png" }}],
+    provider_command: "python /private/model.py",
+    environment: {{ SECRET_TOKEN: "PRIVATE_OCR_TEXT" }}
+  }};
+
+  const aggregateEvidenceBundleCandidateFixture = {{
+    schema_version: "scan-qc-aggregate-evidence-bundle-summary.v1",
+    generated_at: "2026-05-11T01:19:00Z",
+    status: "pass",
+    checks_passed: 9,
+    checks_failed: 0,
+    blocking_item_count: 0,
+    blocking_items: [],
+    artifacts: {{
+      "deep_inspection_candidate_summary.json": {{
+        present: true,
+        required: false,
+        status: "pass",
+        reported_status: "pass",
+        candidate_total: 4,
+        candidates_by_reason: {{
+          processing_review_status_warning: 1,
+          quality_content_edge_cutoff_candidate: 3
+        }},
+        candidates_by_severity: {{
+          P1: 1,
+          P2: 3
+        }},
+        provider_configured: true,
+        provider_count: 2,
+        checks_passed_count: 6,
+        checks_failed_count: 0,
+        privacy_status: "aggregate_public_safe",
+        no_inference_run: true,
+        manifest: [{{ path: "/Users/private/archive/private_scan_alpha.tif" }}],
+        provider_command: "python /private/model.py",
+        source_root: "/Users/private/archive"
+      }}
+    }},
+    privacy: {{
+      aggregate_only: true,
       redacts_private_values: true,
       private_indicators_found: false,
       private_indicator_count: 0
@@ -1153,13 +1260,44 @@ vm.runInContext(workbenchScript + `
   assert(completeChecklistModel.sourceType === "aggregate-handoff", "complete checklist fixture did not load as aggregate handoff");
   assert(completeChecklistModel.artifactReadiness.ready === true, "complete checklist fixture was not ready");
   assert(completeChecklistModel.artifactReadiness.missingCount === 0, "complete checklist fixture reported missing artifacts");
-  assert(completeChecklistModel.artifactReadiness.rows.length === 7, "complete checklist fixture did not cover seven expected artifacts");
+  assert(completeChecklistModel.artifactReadiness.rows.length === 8, "complete checklist fixture did not cover eight expected artifacts");
   state.model = completeChecklistModel;
   renderAggregateHandoff();
   assert(els.aggregateHandoff.innerHTML.includes("Public-Safe Artifact Readiness Checklist"), "complete checklist did not render checklist heading");
   assert(els.aggregateHandoff.innerHTML.includes("Ready for public handoff"), "complete checklist did not render ready summary");
   assert(els.aggregateHandoff.innerHTML.includes("final_production_handoff_summary.json"), "complete checklist did not render final handoff artifact");
+  assert(els.aggregateHandoff.innerHTML.includes("deep_inspection_candidate_summary.json"), "complete checklist did not render deep-inspection candidate artifact");
   assert(!els.aggregateHandoff.innerHTML.includes("blob:aggregate-fixture"), "complete checklist rendered object URL state");
+
+  const deepInspectionCandidateModel = inferArtifact(deepInspectionCandidateFixture);
+  assert(deepInspectionCandidateModel.sourceType === "aggregate-handoff", "deep-inspection candidate fixture did not load as aggregate handoff");
+  assert(deepInspectionCandidateModel.aggregateHandoff.artifactType === "Deep-inspection candidate summary", "deep-inspection candidate fixture did not classify as candidate summary");
+  assert(deepInspectionCandidateModel.aggregateHandoff.deepInspectionCandidate.candidateTotal === 3, "deep-inspection candidate total was not preserved");
+  assert(deepInspectionCandidateModel.aggregateHandoff.deepInspectionCandidate.providerConfigured === false, "deep-inspection provider configured flag was not preserved");
+  assert(deepInspectionCandidateModel.aggregateHandoff.deepInspectionCandidate.providerCount === 0, "deep-inspection provider count was not preserved");
+  assert(deepInspectionCandidateModel.aggregateHandoff.deepInspectionCandidate.checksPassed === 3, "deep-inspection checks passed count was not derived from codes");
+  assert(deepInspectionCandidateModel.aggregateHandoff.deepInspectionCandidate.checksFailed === 0, "deep-inspection checks failed count was not preserved");
+  assert(deepInspectionCandidateModel.aggregateHandoff.deepInspectionCandidate.privacyStatus === "aggregate_public_safe", "deep-inspection privacy status was not preserved");
+  assert(deepInspectionCandidateModel.aggregateHandoff.deepInspectionCandidate.noInferenceRun === true, "deep-inspection no-inference flag was not preserved");
+  state.model = deepInspectionCandidateModel;
+  renderAggregateHandoff();
+  assert(els.aggregateHandoff.innerHTML.includes("Deep-Inspection Candidate Summary"), "deep-inspection candidate panel did not render");
+  assert(els.aggregateHandoff.innerHTML.includes("Candidate Total"), "deep-inspection candidate total did not render");
+  assert(els.aggregateHandoff.innerHTML.includes("Candidates By Reason"), "deep-inspection reason counts did not render");
+  assert(els.aggregateHandoff.innerHTML.includes("quality_scanline_candidate"), "deep-inspection reason code did not render");
+  assert(els.aggregateHandoff.innerHTML.includes("No Inference Run"), "deep-inspection no-inference flag did not render");
+  assertPublicSafe(els.aggregateHandoff.innerHTML, "direct deep-inspection candidate rendering");
+
+  const aggregateEvidenceBundleCandidateModel = inferArtifact(aggregateEvidenceBundleCandidateFixture);
+  assert(aggregateEvidenceBundleCandidateModel.sourceType === "aggregate-handoff", "aggregate evidence bundle candidate fixture did not load as aggregate handoff");
+  assert(aggregateEvidenceBundleCandidateModel.aggregateHandoff.artifactType === "Aggregate evidence bundle summary", "aggregate evidence bundle candidate fixture did not classify as bundle");
+  assert(aggregateEvidenceBundleCandidateModel.aggregateHandoff.deepInspectionCandidate.candidateTotal === 4, "nested evidence bundle deep-inspection candidate total was not preserved");
+  assert(aggregateEvidenceBundleCandidateModel.aggregateHandoff.deepInspectionCandidate.providerConfigured === true, "nested evidence bundle provider flag was not preserved");
+  state.model = aggregateEvidenceBundleCandidateModel;
+  renderAggregateHandoff();
+  assert(els.aggregateHandoff.innerHTML.includes("Deep-Inspection Candidate Summary"), "aggregate evidence bundle did not render nested deep-inspection candidate summary");
+  assert(els.aggregateHandoff.innerHTML.includes("quality_content_edge_cutoff_candidate"), "aggregate evidence bundle did not render nested deep-inspection candidate reason code");
+  assertPublicSafe(els.aggregateHandoff.innerHTML, "nested aggregate evidence bundle deep-inspection candidate rendering");
 
   const finalHandoffPassModel = inferArtifact(finalHandoffPassFixture);
   assert(finalHandoffPassModel.sourceType === "aggregate-handoff", "passing final handoff fixture did not load as aggregate handoff");
@@ -1169,6 +1307,7 @@ vm.runInContext(workbenchScript + `
   assert(finalHandoffPassModel.aggregateHandoff.checksPassed === 6, "passing final handoff checks passed were not preserved");
   assert(finalHandoffPassModel.aggregateHandoff.checksFailed === 0, "passing final handoff checks failed were not preserved");
   assert(finalHandoffPassModel.aggregateHandoff.blockingItemCount === 0, "passing final handoff blocking count was not zero");
+  assert(finalHandoffPassModel.aggregateHandoff.deepInspectionCandidate.candidateTotal === 3, "nested final handoff deep-inspection candidate total was not preserved");
   state.model = finalHandoffPassModel;
   renderAggregateHandoff();
   assert(els.aggregateHandoff.innerHTML.includes("Final production handoff summary"), "passing final handoff did not render final handoff type");
@@ -1176,7 +1315,10 @@ vm.runInContext(workbenchScript + `
   assert(els.aggregateHandoff.innerHTML.includes("Checks Passed"), "passing final handoff did not render checks passed");
   assert(els.aggregateHandoff.innerHTML.includes("Checks Failed"), "passing final handoff did not render checks failed");
   assert(els.aggregateHandoff.innerHTML.includes("Artifact Presence And Status"), "passing final handoff did not render artifact status summary");
+  assert(els.aggregateHandoff.innerHTML.includes("Deep-Inspection Candidate Summary"), "passing final handoff did not render nested deep-inspection candidate summary");
+  assert(els.aggregateHandoff.innerHTML.includes("processing_review_status_failed"), "passing final handoff did not render nested deep-inspection candidate reason code");
   assert(els.aggregateHandoff.innerHTML.includes("Privacy Status"), "passing final handoff did not render privacy status");
+  assertPublicSafe(els.aggregateHandoff.innerHTML, "nested final handoff deep-inspection candidate rendering");
 
   const finalHandoffBlockedModel = inferArtifact(finalHandoffBlockedFixture);
   assert(finalHandoffBlockedModel.sourceType === "aggregate-handoff", "blocked final handoff fixture did not load as aggregate handoff");

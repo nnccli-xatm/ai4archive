@@ -719,7 +719,7 @@
     <section class="load-panel" aria-labelledby="load-title" data-region="artifact-loader">
       <div class="panel">
         <h2 id="load-title">Load Artifact</h2>
-        <p class="muted">Choose a <span class="mono">run_plan_summary.json</span>, <span class="mono">scan_qc_report.json</span>, <span class="mono">review_summary.json</span>, <span class="mono">acceptance_summary.json</span>, <span class="mono">aggregate_evidence_bundle_summary.json</span>, <span class="mono">final_production_handoff_summary.json</span>, <span class="mono">release_candidate_summary.json</span>, or <span class="mono">public_safe_validation_index.json</span>. Files are parsed in this browser only.</p>
+        <p class="muted">Choose a <span class="mono">run_plan_summary.json</span>, <span class="mono">scan_qc_report.json</span>, <span class="mono">review_summary.json</span>, <span class="mono">acceptance_summary.json</span>, <span class="mono">aggregate_evidence_bundle_summary.json</span>, <span class="mono">final_production_handoff_summary.json</span>, <span class="mono">release_candidate_summary.json</span>, <span class="mono">deep_inspection_candidate_summary.json</span>, or <span class="mono">public_safe_validation_index.json</span>. Files are parsed in this browser only.</p>
         <div class="file-row">
           <input id="artifactFile" type="file" accept="application/json,.json">
           <button id="clearButton" class="secondary" type="button">Clear</button>
@@ -1088,6 +1088,14 @@
         privacy_status: "public-safe",
         generated_at: "2026-05-11T00:05:00Z"
       },
+      "deep_inspection_candidate_summary.json": {
+        present: true,
+        status: "pass",
+        blocking_count: 0,
+        warning_count: 0,
+        privacy_status: "public-safe",
+        generated_at: "2026-05-11T00:05:30Z"
+      },
       "public_safe_validation_index.json": {
         present: true,
         status: "pass",
@@ -1192,6 +1200,7 @@
             "acceptance_summary.json": { present: true, required: true, status: "pass", reported_status: "current", privacy_status: "public-safe" },
             "aggregate_evidence_bundle_summary.json": { present: true, required: true, status: "pass", reported_status: "current", privacy_status: "public-safe" },
             "release_candidate_summary.json": { present: true, required: true, status: "pass", reported_status: "current", privacy_status: "public-safe" },
+            "deep_inspection_candidate_summary.json": { present: true, required: false, status: "pass", reported_status: "pass", candidate_total: 3, candidates_by_reason: { processing_review_status_failed: 1, guardrail_warning: 2 }, candidates_by_severity: { P1: 1, P2: 2 }, provider_configured: false, provider_count: 0, checks_passed: 5, checks_failed: 0, privacy_status: "aggregate_public_safe", no_inference_run: true },
             "final_production_handoff_summary.json": { present: true, required: true, status: "pass", reported_status: "current", privacy_status: "public-safe" }
           },
           privacy: PUBLIC_SAFE_PRIVACY,
@@ -1294,6 +1303,33 @@
           ],
           privacy: PUBLIC_SAFE_PRIVACY,
           sensitive_values_omitted: true
+        }
+      },
+      {
+        id: "deep-inspection-candidate-summary",
+        label: "Deep-inspection candidate summary",
+        payload: {
+          schema_version: "scan-qc.deep-inspection-candidates.v1",
+          generated_at: "2026-05-11T01:18:00Z",
+          status: "pass",
+          candidate_total: 3,
+          candidates_by_reason: {
+            processing_review_status_failed: 1,
+            quality_scanline_candidate: 2
+          },
+          candidates_by_severity: {
+            P1: 1,
+            P2: 2
+          },
+          provider_configured: false,
+          provider_count: 0,
+          checks_passed: ["candidate_total_non_negative", "privacy_aggregate_only", "no_inference_run"],
+          checks_failed: [],
+          privacy_status: "aggregate_public_safe",
+          no_inference_run: true,
+          privacy: PUBLIC_SAFE_PRIVACY,
+          privacy_self_check: { status: "passed", violation_count: 0 },
+          sensitivity: "aggregate-only public summary"
         }
       },
       {
@@ -1508,7 +1544,7 @@
       if (payload.summary || Array.isArray(payload.findings) || Array.isArray(payload.files)) {
         return buildScanReportModel(payload);
       }
-      throw new Error("Unsupported artifact. Load run_plan_summary.json, scan_qc_report.json, review_summary.json, acceptance_summary.json, aggregate_evidence_bundle_summary.json, final_production_handoff_summary.json, release_candidate_summary.json, or public_safe_validation_index.json.");
+      throw new Error("Unsupported artifact. Load run_plan_summary.json, scan_qc_report.json, review_summary.json, acceptance_summary.json, aggregate_evidence_bundle_summary.json, final_production_handoff_summary.json, release_candidate_summary.json, deep_inspection_candidate_summary.json, or public_safe_validation_index.json.");
     }
 
     function buildRunPlanModel(payload) {
@@ -1627,6 +1663,7 @@
         schema.includes("final-production-handoff-summary") ||
         schema.includes("public-safe-validation-index") ||
         schema.includes("release-candidate-summary") ||
+        schema.includes("deep-inspection-candidates") ||
         schema.includes("provider-capability-probe-summary") ||
         schema.includes("review-summary") ||
         schema.includes("acceptance-summary") ||
@@ -1640,6 +1677,7 @@
         payload.artifact_status_summary !== undefined ||
         payload.artifact_presence !== undefined ||
         payload.artifacts !== undefined ||
+        payload.candidate_total !== undefined ||
         payload.artifact_readiness_checklist !== undefined ||
         payload.public_safe_artifact_readiness !== undefined ||
         payload.capability_probe_summary !== undefined;
@@ -1674,6 +1712,7 @@
         warningCodes: aggregateWarningCodes(payload.warnings),
         validationIndex: aggregateValidationIndexSummary(payload),
         artifactSummary: aggregateArtifactSummary(payload),
+        deepInspectionCandidate: aggregateDeepInspectionCandidateSummary(payload),
         providerProbe: aggregateProviderProbe(payload.capability_probe_summary),
         processingReview: aggregateProcessingReview(payload),
         privacy: aggregatePrivacy(payload),
@@ -1715,11 +1754,12 @@
       if (schema.includes("processing-review")) return "Processing-review package summary";
       if (schema.includes("artifact-readiness-checklist") || payload.artifact_readiness_checklist !== undefined || payload.public_safe_artifact_readiness !== undefined) return "Public-safe artifact readiness checklist";
       if (schema.includes("public-safe-validation-index")) return "Public-safe validation index";
+      if (schema.includes("deep-inspection-candidates")) return "Deep-inspection candidate summary";
       if (schema.includes("provider-capability-probe-summary") || payload.capability_probe_summary !== undefined) return "Provider capability probe summary";
       if (schema.includes("review-summary") || payload.status_counts !== undefined || payload.severity_status_counts !== undefined || payload.rule_status_counts !== undefined) return "Review summary";
       if (schema.includes("final-production-handoff-summary") || payload.ready_for_handoff !== undefined) return "Final production handoff summary";
-      if (schema.includes("acceptance-summary") || payload.blocking_items !== undefined || payload.human_review !== undefined || payload.pass !== undefined) return "Acceptance summary";
       if (schema.includes("aggregate-evidence-bundle") || payload.artifact_presence !== undefined) return "Aggregate evidence bundle summary";
+      if (schema.includes("acceptance-summary") || payload.blocking_items !== undefined || payload.human_review !== undefined || payload.pass !== undefined) return "Acceptance summary";
       if (schema.includes("release-candidate-summary") || payload.ready_for_release_candidate !== undefined) return "Release candidate summary";
       return "Aggregate handoff summary";
     }
@@ -1731,6 +1771,7 @@
       "aggregate_evidence_bundle_summary.json",
       "release_candidate_summary.json",
       "final_production_handoff_summary.json",
+      "deep_inspection_candidate_summary.json",
       "public_safe_validation_index.json"
     ];
 
@@ -1740,6 +1781,7 @@
       "Aggregate evidence bundle summary": "aggregate_evidence_bundle_summary.json",
       "Release candidate summary": "release_candidate_summary.json",
       "Final production handoff summary": "final_production_handoff_summary.json",
+      "Deep-inspection candidate summary": "deep_inspection_candidate_summary.json",
       "Public-safe validation index": "public_safe_validation_index.json"
     };
 
@@ -1749,6 +1791,7 @@
       "scan-qc-aggregate-evidence-bundle-summary.v1",
       "scan-qc-final-production-handoff-summary.v1",
       "scan-qc-release-candidate-summary.v1",
+      "scan-qc.deep-inspection-candidates.v1",
       "scan-qc.public-safe-validation-index.v1",
       "scan-qc-artifact-readiness-checklist.v1",
       "scan-qc-provider-capability-probe-summary.v1",
@@ -1763,9 +1806,9 @@
       const statusFields = [
         ["schema_version", hasOwn(payload, "schema_version")],
         ["generated_at", generatedPresent],
-        ["status or pass flag", isProcessingReview || hasOwn(payload, "status") || hasOwn(payload, "acceptance_passed") || hasOwn(payload, "pass") || hasOwn(payload, "ready_for_handoff") || hasOwn(payload, "ready_for_release_candidate")],
-        ["blocking count/code aggregate", isProcessingReview || hasOwn(payload, "blocking_item_count") || hasOwn(payload, "blocking_items") || Boolean(payload.summary && hasOwn(payload.summary, "blocking_item_count"))],
-        ["warning count/code aggregate", isProcessingReview || hasOwn(payload, "warnings")],
+        ["status or pass flag", isProcessingReview || aggregate.artifactType === "Deep-inspection candidate summary" || hasOwn(payload, "status") || hasOwn(payload, "acceptance_passed") || hasOwn(payload, "pass") || hasOwn(payload, "ready_for_handoff") || hasOwn(payload, "ready_for_release_candidate")],
+        ["blocking count/code aggregate", isProcessingReview || aggregate.artifactType === "Deep-inspection candidate summary" || hasOwn(payload, "blocking_item_count") || hasOwn(payload, "blocking_items") || Boolean(payload.summary && hasOwn(payload.summary, "blocking_item_count"))],
+        ["warning count/code aggregate", isProcessingReview || aggregate.artifactType === "Deep-inspection candidate summary" || hasOwn(payload, "warnings")],
         ["privacy summary", hasOwn(payload, "privacy") || hasOwn(payload, "privacy_self_check") || hasOwn(payload, "sensitivity")]
       ];
       const missingStatusFields = statusFields.filter(([, present]) => !present).map(([label]) => label);
@@ -1948,6 +1991,37 @@
       }));
     }
 
+    function aggregateDeepInspectionCandidateSummary(payload) {
+      const source = deepInspectionCandidateSource(payload);
+      if (!source) return null;
+      return {
+        status: normalizeAggregateStatus(text(source.status || source.reported_status || payload.status, "unknown")),
+        candidateTotal: firstNumber(source.candidate_total),
+        candidatesByReason: aggregateStatusCounts(source.candidates_by_reason),
+        candidatesBySeverity: aggregateStatusCounts(source.candidates_by_severity),
+        providerConfigured: firstBoolean(source.provider_configured),
+        providerCount: firstNumber(source.provider_count),
+        checksPassed: firstNumber(source.checks_passed_count, aggregateArrayCount(source.checks_passed)),
+        checksFailed: firstNumber(source.checks_failed_count, aggregateArrayCount(source.checks_failed)),
+        privacyStatus: text(source.privacy_status || payload.privacy_status, "Not provided"),
+        noInferenceRun: firstBoolean(source.no_inference_run),
+        checkCodesPassed: aggregateStringCodes(source.checks_passed),
+        checkCodesFailed: aggregateStringCodes(source.checks_failed)
+      };
+    }
+
+    function deepInspectionCandidateSource(payload) {
+      const schema = String(payload.schema_version || "");
+      if (schema.includes("deep-inspection-candidates")) return payload;
+      const containers = [payload.artifacts, payload.artifact_status_summary, payload.artifact_presence];
+      for (const container of containers) {
+        if (!container || typeof container !== "object" || Array.isArray(container)) continue;
+        const candidate = container["deep_inspection_candidate_summary.json"];
+        if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) return candidate;
+      }
+      return null;
+    }
+
     function aggregateValidationIndexSummary(payload) {
       const summary = payload.summary && typeof payload.summary === "object" && !Array.isArray(payload.summary) ? payload.summary : {};
       return {
@@ -2040,6 +2114,15 @@
         if (item && typeof item === "object") return text(item.code, `warning_${index + 1}`);
         return `warning_${index + 1}`;
       });
+    }
+
+    function aggregateStringCodes(items) {
+      if (!Array.isArray(items)) return [];
+      return items.map(item => text(item && typeof item === "object" ? item.code : item, "")).filter(Boolean);
+    }
+
+    function aggregateArrayCount(items) {
+      return Array.isArray(items) ? items.length : undefined;
     }
 
     function aggregateCounts(counts, payload = {}) {
@@ -2204,7 +2287,7 @@
     function renderAggregateHandoff() {
       const aggregate = state.model.aggregateHandoff;
       if (!aggregate) {
-        els.aggregateHandoff.innerHTML = `<div class="empty">Load review_summary.json, acceptance_summary.json, aggregate_evidence_bundle_summary.json, final_production_handoff_summary.json, release_candidate_summary.json, or public_safe_validation_index.json to inspect public-safe aggregate status.</div>`;
+        els.aggregateHandoff.innerHTML = `<div class="empty">Load review_summary.json, acceptance_summary.json, aggregate_evidence_bundle_summary.json, final_production_handoff_summary.json, release_candidate_summary.json, deep_inspection_candidate_summary.json, or public_safe_validation_index.json to inspect public-safe aggregate status.</div>`;
         return;
       }
       const privacyRows = [
@@ -2266,6 +2349,7 @@
         ${compatibility ? artifactCompatibilityPanel(compatibility) : ""}
         ${readiness ? artifactReadinessPanel(readiness) : ""}
         ${aggregate.processingReview.recognized ? processingReviewPanel(aggregate.processingReview, processingReviewRows) : ""}
+        ${aggregate.deepInspectionCandidate ? deepInspectionCandidatePanel(aggregate.deepInspectionCandidate) : ""}
         <div class="metric-grid">
           ${aggregateMetric("Artifact Type", aggregate.artifactType)}
           ${aggregateMetric("Aggregate-only Status", statusBadge(aggregate.status), true)}
@@ -2322,6 +2406,39 @@
             ${aggregate.ruleStatusCounts.length ? aggregateNestedCountTable(aggregate.ruleStatusCounts) : `<div class="empty">No rule/status counts were present.</div>`}
           </div>
         </div>`;
+    }
+
+    function deepInspectionCandidatePanel(candidate) {
+      const rows = [
+        ["Status", candidate.status],
+        ["Candidate Total", candidate.candidateTotal],
+        ["Provider Configured", candidate.providerConfigured === null ? "Not provided" : candidate.providerConfigured],
+        ["Provider Count", candidate.providerCount],
+        ["Checks Passed Count", candidate.checksPassed],
+        ["Checks Failed Count", candidate.checksFailed],
+        ["Privacy Status", candidate.privacyStatus],
+        ["No Inference Run", candidate.noInferenceRun === null ? "Not provided" : candidate.noInferenceRun]
+      ];
+      return `
+        <section class="subpanel">
+          <h3>Deep-Inspection Candidate Summary</h3>
+          <p class="muted">Aggregate-only candidate evidence. Counts, statuses, and check codes are shown without filenames, paths, hashes, OCR text, images, row-level findings, provider commands, manifests, source roots, or environment values.</p>
+          <div class="table-wrap">
+            <table><tbody>${rows.map(([label, value, html]) => kv(label, value, html)).join("")}</tbody></table>
+          </div>
+          <div class="grid" style="margin-top:12px">
+            <div>
+              <h3>Candidates By Reason</h3>
+              ${candidate.candidatesByReason.length ? aggregateCountTable(candidate.candidatesByReason, "Reason") : `<div class="empty">No candidate reason counts were present.</div>`}
+            </div>
+            <div>
+              <h3>Candidates By Severity</h3>
+              ${candidate.candidatesBySeverity.length ? aggregateCountTable(candidate.candidatesBySeverity, "Severity") : `<div class="empty">No candidate severity counts were present.</div>`}
+            </div>
+          </div>
+          ${aggregateCodeList("Passed check codes", candidate.checkCodesPassed)}
+          ${aggregateCodeList("Failed check codes", candidate.checkCodesFailed)}
+        </section>`;
     }
 
     function validationIndexPanel(rows) {
