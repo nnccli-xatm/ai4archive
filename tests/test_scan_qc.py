@@ -1433,6 +1433,117 @@ class ScanQcTest(unittest.TestCase):
         self.assertNotIn("processing_duplicate_reused_files", summary["summary"])
         self.assertNotIn("processing_existing_derivative_reused_files", summary["summary"])
 
+    def test_workbench_summary_propagates_despeckle_backend_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_json(
+                root / "run_plan_summary.json",
+                {
+                    "schema_version": "scan-qc.run-plan-summary.v1",
+                    "privacy": {"aggregate_only": True},
+                    "summary": {
+                        "total_batches": 1,
+                        "failed_batches": 0,
+                        "processing_operation_timings": {
+                            "despeckle": {
+                                "enabled": True,
+                                "file_count": 7,
+                                "elapsed_seconds": 1.25,
+                                "backend_mode": "numpy",
+                                "numpy_available": True,
+                                "backend_counts": {
+                                    "numpy": 7,
+                                    "fallback": 0,
+                                    "not_applicable": 0,
+                                    "unknown": 0,
+                                },
+                            }
+                        },
+                    },
+                    "batches": [],
+                },
+            )
+
+            summary = build_workbench_public_summary(
+                evidence_dir=root,
+                generated_at="2026-01-01T00:00:00+00:00",
+            )
+
+        self.assertEqual(summary["status"], "pass")
+        despeckle = summary["summary"]["processing_operation_timings"]["despeckle"]
+        self.assertEqual(despeckle["backend_mode"], "numpy")
+        self.assertTrue(despeckle["numpy_available"])
+        self.assertEqual(despeckle["backend_counts"]["numpy"], 7)
+        self.assertEqual(despeckle["backend_counts"]["fallback"], 0)
+        self.assertNotIn("file_count", despeckle)
+        metrics = summary["artifacts"]["run_plan_summary.json"]["metrics"]
+        self.assertEqual(metrics["processing_operation_timings"]["despeckle"], despeckle)
+
+    def test_workbench_summary_missing_despeckle_backend_metadata_is_non_blocking(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_json(
+                root / "run_plan_summary.json",
+                {
+                    "schema_version": "scan-qc.run-plan-summary.v1",
+                    "privacy": {"aggregate_only": True},
+                    "summary": {
+                        "total_batches": 1,
+                        "failed_batches": 0,
+                        "processing_operation_timings": {
+                            "despeckle": {"enabled": True, "file_count": 7, "elapsed_seconds": 1.25}
+                        },
+                    },
+                    "batches": [],
+                },
+            )
+
+            summary = build_workbench_public_summary(
+                evidence_dir=root,
+                generated_at="2026-01-01T00:00:00+00:00",
+            )
+
+        self.assertEqual(summary["status"], "pass")
+        self.assertNotIn("processing_operation_timings", summary["summary"])
+
+    def test_workbench_summary_blocks_private_despeckle_backend_values(self) -> None:
+        private_value = "/Users/private/archive/page_0001.png"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_json(
+                root / "run_plan_summary.json",
+                {
+                    "schema_version": "scan-qc.run-plan-summary.v1",
+                    "privacy": {"aggregate_only": True},
+                    "summary": {
+                        "total_batches": 1,
+                        "failed_batches": 0,
+                        "processing_operation_timings": {
+                            "despeckle": {
+                                "backend_mode": private_value,
+                                "numpy_available": True,
+                                "backend_counts": {"numpy": 7},
+                            }
+                        },
+                    },
+                    "batches": [],
+                },
+            )
+
+            summary = build_workbench_public_summary(
+                files=[root / "run_plan_summary.json"],
+                generated_at="2026-01-01T00:00:00+00:00",
+            )
+            raw = json.dumps(summary, ensure_ascii=False, sort_keys=True)
+
+        self.assertEqual(summary["status"], "fail")
+        self.assertIn("private_value_present", summary["blocking_counts_by_code"])
+        self.assertNotIn(private_value, raw)
+        despeckle = summary["summary"]["processing_operation_timings"]["despeckle"]
+        self.assertNotIn("backend_mode", despeckle)
+        self.assertTrue(despeckle["numpy_available"])
+        self.assertEqual(despeckle["backend_counts"]["numpy"], 7)
+
     def test_workbench_summary_reuse_counters_remain_aggregate_only(self) -> None:
         forbidden_private_values = [
             "/Users/private/archive/page_0001.png",
