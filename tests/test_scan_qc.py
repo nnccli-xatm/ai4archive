@@ -1274,6 +1274,81 @@ class ScanQcTest(unittest.TestCase):
         self.assertNotIn("scan-qc-review-decisions.local.v1", raw)
         self.assertNotIn("aggregate_handoff", raw)
 
+    def test_public_safe_validation_index_propagates_processing_reuse_counters(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_public_safe_validation_index_fixtures(root)
+            payload = _aggregate_evidence_bundle_payload(status="pass")
+            payload["summary"] = {
+                "total_files": 8,
+                "processing_resumed_files": 2,
+                "processing_duplicate_reused_files": 3,
+                "processing_existing_derivative_reused_files": 4,
+            }
+            _write_json(root / "aggregate_evidence_bundle_summary.json", payload)
+
+            summary = build_public_safe_validation_index(input_dir=root, generated_at="2026-01-01T00:00:00+00:00")
+
+        self.assertEqual(summary["status"], "pass")
+        self.assertEqual(summary["summary"]["processing_resumed_files"], 2)
+        self.assertEqual(summary["summary"]["processing_duplicate_reused_files"], 3)
+        self.assertEqual(summary["summary"]["processing_existing_derivative_reused_files"], 4)
+        counts = summary["artifacts"]["aggregate_evidence_bundle_summary.json"]["counts"]
+        self.assertEqual(counts["processing_resumed_files"], 2)
+        self.assertEqual(counts["processing_duplicate_reused_files"], 3)
+        self.assertEqual(counts["processing_existing_derivative_reused_files"], 4)
+
+    def test_public_safe_validation_index_omits_missing_processing_reuse_counters(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_public_safe_validation_index_fixtures(root)
+
+            summary = build_public_safe_validation_index(input_dir=root, generated_at="2026-01-01T00:00:00+00:00")
+
+        self.assertEqual(summary["status"], "pass")
+        self.assertNotIn("processing_resumed_files", summary["summary"])
+        self.assertNotIn("processing_duplicate_reused_files", summary["summary"])
+        self.assertNotIn("processing_existing_derivative_reused_files", summary["summary"])
+
+    def test_public_safe_validation_index_reuse_counters_remain_aggregate_only(self) -> None:
+        forbidden_private_values = [
+            "/Users/private/archive/page_0001.png",
+            "page_0001.png",
+            "processing_manifest.json",
+            "row_report.csv",
+            "OCR text",
+            "thumbnail-preview-object",
+            "data:image/png",
+            "blob:http://localhost/preview",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "provider --private /Users/private/archive",
+            "prompt: inspect the private page",
+            "raw_model_output: private answer",
+            "derivative/page_0001.png",
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_public_safe_validation_index_fixtures(root)
+            payload = _aggregate_evidence_bundle_payload(status="pass")
+            payload["summary"] = {
+                "processing_resumed_files": 0,
+                "processing_duplicate_reused_files": 1,
+                "processing_existing_derivative_reused_files": 2,
+            }
+            payload["operator_warning"] = " ".join(forbidden_private_values)
+            _write_json(root / "aggregate_evidence_bundle_summary.json", payload)
+
+            summary = build_public_safe_validation_index(input_dir=root, generated_at="2026-01-01T00:00:00+00:00")
+            raw = json.dumps(summary, ensure_ascii=False, sort_keys=True)
+
+        self.assertEqual(summary["status"], "fail")
+        self.assertEqual(summary["summary"]["processing_resumed_files"], 0)
+        self.assertEqual(summary["summary"]["processing_duplicate_reused_files"], 1)
+        self.assertEqual(summary["summary"]["processing_existing_derivative_reused_files"], 2)
+        self.assertIn("private_value_present", {item["code"] for item in summary["blocking_items"]})
+        for value in forbidden_private_values:
+            self.assertNotIn(value, raw)
+
     def test_workbench_summary_passes_with_public_aggregate_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

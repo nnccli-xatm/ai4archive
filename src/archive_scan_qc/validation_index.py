@@ -16,6 +16,11 @@ SCHEMA_VERSION = "scan-qc.public-safe-validation-index.v1"
 
 _PASS_STATUSES = {"pass", "passed", "ok", "success"}
 _FAIL_STATUSES = {"fail", "failed", "error", "blocked"}
+_PROCESSING_REUSE_COUNTER_KEYS = (
+    "processing_resumed_files",
+    "processing_duplicate_reused_files",
+    "processing_existing_derivative_reused_files",
+)
 
 
 @dataclass(frozen=True)
@@ -84,6 +89,7 @@ def build_public_safe_validation_index(
     pass_count = 0
     fail_count = 0
     missing_count = 0
+    processing_reuse_counts: dict[str, int] = {}
 
     for expected in KNOWN_PUBLIC_SAFE_ARTIFACTS:
         path = paths_by_name.get(expected.name)
@@ -97,6 +103,7 @@ def build_public_safe_validation_index(
         pass_count += int(record["status"] == "pass")
         fail_count += int(record["status"] == "fail")
         missing_count += int(record["status"] in {"missing", "not_provided"})
+        _merge_processing_reuse_counts(processing_reuse_counts, record.get("counts", {}))
 
     unknown_inputs = sorted(name for name in paths_by_name if name not in {item.name for item in KNOWN_PUBLIC_SAFE_ARTIFACTS})
     for name in unknown_inputs:
@@ -104,21 +111,24 @@ def build_public_safe_validation_index(
         checks_failed += 1
 
     status = "pass" if checks_failed == 0 and not blocking_items else "fail"
+    summary = {
+        "known_artifacts": len(KNOWN_PUBLIC_SAFE_ARTIFACTS),
+        "artifacts_present": present_count,
+        "artifacts_passed": pass_count,
+        "artifacts_failed": fail_count,
+        "artifacts_missing": missing_count,
+        "unknown_inputs": len(unknown_inputs),
+        "blocking_item_count": len(blocking_items),
+        "checks_passed": checks_passed,
+        "checks_failed": checks_failed,
+    }
+    summary.update(processing_reuse_counts)
+
     return {
         "schema_version": SCHEMA_VERSION,
         "generated_at": generated_at or datetime.now(timezone.utc).isoformat(),
         "status": status,
-        "summary": {
-            "known_artifacts": len(KNOWN_PUBLIC_SAFE_ARTIFACTS),
-            "artifacts_present": present_count,
-            "artifacts_passed": pass_count,
-            "artifacts_failed": fail_count,
-            "artifacts_missing": missing_count,
-            "unknown_inputs": len(unknown_inputs),
-            "blocking_item_count": len(blocking_items),
-            "checks_passed": checks_passed,
-            "checks_failed": checks_failed,
-        },
+        "summary": summary,
         "checks_passed": checks_passed,
         "checks_failed": checks_failed,
         "artifact_presence": {
@@ -299,6 +309,7 @@ def _extract_int(payload: Any, key: str) -> int:
 
 def _safe_artifact_counts(payload: dict[str, Any]) -> dict[str, Any]:
     counts: dict[str, Any] = {}
+    counts.update(_processing_reuse_counts(payload))
     for key in ("blocking_count", "warning_count", "blocking_item_count"):
         value = payload.get(key)
         if isinstance(value, int) and not isinstance(value, bool):
@@ -312,6 +323,49 @@ def _safe_artifact_counts(payload: dict[str, Any]) -> dict[str, Any]:
                 if isinstance(count, int) and not isinstance(count, bool)
             }
     return counts
+
+
+def _processing_reuse_counts(payload: dict[str, Any]) -> dict[str, int]:
+    return {
+        key: value
+        for key in _PROCESSING_REUSE_COUNTER_KEYS
+        if (value := _extract_optional_int(payload, key)) is not None
+    }
+
+
+def _merge_processing_reuse_counts(target: dict[str, int], counts: dict[str, Any]) -> None:
+    for key in _PROCESSING_REUSE_COUNTER_KEYS:
+        value = _safe_int(counts.get(key))
+        if value is None:
+            continue
+        if key not in target or value > target[key]:
+            target[key] = value
+
+
+def _extract_optional_int(payload: Any, key: str) -> int | None:
+    if isinstance(payload, dict):
+        value = payload.get(key)
+        parsed = _safe_int(value)
+        if parsed is not None:
+            return parsed
+        for child in payload.values():
+            found = _extract_optional_int(child, key)
+            if found is not None:
+                return found
+    elif isinstance(payload, list):
+        for child in payload:
+            found = _extract_optional_int(child, key)
+            if found is not None:
+                return found
+    return None
+
+
+def _safe_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int) and value >= 0:
+        return value
+    return None
 
 
 def _nested_artifact_status(payload: dict[str, Any], artifact_name: str) -> dict[str, Any]:
