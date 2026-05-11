@@ -139,6 +139,12 @@ def _add_scan_arguments(parser: argparse.ArgumentParser, *, include_scan_overrid
         help="Replace isolated dark speckles in derivative images. Requires --process-out.",
     )
     parser.add_argument(
+        "--despeckle-backend",
+        choices=("fallback", "numpy"),
+        default="fallback",
+        help="Despeckle processing backend. Defaults to conservative fallback; numpy is opt-in.",
+    )
+    parser.add_argument(
         "--resume-processing",
         action="store_true",
         help="Resume derivative processing by skipping existing successful derivatives. Requires --process-out.",
@@ -243,6 +249,7 @@ def main(argv: list[str] | None = None) -> int:
                 deskew=args.deskew,
                 trim_dark_border=args.trim_dark_border,
                 despeckle=args.despeckle,
+                despeckle_backend=args.despeckle_backend,
                 resume_processing=args.resume_processing,
                 workers=args.workers,
             ),
@@ -816,6 +823,12 @@ def _main_processing_plan(argv: list[str]) -> int:
     parser.add_argument("--deskew", action="store_true", help="Plan conservative small-angle deskew candidates.")
     parser.add_argument("--trim-dark-border", action="store_true", help="Plan conservative dark scan border trim candidates.")
     parser.add_argument("--despeckle", action="store_true", help="Plan isolated dark speckle cleanup candidates.")
+    parser.add_argument(
+        "--despeckle-backend",
+        choices=("fallback", "numpy"),
+        default="fallback",
+        help="Despeckle planning backend. Defaults to conservative fallback; numpy is opt-in.",
+    )
     args = parser.parse_args(argv)
     try:
         json_path, csv_path, plan = write_processing_plan(
@@ -827,6 +840,7 @@ def _main_processing_plan(argv: list[str]) -> int:
                 deskew=args.deskew,
                 trim_dark_border=args.trim_dark_border,
                 despeckle=args.despeckle,
+                despeckle_backend=args.despeckle_backend,
             ),
         )
     except (OSError, ValueError) as exc:

@@ -39,6 +39,7 @@ class PlanBatch:
     deskew: bool
     trim_dark_border: bool
     despeckle: bool
+    despeckle_backend: str
     resume_processing: bool
 
 
@@ -244,6 +245,7 @@ def _run_batch(project_id: str, batch: PlanBatch, index: int) -> dict[str, Any]:
                     deskew=batch.deskew,
                     trim_dark_border=batch.trim_dark_border,
                     despeckle=batch.despeckle,
+                    despeckle_backend=batch.despeckle_backend,
                     resume_processing=batch.resume_processing,
                     workers=batch.workers,
                 ),
@@ -502,8 +504,16 @@ def _batch_from_row(row: dict[str, Any], index: int, plan_dir: Path, output_root
         deskew=_bool(normalized.get("deskew"), "deskew", index),
         trim_dark_border=_bool(normalized.get("trim_dark_border"), "trim_dark_border", index),
         despeckle=_bool(normalized.get("despeckle"), "despeckle", index),
+        despeckle_backend=_despeckle_backend(normalized.get("despeckle_backend"), index),
         resume_processing=_bool(normalized.get("resume_processing"), "resume_processing", index),
     )
+
+
+def _despeckle_backend(value: Any, index: int) -> str:
+    backend = _text(value) or "fallback"
+    if backend not in {"fallback", "numpy"}:
+        raise ValueError(f"Run plan row {index} field 'despeckle_backend' must be fallback or numpy.")
+    return backend
 
 
 def _load_rules_profile(batch: PlanBatch):

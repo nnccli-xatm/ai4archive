@@ -5556,7 +5556,7 @@ class ScanQcTest(unittest.TestCase):
             self.assertTrue(audit_summary["timing"]["operation_timings"]["despeckle"]["enabled"])
             self.assertEqual(audit_summary["timing"]["operation_timings"]["despeckle"]["file_count"], 1)
             self.assertGreaterEqual(audit_summary["timing"]["operation_timings"]["despeckle"]["elapsed_seconds"], 0.0)
-            self.assertIn(audit_summary["timing"]["operation_timings"]["despeckle"]["backend_mode"], {"numpy", "fallback"})
+            self.assertEqual(audit_summary["timing"]["operation_timings"]["despeckle"]["backend_mode"], "fallback")
             self.assertEqual(sum(audit_summary["timing"]["operation_timings"]["despeckle"]["backend_counts"].values()), 1)
 
     def test_processing_audit_reports_numpy_despeckle_backend_counts(self) -> None:
@@ -5572,7 +5572,12 @@ class ScanQcTest(unittest.TestCase):
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
             with mock.patch("archive_scan_qc.processing._despeckle_candidate_points_numpy", return_value=[(10, 10)]):
-                manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, workers=1))
+                manifest = process_images(
+                    report,
+                    input_dir,
+                    process_dir,
+                    ProcessingOptions(despeckle=True, despeckle_backend="numpy", workers=1),
+                )
             audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
             despeckle_timing = audit_summary["timing"]["operation_timings"]["despeckle"]
 
@@ -5823,6 +5828,13 @@ class ScanQcTest(unittest.TestCase):
         mask.putpixel((10, 10), 255)
 
         with mock.patch("archive_scan_qc.processing._load_numpy", return_value=None):
+            self.assertEqual(_despeckle_candidate_points(mask, backend="numpy"), [(10, 10)])
+
+    def test_despeckle_candidate_points_default_backend_is_fallback(self) -> None:
+        mask = Image.new("L", (20, 20), 0)
+        mask.putpixel((10, 10), 255)
+
+        with mock.patch("archive_scan_qc.processing._despeckle_candidate_points_numpy", return_value=[(5, 5)]):
             self.assertEqual(_despeckle_candidate_points(mask), [(10, 10)])
 
     def test_despeckle_candidate_points_dense_content_fast_path(self) -> None:
