@@ -459,7 +459,7 @@
     <section class="load-panel" aria-labelledby="load-title" data-region="artifact-loader">
       <div class="panel">
         <h2 id="load-title">Load Artifact</h2>
-        <p class="muted">Choose a <span class="mono">run_plan_summary.json</span>, <span class="mono">scan_qc_report.json</span>, <span class="mono">aggregate_evidence_bundle_summary.json</span>, <span class="mono">final_production_handoff_summary.json</span>, or <span class="mono">release_candidate_summary.json</span>. Files are parsed in this browser only.</p>
+        <p class="muted">Choose a <span class="mono">run_plan_summary.json</span>, <span class="mono">scan_qc_report.json</span>, <span class="mono">review_summary.json</span>, <span class="mono">acceptance_summary.json</span>, <span class="mono">aggregate_evidence_bundle_summary.json</span>, <span class="mono">final_production_handoff_summary.json</span>, or <span class="mono">release_candidate_summary.json</span>. Files are parsed in this browser only.</p>
         <div class="file-row">
           <input id="artifactFile" type="file" accept="application/json,.json">
           <button id="clearButton" class="secondary" type="button">Clear</button>
@@ -481,8 +481,8 @@
     <section class="panel" aria-labelledby="aggregate-title" data-region="aggregate-handoff" style="margin-top:16px">
       <div class="toolbar">
         <div>
-          <h2 id="aggregate-title">Aggregate Handoff Artifact</h2>
-          <p class="muted">Public-safe final handoff summaries only. This view never displays private filenames, paths, hashes, OCR text, thumbnails, row-level findings, reviewer notes, manifests, or derivative image references.</p>
+          <h2 id="aggregate-title">Aggregate Artifact Summary</h2>
+          <p class="muted">Public-safe aggregate summaries only after local policy review. This view never displays private filenames, paths, hashes, OCR text, thumbnails, image content, row-level findings, reviewer notes, manifests, or derivative image references.</p>
         </div>
       </div>
       <div id="aggregateHandoff"></div>
@@ -686,7 +686,7 @@
       if (payload.summary || Array.isArray(payload.findings) || Array.isArray(payload.files)) {
         return buildScanReportModel(payload);
       }
-      throw new Error("Unsupported artifact. Load run_plan_summary.json, scan_qc_report.json, aggregate_evidence_bundle_summary.json, final_production_handoff_summary.json, or release_candidate_summary.json.");
+      throw new Error("Unsupported artifact. Load run_plan_summary.json, scan_qc_report.json, review_summary.json, acceptance_summary.json, aggregate_evidence_bundle_summary.json, final_production_handoff_summary.json, or release_candidate_summary.json.");
     }
 
     function buildRunPlanModel(payload) {
@@ -799,8 +799,15 @@
       return schema.includes("aggregate-evidence-bundle") ||
         schema.includes("final-production-handoff-summary") ||
         schema.includes("release-candidate-summary") ||
+        schema.includes("review-summary") ||
+        schema.includes("acceptance-summary") ||
         payload.ready_for_handoff !== undefined ||
         payload.ready_for_release_candidate !== undefined ||
+        payload.remaining_p0 !== undefined ||
+        payload.remaining_p1 !== undefined ||
+        payload.acceptance_passed !== undefined ||
+        payload.blocking_items !== undefined ||
+        payload.human_review !== undefined ||
         payload.artifact_status_summary !== undefined ||
         payload.artifact_presence !== undefined;
     }
@@ -812,19 +819,30 @@
       const productionThroughput = production.throughput || {};
       const decision = payload.decision || {};
       const checks = payload.checks || {};
+      const aggregateStatus = payload.status || production.status || (payload.acceptance_passed === true || payload.pass === true ? "pass" : payload.acceptance_passed === false || payload.pass === false ? "fail" : "");
       const aggregate = {
         artifactType: aggregateArtifactType(schema, payload),
         schemaVersion: schema || "Unknown aggregate schema",
-        status: normalizeAggregateStatus(payload.status || production.status),
+        status: normalizeAggregateStatus(aggregateStatus),
         readyFlagLabel: payload.ready_for_handoff !== undefined ? "Ready for handoff" : payload.ready_for_release_candidate !== undefined ? "Ready for release candidate" : "Ready flag",
-        readyFlag: payload.ready_for_handoff !== undefined ? Boolean(payload.ready_for_handoff) : payload.ready_for_release_candidate !== undefined ? Boolean(payload.ready_for_release_candidate) : normalizeAggregateStatus(payload.status || production.status) === "pass",
+        readyFlag: payload.ready_for_handoff !== undefined ? Boolean(payload.ready_for_handoff) : payload.ready_for_release_candidate !== undefined ? Boolean(payload.ready_for_release_candidate) : normalizeAggregateStatus(aggregateStatus) === "pass",
         checksPassed: firstNumber(payload.checks_passed, checks.passed),
         checksFailed: firstNumber(payload.checks_failed, checks.failed),
-        blockingItemCount: firstNumber(payload.blocking_item_count, decision.blocking_item_count),
+        blockingItemCount: firstNumber(payload.blocking_item_count, decision.blocking_item_count, Array.isArray(payload.blocking_items) ? payload.blocking_items.length : undefined),
+        remainingP0: firstNullableNumber(payload.remaining_p0, payload.remaining && payload.remaining.p0),
+        remainingP1: firstNullableNumber(payload.remaining_p1, payload.remaining && payload.remaining.p1),
+        reviewStatusCounts: aggregateStatusCounts(payload.status_counts || (payload.human_review && payload.human_review.status_counts)),
+        ruleCounts: aggregateStatusCounts(payload.rule_counts),
+        ruleStatusCounts: aggregateNestedStatusCounts(payload.rule_status_counts),
+        acceptancePassed: firstBoolean(payload.acceptance_passed, payload.pass),
+        blockingCodes: aggregateCodes(payload.blocking_items),
+        warningCount: Array.isArray(payload.warnings) ? payload.warnings.length : 0,
+        warningCodes: aggregateWarningCodes(payload.warnings),
         artifactSummary: aggregateArtifactSummary(payload),
         privacy: aggregatePrivacy(payload),
         counts: aggregateCounts(productionCounts),
-        throughput: aggregateThroughput(productionThroughput),
+        throughput: aggregateThroughput(payload.throughput || productionThroughput),
+        workers: aggregateWorkers(payload.workers),
         generatedAt: text(payload.generated_at, "")
       };
 
@@ -837,9 +855,9 @@
           passedBatches: 0,
           failedBatches: aggregate.status === "fail" ? 1 : 0,
           totalFiles: firstNumber(aggregate.counts.totalFiles, aggregate.counts.processedFiles),
-          totalFindings: 0,
-          p0: 0,
-          p1: 0,
+          totalFindings: firstNumber(payload.total_findings, payload.human_review && payload.human_review.total_findings),
+          p0: firstNumber(aggregate.remainingP0),
+          p1: firstNumber(aggregate.remainingP1),
           p2: 0,
           preflightErrors: 0,
           processingFailed: firstNumber(aggregate.counts.processingFailedFiles)
@@ -852,6 +870,8 @@
     }
 
     function aggregateArtifactType(schema, payload) {
+      if (schema.includes("review-summary") || payload.acceptance_passed !== undefined) return "Review summary";
+      if (schema.includes("acceptance-summary") || payload.blocking_items !== undefined || payload.human_review !== undefined) return "Acceptance summary";
       if (schema.includes("final-production-handoff-summary") || payload.ready_for_handoff !== undefined) return "Final production handoff summary";
       if (schema.includes("aggregate-evidence-bundle") || payload.artifact_presence !== undefined) return "Aggregate evidence bundle summary";
       if (schema.includes("release-candidate-summary") || payload.ready_for_release_candidate !== undefined) return "Release candidate summary";
@@ -874,6 +894,22 @@
       return 0;
     }
 
+    function firstNullableNumber(...values) {
+      for (const value of values) {
+        if (value === null || value === undefined || value === "") continue;
+        const parsed = Number(value);
+        if (Number.isFinite(parsed)) return parsed;
+      }
+      return null;
+    }
+
+    function firstBoolean(...values) {
+      for (const value of values) {
+        if (value === true || value === false) return value;
+      }
+      return null;
+    }
+
     function aggregateArtifactSummary(payload) {
       const source = payload.artifact_status_summary || payload.artifact_presence || {};
       return Object.entries(source).map(([name, item]) => ({
@@ -887,8 +923,11 @@
 
     function aggregatePrivacy(payload) {
       const privacy = payload.privacy || {};
+      const sensitivity = text(payload.sensitivity, "");
+      const sensitivityAggregateOnly = sensitivity.toLowerCase().includes("aggregate-only") || sensitivity.toLowerCase().includes("aggregate only");
       return {
-        aggregateOnly: Boolean(privacy.aggregate_only),
+        aggregateOnly: Boolean(privacy.aggregate_only) || sensitivityAggregateOnly,
+        sensitivity: sensitivity || "Not provided",
         privateIndicatorsFound: Boolean(privacy.private_indicators_found),
         privateIndicatorCount: firstNumber(privacy.private_indicator_count),
         containsPaths: Boolean(privacy.contains_paths),
@@ -902,6 +941,35 @@
       };
     }
 
+    function aggregateStatusCounts(source) {
+      if (!source || typeof source !== "object" || Array.isArray(source)) return [];
+      return Object.entries(source).map(([name, value]) => ({
+        name,
+        count: firstNumber(value)
+      }));
+    }
+
+    function aggregateNestedStatusCounts(source) {
+      if (!source || typeof source !== "object" || Array.isArray(source)) return [];
+      return Object.entries(source).map(([name, statuses]) => ({
+        name,
+        statuses: aggregateStatusCounts(statuses)
+      }));
+    }
+
+    function aggregateCodes(items) {
+      if (!Array.isArray(items)) return [];
+      return items.map(item => text(item && item.code, "")).filter(Boolean);
+    }
+
+    function aggregateWarningCodes(items) {
+      if (!Array.isArray(items)) return [];
+      return items.map((item, index) => {
+        if (item && typeof item === "object") return text(item.code, `warning_${index + 1}`);
+        return `warning_${index + 1}`;
+      });
+    }
+
     function aggregateCounts(counts) {
       return {
         totalFiles: firstNumber(counts.total_files),
@@ -913,9 +981,22 @@
     }
 
     function aggregateThroughput(throughput) {
+      const scan = throughput.scan_files_per_minute || {};
+      const processing = throughput.processing_files_per_minute || {};
       return {
-        scanFilesPerMinute: firstNumber(throughput.scan_files_per_minute, throughput.files_per_minute),
-        processingFilesPerMinute: firstNumber(throughput.processing_files_per_minute)
+        scanFilesPerMinute: firstNumber(scan.best_observed, scan.lowest_observed, throughput.scan_files_per_minute, throughput.files_per_minute),
+        processingFilesPerMinute: firstNumber(processing.best_observed, processing.lowest_observed, throughput.processing_files_per_minute)
+      };
+    }
+
+    function aggregateWorkers(workers) {
+      const scan = workers && workers.scan_effective_workers ? workers.scan_effective_workers : {};
+      const processing = workers && workers.processing_effective_workers ? workers.processing_effective_workers : {};
+      return {
+        scanMin: firstNullableNumber(scan.min),
+        scanMax: firstNullableNumber(scan.max),
+        processingMin: firstNullableNumber(processing.min),
+        processingMax: firstNullableNumber(processing.max)
       };
     }
 
@@ -1007,11 +1088,12 @@
     function renderAggregateHandoff() {
       const aggregate = state.model.aggregateHandoff;
       if (!aggregate) {
-        els.aggregateHandoff.innerHTML = `<div class="empty">Load aggregate_evidence_bundle_summary.json, final_production_handoff_summary.json, or release_candidate_summary.json to inspect public-safe handoff status.</div>`;
+        els.aggregateHandoff.innerHTML = `<div class="empty">Load review_summary.json, acceptance_summary.json, aggregate_evidence_bundle_summary.json, final_production_handoff_summary.json, or release_candidate_summary.json to inspect public-safe aggregate status.</div>`;
         return;
       }
       const privacyRows = [
         ["Aggregate only", aggregate.privacy.aggregateOnly],
+        ["Sensitivity", aggregate.privacy.sensitivity],
         ["Private indicators found", aggregate.privacy.privateIndicatorsFound],
         ["Private indicator count", aggregate.privacy.privateIndicatorCount],
         ["Contains paths", aggregate.privacy.containsPaths],
@@ -1030,6 +1112,10 @@
           ${aggregateMetric("Checks Passed", aggregate.checksPassed)}
           ${aggregateMetric("Checks Failed", aggregate.checksFailed)}
           ${aggregateMetric("Blocking Items", aggregate.blockingItemCount)}
+          ${aggregateMetric("Remaining P0", aggregate.remainingP0 ?? "Not provided")}
+          ${aggregateMetric("Remaining P1", aggregate.remainingP1 ?? "Not provided")}
+          ${aggregateMetric("Acceptance Passed", aggregate.acceptancePassed === null ? "Not provided" : aggregate.acceptancePassed)}
+          ${aggregateMetric("Warning Count", aggregate.warningCount)}
           ${aggregateMetric("Generated", aggregate.generatedAt || "Not provided")}
           ${aggregateMetric("Total Files", aggregate.counts.totalFiles)}
           ${aggregateMetric("Openable Files", aggregate.counts.openableFiles)}
@@ -1037,11 +1123,18 @@
           ${aggregateMetric("Processing Failed", aggregate.counts.processingFailedFiles)}
           ${aggregateMetric("Scan Throughput", aggregate.throughput.scanFilesPerMinute ? `${aggregate.throughput.scanFilesPerMinute} files/min` : "Not provided")}
           ${aggregateMetric("Processing Throughput", aggregate.throughput.processingFilesPerMinute ? `${aggregate.throughput.processingFilesPerMinute} files/min` : "Not provided")}
+          ${aggregateMetric("Scan Workers", workerRange(aggregate.workers.scanMin, aggregate.workers.scanMax))}
+          ${aggregateMetric("Processing Workers", workerRange(aggregate.workers.processingMin, aggregate.workers.processingMax))}
         </div>
         <div class="grid" style="margin-top:12px">
           <div>
             <h3>Artifact Presence And Status</h3>
             ${aggregate.artifactSummary.length ? aggregateArtifactTable(aggregate.artifactSummary) : `<div class="empty">No artifact presence/status section was present.</div>`}
+            <h3>Review Status Counts</h3>
+            ${aggregate.reviewStatusCounts.length ? aggregateCountTable(aggregate.reviewStatusCounts, "Status") : `<div class="empty">No review status counts were present.</div>`}
+            <h3>Blocking And Warning Codes</h3>
+            ${aggregateCodeList("Blocking codes", aggregate.blockingCodes)}
+            ${aggregateCodeList("Warning codes", aggregate.warningCodes)}
           </div>
           <div>
             <h3>Privacy Status</h3>
@@ -1050,8 +1143,18 @@
                 <tbody>${privacyRows.map(([label, value]) => kv(label, value)).join("")}</tbody>
               </table>
             </div>
+            <h3>Rule Counts</h3>
+            ${aggregate.ruleCounts.length ? aggregateCountTable(aggregate.ruleCounts, "Rule") : `<div class="empty">No rule counts were present.</div>`}
+            <h3>Rule Status Counts</h3>
+            ${aggregate.ruleStatusCounts.length ? aggregateNestedCountTable(aggregate.ruleStatusCounts) : `<div class="empty">No rule/status counts were present.</div>`}
           </div>
         </div>`;
+    }
+
+    function workerRange(min, max) {
+      if (min === null && max === null) return "Not provided";
+      if (min === max) return String(min);
+      return `${min ?? "?"}-${max ?? "?"}`;
     }
 
     function aggregateMetric(label, value, raw = false) {
@@ -1078,6 +1181,49 @@
                 </tr>
               `).join("")}
             </tbody>
+          </table>
+        </div>`;
+    }
+
+    function aggregateCountTable(items, nameLabel) {
+      return `
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>${escapeHtml(nameLabel)}</th><th>Count</th></tr></thead>
+            <tbody>
+              ${items.map(item => `
+                <tr>
+                  <td class="mono">${escapeHtml(item.name)}</td>
+                  <td>${escapeHtml(item.count)}</td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>`;
+    }
+
+    function aggregateNestedCountTable(items) {
+      return `
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Rule</th><th>Status Counts</th></tr></thead>
+            <tbody>
+              ${items.map(item => `
+                <tr>
+                  <td class="mono">${escapeHtml(item.name)}</td>
+                  <td>${escapeHtml(item.statuses.map(status => `${status.name}: ${status.count}`).join(", ") || "Not provided")}</td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>`;
+    }
+
+    function aggregateCodeList(label, codes) {
+      return `
+        <div class="table-wrap">
+          <table>
+            <tbody>${kv(label, codes.length ? codes.join(", ") : "None")}</tbody>
           </table>
         </div>`;
     }
