@@ -1302,6 +1302,105 @@ class ScanQcTest(unittest.TestCase):
         self.assertFalse(summary["privacy"]["contains_filenames"])
         self.assertIn("Workbench summary status: pass", stdout.getvalue())
 
+    def test_workbench_summary_propagates_processing_reuse_counters(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_json(
+                root / "aggregate_baseline_summary.json",
+                {
+                    "schema_version": "scan-qc.aggregate-baseline.v1",
+                    "privacy": {"aggregate_only": True},
+                    "aggregate_counts": {
+                        "total_files": 8,
+                        "processing_resumed_files": 2,
+                        "processing_duplicate_reused_files": 3,
+                        "processing_existing_derivative_reused_files": 4,
+                    },
+                },
+            )
+
+            summary = build_workbench_public_summary(
+                evidence_dir=root,
+                generated_at="2026-01-01T00:00:00+00:00",
+            )
+
+        self.assertEqual(summary["status"], "pass")
+        self.assertEqual(summary["summary"]["processing_resumed_files"], 2)
+        self.assertEqual(summary["summary"]["processing_duplicate_reused_files"], 3)
+        self.assertEqual(summary["summary"]["processing_existing_derivative_reused_files"], 4)
+        metrics = summary["artifacts"]["aggregate_baseline_summary.json"]["metrics"]
+        self.assertEqual(metrics["processing_resumed_files"], 2)
+        self.assertEqual(metrics["processing_duplicate_reused_files"], 3)
+        self.assertEqual(metrics["processing_existing_derivative_reused_files"], 4)
+
+    def test_workbench_summary_omits_missing_processing_reuse_counters(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_json(
+                root / "run_plan_summary.json",
+                {
+                    "schema_version": "scan-qc.run-plan-summary.v1",
+                    "privacy": {"aggregate_only": True},
+                    "summary": {"total_batches": 1, "failed_batches": 0},
+                    "batches": [],
+                },
+            )
+
+            summary = build_workbench_public_summary(
+                evidence_dir=root,
+                generated_at="2026-01-01T00:00:00+00:00",
+            )
+
+        self.assertEqual(summary["status"], "pass")
+        self.assertNotIn("processing_resumed_files", summary["summary"])
+        self.assertNotIn("processing_duplicate_reused_files", summary["summary"])
+        self.assertNotIn("processing_existing_derivative_reused_files", summary["summary"])
+
+    def test_workbench_summary_reuse_counters_remain_aggregate_only(self) -> None:
+        forbidden_private_values = [
+            "/Users/private/archive/page_0001.png",
+            "page_0001.png",
+            "processing_manifest.json",
+            "OCR TEXT",
+            "thumbnail-preview-object",
+            "data:image/png",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "provider --private /Users/private/archive",
+            "raw_model_output: private answer",
+            "derivative/page_0001.png",
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_json(
+                root / "run_plan_summary.json",
+                {
+                    "schema_version": "scan-qc.run-plan-summary.v1",
+                    "privacy": {"aggregate_only": True},
+                    "summary": {
+                        "total_batches": 1,
+                        "failed_batches": 0,
+                        "processing_resumed_files": 0,
+                        "processing_duplicate_reused_files": 1,
+                        "processing_existing_derivative_reused_files": 2,
+                    },
+                    "operator_warning": " ".join(forbidden_private_values),
+                },
+            )
+
+            summary = build_workbench_public_summary(
+                files=[root / "run_plan_summary.json"],
+                generated_at="2026-01-01T00:00:00+00:00",
+            )
+            raw = json.dumps(summary, ensure_ascii=False, sort_keys=True)
+
+        self.assertEqual(summary["status"], "fail")
+        self.assertEqual(summary["summary"]["processing_resumed_files"], 0)
+        self.assertEqual(summary["summary"]["processing_duplicate_reused_files"], 1)
+        self.assertEqual(summary["summary"]["processing_existing_derivative_reused_files"], 2)
+        self.assertIn("private_value_present", summary["blocking_counts_by_code"])
+        for value in forbidden_private_values:
+            self.assertNotIn(value, raw)
+
     def test_workbench_summary_blocks_aggregate_failures_by_code_only(self) -> None:
         forbidden_private_values = [
             "/Users/private/archive",

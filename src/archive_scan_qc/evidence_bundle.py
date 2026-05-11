@@ -87,6 +87,9 @@ _ALLOWED_NUMERIC_KEYS = {
     "processing_failed_files",
     "processing_failed_files_max",
     "processing_processed_files",
+    "processing_resumed_files",
+    "processing_duplicate_reused_files",
+    "processing_existing_derivative_reused_files",
 }
 _COUNT_SUMMARY_KEYS = {
     "average",
