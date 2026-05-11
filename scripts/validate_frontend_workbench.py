@@ -74,6 +74,12 @@ REQUIRED_STRINGS = {
     "Source mismatch: summary source_type does not match the loaded artifact.",
     "Target count mismatch",
     "Load a scan, run-plan, or aggregate handoff artifact before importing decisions.",
+    "Validation codes",
+    "private_field_omitted",
+    "unsupported_decision_status",
+    "unknown_review_target",
+    "unsupported_field_omitted",
+    "invalid_decision_entry",
     "accepted_issue",
     "false_positive",
     "fixed_externally",
@@ -390,6 +396,7 @@ def new_summary(workbench: Path) -> dict[str, Any]:
         "coverage": {
             "aggregate_summary": False,
             "review_acceptance": False,
+            "review_decision_import_export": False,
             "compatibility_diagnostics": False,
             "readiness_checklist": False,
             "demo_fixtures": False,
@@ -1408,6 +1415,189 @@ vm.runInContext(workbenchScript + `
     return []
 
 
+def validate_executable_review_decision_import_export(html: str) -> list[str]:
+    script_match = re.search(r"<script>(?P<script>.*?)</script>", html, re.DOTALL)
+    if not script_match:
+        return ["missing executable workbench script"]
+
+    runner = f"""
+const vm = require("node:vm");
+const workbenchScript = {script_match.group("script")!r};
+const elements = new Map();
+const eventHandlers = {{}};
+
+function element(id) {{
+  if (!elements.has(id)) {{
+    elements.set(id, {{
+      id,
+      value: "",
+      innerHTML: "",
+      textContent: "",
+      className: "",
+      disabled: false,
+      files: [],
+      dataset: {{}},
+      classList: {{
+        add(cls) {{ this.ownerClass = cls; }},
+        remove() {{}}
+      }},
+      addEventListener(type, handler) {{
+        eventHandlers[id + ":" + type] = handler;
+      }},
+      querySelectorAll() {{
+        return [];
+      }},
+      click() {{}}
+    }});
+  }}
+  return elements.get(id);
+}}
+
+const context = {{
+  assert,
+  assertPublicSafe,
+  console,
+  Blob: function Blob() {{}},
+  Date,
+  Map,
+  Number,
+  Object,
+  Set,
+  String,
+  JSON,
+  Array,
+  URL: {{
+    createObjectURL() {{ return "blob:synthetic-download"; }},
+    revokeObjectURL() {{}}
+  }},
+  document: {{
+    getElementById: element,
+    createElement: element
+  }},
+  window: {{
+    addEventListener(type, handler) {{
+      eventHandlers["window:" + type] = handler;
+    }}
+  }}
+}};
+
+function assert(condition, message) {{
+  if (!condition) throw new Error(message);
+}}
+
+function assertPublicSafe(value, label) {{
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  [
+    "/Users/",
+    "C:\\\\",
+    "PRIVATE_OCR_TEXT",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "private_scan_alpha.tif",
+    "blob:synthetic-preview"
+  ].forEach(token => assert(!text.includes(token), label + " leaked " + token));
+}}
+
+vm.createContext(context);
+vm.runInContext(workbenchScript + `
+  const scanReport = {{
+    schema_version: "scan-qc-report.v1",
+    generated_at: "2026-05-11T00:00:00Z",
+    project: {{ project_id: "synthetic-public-project" }},
+    manifest: {{ batch_id: "synthetic-batch" }},
+    summary: {{
+      total_files: 3,
+      openable_files: 3,
+      total_findings: 2,
+      p0_findings: 0,
+      p1_findings: 1,
+      p2_findings: 1
+    }},
+    findings: [
+      {{ rule: "skew_detected", severity: "P1", source: "rules", confidence: "medium", message: "Synthetic skew prompt" }},
+      {{ rule: "blur_detected", severity: "P2", source: "rules", confidence: "low", message: "Synthetic blur prompt" }}
+    ]
+  }};
+
+  state.model = inferArtifact(scanReport);
+  state.selectedBatchId = state.model.batches[0].id;
+  render();
+
+  assert(reviewTargets().length === 3, "synthetic scan report did not create expected review targets");
+  state.decisions.set(decisionKey("batch", "B0001"), "accepted_issue");
+  state.decisions.set(decisionKey("finding", "F0001"), "false_positive");
+  state.decisions.set(decisionKey("finding", "F0002"), "needs_rescan");
+  const exported = buildReviewSummary();
+  assert(exported.schema === "scan-qc-review-decisions.local.v1", "review export schema changed");
+  assert(exported.source_type === "scan-report", "review export source type was not preserved");
+  assert(exported.source_target_count === 3, "review export target count was not preserved");
+  assert(exported.review_counts.accepted_issue === 1, "review export accepted count was not preserved");
+  assert(exported.review_counts.false_positive === 1, "review export false-positive count was not preserved");
+  assert(exported.review_counts.needs_rescan === 1, "review export needs-rescan count was not preserved");
+  assert(exported.decisions.every(item => Object.keys(item).sort().join(",") === "decision,local_id,scope"), "review export included unexpected decision fields");
+  assertPublicSafe(exported, "review export summary");
+
+  resetReviewState();
+  renderReview();
+  assert(getDecision("batch", "B0001") === "pending", "reset did not clear batch decision");
+  applyReviewDecisionSummary(exported);
+  assert(state.importStatus.imported === 3, "valid review summary did not import all decisions");
+  assert(state.importStatus.skipped === 0, "valid review summary skipped entries");
+  assert(getDecision("batch", "B0001") === "accepted_issue", "batch decision was not restored");
+  assert(getDecision("finding", "F0001") === "false_positive", "finding decision was not restored");
+  assert(getDecision("finding", "F0002") === "needs_rescan", "second finding decision was not restored");
+  assert(els.reviewImportStatus.textContent.includes("Imported 3 review decisions; skipped 0."), "valid import status did not render aggregate counts");
+  assertPublicSafe(els.reviewImportStatus.textContent, "valid import status");
+
+  const invalidPayload = JSON.parse(JSON.stringify(exported));
+  invalidPayload.decisions = [
+    {{ scope: "batch", local_id: "B0001", decision: "fixed_externally" }},
+    {{ scope: "finding", local_id: "F0001", decision: "false_positive", ocr_text: "PRIVATE_OCR_TEXT" }},
+    {{ scope: "finding", local_id: "F0002", decision: "needs_rescan", hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }},
+    {{ scope: "finding", local_id: "F9999", decision: "accepted_issue" }},
+    {{ scope: "finding", local_id: "F0002", decision: "not_a_status" }},
+    {{ scope: "finding", local_id: "F0002", decision: "accepted_issue", reviewer_notes: "synthetic note" }},
+    {{ scope: "finding", local_id: "F0002", decision: "accepted_issue", extra_public_field: "ignored" }},
+    "bad-entry"
+  ];
+  applyReviewDecisionSummary(invalidPayload);
+  assert(state.importStatus.imported === 1, "invalid/private-bearing summary imported wrong count");
+  assert(state.importStatus.skipped === 7, "invalid/private-bearing summary skipped wrong count");
+  [
+    "private_field_omitted=3",
+    "unknown_review_target=1",
+    "unsupported_decision_status=1",
+    "unsupported_field_omitted=1",
+    "invalid_decision_entry=1"
+  ].forEach(code => assert(state.importStatus.validationCodes.includes(code), "missing aggregate validation code " + code));
+  assert(els.reviewImportStatus.textContent.includes("Validation codes:"), "invalid import status did not render validation codes");
+  assertPublicSafe(els.reviewImportStatus.textContent, "invalid import status");
+  assertPublicSafe(state.exportSummary, "post-import export summary");
+`, context);
+"""
+
+    with tempfile.NamedTemporaryFile("w", suffix=".js", encoding="utf-8", delete=False) as handle:
+        handle.write(runner)
+        runner_path = Path(handle.name)
+
+    try:
+        completed = subprocess.run(
+            ["node", str(runner_path)],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return ["Node.js is required for executable review import/export checks but was not found on PATH"]
+    finally:
+        runner_path.unlink(missing_ok=True)
+
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or completed.stdout.strip() or f"node exited {completed.returncode}"
+        return [f"executable review import/export check failed: {detail}"]
+    return []
+
+
 def validate_workbench(workbench: Path = WORKBENCH) -> dict[str, Any]:
     summary = new_summary(workbench)
     errors = summary["errors"]
@@ -1613,6 +1803,12 @@ def validate_workbench(workbench: Path = WORKBENCH) -> dict[str, Any]:
         for error in errors
     )
     summary["privacy"]["preview_lifecycle_public_safe"] = summary["coverage"]["preview_lifecycle"]
+
+    for error in validate_executable_review_decision_import_export(html):
+        add_error(summary, "review_import_export_failure", error)
+    summary["coverage"]["review_decision_import_export"] = not any(
+        error["code"] == "review_import_export_failure" for error in errors
+    )
 
     render_start = html.find("function renderAggregateHandoff")
     render_end = html.find("function workerRange", render_start)
