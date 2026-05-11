@@ -351,6 +351,29 @@
       min-width: 172px;
     }
 
+    .preview-controls {
+      display: grid;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .preview-copy {
+      border: 1px solid #cfe4ec;
+      border-radius: 8px;
+      background: #f2fbfd;
+      color: #315566;
+      padding: 10px 12px;
+    }
+
+    .preview-state {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--muted);
+    }
+
     .preview {
       display: grid;
       min-height: 360px;
@@ -366,6 +389,21 @@
       place-items: center;
       text-align: center;
       padding: 24px;
+    }
+
+    .preview.has-image {
+      border-style: solid;
+      background: #111820;
+      padding: 0;
+      overflow: hidden;
+    }
+
+    .preview img {
+      display: block;
+      width: 100%;
+      max-height: 520px;
+      object-fit: contain;
+      background: #111820;
     }
 
     .preview strong {
@@ -508,6 +546,17 @@
 
         <section class="panel" aria-labelledby="preview-title" data-region="image-preview">
           <h2 id="preview-title">Image Preview</h2>
+          <div class="preview-controls">
+            <p class="preview-copy">Local image preview scaffold: an operator may choose one local image for this browser tab only. The workbench creates a temporary object URL, revokes it on clear, reload, or new selection, and never uploads, scans, transforms, or derives image paths from report JSON.</p>
+            <div class="file-row">
+              <input id="previewFile" type="file" accept="image/*" aria-describedby="previewPrivacyCopy">
+              <button id="clearPreviewButton" class="secondary" type="button" disabled>Clear Preview</button>
+            </div>
+            <div id="previewPrivacyCopy" class="preview-state" role="status" aria-live="polite">
+              <span>Selected preview filename: none</span>
+              <span>Preview is excluded from review-decision export JSON.</span>
+            </div>
+          </div>
           <div id="imagePreview" class="preview">
             <div>
               <strong>No preview loaded</strong>
@@ -547,7 +596,11 @@
       model: SAMPLE_EMPTY,
       selectedBatchId: null,
       decisions: new Map(),
-      exportSummary: ""
+      exportSummary: "",
+      preview: {
+        fileName: "",
+        objectUrl: ""
+      }
     };
 
     const REVIEW_DECISIONS = [
@@ -569,6 +622,9 @@
       findingsList: document.getElementById("findingsList"),
       batchDetail: document.getElementById("batchDetail"),
       preview: document.getElementById("imagePreview"),
+      previewFile: document.getElementById("previewFile"),
+      clearPreview: document.getElementById("clearPreviewButton"),
+      previewPrivacyCopy: document.getElementById("previewPrivacyCopy"),
       decisionSummary: document.getElementById("decisionSummary"),
       exportReview: document.getElementById("reviewExport"),
       exportReviewButton: document.getElementById("exportReviewButton"),
@@ -913,10 +969,21 @@
     }
 
     function renderPreview() {
+      const hasPreview = Boolean(state.preview.objectUrl);
+      els.clearPreview.disabled = !hasPreview;
+      els.previewPrivacyCopy.innerHTML = `
+        <span>Selected preview filename: ${escapeHtml(state.preview.fileName || "none")}</span>
+        <span>Preview is excluded from review-decision export JSON.</span>`;
+      if (hasPreview) {
+        els.preview.className = "preview has-image";
+        els.preview.innerHTML = `<img src="${escapeHtml(state.preview.objectUrl)}" alt="Operator-selected local preview">`;
+        return;
+      }
+      els.preview.className = "preview";
       els.preview.innerHTML = `
         <div>
           <strong>Preview placeholder</strong>
-          <p class="muted">No image is loaded or transformed in this static prototype. Use existing local reports for review, and keep private source media in controlled storage.</p>
+          <p class="muted">No image is loaded or transformed in this static prototype. Use the separate image picker only for a controlled local tab preview.</p>
         </div>`;
     }
 
@@ -1002,7 +1069,7 @@
         generated_in_browser: true,
         privacy: {
           summary_only: true,
-          excludes: ["private image content", "OCR text", "hashes", "thumbnails", "absolute paths", "row-level private evidence"]
+          excludes: ["private image content", "preview filename", "preview object URL", "OCR text", "hashes", "thumbnails", "absolute paths", "row-level private evidence"]
         },
         aggregate_counts: {
           total_batches: state.model.metrics.totalBatches,
@@ -1020,6 +1087,33 @@
     function resetReviewState() {
       state.decisions = new Map();
       state.exportSummary = "";
+    }
+
+    function clearPreviewState() {
+      if (state.preview.objectUrl) {
+        URL.revokeObjectURL(state.preview.objectUrl);
+      }
+      state.preview = {
+        fileName: "",
+        objectUrl: ""
+      };
+      els.previewFile.value = "";
+      renderPreview();
+    }
+
+    function loadPreviewFile(file) {
+      if (!file) {
+        clearPreviewState();
+        return;
+      }
+      if (state.preview.objectUrl) {
+        URL.revokeObjectURL(state.preview.objectUrl);
+      }
+      state.preview = {
+        fileName: file.name,
+        objectUrl: URL.createObjectURL(file)
+      };
+      renderPreview();
     }
 
     async function loadFile(file) {
@@ -1042,11 +1136,19 @@
     }
 
     els.file.addEventListener("change", event => loadFile(event.target.files[0]));
+    els.previewFile.addEventListener("change", event => loadPreviewFile(event.target.files[0]));
+    els.clearPreview.addEventListener("click", clearPreviewState);
+    window.addEventListener("beforeunload", () => {
+      if (state.preview.objectUrl) {
+        URL.revokeObjectURL(state.preview.objectUrl);
+      }
+    });
     els.clear.addEventListener("click", () => {
       els.file.value = "";
       state.model = SAMPLE_EMPTY;
       state.selectedBatchId = null;
       resetReviewState();
+      clearPreviewState();
       render();
     });
     els.exportReviewButton.addEventListener("click", () => {
