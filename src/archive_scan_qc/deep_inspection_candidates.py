@@ -152,6 +152,7 @@ def _add_processing_review_candidates(processing_review_package: dict[str, Any],
         for status, count in _safe_counts(summary.get("status_counts")).items():
             if status in {"needs_review", "warning"}:
                 candidates_by_reason[f"processing_review_status:{status}"] += count
+                candidate_count += count
         for key, reason in (
             ("failed_files", "processing_review_status:failed"),
             ("guardrail_warning_files", "processing_review_uncertainty:guardrail_warning"),

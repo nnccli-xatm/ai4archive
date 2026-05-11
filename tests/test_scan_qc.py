@@ -1522,7 +1522,7 @@ class ScanQcTest(unittest.TestCase):
             "summary": {
                 "failed_files": 1,
                 "guardrail_warning_files": 1,
-                "status_counts": {"failed": 1, "processed": 3},
+                "status_counts": {"failed": 1, "needs_review": 2, "processed": 3},
             },
             "groups": {
                 "failed": {
@@ -1545,12 +1545,13 @@ class ScanQcTest(unittest.TestCase):
         raw = json.dumps(summary, ensure_ascii=False)
 
         self.assertEqual(summary["schema_version"], "scan-qc.deep-inspection-candidates.v1")
-        self.assertEqual(summary["candidate_total"], 4)
+        self.assertEqual(summary["candidate_total"], 6)
         self.assertEqual(summary["candidates_by_severity"]["P1"], 1)
         self.assertEqual(summary["candidates_by_severity"]["P2"], 1)
         self.assertEqual(summary["candidates_by_reason"]["rule_bucket:quality"], 1)
         self.assertEqual(summary["candidates_by_reason"]["rule_bucket:provider"], 1)
         self.assertEqual(summary["candidates_by_reason"]["processing_review_status:failed"], 1)
+        self.assertEqual(summary["candidates_by_reason"]["processing_review_status:needs_review"], 2)
         self.assertTrue(summary["provider_configured"])
         self.assertEqual(summary["provider_count"], 2)
         self.assertTrue(summary["no_inference_run"])
