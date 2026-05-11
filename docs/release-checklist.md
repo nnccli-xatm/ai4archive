@@ -27,6 +27,12 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   aggregate `acceptance_summary.json` with pass/fail status, blocking items,
   warnings, P0/P1 remaining counts, processing failure count, throughput and
   worker summaries, human review status, and recommended next steps.
+- Confirm a synthetic `archive-scan-qc review-decisions-verify` run creates
+  `review_decision_verification_summary.json` with aggregate decision counts,
+  privacy status, blocking/warning counts by code, and final handoff readiness,
+  without private filenames, roots, hashes, OCR text, thumbnails, row-level
+  findings, reviewer notes, prompts, provider commands, raw model output,
+  object URLs, or sample data.
 - Confirm CI is green for Python 3.10, 3.11, and 3.12.
 
 ## Package and install checks
@@ -94,6 +100,17 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 - Confirm production runbooks explain final acceptance gate defaults, optional
   scan and processing throughput thresholds, missing-evidence warnings, and the
   privacy boundary for `acceptance_summary.json`.
+- Confirm production runbooks explain the aggregate-only final review-decision
+  handoff sequence: `review-decisions-verify`, `evidence-bundle-verify`,
+  `final-handoff-summary`, then optional static workbench inspection of
+  `final_production_handoff_summary.json`.
+- Confirm production runbooks distinguish public-safe aggregate summaries
+  (`review_decision_verification_summary.json`,
+  `aggregate_evidence_bundle_summary.json`, and
+  `final_production_handoff_summary.json` after local policy review) from
+  sensitive local/source artifacts such as source images, derivative images,
+  scan reports, review templates, reviewer notes, processing manifests, retry
+  manifests, provider logs, object URLs, and row-level paths or hashes.
 - Confirm README and runbook document the offline provider JSONL contract,
   `provider.<name>.<rule>` namespace, protected built-in P0 rule boundary,
   provider disable path, local/GPU sidecar guidance for future PaddleOCR/ONNX/
@@ -170,9 +187,25 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   acceptance. Share only entries classified as aggregate/public-safe after local
   policy review; keep sensitive local evidence entries inside the approved
   environment.
+- Verify exported local human review decisions with the aggregate-only review
+  decision verifier:
+
+  ```bash
+  archive-scan-qc review-decisions-verify \
+    --review-decisions /placeholder/private-review-decisions/review_decisions.json \
+    --out /placeholder/private-validation-output/review_decision_verification_summary.json
+  ```
+
+  Share only `review_decision_verification_summary.json` after local policy
+  review. It contributes aggregate decision counts, privacy status, blocker and
+  warning counts by code, and final handoff readiness; it must not expose
+  private filenames, roots, hashes, OCR text, thumbnails, row-level findings,
+  reviewer notes, prompts, provider commands, raw model output, object URLs, or
+  actual sample data.
 - Run the aggregate evidence bundle verifier against the directory that contains
   the release-candidate, readiness, acceptance, provider probe, and production
-  validation aggregate summaries:
+  validation aggregate summaries, plus review-decision verification when final
+  human decisions are part of the handoff:
 
   ```bash
   archive-scan-qc evidence-bundle-verify \
@@ -198,6 +231,11 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   reports blockers by aggregate code/count, and does not read source images,
   row-level reports, manifests, OCR text, thumbnails, hashes, private roots, or
   derivative images.
+- Optionally open `docs/frontend-workbench-prototype.html` locally and load
+  `final_production_handoff_summary.json` for static inspection of aggregate
+  readiness and code/count diagnostics. Do not load or publish private source
+  artifacts, object URLs, row-level findings, reviewer notes, prompts, provider
+  commands, raw model output, or actual sample data through the workbench.
 
 ## Privacy prohibitions
 
@@ -211,6 +249,9 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 - Do not upload or attach filled review templates or reviewer notes from
   private collections; share only aggregate `review_summary.json` after policy
   review.
+- Do not publish local review-decision exports, reviewer notes, or workbench
+  preview state. Share only aggregate
+  `review_decision_verification_summary.json` after policy review.
 - Do not enable an analysis provider that uploads source images, thumbnails,
   OCR text, derived content, hashes, row-level metadata, or findings to a
   network service.
