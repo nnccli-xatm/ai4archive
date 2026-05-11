@@ -157,6 +157,21 @@ REQUIRED_STRINGS = {
     "contains_image_content",
     "contains_row_level_findings",
     "private filenames, paths, hashes, OCR text, thumbnails, image content, row-level findings, reviewer notes, manifests, or derivative image references",
+    "Public-Safe Demo Fixture Gallery",
+    "Synthetic aggregate-only fixtures for browser validation.",
+    "Demo fixtures exclude private filenames, paths, hashes, OCR text, thumbnails, image content, manifests, row-level findings, reviewer notes, derivative image references, and local preview state.",
+    "demoFixtureSelect",
+    "loadDemoFixtureButton",
+    "DEMO_FIXTURES",
+    "loadDemoFixture",
+    "cloneDemoPayload",
+    "Recognized passing review summary",
+    "Passing acceptance summary",
+    "Complete public-safe readiness checklist",
+    "Unsupported schema compatibility warning",
+    "Privacy summary failing diagnostic",
+    "Privacy summary missing diagnostic",
+    "Loaded public-safe demo fixture",
 }
 
 FORBIDDEN_PATTERNS = {
@@ -246,6 +261,32 @@ FORBIDDEN_AGGREGATE_PAYLOAD_FIELDS = {
     "reviewer notes": "reviewer_notes",
     "row-level findings": "findings",
     "thumbnail": "thumbnail",
+}
+
+REQUIRED_DEMO_FIXTURE_LABELS = {
+    "Recognized passing review summary",
+    "Passing acceptance summary",
+    "Complete public-safe readiness checklist",
+    "Unsupported schema compatibility warning",
+    "Privacy summary failing diagnostic",
+    "Privacy summary missing diagnostic",
+}
+
+FORBIDDEN_DEMO_FIXTURE_FIELDS = {
+    "absolute_path",
+    "derivative_image",
+    "filename",
+    "hash",
+    "image_bytes",
+    "image_content",
+    "manifest",
+    "ocr_text",
+    "path",
+    "preview_filename",
+    "preview_object_url",
+    "reviewer_notes",
+    "sha256",
+    "thumbnail",
 }
 
 
@@ -643,6 +684,56 @@ vm.runInContext(workbenchScript + `
   state.model = missingPrivacyModel;
   renderAggregateHandoff();
   assert(els.aggregateHandoff.innerHTML.includes("privacy_summary_missing"), "missing privacy fixture did not render privacy missing diagnostic");
+
+  assert(Array.isArray(DEMO_FIXTURES), "demo fixture gallery is not an array");
+  assert(DEMO_FIXTURES.length >= 5, "demo fixture gallery does not cover at least five options");
+  const demoLabels = DEMO_FIXTURES.map(item => item.label);
+  [
+    "Recognized passing review summary",
+    "Passing acceptance summary",
+    "Complete public-safe readiness checklist",
+    "Unsupported schema compatibility warning",
+    "Privacy summary failing diagnostic",
+    "Privacy summary missing diagnostic"
+  ].forEach(label => assert(demoLabels.includes(label), "missing demo fixture label: " + label));
+
+  DEMO_FIXTURES.forEach(item => {{
+    assert(item && item.id && item.label && item.payload, "demo fixture is missing id, label, or payload");
+    const serialized = JSON.stringify(item.payload);
+    [
+      "filename",
+      "path",
+      "hash",
+      "sha256",
+      "ocr_text",
+      "thumbnail",
+      "image_content",
+      "image_bytes",
+      "manifest",
+      "reviewer_notes",
+      "derivative_image",
+      "preview_filename",
+      "preview_object_url"
+    ].forEach(field => assert(!serialized.includes(String.fromCharCode(34) + field + String.fromCharCode(34)), "demo fixture " + item.id + " includes forbidden field " + field));
+    const model = inferArtifact(cloneDemoPayload(item.payload));
+    assert(model.sourceType === "aggregate-handoff", "demo fixture " + item.id + " did not load through aggregate inference");
+    state.model = model;
+    renderAggregateHandoff();
+    assert(els.aggregateHandoff.innerHTML.includes("Public-Safe Artifact Compatibility Diagnostics"), "demo fixture " + item.id + " did not render diagnostics");
+    assert(els.aggregateHandoff.innerHTML.includes("Aggregate-only Status"), "demo fixture " + item.id + " did not render aggregate summary");
+  }});
+
+  loadDemoFixture("recognized-review-pass");
+  assert(els.status.textContent.includes("Loaded public-safe demo fixture: Recognized passing review summary."), "demo load button path did not report selected fixture");
+  assert(els.aggregateHandoff.innerHTML.includes("Review summary"), "demo load path did not render review summary");
+  loadDemoFixture("complete-readiness-checklist");
+  assert(els.aggregateHandoff.innerHTML.includes("Public-Safe Artifact Readiness Checklist"), "demo load path did not render readiness checklist");
+  loadDemoFixture("unsupported-schema-warning");
+  assert(els.aggregateHandoff.innerHTML.includes("unsupported_public_safe_schema_version"), "demo load path did not render unsupported schema diagnostic");
+  loadDemoFixture("privacy-diagnostic-fail");
+  assert(els.aggregateHandoff.innerHTML.includes("privacy_summary_fail"), "demo load path did not render failing privacy diagnostic");
+  loadDemoFixture("privacy-diagnostic-missing");
+  assert(els.aggregateHandoff.innerHTML.includes("privacy_summary_missing"), "demo load path did not render missing privacy diagnostic");
 `, context);
 """
 
@@ -738,6 +829,21 @@ def main() -> int:
             pattern = rf"\bpayload\.{re.escape(field)}\b|\bpayload\[['\"]{re.escape(field)}['\"]\]"
             if re.search(pattern, aggregate_block):
                 errors.append(f"aggregate summary builder reads forbidden {label} field {field!r}")
+
+    demo_start = html.find("const DEMO_FIXTURES = [")
+    demo_end = html.find("const els = {", demo_start)
+    if demo_start == -1 or demo_end == -1:
+        errors.append("missing public-safe demo fixture gallery data")
+    else:
+        demo_block = html[demo_start:demo_end]
+        for label in sorted(REQUIRED_DEMO_FIXTURE_LABELS):
+            if label not in demo_block:
+                errors.append(f"demo fixture gallery missing label {label!r}")
+        for field in sorted(FORBIDDEN_DEMO_FIXTURE_FIELDS):
+            if re.search(rf"['\"]{re.escape(field)}['\"]\s*:", demo_block):
+                errors.append(f"demo fixture gallery includes forbidden field {field!r}")
+        if "URL.createObjectURL" in demo_block or "preview" in demo_block.lower():
+            errors.append("demo fixture gallery must not include local preview object URL or filename state")
 
     render_start = html.find("function renderAggregateHandoff")
     render_end = html.find("function workerRange", render_start)
