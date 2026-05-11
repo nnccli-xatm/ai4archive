@@ -184,6 +184,20 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   presence, and privacy indicators, and reports private evidence findings by
   code without copying private paths, filenames, hashes, OCR text, thumbnails,
   image content, row-level findings, secrets, or sample roots into the summary.
+- After the release-candidate summary and aggregate evidence bundle verifier
+  have run, generate the final public handoff decision:
+
+  ```bash
+  archive-scan-qc final-handoff-summary \
+    --evidence-dir /placeholder/private-validation-output/release-candidate
+  ```
+
+  Share `final_production_handoff_summary.json` as the concise go/no-go handoff
+  status. It consumes only aggregate summaries such as
+  `aggregate_evidence_bundle_summary.json` and `release_candidate_summary.json`,
+  reports blockers by aggregate code/count, and does not read source images,
+  row-level reports, manifests, OCR text, thumbnails, hashes, private roots, or
+  derivative images.
 
 ## Privacy prohibitions
 

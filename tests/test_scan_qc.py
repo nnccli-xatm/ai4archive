@@ -27,6 +27,7 @@ from archive_scan_qc.deep_inspection_provider import (
     parse_deep_inspection_provider_config,
 )
 from archive_scan_qc.evidence_bundle import build_evidence_bundle_summary
+from archive_scan_qc.final_handoff import build_final_handoff_summary
 from archive_scan_qc.handoff import write_delivery_handoff_manifest
 from archive_scan_qc.processing import (
     ProcessingOptions,
@@ -568,6 +569,71 @@ class ScanQcTest(unittest.TestCase):
         self.assertNotIn("SECRET123", raw)
         self.assertNotIn("page_0001.png", raw)
         self.assertIn("Evidence bundle status: fail", stdout.getvalue())
+
+    def test_final_handoff_summary_passes_with_aggregate_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_json(root / "aggregate_evidence_bundle_summary.json", _aggregate_evidence_bundle_payload(status="pass"))
+            _write_json(root / "release_candidate_summary.json", _release_candidate_bundle_payload())
+
+            summary = build_final_handoff_summary(root, generated_at="2026-01-01T00:00:00+00:00")
+
+        self.assertEqual(summary["status"], "pass")
+        self.assertTrue(summary["ready_for_handoff"])
+        self.assertEqual(summary["blocking_item_count"], 0)
+        self.assertEqual(summary["artifact_status_summary"]["aggregate_evidence_bundle_summary.json"]["status"], "pass")
+        self.assertTrue(summary["privacy"]["aggregate_only"])
+
+    def test_final_handoff_summary_fails_for_blocking_evidence_and_cli_exits_nonzero(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            payload = _aggregate_evidence_bundle_payload(status="fail", blocking_codes=["artifact_status_failed"])
+            _write_json(root / "aggregate_evidence_bundle_summary.json", payload)
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(["final-handoff-summary", "--evidence-dir", str(root), "--out", str(root / "handoff.json")])
+            summary = json.loads((root / "handoff.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(summary["status"], "fail")
+        self.assertFalse(summary["ready_for_handoff"])
+        self.assertIn("aggregate_evidence_blocking_items_present", {item["code"] for item in summary["blocking_items"]})
+        self.assertIn("Handoff status: fail", stdout.getvalue())
+
+    def test_final_handoff_summary_blocks_missing_required_aggregate_input(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            summary = build_final_handoff_summary(Path(temp_dir), generated_at="2026-01-01T00:00:00+00:00")
+
+        self.assertEqual(summary["status"], "fail")
+        self.assertIn("required_aggregate_input_missing", {item["code"] for item in summary["blocking_items"]})
+        self.assertEqual(summary["artifact_status_summary"]["release_candidate_summary.json"]["status"], "optional_missing")
+
+    def test_final_handoff_summary_blocks_malformed_json(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "aggregate_evidence_bundle_summary.json").write_text("{not-json", encoding="utf-8")
+
+            summary = build_final_handoff_summary(root, generated_at="2026-01-01T00:00:00+00:00")
+
+        self.assertEqual(summary["status"], "fail")
+        self.assertIn("malformed_json", {item["code"] for item in summary["blocking_items"]})
+
+    def test_final_handoff_summary_omits_private_token_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            payload = _aggregate_evidence_bundle_payload(status="pass")
+            payload["operator_warning"] = "private source /Users/private/archive/page_0001.png token SECRET123"
+            _write_json(root / "aggregate_evidence_bundle_summary.json", payload)
+
+            exit_code = main(["final-handoff-summary", "--evidence-dir", str(root), "--out", str(root / "handoff.json")])
+            raw = (root / "handoff.json").read_text(encoding="utf-8")
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("private_value_present", raw)
+        self.assertNotIn("/Users/private/archive/page_0001.png", raw)
+        self.assertNotIn("SECRET123", raw)
+        self.assertNotIn("page_0001.png", raw)
 
     def test_version_output_matches_package_version(self) -> None:
         stdout = io.StringIO()
@@ -5205,6 +5271,38 @@ def _aggregate_baseline_bundle_payload() -> dict[str, object]:
         "aggregate_counts": {"total_files": 2, "openable_files": 2, "total_findings": 0},
         "privacy_self_check": {"passed": True, "status": "pass", "violation_count": 0},
         "cleanup": {"enabled": True, "retained_public_summary_only": True},
+    }
+
+
+def _aggregate_evidence_bundle_payload(*, status: str, blocking_codes: list[str] | None = None) -> dict[str, object]:
+    blockers = [
+        {"artifact": "release_candidate_summary.json", "code": code}
+        for code in (blocking_codes or [])
+    ]
+    return {
+        "schema_version": "scan-qc.aggregate-evidence-bundle.v1",
+        "status": status,
+        "checks_passed": 6,
+        "checks_failed": len(blockers),
+        "blocking_items": blockers,
+        "artifact_presence": {
+            "release_candidate_summary.json": {"present": True, "required": True, "status": status},
+            "release_readiness_summary.json": {"present": False, "required": False, "status": "optional_missing"},
+        },
+        "privacy": {
+            "aggregate_only": True,
+            "private_indicators_found": False,
+            "private_indicator_count": 0,
+            "contains_paths": False,
+            "contains_filenames": False,
+            "contains_hashes": False,
+            "contains_ocr_text": False,
+            "contains_thumbnails": False,
+            "contains_image_content": False,
+            "contains_secrets": False,
+            "contains_row_level_findings": False,
+        },
+        "sensitive_values_omitted": True,
     }
 
 
