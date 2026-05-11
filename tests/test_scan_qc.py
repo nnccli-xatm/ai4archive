@@ -267,6 +267,85 @@ class ScanQcTest(unittest.TestCase):
         self.assertEqual(completed.completed_keys, ("nav",))
         self.assertEqual(linear.updated, [("linear-nav", "done")])
 
+    def test_frontend_issue_driver_status_reports_public_safe_progress_without_linear(self) -> None:
+        module = _load_frontend_issue_driver_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            plan_path = root / "plan.json"
+            state_path = root / "state.json"
+            plan_path.write_text(
+                json.dumps(
+                    {
+                        "issues": [
+                            {"key": "nav", "title": "Navigation"},
+                            {"key": "report", "title": "Report"},
+                            {"key": "filters", "title": "Filters"},
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "next_index": 2,
+                        "active_key": "report",
+                        "active_linear_id": "AI4-123",
+                        "completed_keys": ["nav"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with mock.patch.dict(os.environ, {"LINEAR_API_KEY": ""}, clear=False):
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = module.main(["status", "--plan", str(plan_path), "--state-file", str(state_path)])
+
+            payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["next_index"], 2)
+        self.assertEqual(payload["active_key"], "report")
+        self.assertEqual(payload["active_linear_id"], "AI4-123")
+        self.assertEqual(payload["completed_keys"], ["nav"])
+        self.assertEqual(payload["total_planned"], 3)
+        self.assertEqual(payload["completed_count"], 1)
+        self.assertEqual(payload["remaining_count"], 1)
+        self.assertEqual(payload["driver_status"], "active")
+
+    def test_frontend_issue_driver_status_reports_idle_and_complete_modes(self) -> None:
+        module = _load_frontend_issue_driver_module()
+        plan = [
+            module.PlannedIssue(key="nav", title="Navigation", description=""),
+            module.PlannedIssue(key="report", title="Report", description=""),
+        ]
+
+        idle = module.build_status_report(plan, module.DriverState())
+        complete = module.build_status_report(
+            plan,
+            module.DriverState(next_index=2, completed_keys=("nav", "report")),
+        )
+
+        self.assertEqual(idle["driver_status"], "idle")
+        self.assertEqual(idle["remaining_count"], 2)
+        self.assertEqual(complete["driver_status"], "complete")
+        self.assertEqual(complete["remaining_count"], 0)
+
+    def test_frontend_issue_driver_non_status_requires_team_key(self) -> None:
+        module = _load_frontend_issue_driver_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            plan_path = Path(temp_dir) / "plan.json"
+            plan_path.write_text(json.dumps({"issues": [{"key": "nav", "title": "Navigation"}]}), encoding="utf-8")
+
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                with self.assertRaises(SystemExit) as raised:
+                    module.main(["next", "--plan", str(plan_path), "--dry-run"])
+
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("--team-key is required unless action is status", stderr.getvalue())
+
     def test_offline_dependency_check_passes_with_complete_wheelhouse(self) -> None:
         module = _load_offline_dependency_check_module()
         with tempfile.TemporaryDirectory(prefix="private-wheelhouse-") as temp_dir:
