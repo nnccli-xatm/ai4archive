@@ -67,6 +67,38 @@ _ALLOWED_KEY_EXCEPTIONS = {
     "total_files",
     "total_findings",
 }
+_ALLOWED_NUMERIC_KEY_SUFFIXES = (
+    "files_per_minute",
+    "openable_files_per_minute",
+    "processed_files_per_minute",
+    "benchmark_files_per_minute",
+    "benchmark_processed_files_per_minute",
+    "average_seconds_per_file",
+)
+_ALLOWED_NUMERIC_KEYS = {
+    "min_scan_files_per_minute",
+    "min_processing_files_per_minute",
+    "file_count",
+    "processing_failed_files",
+    "processing_failed_files_max",
+    "processing_processed_files",
+}
+_COUNT_SUMMARY_KEYS = {
+    "average",
+    "best_observed",
+    "count",
+    "file_count",
+    "lowest_observed",
+    "max",
+    "mean",
+    "median",
+    "min",
+    "provided",
+    "status",
+    "threshold",
+    "total",
+    "value",
+}
 _PRIVATE_VALUE_PATTERNS = (
     ("absolute_path", re.compile(r"(^|[\s\"'])((/[A-Za-z0-9_.~ -]+)+|[A-Za-z]:\\[^\"'\s]+)")),
     ("filename", re.compile(r"\b[^/\\\s\"']+\.(?:png|jpe?g|tiff?|bmp|gif|jp2|pdf|csv)\b", re.IGNORECASE)),
@@ -223,7 +255,7 @@ def _privacy_failures(payload: dict[str, Any], raw: str) -> list[str]:
         failures.append("privacy_flag_contains_private_evidence")
 
     for path, key, value in _walk(payload):
-        if _private_key(key):
+        if _private_key(path, key, value):
             failures.append("private_key_present")
             break
         if isinstance(value, str) and _private_value(value):
@@ -252,11 +284,41 @@ def _count_failures(payload: dict[str, Any]) -> list[str]:
     return failures
 
 
-def _private_key(key: str) -> bool:
+def _private_key(path: tuple[str, ...], key: str, value: Any) -> bool:
     normalized = key.lower()
     if normalized in _ALLOWED_KEY_EXCEPTIONS:
         return False
+    if _aggregate_key_exception(path, normalized, value):
+        return False
     return any(token in normalized for token in _PRIVATE_KEYS)
+
+
+def _aggregate_key_exception(path: tuple[str, ...], normalized: str, value: Any) -> bool:
+    if normalized in _ALLOWED_NUMERIC_KEYS and _is_number(value):
+        return True
+    if normalized.endswith(_ALLOWED_NUMERIC_KEY_SUFFIXES) and (_is_number(value) or _aggregate_count_structure(value)):
+        return True
+    if path == ("sensitive_artifacts", "paths_embedded") and isinstance(value, bool):
+        return True
+    if "finding_rule_counts_repeated_runs" in path and _aggregate_count_structure(value):
+        return True
+    if path == ("benchmark", "finding_rule_counts_repeated_runs") and _aggregate_count_structure(value):
+        return True
+    return False
+
+
+def _aggregate_count_structure(value: Any) -> bool:
+    if _is_number(value) or isinstance(value, bool):
+        return True
+    if isinstance(value, dict):
+        return all(str(key).lower() in _COUNT_SUMMARY_KEYS or _aggregate_count_structure(child) for key, child in value.items())
+    if isinstance(value, list):
+        return all(_aggregate_count_structure(child) for child in value)
+    return False
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def _private_value(value: str) -> bool:

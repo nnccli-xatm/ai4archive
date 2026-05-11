@@ -527,6 +527,40 @@ class ScanQcTest(unittest.TestCase):
         self.assertEqual(summary["checks_failed"], 0)
         self.assertFalse(summary["privacy"]["private_indicators_found"])
 
+    def test_evidence_bundle_verifier_allows_real_artifact_aggregate_metric_keys(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_json(root / "release_candidate_summary.json", _release_candidate_bundle_payload(real_artifact_metrics=True))
+            _write_json(root / "release_readiness_summary.json", _release_readiness_bundle_payload(real_artifact_metrics=True))
+            _write_json(root / "acceptance_summary.json", _acceptance_bundle_payload(real_artifact_metrics=True))
+            _write_json(root / "aggregate_baseline_summary.json", _aggregate_baseline_bundle_payload(real_artifact_metrics=True))
+
+            summary = build_evidence_bundle_summary(root, generated_at="2026-01-01T00:00:00+00:00")
+
+        self.assertEqual(summary["status"], "pass")
+        self.assertEqual(summary["checks_failed"], 0)
+        self.assertEqual(summary["blocking_items"], [])
+        self.assertFalse(summary["privacy"]["private_indicators_found"])
+
+    def test_evidence_bundle_verifier_still_blocks_private_values_under_metric_like_keys(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            payload = _release_candidate_bundle_payload(real_artifact_metrics=True)
+            payload["benchmark"]["finding_rule_counts_repeated_runs"]["duplicate_file"] = {
+                "count": 1,
+                "source": "/private/validation-host/tmp/A001_0001.png",
+            }
+            payload["sensitive_artifacts"]["paths_embedded"] = "/private/validation-host/tmp/A001_0001.png"
+            _write_json(root / "release_candidate_summary.json", payload)
+
+            exit_code = main(["evidence-bundle-verify", "--evidence-dir", str(root), "--out", str(root / "bundle.json")])
+            raw = (root / "bundle.json").read_text(encoding="utf-8")
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("private_key_present", raw)
+        self.assertNotIn("/private/validation-host/tmp/A001_0001.png", raw)
+        self.assertNotIn("A001_0001.png", raw)
+
     def test_evidence_bundle_verifier_blocks_missing_required_but_allows_optional(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -5210,8 +5244,8 @@ def _write_json(path: Path, payload: dict[str, object]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
 
-def _release_candidate_bundle_payload() -> dict[str, object]:
-    return {
+def _release_candidate_bundle_payload(*, real_artifact_metrics: bool = False) -> dict[str, object]:
+    payload: dict[str, object] = {
         "schema_version": "scan-qc.release-candidate-summary.v1",
         "status": "pass",
         "ready_for_release_candidate": True,
@@ -5230,10 +5264,40 @@ def _release_candidate_bundle_payload() -> dict[str, object]:
         "release_readiness": {"status": "pass", "blocking_item_count": 0},
         "decision": {"blocking_item_count": 0},
     }
+    if real_artifact_metrics:
+        payload["production_validation"] = {
+            "status": "pass",
+            "counts": {
+                "total_files": 20,
+                "openable_files": 20,
+                "processing_processed_files": 20,
+                "processing_failed_files": 0,
+            },
+            "scan": {"files_per_minute": 149.4, "openable_files_per_minute": 149.4},
+            "processing": {
+                "processed_files_per_minute": 294.74,
+                "operation_timings": {"deskew": {"file_count": 20, "average_seconds_per_file": 0.2}},
+            },
+            "thresholds": {
+                "min_scan_files_per_minute": 100.0,
+                "min_processing_files_per_minute": 50.0,
+                "processing_failed_files_max": 0,
+            },
+        }
+        payload["benchmark"] = {
+            "scan": {"benchmark_files_per_minute": 140.0},
+            "processing": {"benchmark_processed_files_per_minute": 280.0},
+            "finding_rule_counts_repeated_runs": {
+                "duplicate_file": 0,
+                "edge_cutoff": {"min": 0, "max": 1, "total": 1},
+            },
+        }
+        payload["sensitive_artifacts"] = {"paths_embedded": False}
+    return payload
 
 
-def _release_readiness_bundle_payload() -> dict[str, object]:
-    return {
+def _release_readiness_bundle_payload(*, real_artifact_metrics: bool = False) -> dict[str, object]:
+    payload: dict[str, object] = {
         "schema_version": "scan-qc.release-readiness.v1",
         "status": "pass",
         "privacy": {
@@ -5250,10 +5314,13 @@ def _release_readiness_bundle_payload() -> dict[str, object]:
         "summary": {"checks_total": 2, "checks_passed": 2, "checks_failed": 0, "blocking_items": 0},
         "checks": {"unit_tests": {"status": "pass", "blocking": False}},
     }
+    if real_artifact_metrics:
+        payload["sensitive_artifacts"] = {"paths_embedded": False}
+    return payload
 
 
-def _acceptance_bundle_payload() -> dict[str, object]:
-    return {
+def _acceptance_bundle_payload(*, real_artifact_metrics: bool = False) -> dict[str, object]:
+    payload: dict[str, object] = {
         "schema_version": "scan-qc.acceptance-summary.v1",
         "status": "pass",
         "pass": True,
@@ -5261,10 +5328,21 @@ def _acceptance_bundle_payload() -> dict[str, object]:
         "blocking_items": [],
         "privacy_self_check": {"provided": True, "passed": True, "status": "pass", "violation_count": 0},
     }
+    if real_artifact_metrics:
+        payload["thresholds"] = {
+            "min_scan_files_per_minute": 100.0,
+            "min_processing_files_per_minute": 50.0,
+            "processing_failed_files_max": 0,
+        }
+        payload["throughput"] = {
+            "scan_files_per_minute": {"provided": True, "best_observed": 149.4, "lowest_observed": 149.4},
+            "processing_files_per_minute": {"provided": True, "best_observed": 294.74, "lowest_observed": 294.74},
+        }
+    return payload
 
 
-def _aggregate_baseline_bundle_payload() -> dict[str, object]:
-    return {
+def _aggregate_baseline_bundle_payload(*, real_artifact_metrics: bool = False) -> dict[str, object]:
+    payload: dict[str, object] = {
         "schema_version": "scan-qc.aggregate-baseline.v1",
         "status": "pass",
         "privacy": {"aggregate_only": True},
@@ -5272,6 +5350,17 @@ def _aggregate_baseline_bundle_payload() -> dict[str, object]:
         "privacy_self_check": {"passed": True, "status": "pass", "violation_count": 0},
         "cleanup": {"enabled": True, "retained_public_summary_only": True},
     }
+    if real_artifact_metrics:
+        payload["stage_timings"] = {
+            "scan": {"files_per_minute": 149.4, "openable_files_per_minute": 149.4},
+            "processing": {"processed_files_per_minute": 294.74},
+        }
+        payload["benchmark"] = {
+            "scan": {"benchmark_files_per_minute": 140.0},
+            "processing": {"benchmark_processed_files_per_minute": 280.0},
+            "finding_rule_counts_repeated_runs": {"duplicate_file": 0},
+        }
+    return payload
 
 
 def _aggregate_evidence_bundle_payload(*, status: str, blocking_codes: list[str] | None = None) -> dict[str, object]:
