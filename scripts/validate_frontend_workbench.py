@@ -1361,6 +1361,27 @@ vm.runInContext(workbenchScript + `
       processing_resumed_files: 2,
       processing_duplicate_reused_files: 3,
       processing_existing_derivative_reused_files: 4,
+      human_review_closure: {{
+        review_present: true,
+        review_status: "pass",
+        acceptance_present: true,
+        acceptance_status: "pass",
+        total_findings: 9,
+        remaining_p0: 0,
+        remaining_p1: 2,
+        status_counts: {{
+          accepted_issue: 4,
+          false_positive: 5
+        }},
+        severity_status_counts: {{
+          P0: {{ accepted_issue: 0, false_positive: 0 }},
+          P1: {{ accepted_issue: 4, false_positive: 1 }},
+          P2: {{ accepted_issue: 0, false_positive: 4 }}
+        }},
+        acceptance_passed: true,
+        acceptance_pass: true,
+        privacy_status: "aggregate_public_safe"
+      }},
       deep_inspection_readiness: {{
         status: "pass",
         candidate_total: 3,
@@ -1612,6 +1633,10 @@ vm.runInContext(workbenchScript + `
   assert(workbenchPublicPassModel.aggregateHandoff.despeckleBackend.numpyAvailable === true, "workbench public pass despeckle numpy availability was not preserved");
   assert(countFor(workbenchPublicPassModel.aggregateHandoff.despeckleBackend.backendCounts, "numpy") === 7, "workbench public pass despeckle numpy backend count was not preserved");
   assert(countFor(workbenchPublicPassModel.aggregateHandoff.despeckleBackend.backendCounts, "fallback") === 0, "workbench public pass despeckle fallback backend count was not preserved");
+  assert(workbenchPublicPassModel.aggregateHandoff.remainingP0 === 0, "workbench public pass did not read promoted remaining P0");
+  assert(workbenchPublicPassModel.aggregateHandoff.remainingP1 === 2, "workbench public pass did not read promoted remaining P1");
+  assert(workbenchPublicPassModel.aggregateHandoff.acceptancePassed === true, "workbench public pass did not read promoted acceptance signal");
+  assert(countFor(workbenchPublicPassModel.aggregateHandoff.reviewStatusCounts, "false_positive") === 5, "workbench public pass did not read promoted review status counts");
   assert(workbenchPublicPassModel.aggregateHandoff.warningCodeCounts[0].name === "aggregate_warning_review_backlog", "workbench public pass warning code count label was not preserved");
   assert(workbenchPublicPassModel.artifactCompatibility.schemaRecognized === true, "workbench public pass schema was not recognized");
   assert(!workbenchPublicPassModel.artifactCompatibility.diagnostics.some(item => item.code === "aggregate_status_fields_missing"), "workbench public pass reported missing aggregate status fields");
@@ -1638,6 +1663,9 @@ vm.runInContext(workbenchScript + `
   assert(els.aggregateHandoff.innerHTML.includes("NumPy Available"), "workbench public pass did not render numpy availability label");
   assert(els.aggregateHandoff.innerHTML.includes("Backend Counts"), "workbench public pass did not render despeckle backend counts");
   assert(els.aggregateHandoff.innerHTML.includes("Warning Code"), "workbench public pass did not render warning code counts");
+  assert(els.aggregateHandoff.innerHTML.includes("Remaining P0"), "workbench public pass did not render promoted remaining P0");
+  assert(els.aggregateHandoff.innerHTML.includes("Review Status Counts"), "workbench public pass did not render promoted review status counts");
+  assert(els.aggregateHandoff.innerHTML.includes("Acceptance Passed"), "workbench public pass did not render promoted acceptance signal");
   assertPublicSafe(els.aggregateHandoff.innerHTML, "workbench public pass rendering");
 
   const workbenchPublicBlockedModel = inferArtifact(workbenchPublicBlockedFixture);

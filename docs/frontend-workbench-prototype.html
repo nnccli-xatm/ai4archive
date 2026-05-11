@@ -1157,6 +1157,27 @@
             processing_resumed_files: 2,
             processing_duplicate_reused_files: 3,
             processing_existing_derivative_reused_files: 4,
+            human_review_closure: {
+              review_present: true,
+              review_status: "pass",
+              acceptance_present: true,
+              acceptance_status: "pass",
+              total_findings: 9,
+              remaining_p0: 0,
+              remaining_p1: 2,
+              status_counts: {
+                accepted_issue: 4,
+                false_positive: 5
+              },
+              severity_status_counts: {
+                P0: { accepted_issue: 0, false_positive: 0 },
+                P1: { accepted_issue: 4, false_positive: 1 },
+                P2: { accepted_issue: 0, false_positive: 4 }
+              },
+              acceptance_passed: true,
+              acceptance_pass: true,
+              privacy_status: "aggregate_public_safe"
+            },
             processing_operation_timings: {
               auto_crop: {
                 enabled: true,
@@ -1976,6 +1997,7 @@
       const productionThroughput = production.throughput || {};
       const decision = payload.decision || {};
       const checks = payload.checks || {};
+      const promotedClosure = (payload.summary && payload.summary.human_review_closure) || payload.human_review_closure || {};
       const aggregateStatus = payload.status || production.status || (schema.includes("processing-review") ? "local-review" : "") || (payload.acceptance_passed === true || payload.pass === true || payload.ready === true ? "pass" : payload.acceptance_passed === false || payload.pass === false || payload.ready === false ? "fail" : "");
       const aggregate = {
         artifactType: aggregateArtifactType(schema, payload),
@@ -1987,13 +2009,13 @@
         checksPassed: firstNumber(payload.checks_passed, checks.passed, payload.summary && payload.summary.checks_passed),
         checksFailed: firstNumber(payload.checks_failed, checks.failed, payload.summary && payload.summary.checks_failed),
         blockingItemCount: firstNumber(payload.blocking_item_count, payload.blocking_count, decision.blocking_item_count, payload.summary && payload.summary.blocking_item_count, payload.summary && payload.summary.blocking_count, Array.isArray(payload.blocking_items) ? payload.blocking_items.length : undefined),
-        remainingP0: firstNullableNumber(payload.remaining_p0, payload.remaining && payload.remaining.p0, payload.human_review && payload.human_review.remaining_p0),
-        remainingP1: firstNullableNumber(payload.remaining_p1, payload.remaining && payload.remaining.p1, payload.human_review && payload.human_review.remaining_p1),
-        reviewStatusCounts: aggregateStatusCounts(payload.status_counts || (payload.human_review && payload.human_review.status_counts)),
-        severityStatusCounts: aggregateNestedStatusCounts(payload.severity_status_counts),
+        remainingP0: firstNullableNumber(payload.remaining_p0, payload.remaining && payload.remaining.p0, payload.human_review && payload.human_review.remaining_p0, promotedClosure.remaining_p0),
+        remainingP1: firstNullableNumber(payload.remaining_p1, payload.remaining && payload.remaining.p1, payload.human_review && payload.human_review.remaining_p1, promotedClosure.remaining_p1),
+        reviewStatusCounts: aggregateStatusCounts(payload.status_counts || (payload.human_review && payload.human_review.status_counts) || promotedClosure.status_counts),
+        severityStatusCounts: aggregateNestedStatusCounts(payload.severity_status_counts || promotedClosure.severity_status_counts),
         ruleCounts: aggregateStatusCounts(payload.rule_counts),
-        ruleStatusCounts: aggregateNestedStatusCounts(payload.rule_status_counts),
-        acceptancePassed: firstBoolean(payload.acceptance_passed, payload.pass),
+        ruleStatusCounts: aggregateNestedStatusCounts(payload.rule_status_counts || promotedClosure.rule_status_counts),
+        acceptancePassed: firstBoolean(payload.acceptance_passed, payload.pass, promotedClosure.acceptance_passed, promotedClosure.acceptance_pass),
         blockingCodes: aggregateCodes(payload.blocking_items),
         warningCount: firstNumber(payload.warning_count, payload.warning_item_count, payload.summary && payload.summary.warning_count, payload.summary && payload.summary.warning_item_count, Array.isArray(payload.warnings) ? payload.warnings.length : undefined, Array.isArray(payload.warning_items) ? payload.warning_items.length : undefined),
         warningCodes: aggregateWarningCodes(payload.warnings || payload.warning_items),
@@ -2026,7 +2048,7 @@
           passedBatches: 0,
           failedBatches: aggregate.status === "fail" ? 1 : 0,
           totalFiles: firstNumber(aggregate.counts.totalFiles, aggregate.counts.processedFiles),
-          totalFindings: firstNumber(payload.total_findings, payload.human_review && payload.human_review.total_findings, aggregate.processingReview.reviewTargetCount),
+          totalFindings: firstNumber(payload.total_findings, payload.human_review && payload.human_review.total_findings, promotedClosure.total_findings, aggregate.processingReview.reviewTargetCount),
           p0: firstNumber(aggregate.remainingP0),
           p1: firstNumber(aggregate.remainingP1),
           p2: 0,

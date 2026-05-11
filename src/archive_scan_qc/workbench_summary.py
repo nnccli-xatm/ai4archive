@@ -222,6 +222,9 @@ def build_workbench_public_summary(
     }
     if processing_operation_timings:
         summary_metrics["processing_operation_timings"] = processing_operation_timings
+    closure_metrics = _human_review_closure_metrics(artifacts)
+    if closure_metrics:
+        summary_metrics["human_review_closure"] = closure_metrics
     readiness_metrics = _deep_inspection_readiness_metrics(artifacts)
     summary_metrics.update(readiness_metrics)
 
@@ -466,7 +469,87 @@ def _metrics(payload: dict[str, Any], expected: WorkbenchArtifact) -> dict[str, 
         elif isinstance(checklist, list):
             metrics["checklist_item_count"] = len(checklist)
             metrics["missing_count"] = sum(1 for item in checklist if isinstance(item, dict) and item.get("status") == "missing")
+    if expected.name == "review_summary.json":
+        metrics.update(_review_closure_metrics(payload))
+    if expected.name == "acceptance_summary.json":
+        metrics.update(_acceptance_closure_metrics(payload))
     return {key: value for key, value in metrics.items() if value is not None}
+
+
+def _human_review_closure_metrics(artifacts: dict[str, Any]) -> dict[str, Any]:
+    review = _artifact_metrics(artifacts, "review_summary.json")
+    acceptance = _artifact_metrics(artifacts, "acceptance_summary.json")
+    result = _clean_optional_metrics(
+        {
+            "review_present": artifacts["review_summary.json"].get("present"),
+            "review_status": artifacts["review_summary.json"].get("reported_status"),
+            "acceptance_present": artifacts["acceptance_summary.json"].get("present"),
+            "acceptance_status": artifacts["acceptance_summary.json"].get("reported_status"),
+            "total_findings": _first_present(review.get("total_findings"), acceptance.get("human_review_total_findings")),
+            "remaining_p0": _first_present(review.get("remaining_p0"), acceptance.get("human_review_remaining_p0")),
+            "remaining_p1": _first_present(review.get("remaining_p1"), acceptance.get("human_review_remaining_p1")),
+            "status_counts": _first_present(review.get("status_counts"), acceptance.get("human_review_status_counts")),
+            "severity_counts": review.get("severity_counts"),
+            "severity_status_counts": review.get("severity_status_counts"),
+            "rule_status_counts": review.get("rule_status_counts"),
+            "acceptance_passed": _first_present(review.get("acceptance_passed"), acceptance.get("acceptance_passed")),
+            "acceptance_pass": acceptance.get("pass"),
+            "blocking_item_count": acceptance.get("blocking_item_count"),
+            "warning_item_count": acceptance.get("warning_item_count"),
+            "privacy_status": _first_present(review.get("privacy_status"), acceptance.get("privacy_status")),
+        }
+    )
+    if not artifacts["review_summary.json"].get("present") and not artifacts["acceptance_summary.json"].get("present"):
+        return {}
+    return result
+
+
+def _review_closure_metrics(payload: dict[str, Any]) -> dict[str, Any]:
+    return _clean_optional_metrics(
+        {
+            "total_findings": _safe_int(payload.get("total_findings")),
+            "remaining_p0": _safe_int(payload.get("remaining_p0")),
+            "remaining_p1": _safe_int(payload.get("remaining_p1")),
+            "status_counts": _safe_count_map(payload.get("status_counts")),
+            "severity_counts": _safe_count_map(payload.get("severity_counts")),
+            "severity_status_counts": _safe_nested_count_map(payload.get("severity_status_counts")),
+            "rule_status_counts": _safe_nested_count_map(payload.get("rule_status_counts")),
+            "acceptance_passed": payload.get("acceptance_passed") if isinstance(payload.get("acceptance_passed"), bool) else None,
+            "privacy_status": _privacy_status_code(payload),
+        }
+    )
+
+
+def _acceptance_closure_metrics(payload: dict[str, Any]) -> dict[str, Any]:
+    human_review = payload.get("human_review")
+    review_metrics = human_review if isinstance(human_review, dict) else {}
+    return _clean_optional_metrics(
+        {
+            "pass": payload.get("pass") if isinstance(payload.get("pass"), bool) else None,
+            "acceptance_passed": payload.get("acceptance_passed") if isinstance(payload.get("acceptance_passed"), bool) else payload.get("pass") if isinstance(payload.get("pass"), bool) else None,
+            "blocking_item_count": _safe_int(payload.get("blocking_item_count")),
+            "warning_item_count": _safe_int(payload.get("warning_item_count")),
+            "human_review_total_findings": _safe_int(review_metrics.get("total_findings")),
+            "human_review_remaining_p0": _safe_int(review_metrics.get("remaining_p0")),
+            "human_review_remaining_p1": _safe_int(review_metrics.get("remaining_p1")),
+            "human_review_status_counts": _safe_count_map(review_metrics.get("status_counts")),
+            "privacy_status": _privacy_status_code(payload),
+        }
+    )
+
+
+def _privacy_status_code(payload: dict[str, Any]) -> str | None:
+    privacy = payload.get("privacy")
+    if isinstance(privacy, dict):
+        status = privacy.get("status")
+        if isinstance(status, str) and _safe_metric_key(status):
+            return status
+        if privacy.get("aggregate_only") is True:
+            return "aggregate_public_safe"
+    status = payload.get("privacy_status")
+    if isinstance(status, str) and _safe_metric_key(status):
+        return status
+    return None
 
 
 def _processing_reuse_counts(payload: dict[str, Any]) -> dict[str, int]:
@@ -767,9 +850,28 @@ def _safe_count_map(value: Any) -> dict[str, int]:
     result: dict[str, int] = {}
     for key, count in value.items():
         parsed = _safe_int(count)
-        if isinstance(key, str) and parsed is not None:
+        if isinstance(key, str) and _safe_metric_key(key) and parsed is not None:
             result[key] = parsed
     return dict(sorted(result.items()))
+
+
+def _safe_nested_count_map(value: Any) -> dict[str, dict[str, int]]:
+    if not isinstance(value, dict):
+        return {}
+    result: dict[str, dict[str, int]] = {}
+    for key, counts in value.items():
+        nested = _safe_count_map(counts)
+        if isinstance(key, str) and _safe_metric_key(key) and nested:
+            result[key] = nested
+    return dict(sorted(result.items()))
+
+
+def _safe_metric_key(value: str) -> bool:
+    if not value or len(value) > 80:
+        return False
+    if len(value) >= 32 and all(char.lower() in "0123456789abcdef" for char in value):
+        return False
+    return all(char.isalnum() or char in {"_", "-"} for char in value)
 
 
 def _unsupported_code(name: str) -> str:

@@ -1383,9 +1383,58 @@ class ScanQcTest(unittest.TestCase):
         self.assertEqual(summary["summary"]["provider_capability_readiness"]["optional_package_missing_count"], 1)
         self.assertFalse(summary["summary"]["provider_capability_readiness"]["gpu_acceleration_configured"])
         self.assertEqual(summary["summary"]["provider_capability_readiness"]["privacy_status"], "aggregate_public_safe")
+        closure = summary["summary"]["human_review_closure"]
+        self.assertEqual(closure["total_findings"], 1)
+        self.assertEqual(closure["remaining_p0"], 0)
+        self.assertEqual(closure["remaining_p1"], 0)
+        self.assertEqual(closure["status_counts"]["fixed"], 1)
+        self.assertEqual(closure["severity_status_counts"]["P1"]["fixed"], 1)
+        self.assertTrue(closure["acceptance_passed"])
+        self.assertTrue(closure["acceptance_pass"])
         self.assertFalse(summary["privacy"]["contains_paths"])
         self.assertFalse(summary["privacy"]["contains_filenames"])
         self.assertIn("Workbench summary status: pass", stdout.getvalue())
+
+    def test_workbench_summary_promotes_review_acceptance_closure_without_private_values(self) -> None:
+        forbidden_private_values = [
+            "/Users/private/archive/page_0001.png",
+            "page_0001.png",
+            "reviewer note private",
+            "finding_id_123",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "OCR TEXT",
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            review = _review_summary_bundle_payload()
+            review["status_counts"]["/Users/private/archive/page_0001.png"] = 2
+            review["rule_status_counts"]["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"] = {"fixed": 1}
+            review["reviewer_note"] = " ".join(forbidden_private_values)
+            acceptance = _acceptance_bundle_payload()
+            acceptance["human_review"] = {
+                "remaining_p0": 0,
+                "remaining_p1": 0,
+                "total_findings": 1,
+                "status_counts": {"fixed": 1, "page_0001.png": 1},
+            }
+            _write_json(root / "review_summary.json", review)
+            _write_json(root / "acceptance_summary.json", acceptance)
+
+            summary = build_workbench_public_summary(files=[root / "review_summary.json", root / "acceptance_summary.json"])
+            raw = json.dumps(summary, ensure_ascii=False, sort_keys=True)
+
+        self.assertEqual(summary["status"], "fail")
+        self.assertIn("private_value_present", summary["blocking_counts_by_code"])
+        closure = summary["summary"]["human_review_closure"]
+        self.assertEqual(closure["total_findings"], 1)
+        self.assertEqual(closure["remaining_p0"], 0)
+        self.assertEqual(closure["remaining_p1"], 0)
+        self.assertEqual(closure["status_counts"], {"fixed": 1})
+        self.assertEqual(closure["rule_status_counts"], {"dpi_below_minimum": {"fixed": 1}})
+        self.assertTrue(closure["acceptance_passed"])
+        self.assertTrue(closure["acceptance_pass"])
+        for value in forbidden_private_values:
+            self.assertNotIn(value, raw)
 
     def test_workbench_summary_promotes_readiness_without_private_provider_values(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -6937,7 +6986,15 @@ def _acceptance_bundle_payload(*, real_artifact_metrics: bool = False) -> dict[s
         "status": "pass",
         "pass": True,
         "privacy": {"aggregate_only": True},
+        "blocking_item_count": 0,
+        "warning_item_count": 0,
         "blocking_items": [],
+        "human_review": {
+            "remaining_p0": 0,
+            "remaining_p1": 0,
+            "total_findings": 1,
+            "status_counts": {"fixed": 1},
+        },
         "privacy_self_check": {"provided": True, "passed": True, "status": "pass", "violation_count": 0},
     }
     if real_artifact_metrics:
@@ -7111,8 +7168,12 @@ def _review_summary_bundle_payload() -> dict[str, object]:
         "schema_version": "scan-qc.review-summary.v1",
         "status": "pass",
         "acceptance_passed": True,
+        "total_findings": 1,
         "remaining_p0": 0,
         "remaining_p1": 0,
+        "status_counts": {"fixed": 1},
+        "severity_counts": {"P1": 1},
+        "severity_status_counts": {"P1": {"fixed": 1}},
         "rule_status_counts": {"dpi_below_minimum": {"fixed": 1}},
         "privacy": {
             "aggregate_only": True,
