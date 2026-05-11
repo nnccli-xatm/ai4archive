@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import replace
+import json
 from pathlib import Path
 import sys
 
@@ -12,6 +13,12 @@ from .acceptance import ACCEPTANCE_JSON, write_acceptance_summary
 from .analysis_provider import AnalysisProviderError
 from .calibration import CALIBRATION_JSON, write_rules_calibration_summary
 from .capability_probe import CapabilityProbeConfig, run_capability_probe, write_capability_probe
+from .deep_inspection_provider import (
+    DeepInspectionProviderConfigError,
+    build_deep_inspection_provider_probe,
+    load_deep_inspection_provider_config,
+    write_deep_inspection_provider_probe,
+)
 from .handoff import write_delivery_handoff_manifest
 from .preflight import PreflightConfig, run_preflight, write_preflight_report
 from .processing import ProcessingOptions, process_images
@@ -158,6 +165,8 @@ def main(argv: list[str] | None = None) -> int:
         return _main_preflight(argv[1:])
     if argv and argv[0] == "capability-probe":
         return _main_capability_probe(argv[1:])
+    if argv and argv[0] == "deep-inspection-provider-probe":
+        return _main_deep_inspection_provider_probe(argv[1:])
     if argv and argv[0] == "review-export":
         return _main_review_export(argv[1:])
     if argv and argv[0] == "review-summary":
@@ -339,6 +348,36 @@ def _main_capability_probe(argv: list[str]) -> int:
     print(f"Model acceleration configured: {report['readiness']['model_acceleration_configured']}")
     print("Inference run: no")
     print("Privacy: aggregate-only; no image paths, filenames, hashes, OCR text, thumbnails, secrets, or row-level findings.")
+    return 0
+
+
+def _main_deep_inspection_provider_probe(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="archive-scan-qc deep-inspection-provider-probe",
+        description="Validate optional deep-inspection provider metadata without running inference.",
+    )
+    parser.add_argument(
+        "--provider-config",
+        default=None,
+        type=Path,
+        help="Optional JSON provider metadata config. No provider command is executed.",
+    )
+    parser.add_argument("--out", default=None, type=Path, help="Optional JSON output path or directory.")
+    args = parser.parse_args(argv)
+
+    try:
+        config = load_deep_inspection_provider_config(args.provider_config)
+        report = build_deep_inspection_provider_probe(config)
+    except (OSError, json.JSONDecodeError, DeepInspectionProviderConfigError) as exc:
+        parser.error(str(exc))
+    if args.out:
+        path = write_deep_inspection_provider_probe(report, args.out)
+        print(f"Deep-inspection provider probe report: {path}")
+    print(f"Configured: {str(report['configured']).lower()}")
+    print(f"Provider count: {report['provider_count']}")
+    print(f"Missing requirements: {len(report['missing_requirements'])}")
+    print("No inference run: true")
+    print("Privacy: aggregate-only; no images, OCR text, paths, hashes, thumbnails, filenames, or row-level evidence.")
     return 0
 
 

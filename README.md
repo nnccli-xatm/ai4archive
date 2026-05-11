@@ -1028,6 +1028,29 @@ private sample benchmarks locally only, and publish aggregate
 performance/statistical summaries without images, paths, thumbnails, or
 row-level processing manifests.
 
+### Deep-inspection provider scaffold
+
+Optional model/deep-inspection work must start with the privacy-safe scaffold,
+not with private image inference. The scaffold validates aggregate provider
+metadata and reports readiness without executing provider commands, opening
+images, transmitting data, or changing the CPU/Pillow scan and processing
+baseline.
+
+```bash
+archive-scan-qc deep-inspection-provider-probe \
+  --out /approved-work/project/deep-inspection-provider-probe
+```
+
+The output `deep_inspection_provider_probe.json` reports only aggregate fields
+such as `configured`, `provider_count`, `provider_names`,
+`missing_requirements`, `no_inference_run`, and
+`scan_processing_semantics`. It must not contain source images, OCR text, paths,
+filenames, hashes, thumbnails, row-level evidence, command lines, secrets, or
+provider environment values. Provider configs are disabled by default; do not
+enable any model provider in production until a separate reviewed implementation
+proves the same privacy boundary and explicitly documents any local-only
+inference behavior.
+
 ### Production acceptance gate
 
 Use `archive-scan-qc acceptance-summary` as the final aggregate-only gate before
