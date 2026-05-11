@@ -72,6 +72,10 @@ REQUIRED_STRINGS = {
     "Selected processed preview filename: none",
     "Clear Original Preview",
     "Clear Processed Preview",
+    "Fit to Panel",
+    "Reset Zoom",
+    "Preview zoom level",
+    "Preview display: fit to panel",
     "Original preview is excluded from review-decision export JSON.",
     "Processed preview is excluded from review-decision export JSON.",
     "URL.createObjectURL",
@@ -79,6 +83,8 @@ REQUIRED_STRINGS = {
     "beforeunload",
     "preview filename",
     "preview object URL",
+    "preview display mode",
+    "preview zoom level",
     "Human Review Decisions",
     "reviewTargetList",
     "Total Targets",
@@ -346,6 +352,9 @@ REQUIRED_PREVIEW_LIFECYCLE_STRINGS = {
     "clear function": "function clearPreviewState",
     "clear all function": "function clearAllPreviewState",
     "load function": "function loadPreviewFile",
+    "fit function": "function setPreviewFitMode",
+    "zoom function": "function setPreviewZoom",
+    "reset zoom function": "function resetPreviewZoom",
     "create object URL": "URL.createObjectURL(file)",
     "clear revocation": "URL.revokeObjectURL(previewState.objectUrl)",
     "replacement revocation": "if (previewState.objectUrl)",
@@ -355,6 +364,10 @@ REQUIRED_PREVIEW_LIFECYCLE_STRINGS = {
     "local tab copy": "browser tab only",
     "original slot": "originalPreviewFile",
     "processed slot": "processedPreviewFile",
+    "fit control": "fitPreviewButton",
+    "zoom control": "previewZoomSelect",
+    "zoom status": "previewZoomStatus",
+    "zoom class": "preview-zoom",
     "preview slot child width cap": ".preview-slot > *",
     "preview file input width cap": '.preview-slot input[type="file"]',
     "preview max width cap": "max-width: 100%",
@@ -373,6 +386,8 @@ FORBIDDEN_DEMO_FIXTURE_FIELDS = {
     "path",
     "preview_filename",
     "preview_object_url",
+    "preview_display_mode",
+    "preview_zoom_level",
     "reviewer_notes",
     "sha256",
     "thumbnail",
@@ -1493,6 +1508,27 @@ vm.runInContext(workbenchScript + `
   assert(revokedUrls.length === 0, "first processed preview unexpectedly revoked a URL");
   assert(els.previewSlots.processed.preview.innerHTML.includes("blob:synthetic-preview-private_scan_processed_alpha.webp-1"), "processed preview image did not render object URL locally");
 
+  assert(state.previewDisplay.mode === "fit", "preview display should default to fit mode");
+  assert(els.previewZoomStatus.textContent === "Preview display: fit to panel", "fit preview status did not render");
+  setPreviewZoom("1.5");
+  assert(state.previewDisplay.mode === "zoom", "zoom selection did not switch preview display mode");
+  assert(state.previewDisplay.zoom === 1.5, "zoom selection did not store the selected zoom level locally");
+  assert(els.previewZoomSelect.value === "1.5", "zoom selector did not reflect selected zoom level");
+  assert(els.previewZoomStatus.textContent === "Preview display: 150% zoom", "zoom preview status did not render selected percentage");
+  assert(els.previewSlots.original.preview.className.includes("preview-zoom"), "original preview did not receive shared zoom class");
+  assert(els.previewSlots.processed.preview.className.includes("preview-zoom"), "processed preview did not receive shared zoom class");
+  assert(els.previewSlots.original.preview.innerHTML.includes("--preview-zoom: 1.5"), "original preview did not receive shared zoom style");
+  assert(els.previewSlots.processed.preview.innerHTML.includes("--preview-zoom: 1.5"), "processed preview did not receive shared zoom style");
+  setPreviewFitMode();
+  assert(state.previewDisplay.mode === "fit", "fit control did not restore fit mode");
+  assert(!els.previewSlots.original.preview.className.includes("preview-zoom"), "fit mode left original preview zoom class active");
+  assert(!els.previewSlots.processed.preview.className.includes("preview-zoom"), "fit mode left processed preview zoom class active");
+  setPreviewZoom("2");
+  resetPreviewZoom();
+  assert(state.previewDisplay.mode === "fit", "reset zoom did not return to fit mode");
+  assert(state.previewDisplay.zoom === 1, "reset zoom did not restore 100 percent zoom state");
+  assert(els.previewZoomStatus.textContent === "Preview display: fit to panel", "reset zoom did not restore fit status");
+
   state.model = {{
     sourceType: "scan-report",
     metrics: {{ totalBatches: 0, totalFindings: 0, p0: 0, p1: 0, p2: 0 }},
@@ -1501,6 +1537,9 @@ vm.runInContext(workbenchScript + `
   }};
   const exportWhilePreviewLoaded = JSON.stringify(buildReviewSummary());
   assertPublicSafe(exportWhilePreviewLoaded, "review export");
+  assert(!exportWhilePreviewLoaded.includes("previewDisplay"), "review export leaked preview display state object");
+  assert(!exportWhilePreviewLoaded.includes("preview_display_mode"), "review export leaked preview display mode field");
+  assert(!exportWhilePreviewLoaded.includes("preview_zoom_level"), "review export leaked preview zoom level field");
 
   state.model = inferArtifact(cloneDemoPayload(DEMO_FIXTURES.find(item => item.id === "recognized-review-pass").payload));
   renderAggregateHandoff();

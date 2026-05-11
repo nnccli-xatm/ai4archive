@@ -435,6 +435,46 @@
       margin-bottom: 12px;
     }
 
+    .preview-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      justify-content: space-between;
+      min-width: 0;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+    }
+
+    .preview-toolbar-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      min-width: 0;
+    }
+
+    .preview-toolbar label {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      color: var(--muted);
+      min-width: 0;
+    }
+
+    .preview-toolbar select {
+      width: auto;
+      min-width: 108px;
+    }
+
+    .preview-zoom-status {
+      color: var(--muted);
+      overflow-wrap: anywhere;
+    }
+
     .preview-copy {
       border: 1px solid #cfe4ec;
       border-radius: 8px;
@@ -510,7 +550,7 @@
       border-style: solid;
       background: #111820;
       padding: 0;
-      overflow: hidden;
+      overflow: auto;
     }
 
     .preview img {
@@ -519,6 +559,12 @@
       max-height: 520px;
       object-fit: contain;
       background: #111820;
+    }
+
+    .preview.preview-zoom img {
+      width: calc(var(--preview-zoom, 1) * 100%);
+      max-width: none;
+      max-height: none;
     }
 
     .preview strong {
@@ -690,6 +736,23 @@
           <h2 id="preview-title">Image Previews</h2>
           <div class="preview-controls">
             <p class="preview-copy">Local image preview scaffold: an operator may choose separate original/source and processed/QC output images for this browser tab only. The workbench creates temporary object URLs, revokes each one on clear, reload, or new selection, and never uploads, scans, transforms, or derives image paths from report JSON.</p>
+            <div class="preview-toolbar" aria-label="Local preview display controls">
+              <div class="preview-toolbar-actions">
+                <button id="fitPreviewButton" class="secondary" type="button">Fit to Panel</button>
+                <button id="resetPreviewZoomButton" class="secondary" type="button">Reset Zoom</button>
+                <label>Zoom
+                  <select id="previewZoomSelect" aria-label="Preview zoom level">
+                    <option value="0.5">50%</option>
+                    <option value="0.75">75%</option>
+                    <option value="1">100%</option>
+                    <option value="1.25">125%</option>
+                    <option value="1.5">150%</option>
+                    <option value="2">200%</option>
+                  </select>
+                </label>
+              </div>
+              <span id="previewZoomStatus" class="preview-zoom-status" role="status" aria-live="polite">Preview display: fit to panel</span>
+            </div>
           </div>
           <div class="preview-slots">
             <div class="preview-slot" data-preview-slot="original">
@@ -776,6 +839,10 @@
           fileName: "",
           objectUrl: ""
         }
+      },
+      previewDisplay: {
+        mode: "fit",
+        zoom: 1
       }
     };
 
@@ -1222,6 +1289,10 @@
           privacyCopy: document.getElementById("processedPreviewPrivacyCopy")
         }
       },
+      fitPreviewButton: document.getElementById("fitPreviewButton"),
+      resetPreviewZoomButton: document.getElementById("resetPreviewZoomButton"),
+      previewZoomSelect: document.getElementById("previewZoomSelect"),
+      previewZoomStatus: document.getElementById("previewZoomStatus"),
       decisionSummary: document.getElementById("decisionSummary"),
       reviewTargetList: document.getElementById("reviewTargetList"),
       exportReview: document.getElementById("reviewExport"),
@@ -2439,8 +2510,9 @@
         <span>Selected ${slot} preview filename: ${escapeHtml(previewState.fileName || "none")}</span>
         <span>${label} preview is excluded from review-decision export JSON.</span>`;
       if (hasPreview) {
-        previewEls.preview.className = "preview has-image";
-        previewEls.preview.innerHTML = `<img src="${escapeHtml(previewState.objectUrl)}" alt="Operator-selected local ${slot} preview">`;
+        const zoomStyle = state.previewDisplay.mode === "zoom" ? ` style="--preview-zoom: ${state.previewDisplay.zoom}"` : "";
+        previewEls.preview.className = state.previewDisplay.mode === "zoom" ? "preview has-image preview-zoom" : "preview has-image";
+        previewEls.preview.innerHTML = `<img src="${escapeHtml(previewState.objectUrl)}" alt="Operator-selected local ${slot} preview"${zoomStyle}>`;
         return;
       }
       previewEls.preview.className = "preview";
@@ -2451,8 +2523,35 @@
         </div>`;
     }
 
+    function renderPreviewToolbar() {
+      const percent = Math.round(state.previewDisplay.zoom * 100);
+      els.previewZoomSelect.value = String(state.previewDisplay.zoom);
+      els.fitPreviewButton.disabled = state.previewDisplay.mode === "fit";
+      els.resetPreviewZoomButton.disabled = state.previewDisplay.mode === "fit" && state.previewDisplay.zoom === 1;
+      els.previewZoomStatus.textContent = state.previewDisplay.mode === "fit" ? "Preview display: fit to panel" : `Preview display: ${percent}% zoom`;
+    }
+
     function renderPreview() {
+      renderPreviewToolbar();
       Object.keys(state.previews).forEach(renderPreviewSlot);
+    }
+
+    function setPreviewFitMode() {
+      state.previewDisplay.mode = "fit";
+      renderPreview();
+    }
+
+    function setPreviewZoom(zoom) {
+      const normalized = Number(zoom);
+      state.previewDisplay.zoom = Number.isFinite(normalized) && normalized > 0 ? normalized : 1;
+      state.previewDisplay.mode = "zoom";
+      renderPreview();
+    }
+
+    function resetPreviewZoom() {
+      state.previewDisplay.zoom = 1;
+      state.previewDisplay.mode = "fit";
+      renderPreview();
     }
 
     function kv(label, value) {
@@ -2553,7 +2652,7 @@
         generated_in_browser: true,
         privacy: {
           summary_only: true,
-          excludes: ["private image content", "preview filename", "preview object URL", "OCR text", "hashes", "thumbnails", "absolute paths", "row-level private evidence"]
+          excludes: ["private image content", "preview filename", "preview object URL", "preview display mode", "preview zoom level", "OCR text", "hashes", "thumbnails", "absolute paths", "row-level private evidence"]
         },
         aggregate_counts: {
           total_batches: state.model.metrics.totalBatches,
@@ -2812,6 +2911,9 @@
     els.previewSlots.processed.file.addEventListener("change", event => loadPreviewFile("processed", event.target.files[0]));
     els.previewSlots.original.clear.addEventListener("click", () => clearPreviewState("original"));
     els.previewSlots.processed.clear.addEventListener("click", () => clearPreviewState("processed"));
+    els.fitPreviewButton.addEventListener("click", setPreviewFitMode);
+    els.resetPreviewZoomButton.addEventListener("click", resetPreviewZoom);
+    els.previewZoomSelect.addEventListener("change", event => setPreviewZoom(event.target.value));
     window.addEventListener("beforeunload", () => {
       Object.values(state.previews).forEach(previewState => {
         if (previewState.objectUrl) {
