@@ -46,6 +46,7 @@ PRODUCTION_VALIDATION_PATH = REPO_ROOT / "scripts" / "run_production_validation.
 OFFLINE_DEPENDENCY_CHECK_PATH = REPO_ROOT / "scripts" / "check_offline_dependencies.py"
 RELEASE_READINESS_PATH = REPO_ROOT / "scripts" / "release_readiness_summary.py"
 RELEASE_CANDIDATE_PATH = REPO_ROOT / "scripts" / "release_candidate_summary.py"
+FRONTEND_ISSUE_DRIVER_PATH = REPO_ROOT / "scripts" / "frontend_issue_driver.py"
 LOCAL_PROVIDER_EXAMPLE = REPO_ROOT / "examples" / "local_analysis_provider.py"
 
 
@@ -109,7 +110,115 @@ def _load_release_candidate_module():
     return module
 
 
+def _load_frontend_issue_driver_module():
+    spec = importlib.util.spec_from_file_location("frontend_issue_driver", FRONTEND_ISSUE_DRIVER_PATH)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Could not load frontend_issue_driver.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 class ScanQcTest(unittest.TestCase):
+    def test_frontend_issue_driver_loads_plan_and_rejects_duplicates(self) -> None:
+        module = _load_frontend_issue_driver_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            plan_path = Path(temp_dir) / "frontend-issues.json"
+            plan_path.write_text(
+                json.dumps(
+                    {
+                        "issues": [
+                            {
+                                "key": "home-page",
+                                "title": "Build home page",
+                                "description": "Implement the first viewport.",
+                                "validation": ["python -m unittest discover -s tests"],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            issues = module.load_plan(plan_path)
+
+            self.assertEqual(len(issues), 1)
+            self.assertEqual(issues[0].key, "home-page")
+            self.assertEqual(issues[0].validation, ("python -m unittest discover -s tests",))
+
+            plan_path.write_text(
+                json.dumps({"issues": [{"key": "dup", "title": "One"}, {"key": "dup", "title": "Two"}]}),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "duplicate issue key"):
+                module.load_plan(plan_path)
+
+    def test_frontend_issue_driver_creates_one_active_issue_at_a_time(self) -> None:
+        module = _load_frontend_issue_driver_module()
+
+        class FakeLinear:
+            def __init__(self) -> None:
+                self.created = []
+
+            def create_issue(self, *, team_id, state_id, issue):
+                self.created.append((team_id, state_id, issue.key))
+                return f"linear-{issue.key}"
+
+        plan = [
+            module.PlannedIssue(key="nav", title="Navigation", description=""),
+            module.PlannedIssue(key="report", title="Report page", description=""),
+        ]
+        linear = FakeLinear()
+
+        state = module.create_next_issue(
+            plan=plan,
+            state=module.DriverState(),
+            linear=linear,
+            team_id="team",
+            todo_state_id="todo",
+        )
+        unchanged = module.create_next_issue(
+            plan=plan,
+            state=state,
+            linear=linear,
+            team_id="team",
+            todo_state_id="todo",
+        )
+
+        self.assertEqual(state.active_key, "nav")
+        self.assertEqual(state.active_linear_id, "linear-nav")
+        self.assertEqual(state.next_index, 1)
+        self.assertEqual(unchanged, state)
+        self.assertEqual(linear.created, [("team", "todo", "nav")])
+
+    def test_frontend_issue_driver_complete_marks_done_after_validation(self) -> None:
+        module = _load_frontend_issue_driver_module()
+
+        class FakeLinear:
+            def __init__(self) -> None:
+                self.updated = []
+
+            def update_issue_state(self, *, issue_id, state_id):
+                self.updated.append((issue_id, state_id))
+
+        plan = [module.PlannedIssue(key="nav", title="Navigation", description="", validation=("echo ok",))]
+        state = module.DriverState(next_index=1, active_key="nav", active_linear_id="linear-nav")
+        linear = FakeLinear()
+
+        completed = module.complete_active_issue(
+            plan=plan,
+            state=state,
+            linear=linear,
+            done_state_id="done",
+            cwd=REPO_ROOT,
+            dry_run=False,
+        )
+
+        self.assertIsNone(completed.active_key)
+        self.assertEqual(completed.completed_keys, ("nav",))
+        self.assertEqual(linear.updated, [("linear-nav", "done")])
+
     def test_offline_dependency_check_passes_with_complete_wheelhouse(self) -> None:
         module = _load_offline_dependency_check_module()
         with tempfile.TemporaryDirectory(prefix="private-wheelhouse-") as temp_dir:
