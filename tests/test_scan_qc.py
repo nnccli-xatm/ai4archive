@@ -1624,6 +1624,39 @@ class ScanQcTest(unittest.TestCase):
         self.assertNotIn("/Users/private/archive", raw)
         self.assertNotIn("secret_scan.png", raw)
 
+    def test_deep_inspection_candidate_summary_counts_groups_only_processing_review(self) -> None:
+        processing_review_package = {
+            "groups": {
+                "failed": {
+                    "count": 2,
+                    "records": [
+                        {"source_relative_path": "private_failed_001.png"},
+                        {"output_relative_path": "derivatives/private_failed_002.png"},
+                    ],
+                },
+                "guardrail_warnings": {
+                    "count": 1,
+                    "records": [{"reviewer_notes": "restricted note for curator"}],
+                },
+            }
+        }
+
+        summary = build_deep_inspection_candidate_summary(processing_review_package=processing_review_package)
+        raw = json.dumps(summary, ensure_ascii=False)
+
+        self.assertEqual(summary["status"], "pass")
+        self.assertEqual(summary["candidate_total"], 3)
+        self.assertEqual(summary["candidates_by_reason"]["processing_review_group:failed"], 2)
+        self.assertEqual(summary["candidates_by_reason"]["processing_review_group:guardrail_warnings"], 1)
+        self.assertTrue(summary["privacy"]["aggregate_only"])
+        for forbidden in (
+            "private_failed_001.png",
+            "private_failed_002.png",
+            "derivatives/private_failed_002.png",
+            "restricted note",
+        ):
+            self.assertNotIn(forbidden, raw)
+
     def test_aggregate_baseline_privacy_check_blocks_paths_filenames_and_hashes(self) -> None:
         module = _load_aggregate_baseline_module()
         payload = {
