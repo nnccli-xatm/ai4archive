@@ -188,6 +188,7 @@
       border-radius: 8px;
       padding: 10px 12px;
       color: var(--muted);
+      overflow-wrap: anywhere;
     }
 
     .status-banner.error {
@@ -2938,16 +2939,16 @@
       return new Set(reviewTargets().map(target => decisionKey(target.scope, target.localId)));
     }
 
-    function reviewImportValidationCode(item) {
+    function reviewImportIgnoredFieldCode(item) {
       if (!item || typeof item !== "object" || Array.isArray(item)) {
-        return "invalid_decision_entry";
+        return "";
       }
       const keys = Object.keys(item);
       if (keys.some(key => REVIEW_IMPORT_PRIVATE_FIELDS.has(key))) {
-        return "private_field_omitted";
+        return "ignored_private_field";
       }
       if (keys.some(key => !REVIEW_IMPORT_ALLOWED_FIELDS.has(key))) {
-        return "unsupported_field_omitted";
+        return "ignored_extra_field";
       }
       return "";
     }
@@ -2988,16 +2989,17 @@
     function applyReviewDecisionSummary(payload) {
       const parsed = parseReviewDecisionSummary(payload);
       const targetKeys = importableTargetKeys();
+      const importedKeys = new Set();
       let imported = 0;
       let skipped = 0;
       const validationCodeCounts = {};
       parsed.decisions.forEach(item => {
-        const validationCode = reviewImportValidationCode(item);
-        if (validationCode) {
-          addValidationCode(validationCodeCounts, validationCode);
+        if (!item || typeof item !== "object" || Array.isArray(item)) {
+          addValidationCode(validationCodeCounts, "invalid_decision_entry");
           skipped += 1;
           return;
         }
+        addValidationCode(validationCodeCounts, reviewImportIgnoredFieldCode(item));
         const scope = text(item.scope, "");
         const localId = text(item.local_id, "");
         const decision = text(item.decision, "");
@@ -3012,6 +3014,12 @@
           skipped += 1;
           return;
         }
+        if (importedKeys.has(key)) {
+          addValidationCode(validationCodeCounts, "duplicate_decision");
+          skipped += 1;
+          return;
+        }
+        importedKeys.add(key);
         state.decisions.set(key, decision);
         imported += 1;
       });
