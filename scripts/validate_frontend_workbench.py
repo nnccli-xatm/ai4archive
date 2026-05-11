@@ -230,6 +230,17 @@ def main() -> int:
         for label, required in sorted(REQUIRED_AGGREGATE_FIELDS.items()):
             if required not in aggregate_block:
                 errors.append(f"aggregate summary builder missing {label}: {required!r}")
+        required_fragments = {
+            "review summary schema classification": 'schema.includes("review-summary")',
+            "review summary status-count classification": "payload.status_counts",
+            "acceptance summary schema classification": 'schema.includes("acceptance-summary")',
+            "acceptance summary pass classification": "payload.pass",
+            "acceptance human-review remaining p0": "payload.human_review && payload.human_review.remaining_p0",
+            "acceptance human-review remaining p1": "payload.human_review && payload.human_review.remaining_p1",
+        }
+        for label, fragment in sorted(required_fragments.items()):
+            if fragment not in aggregate_block:
+                errors.append(f"aggregate summary builder missing {label}: {fragment!r}")
         for label, field in sorted(FORBIDDEN_AGGREGATE_PAYLOAD_FIELDS.items()):
             pattern = rf"\bpayload\.{re.escape(field)}\b|\bpayload\[['\"]{re.escape(field)}['\"]\]"
             if re.search(pattern, aggregate_block):

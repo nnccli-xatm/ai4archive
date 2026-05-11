@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
   <title>Scan QC Workbench Prototype</title>
   <style>
     :root {
@@ -829,8 +830,8 @@
         checksPassed: firstNumber(payload.checks_passed, checks.passed),
         checksFailed: firstNumber(payload.checks_failed, checks.failed),
         blockingItemCount: firstNumber(payload.blocking_item_count, decision.blocking_item_count, Array.isArray(payload.blocking_items) ? payload.blocking_items.length : undefined),
-        remainingP0: firstNullableNumber(payload.remaining_p0, payload.remaining && payload.remaining.p0),
-        remainingP1: firstNullableNumber(payload.remaining_p1, payload.remaining && payload.remaining.p1),
+        remainingP0: firstNullableNumber(payload.remaining_p0, payload.remaining && payload.remaining.p0, payload.human_review && payload.human_review.remaining_p0),
+        remainingP1: firstNullableNumber(payload.remaining_p1, payload.remaining && payload.remaining.p1, payload.human_review && payload.human_review.remaining_p1),
         reviewStatusCounts: aggregateStatusCounts(payload.status_counts || (payload.human_review && payload.human_review.status_counts)),
         severityStatusCounts: aggregateNestedStatusCounts(payload.severity_status_counts),
         ruleCounts: aggregateStatusCounts(payload.rule_counts),
@@ -871,8 +872,8 @@
     }
 
     function aggregateArtifactType(schema, payload) {
-      if (schema.includes("review-summary") || payload.acceptance_passed !== undefined) return "Review summary";
-      if (schema.includes("acceptance-summary") || payload.blocking_items !== undefined || payload.human_review !== undefined) return "Acceptance summary";
+      if (schema.includes("review-summary") || payload.status_counts !== undefined || payload.severity_status_counts !== undefined || payload.rule_status_counts !== undefined) return "Review summary";
+      if (schema.includes("acceptance-summary") || payload.blocking_items !== undefined || payload.human_review !== undefined || payload.pass !== undefined) return "Acceptance summary";
       if (schema.includes("final-production-handoff-summary") || payload.ready_for_handoff !== undefined) return "Final production handoff summary";
       if (schema.includes("aggregate-evidence-bundle") || payload.artifact_presence !== undefined) return "Aggregate evidence bundle summary";
       if (schema.includes("release-candidate-summary") || payload.ready_for_release_candidate !== undefined) return "Release candidate summary";
