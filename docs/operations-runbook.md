@@ -267,6 +267,64 @@ failed batch IDs. They intentionally omit source filenames, source paths,
 hashes, thumbnails, row-level file metadata, and image content. Keep the run
 plan file itself local if its paths reveal private collection locations.
 
+## Static Workbench Validation
+
+Use `docs/frontend-workbench-prototype.html` for static review of existing
+public-safe aggregate artifacts. The workbench can load aggregate summaries such
+as `run_plan_summary.json`, `review_summary.json`,
+`acceptance_summary.json`, `aggregate_evidence_bundle_summary.json`,
+`final_production_handoff_summary.json`, and `release_candidate_summary.json`.
+It can also parse a scan report for local operator review, but scan reports are
+sensitive local evidence unless they have been separately reduced to a
+public-safe aggregate summary.
+
+The public-safe demo fixture gallery in the workbench is the first validation
+path for frontend-only changes. Open the HTML file locally, choose a fixture
+from the gallery, and select **Load Demo Fixture**. Use the fixtures to confirm
+the aggregate summary view, review-decision import/export, readiness checklist,
+compatibility diagnostics, and privacy diagnostics without loading private
+evidence.
+
+Run the static validator before publishing workbench changes:
+
+```bash
+python3 scripts/validate_frontend_workbench.py
+python3 scripts/validate_frontend_workbench.py --json
+python3 scripts/validate_frontend_workbench.py --json-out /tmp/frontend-workbench-validation.json
+python3 scripts/validate_frontend_workbench.py --self-test-json
+```
+
+Default mode prints the validated HTML path and exits non-zero on failures.
+`--json` prints a deterministic public-safe summary to stdout. `--json-out`
+writes the same summary to the requested file. `--self-test-json` checks both
+the current success summary and a synthetic missing-workbench failure summary
+so orchestration can depend on the JSON shape.
+
+The JSON summary is intentionally high level:
+
+- `status`, `error_count`, and `errors` report pass/fail state and diagnostic
+  messages.
+- `validated_html_path` is repo-relative when possible.
+- `counts` records how many required regions, strings, fields, fixture labels,
+  and forbidden-field checks the validator expected.
+- `coverage` reports whether aggregate summary, review/acceptance,
+  compatibility diagnostics, readiness checklist, demo fixtures, and executable
+  fixture checks were covered.
+- `fixture_groups` records the expected public-safe fixture coverage.
+- `privacy` reports whether forbidden pattern and forbidden field checks passed
+  for the page, review import/export summaries, aggregate payloads, and demo
+  fixtures.
+
+Keep workbench validation evidence public-safe. Do not include private
+filenames, paths, hashes, OCR text, thumbnails, image content, manifests,
+row-level findings, reviewer notes, derivative image references, or local
+preview object URLs in documentation, PRs, Linear comments, demo fixtures, JSON
+summaries, screenshots, or exported review summaries. For static frontend or
+validator-only changes, private-image validation on `puersai-hpc` is not
+required unless the change also modifies scan processing, production validation
+semantics, model inference, private-image behavior, or other runtime behavior
+that depends on private images.
+
 ## Interrupted Processing Recovery
 
 Use normal reruns when a deliberate full overwrite/reprocess is required. The
