@@ -12,6 +12,7 @@ from .evidence_bundle import EVIDENCE_BUNDLE_JSON, _privacy_failures
 
 FINAL_HANDOFF_JSON = "final_production_handoff_summary.json"
 RELEASE_CANDIDATE_JSON = "release_candidate_summary.json"
+DEEP_INSPECTION_CANDIDATE_JSON = "deep_inspection_candidate_summary.json"
 SCHEMA_VERSION = "scan-qc.final-production-handoff-summary.v1"
 
 _PASS_STATUSES = {"pass", "passed", "ok", "success"}
@@ -31,13 +32,19 @@ def write_final_handoff_summary(evidence_dir: Path, output_path: Path | None = N
 def build_final_handoff_summary(evidence_dir: Path, *, generated_at: str | None = None) -> dict[str, Any]:
     evidence = _load_aggregate_artifact(evidence_dir / EVIDENCE_BUNDLE_JSON, required=True)
     release_candidate = _load_aggregate_artifact(evidence_dir / RELEASE_CANDIDATE_JSON, required=False)
+    deep_inspection_candidate = _load_aggregate_artifact(evidence_dir / DEEP_INSPECTION_CANDIDATE_JSON, required=False)
 
     artifacts = {
         EVIDENCE_BUNDLE_JSON: _artifact_summary(evidence),
         RELEASE_CANDIDATE_JSON: _artifact_summary(release_candidate),
+        DEEP_INSPECTION_CANDIDATE_JSON: _artifact_summary(deep_inspection_candidate),
     }
-    blockers = _blocking_items(evidence, release_candidate)
-    checks_passed = _sum_int(evidence.payload, "checks_passed") + _release_candidate_check_passed(release_candidate)
+    blockers = _blocking_items(evidence, release_candidate, deep_inspection_candidate)
+    checks_passed = (
+        _sum_int(evidence.payload, "checks_passed")
+        + _release_candidate_check_passed(release_candidate)
+        + _deep_inspection_candidate_check_passed(deep_inspection_candidate)
+    )
     checks_failed = len(blockers)
     blocking_item_count = len(blockers)
     status = "pass" if blocking_item_count == 0 else "fail"
@@ -54,7 +61,7 @@ def build_final_handoff_summary(evidence_dir: Path, *, generated_at: str | None 
         "artifact_status_summary": artifacts,
         "privacy": {
             "aggregate_only": status == "pass",
-            "source_inputs": [EVIDENCE_BUNDLE_JSON, RELEASE_CANDIDATE_JSON],
+            "source_inputs": [EVIDENCE_BUNDLE_JSON, RELEASE_CANDIDATE_JSON, DEEP_INSPECTION_CANDIDATE_JSON],
             "private_indicators_found": any(item["code"].startswith("private_") or item["code"].startswith("privacy_") for item in blockers),
             "private_indicator_count": sum(
                 1 for item in blockers if item["code"].startswith("private_") or item["code"].startswith("privacy_")
@@ -127,10 +134,17 @@ def _load_aggregate_artifact(path: Path, *, required: bool) -> _LoadedArtifact:
         )
 
     blockers: list[dict[str, str]] = []
+    expected_schema_prefix = _expected_schema_prefix(name)
+    if expected_schema_prefix:
+        schema = payload.get("schema_version")
+        if not isinstance(schema, str) or not schema.startswith(expected_schema_prefix):
+            blockers.append(_blocker(name, "schema_version_unexpected"))
     for code in _privacy_failures(payload, raw):
         blockers.append(_blocker(name, code))
     reported_status = _normalized_status(payload)
-    if reported_status in _FAIL_STATUSES:
+    if name == DEEP_INSPECTION_CANDIDATE_JSON and reported_status in {"no_candidates", "no_inputs"}:
+        pass
+    elif reported_status in _FAIL_STATUSES:
         blockers.append(_blocker(name, "aggregate_status_failed"))
     elif reported_status not in _PASS_STATUSES:
         blockers.append(_blocker(name, "aggregate_status_unknown"))
@@ -139,6 +153,8 @@ def _load_aggregate_artifact(path: Path, *, required: bool) -> _LoadedArtifact:
             blockers.append(_blocker(name, item))
     if name == RELEASE_CANDIDATE_JSON and payload.get("ready_for_release_candidate") is False:
         blockers.append(_blocker(name, "release_candidate_not_ready"))
+    if name == DEEP_INSPECTION_CANDIDATE_JSON:
+        blockers.extend(_blocker(name, code) for code in _deep_inspection_candidate_blocker_codes(payload))
 
     return _LoadedArtifact(
         name=name,
@@ -163,7 +179,7 @@ def _aggregate_blocking_items(payload: dict[str, Any]) -> list[str]:
 
 def _artifact_summary(artifact: _LoadedArtifact) -> dict[str, Any]:
     payload = artifact.payload or {}
-    return {
+    summary = {
         "present": artifact.present,
         "required": artifact.required,
         "status": artifact.status if artifact.present else ("missing" if artifact.required else "optional_missing"),
@@ -172,6 +188,20 @@ def _artifact_summary(artifact: _LoadedArtifact) -> dict[str, Any]:
         "checks_failed": _sum_int(payload, "checks_failed") if payload else 0,
         "blocking_item_count": len(artifact.blockers),
     }
+    if artifact.name == DEEP_INSPECTION_CANDIDATE_JSON and payload:
+        summary.update(
+            {
+                "candidate_total": _safe_int(payload.get("candidate_total")),
+                "candidates_by_reason": _safe_count_map(payload.get("candidates_by_reason")),
+                "candidates_by_severity": _safe_count_map(payload.get("candidates_by_severity")),
+                "provider_configured": payload.get("provider_configured") if isinstance(payload.get("provider_configured"), bool) else None,
+                "provider_count": _safe_int(payload.get("provider_count")),
+                "checks_passed": _candidate_check_count(payload.get("checks_passed")),
+                "checks_failed": _candidate_check_count(payload.get("checks_failed")),
+                "no_inference_run": payload.get("no_inference_run") is True,
+            }
+        )
+    return summary
 
 
 def _blocking_items(*artifacts: _LoadedArtifact) -> list[dict[str, str]]:
@@ -192,12 +222,20 @@ def _release_candidate_check_passed(artifact: _LoadedArtifact) -> int:
     return 1
 
 
+def _deep_inspection_candidate_check_passed(artifact: _LoadedArtifact) -> int:
+    if not artifact.present or artifact.payload is None or artifact.blockers:
+        return 0
+    return 1
+
+
 def _sum_int(payload: dict[str, Any] | None, key: str) -> int:
     if not payload:
         return 0
     value = payload.get(key)
     if isinstance(value, int):
         return value
+    if isinstance(value, list) and key in {"checks_passed", "checks_failed"}:
+        return len(value)
     if key == "blocking_item_count":
         blocking_items = payload.get("blocking_items")
         if isinstance(blocking_items, list):
@@ -212,3 +250,41 @@ def _normalized_status(payload: dict[str, Any]) -> str | None:
 
 def _blocker(artifact: str, code: str) -> dict[str, str]:
     return {"artifact": artifact, "code": code}
+
+
+def _expected_schema_prefix(name: str) -> str | None:
+    if name == DEEP_INSPECTION_CANDIDATE_JSON:
+        return "scan-qc.deep-inspection-candidates."
+    return None
+
+
+def _deep_inspection_candidate_blocker_codes(payload: dict[str, Any]) -> list[str]:
+    codes: list[str] = []
+    checks_failed = payload.get("checks_failed")
+    if not isinstance(checks_failed, list):
+        codes.append("checks_failed_not_list")
+    elif checks_failed:
+        codes.append("checks_failed_present")
+    if payload.get("privacy_status") != "aggregate_public_safe":
+        codes.append("privacy_status_not_aggregate_public_safe")
+    if payload.get("no_inference_run") is not True:
+        codes.append("inference_run_not_allowed")
+    return sorted(set(codes))
+
+
+def _safe_int(value: Any) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
+
+
+def _safe_count_map(value: Any) -> dict[str, int]:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        str(key): count
+        for key, count in sorted(value.items())
+        if isinstance(key, str) and isinstance(count, int) and not isinstance(count, bool) and count >= 0
+    }
+
+
+def _candidate_check_count(value: Any) -> int:
+    return len(value) if isinstance(value, list) else 0
