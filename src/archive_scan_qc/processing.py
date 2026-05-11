@@ -21,6 +21,14 @@ from PIL import Image, ImageChops, ImageOps, ImageStat, UnidentifiedImageError
 from .concurrency import resolve_worker_count, worker_metadata
 
 
+def _load_numpy() -> Any | None:
+    try:
+        import numpy as np  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    return np
+
+
 @dataclass(frozen=True)
 class ProcessingOptions:
     auto_crop: bool = False
@@ -1183,6 +1191,65 @@ def _despeckle_isolated_pixels(image: Image.Image) -> tuple[Image.Image, int]:
 
 
 def _despeckle_candidate_points(dark_mask: Image.Image) -> list[tuple[int, int]]:
+    numpy_candidates = _despeckle_candidate_points_numpy(dark_mask)
+    if numpy_candidates is not None:
+        return numpy_candidates
+    return _despeckle_candidate_points_fallback(dark_mask)
+
+
+def _despeckle_candidate_points_numpy(dark_mask: Image.Image) -> list[tuple[int, int]] | None:
+    np = _load_numpy()
+    if np is None:
+        return None
+
+    width, height = dark_mask.size
+    if width < 3 or height < 3:
+        return []
+
+    candidate_bbox = dark_mask.getbbox()
+    if not candidate_bbox:
+        return []
+
+    left, top, right, bottom = candidate_bbox
+    if left >= width - 1 or top >= height - 1 or right <= 1 or bottom <= 1:
+        return []
+
+    try:
+        crop = np.asarray(dark_mask.crop(candidate_bbox), dtype=np.uint8) > 0
+        padded = np.pad(crop.astype(np.uint8), 1, mode="constant", constant_values=0)
+    except (TypeError, ValueError):
+        return None
+
+    neighbor_counts = (
+        padded[:-2, :-2]
+        + padded[:-2, 1:-1]
+        + padded[:-2, 2:]
+        + padded[1:-1, :-2]
+        + padded[1:-1, 2:]
+        + padded[2:, :-2]
+        + padded[2:, 1:-1]
+        + padded[2:, 2:]
+    )
+    candidate_mask = crop & (neighbor_counts <= 1)
+
+    crop_height, crop_width = crop.shape
+    if left == 0:
+        candidate_mask[:, 0] = False
+    if top == 0:
+        candidate_mask[0, :] = False
+    if right == width:
+        candidate_mask[:, crop_width - 1] = False
+    if bottom == height:
+        candidate_mask[crop_height - 1, :] = False
+
+    local_y_values, local_x_values = np.nonzero(candidate_mask)
+    return [
+        (left + int(local_x), top + int(local_y))
+        for local_y, local_x in zip(local_y_values, local_x_values)
+    ]
+
+
+def _despeckle_candidate_points_fallback(dark_mask: Image.Image) -> list[tuple[int, int]]:
     width, height = dark_mask.size
     if width < 3 or height < 3:
         return []
