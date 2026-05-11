@@ -754,6 +754,100 @@ class ScanQcTest(unittest.TestCase):
         self.assertNotIn("SECRET123", raw)
         self.assertNotIn("page_0001.png", raw)
 
+    def test_synthetic_final_handoff_chain_smoke_validates_go_no_go_shape(self) -> None:
+        forbidden_private_values = [
+            "/Users/private/archive",
+            "private-root",
+            "page_0001.png",
+            "row_report.csv",
+            "processing_manifest.json",
+            "ocr text",
+            "thumbnail-preview-object",
+            "data:image/png",
+            "blob:http://localhost/preview",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "SECRET123",
+            "derivative/page_0001.png",
+        ]
+        blocked_release = _release_candidate_bundle_payload()
+        blocked_release["status"] = "fail"
+        blocked_release["ready_for_release_candidate"] = False
+        blocked_release["decision"] = {"blocking_item_count": 1}
+
+        pass_cases = [
+            (
+                "ready",
+                _aggregate_evidence_bundle_payload(status="pass"),
+                _release_candidate_bundle_payload(),
+                0,
+                "pass",
+                True,
+            ),
+            (
+                "blocked",
+                _aggregate_evidence_bundle_payload(status="fail", blocking_codes=["artifact_status_failed"]),
+                blocked_release,
+                1,
+                "fail",
+                False,
+            ),
+        ]
+
+        for case_name, evidence_payload, release_payload, expected_exit, expected_status, expected_ready in pass_cases:
+            with self.subTest(case=case_name), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                if expected_status == "fail":
+                    evidence_payload["operator_warning"] = " ".join(forbidden_private_values)
+                _write_json(root / "aggregate_evidence_bundle_summary.json", evidence_payload)
+                _write_json(root / "release_candidate_summary.json", release_payload)
+
+                stdout = io.StringIO()
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = main(["final-handoff-summary", "--evidence-dir", str(root), "--out", str(root / "handoff.json")])
+                raw = (root / "handoff.json").read_text(encoding="utf-8")
+                summary = json.loads(raw)
+
+            self.assertEqual(exit_code, expected_exit)
+            self.assertEqual(summary["status"], expected_status)
+            self.assertEqual(summary["ready_for_handoff"], expected_ready)
+            self.assertIsInstance(summary["checks_passed"], int)
+            self.assertIsInstance(summary["checks_failed"], int)
+            self.assertEqual(summary["blocking_item_count"], len(summary["blocking_items"]))
+            self.assertIn("aggregate_evidence_bundle_summary.json", summary["artifact_status_summary"])
+            self.assertIn("release_candidate_summary.json", summary["artifact_status_summary"])
+            self.assertTrue(summary["privacy"]["source_inputs"])
+            self.assertFalse(summary["privacy"]["contains_paths"])
+            self.assertFalse(summary["privacy"]["contains_filenames"])
+            self.assertFalse(summary["privacy"]["contains_hashes"])
+            self.assertFalse(summary["privacy"]["contains_ocr_text"])
+            self.assertFalse(summary["privacy"]["contains_thumbnails"])
+            self.assertFalse(summary["privacy"]["contains_image_content"])
+            self.assertFalse(summary["privacy"]["contains_row_level_findings"])
+            self.assertIn(f"Handoff status: {expected_status}", stdout.getvalue())
+            for value in forbidden_private_values:
+                self.assertNotIn(value, raw)
+            if expected_status == "fail":
+                self.assertIn("private_value_present", {item["code"] for item in summary["blocking_items"]})
+
+    def test_synthetic_final_handoff_chain_smoke_blocks_missing_required_input_by_code_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_json(root / "release_candidate_summary.json", _release_candidate_bundle_payload())
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(["final-handoff-summary", "--evidence-dir", str(root), "--out", str(root / "handoff.json")])
+            summary = json.loads((root / "handoff.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(summary["status"], "fail")
+        self.assertFalse(summary["ready_for_handoff"])
+        self.assertEqual(summary["blocking_item_count"], 1)
+        self.assertEqual(summary["blocking_items"], [{"artifact": "aggregate_evidence_bundle_summary.json", "code": "required_aggregate_input_missing"}])
+        self.assertEqual(summary["artifact_status_summary"]["aggregate_evidence_bundle_summary.json"]["status"], "missing")
+        self.assertEqual(summary["artifact_status_summary"]["release_candidate_summary.json"]["status"], "pass")
+        self.assertIn("Blocking items: 1", stdout.getvalue())
+
     def test_version_output_matches_package_version(self) -> None:
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout), self.assertRaises(SystemExit) as raised:
