@@ -3068,6 +3068,34 @@ class ScanQcTest(unittest.TestCase):
         self.assertNotIn("preview_filename", raw)
         self.assertNotIn("sha256", raw)
 
+    def test_review_decisions_verify_blocks_sensitive_field_name_variants_by_code_only(self) -> None:
+        fixture = _review_decision_export_fixture(decisions=("accepted_issue",))
+        fixture["decisions"][0]["image_path"] = "/private/archive/card-001.png"
+        fixture["decisions"][0]["file_name"] = "card-001.png"
+        fixture["decisions"][0]["sourceImageObjectUrl"] = "blob:https://local.invalid/private"
+        fixture["decisions"][0]["ocrText"] = "private OCR text"
+        fixture["decisions"][0]["reviewer_note"] = "private reviewer note"
+
+        result = build_review_decision_verification_summary(fixture)
+        raw = json.dumps(result, ensure_ascii=False)
+
+        self.assertEqual(result["status"], "blocked")
+        self.assertFalse(result["privacy"]["aggregate_only"])
+        self.assertGreater(result["blocking_counts_by_code"]["privacy_sensitive_field"], 0)
+        for sensitive_fragment in (
+            "image_path",
+            "file_name",
+            "sourceImageObjectUrl",
+            "ocrText",
+            "reviewer_note",
+            "/private/archive/card-001.png",
+            "card-001.png",
+            "blob:https://local.invalid/private",
+            "private OCR text",
+            "private reviewer note",
+        ):
+            self.assertNotIn(sensitive_fragment, raw)
+
     def test_review_decisions_verify_cli_smoke_writes_aggregate_only_output(self) -> None:
         with tempfile.TemporaryDirectory(prefix="review-decisions-") as temp_dir:
             root = Path(temp_dir)
