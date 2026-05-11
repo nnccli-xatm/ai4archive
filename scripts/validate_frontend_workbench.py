@@ -101,6 +101,14 @@ REQUIRED_STRINGS = {
     "Showing 0 of 0 targets",
     "Showing ${visibleTargets.length} of ${targets.length} targets",
     "No review targets match the current filters.",
+    "Filtered bulk review decision actions",
+    "Bulk visible decision",
+    "Apply to Visible Targets",
+    "No filtered bulk decision applied.",
+    "Bulk actions update only visible targets in this browser tab.",
+    "Visible targets:",
+    "Updated targets:",
+    "applyBulkVisibleReviewDecision",
     "Severity",
     "Status",
     "Decision State",
@@ -1834,14 +1842,36 @@ vm.runInContext(workbenchScript + `
   assert(els.reviewTargetList.innerHTML.includes("PR0001"), "status filter hid matching failed target");
   assert(!els.reviewTargetList.innerHTML.includes("PR0002"), "status filter left non-matching target visible");
   assert(buildReviewSummary().aggregate_counts.review_completion.total === 6, "filter changed export completion total");
+  const bulkFailedResult = applyBulkVisibleReviewDecision("needs_rescan");
+  assert(bulkFailedResult.visible === 1, "bulk status-filter action did not report the visible target count");
+  assert(bulkFailedResult.updated === 1, "bulk status-filter action did not report the updated target count");
+  assert(getDecision("processing_review", "PR0001") === "needs_rescan", "bulk action did not update visible failed target");
+  assert(getDecision("processing_review", "PR0002") === "pending", "bulk action changed hidden target");
+  assert(els.bulkReviewStatus.textContent.includes("Visible targets: 1. Updated targets: 1."), "bulk action status did not render aggregate counts only");
+  assertPublicSafe(els.bulkReviewStatus.textContent, "bulk action status");
+  assert(buildReviewSummary().aggregate_counts.review_completion.reviewed === 1, "bulk action did not update reviewed completion count");
+  assert(buildReviewSummary().aggregate_counts.review_completion.pending === 5, "bulk action did not update pending completion count");
+  assert(buildReviewSummary().review_counts.needs_rescan === 1, "bulk action did not update decision counts");
+  assert(buildReviewSummary().decisions.length === 6, "bulk action removed hidden targets from export");
+  assertPublicSafe(JSON.stringify(buildReviewSummary()), "bulk action review export summary");
   setReviewFilter("status", "all");
   setReviewFilter("severity", "P2");
   assert(els.reviewFilterCount.textContent === "Showing 3 of 6 targets", "severity filter did not update visible/total count");
+  const bulkP2Result = applyBulkVisibleReviewDecision("blocked");
+  assert(bulkP2Result.visible === 3, "bulk severity-filter action did not report visible target count");
+  assert(bulkP2Result.updated === 3, "bulk severity-filter action did not report updated target count");
+  assert(getDecision("processing_review", "PR0001") === "needs_rescan", "bulk severity action changed hidden failed target");
+  assert(buildReviewSummary().review_counts.blocked === 3, "bulk severity action did not update blocked count");
+  assert(buildReviewSummary().aggregate_counts.review_completion.reviewed === 4, "bulk severity action did not update aggregate reviewed count");
   setReviewFilter("scope", "batch");
   assert(els.reviewFilterCount.textContent === "Showing 0 of 6 targets", "combined filters did not update visible/total count");
   assert(els.reviewTargetList.innerHTML.includes("No review targets match the current filters."), "empty filtered state did not render");
-  setReviewFilter("scope", "all");
-  setReviewFilter("severity", "all");
+  const emptyBulkResult = applyBulkVisibleReviewDecision("accepted_issue");
+  assert(emptyBulkResult.visible === 0, "empty filtered bulk action reported visible targets");
+  assert(emptyBulkResult.updated === 0, "empty filtered bulk action reported updated targets");
+  assert(buildReviewSummary().aggregate_counts.review_completion.reviewed === 4, "empty filtered bulk action changed completion count");
+  resetReviewState();
+  renderReview();
   state.decisions.set(decisionKey("processing_review", "PR0001"), "accepted_issue");
   state.decisions.set(decisionKey("processing_review", "PR0002"), "false_positive");
   renderReview();
