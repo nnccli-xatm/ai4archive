@@ -1383,6 +1383,7 @@
             "aggregate_evidence_bundle_summary.json": { present: true, required: true, status: "pass", reported_status: "current", privacy_status: "public-safe" },
             "release_candidate_summary.json": { present: true, required: true, status: "pass", reported_status: "current", privacy_status: "public-safe" },
             "deep_inspection_candidate_summary.json": { present: true, required: false, status: "pass", reported_status: "pass", candidate_total: 3, candidates_by_reason: { processing_review_status_failed: 1, guardrail_warning: 2 }, candidates_by_severity: { P1: 1, P2: 2 }, provider_configured: false, provider_count: 0, checks_passed: 5, checks_failed: 0, privacy_status: "aggregate_public_safe", no_inference_run: true },
+            "review_decision_verification_summary.json": { present: true, required: false, status: "pass", reported_status: "pass", checks_passed: 3, checks_failed: 0, blocking_count: 0, warning_count: 1, decision_summary: { total_decisions: 19, accepted: 11, rejected: 5, rework: 2, pending: 1 }, blocking_counts_by_code: {}, warning_counts_by_code: { ignored_extra_decision_field: 1 }, privacy_status: "pass" },
             "final_production_handoff_summary.json": { present: true, required: true, status: "pass", reported_status: "current", privacy_status: "public-safe" }
           },
           privacy: PUBLIC_SAFE_PRIVACY,
@@ -2233,44 +2234,56 @@
     }
 
     function aggregateReviewDecisionVerificationSummary(payload) {
-      const schema = String(payload.schema_version || "");
-      if (!schema.includes("review-decision-verification-summary")) return null;
-      const summary = payload.summary && typeof payload.summary === "object" && !Array.isArray(payload.summary) ? payload.summary : {};
-      const decisionSummary = payload.decision_summary && typeof payload.decision_summary === "object" && !Array.isArray(payload.decision_summary) ? payload.decision_summary : {};
-      const decisionCounts = payload.decision_counts && typeof payload.decision_counts === "object" && !Array.isArray(payload.decision_counts) ? payload.decision_counts : {};
+      const source = reviewDecisionVerificationSource(payload);
+      if (!source) return null;
+      const summary = source.summary && typeof source.summary === "object" && !Array.isArray(source.summary) ? source.summary : {};
+      const decisionSummary = source.decision_summary && typeof source.decision_summary === "object" && !Array.isArray(source.decision_summary) ? source.decision_summary : {};
+      const decisionCounts = source.decision_counts && typeof source.decision_counts === "object" && !Array.isArray(source.decision_counts) ? source.decision_counts : {};
       const nestedDecisionCounts = decisionSummary.decision_counts && typeof decisionSummary.decision_counts === "object" && !Array.isArray(decisionSummary.decision_counts) ? decisionSummary.decision_counts : {};
-      const completion = payload.completion && typeof payload.completion === "object" && !Array.isArray(payload.completion) ? payload.completion : {};
-      const checks = payload.checks && typeof payload.checks === "object" && !Array.isArray(payload.checks) ? payload.checks : {};
-      const privacy = payload.privacy || {};
-      const totalDecisions = firstNumber(payload.total_decisions, summary.total_decisions, decisionSummary.total_decisions, decisionCounts.total, nestedDecisionCounts.total, completion.total_decisions);
-      const pendingCount = firstNumber(payload.pending_count, summary.pending_count, decisionSummary.pending, decisionSummary.pending_count, decisionCounts.pending, nestedDecisionCounts.pending, completion.pending_count);
-      const acceptedCount = firstNumber(payload.accepted_count, summary.accepted_count, decisionSummary.accepted, decisionSummary.accepted_count, decisionCounts.accepted, decisionCounts.accept, decisionCounts.accepted_issue, nestedDecisionCounts.accepted_issue);
-      const rejectedCount = firstNumber(payload.rejected_count, summary.rejected_count, decisionSummary.rejected, decisionSummary.rejected_count, decisionCounts.rejected, decisionCounts.reject, decisionCounts.false_positive, nestedDecisionCounts.false_positive);
+      const completion = source.completion && typeof source.completion === "object" && !Array.isArray(source.completion) ? source.completion : {};
+      const checks = source.checks && typeof source.checks === "object" && !Array.isArray(source.checks) ? source.checks : {};
+      const privacy = source.privacy || {};
+      const totalDecisions = firstNumber(source.total_decisions, summary.total_decisions, decisionSummary.total_decisions, decisionCounts.total, nestedDecisionCounts.total, completion.total_decisions);
+      const pendingCount = firstNumber(source.pending_count, summary.pending_count, decisionSummary.pending, decisionSummary.pending_count, decisionCounts.pending, nestedDecisionCounts.pending, completion.pending_count);
+      const acceptedCount = firstNumber(source.accepted_count, summary.accepted_count, decisionSummary.accepted, decisionSummary.accepted_count, decisionCounts.accepted, decisionCounts.accept, decisionCounts.accepted_issue, nestedDecisionCounts.accepted_issue);
+      const rejectedCount = firstNumber(source.rejected_count, summary.rejected_count, decisionSummary.rejected, decisionSummary.rejected_count, decisionCounts.rejected, decisionCounts.reject, decisionCounts.false_positive, nestedDecisionCounts.false_positive);
       const nestedReworkCount = firstNumber(
         nestedDecisionCounts.rework,
         nestedDecisionCounts.needs_rework,
         number(nestedDecisionCounts.fixed_externally) + number(nestedDecisionCounts.needs_rescan) + number(nestedDecisionCounts.blocked)
       );
-      const reworkCount = firstNumber(payload.rework_count, summary.rework_count, decisionSummary.rework, decisionSummary.rework_count, decisionCounts.rework, decisionCounts.needs_rework, nestedReworkCount);
-      const complete = firstBoolean(payload.complete, payload.review_complete, summary.complete, decisionSummary.complete, completion.complete);
-      const completionStatus = text(payload.completion_status || summary.completion_status || decisionSummary.completion_status || completion.status, complete === null ? "Not provided" : complete ? "complete" : "not complete");
+      const reworkCount = firstNumber(source.rework_count, summary.rework_count, decisionSummary.rework, decisionSummary.rework_count, decisionCounts.rework, decisionCounts.needs_rework, nestedReworkCount);
+      const complete = firstBoolean(source.complete, source.review_complete, summary.complete, decisionSummary.complete, completion.complete);
+      const completionStatus = text(source.completion_status || summary.completion_status || decisionSummary.completion_status || completion.status, complete === null ? "Not provided" : complete ? "complete" : "not complete");
       return {
         recognized: true,
-        status: normalizeAggregateStatus(payload.status || summary.status || (completionStatus === "complete" ? "pass" : completionStatus === "incomplete" ? "blocked" : complete === true && pendingCount === 0 ? "pass" : complete === false ? "blocked" : "")),
-        checksPassed: firstNumber(payload.checks_passed, summary.checks_passed, checks.passed),
-        checksFailed: firstNumber(payload.checks_failed, summary.checks_failed, checks.failed),
+        status: normalizeAggregateStatus(source.status || source.reported_status || summary.status || (completionStatus === "complete" ? "pass" : completionStatus === "incomplete" ? "blocked" : complete === true && pendingCount === 0 ? "pass" : complete === false ? "blocked" : "")),
+        checksPassed: firstNumber(source.checks_passed, summary.checks_passed, checks.passed),
+        checksFailed: firstNumber(source.checks_failed, summary.checks_failed, checks.failed),
         totalDecisions,
         pendingCount,
         acceptedCount,
         rejectedCount,
         reworkCount,
         completionStatus,
-        blockingCount: firstNumber(payload.blocking_item_count, payload.blocking_count, summary.blocking_item_count, summary.blocking_count),
-        warningCount: firstNumber(payload.warning_item_count, payload.warning_count, summary.warning_item_count, summary.warning_count),
-        blockingCodeCounts: aggregateCodeCounts(payload.blocking_counts_by_code || payload.blocking_item_counts_by_code || summary.blocking_counts_by_code || summary.blocking_item_counts_by_code),
-        warningCodeCounts: aggregateCodeCounts(payload.warning_counts_by_code || summary.warning_counts_by_code),
-        privacyStatus: text(payload.privacy_status || summary.privacy_status || privacy.status, aggregatePrivacyStatusLabel(aggregatePrivacy(payload)))
+        blockingCount: firstNumber(source.blocking_item_count, source.blocking_count, summary.blocking_item_count, summary.blocking_count),
+        warningCount: firstNumber(source.warning_item_count, source.warning_count, summary.warning_item_count, summary.warning_count),
+        blockingCodeCounts: aggregateCodeCounts(source.blocking_counts_by_code || source.blocking_item_counts_by_code || summary.blocking_counts_by_code || summary.blocking_item_counts_by_code),
+        warningCodeCounts: aggregateCodeCounts(source.warning_counts_by_code || summary.warning_counts_by_code),
+        privacyStatus: text(source.privacy_status || summary.privacy_status || privacy.status, aggregatePrivacyStatusLabel(aggregatePrivacy(source)))
       };
+    }
+
+    function reviewDecisionVerificationSource(payload) {
+      const schema = String(payload.schema_version || "");
+      if (schema.includes("review-decision-verification-summary")) return payload;
+      const containers = [payload.artifacts, payload.artifact_status_summary, payload.artifact_presence];
+      for (const container of containers) {
+        if (!container || typeof container !== "object" || Array.isArray(container)) continue;
+        const candidate = container["review_decision_verification_summary.json"];
+        if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) return candidate;
+      }
+      return null;
     }
 
     function aggregateValidationIndexSummary(payload) {
