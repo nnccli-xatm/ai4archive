@@ -35,6 +35,11 @@ KNOWN_PUBLIC_SAFE_ARTIFACTS = (
         "scan-qc.aggregate-evidence-bundle.",
     ),
     KnownAggregateArtifact(
+        "review_decision_verification_summary.json",
+        "review_decision_verification",
+        "scan-qc.review-decision-verification-summary.",
+    ),
+    KnownAggregateArtifact(
         "final_production_handoff_summary.json",
         "final_production_handoff",
         "scan-qc.final-production-handoff-summary.",
@@ -230,6 +235,7 @@ def _artifact_record(
     if checks_passed == 0 and nested_failed == 0 and checks_failed == 0:
         checks_passed = 1
     checks_failed += nested_failed
+    counts = _safe_artifact_counts(payload)
 
     base.update(
         {
@@ -237,6 +243,7 @@ def _artifact_record(
             "status": "pass" if checks_failed == 0 else "fail",
             "checks_passed": checks_passed,
             "checks_failed": checks_failed,
+            "counts": counts,
             "privacy": {
                 "status": "pass" if not privacy_codes else "fail",
                 "failure_count": len(privacy_codes),
@@ -244,6 +251,9 @@ def _artifact_record(
             },
         }
     )
+    nested_review_decision = _nested_artifact_status(payload, "review_decision_verification_summary.json")
+    if nested_review_decision:
+        base["review_decision_verification"] = nested_review_decision
     return base, blockers
 
 
@@ -257,6 +267,7 @@ def _privacy_codes(payload: dict[str, Any], raw: str) -> list[str]:
         "private_prompt_present": ("prompt",),
         "private_raw_model_output_present": ("raw_model_output", "model_output"),
         "private_manifest_reference_present": ("processing_manifest", "manifest.csv", "row_report.csv"),
+        "private_source_metadata_present": ("source_type", "scan-qc-review-decisions.local.v1"),
     }
     for code, needles in extra_patterns.items():
         if any(needle in raw_lower for needle in needles):
@@ -284,6 +295,57 @@ def _extract_int(payload: Any, key: str) -> int:
             if found:
                 return found
     return 0
+
+
+def _safe_artifact_counts(payload: dict[str, Any]) -> dict[str, Any]:
+    counts: dict[str, Any] = {}
+    for key in ("blocking_count", "warning_count", "blocking_item_count"):
+        value = payload.get(key)
+        if isinstance(value, int) and not isinstance(value, bool):
+            counts[key] = max(0, value)
+    for key in ("blocking_counts_by_code", "warning_counts_by_code"):
+        value = payload.get(key)
+        if isinstance(value, dict):
+            counts[key] = {
+                str(code): max(0, count)
+                for code, count in sorted(value.items())
+                if isinstance(count, int) and not isinstance(count, bool)
+            }
+    return counts
+
+
+def _nested_artifact_status(payload: dict[str, Any], artifact_name: str) -> dict[str, Any]:
+    for container_name in ("artifact_status_summary", "artifacts", "artifact_presence"):
+        container = payload.get(container_name)
+        if not isinstance(container, dict):
+            continue
+        item = container.get(artifact_name)
+        if not isinstance(item, dict):
+            continue
+        summary: dict[str, Any] = {}
+        for key in ("present", "required"):
+            value = item.get(key)
+            if isinstance(value, bool):
+                summary[key] = value
+        for key in ("status", "reported_status", "privacy_status"):
+            value = item.get(key)
+            if isinstance(value, str):
+                summary[key] = value
+        for key in ("checks_passed", "checks_failed", "blocking_count", "warning_count"):
+            value = item.get(key)
+            if isinstance(value, int) and not isinstance(value, bool):
+                summary[key] = max(0, value)
+        for key in ("blocking_counts_by_code", "warning_counts_by_code"):
+            value = item.get(key)
+            if isinstance(value, dict):
+                summary[key] = {
+                    str(code): max(0, count)
+                    for code, count in sorted(value.items())
+                    if isinstance(count, int) and not isinstance(count, bool)
+                }
+        if summary:
+            return summary
+    return {}
 
 
 def _blocker(expected: KnownAggregateArtifact, code: str) -> dict[str, str]:
