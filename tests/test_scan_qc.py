@@ -1375,9 +1375,36 @@ class ScanQcTest(unittest.TestCase):
         self.assertEqual(summary["artifact_presence"]["final_production_handoff_summary.json"]["status"], "pass")
         self.assertEqual(summary["workflow_state"]["handoff_status"], "pass")
         self.assertEqual(summary["artifacts"]["deep_inspection_candidate_summary.json"]["metrics"]["candidate_total"], 3)
+        self.assertEqual(summary["summary"]["deep_inspection_readiness"]["candidate_total"], 3)
+        self.assertEqual(summary["summary"]["deep_inspection_readiness"]["candidates_by_severity"]["P1"], 1)
+        self.assertFalse(summary["summary"]["deep_inspection_readiness"]["provider_configured"])
+        self.assertEqual(summary["summary"]["provider_capability_readiness"]["provider_packages_found_count"], 1)
+        self.assertEqual(summary["summary"]["provider_capability_readiness"]["optional_package_visible_count"], 1)
+        self.assertEqual(summary["summary"]["provider_capability_readiness"]["optional_package_missing_count"], 1)
+        self.assertFalse(summary["summary"]["provider_capability_readiness"]["gpu_acceleration_configured"])
+        self.assertEqual(summary["summary"]["provider_capability_readiness"]["privacy_status"], "aggregate_public_safe")
         self.assertFalse(summary["privacy"]["contains_paths"])
         self.assertFalse(summary["privacy"]["contains_filenames"])
         self.assertIn("Workbench summary status: pass", stdout.getvalue())
+
+    def test_workbench_summary_promotes_readiness_without_private_provider_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            candidate = _deep_inspection_candidate_bundle_payload()
+            candidate["provider_command"] = "python /Users/private/model.py"
+            candidate["environment"] = {"SECRET_TOKEN": "PRIVATE_OCR_TEXT"}
+            _write_json(root / "deep_inspection_candidate_summary.json", candidate)
+            _write_json(root / "capability_probe.json", _capability_probe_bundle_payload())
+
+            summary = build_workbench_public_summary(evidence_dir=root)
+            raw = json.dumps(summary, ensure_ascii=False, sort_keys=True)
+
+        self.assertIn("deep_inspection_readiness", summary["summary"])
+        self.assertIn("provider_capability_readiness", summary["summary"])
+        self.assertEqual(summary["summary"]["deep_inspection_readiness"]["candidate_total"], 3)
+        self.assertNotIn("SECRET_TOKEN", raw)
+        self.assertNotIn("PRIVATE_OCR_TEXT", raw)
+        self.assertNotIn("/Users/private/model.py", raw)
 
     def test_workbench_summary_propagates_processing_reuse_counters(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -7144,13 +7171,23 @@ def _capability_probe_bundle_payload() -> dict[str, object]:
     return {
         "schema_version": "scan-qc.capability-probe.v1",
         "status": "pass",
+        "optional_packages": {
+            "onnxruntime": {"available": True},
+            "paddleocr": {"available": False},
+        },
         "readiness": {
             "blocking": False,
             "provider_packages_found": ["onnxruntime"],
             "gpu_acceleration_configured": False,
             "model_acceleration_configured": False,
         },
-        "gpu_provider_visibility": {"gpu_visible_count": 0},
+        "gpu_provider_visibility": {"gpu_visible_count": 0, "torch_cuda": {"visible_count": 0}},
+        "configuration": {
+            "any_provider_configured": False,
+            "analysis_provider_configured": False,
+            "gpu_acceleration_configured": False,
+            "model_acceleration_configured": False,
+        },
         "privacy": {
             "aggregate_only": True,
             "contains_paths": False,

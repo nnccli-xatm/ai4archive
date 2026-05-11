@@ -222,6 +222,8 @@ def build_workbench_public_summary(
     }
     if processing_operation_timings:
         summary_metrics["processing_operation_timings"] = processing_operation_timings
+    readiness_metrics = _deep_inspection_readiness_metrics(artifacts)
+    summary_metrics.update(readiness_metrics)
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -409,10 +411,24 @@ def _metrics(payload: dict[str, Any], expected: WorkbenchArtifact) -> dict[str, 
         metrics["candidates_by_severity"] = _safe_count_map(payload.get("candidates_by_severity"))
         if isinstance(payload.get("provider_configured"), bool):
             metrics["provider_configured"] = payload["provider_configured"]
+        if isinstance(payload.get("privacy_status"), str) and _safe_code(payload["privacy_status"]):
+            metrics["privacy_status"] = payload["privacy_status"]
+        if isinstance(payload.get("no_inference_run"), bool):
+            metrics["no_inference_run"] = payload["no_inference_run"]
     if expected.name in {"capability_probe.json", "deep_inspection_provider_probe.json"}:
         readiness = payload.get("readiness")
         visibility = payload.get("gpu_provider_visibility")
+        privacy = payload.get("privacy")
+        configuration = payload.get("configuration")
+        optional_packages = payload.get("optional_packages")
         metrics["provider_count"] = _safe_int(payload.get("provider_count"))
+        if isinstance(payload.get("configured"), bool):
+            metrics["provider_configured"] = payload["configured"]
+            metrics["configured_provider_count"] = metrics["provider_count"] if payload["configured"] else 0
+            metrics["disabled_provider_count"] = 0 if payload["configured"] else metrics["provider_count"]
+            metrics["configuration_status"] = "configured" if payload["configured"] else "not_configured"
+        if isinstance(payload.get("no_inference_run"), bool):
+            metrics["no_inference_run"] = payload["no_inference_run"]
         if isinstance(readiness, dict):
             providers = readiness.get("provider_packages_found")
             metrics["provider_packages_found_count"] = len(providers) if isinstance(providers, list) else 0
@@ -421,6 +437,25 @@ def _metrics(payload: dict[str, Any], expected: WorkbenchArtifact) -> dict[str, 
                     metrics[key] = readiness[key]
         if isinstance(visibility, dict):
             metrics["gpu_visible_count"] = _safe_int(visibility.get("gpu_visible_count"))
+            torch_cuda = visibility.get("torch_cuda")
+            if isinstance(torch_cuda, dict):
+                metrics["visible_model_count"] = _safe_int(torch_cuda.get("visible_count"))
+        if isinstance(configuration, dict):
+            if isinstance(configuration.get("any_provider_configured"), bool):
+                metrics["providers_configured"] = configuration["any_provider_configured"]
+            configured_parts = [
+                key
+                for key in ("analysis_provider_configured", "gpu_acceleration_configured", "model_acceleration_configured")
+                if configuration.get(key) is True
+            ]
+            metrics["configuration_status"] = "configured" if configured_parts else "not_configured"
+        if isinstance(optional_packages, dict):
+            visible_count = sum(1 for item in optional_packages.values() if isinstance(item, dict) and item.get("available") is True)
+            missing_count = sum(1 for item in optional_packages.values() if isinstance(item, dict) and item.get("available") is False)
+            metrics["optional_package_visible_count"] = visible_count
+            metrics["optional_package_missing_count"] = missing_count
+        if isinstance(privacy, dict) and privacy.get("aggregate_only") is True:
+            metrics["privacy_status"] = "aggregate_public_safe"
     if expected.name in {"artifact_readiness_checklist.json", "public_safe_artifact_readiness.json"}:
         checklist = payload.get("artifact_readiness_checklist") or payload.get("public_safe_artifact_readiness")
         if isinstance(checklist, dict):
@@ -525,6 +560,71 @@ def _merge_processing_operation_timings(target: dict[str, Any], metrics: dict[st
         timing = timings.get(operation)
         if isinstance(timing, dict):
             target[operation] = dict(timing)
+
+
+def _deep_inspection_readiness_metrics(artifacts: dict[str, Any]) -> dict[str, Any]:
+    candidate = _artifact_metrics(artifacts, "deep_inspection_candidate_summary.json")
+    provider_probe = _artifact_metrics(artifacts, "deep_inspection_provider_probe.json")
+    capability_probe = _artifact_metrics(artifacts, "capability_probe.json")
+    result: dict[str, Any] = {}
+
+    deep_inspection = _clean_optional_metrics(
+        {
+            "status": artifacts["deep_inspection_candidate_summary.json"].get("reported_status"),
+            "candidate_total": candidate.get("candidate_total"),
+            "candidates_by_reason": candidate.get("candidates_by_reason"),
+            "candidates_by_severity": candidate.get("candidates_by_severity"),
+            "provider_configured": _first_present(candidate.get("provider_configured"), provider_probe.get("provider_configured")),
+            "provider_count": _first_present(candidate.get("provider_count"), provider_probe.get("provider_count")),
+            "checks_passed": candidate.get("checks_passed"),
+            "checks_failed": candidate.get("checks_failed"),
+            "privacy_status": candidate.get("privacy_status"),
+            "no_inference_run": _first_present(candidate.get("no_inference_run"), provider_probe.get("no_inference_run")),
+            "configuration_status": provider_probe.get("configuration_status"),
+        }
+    )
+    if deep_inspection:
+        result["deep_inspection_readiness"] = deep_inspection
+
+    provider_capability = _clean_optional_metrics(
+        {
+            "provider_count": _first_present(provider_probe.get("provider_count"), capability_probe.get("provider_count")),
+            "configured_provider_count": provider_probe.get("configured_provider_count"),
+            "disabled_provider_count": provider_probe.get("disabled_provider_count"),
+            "providers_configured": _first_present(provider_probe.get("provider_configured"), capability_probe.get("providers_configured")),
+            "provider_packages_found_count": capability_probe.get("provider_packages_found_count"),
+            "optional_package_visible_count": capability_probe.get("optional_package_visible_count"),
+            "optional_package_missing_count": capability_probe.get("optional_package_missing_count"),
+            "visible_gpu_count": capability_probe.get("gpu_visible_count"),
+            "visible_model_count": capability_probe.get("visible_model_count"),
+            "gpu_acceleration_configured": capability_probe.get("gpu_acceleration_configured"),
+            "model_acceleration_configured": capability_probe.get("model_acceleration_configured"),
+            "privacy_status": _first_present(capability_probe.get("privacy_status"), provider_probe.get("privacy_status")),
+            "no_inference_run": _first_present(capability_probe.get("no_inference_run"), provider_probe.get("no_inference_run")),
+            "configuration_status": capability_probe.get("configuration_status"),
+        }
+    )
+    if provider_capability:
+        result["provider_capability_readiness"] = provider_capability
+
+    return result
+
+
+def _artifact_metrics(artifacts: dict[str, Any], name: str) -> dict[str, Any]:
+    record = artifacts.get(name)
+    metrics = record.get("metrics") if isinstance(record, dict) else None
+    return metrics if isinstance(metrics, dict) else {}
+
+
+def _first_present(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
+def _clean_optional_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in metrics.items() if value is not None and value != {}}
 
 
 def _aggregate_baseline_infers_pass(payload: dict[str, Any]) -> bool:

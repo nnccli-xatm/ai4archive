@@ -1361,6 +1361,34 @@ vm.runInContext(workbenchScript + `
       processing_resumed_files: 2,
       processing_duplicate_reused_files: 3,
       processing_existing_derivative_reused_files: 4,
+      deep_inspection_readiness: {{
+        status: "pass",
+        candidate_total: 3,
+        candidates_by_reason: {{ processing_review_status_failed: 1, quality_scanline_candidate: 2 }},
+        candidates_by_severity: {{ P1: 1, P2: 2 }},
+        provider_configured: false,
+        provider_count: 0,
+        checks_passed: 5,
+        checks_failed: 0,
+        privacy_status: "aggregate_public_safe",
+        no_inference_run: true
+      }},
+      provider_capability_readiness: {{
+        provider_count: 3,
+        configured_provider_count: 0,
+        disabled_provider_count: 3,
+        providers_configured: false,
+        provider_packages_found_count: 1,
+        optional_package_visible_count: 1,
+        optional_package_missing_count: 2,
+        visible_gpu_count: 0,
+        visible_model_count: 0,
+        gpu_acceleration_configured: false,
+        model_acceleration_configured: false,
+        privacy_status: "aggregate_public_safe",
+        no_inference_run: true,
+        configuration_status: "not_configured"
+      }},
       processing_operation_timings: {{
         auto_crop: {{
           enabled: true,
@@ -1566,6 +1594,12 @@ vm.runInContext(workbenchScript + `
   assert(workbenchPublicPassModel.aggregateHandoff.checksPassed === 14, "workbench public pass checks passed were not preserved");
   assert(workbenchPublicPassModel.aggregateHandoff.checksFailed === 0, "workbench public pass checks failed were not preserved");
   assert(workbenchPublicPassModel.aggregateHandoff.validationIndex.artifactsPresent === 9, "workbench public pass artifact present count was not preserved");
+  assert(workbenchPublicPassModel.aggregateHandoff.deepInspectionCandidate.candidateTotal === 3, "workbench public pass promoted deep-inspection candidate total was not preserved");
+  assert(workbenchPublicPassModel.aggregateHandoff.deepInspectionCandidate.providerConfigured === false, "workbench public pass promoted provider configured flag was not preserved");
+  assert(countFor(workbenchPublicPassModel.aggregateHandoff.deepInspectionCandidate.candidatesBySeverity, "P1") === 1, "workbench public pass promoted candidate severity count was not preserved");
+  assert(workbenchPublicPassModel.aggregateHandoff.providerProbe.providerCount === 3, "workbench public pass promoted provider count was not preserved");
+  assert(workbenchPublicPassModel.aggregateHandoff.providerProbe.providersConfigured === false, "workbench public pass promoted provider configured status was not preserved");
+  assert(workbenchPublicPassModel.aggregateHandoff.providerProbe.optionalPackageVisibleCount === 1, "workbench public pass promoted optional package count was not preserved");
   assert(workbenchPublicPassModel.aggregateHandoff.counts.processingResumedFiles === 2, "workbench public pass processing resumed count was not preserved");
   assert(workbenchPublicPassModel.aggregateHandoff.counts.processingDuplicateReusedFiles === 3, "workbench public pass duplicate reuse count was not preserved");
   assert(workbenchPublicPassModel.aggregateHandoff.counts.processingExistingDerivativeReusedFiles === 4, "workbench public pass existing derivative reuse count was not preserved");
@@ -1596,6 +1630,9 @@ vm.runInContext(workbenchScript + `
   assert(els.aggregateHandoff.innerHTML.includes("Elapsed Seconds"), "workbench public pass did not render elapsed seconds column");
   assert(els.aggregateHandoff.innerHTML.includes("Avg Sec/File"), "workbench public pass did not render per-file average column");
   assert(els.aggregateHandoff.innerHTML.includes("Despeckle Backend Summary"), "workbench public pass did not render despeckle backend summary");
+  assert(els.aggregateHandoff.innerHTML.includes("Deep-Inspection Candidate Summary"), "workbench public pass did not render promoted deep-inspection readiness");
+  assert(els.aggregateHandoff.innerHTML.includes("Provider Capability Probe"), "workbench public pass did not render promoted provider readiness");
+  assert(els.aggregateHandoff.innerHTML.includes("Optional Package Visible Count"), "workbench public pass did not render promoted optional package count");
   assert(els.aggregateHandoff.innerHTML.includes("Backend Mode"), "workbench public pass did not render despeckle backend mode label");
   assert(els.aggregateHandoff.innerHTML.includes("numpy"), "workbench public pass did not render despeckle backend mode value");
   assert(els.aggregateHandoff.innerHTML.includes("NumPy Available"), "workbench public pass did not render numpy availability label");
