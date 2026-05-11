@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -182,6 +184,214 @@ FORBIDDEN_AGGREGATE_PAYLOAD_FIELDS = {
 }
 
 
+def validate_executable_aggregate_fixtures(html: str) -> list[str]:
+    script_match = re.search(r"<script>(?P<script>.*?)</script>", html, re.DOTALL)
+    if not script_match:
+        return ["missing executable workbench script"]
+
+    runner = f"""
+const vm = require("node:vm");
+const workbenchScript = {script_match.group("script")!r};
+const elements = new Map();
+
+function element(id) {{
+  if (!elements.has(id)) {{
+    elements.set(id, {{
+      id,
+      value: "",
+      innerHTML: "",
+      textContent: "",
+      className: "",
+      files: [],
+      classList: {{
+        add() {{}},
+        remove() {{}}
+      }},
+      addEventListener() {{}},
+      click() {{}}
+    }});
+  }}
+  return elements.get(id);
+}}
+
+const context = {{
+  assert,
+  countFor,
+  console,
+  Blob: function Blob() {{}},
+  URL: {{
+    createObjectURL() {{ return "blob:aggregate-fixture"; }},
+    revokeObjectURL() {{}}
+  }},
+  document: {{
+    getElementById: element,
+    createElement: element
+  }},
+  window: {{
+    addEventListener() {{}}
+  }}
+}};
+
+function assert(condition, message) {{
+  if (!condition) throw new Error(message);
+}}
+
+function countFor(rows, name) {{
+  const row = rows.find(item => item.name === name);
+  return row ? row.count : undefined;
+}}
+
+vm.createContext(context);
+vm.runInContext(workbenchScript + `
+  const reviewFixture = {{
+    schema_version: "scan-qc-review-summary.v1",
+    generated_at: "2026-05-11T00:00:00Z",
+    status: "pass",
+    remaining_p0: 0,
+    remaining_p1: 1,
+    total_findings: 8,
+    status_counts: {{
+      accepted_issue: 2,
+      false_positive: 5,
+      needs_rescan: 1
+    }},
+    severity_status_counts: {{
+      P0: {{ accepted_issue: 0, false_positive: 0 }},
+      P1: {{ accepted_issue: 1, false_positive: 1 }},
+      P2: {{ accepted_issue: 1, false_positive: 4, needs_rescan: 1 }}
+    }},
+    rule_counts: {{
+      skew_detected: 3,
+      blur_detected: 5
+    }},
+    rule_status_counts: {{
+      skew_detected: {{ false_positive: 3 }},
+      blur_detected: {{ accepted_issue: 2, false_positive: 2, needs_rescan: 1 }}
+    }},
+    privacy: {{
+      aggregate_only: true,
+      omits: [
+        "source location strings",
+        "source file identifiers",
+        "content hashes",
+        "recognized text",
+        "thumbnails",
+        "image content",
+        "row-level findings"
+      ],
+      contains_paths: false,
+      contains_filenames: false,
+      contains_hashes: false,
+      contains_ocr_text: false,
+      contains_thumbnails: false,
+      contains_image_content: false,
+      contains_row_level_findings: false,
+      redacts_private_values: true
+    }},
+    sensitivity: "aggregate-only public summary"
+  }};
+
+  const acceptanceFixture = {{
+    schema_version: "scan-qc-acceptance-summary.v1",
+    generated_at: "2026-05-11T00:00:00Z",
+    acceptance_passed: true,
+    pass: true,
+    blocking_item_count: 0,
+    blocking_items: [],
+    warnings: [
+      {{ code: "aggregate_warning_review_backlog" }},
+      {{ code: "aggregate_warning_policy_hold" }}
+    ],
+    human_review: {{
+      remaining_p0: 0,
+      remaining_p1: 2,
+      total_findings: 9,
+      status_counts: {{
+        accepted_issue: 4,
+        false_positive: 5
+      }}
+    }},
+    privacy: {{
+      aggregate_only: true,
+      omits: [
+        "source location strings",
+        "source file identifiers",
+        "content hashes",
+        "recognized text",
+        "thumbnails",
+        "image content",
+        "row-level findings"
+      ],
+      contains_paths: false,
+      contains_filenames: false,
+      contains_hashes: false,
+      contains_ocr_text: false,
+      contains_thumbnails: false,
+      contains_image_content: false,
+      contains_row_level_findings: false,
+      redacts_private_values: true
+    }},
+    privacy_self_check: {{
+      status: "passed",
+      violation_count: 0
+    }},
+    sensitivity: "aggregate-only public summary"
+  }};
+
+  const reviewModel = inferArtifact(reviewFixture);
+  assert(reviewModel.sourceType === "aggregate-handoff", "review fixture did not load as aggregate handoff");
+  assert(reviewModel.aggregateHandoff.artifactType === "Review summary", "review fixture did not classify as Review summary");
+  assert(reviewModel.aggregateHandoff.status === "pass", "review fixture status was not pass");
+  assert(countFor(reviewModel.aggregateHandoff.reviewStatusCounts, "false_positive") === 5, "review fixture status counts were not preserved");
+  state.model = reviewModel;
+  renderAggregateHandoff();
+  assert(els.aggregateHandoff.innerHTML.includes("Review summary"), "review fixture did not render Review summary");
+  assert(els.aggregateHandoff.innerHTML.includes("Review Status Counts"), "review fixture did not render review status counts");
+
+  const acceptanceModel = inferArtifact(acceptanceFixture);
+  assert(acceptanceModel.sourceType === "aggregate-handoff", "acceptance fixture did not load as aggregate handoff");
+  assert(acceptanceModel.aggregateHandoff.artifactType === "Acceptance summary", "acceptance fixture did not classify as Acceptance summary");
+  assert(acceptanceModel.aggregateHandoff.status === "pass", "acceptance fixture aggregate-only status was not pass");
+  assert(acceptanceModel.aggregateHandoff.acceptancePassed === true, "acceptance fixture did not preserve acceptance_passed/pass");
+  assert(acceptanceModel.aggregateHandoff.blockingItemCount === 0, "acceptance fixture blocking count was not aggregate-only zero");
+  assert(acceptanceModel.aggregateHandoff.remainingP0 === 0, "acceptance fixture remaining P0 was not aggregate-only zero");
+  assert(acceptanceModel.aggregateHandoff.remainingP1 === 2, "acceptance fixture remaining P1 was not preserved");
+  assert(acceptanceModel.aggregateHandoff.warningCount === 2, "acceptance fixture warning count was not preserved");
+  assert(acceptanceModel.aggregateHandoff.privacy.aggregateOnly === true, "acceptance fixture privacy was not aggregate-only");
+  assert(acceptanceModel.aggregateHandoff.privacy.containsPaths === false, "acceptance fixture reported private paths");
+  assert(acceptanceModel.aggregateHandoff.privacy.containsFilenames === false, "acceptance fixture reported private filenames");
+  state.model = acceptanceModel;
+  renderAggregateHandoff();
+  assert(els.aggregateHandoff.innerHTML.includes("Acceptance summary"), "acceptance fixture did not render Acceptance summary");
+  assert(els.aggregateHandoff.innerHTML.includes("aggregate_warning_review_backlog"), "acceptance fixture did not render warning code");
+  assert(els.aggregateHandoff.innerHTML.includes("Aggregate-only Status"), "acceptance fixture did not render aggregate-only status");
+  assert(els.aggregateHandoff.innerHTML.includes("Acceptance Passed"), "acceptance fixture did not render acceptance status");
+`, context);
+"""
+
+    with tempfile.NamedTemporaryFile("w", suffix=".js", encoding="utf-8", delete=False) as handle:
+        handle.write(runner)
+        runner_path = Path(handle.name)
+
+    try:
+        completed = subprocess.run(
+            ["node", str(runner_path)],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return ["Node.js is required for executable aggregate fixture checks but was not found on PATH"]
+    finally:
+        runner_path.unlink(missing_ok=True)
+
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or completed.stdout.strip() or f"node exited {completed.returncode}"
+        return [f"executable aggregate fixture check failed: {detail}"]
+    return []
+
+
 def main() -> int:
     if not WORKBENCH.exists():
         print(f"Missing workbench: {WORKBENCH}", file=sys.stderr)
@@ -269,6 +479,8 @@ def main() -> int:
 
     if "http://" in html or "https://" in html:
         errors.append("workbench should not depend on external network URLs")
+
+    errors.extend(validate_executable_aggregate_fixtures(html))
 
     if errors:
         print("Frontend workbench validation failed:", file=sys.stderr)
