@@ -492,14 +492,18 @@
       <div class="toolbar">
         <div>
           <h2 id="review-title">Human Review Decisions</h2>
-          <p class="muted">Decision state stays in this browser tab and resets when an artifact is cleared or reloaded.</p>
+          <p class="muted">Decision state stays in this browser tab and resets when an artifact is cleared or reloaded. Import accepts only privacy-safe summary JSON with synthetic/local IDs and decision statuses.</p>
         </div>
         <div class="file-row" style="margin-top:0">
+          <label>Import privacy-safe summary
+            <input id="reviewImportFile" type="file" accept="application/json,.json" aria-describedby="reviewImportStatus">
+          </label>
           <button id="exportReviewButton" type="button" disabled>Prepare Privacy-Safe Summary</button>
           <button id="downloadReviewButton" class="secondary" type="button" disabled>Download JSON</button>
         </div>
       </div>
       <div id="decisionSummary" class="decision-strip"></div>
+      <div id="reviewImportStatus" class="status-banner" role="status" aria-live="polite" style="margin-bottom:12px">No review-decision summary imported. Imports restore only scope, synthetic/local ID, and decision status; private filenames, paths, hashes, OCR text, thumbnails, image content, row-level findings, reviewer notes, manifests, and derivative image references are ignored.</div>
       <textarea id="reviewExport" aria-label="Privacy-safe review-decision JSON summary" readonly placeholder="Privacy-safe review-decision JSON summary will appear after a reviewer decision changes or after export is prepared."></textarea>
     </section>
 
@@ -608,6 +612,7 @@
       selectedBatchId: null,
       decisions: new Map(),
       exportSummary: "",
+      importStatus: null,
       preview: {
         fileName: "",
         objectUrl: ""
@@ -639,6 +644,8 @@
       previewPrivacyCopy: document.getElementById("previewPrivacyCopy"),
       decisionSummary: document.getElementById("decisionSummary"),
       exportReview: document.getElementById("reviewExport"),
+      reviewImportFile: document.getElementById("reviewImportFile"),
+      reviewImportStatus: document.getElementById("reviewImportStatus"),
       exportReviewButton: document.getElementById("exportReviewButton"),
       downloadReviewButton: document.getElementById("downloadReviewButton"),
       statusFilter: document.getElementById("statusFilter"),
@@ -1184,9 +1191,25 @@
         </div>
       `).join("");
       const hasLoadedArtifact = state.model.sourceType !== "empty";
+      renderReviewImportStatus();
       els.exportReviewButton.disabled = !hasLoadedArtifact;
       els.downloadReviewButton.disabled = !state.exportSummary;
       els.exportReview.value = state.exportSummary;
+    }
+
+    function renderReviewImportStatus() {
+      els.reviewImportStatus.className = "status-banner";
+      if (!state.importStatus) {
+        els.reviewImportStatus.textContent = "No review-decision summary imported. Imports restore only scope, synthetic/local ID, and decision status; private filenames, paths, hashes, OCR text, thumbnails, image content, row-level findings, reviewer notes, manifests, and derivative image references are ignored.";
+        return;
+      }
+      if (state.importStatus.kind === "error") {
+        els.reviewImportStatus.classList.add("error");
+      } else if (state.importStatus.imported > 0) {
+        els.reviewImportStatus.classList.add("ok");
+      }
+      const warnings = state.importStatus.warnings.length ? ` Warnings: ${state.importStatus.warnings.join(" ")}` : "";
+      els.reviewImportStatus.textContent = `Imported ${state.importStatus.imported} review decisions; skipped ${state.importStatus.skipped}. Last import: ${state.importStatus.importedAt}.${warnings}`;
     }
 
     function renderPreview() {
@@ -1248,6 +1271,7 @@
         control.addEventListener("click", event => event.stopPropagation());
         control.addEventListener("change", () => {
           state.decisions.set(decisionKey(control.dataset.reviewScope, control.dataset.reviewId), control.value);
+          state.importStatus = null;
           state.exportSummary = JSON.stringify(buildReviewSummary(), null, 2);
           renderWorkflow();
           renderDetail();
@@ -1287,6 +1311,7 @@
       return {
         schema: "scan-qc-review-decisions.local.v1",
         source_type: state.model.sourceType,
+        source_target_count: targets.length,
         generated_in_browser: true,
         privacy: {
           summary_only: true,
@@ -1308,6 +1333,104 @@
     function resetReviewState() {
       state.decisions = new Map();
       state.exportSummary = "";
+      state.importStatus = null;
+      els.reviewImportFile.value = "";
+    }
+
+    function allowedReviewDecision(value) {
+      return REVIEW_DECISIONS.some(([decision]) => decision === value);
+    }
+
+    function importableTargetKeys() {
+      return new Set(reviewTargets().map(target => decisionKey(target.scope, target.localId)));
+    }
+
+    function parseReviewDecisionSummary(payload) {
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+        throw new Error("Review-decision import JSON root must be an object.");
+      }
+      if (payload.schema !== "scan-qc-review-decisions.local.v1") {
+        throw new Error("Schema mismatch: expected scan-qc-review-decisions.local.v1.");
+      }
+      if (!Array.isArray(payload.decisions)) {
+        throw new Error("Review-decision summary is missing a decisions array.");
+      }
+      const warnings = [];
+      if (payload.source_type && payload.source_type !== state.model.sourceType) {
+        warnings.push("Source mismatch: summary source_type does not match the loaded artifact.");
+      }
+      const sourceTargetCount = Number(payload.source_target_count);
+      const currentTargetCount = reviewTargets().length;
+      if (Number.isFinite(sourceTargetCount) && sourceTargetCount !== currentTargetCount) {
+        warnings.push(`Target count mismatch: summary has ${sourceTargetCount}, loaded artifact has ${currentTargetCount}.`);
+      }
+      return { decisions: payload.decisions, warnings };
+    }
+
+    function applyReviewDecisionSummary(payload) {
+      const parsed = parseReviewDecisionSummary(payload);
+      const targetKeys = importableTargetKeys();
+      let imported = 0;
+      let skipped = 0;
+      parsed.decisions.forEach(item => {
+        if (!item || typeof item !== "object") {
+          skipped += 1;
+          return;
+        }
+        const scope = text(item.scope, "");
+        const localId = text(item.local_id, "");
+        const decision = text(item.decision, "");
+        const key = decisionKey(scope, localId);
+        if (!targetKeys.has(key) || !allowedReviewDecision(decision)) {
+          skipped += 1;
+          return;
+        }
+        state.decisions.set(key, decision);
+        imported += 1;
+      });
+      if (imported === 0 && parsed.decisions.length > 0) {
+        parsed.warnings.push("No decisions matched the currently loaded artifact review targets.");
+      }
+      state.exportSummary = JSON.stringify(buildReviewSummary(), null, 2);
+      state.importStatus = {
+        kind: imported > 0 ? "ok" : "warning",
+        imported,
+        skipped,
+        warnings: parsed.warnings,
+        importedAt: new Date().toISOString()
+      };
+      render();
+    }
+
+    async function importReviewDecisionFile(file) {
+      if (!file) return;
+      if (state.model.sourceType === "empty") {
+        state.importStatus = {
+          kind: "error",
+          imported: 0,
+          skipped: 0,
+          warnings: ["Load a scan, run-plan, or aggregate handoff artifact before importing decisions."],
+          importedAt: new Date().toISOString()
+        };
+        renderReview();
+        return;
+      }
+      try {
+        const content = await file.text();
+        const payload = JSON.parse(content);
+        applyReviewDecisionSummary(payload);
+      } catch (error) {
+        state.importStatus = {
+          kind: "error",
+          imported: 0,
+          skipped: 0,
+          warnings: [error.message],
+          importedAt: new Date().toISOString()
+        };
+        renderReview();
+      } finally {
+        els.reviewImportFile.value = "";
+      }
     }
 
     function clearPreviewState() {
@@ -1357,6 +1480,7 @@
     }
 
     els.file.addEventListener("change", event => loadFile(event.target.files[0]));
+    els.reviewImportFile.addEventListener("change", event => importReviewDecisionFile(event.target.files[0]));
     els.previewFile.addEventListener("change", event => loadPreviewFile(event.target.files[0]));
     els.clearPreview.addEventListener("click", clearPreviewState);
     window.addEventListener("beforeunload", () => {

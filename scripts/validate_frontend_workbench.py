@@ -43,6 +43,18 @@ REQUIRED_STRINGS = {
     "preview filename",
     "preview object URL",
     "Human Review Decisions",
+    "Import privacy-safe summary",
+    "reviewImportFile",
+    "reviewImportStatus",
+    "No review-decision summary imported.",
+    "Imports restore only scope, synthetic/local ID, and decision status",
+    "Imported",
+    "skipped",
+    "Last import",
+    "Schema mismatch: expected scan-qc-review-decisions.local.v1.",
+    "Source mismatch: summary source_type does not match the loaded artifact.",
+    "Target count mismatch",
+    "Load a scan, run-plan, or aggregate handoff artifact before importing decisions.",
     "accepted_issue",
     "false_positive",
     "fixed_externally",
@@ -50,6 +62,13 @@ REQUIRED_STRINGS = {
     "scan-qc-review-decisions.local.v1",
     "Prepare Privacy-Safe Summary",
     "generated_in_browser",
+    "source_target_count",
+    "parseReviewDecisionSummary",
+    "applyReviewDecisionSummary",
+    "importReviewDecisionFile",
+    "scope",
+    "local_id",
+    "decision",
     "Aggregate Handoff Artifact",
     "Public-safe final handoff summaries only",
     "Artifact Presence And Status",
@@ -126,6 +145,15 @@ def main() -> int:
         for field in sorted(FORBIDDEN_EXPORT_FIELDS):
             if re.search(rf"\b{re.escape(field)}\b\s*:", export_block):
                 errors.append(f"review export includes forbidden field {field!r}")
+
+    import_start = html.find("function parseReviewDecisionSummary")
+    if import_start == -1:
+        errors.append("missing privacy-safe review import parser")
+    else:
+        import_block = html[import_start : html.find("function clearPreviewState", import_start)]
+        for field in sorted(FORBIDDEN_EXPORT_FIELDS):
+            if re.search(rf"\b{re.escape(field)}\b\s*:", import_block):
+                errors.append(f"review import reads forbidden field {field!r}")
 
     if "http://" in html or "https://" in html:
         errors.append("workbench should not depend on external network URLs")
