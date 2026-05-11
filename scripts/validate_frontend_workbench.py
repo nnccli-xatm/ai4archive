@@ -37,6 +37,18 @@ REQUIRED_STRINGS = {
     "release_candidate_summary.json",
     "public_safe_validation_index.json",
     "scan-qc.public-safe-validation-index.v1",
+    "scan-qc.processing-review.v1",
+    "Processing-review package summary",
+    "Processing-Review Package Summary",
+    "Processed Count",
+    "Failed Count",
+    "Review Target Count",
+    "Local-only status",
+    "Sensitivity/Local-only Status",
+    "Processing Status Counts",
+    "synthetic review IDs only",
+    "row-level private notes",
+    "processing_review",
     "Public-safe validation index",
     "Public-Safe Validation Index",
     "Artifacts Present",
@@ -130,6 +142,8 @@ REQUIRED_STRINGS = {
     "aggregateNestedStatusCounts",
     "aggregateWorkers",
     "aggregateProviderProbe",
+    "aggregateProcessingReview",
+    "buildProcessingReviewTargets",
     "aggregatePrivacyOmissions",
     "privacyOmits",
     "Privacy self-check status",
@@ -200,6 +214,7 @@ REQUIRED_STRINGS = {
     "Recognized passing review summary",
     "Passing acceptance summary",
     "Complete public-safe readiness checklist",
+    "Synthetic processing-review package summary",
     "Unsupported schema compatibility warning",
     "Privacy summary failing diagnostic",
     "Privacy summary missing diagnostic",
@@ -252,6 +267,8 @@ REQUIRED_AGGREGATE_FIELDS = {
     "workers": "aggregateWorkers",
     "compatibility diagnostics": "buildArtifactCompatibilityDiagnostics",
     "provider capability probe": "aggregateProviderProbe",
+    "processing review summary": "aggregateProcessingReview",
+    "processing review targets": "buildProcessingReviewTargets",
 }
 
 REQUIRED_CHECKLIST_FIELDS = {
@@ -305,6 +322,7 @@ REQUIRED_DEMO_FIXTURE_LABELS = {
     "Disabled provider capability probe",
     "Passing public-safe validation index",
     "Blocked public-safe validation index",
+    "Synthetic processing-review package summary",
     "Unsupported schema compatibility warning",
     "Privacy summary failing diagnostic",
     "Privacy summary missing diagnostic",
@@ -390,7 +408,7 @@ def new_summary(workbench: Path) -> dict[str, Any]:
             "forbidden_demo_fixture_field_checks": len(FORBIDDEN_DEMO_FIXTURE_FIELDS),
         },
         "fixture_groups": {
-            "aggregate_executable_fixture_groups": 9,
+            "aggregate_executable_fixture_groups": 10,
             "demo_fixture_labels_required": len(REQUIRED_DEMO_FIXTURE_LABELS),
         },
         "coverage": {
@@ -983,6 +1001,41 @@ vm.runInContext(workbenchScript + `
     sensitivity: "aggregate-only public summary"
   }};
 
+  const processingReviewFixture = {{
+    schema_version: "scan-qc.processing-review.v1",
+    generated_at: "2026-05-11T01:30:00Z",
+    sensitivity: "local-only processing review summary; private row values omitted from this workbench view",
+    privacy: {{
+      local_only: true,
+      aggregate_only: false,
+      contains_row_level_paths: true,
+      contains_hashes: true,
+      contains_image_links: true,
+      embeds_image_data: false,
+      public_evidence: false
+    }},
+    summary: {{
+      total_files: 6,
+      processed_files: 4,
+      failed_files: 1,
+      skipped_files: 1,
+      guardrail_warning_files: 2,
+      status_counts: {{
+        processed: 4,
+        failed: 1,
+        skipped: 1
+      }},
+      deskewed_files: 2,
+      dark_border_trimmed_files: 1,
+      cropped_files: 1,
+      despeckled_files: 3
+    }},
+    groups: {{
+      failed: {{ count: 1 }},
+      guardrail_warnings: {{ count: 2 }}
+    }}
+  }};
+
   const reviewModel = inferArtifact(reviewFixture);
   assert(reviewModel.sourceType === "aggregate-handoff", "review fixture did not load as aggregate handoff");
   assert(reviewModel.aggregateHandoff.artifactType === "Review summary", "review fixture did not classify as Review summary");
@@ -1153,6 +1206,32 @@ vm.runInContext(workbenchScript + `
   assert(els.aggregateHandoff.innerHTML.includes("Probe Privacy Status"), "provider probe did not render privacy status");
   assert(els.aggregateHandoff.innerHTML.includes("provider_probe_gpu_not_visible"), "provider probe did not render warning code");
 
+  const processingReviewModel = inferArtifact(processingReviewFixture);
+  assert(processingReviewModel.sourceType === "aggregate-handoff", "processing review fixture did not load as aggregate handoff");
+  assert(processingReviewModel.aggregateHandoff.artifactType === "Processing-review package summary", "processing review fixture did not classify as package summary");
+  assert(processingReviewModel.aggregateHandoff.processingReview.processedCount === 4, "processing review processed count was not preserved");
+  assert(processingReviewModel.aggregateHandoff.processingReview.failedCount === 1, "processing review failed count was not preserved");
+  assert(processingReviewModel.aggregateHandoff.processingReview.warningCount === 2, "processing review warning count was not preserved");
+  assert(processingReviewModel.aggregateHandoff.processingReview.reviewTargetCount === 6, "processing review target count was not preserved");
+  assert(processingReviewModel.aggregateHandoff.processingReview.localOnly === true, "processing review local-only status was not preserved");
+  assert(processingReviewModel.reviewTargets.length === 6, "processing review synthetic targets were not created from summary count");
+  assert(processingReviewModel.reviewTargets[0].scope === "processing_review", "processing review target scope changed");
+  assert(processingReviewModel.reviewTargets[0].localId === "PR0001", "processing review target local ID changed");
+  state.model = processingReviewModel;
+  renderAggregateHandoff();
+  assert(els.aggregateHandoff.innerHTML.includes("Processing-Review Package Summary"), "processing review did not render package summary section");
+  assert(els.aggregateHandoff.innerHTML.includes("Processed Count"), "processing review did not render processed count");
+  assert(els.aggregateHandoff.innerHTML.includes("Failed Count"), "processing review did not render failed count");
+  assert(els.aggregateHandoff.innerHTML.includes("Review Target Count"), "processing review did not render target count");
+  assert(els.aggregateHandoff.innerHTML.includes("Sensitivity/Local-only Status"), "processing review did not render local-only sensitivity");
+  assert(els.aggregateHandoff.innerHTML.includes("Processing Status Counts"), "processing review did not render status counts");
+  state.decisions.set(decisionKey("processing_review", "PR0001"), "accepted_issue");
+  const processingReviewExport = buildReviewSummary();
+  assert(processingReviewExport.decisions.length === 6, "processing review export did not include synthetic review targets");
+  assert(processingReviewExport.decisions[0].scope === "processing_review", "processing review export scope changed");
+  assert(Object.keys(processingReviewExport.decisions[0]).sort().join(",") === "decision,local_id,scope", "processing review export included unexpected decision fields");
+  assert(!JSON.stringify(processingReviewExport).includes("processed_files"), "processing review export leaked package summary fields");
+
   assert(Array.isArray(DEMO_FIXTURES), "demo fixture gallery is not an array");
   assert(DEMO_FIXTURES.length >= 5, "demo fixture gallery does not cover at least five options");
   const demoLabels = DEMO_FIXTURES.map(item => item.label);
@@ -1165,6 +1244,7 @@ vm.runInContext(workbenchScript + `
     "Passing public-safe validation index",
     "Blocked public-safe validation index",
     "Disabled provider capability probe",
+    "Synthetic processing-review package summary",
     "Unsupported schema compatibility warning",
     "Privacy summary failing diagnostic",
     "Privacy summary missing diagnostic"
@@ -1217,6 +1297,10 @@ vm.runInContext(workbenchScript + `
   assert(els.aggregateHandoff.innerHTML.includes("Provider capability probe summary"), "demo load path did not render provider probe type");
   assert(els.aggregateHandoff.innerHTML.includes("Provider Capability Probe"), "demo load path did not render provider probe section");
   assert(els.aggregateHandoff.innerHTML.includes("provider_probe_optional_packages_not_installed"), "demo load path did not render provider probe warning");
+  loadDemoFixture("processing-review-package-summary");
+  assert(els.aggregateHandoff.innerHTML.includes("Processing-review package summary"), "demo load path did not render processing review type");
+  assert(els.aggregateHandoff.innerHTML.includes("Processing-Review Package Summary"), "demo load path did not render processing review section");
+  assert(reviewTargets().length === 6, "demo load path did not expose synthetic processing review targets");
   loadDemoFixture("unsupported-schema-warning");
   assert(els.aggregateHandoff.innerHTML.includes("unsupported_public_safe_schema_version"), "demo load path did not render unsupported schema diagnostic");
   loadDemoFixture("privacy-diagnostic-fail");
