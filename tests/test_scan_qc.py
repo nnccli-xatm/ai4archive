@@ -7,6 +7,7 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
 import sys
 import tempfile
@@ -1133,6 +1134,51 @@ class ScanQcTest(unittest.TestCase):
         self.assertEqual(summary["artifact_status_summary"]["aggregate_evidence_bundle_summary.json"]["status"], "missing")
         self.assertEqual(summary["artifact_status_summary"]["release_candidate_summary.json"]["status"], "pass")
         self.assertIn("Blocking items: 1", stdout.getvalue())
+
+    def test_documented_aggregate_handoff_commands_accept_current_cli_flags(self) -> None:
+        docs_and_commands = {
+            REPO_ROOT / "docs" / "operations-runbook.md": (
+                "review-decisions-verify",
+                "evidence-bundle-verify",
+                "final-handoff-summary",
+            ),
+            REPO_ROOT / "docs" / "release-checklist.md": (
+                "review-decisions-verify",
+                "evidence-bundle-verify",
+                "final-handoff-summary",
+            ),
+            REPO_ROOT / "README.md": ("final-handoff-summary",),
+        }
+
+        with tempfile.TemporaryDirectory(prefix="docs-handoff-cli-") as temp_dir:
+            root = Path(temp_dir)
+            private_decisions = root / "private-review-decisions"
+            validation_output = root / "private-validation-output"
+            release_candidate = validation_output / "release-candidate"
+            private_decisions.mkdir()
+            validation_output.mkdir()
+            release_candidate.mkdir()
+            (private_decisions / "review_decisions.json").write_text(
+                json.dumps(_review_decision_export_fixture()),
+                encoding="utf-8",
+            )
+            for evidence_dir in (validation_output, release_candidate):
+                _write_json(evidence_dir / "release_candidate_summary.json", _release_candidate_bundle_payload())
+                _write_json(evidence_dir / "aggregate_evidence_bundle_summary.json", _aggregate_evidence_bundle_payload(status="pass"))
+
+            replacements = {
+                "/placeholder/private-review-decisions": str(private_decisions),
+                "/placeholder/private-validation-output": str(validation_output),
+            }
+
+            for doc_path, expected_commands in docs_and_commands.items():
+                with self.subTest(doc=doc_path.name):
+                    commands = _documented_archive_scan_qc_commands(doc_path, expected_commands, replacements)
+                    self.assertEqual([command[0] for command in commands], list(expected_commands))
+                    for command in commands:
+                        with contextlib.redirect_stdout(io.StringIO()):
+                            exit_code = main(command)
+                        self.assertEqual(exit_code, 0, command)
 
     def test_public_safe_validation_index_passes_known_aggregate_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -6239,6 +6285,31 @@ def _write_public_safe_validation_index_fixtures(root: Path) -> None:
             "sensitive_values_omitted": True,
         },
     )
+
+
+def _documented_archive_scan_qc_commands(
+    doc_path: Path,
+    expected_commands: tuple[str, ...],
+    replacements: dict[str, str],
+) -> list[list[str]]:
+    text = doc_path.read_text(encoding="utf-8")
+    commands: list[list[str]] = []
+    for match in re.finditer(r"^[ \t]*```bash\n(.*?)^[ \t]*```", text, re.DOTALL | re.MULTILINE):
+        block = match.group(1).replace("\\\n", " ")
+        if "archive-scan-qc" not in block:
+            continue
+        argv = shlex.split(block)
+        start_indexes = [index for index, value in enumerate(argv) if value == "archive-scan-qc"]
+        for start, end in zip(start_indexes, start_indexes[1:] + [len(argv)]):
+            command = argv[start + 1:end]
+            if not command or command[0] not in expected_commands:
+                continue
+            for index, value in enumerate(command):
+                for placeholder, replacement in replacements.items():
+                    if value.startswith(placeholder):
+                        command[index] = replacement + value[len(placeholder):]
+            commands.append(command)
+    return commands
 
 
 def _release_candidate_bundle_payload(*, real_artifact_metrics: bool = False) -> dict[str, object]:
