@@ -21,6 +21,7 @@ _PROCESSING_REUSE_COUNTER_KEYS = (
     "processing_duplicate_reused_files",
     "processing_existing_derivative_reused_files",
 )
+_DESPECKLE_BACKEND_FIELDS = ("backend_mode", "numpy_available", "backend_counts")
 
 
 @dataclass(frozen=True)
@@ -172,6 +173,7 @@ def build_workbench_public_summary(
     failed_count = 0
     missing_count = 0
     processing_reuse_counts: dict[str, int] = {}
+    processing_operation_timings: dict[str, Any] = {}
     ready_signals: list[bool] = []
 
     for expected in KNOWN_WORKBENCH_ARTIFACTS:
@@ -188,6 +190,7 @@ def build_workbench_public_summary(
         failed_count += int(record["status"] == "fail")
         missing_count += int(record["status"] in {"missing", "not_provided"})
         _merge_processing_reuse_counts(processing_reuse_counts, record["metrics"])
+        _merge_processing_operation_timings(processing_operation_timings, record["metrics"])
         if record["ready"] is not None:
             ready_signals.append(bool(record["ready"]))
 
@@ -199,6 +202,18 @@ def build_workbench_public_summary(
     warning_counts_by_code = _counts_by_code(warning_items)
     status = "pass" if checks_failed == 0 and not blocking_items else "fail"
     ready = (status == "pass" and all(ready_signals)) if ready_signals else None
+
+    summary_metrics = {
+        "known_artifacts": len(KNOWN_WORKBENCH_ARTIFACTS),
+        "artifacts_present": present_count,
+        "artifacts_passed": passed_count,
+        "artifacts_failed": failed_count,
+        "artifacts_missing": missing_count,
+        "unsupported_inputs": len(rejected_inputs),
+        **processing_reuse_counts,
+    }
+    if processing_operation_timings:
+        summary_metrics["processing_operation_timings"] = processing_operation_timings
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -213,15 +228,7 @@ def build_workbench_public_summary(
         "warning_counts_by_code": warning_counts_by_code,
         "blocking_items": blocking_items,
         "warning_items": warning_items,
-        "summary": {
-            "known_artifacts": len(KNOWN_WORKBENCH_ARTIFACTS),
-            "artifacts_present": present_count,
-            "artifacts_passed": passed_count,
-            "artifacts_failed": failed_count,
-            "artifacts_missing": missing_count,
-            "unsupported_inputs": len(rejected_inputs),
-            **processing_reuse_counts,
-        },
+        "summary": summary_metrics,
         "workflow_state": _workflow_state(artifacts),
         "artifact_presence": {
             name: {
@@ -377,6 +384,7 @@ def _metrics(payload: dict[str, Any], expected: WorkbenchArtifact) -> dict[str, 
         "warning_item_count": _count_from_payload(payload, "warning_item_count", "warnings"),
     }
     metrics.update(_processing_reuse_counts(payload))
+    metrics.update(_processing_operation_timings(payload))
     for key in ("checks_passed", "checks_failed"):
         value = _extract_int(payload, key)
         if value:
@@ -433,6 +441,62 @@ def _merge_processing_reuse_counts(target: dict[str, int], metrics: dict[str, An
             continue
         if key not in target or value > target[key]:
             target[key] = value
+
+
+def _processing_operation_timings(payload: dict[str, Any]) -> dict[str, Any]:
+    despeckle = _extract_despeckle_timing(payload)
+    if not despeckle:
+        return {}
+    return {"processing_operation_timings": {"despeckle": despeckle}}
+
+
+def _extract_despeckle_timing(payload: dict[str, Any]) -> dict[str, Any]:
+    for timings in _processing_operation_timing_candidates(payload):
+        despeckle = timings.get("despeckle")
+        if not isinstance(despeckle, dict):
+            continue
+        sanitized = _sanitize_despeckle_timing(despeckle)
+        if sanitized:
+            return sanitized
+    return {}
+
+
+def _processing_operation_timing_candidates(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for container_key in ("summary", "throughput", "timing"):
+        container = payload.get(container_key)
+        if not isinstance(container, dict):
+            continue
+        timings = container.get("processing_operation_timings") or container.get("operation_timings")
+        if isinstance(timings, dict):
+            candidates.append(timings)
+    timings = payload.get("processing_operation_timings") or payload.get("operation_timings")
+    if isinstance(timings, dict):
+        candidates.append(timings)
+    return candidates
+
+
+def _sanitize_despeckle_timing(value: dict[str, Any]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    backend_mode = value.get("backend_mode")
+    if isinstance(backend_mode, str) and _safe_code(backend_mode):
+        result["backend_mode"] = backend_mode
+    if isinstance(value.get("numpy_available"), bool):
+        result["numpy_available"] = value["numpy_available"]
+    backend_counts = {key: count for key, count in _safe_count_map(value.get("backend_counts")).items() if _safe_code(key)}
+    if backend_counts:
+        result["backend_counts"] = backend_counts
+    return {key: result[key] for key in _DESPECKLE_BACKEND_FIELDS if key in result}
+
+
+def _merge_processing_operation_timings(target: dict[str, Any], metrics: dict[str, Any]) -> None:
+    timings = metrics.get("processing_operation_timings")
+    if not isinstance(timings, dict):
+        return
+    despeckle = timings.get("despeckle")
+    if not isinstance(despeckle, dict):
+        return
+    target["despeckle"] = {key: despeckle[key] for key in _DESPECKLE_BACKEND_FIELDS if key in despeckle}
 
 
 def _aggregate_baseline_infers_pass(payload: dict[str, Any]) -> bool:
