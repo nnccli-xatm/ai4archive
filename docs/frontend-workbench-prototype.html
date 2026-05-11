@@ -348,6 +348,32 @@
       font-size: 22px;
     }
 
+    .readiness-summary {
+      display: grid;
+      grid-template-columns: minmax(220px, .8fr) minmax(260px, 1.2fr);
+      gap: 12px;
+      margin: 12px 0;
+      align-items: stretch;
+    }
+
+    .readiness-verdict {
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--idle);
+      border-radius: 8px;
+      background: #fbfcfe;
+      padding: 12px;
+    }
+
+    .readiness-verdict.ready { border-left-color: var(--ok); }
+    .readiness-verdict.not-ready { border-left-color: var(--fail); }
+
+    .readiness-verdict strong {
+      display: block;
+      font-size: 24px;
+      line-height: 1.1;
+      margin-top: 6px;
+    }
+
     .review-select {
       min-width: 172px;
     }
@@ -435,6 +461,7 @@
       .metric-grid { grid-template-columns: repeat(3, minmax(120px, 1fr)); }
       .workflow { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
       .decision-strip { grid-template-columns: repeat(3, minmax(112px, 1fr)); }
+      .readiness-summary { grid-template-columns: 1fr; }
     }
 
     @media (max-width: 640px) {
@@ -605,7 +632,8 @@
       batches: [],
       findings: [],
       detail: null,
-      aggregateHandoff: null
+      aggregateHandoff: null,
+      artifactReadiness: null
     };
 
     const state = {
@@ -729,7 +757,8 @@
         batches,
         findings: [],
         detail: { kind: "run-plan", rawSummary: summary },
-        aggregateHandoff: null
+        aggregateHandoff: null,
+        artifactReadiness: null
       };
     }
 
@@ -791,7 +820,8 @@
           performance: summary.performance || {},
           ruleCatalog: payload.rule_catalog || {}
         },
-        aggregateHandoff: null
+        aggregateHandoff: null,
+        artifactReadiness: null
       };
     }
 
@@ -810,7 +840,9 @@
         payload.blocking_items !== undefined ||
         payload.human_review !== undefined ||
         payload.artifact_status_summary !== undefined ||
-        payload.artifact_presence !== undefined;
+        payload.artifact_presence !== undefined ||
+        payload.artifact_readiness_checklist !== undefined ||
+        payload.public_safe_artifact_readiness !== undefined;
     }
 
     function buildAggregateHandoffModel(payload) {
@@ -847,6 +879,7 @@
         workers: aggregateWorkers(payload.workers),
         generatedAt: text(payload.generated_at, "")
       };
+      const artifactReadiness = buildArtifactReadinessChecklist(payload, aggregate);
 
       return {
         sourceType: "aggregate-handoff",
@@ -867,17 +900,92 @@
         batches: [],
         findings: [],
         detail: { kind: "aggregate-handoff" },
-        aggregateHandoff: aggregate
+        aggregateHandoff: aggregate,
+        artifactReadiness
       };
     }
 
     function aggregateArtifactType(schema, payload) {
+      if (schema.includes("artifact-readiness-checklist") || payload.artifact_readiness_checklist !== undefined || payload.public_safe_artifact_readiness !== undefined) return "Public-safe artifact readiness checklist";
       if (schema.includes("review-summary") || payload.status_counts !== undefined || payload.severity_status_counts !== undefined || payload.rule_status_counts !== undefined) return "Review summary";
       if (schema.includes("acceptance-summary") || payload.blocking_items !== undefined || payload.human_review !== undefined || payload.pass !== undefined) return "Acceptance summary";
       if (schema.includes("final-production-handoff-summary") || payload.ready_for_handoff !== undefined) return "Final production handoff summary";
       if (schema.includes("aggregate-evidence-bundle") || payload.artifact_presence !== undefined) return "Aggregate evidence bundle summary";
       if (schema.includes("release-candidate-summary") || payload.ready_for_release_candidate !== undefined) return "Release candidate summary";
       return "Aggregate handoff summary";
+    }
+
+    const EXPECTED_PUBLIC_SAFE_ARTIFACTS = [
+      "run_plan_summary.json",
+      "review_summary.json",
+      "acceptance_summary.json",
+      "aggregate_evidence_bundle_summary.json",
+      "release_candidate_summary.json",
+      "final_production_handoff_summary.json"
+    ];
+
+    const AGGREGATE_ARTIFACT_NAME_BY_TYPE = {
+      "Review summary": "review_summary.json",
+      "Acceptance summary": "acceptance_summary.json",
+      "Aggregate evidence bundle summary": "aggregate_evidence_bundle_summary.json",
+      "Release candidate summary": "release_candidate_summary.json",
+      "Final production handoff summary": "final_production_handoff_summary.json"
+    };
+
+    function buildArtifactReadinessChecklist(payload, aggregate) {
+      const source = payload.artifact_readiness_checklist || payload.public_safe_artifact_readiness || payload.artifact_readiness || payload.artifact_status_summary || payload.artifact_presence || {};
+      const sourceMap = Array.isArray(source)
+        ? Object.fromEntries(source.map(item => [text(item && (item.artifact || item.name), ""), item]).filter(([name]) => name))
+        : source;
+      const currentArtifactName = AGGREGATE_ARTIFACT_NAME_BY_TYPE[aggregate.artifactType] || "";
+      const rows = EXPECTED_PUBLIC_SAFE_ARTIFACTS.map(name => {
+        const item = sourceMap && typeof sourceMap === "object" && !Array.isArray(sourceMap) ? sourceMap[name] || {} : {};
+        const present = firstBoolean(item.present, item.exists, name === currentArtifactName ? true : undefined);
+        const status = normalizeAggregateStatus(text(item.status || item.reported_status || (name === currentArtifactName ? aggregate.status : ""), present === false ? "missing" : "missing"));
+        const blockingCount = firstNumber(item.blocking_count, item.blocking_item_count, item.blocking_items, name === currentArtifactName ? aggregate.blockingItemCount : 0);
+        const warningCount = firstNumber(item.warning_count, item.warnings, name === currentArtifactName ? aggregate.warningCount : 0);
+        const privacyStatus = text(item.privacy_status || item.privacy || item.public_safe_status || (name === currentArtifactName ? aggregatePrivacyStatusLabel(aggregate.privacy) : ""), present === false ? "not evaluated" : "not provided");
+        return {
+          name,
+          present: present === null ? false : Boolean(present),
+          status,
+          blockingCount,
+          warningCount,
+          privacyStatus,
+          generatedAt: text(item.generated_at || item.generatedAt || (name === currentArtifactName ? aggregate.generatedAt : ""), "")
+        };
+      });
+      const missingCount = rows.filter(row => !row.present).length;
+      const blockingCount = sum(rows, "blockingCount");
+      const warningCount = sum(rows, "warningCount");
+      const privacyBlockers = rows.filter(row => row.present && !isChecklistPrivacySafe(row.privacyStatus)).length;
+      const failingCount = rows.filter(row => row.present && ["fail", "failed", "blocked", "error", "stale"].includes(row.status)).length;
+      const staleCount = rows.filter(row => row.status === "stale").length;
+      const ready = missingCount === 0 && blockingCount === 0 && privacyBlockers === 0 && failingCount === 0;
+      return {
+        ready,
+        summary: ready ? "Ready for public handoff" : "Not ready for public handoff",
+        missingCount,
+        blockingCount,
+        warningCount,
+        privacyBlockers,
+        failingCount,
+        staleCount,
+        rows
+      };
+    }
+
+    function aggregatePrivacyStatusLabel(privacy) {
+      if (!privacy) return "not provided";
+      if (privacy.privateIndicatorsFound || privacy.privateIndicatorCount > 0) return "private indicators found";
+      if (privacy.aggregateOnly && privacy.redactsPrivateValues) return "public-safe";
+      if (privacy.aggregateOnly) return "aggregate-only";
+      return "not provided";
+    }
+
+    function isChecklistPrivacySafe(value) {
+      const status = text(value, "").toLowerCase();
+      return ["public-safe", "public safe", "aggregate-only", "aggregate only", "passed", "pass", "ok", "redacted"].includes(status);
     }
 
     function normalizeAggregateStatus(value) {
@@ -1125,8 +1233,10 @@
         ["Privacy self-check status", aggregate.privacy.privacySelfCheckStatus],
         ["Privacy self-check violations", aggregate.privacy.privacySelfCheckViolations ?? "Not provided"]
       ];
+      const readiness = state.model.artifactReadiness;
       els.aggregateHandoff.innerHTML = `
         <p class="muted">Aggregate-only status from locally reviewed public-safe summary artifacts. This view displays counts, statuses, and codes only, never private filenames, paths, hashes, OCR text, thumbnails, image content, row-level findings, reviewer notes, manifests, or derivative image references.</p>
+        ${readiness ? artifactReadinessPanel(readiness) : ""}
         <div class="metric-grid">
           ${aggregateMetric("Artifact Type", aggregate.artifactType)}
           ${aggregateMetric("Aggregate-only Status", statusBadge(aggregate.status), true)}
@@ -1173,6 +1283,44 @@
             <h3>Rule Status Counts</h3>
             ${aggregate.ruleStatusCounts.length ? aggregateNestedCountTable(aggregate.ruleStatusCounts) : `<div class="empty">No rule/status counts were present.</div>`}
           </div>
+        </div>`;
+    }
+
+    function artifactReadinessPanel(readiness) {
+      return `
+        <h3>Public-Safe Artifact Readiness Checklist</h3>
+        <div class="readiness-summary">
+          <div class="readiness-verdict ${readiness.ready ? "ready" : "not-ready"}">
+            <span class="muted">Top-level readiness</span>
+            <strong>${escapeHtml(readiness.summary)}</strong>
+            <p class="muted">Complete public-safe aggregate artifacts only; excludes local preview filename, preview content, and object URL state.</p>
+          </div>
+          <div class="metric-grid">
+            ${aggregateMetric("Expected Artifacts", EXPECTED_PUBLIC_SAFE_ARTIFACTS.length)}
+            ${aggregateMetric("Missing Artifacts", readiness.missingCount)}
+            ${aggregateMetric("Blocking Count", readiness.blockingCount)}
+            ${aggregateMetric("Warning Count", readiness.warningCount)}
+            ${aggregateMetric("Privacy Blockers", readiness.privacyBlockers)}
+            ${aggregateMetric("Stale Artifacts", readiness.staleCount)}
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Artifact</th><th>Present/Missing</th><th>Status</th><th>Blocking Count</th><th>Warning Count</th><th>Privacy Status</th><th>Generated Timestamp</th></tr></thead>
+            <tbody>
+              ${readiness.rows.map(row => `
+                <tr>
+                  <td class="mono">${escapeHtml(row.name)}</td>
+                  <td>${escapeHtml(row.present ? "present" : "missing")}</td>
+                  <td>${statusBadge(row.status)}</td>
+                  <td>${escapeHtml(row.blockingCount)}</td>
+                  <td>${escapeHtml(row.warningCount)}</td>
+                  <td>${escapeHtml(row.privacyStatus)}</td>
+                  <td>${escapeHtml(row.generatedAt || "Not provided")}</td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
         </div>`;
     }
 
@@ -1407,7 +1555,8 @@
     }
 
     function statusBadge(status) {
-      const cls = status === "passed" ? "pass" : status === "failed" ? "fail" : status === "warning" ? "warn" : "";
+      const normalized = String(status).toLowerCase();
+      const cls = ["pass", "passed", "ready", "present", "ok"].includes(normalized) ? "pass" : ["fail", "failed", "blocked", "error", "missing"].includes(normalized) ? "fail" : ["warning", "warn", "stale"].includes(normalized) ? "warn" : "";
       return `<span class="badge ${cls}">${escapeHtml(status)}</span>`;
     }
 
