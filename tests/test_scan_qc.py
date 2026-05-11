@@ -678,6 +678,47 @@ class ScanQcTest(unittest.TestCase):
         for value in forbidden_private_values:
             self.assertNotIn(value, raw)
 
+    def test_evidence_bundle_verifier_passes_real_review_decision_verifier_output_source_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            payload = build_review_decision_verification_summary(_review_decision_export_fixture())
+            _write_json(root / "release_candidate_summary.json", _release_candidate_bundle_payload())
+            _write_json(root / "review_decision_verification_summary.json", payload)
+
+            exit_code = main(["evidence-bundle-verify", "--evidence-dir", str(root), "--out", str(root / "bundle.json")])
+            raw = (root / "bundle.json").read_text(encoding="utf-8")
+            summary = json.loads(raw)
+
+        self.assertEqual(exit_code, 0)
+        review_decisions = summary["artifacts"]["review_decision_verification_summary.json"]
+        self.assertEqual(review_decisions["status"], "pass")
+        self.assertEqual(review_decisions["decision_summary"]["total_decisions"], 3)
+        self.assertEqual(review_decisions["privacy_status"], "pass")
+        self.assertNotIn("scan-qc-review-decisions.local.v1", raw)
+        self.assertNotIn("aggregate_handoff", raw)
+
+    def test_evidence_bundle_verifier_blocks_arbitrary_review_decision_source_fields(self) -> None:
+        private_source = "/Users/private/archive/page_0001.png"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            payload = build_review_decision_verification_summary(_review_decision_export_fixture())
+            payload["source"] = {
+                "schema": "scan-qc-review-decisions.local.v1",
+                "source_type": "aggregate_handoff",
+                "source_path": private_source,
+            }
+            _write_json(root / "release_candidate_summary.json", _release_candidate_bundle_payload())
+            _write_json(root / "review_decision_verification_summary.json", payload)
+
+            exit_code = main(["evidence-bundle-verify", "--evidence-dir", str(root), "--out", str(root / "bundle.json")])
+            raw = (root / "bundle.json").read_text(encoding="utf-8")
+            summary = json.loads(raw)
+
+        self.assertEqual(exit_code, 1)
+        codes = {item["code"] for item in summary["blocking_items"] if item["artifact"] == "review_decision_verification_summary.json"}
+        self.assertIn("private_key_present", codes)
+        self.assertNotIn(private_source, raw)
+
     def test_evidence_bundle_verifier_allows_real_artifact_aggregate_metric_keys(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -927,6 +968,26 @@ class ScanQcTest(unittest.TestCase):
         self.assertEqual(review_decisions["warning_counts_by_code"]["ignored_extra_decision_field"], 2)
         for value in forbidden_private_values:
             self.assertNotIn(value, raw)
+
+    def test_final_handoff_summary_passes_real_review_decision_verifier_output_source_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            payload = build_review_decision_verification_summary(_review_decision_export_fixture())
+            _write_json(root / "aggregate_evidence_bundle_summary.json", _aggregate_evidence_bundle_payload(status="pass"))
+            _write_json(root / "review_decision_verification_summary.json", payload)
+
+            exit_code = main(["final-handoff-summary", "--evidence-dir", str(root), "--out", str(root / "handoff.json")])
+            raw = (root / "handoff.json").read_text(encoding="utf-8")
+            summary = json.loads(raw)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(summary["ready_for_handoff"])
+        review_decisions = summary["artifact_status_summary"]["review_decision_verification_summary.json"]
+        self.assertEqual(review_decisions["status"], "pass")
+        self.assertEqual(review_decisions["decision_summary"]["accepted"], 1)
+        self.assertEqual(review_decisions["privacy_status"], "pass")
+        self.assertNotIn("scan-qc-review-decisions.local.v1", raw)
+        self.assertNotIn("aggregate_handoff", raw)
 
     def test_final_handoff_summary_fails_for_blocking_evidence_and_cli_exits_nonzero(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

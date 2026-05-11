@@ -125,6 +125,8 @@ _AGGREGATE_BENCHMARK_SOURCES = {
     "run_aggregate_baseline",
     "archive_scan_qc.acceptance.build_acceptance_summary",
 }
+_REVIEW_DECISION_SOURCE_SCHEMA = "scan-qc-review-decisions.local.v1"
+_REVIEW_DECISION_SOURCE_TYPE = "aggregate_handoff"
 
 
 @dataclass(frozen=True)
@@ -445,6 +447,8 @@ def _private_key(path: tuple[str, ...], key: str, value: Any) -> bool:
 
 
 def _aggregate_key_exception(path: tuple[str, ...], normalized: str, value: Any) -> bool:
+    if path == ("source",) and _review_decision_source_metadata(value):
+        return True
     if path in {("source", "schema"), ("source", "source_type")} and isinstance(value, str):
         return True
     if normalized in _ALLOWED_NUMERIC_KEYS and _is_number(value):
@@ -494,6 +498,15 @@ def _numeric_count_value(value: Any) -> bool:
 
 def _aggregate_benchmark_source_key(path: tuple[str, ...], value: Any) -> bool:
     return path == ("benchmark", "source") and isinstance(value, str) and value in _AGGREGATE_BENCHMARK_SOURCES
+
+
+def _review_decision_source_metadata(value: Any) -> bool:
+    return (
+        isinstance(value, dict)
+        and set(value) == {"schema", "source_type"}
+        and value.get("schema") == _REVIEW_DECISION_SOURCE_SCHEMA
+        and value.get("source_type") == _REVIEW_DECISION_SOURCE_TYPE
+    )
 
 
 def _aggregate_baseline_infers_pass(payload: dict[str, Any]) -> bool:
