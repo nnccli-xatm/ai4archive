@@ -128,6 +128,18 @@
       padding: 8px;
     }
 
+    textarea {
+      width: 100%;
+      min-height: 220px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px;
+      resize: vertical;
+      background: #fbfcfe;
+      color: var(--text);
+      font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
     button {
       border: 1px solid #0f5d6f;
       background: var(--accent);
@@ -141,6 +153,11 @@
       color: var(--text);
       background: #fff;
       border-color: var(--border);
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: .55;
     }
 
     button:focus-visible, input:focus-visible, select:focus-visible {
@@ -303,6 +320,37 @@
     .badge.fail { background: #fee4e2; color: var(--fail); }
     .badge.warn { background: #fef0c7; color: var(--warn); }
 
+    .decision-strip {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(112px, 1fr));
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .decision-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+      padding: 10px;
+      min-height: 68px;
+    }
+
+    .decision-card span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .decision-card strong {
+      display: block;
+      margin-top: 4px;
+      font-size: 22px;
+    }
+
+    .review-select {
+      min-width: 172px;
+    }
+
     .preview {
       display: grid;
       min-height: 360px;
@@ -347,12 +395,14 @@
       .load-panel, .grid, .topbar { grid-template-columns: 1fr; }
       .metric-grid { grid-template-columns: repeat(3, minmax(120px, 1fr)); }
       .workflow { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
+      .decision-strip { grid-template-columns: repeat(3, minmax(112px, 1fr)); }
     }
 
     @media (max-width: 640px) {
       main, .topbar { padding-left: 14px; padding-right: 14px; }
       .metric-grid { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
       .workflow { grid-template-columns: 1fr; }
+      .decision-strip { grid-template-columns: repeat(2, minmax(112px, 1fr)); }
     }
   </style>
 </head>
@@ -388,6 +438,21 @@
     <section class="panel" aria-labelledby="workflow-title" data-region="workflow-steps" style="margin-top:16px">
       <h2 id="workflow-title">Workflow Steps</h2>
       <div id="workflowGrid" class="workflow"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="review-title" data-region="review-decisions" style="margin-top:16px">
+      <div class="toolbar">
+        <div>
+          <h2 id="review-title">Human Review Decisions</h2>
+          <p class="muted">Decision state stays in this browser tab and resets when an artifact is cleared or reloaded.</p>
+        </div>
+        <div class="file-row" style="margin-top:0">
+          <button id="exportReviewButton" type="button" disabled>Prepare Privacy-Safe Summary</button>
+          <button id="downloadReviewButton" class="secondary" type="button" disabled>Download JSON</button>
+        </div>
+      </div>
+      <div id="decisionSummary" class="decision-strip"></div>
+      <textarea id="reviewExport" aria-label="Privacy-safe review-decision JSON summary" readonly placeholder="Privacy-safe review-decision JSON summary will appear after a reviewer decision changes or after export is prepared."></textarea>
     </section>
 
     <div class="grid" style="margin-top:16px">
@@ -480,8 +545,19 @@
 
     const state = {
       model: SAMPLE_EMPTY,
-      selectedBatchId: null
+      selectedBatchId: null,
+      decisions: new Map(),
+      exportSummary: ""
     };
+
+    const REVIEW_DECISIONS = [
+      ["pending", "Pending"],
+      ["accepted_issue", "Accepted issue"],
+      ["false_positive", "False positive"],
+      ["fixed_externally", "Fixed externally"],
+      ["needs_rescan", "Needs rescan"],
+      ["blocked", "Blocked"]
+    ];
 
     const els = {
       file: document.getElementById("artifactFile"),
@@ -493,6 +569,10 @@
       findingsList: document.getElementById("findingsList"),
       batchDetail: document.getElementById("batchDetail"),
       preview: document.getElementById("imagePreview"),
+      decisionSummary: document.getElementById("decisionSummary"),
+      exportReview: document.getElementById("reviewExport"),
+      exportReviewButton: document.getElementById("exportReviewButton"),
+      downloadReviewButton: document.getElementById("downloadReviewButton"),
       statusFilter: document.getElementById("statusFilter"),
       severityFilter: document.getElementById("severityFilter"),
       findingSeverityFilter: document.getElementById("findingSeverityFilter")
@@ -535,6 +615,7 @@
       const summary = payload.summary || {};
       const batches = Array.isArray(payload.batches) ? payload.batches.map((batch, index) => ({
         id: text(batch.batch_id, `batch-${index + 1}`),
+        localId: `B${String(index + 1).padStart(4, "0")}`,
         status: normalizeStatus(batch.status),
         failureStage: text(batch.failure_stage, ""),
         failureReason: text(batch.failure_reason, ""),
@@ -578,6 +659,7 @@
       const manifest = payload.manifest || {};
       const findings = Array.isArray(payload.findings) ? payload.findings.map((finding, index) => ({
         id: `F${String(index + 1).padStart(4, "0")}`,
+        localId: `F${String(index + 1).padStart(4, "0")}`,
         batchId: text(manifest.batch_id, "scan-report"),
         rule: text(finding.rule, "unknown_rule"),
         severity: text(finding.severity, "P2"),
@@ -589,6 +671,7 @@
 
       const batch = {
         id: text(manifest.batch_id, "scan-report"),
+        localId: "B0001",
         status: number(summary.p0_findings) > 0 ? "failed" : "passed",
         failureStage: number(summary.p0_findings) > 0 ? "scan" : "",
         failureReason: number(summary.p0_findings) > 0 ? "P0 findings present" : "",
@@ -651,6 +734,7 @@
       renderFindings();
       renderDetail();
       renderPreview();
+      renderReview();
     }
 
     function renderStatus(kind = "idle", message = "") {
@@ -701,7 +785,7 @@
         ["Preflight", m.preflightErrors > 0 ? "failed" : hasData ? "done" : "pending", m.preflightErrors > 0 ? `${m.preflightErrors} errors` : "Aggregate status only"],
         ["QC Scan", m.p0 > 0 ? "failed" : hasData ? "done" : "pending", m.p0 > 0 ? "P0 review required" : "Summary available"],
         ["Processing Copy", m.processingFailed > 0 ? "failed" : hasData ? "blocked" : "pending", hasData ? "Optional backend artifact only" : "No processing state"],
-        ["Review Export", m.totalFindings > 0 ? "blocked" : hasData ? "done" : "pending", m.totalFindings > 0 ? "Findings require review" : "No findings loaded"],
+        ["Review Export", reviewComplete() ? "done" : m.totalFindings > 0 || state.model.batches.length > 0 ? "blocked" : hasData ? "done" : "pending", reviewComplete() ? "Review summary ready" : m.totalFindings > 0 ? "Findings require review" : "No findings loaded"],
         ["Acceptance Summary", m.failedBatches > 0 || m.p0 > 0 ? "blocked" : hasData ? "done" : "pending", "Read-only prototype state"],
         ["Handoff Manifest", hasData ? "blocked" : "pending", "Use existing CLI/report artifacts"]
       ];
@@ -727,15 +811,17 @@
       els.batchList.innerHTML = `
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Batch</th><th>Status</th><th>Files</th><th>Findings</th><th>P0/P1/P2</th><th>Failure</th><th>Report</th></tr></thead>
+            <thead><tr><th>Local ID</th><th>Batch</th><th>Status</th><th>Files</th><th>Findings</th><th>P0/P1/P2</th><th>Review Decision</th><th>Failure</th><th>Report</th></tr></thead>
             <tbody>
               ${batches.map(batch => `
                 <tr class="clickable-row" data-batch-id="${escapeHtml(batch.id)}">
+                  <td class="mono">${escapeHtml(batch.localId)}</td>
                   <td class="mono">${escapeHtml(batch.id)}</td>
                   <td>${statusBadge(batch.status)}</td>
                   <td>${escapeHtml(batch.openableFiles)} / ${escapeHtml(batch.totalFiles)}</td>
                   <td>${escapeHtml(batch.totalFindings)}</td>
                   <td><span class="badge p0">${batch.p0}</span> <span class="badge p1">${batch.p1}</span> <span class="badge p2">${batch.p2}</span></td>
+                  <td>${decisionSelect("batch", batch.localId)}</td>
                   <td class="truncate">${escapeHtml([batch.failureStage, batch.failureReason].filter(Boolean).join(": ") || "None")}</td>
                   <td class="truncate mono">${escapeHtml(batch.reportDir || "Not provided")}</td>
                 </tr>
@@ -749,6 +835,7 @@
           renderDetail();
         });
       });
+      bindDecisionControls(els.batchList);
     }
 
     function renderFindings() {
@@ -762,7 +849,7 @@
       els.findingsList.innerHTML = `
         <div class="table-wrap">
           <table>
-            <thead><tr><th>ID</th><th>Severity</th><th>Rule</th><th>Source</th><th>Confidence</th><th>Message</th><th>Relative Path</th></tr></thead>
+            <thead><tr><th>ID</th><th>Severity</th><th>Rule</th><th>Source</th><th>Confidence</th><th>Review Decision</th><th>Message</th><th>Relative Path</th></tr></thead>
             <tbody>
               ${findings.map(finding => `
                 <tr>
@@ -771,6 +858,7 @@
                   <td class="mono">${escapeHtml(finding.rule)}</td>
                   <td>${escapeHtml(finding.source)}</td>
                   <td>${escapeHtml(finding.confidence)}</td>
+                  <td>${decisionSelect("finding", finding.localId)}</td>
                   <td class="truncate">${escapeHtml(finding.message)}</td>
                   <td class="truncate mono">${escapeHtml(finding.relativePath)}</td>
                 </tr>
@@ -778,6 +866,7 @@
             </tbody>
           </table>
         </div>`;
+      bindDecisionControls(els.findingsList);
     }
 
     function renderDetail() {
@@ -794,6 +883,8 @@
           <table>
             <tbody>
               ${kv("Batch", batch.id)}
+              ${kv("Local Review ID", batch.localId)}
+              ${kv("Review Decision", decisionLabel(getDecision("batch", batch.localId)))}
               ${kv("Status", batch.status)}
               ${kv("Openable Files", `${batch.openableFiles} / ${batch.totalFiles}`)}
               ${kv("Findings", batch.totalFindings)}
@@ -805,6 +896,20 @@
             </tbody>
           </table>
         </div>`;
+    }
+
+    function renderReview() {
+      const counts = decisionCounts();
+      els.decisionSummary.innerHTML = REVIEW_DECISIONS.map(([value, label]) => `
+        <div class="decision-card">
+          <span>${escapeHtml(label)}</span>
+          <strong>${escapeHtml(counts[value] || 0)}</strong>
+        </div>
+      `).join("");
+      const hasLoadedArtifact = state.model.sourceType !== "empty";
+      els.exportReviewButton.disabled = !hasLoadedArtifact;
+      els.downloadReviewButton.disabled = !state.exportSummary;
+      els.exportReview.value = state.exportSummary;
     }
 
     function renderPreview() {
@@ -829,6 +934,94 @@
       return `<span class="badge ${cls}">${escapeHtml(severity)}</span>`;
     }
 
+    function decisionKey(scope, localId) {
+      return `${scope}:${localId}`;
+    }
+
+    function getDecision(scope, localId) {
+      return state.decisions.get(decisionKey(scope, localId)) || "pending";
+    }
+
+    function decisionLabel(value) {
+      const match = REVIEW_DECISIONS.find(([decision]) => decision === value);
+      return match ? match[1] : "Pending";
+    }
+
+    function decisionSelect(scope, localId) {
+      const current = getDecision(scope, localId);
+      const options = REVIEW_DECISIONS.map(([value, label]) => `
+        <option value="${escapeHtml(value)}"${value === current ? " selected" : ""}>${escapeHtml(label)}</option>
+      `).join("");
+      return `<select class="review-select" data-review-scope="${escapeHtml(scope)}" data-review-id="${escapeHtml(localId)}" aria-label="Review decision for ${escapeHtml(localId)}">${options}</select>`;
+    }
+
+    function bindDecisionControls(root) {
+      root.querySelectorAll("[data-review-scope][data-review-id]").forEach(control => {
+        control.addEventListener("click", event => event.stopPropagation());
+        control.addEventListener("change", () => {
+          state.decisions.set(decisionKey(control.dataset.reviewScope, control.dataset.reviewId), control.value);
+          state.exportSummary = JSON.stringify(buildReviewSummary(), null, 2);
+          renderWorkflow();
+          renderDetail();
+          renderReview();
+        });
+      });
+    }
+
+    function reviewTargets() {
+      return [
+        ...state.model.batches.map(batch => ({ scope: "batch", localId: batch.localId, severity: batch.p0 > 0 ? "P0" : batch.p1 > 0 ? "P1" : batch.p2 > 0 ? "P2" : "none" })),
+        ...state.model.findings.map(finding => ({ scope: "finding", localId: finding.localId, severity: finding.severity }))
+      ];
+    }
+
+    function decisionCounts() {
+      const counts = Object.fromEntries(REVIEW_DECISIONS.map(([value]) => [value, 0]));
+      reviewTargets().forEach(target => {
+        counts[getDecision(target.scope, target.localId)] += 1;
+      });
+      return counts;
+    }
+
+    function reviewComplete() {
+      const targets = reviewTargets();
+      return targets.length > 0 && targets.every(target => getDecision(target.scope, target.localId) !== "pending");
+    }
+
+    function buildReviewSummary() {
+      const targets = reviewTargets();
+      const decisions = targets.map(target => ({
+        scope: target.scope,
+        local_id: target.localId,
+        severity: target.severity,
+        decision: getDecision(target.scope, target.localId)
+      }));
+      return {
+        schema: "scan-qc-review-decisions.local.v1",
+        source_type: state.model.sourceType,
+        generated_in_browser: true,
+        privacy: {
+          summary_only: true,
+          excludes: ["private image content", "OCR text", "hashes", "thumbnails", "absolute paths", "row-level private evidence"]
+        },
+        aggregate_counts: {
+          total_batches: state.model.metrics.totalBatches,
+          total_findings: state.model.metrics.totalFindings,
+          p0: state.model.metrics.p0,
+          p1: state.model.metrics.p1,
+          p2: state.model.metrics.p2
+        },
+        review_counts: decisionCounts(),
+        reviewed_targets: decisions.length,
+        decisions
+      };
+    }
+
+    function resetReviewState() {
+      state.decisions = new Map();
+      state.exportSummary = "";
+    }
+
     async function loadFile(file) {
       if (!file) return;
       try {
@@ -836,11 +1029,13 @@
         const payload = JSON.parse(content);
         state.model = inferArtifact(payload);
         state.selectedBatchId = state.model.batches[0] ? state.model.batches[0].id : null;
+        resetReviewState();
         render();
         renderStatus("ok", `Loaded ${file.name}: ${state.model.sourceType} artifact with ${state.model.metrics.totalFindings} findings.`);
       } catch (error) {
         state.model = SAMPLE_EMPTY;
         state.selectedBatchId = null;
+        resetReviewState();
         render();
         renderStatus("error", `Could not load JSON: ${error.message}`);
       }
@@ -851,7 +1046,22 @@
       els.file.value = "";
       state.model = SAMPLE_EMPTY;
       state.selectedBatchId = null;
+      resetReviewState();
       render();
+    });
+    els.exportReviewButton.addEventListener("click", () => {
+      state.exportSummary = JSON.stringify(buildReviewSummary(), null, 2);
+      renderWorkflow();
+      renderReview();
+    });
+    els.downloadReviewButton.addEventListener("click", () => {
+      if (!state.exportSummary) return;
+      const blob = new Blob([state.exportSummary], { type: "application/json" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "scan-qc-review-decisions.summary.json";
+      link.click();
+      URL.revokeObjectURL(link.href);
     });
     [els.statusFilter, els.severityFilter].forEach(el => el.addEventListener("change", renderBatches));
     els.findingSeverityFilter.addEventListener("change", renderFindings);
