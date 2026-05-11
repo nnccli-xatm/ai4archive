@@ -46,6 +46,7 @@ from archive_scan_qc.rules import RulesProfileError, load_rules_profile
 from archive_scan_qc.sampling import build_acceptance_sampling_export
 from archive_scan_qc.scanner import ScanConfig, scan_batch
 from archive_scan_qc.validation_index import build_public_safe_validation_index
+from archive_scan_qc.workbench_summary import build_workbench_public_summary
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -1046,6 +1047,119 @@ class ScanQcTest(unittest.TestCase):
         self.assertIn("aggregate_artifact_missing", {item["code"] for item in summary["blocking_items"]})
         self.assertEqual(summary["summary"]["artifacts_missing"], 1)
         self.assertTrue(summary["privacy"]["aggregate_only"])
+
+    def test_workbench_summary_passes_with_public_aggregate_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_public_safe_validation_index_fixtures(root)
+            _write_json(root / "acceptance_summary.json", _acceptance_bundle_payload())
+            _write_json(root / "review_summary.json", _review_summary_bundle_payload())
+            _write_json(root / "deep_inspection_candidate_summary.json", _deep_inspection_candidate_bundle_payload())
+            _write_json(root / "capability_probe.json", _capability_probe_bundle_payload())
+            _write_json(root / "artifact_readiness_checklist.json", _artifact_readiness_bundle_payload(ready=True))
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(["workbench-summary", "--evidence-dir", str(root), "--out", str(root / "workbench.json")])
+            summary = json.loads((root / "workbench.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(summary["schema_version"], "scan-qc.workbench-public-summary.v1")
+        self.assertEqual(summary["status"], "pass")
+        self.assertTrue(summary["ready"])
+        self.assertEqual(summary["checks_failed"], 0)
+        self.assertEqual(summary["blocking_counts_by_code"], {})
+        self.assertEqual(summary["artifact_presence"]["final_production_handoff_summary.json"]["status"], "pass")
+        self.assertEqual(summary["workflow_state"]["handoff_status"], "pass")
+        self.assertEqual(summary["artifacts"]["deep_inspection_candidate_summary.json"]["metrics"]["candidate_total"], 3)
+        self.assertFalse(summary["privacy"]["contains_paths"])
+        self.assertFalse(summary["privacy"]["contains_filenames"])
+        self.assertIn("Workbench summary status: pass", stdout.getvalue())
+
+    def test_workbench_summary_blocks_aggregate_failures_by_code_only(self) -> None:
+        forbidden_private_values = [
+            "/Users/private/archive",
+            "page_0001.png",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "OCR TEXT",
+            "SECRET123",
+            "processing_manifest.json",
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_public_safe_validation_index_fixtures(root)
+            failing = _release_candidate_bundle_payload()
+            failing["status"] = "fail"
+            failing["ready_for_release_candidate"] = False
+            failing["blocking_items"] = [{"artifact": "acceptance_summary.json", "code": "acceptance_blocked"}]
+            failing["operator_warning"] = " ".join(forbidden_private_values)
+            _write_json(root / "release_candidate_summary.json", failing)
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(["workbench-summary", "--evidence-dir", str(root), "--out", str(root / "workbench.json")])
+            raw = (root / "workbench.json").read_text(encoding="utf-8")
+            summary = json.loads(raw)
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(summary["status"], "fail")
+        self.assertFalse(summary["ready"])
+        self.assertGreater(summary["checks_failed"], 0)
+        self.assertEqual(summary["blocking_counts_by_code"]["artifact_status_failed"], 1)
+        self.assertEqual(summary["blocking_counts_by_code"]["acceptance_blocked"], 1)
+        self.assertIn("private_value_present", summary["blocking_counts_by_code"])
+        for value in forbidden_private_values:
+            self.assertNotIn(value, raw)
+        self.assertIn("Workbench summary status: fail", stdout.getvalue())
+
+    def test_workbench_summary_rejects_explicit_private_inputs_without_reading(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            private_report = root / "scan_qc_report.json"
+            private_report.write_text("/Users/private/archive/page_0001.png SECRET123", encoding="utf-8")
+            _write_json(root / "final_production_handoff_summary.json", _final_handoff_bundle_payload())
+
+            summary = build_workbench_public_summary(
+                files=[root / "final_production_handoff_summary.json", private_report],
+                generated_at="2026-01-01T00:00:00+00:00",
+            )
+            raw = json.dumps(summary, ensure_ascii=False, sort_keys=True)
+
+        self.assertEqual(summary["status"], "fail")
+        self.assertEqual(summary["privacy"]["unsupported_private_input_count"], 1)
+        self.assertIn("unsupported_private_input_rejected", summary["blocking_counts_by_code"])
+        self.assertEqual(summary["artifact_presence"]["final_production_handoff_summary.json"]["status"], "pass")
+        self.assertNotIn("scan_qc_report.json", raw)
+        self.assertNotIn("/Users/private/archive/page_0001.png", raw)
+        self.assertNotIn("SECRET123", raw)
+
+    def test_workbench_summary_directory_mode_ignores_unknown_private_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_json(root / "final_production_handoff_summary.json", _final_handoff_bundle_payload())
+            (root / "scan_qc_report.json").write_text("/Users/private/archive/page_0001.png SECRET123", encoding="utf-8")
+
+            summary = build_workbench_public_summary(evidence_dir=root, generated_at="2026-01-01T00:00:00+00:00")
+            raw = json.dumps(summary, ensure_ascii=False, sort_keys=True)
+
+        self.assertEqual(summary["status"], "pass")
+        self.assertEqual(summary["privacy"]["unsupported_private_input_count"], 0)
+        self.assertNotIn("scan_qc_report.json", summary["blocking_counts_by_code"])
+        self.assertNotIn("/Users/private/archive/page_0001.png", raw)
+        self.assertNotIn("SECRET123", raw)
+
+    def test_workbench_summary_is_deterministic_for_same_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_public_safe_validation_index_fixtures(root)
+            first = build_workbench_public_summary(evidence_dir=root)
+            second = build_workbench_public_summary(evidence_dir=root)
+
+        self.assertEqual(
+            json.dumps(first, ensure_ascii=False, sort_keys=True),
+            json.dumps(second, ensure_ascii=False, sort_keys=True),
+        )
+        self.assertIsNone(first["generated_at"])
 
     def test_public_safe_validation_index_omits_private_values_from_privacy_failures(self) -> None:
         forbidden_private_values = [
@@ -6073,6 +6187,108 @@ def _deep_inspection_candidate_bundle_payload() -> dict[str, object]:
         },
         "no_inference_run": True,
         "dry_run_only": True,
+    }
+
+
+def _review_summary_bundle_payload() -> dict[str, object]:
+    return {
+        "schema_version": "scan-qc.review-summary.v1",
+        "status": "pass",
+        "acceptance_passed": True,
+        "remaining_p0": 0,
+        "remaining_p1": 0,
+        "rule_status_counts": {"dpi_below_minimum": {"fixed": 1}},
+        "privacy": {
+            "aggregate_only": True,
+            "contains_paths": False,
+            "contains_filenames": False,
+            "contains_hashes": False,
+            "contains_ocr_text": False,
+            "contains_thumbnails": False,
+            "contains_image_content": False,
+            "contains_secrets": False,
+            "contains_row_level_findings": False,
+        },
+    }
+
+
+def _capability_probe_bundle_payload() -> dict[str, object]:
+    return {
+        "schema_version": "scan-qc.capability-probe.v1",
+        "status": "pass",
+        "readiness": {
+            "blocking": False,
+            "provider_packages_found": ["onnxruntime"],
+            "gpu_acceleration_configured": False,
+            "model_acceleration_configured": False,
+        },
+        "gpu_provider_visibility": {"gpu_visible_count": 0},
+        "privacy": {
+            "aggregate_only": True,
+            "contains_paths": False,
+            "contains_filenames": False,
+            "contains_hashes": False,
+            "contains_ocr_text": False,
+            "contains_thumbnails": False,
+            "contains_image_content": False,
+            "contains_secrets": False,
+            "contains_row_level_findings": False,
+        },
+    }
+
+
+def _artifact_readiness_bundle_payload(*, ready: bool) -> dict[str, object]:
+    return {
+        "schema_version": "scan-qc-artifact-readiness-checklist.v1",
+        "status": "pass" if ready else "fail",
+        "artifact_readiness_checklist": {
+            "ready": ready,
+            "missing_count": 0 if ready else 1,
+            "blocking_count": 0 if ready else 1,
+            "warning_count": 0,
+            "stale_count": 0,
+        },
+        "privacy": {
+            "aggregate_only": True,
+            "contains_paths": False,
+            "contains_filenames": False,
+            "contains_hashes": False,
+            "contains_ocr_text": False,
+            "contains_thumbnails": False,
+            "contains_image_content": False,
+            "contains_secrets": False,
+            "contains_row_level_findings": False,
+        },
+    }
+
+
+def _final_handoff_bundle_payload() -> dict[str, object]:
+    return {
+        "schema_version": "scan-qc.final-production-handoff-summary.v1",
+        "status": "pass",
+        "ready_for_handoff": True,
+        "checks_passed": 7,
+        "checks_failed": 0,
+        "blocking_item_count": 0,
+        "blocking_items": [],
+        "artifact_status_summary": {
+            "aggregate_evidence_bundle_summary.json": {"present": True, "required": True, "status": "pass"},
+            "release_candidate_summary.json": {"present": True, "required": False, "status": "pass"},
+        },
+        "privacy": {
+            "aggregate_only": True,
+            "private_indicators_found": False,
+            "private_indicator_count": 0,
+            "contains_paths": False,
+            "contains_filenames": False,
+            "contains_hashes": False,
+            "contains_ocr_text": False,
+            "contains_thumbnails": False,
+            "contains_image_content": False,
+            "contains_secrets": False,
+            "contains_row_level_findings": False,
+        },
+        "sensitive_values_omitted": True,
     }
 
 

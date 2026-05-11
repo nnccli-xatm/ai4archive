@@ -37,6 +37,7 @@ from .rules import RulesProfileError, load_rules_profile
 from .sampling import DEFAULT_SAMPLE_RATIO, write_acceptance_sampling_export
 from .scanner import ScanConfig, scan_batch
 from .validation_index import VALIDATION_INDEX_JSON, write_public_safe_validation_index
+from .workbench_summary import WORKBENCH_SUMMARY_JSON, write_workbench_public_summary
 
 
 def _positive_int(value: str) -> int:
@@ -195,6 +196,8 @@ def main(argv: list[str] | None = None) -> int:
         return _main_final_handoff_summary(argv[1:])
     if argv and argv[0] == "public-safe-validation-index":
         return _main_public_safe_validation_index(argv[1:])
+    if argv and argv[0] == "workbench-summary":
+        return _main_workbench_summary(argv[1:])
     if argv and argv[0] == "processing-review-package":
         return _main_processing_review_package(argv[1:])
     if argv and argv[0] == "processing-plan":
@@ -686,6 +689,39 @@ def _main_public_safe_validation_index(argv: list[str]) -> int:
     print(f"Checks passed: {payload['checks_passed']}")
     print(f"Checks failed: {payload['checks_failed']}")
     print("Privacy: public-safe aggregate index only; private indicators are reported by filename/category/code/count only.")
+    return 0 if payload["status"] == "pass" else 1
+
+
+def _main_workbench_summary(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="archive-scan-qc workbench-summary",
+        description=(
+            "Bundle known public-safe aggregate JSON artifacts into one static-workbench input. "
+            "Private reports, row-level evidence, images, manifests, logs, commands, and environment values are not read."
+        ),
+    )
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--evidence-dir", default=None, type=Path, help="Directory containing known public-safe aggregate JSON files.")
+    source.add_argument(
+        "--file",
+        default=[],
+        action="append",
+        type=Path,
+        help="Explicit known public-safe aggregate JSON file. Repeat for multiple files.",
+    )
+    parser.add_argument("--out", default=None, type=Path, help=f"Output JSON path or directory for {WORKBENCH_SUMMARY_JSON}.")
+    args = parser.parse_args(argv)
+    try:
+        path, payload = write_workbench_public_summary(evidence_dir=args.evidence_dir, files=args.file, output_path=args.out)
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    print(f"Workbench public summary: {path}")
+    print(f"Workbench summary status: {payload['status']}")
+    print(f"Ready: {payload['ready']}")
+    print(f"Artifacts present: {payload['summary']['artifacts_present']}")
+    print(f"Checks passed: {payload['checks_passed']}")
+    print(f"Checks failed: {payload['checks_failed']}")
+    print("Privacy: public-safe aggregate workbench input only; private inputs are rejected or reported by code/count only.")
     return 0 if payload["status"] == "pass" else 1
 
 
