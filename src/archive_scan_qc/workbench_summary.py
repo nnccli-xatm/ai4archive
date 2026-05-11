@@ -21,6 +21,14 @@ _PROCESSING_REUSE_COUNTER_KEYS = (
     "processing_duplicate_reused_files",
     "processing_existing_derivative_reused_files",
 )
+_PROCESSING_OPERATION_NAMES = ("auto_crop", "deskew", "trim_dark_border", "despeckle")
+_PROCESSING_OPERATION_FIELDS = (
+    "enabled",
+    "file_count",
+    "elapsed_seconds",
+    "files_per_minute",
+    "average_seconds_per_file",
+)
 _DESPECKLE_BACKEND_FIELDS = ("backend_mode", "numpy_available", "backend_counts")
 
 
@@ -444,18 +452,19 @@ def _merge_processing_reuse_counts(target: dict[str, int], metrics: dict[str, An
 
 
 def _processing_operation_timings(payload: dict[str, Any]) -> dict[str, Any]:
-    despeckle = _extract_despeckle_timing(payload)
-    if not despeckle:
+    timings = _extract_processing_operation_timings(payload)
+    if not timings:
         return {}
-    return {"processing_operation_timings": {"despeckle": despeckle}}
+    return {"processing_operation_timings": timings}
 
 
-def _extract_despeckle_timing(payload: dict[str, Any]) -> dict[str, Any]:
+def _extract_processing_operation_timings(payload: dict[str, Any]) -> dict[str, Any]:
     for timings in _processing_operation_timing_candidates(payload):
-        despeckle = timings.get("despeckle")
-        if not isinstance(despeckle, dict):
-            continue
-        sanitized = _sanitize_despeckle_timing(despeckle)
+        sanitized = {}
+        for operation in _PROCESSING_OPERATION_NAMES:
+            timing = _sanitize_processing_operation_timing(operation, timings.get(operation))
+            if timing:
+                sanitized[operation] = timing
         if sanitized:
             return sanitized
     return {}
@@ -476,7 +485,26 @@ def _processing_operation_timing_candidates(payload: dict[str, Any]) -> list[dic
     return candidates
 
 
-def _sanitize_despeckle_timing(value: dict[str, Any]) -> dict[str, Any]:
+def _sanitize_processing_operation_timing(operation: str, value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    result: dict[str, Any] = {}
+    if isinstance(value.get("enabled"), bool):
+        result["enabled"] = value["enabled"]
+    file_count = _safe_int(value.get("file_count"))
+    if file_count is not None:
+        result["file_count"] = file_count
+    for key in ("elapsed_seconds", "files_per_minute", "average_seconds_per_file"):
+        parsed = _safe_float(value.get(key))
+        if parsed is not None:
+            result[key] = parsed
+    if operation == "despeckle":
+        result.update(_sanitize_despeckle_backend_timing(value))
+    allowed_fields = _PROCESSING_OPERATION_FIELDS + (_DESPECKLE_BACKEND_FIELDS if operation == "despeckle" else ())
+    return {key: result[key] for key in allowed_fields if key in result}
+
+
+def _sanitize_despeckle_backend_timing(value: dict[str, Any]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     backend_mode = value.get("backend_mode")
     if isinstance(backend_mode, str) and _safe_code(backend_mode):
@@ -493,10 +521,10 @@ def _merge_processing_operation_timings(target: dict[str, Any], metrics: dict[st
     timings = metrics.get("processing_operation_timings")
     if not isinstance(timings, dict):
         return
-    despeckle = timings.get("despeckle")
-    if not isinstance(despeckle, dict):
-        return
-    target["despeckle"] = {key: despeckle[key] for key in _DESPECKLE_BACKEND_FIELDS if key in despeckle}
+    for operation in _PROCESSING_OPERATION_NAMES:
+        timing = timings.get(operation)
+        if isinstance(timing, dict):
+            target[operation] = dict(timing)
 
 
 def _aggregate_baseline_infers_pass(payload: dict[str, Any]) -> bool:
@@ -622,6 +650,14 @@ def _safe_int(value: Any) -> int | None:
         return None
     if isinstance(value, int) and value >= 0:
         return value
+    return None
+
+
+def _safe_float(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float) and value >= 0:
+        return float(value)
     return None
 
 

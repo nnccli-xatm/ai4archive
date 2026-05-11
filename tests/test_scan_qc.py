@@ -1433,7 +1433,7 @@ class ScanQcTest(unittest.TestCase):
         self.assertNotIn("processing_duplicate_reused_files", summary["summary"])
         self.assertNotIn("processing_existing_derivative_reused_files", summary["summary"])
 
-    def test_workbench_summary_propagates_despeckle_backend_counts(self) -> None:
+    def test_workbench_summary_propagates_processing_operation_timings(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             _write_json(
@@ -1445,10 +1445,32 @@ class ScanQcTest(unittest.TestCase):
                         "total_batches": 1,
                         "failed_batches": 0,
                         "processing_operation_timings": {
+                            "auto_crop": {
+                                "enabled": True,
+                                "file_count": 7,
+                                "elapsed_seconds": 0.5,
+                                "files_per_minute": 840.0,
+                                "average_seconds_per_file": 0.071429,
+                            },
+                            "deskew": {
+                                "enabled": True,
+                                "file_count": 7,
+                                "elapsed_seconds": 3.5,
+                                "files_per_minute": 120.0,
+                                "average_seconds_per_file": 0.5,
+                            },
+                            "trim_dark_border": {
+                                "enabled": False,
+                                "file_count": 0,
+                                "elapsed_seconds": 0.0,
+                                "files_per_minute": 0.0,
+                            },
                             "despeckle": {
                                 "enabled": True,
                                 "file_count": 7,
                                 "elapsed_seconds": 1.25,
+                                "files_per_minute": 336.0,
+                                "average_seconds_per_file": 0.178571,
                                 "backend_mode": "numpy",
                                 "numpy_available": True,
                                 "backend_counts": {
@@ -1470,16 +1492,25 @@ class ScanQcTest(unittest.TestCase):
             )
 
         self.assertEqual(summary["status"], "pass")
-        despeckle = summary["summary"]["processing_operation_timings"]["despeckle"]
+        timings = summary["summary"]["processing_operation_timings"]
+        self.assertEqual(timings["auto_crop"]["file_count"], 7)
+        self.assertEqual(timings["auto_crop"]["elapsed_seconds"], 0.5)
+        self.assertEqual(timings["deskew"]["elapsed_seconds"], 3.5)
+        self.assertEqual(timings["trim_dark_border"]["enabled"], False)
+        despeckle = timings["despeckle"]
+        self.assertEqual(despeckle["enabled"], True)
+        self.assertEqual(despeckle["file_count"], 7)
+        self.assertEqual(despeckle["elapsed_seconds"], 1.25)
+        self.assertEqual(despeckle["files_per_minute"], 336.0)
+        self.assertEqual(despeckle["average_seconds_per_file"], 0.178571)
         self.assertEqual(despeckle["backend_mode"], "numpy")
         self.assertTrue(despeckle["numpy_available"])
         self.assertEqual(despeckle["backend_counts"]["numpy"], 7)
         self.assertEqual(despeckle["backend_counts"]["fallback"], 0)
-        self.assertNotIn("file_count", despeckle)
         metrics = summary["artifacts"]["run_plan_summary.json"]["metrics"]
-        self.assertEqual(metrics["processing_operation_timings"]["despeckle"], despeckle)
+        self.assertEqual(metrics["processing_operation_timings"], timings)
 
-    def test_workbench_summary_missing_despeckle_backend_metadata_is_non_blocking(self) -> None:
+    def test_workbench_summary_missing_despeckle_backend_metadata_keeps_aggregate_timing_non_blocking(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             _write_json(
@@ -1504,7 +1535,11 @@ class ScanQcTest(unittest.TestCase):
             )
 
         self.assertEqual(summary["status"], "pass")
-        self.assertNotIn("processing_operation_timings", summary["summary"])
+        despeckle = summary["summary"]["processing_operation_timings"]["despeckle"]
+        self.assertEqual(despeckle["enabled"], True)
+        self.assertEqual(despeckle["file_count"], 7)
+        self.assertEqual(despeckle["elapsed_seconds"], 1.25)
+        self.assertNotIn("backend_mode", despeckle)
 
     def test_workbench_summary_blocks_private_despeckle_backend_values(self) -> None:
         private_value = "/Users/private/archive/page_0001.png"
