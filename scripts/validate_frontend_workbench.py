@@ -845,6 +845,7 @@ vm.runInContext(workbenchScript + `
       "aggregate_evidence_bundle_summary.json": {{ present: true, required: true, status: "pass", reported_status: "current", privacy_status: "public-safe" }},
       "release_candidate_summary.json": {{ present: true, required: true, status: "pass", reported_status: "current", privacy_status: "public-safe" }},
       "deep_inspection_candidate_summary.json": {{ present: true, required: false, status: "pass", reported_status: "pass", candidate_total: 3, candidates_by_reason: {{ processing_review_status_failed: 1, quality_scanline_candidate: 2 }}, candidates_by_severity: {{ P1: 1, P2: 2 }}, provider_configured: false, provider_count: 0, checks_passed: 5, checks_failed: 0, privacy_status: "aggregate_public_safe", no_inference_run: true, source_root: "/Users/private/archive", provider_command: "python /private/model.py", environment: {{ SECRET_TOKEN: "PRIVATE_OCR_TEXT" }} }},
+      "review_decision_verification_summary.json": {{ present: true, required: false, status: "pass", reported_status: "pass", checks_passed: 3, checks_failed: 0, blocking_count: 0, warning_count: 1, decision_summary: {{ total_decisions: 19, accepted: 11, rejected: 5, rework: 2, pending: 1 }}, blocking_counts_by_code: {{}}, warning_counts_by_code: {{ ignored_extra_decision_field: 1 }}, privacy_status: "pass", local_id: "PRIVATE-LOCAL-ID", source_type: "review_decision_export", source_schema: "scan-qc-review-decisions.local.v1" }},
       "final_production_handoff_summary.json": {{ present: true, required: true, status: "pass", reported_status: "current", privacy_status: "public-safe" }}
     }},
     privacy: {{
@@ -1637,6 +1638,13 @@ vm.runInContext(workbenchScript + `
   assert(finalHandoffPassModel.aggregateHandoff.checksFailed === 0, "passing final handoff checks failed were not preserved");
   assert(finalHandoffPassModel.aggregateHandoff.blockingItemCount === 0, "passing final handoff blocking count was not zero");
   assert(finalHandoffPassModel.aggregateHandoff.deepInspectionCandidate.candidateTotal === 3, "nested final handoff deep-inspection candidate total was not preserved");
+  assert(finalHandoffPassModel.aggregateHandoff.reviewDecisionVerification.totalDecisions === 19, "nested final handoff review decision total was not preserved");
+  assert(finalHandoffPassModel.aggregateHandoff.reviewDecisionVerification.acceptedCount === 11, "nested final handoff review decision accepted count was not preserved");
+  assert(finalHandoffPassModel.aggregateHandoff.reviewDecisionVerification.rejectedCount === 5, "nested final handoff review decision rejected count was not preserved");
+  assert(finalHandoffPassModel.aggregateHandoff.reviewDecisionVerification.reworkCount === 2, "nested final handoff review decision rework count was not preserved");
+  assert(finalHandoffPassModel.aggregateHandoff.reviewDecisionVerification.pendingCount === 1, "nested final handoff review decision pending count was not preserved");
+  assert(finalHandoffPassModel.aggregateHandoff.reviewDecisionVerification.warningCount === 1, "nested final handoff review decision warning count was not preserved");
+  assert(countFor(finalHandoffPassModel.aggregateHandoff.reviewDecisionVerification.warningCodeCounts, "ignored_extra_decision_field") === 1, "nested final handoff review decision warning code count was not preserved");
   state.model = finalHandoffPassModel;
   renderAggregateHandoff();
   assert(els.aggregateHandoff.innerHTML.includes("Final production handoff summary"), "passing final handoff did not render final handoff type");
@@ -1646,7 +1654,13 @@ vm.runInContext(workbenchScript + `
   assert(els.aggregateHandoff.innerHTML.includes("Artifact Presence And Status"), "passing final handoff did not render artifact status summary");
   assert(els.aggregateHandoff.innerHTML.includes("Deep-Inspection Candidate Summary"), "passing final handoff did not render nested deep-inspection candidate summary");
   assert(els.aggregateHandoff.innerHTML.includes("processing_review_status_failed"), "passing final handoff did not render nested deep-inspection candidate reason code");
+  assert(els.aggregateHandoff.innerHTML.includes("Review Decision Verification Summary"), "passing final handoff did not render nested review decision verification summary");
+  assert(els.aggregateHandoff.innerHTML.includes("Total Decisions"), "passing final handoff did not render nested review decision total");
+  assert(els.aggregateHandoff.innerHTML.includes("ignored_extra_decision_field"), "passing final handoff did not render nested review decision warning code count");
   assert(els.aggregateHandoff.innerHTML.includes("Privacy Status"), "passing final handoff did not render privacy status");
+  assert(!els.aggregateHandoff.innerHTML.includes("PRIVATE-LOCAL-ID"), "passing final handoff rendered nested review decision local ID");
+  assert(!els.aggregateHandoff.innerHTML.includes("source_type"), "passing final handoff rendered nested review decision source type");
+  assert(!els.aggregateHandoff.innerHTML.includes("scan-qc-review-decisions.local.v1"), "passing final handoff rendered nested review decision source schema");
   assertPublicSafe(els.aggregateHandoff.innerHTML, "nested final handoff deep-inspection candidate rendering");
 
   const finalHandoffBlockedModel = inferArtifact(finalHandoffBlockedFixture);
