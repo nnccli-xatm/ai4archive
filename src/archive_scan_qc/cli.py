@@ -32,6 +32,7 @@ from .processing import ProcessingOptions, process_images
 from .processing_plan import write_processing_plan
 from .processing_review import write_processing_review_package
 from .reports import write_reports, write_review_export, write_review_summary
+from .review_decisions import write_review_decision_verification_summary
 from .rework import write_rework_action_list
 from .rules import RulesProfileError, load_rules_profile
 from .sampling import DEFAULT_SAMPLE_RATIO, write_acceptance_sampling_export
@@ -182,6 +183,8 @@ def main(argv: list[str] | None = None) -> int:
         return _main_review_export(argv[1:])
     if argv and argv[0] == "review-summary":
         return _main_review_summary(argv[1:])
+    if argv and argv[0] == "review-decisions-verify":
+        return _main_review_decisions_verify(argv[1:])
     if argv and argv[0] == "calibrate-rules":
         return _main_calibrate_rules(argv[1:])
     if argv and argv[0] == "acceptance-summary":
@@ -484,6 +487,28 @@ def _main_review_summary(argv: list[str]) -> int:
         parser.error(str(exc))
     print(f"Review summary: {path}")
     return 0
+
+
+def _main_review_decisions_verify(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="archive-scan-qc review-decisions-verify",
+        description="Verify a browser-exported privacy-safe review decision summary.",
+    )
+    parser.add_argument("--summary", required=True, type=Path, help="Path to scan-qc-review-decisions.summary.json.")
+    parser.add_argument("--out", required=True, type=Path, help="Output aggregate verification summary JSON path or directory.")
+    args = parser.parse_args(argv)
+    try:
+        path, payload = write_review_decision_verification_summary(args.summary, args.out)
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    decisions = payload["decision_summary"]
+    print(f"Review decision verification summary: {path}")
+    print(f"Verification status: {payload['status']}")
+    print(f"Total decisions: {decisions['total_decisions']}")
+    print(f"Completion status: {decisions['completion_status']}")
+    print(f"Blocking items: {payload['blocking_count']}")
+    print("Privacy: aggregate-only verifier output; private indicators are reported by code/count only.")
+    return 0 if payload["status"] == "pass" else 1
 
 
 def _main_calibrate_rules(argv: list[str]) -> int:

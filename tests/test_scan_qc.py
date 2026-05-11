@@ -40,6 +40,7 @@ from archive_scan_qc.processing import (
 from archive_scan_qc.processing_plan import build_processing_plan
 from archive_scan_qc.processing_review import build_processing_review_package
 from archive_scan_qc.reports import build_review_summary, write_reports, write_review_export, write_review_summary
+from archive_scan_qc.review_decisions import build_review_decision_verification_summary
 from archive_scan_qc.rework import build_rework_action_list, write_rework_action_list
 from archive_scan_qc.rule_registry import RULE_REGISTRY, validate_provider_rule_id
 from archive_scan_qc.rules import RulesProfileError, load_rules_profile
@@ -3006,6 +3007,82 @@ class ScanQcTest(unittest.TestCase):
         self.assertEqual(summary["remaining_p0"], 0)
         self.assertEqual(summary["remaining_p1"], 0)
         self.assertTrue(summary["acceptance_passed"])
+
+    def test_review_decisions_verify_passes_complete_aggregate_summary(self) -> None:
+        summary = build_review_decision_verification_summary(_review_decision_export_fixture())
+
+        self.assertEqual(summary["schema_version"], "scan-qc.review-decision-verification-summary.v1")
+        self.assertEqual(summary["status"], "pass")
+        self.assertEqual(summary["decision_summary"]["total_decisions"], 3)
+        self.assertEqual(summary["decision_summary"]["pending"], 0)
+        self.assertEqual(summary["decision_summary"]["accepted"], 1)
+        self.assertEqual(summary["decision_summary"]["rejected"], 1)
+        self.assertEqual(summary["decision_summary"]["rework"], 1)
+        self.assertEqual(summary["decision_summary"]["completion_status"], "complete")
+        self.assertEqual(summary["blocking_counts_by_code"], {})
+        self.assertTrue(summary["privacy"]["aggregate_only"])
+
+    def test_review_decisions_verify_allows_incomplete_without_blocking(self) -> None:
+        fixture = _review_decision_export_fixture(decisions=("accepted_issue", "pending", "needs_rescan"))
+        result = build_review_decision_verification_summary(fixture)
+
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["decision_summary"]["pending"], 1)
+        self.assertEqual(result["decision_summary"]["completion_status"], "incomplete")
+
+    def test_review_decisions_verify_blocks_invalid_decision_value(self) -> None:
+        fixture = _review_decision_export_fixture(decisions=("accepted_issue", "done", "blocked"))
+        result = build_review_decision_verification_summary(fixture)
+
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["blocking_counts_by_code"]["unknown_decision_value"], 1)
+        self.assertNotIn("RID0002", json.dumps(result, ensure_ascii=False))
+        self.assertNotIn("done", json.dumps(result, ensure_ascii=False))
+
+    def test_review_decisions_verify_blocks_count_mismatch(self) -> None:
+        fixture = _review_decision_export_fixture()
+        fixture["source_target_count"] = 4
+        fixture["review_counts"]["accepted_issue"] = 99
+        fixture["aggregate_counts"]["review_completion"]["reviewed"] = 2
+
+        result = build_review_decision_verification_summary(fixture)
+
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["blocking_counts_by_code"]["source_target_count_mismatch"], 1)
+        self.assertEqual(result["blocking_counts_by_code"]["review_count_mismatch"], 1)
+        self.assertEqual(result["blocking_counts_by_code"]["review_completion_count_mismatch"], 1)
+
+    def test_review_decisions_verify_blocks_private_fields_by_code_only(self) -> None:
+        fixture = _review_decision_export_fixture()
+        fixture["decisions"][0]["preview_filename"] = "private_scan_001.tif"
+        fixture["sha256"] = "abc123-private-hash"
+
+        result = build_review_decision_verification_summary(fixture)
+        raw = json.dumps(result, ensure_ascii=False)
+
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["blocking_counts_by_code"]["privacy_sensitive_field"], 2)
+        self.assertFalse(result["privacy"]["aggregate_only"])
+        self.assertNotIn("private_scan_001.tif", raw)
+        self.assertNotIn("abc123-private-hash", raw)
+        self.assertNotIn("preview_filename", raw)
+        self.assertNotIn("sha256", raw)
+
+    def test_review_decisions_verify_cli_smoke_writes_aggregate_only_output(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="review-decisions-") as temp_dir:
+            root = Path(temp_dir)
+            input_path = root / "scan-qc-review-decisions.summary.json"
+            output_path = root / "review_decision_verification_summary.json"
+            input_path.write_text(json.dumps(_review_decision_export_fixture()), encoding="utf-8")
+
+            self.assertEqual(
+                main(["review-decisions-verify", "--summary", str(input_path), "--out", str(output_path)]),
+                0,
+            )
+            payload = json.loads(output_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(payload["status"], "pass")
+        self.assertEqual(payload["decision_summary"]["total_decisions"], 3)
 
     def test_rules_calibration_without_review_generates_rule_counts(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -6209,6 +6286,45 @@ def _review_summary_bundle_payload() -> dict[str, object]:
             "contains_secrets": False,
             "contains_row_level_findings": False,
         },
+    }
+
+
+def _review_decision_export_fixture(
+    decisions: tuple[str, ...] = ("accepted_issue", "false_positive", "fixed_externally"),
+) -> dict[str, object]:
+    decision_rows = [
+        {"scope": "finding", "local_id": f"RID{index:04d}", "decision": decision}
+        for index, decision in enumerate(decisions, start=1)
+    ]
+    counts = {decision: 0 for decision in ("pending", "accepted_issue", "false_positive", "fixed_externally", "needs_rescan", "blocked")}
+    for decision in decisions:
+        if decision in counts:
+            counts[decision] += 1
+    pending = counts["pending"]
+    reviewed = len(decision_rows) - pending
+    return {
+        "schema": "scan-qc-review-decisions.local.v1",
+        "source_type": "aggregate_handoff",
+        "source_target_count": len(decision_rows),
+        "generated_in_browser": True,
+        "privacy": {"summary_only": True},
+        "aggregate_counts": {
+            "total_batches": 1,
+            "total_findings": len(decision_rows),
+            "p0": 1,
+            "p1": 1,
+            "p2": 1,
+            "review_completion": {
+                "total": len(decision_rows),
+                "reviewed": reviewed,
+                "pending": pending,
+                "complete": len(decision_rows) > 0 and pending == 0,
+                "counts": counts,
+            },
+        },
+        "review_counts": counts,
+        "reviewed_targets": reviewed,
+        "decisions": decision_rows,
     }
 
 
