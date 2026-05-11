@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import re
 from typing import Any
 
 SCHEMA_VERSION = "scan-qc.review-decision-verification-summary.v1"
@@ -31,6 +32,49 @@ PRIVATE_FIELD_NAMES = {
     "sha256",
     "source_image",
     "thumbnail",
+}
+PRIVATE_FIELD_TOKENS = {
+    "blob",
+    "derivative",
+    "digest",
+    "filepath",
+    "filename",
+    "hash",
+    "image",
+    "manifest",
+    "md5",
+    "ocr",
+    "path",
+    "preview",
+    "prompt",
+    "sha",
+    "sha1",
+    "sha256",
+    "sha512",
+    "sourceimage",
+    "text",
+    "thumbnail",
+    "thumb",
+    "transcript",
+}
+PRIVATE_FIELD_TOKEN_PAIRS = {
+    ("file", "name"),
+    ("object", "url"),
+    ("provider", "command"),
+    ("raw", "model"),
+    ("raw", "output"),
+    ("reviewer", "comment"),
+    ("reviewer", "comments"),
+    ("reviewer", "note"),
+    ("reviewer", "notes"),
+    ("source", "file"),
+    ("source", "filename"),
+    ("source", "image"),
+    ("source", "path"),
+}
+PRIVATE_FIELD_TOKEN_SEQUENCES = {
+    ("model", "output"),
+    ("source", "image"),
 }
 ALLOWED_TOP_LEVEL_FIELDS = {
     "schema",
@@ -204,13 +248,39 @@ def _private_field_count(value: Any) -> int:
     if isinstance(value, dict):
         count = 0
         for key, child in value.items():
-            if isinstance(key, str) and key in PRIVATE_FIELD_NAMES:
+            if isinstance(key, str) and _is_private_field_name(key):
                 count += 1
             count += _private_field_count(child)
         return count
     if isinstance(value, list):
         return sum(_private_field_count(item) for item in value)
     return 0
+
+
+def _is_private_field_name(key: str) -> bool:
+    normalized = key.strip().lower()
+    if normalized in PRIVATE_FIELD_NAMES:
+        return True
+    tokens = _field_name_tokens(key.strip())
+    if not tokens:
+        return False
+    token_set = set(tokens)
+    if token_set & PRIVATE_FIELD_TOKENS:
+        return True
+    if any(left in token_set and right in token_set for left, right in PRIVATE_FIELD_TOKEN_PAIRS):
+        return True
+    return any(_contains_token_sequence(tokens, sequence) for sequence in PRIVATE_FIELD_TOKEN_SEQUENCES)
+
+
+def _field_name_tokens(key: str) -> list[str]:
+    split_camel = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", key)
+    return [token for token in re.split(r"[^A-Za-z0-9]+", split_camel.lower()) if token]
+
+
+def _contains_token_sequence(tokens: list[str], sequence: tuple[str, ...]) -> bool:
+    if len(tokens) < len(sequence):
+        return False
+    return any(tuple(tokens[index : index + len(sequence)]) == sequence for index in range(len(tokens) - len(sequence) + 1))
 
 
 def _safe_int(value: Any) -> int | None:
