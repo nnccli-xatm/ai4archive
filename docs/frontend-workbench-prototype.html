@@ -719,7 +719,7 @@
     <section class="load-panel" aria-labelledby="load-title" data-region="artifact-loader">
       <div class="panel">
         <h2 id="load-title">Load Artifact</h2>
-        <p class="muted">Choose a <span class="mono">run_plan_summary.json</span>, <span class="mono">scan_qc_report.json</span>, <span class="mono">review_summary.json</span>, <span class="mono">acceptance_summary.json</span>, <span class="mono">aggregate_evidence_bundle_summary.json</span>, <span class="mono">final_production_handoff_summary.json</span>, <span class="mono">release_candidate_summary.json</span>, <span class="mono">deep_inspection_candidate_summary.json</span>, or <span class="mono">public_safe_validation_index.json</span>. Files are parsed in this browser only.</p>
+        <p class="muted">Choose a <span class="mono">run_plan_summary.json</span>, <span class="mono">scan_qc_report.json</span>, <span class="mono">workbench_public_summary.json</span>, <span class="mono">review_summary.json</span>, <span class="mono">acceptance_summary.json</span>, <span class="mono">aggregate_evidence_bundle_summary.json</span>, <span class="mono">final_production_handoff_summary.json</span>, <span class="mono">release_candidate_summary.json</span>, <span class="mono">deep_inspection_candidate_summary.json</span>, or <span class="mono">public_safe_validation_index.json</span>. Files are parsed in this browser only.</p>
         <div class="file-row">
           <input id="artifactFile" type="file" accept="application/json,.json">
           <button id="clearButton" class="secondary" type="button">Clear</button>
@@ -1048,6 +1048,14 @@
         privacy_status: "public-safe",
         generated_at: "2026-05-11T00:00:00Z"
       },
+      "workbench_public_summary.json": {
+        present: true,
+        status: "pass",
+        blocking_count: 0,
+        warning_count: 0,
+        privacy_status: "public-safe",
+        generated_at: "2026-05-11T00:00:30Z"
+      },
       "review_summary.json": {
         present: true,
         status: "pass",
@@ -1107,6 +1115,91 @@
     };
 
     const DEMO_FIXTURES = [
+      {
+        id: "workbench-public-summary-pass",
+        label: "Passing workbench public summary",
+        payload: {
+          schema_version: "scan-qc.workbench-public-summary.v1",
+          generated_at: "2026-05-11T00:08:00Z",
+          status: "pass",
+          ready: true,
+          workflow_state: "ready_for_operator_review",
+          checks_passed: 14,
+          checks_failed: 0,
+          blocking_item_count: 0,
+          warning_count: 1,
+          blocking_items: [],
+          warnings: [{ code: "aggregate_warning_review_backlog" }],
+          blocking_counts_by_code: {},
+          warning_counts_by_code: { aggregate_warning_review_backlog: 1 },
+          summary: {
+            artifacts_present: 9,
+            artifacts_passed: 9,
+            artifacts_failed: 0,
+            artifacts_missing: 0,
+            unknown_inputs: 0,
+            checks_passed: 14,
+            checks_failed: 0,
+            blocking_item_count: 0,
+            warning_count: 1
+          },
+          known_artifacts: PUBLIC_SAFE_READINESS_ROWS,
+          privacy: PUBLIC_SAFE_PRIVACY,
+          privacy_self_check: { status: "passed", violation_count: 0 },
+          sensitivity: "aggregate-only public summary"
+        }
+      },
+      {
+        id: "workbench-public-summary-blocked",
+        label: "Blocked workbench public summary",
+        payload: {
+          schema_version: "scan-qc.workbench-public-summary.v1",
+          generated_at: "2026-05-11T00:09:00Z",
+          status: "fail",
+          ready: false,
+          workflow_state: "blocked_for_operator_review",
+          checks_passed: 11,
+          checks_failed: 2,
+          blocking_item_count: 3,
+          warning_count: 2,
+          blocking_items: [
+            { code: "aggregate_artifact_missing" },
+            { code: "unsupported_input" }
+          ],
+          warnings: [{ code: "aggregate_warning_review_backlog" }],
+          blocking_counts_by_code: {
+            aggregate_artifact_missing: 2,
+            unsupported_input: 1
+          },
+          warning_counts_by_code: {
+            aggregate_warning_review_backlog: 2
+          },
+          summary: {
+            artifacts_present: 6,
+            artifacts_passed: 5,
+            artifacts_failed: 1,
+            artifacts_missing: 2,
+            unknown_inputs: 1,
+            checks_passed: 11,
+            checks_failed: 2,
+            blocking_item_count: 3,
+            warning_count: 2
+          },
+          known_artifacts: {
+            ...PUBLIC_SAFE_READINESS_ROWS,
+            "acceptance_summary.json": { present: true, status: "fail", blocking_count: 1, warning_count: 1, privacy_status: "public-safe", generated_at: "2026-05-11T00:02:00Z" },
+            "release_candidate_summary.json": { present: false, status: "missing", blocking_count: 1, warning_count: 0, privacy_status: "not evaluated" }
+          },
+          unsupported_inputs: {
+            label: "unsupported_input",
+            count: 1,
+            aggregate_code: "unsupported_input"
+          },
+          privacy: PUBLIC_SAFE_PRIVACY,
+          privacy_self_check: { status: "passed", violation_count: 0 },
+          sensitivity: "aggregate-only public summary"
+        }
+      },
       {
         id: "recognized-review-pass",
         label: "Recognized passing review summary",
@@ -1544,7 +1637,7 @@
       if (payload.summary || Array.isArray(payload.findings) || Array.isArray(payload.files)) {
         return buildScanReportModel(payload);
       }
-      throw new Error("Unsupported artifact. Load run_plan_summary.json, scan_qc_report.json, review_summary.json, acceptance_summary.json, aggregate_evidence_bundle_summary.json, final_production_handoff_summary.json, release_candidate_summary.json, deep_inspection_candidate_summary.json, or public_safe_validation_index.json.");
+      throw new Error("Unsupported artifact. Load run_plan_summary.json, scan_qc_report.json, workbench_public_summary.json, review_summary.json, acceptance_summary.json, aggregate_evidence_bundle_summary.json, final_production_handoff_summary.json, release_candidate_summary.json, deep_inspection_candidate_summary.json, or public_safe_validation_index.json.");
     }
 
     function buildRunPlanModel(payload) {
@@ -1659,6 +1752,7 @@
     function isAggregateHandoffArtifact(payload) {
       const schema = String(payload.schema_version || "");
       return schema.includes("aggregate-evidence-bundle") ||
+        schema.includes("workbench-public-summary") ||
         schema.includes("processing-review") ||
         schema.includes("final-production-handoff-summary") ||
         schema.includes("public-safe-validation-index") ||
@@ -1676,6 +1770,9 @@
         payload.human_review !== undefined ||
         payload.artifact_status_summary !== undefined ||
         payload.artifact_presence !== undefined ||
+        payload.known_artifacts !== undefined ||
+        payload.artifact_cards !== undefined ||
+        payload.workflow_state !== undefined ||
         payload.artifacts !== undefined ||
         payload.candidate_total !== undefined ||
         payload.artifact_readiness_checklist !== undefined ||
@@ -1690,16 +1787,17 @@
       const productionThroughput = production.throughput || {};
       const decision = payload.decision || {};
       const checks = payload.checks || {};
-      const aggregateStatus = payload.status || production.status || (schema.includes("processing-review") ? "local-review" : "") || (payload.acceptance_passed === true || payload.pass === true ? "pass" : payload.acceptance_passed === false || payload.pass === false ? "fail" : "");
+      const aggregateStatus = payload.status || production.status || (schema.includes("processing-review") ? "local-review" : "") || (payload.acceptance_passed === true || payload.pass === true || payload.ready === true ? "pass" : payload.acceptance_passed === false || payload.pass === false || payload.ready === false ? "fail" : "");
       const aggregate = {
         artifactType: aggregateArtifactType(schema, payload),
         schemaVersion: schema || "Unknown aggregate schema",
         status: normalizeAggregateStatus(aggregateStatus),
         readyFlagLabel: payload.ready_for_handoff !== undefined ? "Ready for handoff" : payload.ready_for_release_candidate !== undefined ? "Ready for release candidate" : "Ready flag",
-        readyFlag: payload.ready_for_handoff !== undefined ? Boolean(payload.ready_for_handoff) : payload.ready_for_release_candidate !== undefined ? Boolean(payload.ready_for_release_candidate) : normalizeAggregateStatus(aggregateStatus) === "pass",
-        checksPassed: firstNumber(payload.checks_passed, checks.passed),
-        checksFailed: firstNumber(payload.checks_failed, checks.failed),
-        blockingItemCount: firstNumber(payload.blocking_item_count, decision.blocking_item_count, Array.isArray(payload.blocking_items) ? payload.blocking_items.length : undefined),
+        readyFlag: payload.ready_for_handoff !== undefined ? Boolean(payload.ready_for_handoff) : payload.ready_for_release_candidate !== undefined ? Boolean(payload.ready_for_release_candidate) : payload.ready !== undefined ? Boolean(payload.ready) : normalizeAggregateStatus(aggregateStatus) === "pass",
+        workflowState: text(payload.workflow_state || payload.workflow_status || (payload.summary && (payload.summary.workflow_state || payload.summary.workflow_status)), "Not provided"),
+        checksPassed: firstNumber(payload.checks_passed, checks.passed, payload.summary && payload.summary.checks_passed),
+        checksFailed: firstNumber(payload.checks_failed, checks.failed, payload.summary && payload.summary.checks_failed),
+        blockingItemCount: firstNumber(payload.blocking_item_count, decision.blocking_item_count, payload.summary && payload.summary.blocking_item_count, Array.isArray(payload.blocking_items) ? payload.blocking_items.length : undefined),
         remainingP0: firstNullableNumber(payload.remaining_p0, payload.remaining && payload.remaining.p0, payload.human_review && payload.human_review.remaining_p0),
         remainingP1: firstNullableNumber(payload.remaining_p1, payload.remaining && payload.remaining.p1, payload.human_review && payload.human_review.remaining_p1),
         reviewStatusCounts: aggregateStatusCounts(payload.status_counts || (payload.human_review && payload.human_review.status_counts)),
@@ -1708,8 +1806,10 @@
         ruleStatusCounts: aggregateNestedStatusCounts(payload.rule_status_counts),
         acceptancePassed: firstBoolean(payload.acceptance_passed, payload.pass),
         blockingCodes: aggregateCodes(payload.blocking_items),
-        warningCount: Array.isArray(payload.warnings) ? payload.warnings.length : 0,
+        warningCount: firstNumber(payload.warning_count, payload.summary && payload.summary.warning_count, Array.isArray(payload.warnings) ? payload.warnings.length : undefined),
         warningCodes: aggregateWarningCodes(payload.warnings),
+        blockingCodeCounts: aggregateCodeCounts(payload.blocking_counts_by_code || payload.blocking_item_counts_by_code || (payload.summary && (payload.summary.blocking_counts_by_code || payload.summary.blocking_item_counts_by_code))),
+        warningCodeCounts: aggregateCodeCounts(payload.warning_counts_by_code || (payload.summary && payload.summary.warning_counts_by_code)),
         validationIndex: aggregateValidationIndexSummary(payload),
         artifactSummary: aggregateArtifactSummary(payload),
         deepInspectionCandidate: aggregateDeepInspectionCandidateSummary(payload),
@@ -1752,6 +1852,7 @@
 
     function aggregateArtifactType(schema, payload) {
       if (schema.includes("processing-review")) return "Processing-review package summary";
+      if (schema.includes("workbench-public-summary")) return "Workbench public summary";
       if (schema.includes("artifact-readiness-checklist") || payload.artifact_readiness_checklist !== undefined || payload.public_safe_artifact_readiness !== undefined) return "Public-safe artifact readiness checklist";
       if (schema.includes("public-safe-validation-index")) return "Public-safe validation index";
       if (schema.includes("deep-inspection-candidates")) return "Deep-inspection candidate summary";
@@ -1766,6 +1867,7 @@
 
     const EXPECTED_PUBLIC_SAFE_ARTIFACTS = [
       "run_plan_summary.json",
+      "workbench_public_summary.json",
       "review_summary.json",
       "acceptance_summary.json",
       "aggregate_evidence_bundle_summary.json",
@@ -1777,6 +1879,7 @@
 
     const AGGREGATE_ARTIFACT_NAME_BY_TYPE = {
       "Review summary": "review_summary.json",
+      "Workbench public summary": "workbench_public_summary.json",
       "Acceptance summary": "acceptance_summary.json",
       "Aggregate evidence bundle summary": "aggregate_evidence_bundle_summary.json",
       "Release candidate summary": "release_candidate_summary.json",
@@ -1787,6 +1890,7 @@
 
     const SUPPORTED_PUBLIC_SAFE_SCHEMA_PREFIXES = [
       "scan-qc-review-summary.v1",
+      "scan-qc.workbench-public-summary.v1",
       "scan-qc-acceptance-summary.v1",
       "scan-qc-aggregate-evidence-bundle-summary.v1",
       "scan-qc-final-production-handoff-summary.v1",
@@ -1806,7 +1910,7 @@
       const statusFields = [
         ["schema_version", hasOwn(payload, "schema_version")],
         ["generated_at", generatedPresent],
-        ["status or pass flag", isProcessingReview || aggregate.artifactType === "Deep-inspection candidate summary" || hasOwn(payload, "status") || hasOwn(payload, "acceptance_passed") || hasOwn(payload, "pass") || hasOwn(payload, "ready_for_handoff") || hasOwn(payload, "ready_for_release_candidate")],
+        ["status or pass flag", isProcessingReview || aggregate.artifactType === "Deep-inspection candidate summary" || hasOwn(payload, "status") || hasOwn(payload, "acceptance_passed") || hasOwn(payload, "pass") || hasOwn(payload, "ready_for_handoff") || hasOwn(payload, "ready_for_release_candidate") || hasOwn(payload, "ready")],
         ["blocking count/code aggregate", isProcessingReview || aggregate.artifactType === "Deep-inspection candidate summary" || hasOwn(payload, "blocking_item_count") || hasOwn(payload, "blocking_items") || Boolean(payload.summary && hasOwn(payload.summary, "blocking_item_count"))],
         ["warning count/code aggregate", isProcessingReview || aggregate.artifactType === "Deep-inspection candidate summary" || hasOwn(payload, "warnings")],
         ["privacy summary", hasOwn(payload, "privacy") || hasOwn(payload, "privacy_self_check") || hasOwn(payload, "sensitivity")]
@@ -1891,7 +1995,7 @@
     }
 
     function buildArtifactReadinessChecklist(payload, aggregate) {
-      const source = payload.artifact_readiness_checklist || payload.public_safe_artifact_readiness || payload.artifact_readiness || payload.artifact_status_summary || payload.artifact_presence || {};
+      const source = payload.artifact_readiness_checklist || payload.public_safe_artifact_readiness || payload.artifact_readiness || payload.artifact_status_summary || payload.artifact_presence || payload.known_artifacts || payload.artifact_cards || {};
       const sourceMap = Array.isArray(source)
         ? Object.fromEntries(source.map(item => [text(item && (item.artifact || item.name), ""), item]).filter(([name]) => name))
         : source;
@@ -1980,14 +2084,25 @@
     }
 
     function aggregateArtifactSummary(payload) {
-      const source = payload.artifact_status_summary || payload.artifact_presence || {};
-      return Object.entries(source).map(([name, item]) => ({
+      const source = payload.artifact_status_summary || payload.artifact_presence || payload.known_artifacts || payload.artifact_cards || {};
+      const sourceMap = Array.isArray(source)
+        ? Object.fromEntries(source.map(item => [text(item && (item.artifact || item.name), ""), item]).filter(([name]) => name))
+        : source;
+      return Object.entries(sourceMap).map(([name, item]) => ({
         name,
         present: Boolean(item && item.present),
         required: item && item.required !== undefined ? Boolean(item.required) : true,
         category: text(item && item.category, "not provided"),
         status: text(item && item.status, "unknown"),
-        reportedStatus: text(item && item.reported_status, "")
+        reportedStatus: text(item && (item.reported_status || item.public_status), "")
+      }));
+    }
+
+    function aggregateCodeCounts(source) {
+      if (!source || typeof source !== "object" || Array.isArray(source)) return [];
+      return Object.entries(source).map(([name, value]) => ({
+        name,
+        count: firstNumber(value)
       }));
     }
 
@@ -2287,7 +2402,7 @@
     function renderAggregateHandoff() {
       const aggregate = state.model.aggregateHandoff;
       if (!aggregate) {
-        els.aggregateHandoff.innerHTML = `<div class="empty">Load review_summary.json, acceptance_summary.json, aggregate_evidence_bundle_summary.json, final_production_handoff_summary.json, release_candidate_summary.json, deep_inspection_candidate_summary.json, or public_safe_validation_index.json to inspect public-safe aggregate status.</div>`;
+        els.aggregateHandoff.innerHTML = `<div class="empty">Load workbench_public_summary.json, review_summary.json, acceptance_summary.json, aggregate_evidence_bundle_summary.json, final_production_handoff_summary.json, release_candidate_summary.json, deep_inspection_candidate_summary.json, or public_safe_validation_index.json to inspect public-safe aggregate status.</div>`;
         return;
       }
       const privacyRows = [
@@ -2353,6 +2468,7 @@
         <div class="metric-grid">
           ${aggregateMetric("Artifact Type", aggregate.artifactType)}
           ${aggregateMetric("Aggregate-only Status", statusBadge(aggregate.status), true)}
+          ${aggregateMetric("Workflow State", aggregate.workflowState)}
           ${aggregateMetric(aggregate.readyFlagLabel, aggregate.readyFlag ? "true" : "false")}
           ${aggregateMetric("Checks Passed", aggregate.checksPassed)}
           ${aggregateMetric("Checks Failed", aggregate.checksFailed)}
@@ -2373,7 +2489,7 @@
           ${aggregateMetric("Scan Workers", workerRange(aggregate.workers.scanMin, aggregate.workers.scanMax))}
           ${aggregateMetric("Processing Workers", workerRange(aggregate.workers.processingMin, aggregate.workers.processingMax))}
         </div>
-        ${aggregate.artifactType === "Public-safe validation index" ? validationIndexPanel(validationIndexRows) : ""}
+        ${["Public-safe validation index", "Workbench public summary"].includes(aggregate.artifactType) ? validationIndexPanel(validationIndexRows) : ""}
         <div class="grid" style="margin-top:12px">
           <div>
             <h3>Artifact Presence And Status</h3>
@@ -2385,6 +2501,8 @@
             <h3>Blocking And Warning Codes</h3>
             ${aggregateCodeList("Blocking codes", aggregate.blockingCodes)}
             ${aggregateCodeList("Warning codes", aggregate.warningCodes)}
+            ${aggregate.blockingCodeCounts.length ? aggregateCountTable(aggregate.blockingCodeCounts, "Blocking Code") : `<div class="empty">No blocking counts by aggregate code were present.</div>`}
+            ${aggregate.warningCodeCounts.length ? aggregateCountTable(aggregate.warningCodeCounts, "Warning Code") : `<div class="empty">No warning counts by aggregate code were present.</div>`}
             <h3>Provider Capability Probe</h3>
             <p class="muted">Synthetic provider readiness aggregate only; displays configured state and optional package, GPU, and model visibility counts without command strings or local locations.</p>
             <div class="table-wrap">
