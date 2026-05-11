@@ -911,6 +911,35 @@
         }
       },
       {
+        id: "provider-capability-probe-disabled",
+        label: "Disabled provider capability probe",
+        payload: {
+          schema_version: "scan-qc-provider-capability-probe-summary.v1",
+          generated_at: "2026-05-11T01:20:00Z",
+          status: "blocked",
+          blocking_item_count: 0,
+          blocking_items: [],
+          warnings: [
+            { code: "provider_probe_optional_packages_not_installed" },
+            { code: "provider_probe_gpu_not_visible" }
+          ],
+          capability_probe_summary: {
+            provider_count: 3,
+            configured_provider_count: 0,
+            disabled_provider_count: 3,
+            visible_gpu_count: 0,
+            visible_model_count: 0,
+            optional_package_visible_count: 1,
+            optional_package_missing_count: 2,
+            privacy_status: "public-safe",
+            providers_configured: false
+          },
+          privacy: PUBLIC_SAFE_PRIVACY,
+          privacy_self_check: { status: "passed", violation_count: 0 },
+          sensitivity: "aggregate-only public summary"
+        }
+      },
+      {
         id: "unsupported-schema-warning",
         label: "Unsupported schema compatibility warning",
         payload: {
@@ -1146,6 +1175,7 @@
       return schema.includes("aggregate-evidence-bundle") ||
         schema.includes("final-production-handoff-summary") ||
         schema.includes("release-candidate-summary") ||
+        schema.includes("provider-capability-probe-summary") ||
         schema.includes("review-summary") ||
         schema.includes("acceptance-summary") ||
         payload.ready_for_handoff !== undefined ||
@@ -1158,7 +1188,8 @@
         payload.artifact_status_summary !== undefined ||
         payload.artifact_presence !== undefined ||
         payload.artifact_readiness_checklist !== undefined ||
-        payload.public_safe_artifact_readiness !== undefined;
+        payload.public_safe_artifact_readiness !== undefined ||
+        payload.capability_probe_summary !== undefined;
     }
 
     function buildAggregateHandoffModel(payload) {
@@ -1189,6 +1220,7 @@
         warningCount: Array.isArray(payload.warnings) ? payload.warnings.length : 0,
         warningCodes: aggregateWarningCodes(payload.warnings),
         artifactSummary: aggregateArtifactSummary(payload),
+        providerProbe: aggregateProviderProbe(payload.capability_probe_summary),
         privacy: aggregatePrivacy(payload),
         counts: aggregateCounts(productionCounts, payload),
         throughput: aggregateThroughput(payload.throughput || productionThroughput),
@@ -1224,6 +1256,7 @@
 
     function aggregateArtifactType(schema, payload) {
       if (schema.includes("artifact-readiness-checklist") || payload.artifact_readiness_checklist !== undefined || payload.public_safe_artifact_readiness !== undefined) return "Public-safe artifact readiness checklist";
+      if (schema.includes("provider-capability-probe-summary") || payload.capability_probe_summary !== undefined) return "Provider capability probe summary";
       if (schema.includes("review-summary") || payload.status_counts !== undefined || payload.severity_status_counts !== undefined || payload.rule_status_counts !== undefined) return "Review summary";
       if (schema.includes("final-production-handoff-summary") || payload.ready_for_handoff !== undefined) return "Final production handoff summary";
       if (schema.includes("acceptance-summary") || payload.blocking_items !== undefined || payload.human_review !== undefined || payload.pass !== undefined) return "Acceptance summary";
@@ -1255,7 +1288,8 @@
       "scan-qc-aggregate-evidence-bundle-summary.v1",
       "scan-qc-final-production-handoff-summary.v1",
       "scan-qc-release-candidate-summary.v1",
-      "scan-qc-artifact-readiness-checklist.v1"
+      "scan-qc-artifact-readiness-checklist.v1",
+      "scan-qc-provider-capability-probe-summary.v1"
     ];
 
     function buildArtifactCompatibilityDiagnostics(payload, aggregate) {
@@ -1444,6 +1478,21 @@
         status: text(item && item.status, "unknown"),
         reportedStatus: text(item && item.reported_status, "")
       }));
+    }
+
+    function aggregateProviderProbe(source) {
+      const probe = source && typeof source === "object" && !Array.isArray(source) ? source : {};
+      return {
+        providerCount: firstNumber(probe.provider_count),
+        configuredProviderCount: firstNumber(probe.configured_provider_count),
+        disabledProviderCount: firstNumber(probe.disabled_provider_count),
+        providersConfigured: firstBoolean(probe.providers_configured),
+        visibleGpuCount: firstNumber(probe.visible_gpu_count),
+        visibleModelCount: firstNumber(probe.visible_model_count),
+        optionalPackageVisibleCount: firstNumber(probe.optional_package_visible_count),
+        optionalPackageMissingCount: firstNumber(probe.optional_package_missing_count),
+        privacyStatus: text(probe.privacy_status, "Not provided")
+      };
     }
 
     function aggregatePrivacy(payload) {
@@ -1650,6 +1699,17 @@
       ];
       const readiness = state.model.artifactReadiness;
       const compatibility = state.model.artifactCompatibility;
+      const providerProbeRows = [
+        ["Provider Count", aggregate.providerProbe.providerCount],
+        ["Configured Provider Count", aggregate.providerProbe.configuredProviderCount],
+        ["Disabled Provider Count", aggregate.providerProbe.disabledProviderCount],
+        ["Providers Configured", aggregate.providerProbe.providersConfigured === null ? "Not provided" : aggregate.providerProbe.providersConfigured],
+        ["Visible GPU Count", aggregate.providerProbe.visibleGpuCount],
+        ["Visible Model Count", aggregate.providerProbe.visibleModelCount],
+        ["Optional Package Visible Count", aggregate.providerProbe.optionalPackageVisibleCount],
+        ["Optional Package Missing Count", aggregate.providerProbe.optionalPackageMissingCount],
+        ["Probe Privacy Status", aggregate.providerProbe.privacyStatus]
+      ];
       els.aggregateHandoff.innerHTML = `
         <p class="muted">Aggregate-only status from locally reviewed public-safe summary artifacts. This view displays counts, statuses, and codes only, never private filenames, paths, hashes, OCR text, thumbnails, image content, row-level findings, reviewer notes, manifests, or derivative image references.</p>
         ${compatibility ? artifactCompatibilityPanel(compatibility) : ""}
@@ -1687,6 +1747,13 @@
             <h3>Blocking And Warning Codes</h3>
             ${aggregateCodeList("Blocking codes", aggregate.blockingCodes)}
             ${aggregateCodeList("Warning codes", aggregate.warningCodes)}
+            <h3>Provider Capability Probe</h3>
+            <p class="muted">Synthetic provider readiness aggregate only; displays configured state and optional package, GPU, and model visibility counts without command strings or local locations.</p>
+            <div class="table-wrap">
+              <table>
+                <tbody>${providerProbeRows.map(([label, value]) => kv(label, value)).join("")}</tbody>
+              </table>
+            </div>
           </div>
           <div>
             <h3>Privacy Status</h3>

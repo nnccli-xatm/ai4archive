@@ -98,9 +98,20 @@ REQUIRED_STRINGS = {
     "Warning Count",
     "Scan Workers",
     "Processing Workers",
+    "Provider Capability Probe",
+    "Provider Count",
+    "Configured Provider Count",
+    "Disabled Provider Count",
+    "Providers Configured",
+    "Visible GPU Count",
+    "Visible Model Count",
+    "Optional Package Visible Count",
+    "Optional Package Missing Count",
+    "Probe Privacy Status",
     "aggregateWarningCodes",
     "aggregateNestedStatusCounts",
     "aggregateWorkers",
+    "aggregateProviderProbe",
     "aggregatePrivacyOmissions",
     "privacyOmits",
     "Privacy self-check status",
@@ -222,6 +233,7 @@ REQUIRED_AGGREGATE_FIELDS = {
     "warning count": "warningCount",
     "workers": "aggregateWorkers",
     "compatibility diagnostics": "buildArtifactCompatibilityDiagnostics",
+    "provider capability probe": "aggregateProviderProbe",
 }
 
 REQUIRED_CHECKLIST_FIELDS = {
@@ -272,6 +284,7 @@ REQUIRED_DEMO_FIXTURE_LABELS = {
     "Complete public-safe readiness checklist",
     "Passing final production handoff",
     "Blocked final production handoff",
+    "Disabled provider capability probe",
     "Unsupported schema compatibility warning",
     "Privacy summary failing diagnostic",
     "Privacy summary missing diagnostic",
@@ -357,7 +370,7 @@ def new_summary(workbench: Path) -> dict[str, Any]:
             "forbidden_demo_fixture_field_checks": len(FORBIDDEN_DEMO_FIXTURE_FIELDS),
         },
         "fixture_groups": {
-            "aggregate_executable_fixture_groups": 8,
+            "aggregate_executable_fixture_groups": 9,
             "demo_fixture_labels_required": len(REQUIRED_DEMO_FIXTURE_LABELS),
         },
         "coverage": {
@@ -367,6 +380,7 @@ def new_summary(workbench: Path) -> dict[str, Any]:
             "readiness_checklist": False,
             "demo_fixtures": False,
             "final_handoff_fixtures": False,
+            "provider_capability_probe": False,
             "executable_fixtures": False,
             "preview_lifecycle": False,
         },
@@ -818,6 +832,56 @@ vm.runInContext(workbenchScript + `
     }}
   }};
 
+  const providerProbeFixture = {{
+    schema_version: "scan-qc-provider-capability-probe-summary.v1",
+    generated_at: "2026-05-11T01:20:00Z",
+    status: "blocked",
+    blocking_item_count: 0,
+    blocking_items: [],
+    warnings: [
+      {{ code: "provider_probe_optional_packages_not_installed" }},
+      {{ code: "provider_probe_gpu_not_visible" }}
+    ],
+    capability_probe_summary: {{
+      provider_count: 3,
+      configured_provider_count: 0,
+      disabled_provider_count: 3,
+      visible_gpu_count: 0,
+      visible_model_count: 0,
+      optional_package_visible_count: 1,
+      optional_package_missing_count: 2,
+      privacy_status: "public-safe",
+      providers_configured: false
+    }},
+    privacy: {{
+      aggregate_only: true,
+      omits: [
+        "source location strings",
+        "source file identifiers",
+        "content hashes",
+        "recognized text",
+        "thumbnails",
+        "image content",
+        "row-level findings"
+      ],
+      contains_paths: false,
+      contains_filenames: false,
+      contains_hashes: false,
+      contains_ocr_text: false,
+      contains_thumbnails: false,
+      contains_image_content: false,
+      contains_row_level_findings: false,
+      redacts_private_values: true,
+      private_indicators_found: false,
+      private_indicator_count: 0
+    }},
+    privacy_self_check: {{
+      status: "passed",
+      violation_count: 0
+    }},
+    sensitivity: "aggregate-only public summary"
+  }};
+
   const reviewModel = inferArtifact(reviewFixture);
   assert(reviewModel.sourceType === "aggregate-handoff", "review fixture did not load as aggregate handoff");
   assert(reviewModel.aggregateHandoff.artifactType === "Review summary", "review fixture did not classify as Review summary");
@@ -932,6 +996,28 @@ vm.runInContext(workbenchScript + `
   renderAggregateHandoff();
   assert(els.aggregateHandoff.innerHTML.includes("privacy_summary_missing"), "missing privacy fixture did not render privacy missing diagnostic");
 
+  const providerProbeModel = inferArtifact(providerProbeFixture);
+  assert(providerProbeModel.sourceType === "aggregate-handoff", "provider probe fixture did not load as aggregate handoff");
+  assert(providerProbeModel.aggregateHandoff.artifactType === "Provider capability probe summary", "provider probe fixture did not classify as provider capability probe");
+  assert(providerProbeModel.aggregateHandoff.status === "fail", "provider probe blocked status did not normalize to fail");
+  assert(providerProbeModel.aggregateHandoff.providerProbe.providerCount === 3, "provider probe provider count was not preserved");
+  assert(providerProbeModel.aggregateHandoff.providerProbe.configuredProviderCount === 0, "provider probe configured provider count was not preserved");
+  assert(providerProbeModel.aggregateHandoff.providerProbe.providersConfigured === false, "provider probe configured flag was not preserved");
+  assert(providerProbeModel.aggregateHandoff.providerProbe.visibleGpuCount === 0, "provider probe GPU count was not preserved");
+  assert(providerProbeModel.aggregateHandoff.providerProbe.visibleModelCount === 0, "provider probe model count was not preserved");
+  assert(providerProbeModel.aggregateHandoff.providerProbe.optionalPackageVisibleCount === 1, "provider probe optional package visible count was not preserved");
+  assert(providerProbeModel.aggregateHandoff.providerProbe.optionalPackageMissingCount === 2, "provider probe optional package missing count was not preserved");
+  assert(providerProbeModel.aggregateHandoff.providerProbe.privacyStatus === "public-safe", "provider probe privacy status was not preserved");
+  state.model = providerProbeModel;
+  renderAggregateHandoff();
+  assert(els.aggregateHandoff.innerHTML.includes("Provider Capability Probe"), "provider probe did not render probe section");
+  assert(els.aggregateHandoff.innerHTML.includes("Configured Provider Count"), "provider probe did not render configured count");
+  assert(els.aggregateHandoff.innerHTML.includes("Visible GPU Count"), "provider probe did not render GPU count");
+  assert(els.aggregateHandoff.innerHTML.includes("Visible Model Count"), "provider probe did not render model count");
+  assert(els.aggregateHandoff.innerHTML.includes("Optional Package Missing Count"), "provider probe did not render optional package count");
+  assert(els.aggregateHandoff.innerHTML.includes("Probe Privacy Status"), "provider probe did not render privacy status");
+  assert(els.aggregateHandoff.innerHTML.includes("provider_probe_gpu_not_visible"), "provider probe did not render warning code");
+
   assert(Array.isArray(DEMO_FIXTURES), "demo fixture gallery is not an array");
   assert(DEMO_FIXTURES.length >= 5, "demo fixture gallery does not cover at least five options");
   const demoLabels = DEMO_FIXTURES.map(item => item.label);
@@ -941,6 +1027,7 @@ vm.runInContext(workbenchScript + `
     "Complete public-safe readiness checklist",
     "Passing final production handoff",
     "Blocked final production handoff",
+    "Disabled provider capability probe",
     "Unsupported schema compatibility warning",
     "Privacy summary failing diagnostic",
     "Privacy summary missing diagnostic"
@@ -983,6 +1070,10 @@ vm.runInContext(workbenchScript + `
   loadDemoFixture("final-handoff-blocked");
   assert(els.aggregateHandoff.innerHTML.includes("aggregate_handoff_acceptance_blocker"), "demo load path did not render blocked final handoff");
   assert(els.aggregateHandoff.innerHTML.includes("Not ready for public handoff"), "demo load path did not render blocked final handoff readiness");
+  loadDemoFixture("provider-capability-probe-disabled");
+  assert(els.aggregateHandoff.innerHTML.includes("Provider capability probe summary"), "demo load path did not render provider probe type");
+  assert(els.aggregateHandoff.innerHTML.includes("Provider Capability Probe"), "demo load path did not render provider probe section");
+  assert(els.aggregateHandoff.innerHTML.includes("provider_probe_optional_packages_not_installed"), "demo load path did not render provider probe warning");
   loadDemoFixture("unsupported-schema-warning");
   assert(els.aggregateHandoff.innerHTML.includes("unsupported_public_safe_schema_version"), "demo load path did not render unsupported schema diagnostic");
   loadDemoFixture("privacy-diagnostic-fail");
@@ -1315,6 +1406,7 @@ def validate_workbench(workbench: Path = WORKBENCH) -> dict[str, Any]:
 
     demo_start = html.find("const DEMO_FIXTURES = [")
     demo_end = html.find("const els = {", demo_start)
+    demo_block = ""
     if demo_start == -1 or demo_end == -1:
         add_error(summary, "missing_demo_fixture_gallery", "missing public-safe demo fixture gallery data")
     else:
@@ -1348,6 +1440,16 @@ def validate_workbench(workbench: Path = WORKBENCH) -> dict[str, Any]:
             )
             for error in errors
         )
+    )
+    summary["coverage"]["provider_capability_probe"] = (
+        summary["coverage"]["demo_fixtures"]
+        and not any(
+            error["code"] == "missing_demo_fixture_label"
+            and "Disabled provider capability probe" in error["message"]
+            for error in errors
+        )
+        and "scan-qc-provider-capability-probe-summary.v1" in demo_block
+        and "capability_probe_summary" in demo_block
     )
     summary["privacy"]["demo_fixture_forbidden_field_checks_passed"] = not any(
         error["code"] in {"forbidden_demo_fixture_field", "demo_fixture_preview_state"} for error in errors
@@ -1393,6 +1495,13 @@ def validate_workbench(workbench: Path = WORKBENCH) -> dict[str, Any]:
             "Privacy Status",
             "Public-Safe Artifact Readiness Checklist",
             "Processing Workers",
+            "Provider Capability Probe",
+            "Provider Count",
+            "Configured Provider Count",
+            "Visible GPU Count",
+            "Visible Model Count",
+            "Optional Package Missing Count",
+            "Probe Privacy Status",
             "Public-Safe Artifact Compatibility Diagnostics",
             "Recognized Artifact Type",
             "Review Status Counts",
