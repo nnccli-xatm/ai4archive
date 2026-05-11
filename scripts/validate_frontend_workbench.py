@@ -74,6 +74,9 @@ REQUIRED_STRINGS = {
     "preview filename",
     "preview object URL",
     "Human Review Decisions",
+    "reviewTargetList",
+    "Severity/Status",
+    "Decision State",
     "Import privacy-safe summary",
     "reviewImportFile",
     "reviewImportStatus",
@@ -483,6 +486,9 @@ function element(id) {{
         remove() {{}}
       }},
       addEventListener() {{}},
+      querySelectorAll() {{
+        return [];
+      }},
       click() {{}}
     }});
   }}
@@ -491,6 +497,7 @@ function element(id) {{
 
 const context = {{
   assert,
+  assertPublicSafe,
   countFor,
   console,
   Blob: function Blob() {{}},
@@ -509,6 +516,18 @@ const context = {{
 
 function assert(condition, message) {{
   if (!condition) throw new Error(message);
+}}
+
+function assertPublicSafe(value, label) {{
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  [
+    "/Users/",
+    "C:\\\\",
+    "PRIVATE_OCR_TEXT",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "private_scan_alpha.tif",
+    "blob:synthetic-preview"
+  ].forEach(token => assert(!text.includes(token), label + " leaked " + token));
 }}
 
 function countFor(rows, name) {{
@@ -1225,6 +1244,13 @@ vm.runInContext(workbenchScript + `
   assert(els.aggregateHandoff.innerHTML.includes("Review Target Count"), "processing review did not render target count");
   assert(els.aggregateHandoff.innerHTML.includes("Sensitivity/Local-only Status"), "processing review did not render local-only sensitivity");
   assert(els.aggregateHandoff.innerHTML.includes("Processing Status Counts"), "processing review did not render status counts");
+  renderReview();
+  assert(els.reviewTargetList.innerHTML.includes("processing_review"), "processing review target list did not render scope");
+  assert(els.reviewTargetList.innerHTML.includes("PR0001"), "processing review target list did not render first synthetic local ID");
+  assert(els.reviewTargetList.innerHTML.includes("local-review"), "processing review target list did not render status");
+  assert(els.reviewTargetList.innerHTML.includes('data-review-scope="processing_review"'), "processing review target list did not render decision control scope");
+  assert(els.reviewTargetList.innerHTML.includes('data-review-id="PR0001"'), "processing review target list did not render first decision control ID");
+  assertPublicSafe(els.reviewTargetList.innerHTML, "processing review target list");
   state.decisions.set(decisionKey("processing_review", "PR0001"), "accepted_issue");
   const processingReviewExport = buildReviewSummary();
   assert(processingReviewExport.decisions.length === 6, "processing review export did not include synthetic review targets");
