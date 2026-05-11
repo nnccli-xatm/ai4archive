@@ -11,6 +11,7 @@ import sys
 from ._version import __version__
 from .acceptance import ACCEPTANCE_JSON, write_acceptance_summary
 from .analysis_provider import AnalysisProviderError
+from .artifact_readiness import ARTIFACT_READINESS_JSON, write_artifact_readiness_checklist
 from .calibration import CALIBRATION_JSON, write_rules_calibration_summary
 from .capability_probe import CapabilityProbeConfig, run_capability_probe, write_capability_probe
 from .deep_inspection_provider import (
@@ -201,6 +202,8 @@ def main(argv: list[str] | None = None) -> int:
         return _main_public_safe_validation_index(argv[1:])
     if argv and argv[0] == "workbench-summary":
         return _main_workbench_summary(argv[1:])
+    if argv and argv[0] == "artifact-readiness-checklist":
+        return _main_artifact_readiness_checklist(argv[1:])
     if argv and argv[0] == "processing-review-package":
         return _main_processing_review_package(argv[1:])
     if argv and argv[0] == "processing-plan":
@@ -748,6 +751,39 @@ def _main_workbench_summary(argv: list[str]) -> int:
     print(f"Checks failed: {payload['checks_failed']}")
     print("Privacy: public-safe aggregate workbench input only; private inputs are rejected or reported by code/count only.")
     return 0 if payload["status"] == "pass" else 1
+
+
+def _main_artifact_readiness_checklist(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="archive-scan-qc artifact-readiness-checklist",
+        description=(
+            "Generate a public-safe artifact readiness checklist from known aggregate JSON artifacts only. "
+            "Private reports, images, row-level values, manifests, commands, notes, and environment values are not read."
+        ),
+    )
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--evidence-dir", default=None, type=Path, help="Directory containing known aggregate/public-safe JSON files.")
+    source.add_argument(
+        "--file",
+        default=[],
+        action="append",
+        type=Path,
+        help="Explicit known aggregate/public-safe JSON file. Repeat for multiple files.",
+    )
+    parser.add_argument("--out", default=None, type=Path, help=f"Output JSON path or directory for {ARTIFACT_READINESS_JSON}.")
+    args = parser.parse_args(argv)
+    try:
+        path, payload = write_artifact_readiness_checklist(evidence_dir=args.evidence_dir, files=args.file, output_path=args.out)
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    print(f"Artifact readiness checklist: {path}")
+    print(f"Artifact readiness status: {payload['status']}")
+    print(f"Ready: {payload['ready']}")
+    print(f"Artifacts present: {payload['summary']['artifacts_present']}")
+    print(f"Required missing: {payload['summary']['required_missing_count']}")
+    print(f"Blocking items: {payload['summary']['blocking_count']}")
+    print("Privacy: public-safe aggregate readiness only; private inputs are rejected or reported by code/count only.")
+    return 0 if payload["ready"] else 1
 
 
 def _main_processing_review_package(argv: list[str]) -> int:
