@@ -374,6 +374,29 @@
       margin-top: 6px;
     }
 
+    .diagnostic-list {
+      display: grid;
+      gap: 8px;
+      margin: 12px 0;
+    }
+
+    .diagnostic-item {
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--idle);
+      border-radius: 8px;
+      background: #fbfcfe;
+      padding: 10px 12px;
+    }
+
+    .diagnostic-item.blocking { border-left-color: var(--fail); }
+    .diagnostic-item.warning { border-left-color: var(--warn); }
+    .diagnostic-item.info { border-left-color: var(--accent); }
+
+    .diagnostic-item strong {
+      display: block;
+      margin-bottom: 3px;
+    }
+
     .review-select {
       min-width: 172px;
     }
@@ -901,6 +924,7 @@
         findings: [],
         detail: { kind: "aggregate-handoff" },
         aggregateHandoff: aggregate,
+        artifactCompatibility: buildArtifactCompatibilityDiagnostics(payload, aggregate),
         artifactReadiness
       };
     }
@@ -931,6 +955,104 @@
       "Release candidate summary": "release_candidate_summary.json",
       "Final production handoff summary": "final_production_handoff_summary.json"
     };
+
+    const SUPPORTED_PUBLIC_SAFE_SCHEMA_PREFIXES = [
+      "scan-qc-review-summary.v1",
+      "scan-qc-acceptance-summary.v1",
+      "scan-qc-aggregate-evidence-bundle-summary.v1",
+      "scan-qc-final-production-handoff-summary.v1",
+      "scan-qc-release-candidate-summary.v1",
+      "scan-qc-artifact-readiness-checklist.v1"
+    ];
+
+    function buildArtifactCompatibilityDiagnostics(payload, aggregate) {
+      const schema = text(payload.schema_version, "");
+      const recognizedSchema = SUPPORTED_PUBLIC_SAFE_SCHEMA_PREFIXES.includes(schema);
+      const generatedPresent = hasOwn(payload, "generated_at") && Boolean(text(payload.generated_at, ""));
+      const statusFields = [
+        ["schema_version", hasOwn(payload, "schema_version")],
+        ["generated_at", generatedPresent],
+        ["status or pass flag", hasOwn(payload, "status") || hasOwn(payload, "acceptance_passed") || hasOwn(payload, "pass") || hasOwn(payload, "ready_for_handoff") || hasOwn(payload, "ready_for_release_candidate")],
+        ["blocking count/code aggregate", hasOwn(payload, "blocking_item_count") || hasOwn(payload, "blocking_items")],
+        ["warning count/code aggregate", hasOwn(payload, "warnings")],
+        ["privacy summary", hasOwn(payload, "privacy") || hasOwn(payload, "privacy_self_check") || hasOwn(payload, "sensitivity")]
+      ];
+      const missingStatusFields = statusFields.filter(([, present]) => !present).map(([label]) => label);
+      const privacyPresent = hasOwn(payload, "privacy") || hasOwn(payload, "privacy_self_check") || hasOwn(payload, "sensitivity");
+      const privacyFailing = aggregate.privacy.privateIndicatorsFound ||
+        aggregate.privacy.privateIndicatorCount > 0 ||
+        aggregate.privacy.containsPaths ||
+        aggregate.privacy.containsFilenames ||
+        aggregate.privacy.containsHashes ||
+        aggregate.privacy.containsOcrText ||
+        aggregate.privacy.containsThumbnails ||
+        aggregate.privacy.containsImageContent ||
+        aggregate.privacy.containsRowLevelFindings ||
+        text(aggregate.privacy.privacySelfCheckStatus, "").toLowerCase() === "failed" ||
+        Number(aggregate.privacy.privacySelfCheckViolations) > 0;
+      const privacyPassing = privacyPresent && !privacyFailing && (aggregate.privacy.aggregateOnly || aggregate.privacy.redactsPrivateValues || isChecklistPrivacySafe(aggregate.privacy.privacySelfCheckStatus));
+      const diagnostics = [];
+
+      if (!recognizedSchema) {
+        diagnostics.push({
+          severity: "warning",
+          code: "unsupported_public_safe_schema_version",
+          message: schema ? `Unsupported or unknown public-safe schema/version: ${schema}.` : "Unsupported or unknown public-safe schema/version: not provided."
+        });
+      }
+      if (!generatedPresent) {
+        diagnostics.push({
+          severity: "warning",
+          code: "generated_timestamp_missing",
+          message: "Generated timestamp presence: missing."
+        });
+      }
+      if (missingStatusFields.length) {
+        diagnostics.push({
+          severity: "warning",
+          code: "aggregate_status_fields_missing",
+          message: `Expected aggregate status fields missing: ${missingStatusFields.join(", ")}.`
+        });
+      }
+      if (!privacyPresent) {
+        diagnostics.push({
+          severity: "blocking",
+          code: "privacy_summary_missing",
+          message: "Privacy summary present/missing/pass/fail: missing."
+        });
+      } else if (privacyFailing) {
+        diagnostics.push({
+          severity: "blocking",
+          code: "privacy_summary_fail",
+          message: "Privacy summary present/missing/pass/fail: fail."
+        });
+      } else if (!privacyPassing) {
+        diagnostics.push({
+          severity: "warning",
+          code: "privacy_summary_incomplete",
+          message: "Privacy summary present/missing/pass/fail: present but not enough aggregate privacy flags to mark pass."
+        });
+      }
+
+      const blockingCount = diagnostics.filter(item => item.severity === "blocking").length;
+      const warningCount = diagnostics.filter(item => item.severity === "warning").length;
+      return {
+        artifactType: aggregate.artifactType,
+        schemaVersion: schema || "Not provided",
+        schemaRecognized: recognizedSchema,
+        generatedTimestampPresent: generatedPresent,
+        statusFieldsPresent: statusFields.filter(([, present]) => present).map(([label]) => label),
+        statusFieldsMissing: missingStatusFields,
+        privacySummaryStatus: !privacyPresent ? "missing" : privacyFailing ? "fail" : privacyPassing ? "pass" : "present",
+        blockingCount,
+        warningCount,
+        diagnostics
+      };
+    }
+
+    function hasOwn(source, key) {
+      return Object.prototype.hasOwnProperty.call(source, key);
+    }
 
     function buildArtifactReadinessChecklist(payload, aggregate) {
       const source = payload.artifact_readiness_checklist || payload.public_safe_artifact_readiness || payload.artifact_readiness || payload.artifact_status_summary || payload.artifact_presence || {};
@@ -1234,8 +1356,10 @@
         ["Privacy self-check violations", aggregate.privacy.privacySelfCheckViolations ?? "Not provided"]
       ];
       const readiness = state.model.artifactReadiness;
+      const compatibility = state.model.artifactCompatibility;
       els.aggregateHandoff.innerHTML = `
         <p class="muted">Aggregate-only status from locally reviewed public-safe summary artifacts. This view displays counts, statuses, and codes only, never private filenames, paths, hashes, OCR text, thumbnails, image content, row-level findings, reviewer notes, manifests, or derivative image references.</p>
+        ${compatibility ? artifactCompatibilityPanel(compatibility) : ""}
         ${readiness ? artifactReadinessPanel(readiness) : ""}
         <div class="metric-grid">
           ${aggregateMetric("Artifact Type", aggregate.artifactType)}
@@ -1283,6 +1407,42 @@
             <h3>Rule Status Counts</h3>
             ${aggregate.ruleStatusCounts.length ? aggregateNestedCountTable(aggregate.ruleStatusCounts) : `<div class="empty">No rule/status counts were present.</div>`}
           </div>
+        </div>`;
+    }
+
+    function artifactCompatibilityPanel(compatibility) {
+      const items = compatibility.diagnostics.length ? compatibility.diagnostics : [{
+        severity: "info",
+        code: "artifact_compatibility_pass",
+        message: "Recognized public-safe aggregate schema with required aggregate compatibility signals present."
+      }];
+      return `
+        <h3>Public-Safe Artifact Compatibility Diagnostics</h3>
+        <p class="muted">Compatibility diagnostic uses aggregate/public-safe fields only; no private filenames, paths, hashes, OCR text, thumbnails, image content, manifests, row-level findings, reviewer notes, or derivative image references are parsed or displayed.</p>
+        <div class="metric-grid">
+          ${aggregateMetric("Recognized Artifact Type", compatibility.artifactType)}
+          ${aggregateMetric("Schema Version", compatibility.schemaVersion)}
+          ${aggregateMetric("Schema/Type Detection", compatibility.schemaRecognized ? "recognized" : "unsupported or unknown")}
+          ${aggregateMetric("Generated Timestamp Presence", compatibility.generatedTimestampPresent ? "present" : "missing")}
+          ${aggregateMetric("Privacy Summary", compatibility.privacySummaryStatus)}
+          ${aggregateMetric("Diagnostic Blocking Count", compatibility.blockingCount)}
+          ${aggregateMetric("Diagnostic Warning Count", compatibility.warningCount)}
+        </div>
+        <div class="table-wrap" style="margin-top:12px">
+          <table>
+            <tbody>
+              ${kv("Expected aggregate status fields present", compatibility.statusFieldsPresent.join(", ") || "None")}
+              ${kv("Expected aggregate status fields missing", compatibility.statusFieldsMissing.join(", ") || "None")}
+            </tbody>
+          </table>
+        </div>
+        <div class="diagnostic-list">
+          ${items.map(item => `
+            <div class="diagnostic-item ${escapeHtml(item.severity)}">
+              <strong>${escapeHtml(item.code)}</strong>
+              <span>${escapeHtml(item.message)}</span>
+            </div>
+          `).join("")}
         </div>`;
     }
 

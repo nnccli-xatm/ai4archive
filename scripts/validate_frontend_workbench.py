@@ -103,6 +103,25 @@ REQUIRED_STRINGS = {
     "Privacy self-check status",
     "Privacy self-check violations",
     "Aggregate-only status from locally reviewed public-safe summary artifacts.",
+    "Public-Safe Artifact Compatibility Diagnostics",
+    "Compatibility diagnostic uses aggregate/public-safe fields only",
+    "Recognized Artifact Type",
+    "Schema Version",
+    "Schema/Type Detection",
+    "Generated Timestamp Presence",
+    "Privacy Summary",
+    "Diagnostic Blocking Count",
+    "Diagnostic Warning Count",
+    "Expected aggregate status fields present",
+    "Expected aggregate status fields missing",
+    "unsupported_public_safe_schema_version",
+    "generated_timestamp_missing",
+    "aggregate_status_fields_missing",
+    "privacy_summary_missing",
+    "privacy_summary_fail",
+    "artifact_compatibility_pass",
+    "SUPPORTED_PUBLIC_SAFE_SCHEMA_PREFIXES",
+    "buildArtifactCompatibilityDiagnostics",
     "Public-Safe Artifact Readiness Checklist",
     "Top-level readiness",
     "Ready for public handoff",
@@ -184,6 +203,7 @@ REQUIRED_AGGREGATE_FIELDS = {
     "warning codes": "warningCodes",
     "warning count": "warningCount",
     "workers": "aggregateWorkers",
+    "compatibility diagnostics": "buildArtifactCompatibilityDiagnostics",
 }
 
 REQUIRED_CHECKLIST_FIELDS = {
@@ -198,6 +218,21 @@ REQUIRED_CHECKLIST_FIELDS = {
     "blocking count": "blockingCount",
     "warning count": "warningCount",
     "stale count": "staleCount",
+}
+
+REQUIRED_COMPATIBILITY_FIELDS = {
+    "recognized artifact type": "Recognized Artifact Type",
+    "schema version": "Schema Version",
+    "schema/type detection": "Schema/Type Detection",
+    "generated timestamp presence": "Generated Timestamp Presence",
+    "privacy summary": "Privacy Summary",
+    "blocking diagnostic count": "Diagnostic Blocking Count",
+    "warning diagnostic count": "Diagnostic Warning Count",
+    "expected fields present": "Expected aggregate status fields present",
+    "expected fields missing": "Expected aggregate status fields missing",
+    "unsupported schema warning": "unsupported_public_safe_schema_version",
+    "privacy missing diagnostic": "privacy_summary_missing",
+    "privacy failing diagnostic": "privacy_summary_fail",
 }
 
 FORBIDDEN_AGGREGATE_PAYLOAD_FIELDS = {
@@ -277,6 +312,9 @@ vm.runInContext(workbenchScript + `
     schema_version: "scan-qc-review-summary.v1",
     generated_at: "2026-05-11T00:00:00Z",
     status: "pass",
+    blocking_item_count: 0,
+    blocking_items: [],
+    warnings: [],
     remaining_p0: 0,
     remaining_p1: 1,
     total_findings: 8,
@@ -472,6 +510,60 @@ vm.runInContext(workbenchScript + `
     ]
   }};
 
+  const unsupportedSchemaFixture = {{
+    schema_version: "scan-qc-artifact-readiness-checklist.v99",
+    generated_at: "2026-05-11T00:00:00Z",
+    status: "pass",
+    privacy: {{
+      aggregate_only: true,
+      redacts_private_values: true,
+      private_indicators_found: false,
+      private_indicator_count: 0
+    }},
+    sensitivity: "aggregate-only public summary",
+    artifact_readiness_checklist: {{
+      "run_plan_summary.json": {{
+        present: true,
+        status: "pass",
+        blocking_count: 0,
+        warning_count: 0,
+        privacy_status: "public-safe",
+        generated_at: "2026-05-11T00:00:00Z"
+      }}
+    }}
+  }};
+
+  const failingPrivacyFixture = {{
+    schema_version: "scan-qc-acceptance-summary.v1",
+    generated_at: "2026-05-11T00:00:00Z",
+    status: "fail",
+    acceptance_passed: false,
+    blocking_item_count: 1,
+    blocking_items: [{{ code: "aggregate_privacy_hold" }}],
+    warnings: [{{ code: "aggregate_warning_review_backlog" }}],
+    privacy: {{
+      aggregate_only: true,
+      redacts_private_values: false,
+      private_indicators_found: true,
+      private_indicator_count: 1,
+      contains_paths: true
+    }},
+    privacy_self_check: {{
+      status: "failed",
+      violation_count: 1
+    }},
+    sensitivity: "aggregate-only public summary"
+  }};
+
+  const missingPrivacyFixture = {{
+    schema_version: "scan-qc-review-summary.v1",
+    generated_at: "2026-05-11T00:00:00Z",
+    status: "pass",
+    status_counts: {{
+      accepted_issue: 1
+    }}
+  }};
+
   const reviewModel = inferArtifact(reviewFixture);
   assert(reviewModel.sourceType === "aggregate-handoff", "review fixture did not load as aggregate handoff");
   assert(reviewModel.aggregateHandoff.artifactType === "Review summary", "review fixture did not classify as Review summary");
@@ -481,6 +573,9 @@ vm.runInContext(workbenchScript + `
   renderAggregateHandoff();
   assert(els.aggregateHandoff.innerHTML.includes("Review summary"), "review fixture did not render Review summary");
   assert(els.aggregateHandoff.innerHTML.includes("Review Status Counts"), "review fixture did not render review status counts");
+  assert(els.aggregateHandoff.innerHTML.includes("Public-Safe Artifact Compatibility Diagnostics"), "review fixture did not render compatibility diagnostics");
+  assert(els.aggregateHandoff.innerHTML.includes("artifact_compatibility_pass"), "review fixture did not render compatibility pass code");
+  assert(els.aggregateHandoff.innerHTML.includes("Schema/Type Detection"), "review fixture did not render schema/type detection");
 
   const acceptanceModel = inferArtifact(acceptanceFixture);
   assert(acceptanceModel.sourceType === "aggregate-handoff", "acceptance fixture did not load as aggregate handoff");
@@ -500,6 +595,7 @@ vm.runInContext(workbenchScript + `
   assert(els.aggregateHandoff.innerHTML.includes("aggregate_warning_review_backlog"), "acceptance fixture did not render warning code");
   assert(els.aggregateHandoff.innerHTML.includes("Aggregate-only Status"), "acceptance fixture did not render aggregate-only status");
   assert(els.aggregateHandoff.innerHTML.includes("Acceptance Passed"), "acceptance fixture did not render acceptance status");
+  assert(els.aggregateHandoff.innerHTML.includes("Privacy Summary"), "acceptance fixture did not render privacy summary diagnostic");
 
   const completeChecklistModel = inferArtifact(completeChecklistFixture);
   assert(completeChecklistModel.sourceType === "aggregate-handoff", "complete checklist fixture did not load as aggregate handoff");
@@ -524,6 +620,29 @@ vm.runInContext(workbenchScript + `
   assert(els.aggregateHandoff.innerHTML.includes("Not ready for public handoff"), "missing checklist did not render not-ready summary");
   assert(els.aggregateHandoff.innerHTML.includes("missing"), "missing checklist did not render missing status");
   assert(els.aggregateHandoff.innerHTML.includes("stale"), "missing checklist did not render stale status");
+
+  const unsupportedSchemaModel = inferArtifact(unsupportedSchemaFixture);
+  assert(unsupportedSchemaModel.aggregateHandoff.artifactType === "Public-safe artifact readiness checklist", "unsupported schema fixture did not classify by public-safe artifact type");
+  assert(unsupportedSchemaModel.artifactCompatibility.schemaRecognized === false, "unsupported schema fixture was unexpectedly recognized");
+  assert(unsupportedSchemaModel.artifactCompatibility.warningCount >= 1, "unsupported schema fixture did not produce warning count");
+  state.model = unsupportedSchemaModel;
+  renderAggregateHandoff();
+  assert(els.aggregateHandoff.innerHTML.includes("unsupported_public_safe_schema_version"), "unsupported schema fixture did not render unsupported schema warning");
+  assert(els.aggregateHandoff.innerHTML.includes("unsupported or unknown"), "unsupported schema fixture did not render unknown schema wording");
+
+  const failingPrivacyModel = inferArtifact(failingPrivacyFixture);
+  assert(failingPrivacyModel.artifactCompatibility.privacySummaryStatus === "fail", "failing privacy fixture did not produce privacy fail status");
+  assert(failingPrivacyModel.artifactCompatibility.blockingCount >= 1, "failing privacy fixture did not produce blocking count");
+  state.model = failingPrivacyModel;
+  renderAggregateHandoff();
+  assert(els.aggregateHandoff.innerHTML.includes("privacy_summary_fail"), "failing privacy fixture did not render privacy failure diagnostic");
+  assert(els.aggregateHandoff.innerHTML.includes("Diagnostic Blocking Count"), "failing privacy fixture did not render diagnostic blocking count");
+
+  const missingPrivacyModel = inferArtifact(missingPrivacyFixture);
+  assert(missingPrivacyModel.artifactCompatibility.privacySummaryStatus === "missing", "missing privacy fixture did not produce privacy missing status");
+  state.model = missingPrivacyModel;
+  renderAggregateHandoff();
+  assert(els.aggregateHandoff.innerHTML.includes("privacy_summary_missing"), "missing privacy fixture did not render privacy missing diagnostic");
 `, context);
 """
 
@@ -601,6 +720,9 @@ def main() -> int:
         for label, required in sorted(REQUIRED_CHECKLIST_FIELDS.items()):
             if required not in aggregate_block:
                 errors.append(f"artifact readiness checklist builder missing {label}: {required!r}")
+        for label, required in sorted(REQUIRED_COMPATIBILITY_FIELDS.items()):
+            if required not in html:
+                errors.append(f"artifact compatibility diagnostics missing {label}: {required!r}")
         required_fragments = {
             "review summary schema classification": 'schema.includes("review-summary")',
             "review summary status-count classification": "payload.status_counts",
@@ -634,10 +756,14 @@ def main() -> int:
             "Privacy Status",
             "Public-Safe Artifact Readiness Checklist",
             "Processing Workers",
+            "Public-Safe Artifact Compatibility Diagnostics",
+            "Recognized Artifact Type",
             "Review Status Counts",
             "Rule Counts",
             "Rule Status Counts",
             "Scan Workers",
+            "Schema Version",
+            "Schema/Type Detection",
         }
         for label in sorted(expected_labels):
             if label not in render_block:
