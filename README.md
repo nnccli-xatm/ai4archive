@@ -1201,6 +1201,32 @@ and reports blockers by code/count without copying private paths, filenames,
 hashes, OCR text, thumbnails, source roots, row-level findings, or derivative
 image evidence.
 
+To load multiple approved aggregate artifacts in the static workbench, build a
+single public-safe summary bundle:
+
+```bash
+archive-scan-qc workbench-summary \
+  --evidence-dir /placeholder/private-validation-output/release-candidate \
+  --out /placeholder/private-validation-output/release-candidate
+```
+
+This writes `workbench_public_summary.json` with schema
+`scan-qc.workbench-public-summary.v1`. It summarizes known aggregate/public-safe
+JSON artifacts such as the aggregate evidence bundle, final handoff summary,
+release candidate summary, release readiness summary, acceptance summary,
+review summary, deep-inspection candidate summary, provider probes,
+public-safe validation index, and public-safe artifact readiness checklist. The
+bundle contains status, readiness, check counts, blocking and warning counts by
+aggregate code, artifact presence/status, workflow state, aggregate card
+metrics, and privacy status.
+
+`workbench_public_summary.json` is public-safe aggregate workbench input. It is
+not a sensitive local evidence package. The command does not read
+`scan_qc_report.json`, CSV row reports, processing manifests, review templates,
+source images, thumbnails, OCR text, hashes, private filenames/roots,
+derivative images, provider logs, command lines, or environment values.
+Unsupported explicit inputs are rejected or summarized by code/count only.
+
 See `docs/operations-runbook.md` for production installation, directory,
 privacy, troubleshooting, exit-code, and tuning guidance. See
 `docs/release-checklist.md` before publishing a release.
