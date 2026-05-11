@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import argparse
+import json
 import re
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -288,6 +291,88 @@ FORBIDDEN_DEMO_FIXTURE_FIELDS = {
     "sha256",
     "thumbnail",
 }
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print a deterministic public-safe JSON validation summary to stdout.",
+    )
+    parser.add_argument(
+        "--json-out",
+        type=Path,
+        help="Write a deterministic public-safe JSON validation summary to this path.",
+    )
+    parser.add_argument(
+        "--self-test-json",
+        action="store_true",
+        help="Run focused self-tests for JSON success and synthetic failure output.",
+    )
+    parser.add_argument(
+        "--workbench",
+        type=Path,
+        default=WORKBENCH,
+        help=argparse.SUPPRESS,
+    )
+    return parser
+
+
+def new_summary(workbench: Path) -> dict[str, Any]:
+    return {
+        "status": "fail",
+        "validated_html_path": safe_workbench_path(workbench),
+        "counts": {
+            "required_regions": len(REQUIRED_REGIONS),
+            "required_strings": len(REQUIRED_STRINGS),
+            "required_aggregate_fields": len(REQUIRED_AGGREGATE_FIELDS),
+            "required_checklist_fields": len(REQUIRED_CHECKLIST_FIELDS),
+            "required_compatibility_fields": len(REQUIRED_COMPATIBILITY_FIELDS),
+            "required_demo_fixture_labels": len(REQUIRED_DEMO_FIXTURE_LABELS),
+            "forbidden_pattern_checks": len(FORBIDDEN_PATTERNS),
+            "forbidden_export_field_checks": len(FORBIDDEN_EXPORT_FIELDS),
+            "forbidden_aggregate_payload_field_checks": len(FORBIDDEN_AGGREGATE_PAYLOAD_FIELDS),
+            "forbidden_demo_fixture_field_checks": len(FORBIDDEN_DEMO_FIXTURE_FIELDS),
+        },
+        "fixture_groups": {
+            "aggregate_executable_fixture_groups": 6,
+            "demo_fixture_labels_required": len(REQUIRED_DEMO_FIXTURE_LABELS),
+        },
+        "coverage": {
+            "aggregate_summary": False,
+            "review_acceptance": False,
+            "compatibility_diagnostics": False,
+            "readiness_checklist": False,
+            "demo_fixtures": False,
+            "executable_fixtures": False,
+        },
+        "privacy": {
+            "forbidden_pattern_checks_passed": False,
+            "review_export_forbidden_field_checks_passed": False,
+            "review_import_forbidden_field_checks_passed": False,
+            "aggregate_payload_forbidden_field_checks_passed": False,
+            "demo_fixture_forbidden_field_checks_passed": False,
+            "forbidden_field_check_count": (
+                len(FORBIDDEN_EXPORT_FIELDS) * 2
+                + len(FORBIDDEN_AGGREGATE_PAYLOAD_FIELDS)
+                + len(FORBIDDEN_DEMO_FIXTURE_FIELDS)
+            ),
+        },
+        "error_count": 0,
+        "errors": [],
+    }
+
+
+def safe_workbench_path(workbench: Path) -> str:
+    try:
+        return str(workbench.resolve().relative_to(ROOT))
+    except ValueError:
+        return workbench.name
+
+
+def add_error(summary: dict[str, Any], code: str, message: str) -> None:
+    summary["errors"].append({"code": code, "message": message})
 
 
 def validate_executable_aggregate_fixtures(html: str) -> list[str]:
@@ -760,60 +845,101 @@ vm.runInContext(workbenchScript + `
     return []
 
 
-def main() -> int:
-    if not WORKBENCH.exists():
-        print(f"Missing workbench: {WORKBENCH}", file=sys.stderr)
-        return 1
+def validate_workbench(workbench: Path = WORKBENCH) -> dict[str, Any]:
+    summary = new_summary(workbench)
+    errors = summary["errors"]
 
-    html = WORKBENCH.read_text(encoding="utf-8")
-    errors: list[str] = []
+    if not workbench.exists():
+        add_error(summary, "missing_workbench", f"Missing workbench: {safe_workbench_path(workbench)}")
+        return finalize_summary(summary)
+
+    html = workbench.read_text(encoding="utf-8")
 
     for region in sorted(REQUIRED_REGIONS):
         if f'data-region="{region}"' not in html:
-            errors.append(f"missing data-region={region!r}")
+            add_error(summary, "missing_required_region", f"missing data-region={region!r}")
 
     for required in sorted(REQUIRED_STRINGS):
         if required not in html:
-            errors.append(f"missing required string {required!r}")
+            add_error(summary, "missing_required_string", f"missing required string {required!r}")
+
+    summary["coverage"]["review_acceptance"] = not any(
+        error["code"] == "missing_required_string"
+        and (
+            "review_summary.json" in error["message"]
+            or "acceptance_summary.json" in error["message"]
+            or "Human Review Decisions" in error["message"]
+        )
+        for error in errors
+    )
 
     for label, pattern in FORBIDDEN_PATTERNS.items():
         match = pattern.search(html)
         if match:
-            errors.append(f"found forbidden {label}: {match.group(0)!r}")
+            add_error(summary, "forbidden_pattern_found", f"found forbidden {label}: {match.group(0)!r}")
+    summary["privacy"]["forbidden_pattern_checks_passed"] = not any(
+        error["code"] == "forbidden_pattern_found" for error in errors
+    )
 
     export_start = html.find('schema: "scan-qc-review-decisions.local.v1"')
     if export_start == -1:
-        errors.append("missing privacy-safe review export builder")
+        add_error(summary, "missing_review_export_builder", "missing privacy-safe review export builder")
     else:
         export_block = html[export_start : html.find("function resetReviewState", export_start)]
         for field in sorted(FORBIDDEN_EXPORT_FIELDS):
             if re.search(rf"\b{re.escape(field)}\b\s*:", export_block):
-                errors.append(f"review export includes forbidden field {field!r}")
+                add_error(
+                    summary,
+                    "forbidden_review_export_field",
+                    f"review export includes forbidden field {field!r}",
+                )
+    summary["privacy"]["review_export_forbidden_field_checks_passed"] = not any(
+        error["code"] in {"missing_review_export_builder", "forbidden_review_export_field"} for error in errors
+    )
 
     import_start = html.find("function parseReviewDecisionSummary")
     if import_start == -1:
-        errors.append("missing privacy-safe review import parser")
+        add_error(summary, "missing_review_import_parser", "missing privacy-safe review import parser")
     else:
         import_block = html[import_start : html.find("function clearPreviewState", import_start)]
         for field in sorted(FORBIDDEN_EXPORT_FIELDS):
             if re.search(rf"\b{re.escape(field)}\b\s*:", import_block):
-                errors.append(f"review import reads forbidden field {field!r}")
+                add_error(
+                    summary,
+                    "forbidden_review_import_field",
+                    f"review import reads forbidden field {field!r}",
+                )
+    summary["privacy"]["review_import_forbidden_field_checks_passed"] = not any(
+        error["code"] in {"missing_review_import_parser", "forbidden_review_import_field"} for error in errors
+    )
 
     aggregate_start = html.find("function buildAggregateHandoffModel")
     aggregate_end = html.find("function normalizeStatus", aggregate_start)
     if aggregate_start == -1 or aggregate_end == -1:
-        errors.append("missing aggregate summary model builder")
+        add_error(summary, "missing_aggregate_model_builder", "missing aggregate summary model builder")
     else:
         aggregate_block = html[aggregate_start:aggregate_end]
         for label, required in sorted(REQUIRED_AGGREGATE_FIELDS.items()):
             if required not in aggregate_block:
-                errors.append(f"aggregate summary builder missing {label}: {required!r}")
+                add_error(
+                    summary,
+                    "missing_aggregate_field",
+                    f"aggregate summary builder missing {label}: {required!r}",
+                )
         for label, required in sorted(REQUIRED_CHECKLIST_FIELDS.items()):
             if required not in aggregate_block:
-                errors.append(f"artifact readiness checklist builder missing {label}: {required!r}")
+                add_error(
+                    summary,
+                    "missing_readiness_field",
+                    f"artifact readiness checklist builder missing {label}: {required!r}",
+                )
         for label, required in sorted(REQUIRED_COMPATIBILITY_FIELDS.items()):
             if required not in html:
-                errors.append(f"artifact compatibility diagnostics missing {label}: {required!r}")
+                add_error(
+                    summary,
+                    "missing_compatibility_field",
+                    f"artifact compatibility diagnostics missing {label}: {required!r}",
+                )
         required_fragments = {
             "review summary schema classification": 'schema.includes("review-summary")',
             "review summary status-count classification": "payload.status_counts",
@@ -824,31 +950,66 @@ def main() -> int:
         }
         for label, fragment in sorted(required_fragments.items()):
             if fragment not in aggregate_block:
-                errors.append(f"aggregate summary builder missing {label}: {fragment!r}")
+                add_error(
+                    summary,
+                    "missing_aggregate_fragment",
+                    f"aggregate summary builder missing {label}: {fragment!r}",
+                )
         for label, field in sorted(FORBIDDEN_AGGREGATE_PAYLOAD_FIELDS.items()):
             pattern = rf"\bpayload\.{re.escape(field)}\b|\bpayload\[['\"]{re.escape(field)}['\"]\]"
             if re.search(pattern, aggregate_block):
-                errors.append(f"aggregate summary builder reads forbidden {label} field {field!r}")
+                add_error(
+                    summary,
+                    "forbidden_aggregate_payload_field",
+                    f"aggregate summary builder reads forbidden {label} field {field!r}",
+                )
+    summary["coverage"]["aggregate_summary"] = not any(
+        error["code"] in {"missing_aggregate_model_builder", "missing_aggregate_field", "missing_aggregate_fragment"}
+        for error in errors
+    )
+    summary["coverage"]["compatibility_diagnostics"] = not any(
+        error["code"] == "missing_compatibility_field" for error in errors
+    )
+    summary["coverage"]["readiness_checklist"] = not any(
+        error["code"] == "missing_readiness_field" for error in errors
+    )
+    summary["privacy"]["aggregate_payload_forbidden_field_checks_passed"] = not any(
+        error["code"] == "forbidden_aggregate_payload_field" for error in errors
+    )
 
     demo_start = html.find("const DEMO_FIXTURES = [")
     demo_end = html.find("const els = {", demo_start)
     if demo_start == -1 or demo_end == -1:
-        errors.append("missing public-safe demo fixture gallery data")
+        add_error(summary, "missing_demo_fixture_gallery", "missing public-safe demo fixture gallery data")
     else:
         demo_block = html[demo_start:demo_end]
         for label in sorted(REQUIRED_DEMO_FIXTURE_LABELS):
             if label not in demo_block:
-                errors.append(f"demo fixture gallery missing label {label!r}")
+                add_error(summary, "missing_demo_fixture_label", f"demo fixture gallery missing label {label!r}")
         for field in sorted(FORBIDDEN_DEMO_FIXTURE_FIELDS):
             if re.search(rf"['\"]{re.escape(field)}['\"]\s*:", demo_block):
-                errors.append(f"demo fixture gallery includes forbidden field {field!r}")
+                add_error(
+                    summary,
+                    "forbidden_demo_fixture_field",
+                    f"demo fixture gallery includes forbidden field {field!r}",
+                )
         if "URL.createObjectURL" in demo_block or "preview" in demo_block.lower():
-            errors.append("demo fixture gallery must not include local preview object URL or filename state")
+            add_error(
+                summary,
+                "demo_fixture_preview_state",
+                "demo fixture gallery must not include local preview object URL or filename state",
+            )
+    summary["coverage"]["demo_fixtures"] = not any(
+        error["code"] in {"missing_demo_fixture_gallery", "missing_demo_fixture_label"} for error in errors
+    )
+    summary["privacy"]["demo_fixture_forbidden_field_checks_passed"] = not any(
+        error["code"] in {"forbidden_demo_fixture_field", "demo_fixture_preview_state"} for error in errors
+    )
 
     render_start = html.find("function renderAggregateHandoff")
     render_end = html.find("function workerRange", render_start)
     if render_start == -1 or render_end == -1:
-        errors.append("missing aggregate summary renderer")
+        add_error(summary, "missing_aggregate_renderer", "missing aggregate summary renderer")
     else:
         render_block = html[render_start:render_end]
         expected_labels = {
@@ -873,20 +1034,92 @@ def main() -> int:
         }
         for label in sorted(expected_labels):
             if label not in render_block:
-                errors.append(f"aggregate summary renderer missing label {label!r}")
+                add_error(summary, "missing_renderer_label", f"aggregate summary renderer missing label {label!r}")
 
     if "http://" in html or "https://" in html:
-        errors.append("workbench should not depend on external network URLs")
+        add_error(summary, "external_network_url", "workbench should not depend on external network URLs")
 
-    errors.extend(validate_executable_aggregate_fixtures(html))
+    for error in validate_executable_aggregate_fixtures(html):
+        add_error(summary, "executable_fixture_failure", error)
+    summary["coverage"]["executable_fixtures"] = not any(
+        error["code"] == "executable_fixture_failure" for error in errors
+    )
 
-    if errors:
-        print("Frontend workbench validation failed:", file=sys.stderr)
-        for error in errors:
-            print(f"- {error}", file=sys.stderr)
+    return finalize_summary(summary)
+
+
+def finalize_summary(summary: dict[str, Any]) -> dict[str, Any]:
+    summary["error_count"] = len(summary["errors"])
+    summary["status"] = "pass" if summary["error_count"] == 0 else "fail"
+    return summary
+
+
+def emit_json_summary(summary: dict[str, Any], json_out: Path | None) -> None:
+    text = json.dumps(summary, indent=2, sort_keys=True) + "\n"
+    if json_out is None:
+        print(text, end="")
+        return
+    json_out.parent.mkdir(parents=True, exist_ok=True)
+    json_out.write_text(text, encoding="utf-8")
+
+
+def run_json_self_tests() -> int:
+    success = validate_workbench(WORKBENCH)
+    if success["status"] != "pass":
+        print("JSON self-test failed: expected success status for current workbench.", file=sys.stderr)
+        return 1
+    if success["error_count"] != 0 or success["errors"]:
+        print("JSON self-test failed: success summary included errors.", file=sys.stderr)
+        return 1
+    required_success_keys = {
+        "status",
+        "validated_html_path",
+        "counts",
+        "fixture_groups",
+        "coverage",
+        "privacy",
+        "error_count",
+        "errors",
+    }
+    if set(success) != required_success_keys:
+        print("JSON self-test failed: success summary keys changed.", file=sys.stderr)
         return 1
 
-    print(f"Validated {WORKBENCH.relative_to(ROOT)}")
+    with tempfile.TemporaryDirectory(prefix="frontend-workbench-json-self-test-") as temp_dir:
+        failure_path = Path(temp_dir) / "missing-workbench.html"
+        failure = validate_workbench(failure_path)
+    if failure["status"] != "fail" or failure["error_count"] != 1:
+        print("JSON self-test failed: expected one synthetic failure.", file=sys.stderr)
+        return 1
+    if failure["errors"] != [{"code": "missing_workbench", "message": "Missing workbench: missing-workbench.html"}]:
+        print("JSON self-test failed: synthetic failure error shape changed.", file=sys.stderr)
+        return 1
+
+    json.loads(json.dumps(success, sort_keys=True))
+    json.loads(json.dumps(failure, sort_keys=True))
+    print("JSON summary self-tests passed.")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+
+    if args.self_test_json:
+        return run_json_self_tests()
+
+    summary = validate_workbench(args.workbench)
+
+    if args.json or args.json_out is not None:
+        emit_json_summary(summary, args.json_out)
+
+    if summary["errors"]:
+        print("Frontend workbench validation failed:", file=sys.stderr)
+        for error in summary["errors"]:
+            print(f"- {error['message']}", file=sys.stderr)
+        return 1
+
+    if not args.json:
+        print(f"Validated {summary['validated_html_path']}")
     return 0
 
 
