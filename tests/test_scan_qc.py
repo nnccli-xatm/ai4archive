@@ -600,6 +600,7 @@ class ScanQcTest(unittest.TestCase):
             _write_json(root / "aggregate_baseline_summary.json", _aggregate_baseline_bundle_payload())
             _write_json(root / "capability_probe.json", run_capability_probe(CapabilityProbeConfig(include_torch_cuda=False)))
             _write_json(root / "deep_inspection_provider_probe.json", build_deep_inspection_provider_probe())
+            _write_json(root / "deep_inspection_candidate_summary.json", _deep_inspection_candidate_bundle_payload())
 
             summary = build_evidence_bundle_summary(root, generated_at="2026-01-01T00:00:00+00:00")
 
@@ -607,6 +608,39 @@ class ScanQcTest(unittest.TestCase):
         self.assertGreater(summary["checks_passed"], 0)
         self.assertEqual(summary["checks_failed"], 0)
         self.assertFalse(summary["privacy"]["private_indicators_found"])
+        self.assertEqual(summary["artifacts"]["deep_inspection_candidate_summary.json"]["candidate_total"], 3)
+
+    def test_evidence_bundle_verifier_allows_missing_optional_deep_inspection_candidate_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_json(root / "release_candidate_summary.json", _release_candidate_bundle_payload())
+
+            summary = build_evidence_bundle_summary(root, generated_at="2026-01-01T00:00:00+00:00")
+
+        self.assertEqual(summary["status"], "pass")
+        self.assertEqual(summary["artifact_presence"]["deep_inspection_candidate_summary.json"]["status"], "optional_missing")
+        self.assertNotIn("deep_inspection_candidate_summary.json", {item["artifact"] for item in summary["blocking_items"]})
+
+    def test_evidence_bundle_verifier_blocks_deep_inspection_candidate_privacy_or_inference_failures(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            payload = _deep_inspection_candidate_bundle_payload()
+            payload["privacy"]["contains_paths"] = True
+            payload["no_inference_run"] = False
+            payload["checks_failed"] = ["privacy_guard_failed"]
+            _write_json(root / "release_candidate_summary.json", _release_candidate_bundle_payload())
+            _write_json(root / "deep_inspection_candidate_summary.json", payload)
+
+            exit_code = main(["evidence-bundle-verify", "--evidence-dir", str(root), "--out", str(root / "bundle.json")])
+            raw = (root / "bundle.json").read_text(encoding="utf-8")
+            summary = json.loads(raw)
+
+        self.assertEqual(exit_code, 1)
+        codes = {item["code"] for item in summary["blocking_items"] if item["artifact"] == "deep_inspection_candidate_summary.json"}
+        self.assertIn("privacy_flag_contains_private_evidence", codes)
+        self.assertIn("inference_run_not_allowed", codes)
+        self.assertIn("checks_failed_present", codes)
+        self.assertNotIn("privacy_guard_failed", raw)
 
     def test_evidence_bundle_verifier_allows_real_artifact_aggregate_metric_keys(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -775,6 +809,7 @@ class ScanQcTest(unittest.TestCase):
             root = Path(temp_dir)
             _write_json(root / "aggregate_evidence_bundle_summary.json", _aggregate_evidence_bundle_payload(status="pass"))
             _write_json(root / "release_candidate_summary.json", _release_candidate_bundle_payload())
+            _write_json(root / "deep_inspection_candidate_summary.json", _deep_inspection_candidate_bundle_payload())
 
             summary = build_final_handoff_summary(root, generated_at="2026-01-01T00:00:00+00:00")
 
@@ -782,7 +817,43 @@ class ScanQcTest(unittest.TestCase):
         self.assertTrue(summary["ready_for_handoff"])
         self.assertEqual(summary["blocking_item_count"], 0)
         self.assertEqual(summary["artifact_status_summary"]["aggregate_evidence_bundle_summary.json"]["status"], "pass")
+        candidate = summary["artifact_status_summary"]["deep_inspection_candidate_summary.json"]
+        self.assertEqual(candidate["status"], "pass")
+        self.assertEqual(candidate["candidate_total"], 3)
+        self.assertEqual(candidate["candidates_by_severity"]["P1"], 1)
         self.assertTrue(summary["privacy"]["aggregate_only"])
+
+    def test_final_handoff_summary_blocks_deep_inspection_candidate_aggregate_failures_by_code_only(self) -> None:
+        forbidden_private_values = [
+            "/Users/private/archive",
+            "page_0001.png",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "OCR TEXT",
+            "thumbnail-preview-object",
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            payload = _deep_inspection_candidate_bundle_payload()
+            payload["schema_version"] = "scan-qc.phase1.v1"
+            payload["privacy_status"] = "failed"
+            payload["no_inference_run"] = False
+            payload["operator_note"] = " ".join(forbidden_private_values)
+            _write_json(root / "aggregate_evidence_bundle_summary.json", _aggregate_evidence_bundle_payload(status="pass"))
+            _write_json(root / "deep_inspection_candidate_summary.json", payload)
+
+            exit_code = main(["final-handoff-summary", "--evidence-dir", str(root), "--out", str(root / "handoff.json")])
+            raw = (root / "handoff.json").read_text(encoding="utf-8")
+            summary = json.loads(raw)
+
+        self.assertEqual(exit_code, 1)
+        self.assertFalse(summary["ready_for_handoff"])
+        codes = {item["code"] for item in summary["blocking_items"] if item["artifact"] == "deep_inspection_candidate_summary.json"}
+        self.assertIn("schema_version_unexpected", codes)
+        self.assertIn("privacy_status_not_aggregate_public_safe", codes)
+        self.assertIn("inference_run_not_allowed", codes)
+        self.assertIn("private_value_present", codes)
+        for value in forbidden_private_values:
+            self.assertNotIn(value, raw)
 
     def test_final_handoff_summary_fails_for_blocking_evidence_and_cli_exits_nonzero(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -5967,6 +6038,41 @@ def _aggregate_evidence_bundle_payload(*, status: str, blocking_codes: list[str]
             "contains_row_level_findings": False,
         },
         "sensitive_values_omitted": True,
+    }
+
+
+def _deep_inspection_candidate_bundle_payload() -> dict[str, object]:
+    return {
+        "schema_version": "scan-qc.deep-inspection-candidates.v1",
+        "status": "pass",
+        "candidate_total": 3,
+        "candidates_by_reason": {
+            "rule_bucket:quality": 2,
+            "processing_review_status:failed": 1,
+        },
+        "candidates_by_severity": {"P0": 0, "P1": 1, "P2": 2, "unknown": 0},
+        "provider_configured": False,
+        "provider_count": 0,
+        "checks_passed": ["scan_report_loaded", "provider_eligibility_summarized"],
+        "checks_failed": [],
+        "privacy_status": "aggregate_public_safe",
+        "privacy": {
+            "aggregate_only": True,
+            "contains_paths": False,
+            "contains_filenames": False,
+            "contains_hashes": False,
+            "contains_ocr_text": False,
+            "contains_thumbnails": False,
+            "contains_image_content": False,
+            "contains_row_level_findings": False,
+            "contains_reviewer_notes": False,
+            "contains_manifests": False,
+            "contains_derivative_image_references": False,
+            "contains_source_roots": False,
+            "network_calls": False,
+        },
+        "no_inference_run": True,
+        "dry_run_only": True,
     }
 
 

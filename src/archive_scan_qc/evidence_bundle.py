@@ -41,15 +41,19 @@ _PRIVATE_KEYS = (
 _ALLOWED_KEY_EXCEPTIONS = {
     "aggregate_only",
     "contains_environment_values",
+    "contains_derivative_image_references",
     "contains_file_list",
     "contains_filenames",
     "contains_hashes",
     "contains_image_content",
+    "contains_manifests",
     "contains_ocr_text",
     "contains_paths",
+    "contains_reviewer_notes",
     "contains_row_level_evidence",
     "contains_row_level_findings",
     "contains_secrets",
+    "contains_source_roots",
     "contains_thumbnails",
     "configuration_sources",
     "model_inference_run",
@@ -137,6 +141,7 @@ EXPECTED_ARTIFACTS = (
     ExpectedArtifact("aggregate_baseline_summary.json", False, "scan-qc.aggregate-baseline."),
     ExpectedArtifact("capability_probe.json", False, "scan-qc.capability-probe."),
     ExpectedArtifact("deep_inspection_provider_probe.json", False, "scan-qc.deep-inspection-provider."),
+    ExpectedArtifact("deep_inspection_candidate_summary.json", False, "scan-qc.deep-inspection-candidates."),
 )
 
 
@@ -240,7 +245,9 @@ def _verify_artifact(path: Path, expected: ExpectedArtifact) -> tuple[dict[str, 
         reported_status = "pass"
     normalized_status = str(reported_status).lower() if reported_status is not None else None
     base["reported_status"] = normalized_status
-    if normalized_status in _FAIL_STATUSES:
+    if expected.name == "deep_inspection_candidate_summary.json" and normalized_status in {"no_candidates", "no_inputs"}:
+        pass
+    elif normalized_status in _FAIL_STATUSES:
         failed += 1
         blockers.append(_blocker(expected.name, "artifact_status_failed"))
     elif normalized_status not in _PASS_STATUSES:
@@ -252,13 +259,24 @@ def _verify_artifact(path: Path, expected: ExpectedArtifact) -> tuple[dict[str, 
         failed += len(privacy_failures)
         blockers.extend(_blocker(expected.name, code) for code in privacy_failures)
 
-    count_failures = _count_failures(payload)
+    count_failures = _count_failures(payload, artifact_name=expected.name)
     if count_failures:
         failed += len(count_failures)
         blockers.extend(_blocker(expected.name, code) for code in count_failures)
 
+    candidate_failures = _deep_inspection_candidate_failures(payload) if expected.name == "deep_inspection_candidate_summary.json" else []
+    if candidate_failures:
+        failed += len(candidate_failures)
+        blockers.extend(_blocker(expected.name, code) for code in candidate_failures)
+
     base["status"] = "pass" if failed == 0 else "fail"
     base["checks"] = sorted({item["code"] for item in blockers if item["artifact"] == expected.name}) or ["json_parseable", "schema_status_counts_privacy_ok"]
+    if expected.name == "deep_inspection_candidate_summary.json":
+        base["candidate_total"] = _coerce_int(payload.get("candidate_total")) or 0
+        base["provider_configured"] = payload.get("provider_configured") if isinstance(payload.get("provider_configured"), bool) else None
+        base["provider_count"] = _coerce_int(payload.get("provider_count")) or 0
+        base["checks_passed_count"] = _candidate_check_count(payload.get("checks_passed"))
+        base["checks_failed_count"] = _candidate_check_count(payload.get("checks_failed"))
     return base, passed, failed, blockers, len(privacy_failures)
 
 
@@ -289,15 +307,57 @@ def _privacy_failures(payload: dict[str, Any], raw: str) -> list[str]:
     return sorted(set(failures))
 
 
-def _count_failures(payload: dict[str, Any]) -> list[str]:
+def _count_failures(payload: dict[str, Any], *, artifact_name: str | None = None) -> list[str]:
     failures: list[str] = []
     for key in ("checks_passed", "checks_failed", "blocking_item_count", "blocking_items"):
         value = _find_first_key(payload, key)
+        if artifact_name == "deep_inspection_candidate_summary.json" and key in {"checks_passed", "checks_failed"}:
+            if value is not None and not isinstance(value, list):
+                failures.append(f"{key}_not_list")
+            continue
         if key == "blocking_items" and value is not None and not isinstance(value, (int, list)):
             failures.append("blocking_items_not_list")
         elif key != "blocking_items" and value is not None and not isinstance(value, int):
             failures.append(f"{key}_not_integer")
     return failures
+
+
+def _deep_inspection_candidate_failures(payload: dict[str, Any]) -> list[str]:
+    failures: list[str] = []
+    if not _non_negative_int(payload.get("candidate_total")):
+        failures.append("candidate_total_not_non_negative_integer")
+    if not _count_map(payload.get("candidates_by_reason")):
+        failures.append("candidates_by_reason_invalid")
+    if not _count_map(payload.get("candidates_by_severity")):
+        failures.append("candidates_by_severity_invalid")
+    if not isinstance(payload.get("provider_configured"), bool):
+        failures.append("provider_configured_not_boolean")
+    if not _non_negative_int(payload.get("provider_count")):
+        failures.append("provider_count_not_non_negative_integer")
+    if not isinstance(payload.get("checks_passed"), list):
+        failures.append("checks_passed_not_list")
+    checks_failed = payload.get("checks_failed")
+    if not isinstance(checks_failed, list):
+        failures.append("checks_failed_not_list")
+    elif checks_failed:
+        failures.append("checks_failed_present")
+    if payload.get("privacy_status") != "aggregate_public_safe":
+        failures.append("privacy_status_not_aggregate_public_safe")
+    if payload.get("no_inference_run") is not True:
+        failures.append("inference_run_not_allowed")
+    return sorted(set(failures))
+
+
+def _non_negative_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _count_map(value: Any) -> bool:
+    return isinstance(value, dict) and all(isinstance(key, str) and _non_negative_int(count) for key, count in value.items())
+
+
+def _candidate_check_count(value: Any) -> int:
+    return len(value) if isinstance(value, list) else 0
 
 
 def _private_key(path: tuple[str, ...], key: str, value: Any) -> bool:
