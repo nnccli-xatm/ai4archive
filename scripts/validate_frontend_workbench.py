@@ -1248,27 +1248,31 @@ vm.runInContext(workbenchScript + `
     generated_at: "2026-05-11T02:00:00Z",
     status: "pass",
     ready: true,
-    workflow_state: "ready_for_operator_review",
+    workflow_state: {{
+      acceptance_status: "pass",
+      deep_inspection_status: "pass",
+      handoff_status: "pass",
+      release_candidate_status: "pass",
+      release_readiness_status: "pass",
+      validation_index_status: "pass"
+    }},
     checks_passed: 14,
     checks_failed: 0,
     blocking_item_count: 0,
-    warning_count: 1,
+    warning_item_count: 1,
     blocking_items: [],
-    warnings: [{{ code: "aggregate_warning_review_backlog" }}],
+    warning_items: [{{ code: "aggregate_warning_review_backlog" }}],
     blocking_counts_by_code: {{}},
     warning_counts_by_code: {{ aggregate_warning_review_backlog: 1 }},
     summary: {{
+      known_artifacts: 12,
       artifacts_present: 9,
       artifacts_passed: 9,
       artifacts_failed: 0,
       artifacts_missing: 0,
-      unknown_inputs: 0,
-      checks_passed: 14,
-      checks_failed: 0,
-      blocking_item_count: 0,
-      warning_count: 1
+      unsupported_inputs: 0
     }},
-    known_artifacts: completeChecklistFixture.artifact_readiness_checklist,
+    artifact_presence: completeChecklistFixture.artifact_readiness_checklist,
     privacy: {{
       aggregate_only: true,
       redacts_private_values: true,
@@ -1279,6 +1283,7 @@ vm.runInContext(workbenchScript + `
       status: "passed",
       violation_count: 0
     }},
+    sensitive_values_omitted: true,
     sensitivity: "aggregate-only public summary"
   }};
 
@@ -1287,16 +1292,23 @@ vm.runInContext(workbenchScript + `
     generated_at: "2026-05-11T02:10:00Z",
     status: "fail",
     ready: false,
-    workflow_state: "blocked_for_operator_review",
+    workflow_state: {{
+      acceptance_status: "fail",
+      deep_inspection_status: "pass",
+      handoff_status: null,
+      release_candidate_status: null,
+      release_readiness_status: null,
+      validation_index_status: "fail"
+    }},
     checks_passed: 11,
     checks_failed: 2,
     blocking_item_count: 3,
-    warning_count: 2,
+    warning_item_count: 2,
     blocking_items: [
       {{ code: "aggregate_artifact_missing" }},
       {{ code: "unsupported_input" }}
     ],
-    warnings: [{{ code: "aggregate_warning_review_backlog" }}],
+    warning_items: [{{ code: "aggregate_warning_review_backlog" }}],
     blocking_counts_by_code: {{
       aggregate_artifact_missing: 2,
       unsupported_input: 1
@@ -1305,17 +1317,14 @@ vm.runInContext(workbenchScript + `
       aggregate_warning_review_backlog: 2
     }},
     summary: {{
+      known_artifacts: 12,
       artifacts_present: 6,
       artifacts_passed: 5,
       artifacts_failed: 1,
       artifacts_missing: 2,
-      unknown_inputs: 1,
-      checks_passed: 11,
-      checks_failed: 2,
-      blocking_item_count: 3,
-      warning_count: 2
+      unsupported_inputs: 1
     }},
-    known_artifacts: {{
+    artifact_presence: {{
       ...completeChecklistFixture.artifact_readiness_checklist,
       "acceptance_summary.json": {{ present: true, status: "fail", blocking_count: 1, warning_count: 1, privacy_status: "public-safe", generated_at: "2026-05-11T00:02:00Z" }},
       "release_candidate_summary.json": {{ present: false, status: "missing", blocking_count: 1, warning_count: 0, privacy_status: "not evaluated" }}
@@ -1335,6 +1344,7 @@ vm.runInContext(workbenchScript + `
       status: "passed",
       violation_count: 0
     }},
+    sensitive_values_omitted: true,
     sensitivity: "aggregate-only public summary"
   }};
 
@@ -1343,17 +1353,19 @@ vm.runInContext(workbenchScript + `
   assert(workbenchPublicPassModel.aggregateHandoff.artifactType === "Workbench public summary", "workbench public pass fixture did not classify as workbench public summary");
   assert(workbenchPublicPassModel.aggregateHandoff.status === "pass", "workbench public pass status was not pass");
   assert(workbenchPublicPassModel.aggregateHandoff.readyFlag === true, "workbench public pass ready flag was not true");
-  assert(workbenchPublicPassModel.aggregateHandoff.workflowState === "ready_for_operator_review", "workbench public pass workflow state was not preserved");
+  assert(workbenchPublicPassModel.aggregateHandoff.workflowState.includes("acceptance_status: pass"), "workbench public pass workflow state was not preserved");
   assert(workbenchPublicPassModel.aggregateHandoff.checksPassed === 14, "workbench public pass checks passed were not preserved");
   assert(workbenchPublicPassModel.aggregateHandoff.checksFailed === 0, "workbench public pass checks failed were not preserved");
   assert(workbenchPublicPassModel.aggregateHandoff.validationIndex.artifactsPresent === 9, "workbench public pass artifact present count was not preserved");
   assert(workbenchPublicPassModel.aggregateHandoff.warningCodeCounts[0].name === "aggregate_warning_review_backlog", "workbench public pass warning code count label was not preserved");
   assert(workbenchPublicPassModel.artifactCompatibility.schemaRecognized === true, "workbench public pass schema was not recognized");
+  assert(!workbenchPublicPassModel.artifactCompatibility.diagnostics.some(item => item.code === "aggregate_status_fields_missing"), "workbench public pass reported missing aggregate status fields");
   state.model = workbenchPublicPassModel;
   renderAggregateHandoff();
   assert(els.aggregateHandoff.innerHTML.includes("Workbench public summary"), "workbench public pass did not render artifact type");
   assert(els.aggregateHandoff.innerHTML.includes("Workflow State"), "workbench public pass did not render workflow state label");
-  assert(els.aggregateHandoff.innerHTML.includes("ready_for_operator_review"), "workbench public pass did not render workflow state value");
+  assert(els.aggregateHandoff.innerHTML.includes("acceptance_status: pass"), "workbench public pass did not render workflow state value");
+  assert(!els.aggregateHandoff.innerHTML.includes("[object Object]"), "workbench public pass rendered workflow object directly");
   assert(els.aggregateHandoff.innerHTML.includes("workbench_public_summary.json"), "workbench public pass did not render known artifact card");
   assert(els.aggregateHandoff.innerHTML.includes("Warning Code"), "workbench public pass did not render warning code counts");
   assertPublicSafe(els.aggregateHandoff.innerHTML, "workbench public pass rendering");
@@ -1363,15 +1375,17 @@ vm.runInContext(workbenchScript + `
   assert(workbenchPublicBlockedModel.aggregateHandoff.artifactType === "Workbench public summary", "workbench public blocked fixture did not classify as workbench public summary");
   assert(workbenchPublicBlockedModel.aggregateHandoff.status === "fail", "workbench public blocked status was not fail");
   assert(workbenchPublicBlockedModel.aggregateHandoff.readyFlag === false, "workbench public blocked ready flag was not false");
-  assert(workbenchPublicBlockedModel.aggregateHandoff.workflowState === "blocked_for_operator_review", "workbench public blocked workflow state was not preserved");
+  assert(workbenchPublicBlockedModel.aggregateHandoff.workflowState.includes("acceptance_status: fail"), "workbench public blocked workflow state was not preserved");
   assert(workbenchPublicBlockedModel.aggregateHandoff.blockingItemCount === 3, "workbench public blocked blocking count was not preserved");
   assert(countFor(workbenchPublicBlockedModel.aggregateHandoff.blockingCodeCounts, "unsupported_input") === 1, "workbench public blocked unsupported input count was not preserved");
   assert(workbenchPublicBlockedModel.aggregateHandoff.validationIndex.unknownInputs === 1, "workbench public blocked unsupported input aggregate count was not preserved");
+  assert(!workbenchPublicBlockedModel.artifactCompatibility.diagnostics.some(item => item.code === "aggregate_status_fields_missing"), "workbench public blocked reported missing aggregate status fields");
   state.model = workbenchPublicBlockedModel;
   renderAggregateHandoff();
   assert(els.aggregateHandoff.innerHTML.includes("unsupported_input"), "workbench public blocked did not render unsupported input aggregate code");
   assert(els.aggregateHandoff.innerHTML.includes("Blocking Code"), "workbench public blocked did not render blocking code counts");
-  assert(els.aggregateHandoff.innerHTML.includes("blocked_for_operator_review"), "workbench public blocked did not render workflow state");
+  assert(els.aggregateHandoff.innerHTML.includes("acceptance_status: fail"), "workbench public blocked did not render workflow state");
+  assert(!els.aggregateHandoff.innerHTML.includes("[object Object]"), "workbench public blocked rendered workflow object directly");
   assert(els.aggregateHandoff.innerHTML.includes("Artifacts Missing"), "workbench public blocked did not render missing artifact count");
   assert(!els.aggregateHandoff.innerHTML.includes("unsupported_inputs"), "workbench public blocked rendered unsupported input object details");
   assertPublicSafe(els.aggregateHandoff.innerHTML, "workbench public blocked rendering");
@@ -1665,7 +1679,7 @@ vm.runInContext(workbenchScript + `
   assert(els.aggregateHandoff.innerHTML.includes("Review summary"), "demo load path did not render review summary");
   loadDemoFixture("workbench-public-summary-pass");
   assert(els.aggregateHandoff.innerHTML.includes("Workbench public summary"), "demo load path did not render passing workbench public summary");
-  assert(els.aggregateHandoff.innerHTML.includes("ready_for_operator_review"), "demo load path did not render passing workbench workflow state");
+  assert(els.aggregateHandoff.innerHTML.includes("acceptance_status: pass"), "demo load path did not render passing workbench workflow state");
   loadDemoFixture("workbench-public-summary-blocked");
   assert(els.aggregateHandoff.innerHTML.includes("unsupported_input"), "demo load path did not render blocked workbench unsupported input aggregate code");
   assert(els.aggregateHandoff.innerHTML.includes("Blocking Code"), "demo load path did not render blocked workbench aggregate code counts");

@@ -1123,29 +1123,34 @@
           generated_at: "2026-05-11T00:08:00Z",
           status: "pass",
           ready: true,
-          workflow_state: "ready_for_operator_review",
+          workflow_state: {
+            acceptance_status: "pass",
+            deep_inspection_status: "pass",
+            handoff_status: "pass",
+            release_candidate_status: "pass",
+            release_readiness_status: "pass",
+            validation_index_status: "pass"
+          },
           checks_passed: 14,
           checks_failed: 0,
           blocking_item_count: 0,
-          warning_count: 1,
+          warning_item_count: 1,
           blocking_items: [],
-          warnings: [{ code: "aggregate_warning_review_backlog" }],
+          warning_items: [{ code: "aggregate_warning_review_backlog" }],
           blocking_counts_by_code: {},
           warning_counts_by_code: { aggregate_warning_review_backlog: 1 },
           summary: {
+            known_artifacts: 12,
             artifacts_present: 9,
             artifacts_passed: 9,
             artifacts_failed: 0,
             artifacts_missing: 0,
-            unknown_inputs: 0,
-            checks_passed: 14,
-            checks_failed: 0,
-            blocking_item_count: 0,
-            warning_count: 1
+            unsupported_inputs: 0
           },
-          known_artifacts: PUBLIC_SAFE_READINESS_ROWS,
+          artifact_presence: PUBLIC_SAFE_READINESS_ROWS,
           privacy: PUBLIC_SAFE_PRIVACY,
           privacy_self_check: { status: "passed", violation_count: 0 },
+          sensitive_values_omitted: true,
           sensitivity: "aggregate-only public summary"
         }
       },
@@ -1157,16 +1162,23 @@
           generated_at: "2026-05-11T00:09:00Z",
           status: "fail",
           ready: false,
-          workflow_state: "blocked_for_operator_review",
+          workflow_state: {
+            acceptance_status: "fail",
+            deep_inspection_status: "pass",
+            handoff_status: null,
+            release_candidate_status: null,
+            release_readiness_status: null,
+            validation_index_status: "fail"
+          },
           checks_passed: 11,
           checks_failed: 2,
           blocking_item_count: 3,
-          warning_count: 2,
+          warning_item_count: 2,
           blocking_items: [
             { code: "aggregate_artifact_missing" },
             { code: "unsupported_input" }
           ],
-          warnings: [{ code: "aggregate_warning_review_backlog" }],
+          warning_items: [{ code: "aggregate_warning_review_backlog" }],
           blocking_counts_by_code: {
             aggregate_artifact_missing: 2,
             unsupported_input: 1
@@ -1175,17 +1187,14 @@
             aggregate_warning_review_backlog: 2
           },
           summary: {
+            known_artifacts: 12,
             artifacts_present: 6,
             artifacts_passed: 5,
             artifacts_failed: 1,
             artifacts_missing: 2,
-            unknown_inputs: 1,
-            checks_passed: 11,
-            checks_failed: 2,
-            blocking_item_count: 3,
-            warning_count: 2
+            unsupported_inputs: 1
           },
-          known_artifacts: {
+          artifact_presence: {
             ...PUBLIC_SAFE_READINESS_ROWS,
             "acceptance_summary.json": { present: true, status: "fail", blocking_count: 1, warning_count: 1, privacy_status: "public-safe", generated_at: "2026-05-11T00:02:00Z" },
             "release_candidate_summary.json": { present: false, status: "missing", blocking_count: 1, warning_count: 0, privacy_status: "not evaluated" }
@@ -1197,6 +1206,7 @@
           },
           privacy: PUBLIC_SAFE_PRIVACY,
           privacy_self_check: { status: "passed", violation_count: 0 },
+          sensitive_values_omitted: true,
           sensitivity: "aggregate-only public summary"
         }
       },
@@ -1794,7 +1804,7 @@
         status: normalizeAggregateStatus(aggregateStatus),
         readyFlagLabel: payload.ready_for_handoff !== undefined ? "Ready for handoff" : payload.ready_for_release_candidate !== undefined ? "Ready for release candidate" : "Ready flag",
         readyFlag: payload.ready_for_handoff !== undefined ? Boolean(payload.ready_for_handoff) : payload.ready_for_release_candidate !== undefined ? Boolean(payload.ready_for_release_candidate) : payload.ready !== undefined ? Boolean(payload.ready) : normalizeAggregateStatus(aggregateStatus) === "pass",
-        workflowState: text(payload.workflow_state || payload.workflow_status || (payload.summary && (payload.summary.workflow_state || payload.summary.workflow_status)), "Not provided"),
+        workflowState: aggregateWorkflowState(payload.workflow_state || payload.workflow_status || (payload.summary && (payload.summary.workflow_state || payload.summary.workflow_status))),
         checksPassed: firstNumber(payload.checks_passed, checks.passed, payload.summary && payload.summary.checks_passed),
         checksFailed: firstNumber(payload.checks_failed, checks.failed, payload.summary && payload.summary.checks_failed),
         blockingItemCount: firstNumber(payload.blocking_item_count, decision.blocking_item_count, payload.summary && payload.summary.blocking_item_count, Array.isArray(payload.blocking_items) ? payload.blocking_items.length : undefined),
@@ -1806,8 +1816,8 @@
         ruleStatusCounts: aggregateNestedStatusCounts(payload.rule_status_counts),
         acceptancePassed: firstBoolean(payload.acceptance_passed, payload.pass),
         blockingCodes: aggregateCodes(payload.blocking_items),
-        warningCount: firstNumber(payload.warning_count, payload.summary && payload.summary.warning_count, Array.isArray(payload.warnings) ? payload.warnings.length : undefined),
-        warningCodes: aggregateWarningCodes(payload.warnings),
+        warningCount: firstNumber(payload.warning_count, payload.warning_item_count, payload.summary && payload.summary.warning_count, payload.summary && payload.summary.warning_item_count, Array.isArray(payload.warnings) ? payload.warnings.length : undefined, Array.isArray(payload.warning_items) ? payload.warning_items.length : undefined),
+        warningCodes: aggregateWarningCodes(payload.warnings || payload.warning_items),
         blockingCodeCounts: aggregateCodeCounts(payload.blocking_counts_by_code || payload.blocking_item_counts_by_code || (payload.summary && (payload.summary.blocking_counts_by_code || payload.summary.blocking_item_counts_by_code))),
         warningCodeCounts: aggregateCodeCounts(payload.warning_counts_by_code || (payload.summary && payload.summary.warning_counts_by_code)),
         validationIndex: aggregateValidationIndexSummary(payload),
@@ -1912,7 +1922,7 @@
         ["generated_at", generatedPresent],
         ["status or pass flag", isProcessingReview || aggregate.artifactType === "Deep-inspection candidate summary" || hasOwn(payload, "status") || hasOwn(payload, "acceptance_passed") || hasOwn(payload, "pass") || hasOwn(payload, "ready_for_handoff") || hasOwn(payload, "ready_for_release_candidate") || hasOwn(payload, "ready")],
         ["blocking count/code aggregate", isProcessingReview || aggregate.artifactType === "Deep-inspection candidate summary" || hasOwn(payload, "blocking_item_count") || hasOwn(payload, "blocking_items") || Boolean(payload.summary && hasOwn(payload.summary, "blocking_item_count"))],
-        ["warning count/code aggregate", isProcessingReview || aggregate.artifactType === "Deep-inspection candidate summary" || hasOwn(payload, "warnings")],
+        ["warning count/code aggregate", isProcessingReview || aggregate.artifactType === "Deep-inspection candidate summary" || hasOwn(payload, "warnings") || hasOwn(payload, "warning_items") || hasOwn(payload, "warning_count") || hasOwn(payload, "warning_item_count") || Boolean(payload.summary && (hasOwn(payload.summary, "warning_count") || hasOwn(payload.summary, "warning_item_count")))],
         ["privacy summary", hasOwn(payload, "privacy") || hasOwn(payload, "privacy_self_check") || hasOwn(payload, "sensitivity")]
       ];
       const missingStatusFields = statusFields.filter(([, present]) => !present).map(([label]) => label);
@@ -2005,7 +2015,7 @@
         const present = firstBoolean(item.present, item.exists, name === currentArtifactName ? true : undefined);
         const status = normalizeAggregateStatus(text(item.status || item.reported_status || (name === currentArtifactName ? aggregate.status : ""), present === false ? "missing" : "missing"));
         const blockingCount = firstNumber(item.blocking_count, item.blocking_item_count, item.blocking_items, name === currentArtifactName ? aggregate.blockingItemCount : 0);
-        const warningCount = firstNumber(item.warning_count, item.warnings, name === currentArtifactName ? aggregate.warningCount : 0);
+        const warningCount = firstNumber(item.warning_count, item.warning_item_count, item.warnings, item.warning_items, name === currentArtifactName ? aggregate.warningCount : 0);
         const privacyStatus = text(item.privacy_status || item.privacy || item.public_safe_status || (name === currentArtifactName ? aggregatePrivacyStatusLabel(aggregate.privacy) : ""), present === false ? "not evaluated" : "not provided");
         return {
           name,
@@ -2144,7 +2154,7 @@
         artifactsPassed: firstNumber(summary.artifacts_passed),
         artifactsFailed: firstNumber(summary.artifacts_failed),
         artifactsMissing: firstNumber(summary.artifacts_missing),
-        unknownInputs: firstNumber(summary.unknown_inputs),
+        unknownInputs: firstNumber(summary.unknown_inputs, summary.unsupported_inputs),
         blockingItemCount: firstNumber(summary.blocking_item_count, payload.blocking_item_count),
         checksPassed: firstNumber(summary.checks_passed, payload.checks_passed),
         checksFailed: firstNumber(summary.checks_failed, payload.checks_failed)
@@ -2229,6 +2239,15 @@
         if (item && typeof item === "object") return text(item.code, `warning_${index + 1}`);
         return `warning_${index + 1}`;
       });
+    }
+
+    function aggregateWorkflowState(value) {
+      if (!value) return "Not provided";
+      if (typeof value !== "object" || Array.isArray(value)) return text(value, "Not provided");
+      const entries = Object.entries(value)
+        .filter(([, status]) => status !== null && status !== undefined && status !== "")
+        .map(([name, status]) => `${name}: ${status}`);
+      return entries.length ? entries.join("; ") : "Not provided";
     }
 
     function aggregateStringCodes(items) {
