@@ -103,6 +103,22 @@ REQUIRED_STRINGS = {
     "Privacy self-check status",
     "Privacy self-check violations",
     "Aggregate-only status from locally reviewed public-safe summary artifacts.",
+    "Public-Safe Artifact Readiness Checklist",
+    "Top-level readiness",
+    "Ready for public handoff",
+    "Not ready for public handoff",
+    "Expected Artifacts",
+    "Missing Artifacts",
+    "Privacy Blockers",
+    "Stale Artifacts",
+    "Present/Missing",
+    "Generated Timestamp",
+    "artifact_readiness_checklist",
+    "public_safe_artifact_readiness",
+    "EXPECTED_PUBLIC_SAFE_ARTIFACTS",
+    "buildArtifactReadinessChecklist",
+    "artifactReadinessPanel",
+    "excludes local preview filename, preview content, and object URL state",
     "Artifact Presence And Status",
     "Privacy Status",
     "Sensitivity",
@@ -168,6 +184,20 @@ REQUIRED_AGGREGATE_FIELDS = {
     "warning codes": "warningCodes",
     "warning count": "warningCount",
     "workers": "aggregateWorkers",
+}
+
+REQUIRED_CHECKLIST_FIELDS = {
+    "expected artifacts": "EXPECTED_PUBLIC_SAFE_ARTIFACTS",
+    "synthetic checklist input": "artifact_readiness_checklist",
+    "alternate checklist input": "public_safe_artifact_readiness",
+    "readiness model": "buildArtifactReadinessChecklist",
+    "ready summary": "Ready for public handoff",
+    "not-ready summary": "Not ready for public handoff",
+    "privacy status": "privacyStatus",
+    "generated timestamp": "generatedAt",
+    "blocking count": "blockingCount",
+    "warning count": "warningCount",
+    "stale count": "staleCount",
 }
 
 FORBIDDEN_AGGREGATE_PAYLOAD_FIELDS = {
@@ -338,6 +368,110 @@ vm.runInContext(workbenchScript + `
     sensitivity: "aggregate-only public summary"
   }};
 
+  const completeChecklistFixture = {{
+    schema_version: "scan-qc-artifact-readiness-checklist.v1",
+    generated_at: "2026-05-11T00:00:00Z",
+    status: "pass",
+    privacy: {{
+      aggregate_only: true,
+      redacts_private_values: true,
+      private_indicators_found: false,
+      private_indicator_count: 0
+    }},
+    sensitivity: "aggregate-only public summary",
+    artifact_readiness_checklist: {{
+      "run_plan_summary.json": {{
+        present: true,
+        status: "pass",
+        blocking_count: 0,
+        warning_count: 0,
+        privacy_status: "public-safe",
+        generated_at: "2026-05-11T00:00:00Z"
+      }},
+      "review_summary.json": {{
+        present: true,
+        status: "pass",
+        blocking_count: 0,
+        warning_count: 0,
+        privacy_status: "public-safe",
+        generated_at: "2026-05-11T00:01:00Z"
+      }},
+      "acceptance_summary.json": {{
+        present: true,
+        status: "pass",
+        blocking_count: 0,
+        warning_count: 0,
+        privacy_status: "public-safe",
+        generated_at: "2026-05-11T00:02:00Z"
+      }},
+      "aggregate_evidence_bundle_summary.json": {{
+        present: true,
+        status: "pass",
+        blocking_count: 0,
+        warning_count: 0,
+        privacy_status: "public-safe",
+        generated_at: "2026-05-11T00:03:00Z"
+      }},
+      "release_candidate_summary.json": {{
+        present: true,
+        status: "pass",
+        blocking_count: 0,
+        warning_count: 0,
+        privacy_status: "public-safe",
+        generated_at: "2026-05-11T00:04:00Z"
+      }},
+      "final_production_handoff_summary.json": {{
+        present: true,
+        status: "pass",
+        blocking_count: 0,
+        warning_count: 0,
+        privacy_status: "public-safe",
+        generated_at: "2026-05-11T00:05:00Z"
+      }}
+    }}
+  }};
+
+  const missingChecklistFixture = {{
+    schema_version: "scan-qc-artifact-readiness-checklist.v1",
+    generated_at: "2026-05-11T00:00:00Z",
+    status: "fail",
+    privacy: {{
+      aggregate_only: true,
+      redacts_private_values: true,
+      private_indicators_found: false,
+      private_indicator_count: 0
+    }},
+    sensitivity: "aggregate-only public summary",
+    artifact_readiness_checklist: [
+      {{
+        artifact: "run_plan_summary.json",
+        present: true,
+        status: "pass",
+        blocking_count: 0,
+        warning_count: 1,
+        privacy_status: "public-safe",
+        generated_at: "2026-05-11T00:00:00Z"
+      }},
+      {{
+        artifact: "review_summary.json",
+        present: true,
+        status: "stale",
+        blocking_count: 1,
+        warning_count: 2,
+        privacy_status: "public-safe",
+        generated_at: "2026-05-10T00:00:00Z"
+      }},
+      {{
+        artifact: "acceptance_summary.json",
+        present: false,
+        status: "missing",
+        blocking_count: 1,
+        warning_count: 0,
+        privacy_status: "not evaluated"
+      }}
+    ]
+  }};
+
   const reviewModel = inferArtifact(reviewFixture);
   assert(reviewModel.sourceType === "aggregate-handoff", "review fixture did not load as aggregate handoff");
   assert(reviewModel.aggregateHandoff.artifactType === "Review summary", "review fixture did not classify as Review summary");
@@ -366,6 +500,30 @@ vm.runInContext(workbenchScript + `
   assert(els.aggregateHandoff.innerHTML.includes("aggregate_warning_review_backlog"), "acceptance fixture did not render warning code");
   assert(els.aggregateHandoff.innerHTML.includes("Aggregate-only Status"), "acceptance fixture did not render aggregate-only status");
   assert(els.aggregateHandoff.innerHTML.includes("Acceptance Passed"), "acceptance fixture did not render acceptance status");
+
+  const completeChecklistModel = inferArtifact(completeChecklistFixture);
+  assert(completeChecklistModel.sourceType === "aggregate-handoff", "complete checklist fixture did not load as aggregate handoff");
+  assert(completeChecklistModel.artifactReadiness.ready === true, "complete checklist fixture was not ready");
+  assert(completeChecklistModel.artifactReadiness.missingCount === 0, "complete checklist fixture reported missing artifacts");
+  assert(completeChecklistModel.artifactReadiness.rows.length === 6, "complete checklist fixture did not cover six expected artifacts");
+  state.model = completeChecklistModel;
+  renderAggregateHandoff();
+  assert(els.aggregateHandoff.innerHTML.includes("Public-Safe Artifact Readiness Checklist"), "complete checklist did not render checklist heading");
+  assert(els.aggregateHandoff.innerHTML.includes("Ready for public handoff"), "complete checklist did not render ready summary");
+  assert(els.aggregateHandoff.innerHTML.includes("final_production_handoff_summary.json"), "complete checklist did not render final handoff artifact");
+  assert(!els.aggregateHandoff.innerHTML.includes("blob:aggregate-fixture"), "complete checklist rendered object URL state");
+
+  const missingChecklistModel = inferArtifact(missingChecklistFixture);
+  assert(missingChecklistModel.artifactReadiness.ready === false, "missing checklist fixture was unexpectedly ready");
+  assert(missingChecklistModel.artifactReadiness.missingCount >= 1, "missing checklist fixture did not count missing artifacts");
+  assert(missingChecklistModel.artifactReadiness.blockingCount === 2, "missing checklist fixture did not preserve blocking counts");
+  assert(missingChecklistModel.artifactReadiness.warningCount === 3, "missing checklist fixture did not preserve warning counts");
+  assert(missingChecklistModel.artifactReadiness.staleCount === 1, "missing checklist fixture did not count stale artifact");
+  state.model = missingChecklistModel;
+  renderAggregateHandoff();
+  assert(els.aggregateHandoff.innerHTML.includes("Not ready for public handoff"), "missing checklist did not render not-ready summary");
+  assert(els.aggregateHandoff.innerHTML.includes("missing"), "missing checklist did not render missing status");
+  assert(els.aggregateHandoff.innerHTML.includes("stale"), "missing checklist did not render stale status");
 `, context);
 """
 
@@ -440,6 +598,9 @@ def main() -> int:
         for label, required in sorted(REQUIRED_AGGREGATE_FIELDS.items()):
             if required not in aggregate_block:
                 errors.append(f"aggregate summary builder missing {label}: {required!r}")
+        for label, required in sorted(REQUIRED_CHECKLIST_FIELDS.items()):
+            if required not in aggregate_block:
+                errors.append(f"artifact readiness checklist builder missing {label}: {required!r}")
         required_fragments = {
             "review summary schema classification": 'schema.includes("review-summary")',
             "review summary status-count classification": "payload.status_counts",
@@ -465,8 +626,13 @@ def main() -> int:
         expected_labels = {
             "Acceptance Passed",
             "Blocking And Warning Codes",
+            "Blocking Count",
+            "Generated Timestamp",
+            "Missing Artifacts",
             "Omitted private evidence",
+            "Present/Missing",
             "Privacy Status",
+            "Public-Safe Artifact Readiness Checklist",
             "Processing Workers",
             "Review Status Counts",
             "Rule Counts",
