@@ -16,6 +16,11 @@ SCHEMA_VERSION = "scan-qc.workbench-public-summary.v1"
 _PASS_STATUSES = {"pass", "passed", "ok", "success", "no_candidates", "no_inputs"}
 _FAIL_STATUSES = {"fail", "failed", "error", "blocked"}
 _UNSUPPORTED_INPUT_ARTIFACT = "unsupported_input"
+_PROCESSING_REUSE_COUNTER_KEYS = (
+    "processing_resumed_files",
+    "processing_duplicate_reused_files",
+    "processing_existing_derivative_reused_files",
+)
 
 
 @dataclass(frozen=True)
@@ -27,6 +32,13 @@ class WorkbenchArtifact:
 
 
 KNOWN_WORKBENCH_ARTIFACTS = (
+    WorkbenchArtifact("run_plan_summary.json", "run_plan", "Run-plan summary", "scan-qc.run-plan-summary."),
+    WorkbenchArtifact(
+        "aggregate_baseline_summary.json",
+        "aggregate_baseline",
+        "Aggregate baseline summary",
+        "scan-qc.aggregate-baseline.",
+    ),
     WorkbenchArtifact(
         "aggregate_evidence_bundle_summary.json",
         "aggregate_evidence_bundle",
@@ -48,6 +60,12 @@ KNOWN_WORKBENCH_ARTIFACTS = (
     WorkbenchArtifact("release_readiness_summary.json", "release_readiness", "Release readiness summary", "scan-qc.release-readiness."),
     WorkbenchArtifact("acceptance_summary.json", "acceptance", "Acceptance summary", "scan-qc.acceptance-summary."),
     WorkbenchArtifact("review_summary.json", "review", "Review summary", "scan-qc.review-summary."),
+    WorkbenchArtifact(
+        "review_decision_verification_summary.json",
+        "review_decision_verification",
+        "Review-decision verification summary",
+        "scan-qc.review-decision-verification-summary.",
+    ),
     WorkbenchArtifact(
         "deep_inspection_candidate_summary.json",
         "deep_inspection_candidates",
@@ -153,6 +171,7 @@ def build_workbench_public_summary(
     passed_count = 0
     failed_count = 0
     missing_count = 0
+    processing_reuse_counts: dict[str, int] = {}
     ready_signals: list[bool] = []
 
     for expected in KNOWN_WORKBENCH_ARTIFACTS:
@@ -168,6 +187,7 @@ def build_workbench_public_summary(
         passed_count += int(record["status"] == "pass")
         failed_count += int(record["status"] == "fail")
         missing_count += int(record["status"] in {"missing", "not_provided"})
+        _merge_processing_reuse_counts(processing_reuse_counts, record["metrics"])
         if record["ready"] is not None:
             ready_signals.append(bool(record["ready"]))
 
@@ -200,6 +220,7 @@ def build_workbench_public_summary(
             "artifacts_failed": failed_count,
             "artifacts_missing": missing_count,
             "unsupported_inputs": len(rejected_inputs),
+            **processing_reuse_counts,
         },
         "workflow_state": _workflow_state(artifacts),
         "artifact_presence": {
@@ -306,6 +327,11 @@ def _artifact_record(
         blockers.append(_blocker(expected, "schema_version_unexpected"))
 
     reported_status = _normalized_status(payload)
+    if reported_status is None:
+        if expected.name == "aggregate_baseline_summary.json" and _aggregate_baseline_infers_pass(payload):
+            reported_status = "pass"
+        elif expected.name == "run_plan_summary.json":
+            reported_status = _run_plan_inferred_status(payload)
     base["reported_status"] = reported_status
     if reported_status in _FAIL_STATUSES:
         blockers.append(_blocker(expected, "artifact_status_failed"))
@@ -350,6 +376,7 @@ def _metrics(payload: dict[str, Any], expected: WorkbenchArtifact) -> dict[str, 
         "blocking_item_count": _count_from_payload(payload, "blocking_item_count", "blocking_items"),
         "warning_item_count": _count_from_payload(payload, "warning_item_count", "warnings"),
     }
+    metrics.update(_processing_reuse_counts(payload))
     for key in ("checks_passed", "checks_failed"):
         value = _extract_int(payload, key)
         if value:
@@ -389,6 +416,42 @@ def _metrics(payload: dict[str, Any], expected: WorkbenchArtifact) -> dict[str, 
             metrics["checklist_item_count"] = len(checklist)
             metrics["missing_count"] = sum(1 for item in checklist if isinstance(item, dict) and item.get("status") == "missing")
     return {key: value for key, value in metrics.items() if value is not None}
+
+
+def _processing_reuse_counts(payload: dict[str, Any]) -> dict[str, int]:
+    return {
+        key: value
+        for key in _PROCESSING_REUSE_COUNTER_KEYS
+        if (value := _extract_optional_int(payload, key)) is not None
+    }
+
+
+def _merge_processing_reuse_counts(target: dict[str, int], metrics: dict[str, Any]) -> None:
+    for key in _PROCESSING_REUSE_COUNTER_KEYS:
+        value = _safe_int(metrics.get(key))
+        if value is None:
+            continue
+        if key not in target or value > target[key]:
+            target[key] = value
+
+
+def _aggregate_baseline_infers_pass(payload: dict[str, Any]) -> bool:
+    if not isinstance(payload.get("aggregate_counts"), dict):
+        return False
+    privacy = payload.get("privacy")
+    if isinstance(privacy, dict) and privacy.get("aggregate_only") is False:
+        return False
+    return True
+
+
+def _run_plan_inferred_status(payload: dict[str, Any]) -> str | None:
+    summary = payload.get("summary")
+    if not isinstance(summary, dict):
+        return None
+    failed_batches = _safe_int(summary.get("failed_batches"))
+    if failed_batches is None:
+        return "pass"
+    return "fail" if failed_batches > 0 else "pass"
 
 
 def _workflow_state(artifacts: dict[str, Any]) -> dict[str, Any]:
@@ -468,21 +531,26 @@ def _counts_by_code(items: list[dict[str, str]]) -> dict[str, int]:
 
 
 def _extract_int(payload: Any, key: str) -> int:
+    value = _extract_optional_int(payload, key)
+    return value if value is not None else 0
+
+
+def _extract_optional_int(payload: Any, key: str) -> int | None:
     if isinstance(payload, dict):
         value = payload.get(key)
         parsed = _safe_int(value)
         if parsed is not None:
             return parsed
         for child in payload.values():
-            found = _extract_int(child, key)
-            if found:
+            found = _extract_optional_int(child, key)
+            if found is not None:
                 return found
     elif isinstance(payload, list):
         for child in payload:
-            found = _extract_int(child, key)
-            if found:
+            found = _extract_optional_int(child, key)
+            if found is not None:
                 return found
-    return 0
+    return None
 
 
 def _safe_int(value: Any) -> int | None:
