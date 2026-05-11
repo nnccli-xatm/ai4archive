@@ -1192,14 +1192,32 @@ After `release_candidate_summary.json` and
 ```bash
 archive-scan-qc final-handoff-summary \
   --evidence-dir /placeholder/private-validation-output/release-candidate
+
+archive-scan-qc public-safe-validation-index \
+  --input-dir /placeholder/private-validation-output/release-candidate
+
+archive-scan-qc artifact-readiness-checklist \
+  --evidence-dir /placeholder/private-validation-output/release-candidate
 ```
 
-The command writes `final_production_handoff_summary.json`, a public-safe final
-handoff status with `ready_for_handoff`, check counts, blocking item count,
-artifact status summary, and privacy status. It reads aggregate summaries only
-and reports blockers by code/count without copying private paths, filenames,
-hashes, OCR text, thumbnails, source roots, row-level findings, or derivative
-image evidence.
+`final-handoff-summary` writes `final_production_handoff_summary.json`, a
+public-safe final handoff status with `ready_for_handoff`, check counts,
+blocking item count, artifact status summary, and privacy status. It reads
+aggregate summaries only and reports blockers by code/count without copying
+private paths, filenames, hashes, OCR text, thumbnails, source roots, row-level
+findings, or derivative image evidence.
+
+`artifact-readiness-checklist` reads only known aggregate/public-safe JSON
+artifacts from `--evidence-dir` or explicit repeated `--file` inputs and writes
+`artifact_readiness_checklist.json`. The checklist contains generated time,
+overall pass/fail readiness, aggregate counts, blocking/warning counts by code,
+and one aggregate row per known public-safe artifact. Share
+`artifact_readiness_checklist.json` only after local policy review when the
+handoff recipient needs artifact presence/readiness detail; keep private local
+artifacts private, including source images, row-level reports, manifests, OCR
+text, thumbnails, hashes, private filenames/roots, derivative images, reviewer
+notes, provider commands, prompts, raw model output, embeddings, environment
+values, network/cloud locations, and preview state.
 
 To load multiple approved aggregate artifacts in the static workbench, build a
 single public-safe summary bundle:

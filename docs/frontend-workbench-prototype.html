@@ -1039,87 +1039,40 @@
       private_indicator_count: 0
     };
 
+    function publicSafeReadinessRow(name, category, label, generatedAt, required = false) {
+      return {
+        artifact: name,
+        name,
+        type: category,
+        category,
+        label,
+        present: true,
+        required,
+        status: "pass",
+        reported_status: "pass",
+        ready: true,
+        pass: true,
+        generated_at: generatedAt,
+        blocking_count: 0,
+        warning_count: 0,
+        blocking_counts_by_code: {},
+        warning_counts_by_code: {},
+        privacy_status: "pass",
+        privacy_failure_codes: []
+      };
+    }
+
     const PUBLIC_SAFE_READINESS_ROWS = {
-      "run_plan_summary.json": {
-        present: true,
-        status: "pass",
-        blocking_count: 0,
-        warning_count: 0,
-        privacy_status: "public-safe",
-        generated_at: "2026-05-11T00:00:00Z"
-      },
-      "workbench_public_summary.json": {
-        present: true,
-        status: "pass",
-        blocking_count: 0,
-        warning_count: 0,
-        privacy_status: "public-safe",
-        generated_at: "2026-05-11T00:00:30Z"
-      },
-      "review_summary.json": {
-        present: true,
-        status: "pass",
-        blocking_count: 0,
-        warning_count: 0,
-        privacy_status: "public-safe",
-        generated_at: "2026-05-11T00:01:00Z"
-      },
-      "acceptance_summary.json": {
-        present: true,
-        status: "pass",
-        blocking_count: 0,
-        warning_count: 0,
-        privacy_status: "public-safe",
-        generated_at: "2026-05-11T00:02:00Z"
-      },
-      "aggregate_evidence_bundle_summary.json": {
-        present: true,
-        status: "pass",
-        blocking_count: 0,
-        warning_count: 0,
-        privacy_status: "public-safe",
-        generated_at: "2026-05-11T00:03:00Z"
-      },
-      "release_candidate_summary.json": {
-        present: true,
-        status: "pass",
-        blocking_count: 0,
-        warning_count: 0,
-        privacy_status: "public-safe",
-        generated_at: "2026-05-11T00:04:00Z"
-      },
-      "final_production_handoff_summary.json": {
-        present: true,
-        status: "pass",
-        blocking_count: 0,
-        warning_count: 0,
-        privacy_status: "public-safe",
-        generated_at: "2026-05-11T00:05:00Z"
-      },
-      "deep_inspection_candidate_summary.json": {
-        present: true,
-        status: "pass",
-        blocking_count: 0,
-        warning_count: 0,
-        privacy_status: "public-safe",
-        generated_at: "2026-05-11T00:05:30Z"
-      },
-      "review_decision_verification_summary.json": {
-        present: true,
-        status: "pass",
-        blocking_count: 0,
-        warning_count: 0,
-        privacy_status: "public-safe",
-        generated_at: "2026-05-11T00:05:45Z"
-      },
-      "public_safe_validation_index.json": {
-        present: true,
-        status: "pass",
-        blocking_count: 0,
-        warning_count: 0,
-        privacy_status: "public-safe",
-        generated_at: "2026-05-11T00:06:00Z"
-      }
+      "run_plan_summary.json": publicSafeReadinessRow("run_plan_summary.json", "run_plan", "Run plan summary", "2026-05-11T00:00:00Z"),
+      "workbench_public_summary.json": publicSafeReadinessRow("workbench_public_summary.json", "workbench_public_summary", "Workbench public summary", "2026-05-11T00:00:30Z", true),
+      "review_summary.json": publicSafeReadinessRow("review_summary.json", "review_summary", "Review summary", "2026-05-11T00:01:00Z"),
+      "acceptance_summary.json": publicSafeReadinessRow("acceptance_summary.json", "acceptance_summary", "Acceptance summary", "2026-05-11T00:02:00Z"),
+      "aggregate_evidence_bundle_summary.json": publicSafeReadinessRow("aggregate_evidence_bundle_summary.json", "aggregate_evidence_bundle", "Aggregate evidence bundle summary", "2026-05-11T00:03:00Z", true),
+      "release_candidate_summary.json": publicSafeReadinessRow("release_candidate_summary.json", "release_candidate_summary", "Release candidate summary", "2026-05-11T00:04:00Z"),
+      "final_production_handoff_summary.json": publicSafeReadinessRow("final_production_handoff_summary.json", "final_production_handoff", "Final production handoff summary", "2026-05-11T00:05:00Z", true),
+      "deep_inspection_candidate_summary.json": publicSafeReadinessRow("deep_inspection_candidate_summary.json", "deep_inspection_candidate_summary", "Deep-inspection candidate summary", "2026-05-11T00:05:30Z"),
+      "review_decision_verification_summary.json": publicSafeReadinessRow("review_decision_verification_summary.json", "review_decision_verification", "Review decision verification summary", "2026-05-11T00:05:45Z"),
+      "public_safe_validation_index.json": publicSafeReadinessRow("public_safe_validation_index.json", "public_safe_validation_index", "Public-safe validation index", "2026-05-11T00:06:00Z", true)
     };
 
     const DEMO_FIXTURES = [
@@ -1416,10 +1369,42 @@
           schema_version: "scan-qc-artifact-readiness-checklist.v1",
           generated_at: "2026-05-11T00:20:00Z",
           status: "pass",
+          ready: true,
+          summary: {
+            known_artifacts: 10,
+            artifacts_present: 10,
+            artifacts_passed: 10,
+            artifacts_failed: 0,
+            required_missing_count: 0,
+            optional_missing_count: 0,
+            missing_count: 0,
+            unsupported_inputs: 0,
+            blocking_count: 0,
+            warning_count: 0,
+            privacy_blocker_count: 0
+          },
+          aggregate_counts: {
+            known_artifacts: 10,
+            artifacts_present: 10,
+            artifacts_passed: 10,
+            artifacts_failed: 0,
+            required_missing_count: 0,
+            optional_missing_count: 0,
+            missing_count: 0,
+            unsupported_inputs: 0,
+            blocking_count: 0,
+            warning_count: 0,
+            privacy_blocker_count: 0
+          },
+          blocking_counts_by_code: {},
+          warning_counts_by_code: {},
+          blocking_items: [],
+          warning_items: [],
           privacy: PUBLIC_SAFE_PRIVACY,
           privacy_self_check: { status: "passed", violation_count: 0 },
           sensitivity: "aggregate-only public summary",
-          artifact_readiness_checklist: PUBLIC_SAFE_READINESS_ROWS
+          artifact_readiness_checklist: PUBLIC_SAFE_READINESS_ROWS,
+          public_safe_artifact_readiness: PUBLIC_SAFE_READINESS_ROWS
         }
       },
       {

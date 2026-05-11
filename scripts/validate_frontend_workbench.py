@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -577,6 +578,73 @@ def validate_executable_aggregate_fixtures(html: str) -> list[str]:
         )
     actual_workbench_summary_json = json.dumps(actual_workbench_summary, sort_keys=True)
 
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        aggregate_dir = Path(tmp_dir)
+        aggregate_payloads = {
+            "workbench_public_summary.json": {
+                "schema_version": "scan-qc.workbench-public-summary.v1",
+                "generated_at": "2026-05-11T02:30:00Z",
+                "status": "pass",
+                "ready": True,
+                "privacy": {"aggregate_only": True, "redacts_private_values": True},
+            },
+            "aggregate_evidence_bundle_summary.json": {
+                "schema_version": "scan-qc.aggregate-evidence-bundle.v1",
+                "generated_at": "2026-05-11T02:31:00Z",
+                "status": "pass",
+                "ready": True,
+                "privacy": {"aggregate_only": True, "redacts_private_values": True},
+            },
+            "final_production_handoff_summary.json": {
+                "schema_version": "scan-qc.final-production-handoff-summary.v1",
+                "generated_at": "2026-05-11T02:32:00Z",
+                "status": "pass",
+                "ready_for_handoff": True,
+                "privacy": {"aggregate_only": True, "redacts_private_values": True},
+            },
+            "public_safe_validation_index.json": {
+                "schema_version": "scan-qc.public-safe-validation-index.v1",
+                "generated_at": "2026-05-11T02:33:00Z",
+                "status": "pass",
+                "ready": True,
+                "privacy": {"aggregate_only": True, "redacts_private_values": True},
+            },
+        }
+        for name, payload in aggregate_payloads.items():
+            (aggregate_dir / name).write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+        env = dict(os.environ)
+        env["PYTHONPATH"] = str(ROOT / "src")
+        command_result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "archive_scan_qc",
+                "artifact-readiness-checklist",
+                "--evidence-dir",
+                str(aggregate_dir),
+                "--out",
+                str(aggregate_dir),
+            ],
+            cwd=ROOT,
+            env=env,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if command_result.returncode != 0:
+            return [f"artifact-readiness-checklist command failed with code {command_result.returncode}"]
+        generated_checklist = json.loads((aggregate_dir / "artifact_readiness_checklist.json").read_text(encoding="utf-8"))
+        checklist_rows = generated_checklist.get("artifact_readiness_checklist", {})
+        if generated_checklist.get("summary", {}).get("required_missing_count") != 0:
+            return ["artifact-readiness-checklist command did not preserve aggregate required missing count"]
+        if generated_checklist.get("blocking_counts_by_code") != {}:
+            return ["artifact-readiness-checklist command did not preserve aggregate blocking code counts"]
+        if checklist_rows.get("workbench_public_summary.json", {}).get("category") != "workbench_public_summary":
+            return ["artifact-readiness-checklist command did not generate workbench public summary readiness row"]
+        if not generated_checklist.get("privacy", {}).get("aggregate_only"):
+            return ["artifact-readiness-checklist command did not mark aggregate-only privacy"]
+
     runner = f"""
 const vm = require("node:vm");
 const workbenchScript = {script_match.group("script")!r};
@@ -746,10 +814,64 @@ vm.runInContext(workbenchScript + `
     sensitivity: "aggregate-only public summary"
   }};
 
+  function publicSafeReadinessRow(name, category, label, generatedAt, required = false) {{
+    return {{
+      artifact: name,
+      name,
+      type: category,
+      category,
+      label,
+      present: true,
+      required,
+      status: "pass",
+      reported_status: "pass",
+      ready: true,
+      pass: true,
+      generated_at: generatedAt,
+      blocking_count: 0,
+      warning_count: 0,
+      blocking_counts_by_code: {{}},
+      warning_counts_by_code: {{}},
+      privacy_status: "pass",
+      privacy_failure_codes: []
+    }};
+  }}
+
   const completeChecklistFixture = {{
     schema_version: "scan-qc-artifact-readiness-checklist.v1",
     generated_at: "2026-05-11T00:00:00Z",
     status: "pass",
+    ready: true,
+    summary: {{
+      known_artifacts: 10,
+      artifacts_present: 10,
+      artifacts_passed: 10,
+      artifacts_failed: 0,
+      required_missing_count: 0,
+      optional_missing_count: 0,
+      missing_count: 0,
+      unsupported_inputs: 0,
+      blocking_count: 0,
+      warning_count: 0,
+      privacy_blocker_count: 0
+    }},
+    aggregate_counts: {{
+      known_artifacts: 10,
+      artifacts_present: 10,
+      artifacts_passed: 10,
+      artifacts_failed: 0,
+      required_missing_count: 0,
+      optional_missing_count: 0,
+      missing_count: 0,
+      unsupported_inputs: 0,
+      blocking_count: 0,
+      warning_count: 0,
+      privacy_blocker_count: 0
+    }},
+    blocking_counts_by_code: {{}},
+    warning_counts_by_code: {{}},
+    blocking_items: [],
+    warning_items: [],
     privacy: {{
       aggregate_only: true,
       redacts_private_values: true,
@@ -758,88 +880,20 @@ vm.runInContext(workbenchScript + `
     }},
     sensitivity: "aggregate-only public summary",
     artifact_readiness_checklist: {{
-      "run_plan_summary.json": {{
-        present: true,
-        status: "pass",
-        blocking_count: 0,
-        warning_count: 0,
-        privacy_status: "public-safe",
-        generated_at: "2026-05-11T00:00:00Z"
-      }},
-      "workbench_public_summary.json": {{
-        present: true,
-        status: "pass",
-        blocking_count: 0,
-        warning_count: 0,
-        privacy_status: "public-safe",
-        generated_at: "2026-05-11T00:00:30Z"
-      }},
-      "review_summary.json": {{
-        present: true,
-        status: "pass",
-        blocking_count: 0,
-        warning_count: 0,
-        privacy_status: "public-safe",
-        generated_at: "2026-05-11T00:01:00Z"
-      }},
-      "acceptance_summary.json": {{
-        present: true,
-        status: "pass",
-        blocking_count: 0,
-        warning_count: 0,
-        privacy_status: "public-safe",
-        generated_at: "2026-05-11T00:02:00Z"
-      }},
-      "aggregate_evidence_bundle_summary.json": {{
-        present: true,
-        status: "pass",
-        blocking_count: 0,
-        warning_count: 0,
-        privacy_status: "public-safe",
-        generated_at: "2026-05-11T00:03:00Z"
-      }},
-      "release_candidate_summary.json": {{
-        present: true,
-        status: "pass",
-        blocking_count: 0,
-        warning_count: 0,
-        privacy_status: "public-safe",
-        generated_at: "2026-05-11T00:04:00Z"
-      }},
-      "final_production_handoff_summary.json": {{
-        present: true,
-        status: "pass",
-        blocking_count: 0,
-        warning_count: 0,
-        privacy_status: "public-safe",
-        generated_at: "2026-05-11T00:05:00Z"
-      }},
-      "deep_inspection_candidate_summary.json": {{
-        present: true,
-        status: "pass",
-        blocking_count: 0,
-        warning_count: 0,
-        privacy_status: "public-safe",
-        generated_at: "2026-05-11T00:05:30Z"
-      }},
-      "review_decision_verification_summary.json": {{
-        present: true,
-        status: "pass",
-        blocking_count: 0,
-        warning_count: 0,
-        privacy_status: "public-safe",
-        generated_at: "2026-05-11T00:05:45Z"
-      }},
-      "public_safe_validation_index.json": {{
-        present: true,
-        status: "pass",
-        blocking_count: 0,
-        warning_count: 0,
-        privacy_status: "public-safe",
-        generated_at: "2026-05-11T00:06:00Z"
-      }}
-    }}
+      "run_plan_summary.json": publicSafeReadinessRow("run_plan_summary.json", "run_plan", "Run plan summary", "2026-05-11T00:00:00Z"),
+      "workbench_public_summary.json": publicSafeReadinessRow("workbench_public_summary.json", "workbench_public_summary", "Workbench public summary", "2026-05-11T00:00:30Z", true),
+      "review_summary.json": publicSafeReadinessRow("review_summary.json", "review_summary", "Review summary", "2026-05-11T00:01:00Z"),
+      "acceptance_summary.json": publicSafeReadinessRow("acceptance_summary.json", "acceptance_summary", "Acceptance summary", "2026-05-11T00:02:00Z"),
+      "aggregate_evidence_bundle_summary.json": publicSafeReadinessRow("aggregate_evidence_bundle_summary.json", "aggregate_evidence_bundle", "Aggregate evidence bundle summary", "2026-05-11T00:03:00Z", true),
+      "release_candidate_summary.json": publicSafeReadinessRow("release_candidate_summary.json", "release_candidate_summary", "Release candidate summary", "2026-05-11T00:04:00Z"),
+      "final_production_handoff_summary.json": publicSafeReadinessRow("final_production_handoff_summary.json", "final_production_handoff", "Final production handoff summary", "2026-05-11T00:05:00Z", true),
+      "deep_inspection_candidate_summary.json": publicSafeReadinessRow("deep_inspection_candidate_summary.json", "deep_inspection_candidate_summary", "Deep-inspection candidate summary", "2026-05-11T00:05:30Z"),
+      "review_decision_verification_summary.json": publicSafeReadinessRow("review_decision_verification_summary.json", "review_decision_verification", "Review decision verification summary", "2026-05-11T00:05:45Z"),
+      "public_safe_validation_index.json": publicSafeReadinessRow("public_safe_validation_index.json", "public_safe_validation_index", "Public-safe validation index", "2026-05-11T00:06:00Z", true)
+    }},
+    public_safe_artifact_readiness: null
   }};
+  completeChecklistFixture.public_safe_artifact_readiness = completeChecklistFixture.artifact_readiness_checklist;
 
   const finalHandoffPassFixture = {{
     schema_version: "scan-qc-final-production-handoff-summary.v1",
@@ -1785,6 +1839,15 @@ vm.runInContext(workbenchScript + `
   assert(completeChecklistModel.artifactReadiness.ready === true, "complete checklist fixture was not ready");
   assert(completeChecklistModel.artifactReadiness.missingCount === 0, "complete checklist fixture reported missing artifacts");
   assert(completeChecklistModel.artifactReadiness.rows.length === 10, "complete checklist fixture did not cover ten expected artifacts");
+  assert(completeChecklistModel.aggregateHandoff.status === "pass", "complete checklist fixture did not preserve aggregate pass status");
+  assert(completeChecklistModel.aggregateHandoff.blockingItemCount === 0, "complete checklist fixture did not preserve aggregate blocking count");
+  assert(completeChecklistModel.aggregateHandoff.warningCount === 0, "complete checklist fixture did not preserve aggregate warning count");
+  assert(completeChecklistFixture.summary.required_missing_count === 0, "complete checklist fixture did not include generated required missing count");
+  assert(completeChecklistFixture.aggregate_counts.blocking_count === 0, "complete checklist fixture did not include generated aggregate blocking count");
+  assert(completeChecklistFixture.aggregate_counts.warning_count === 0, "complete checklist fixture did not include generated aggregate warning count");
+  assert(completeChecklistFixture.artifact_readiness_checklist["workbench_public_summary.json"].category === "workbench_public_summary", "complete checklist fixture did not include generated workbench summary row category");
+  assert(completeChecklistFixture.artifact_readiness_checklist["workbench_public_summary.json"].required === true, "complete checklist fixture did not include generated workbench summary required flag");
+  assert(completeChecklistFixture.artifact_readiness_checklist["workbench_public_summary.json"].blocking_counts_by_code && Object.keys(completeChecklistFixture.artifact_readiness_checklist["workbench_public_summary.json"].blocking_counts_by_code).length === 0, "complete checklist fixture did not include generated row blocking code counts");
   state.model = completeChecklistModel;
   renderAggregateHandoff();
   assert(els.aggregateHandoff.innerHTML.includes("Public-Safe Artifact Readiness Checklist"), "complete checklist did not render checklist heading");
