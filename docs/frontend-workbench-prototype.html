@@ -719,7 +719,7 @@
     <section class="load-panel" aria-labelledby="load-title" data-region="artifact-loader">
       <div class="panel">
         <h2 id="load-title">Load Artifact</h2>
-        <p class="muted">Choose a <span class="mono">run_plan_summary.json</span>, <span class="mono">scan_qc_report.json</span>, <span class="mono">workbench_public_summary.json</span>, <span class="mono">review_summary.json</span>, <span class="mono">acceptance_summary.json</span>, <span class="mono">aggregate_evidence_bundle_summary.json</span>, <span class="mono">final_production_handoff_summary.json</span>, <span class="mono">release_candidate_summary.json</span>, <span class="mono">deep_inspection_candidate_summary.json</span>, or <span class="mono">public_safe_validation_index.json</span>. Files are parsed in this browser only.</p>
+        <p class="muted">Choose a <span class="mono">run_plan_summary.json</span>, <span class="mono">scan_qc_report.json</span>, <span class="mono">workbench_public_summary.json</span>, <span class="mono">review_summary.json</span>, <span class="mono">review_decision_verification_summary.json</span>, <span class="mono">acceptance_summary.json</span>, <span class="mono">aggregate_evidence_bundle_summary.json</span>, <span class="mono">final_production_handoff_summary.json</span>, <span class="mono">release_candidate_summary.json</span>, <span class="mono">deep_inspection_candidate_summary.json</span>, or <span class="mono">public_safe_validation_index.json</span>. Files are parsed in this browser only.</p>
         <div class="file-row">
           <input id="artifactFile" type="file" accept="application/json,.json">
           <button id="clearButton" class="secondary" type="button">Clear</button>
@@ -752,7 +752,7 @@
       <div class="toolbar">
         <div>
           <h2 id="aggregate-title">Aggregate Artifact Summary</h2>
-          <p class="muted">Public-safe aggregate summaries only after local policy review. This view never displays private filenames, paths, hashes, OCR text, thumbnails, image content, row-level findings, reviewer notes, manifests, or derivative image references.</p>
+          <p class="muted">Public-safe aggregate summaries only after local policy review. For final handoff, inspect aggregate outputs from review-decision verification, evidence-bundle verification, and final handoff summary. This view never displays private filenames, paths, hashes, OCR text, thumbnails, image content, row-level findings, reviewer notes, prompts, provider commands, raw model output, object URLs, manifests, or derivative image references.</p>
         </div>
       </div>
       <div id="aggregateHandoff"></div>

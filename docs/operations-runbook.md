@@ -273,10 +273,12 @@ Use `docs/frontend-workbench-prototype.html` for static review of existing
 public-safe aggregate artifacts. The workbench can load aggregate summaries such
 as `run_plan_summary.json`, `review_summary.json`,
 `acceptance_summary.json`, `aggregate_evidence_bundle_summary.json`,
+`review_decision_verification_summary.json`,
 `final_production_handoff_summary.json`, and `release_candidate_summary.json`.
-It can also parse a scan report for local operator review, but scan reports are
-sensitive local evidence unless they have been separately reduced to a
-public-safe aggregate summary.
+It can also parse a scan report for local operator review, but scan reports,
+review templates, reviewer notes, source images, derivative images, object URLs,
+and processing manifests are sensitive local evidence unless they have been
+separately reduced to a public-safe aggregate summary.
 
 The public-safe demo fixture gallery in the workbench is the first validation
 path for frontend-only changes. Open the HTML file locally, choose a fixture
@@ -547,6 +549,46 @@ remaining P0/P1 counts, failed batch and processing failure counts, throughput
 and worker summaries, human review status, and recommended next steps. It must
 not include source filenames, source locations, hashes, thumbnails, row-level
 findings, reviewer notes, OCR/text, or image content.
+
+## Aggregate Review-Decision Handoff
+
+After local human review decisions are exported, use the aggregate-only handoff
+sequence below to verify final review decisions and production readiness without
+reading implementation PRs or exposing local evidence:
+
+```bash
+archive-scan-qc review-decisions-verify \
+  --summary /placeholder/private-review-decisions/review_decisions.json \
+  --out /placeholder/private-validation-output/review_decision_verification_summary.json
+
+archive-scan-qc evidence-bundle-verify \
+  --evidence-dir /placeholder/private-validation-output
+
+archive-scan-qc final-handoff-summary \
+  --evidence-dir /placeholder/private-validation-output
+```
+
+Optional inspection can then happen in the static workbench by loading
+`final_production_handoff_summary.json`. The workbench displays only aggregate
+status, readiness, compatibility diagnostics, and code/count summaries; it must
+not be used to publish loaded private files, local preview state, object URLs,
+or row-level evidence.
+
+`review_decision_verification_summary.json` is designed to contribute aggregate
+decision counts, privacy status, blocking and warning counts by code, and final
+handoff readiness. It must not include private filenames, source roots, hashes,
+OCR text, thumbnails, row-level findings, reviewer notes, prompts, provider
+commands, raw model output, object URLs, or actual sample data.
+
+`aggregate_evidence_bundle_summary.json` and
+`final_production_handoff_summary.json` are public-safe aggregate summaries
+after local policy review. They report artifact presence, schema/status/count
+checks, aggregate blocker and warning codes, privacy indicators, and the final
+go/no-go handoff status. Local/source artifacts remain sensitive, including
+source and derivative images, scan reports, scan CSV/HTML exports, review
+templates, reviewer notes, processing manifests, retry manifests, delivery
+manifest rows for sensitive evidence, provider logs, and any artifact that
+contains row-level paths, hashes, messages, or local roots.
 
 ## Delivery Handoff Manifest
 
