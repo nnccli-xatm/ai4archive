@@ -15,6 +15,7 @@ SCHEMA_VERSION = "scan-qc.workbench-public-summary.v1"
 
 _PASS_STATUSES = {"pass", "passed", "ok", "success", "no_candidates", "no_inputs"}
 _FAIL_STATUSES = {"fail", "failed", "error", "blocked"}
+_UNSUPPORTED_INPUT_ARTIFACT = "unsupported_input"
 
 
 @dataclass(frozen=True)
@@ -170,8 +171,8 @@ def build_workbench_public_summary(
         if record["ready"] is not None:
             ready_signals.append(bool(record["ready"]))
 
-    for name, code in rejected_inputs:
-        blocking_items.append({"artifact": name, "category": "unsupported", "code": code})
+    for _name, code in rejected_inputs:
+        blocking_items.append({"artifact": _UNSUPPORTED_INPUT_ARTIFACT, "category": "unsupported", "code": code})
         checks_failed += 1
 
     blocking_counts_by_code = _counts_by_code(blocking_items)
