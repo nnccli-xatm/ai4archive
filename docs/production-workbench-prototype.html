@@ -681,14 +681,16 @@
               <h3>系统建议</h3>
               <p id="currentAdvice">可以开始处理后再确认。</p>
             </div>
+            <p class="muted" id="reviewPositionText">当前第 0 张，共 0 张；已确认 0 张，剩余 0 张。</p>
+            <p class="muted" id="previewSourceText">预览来源：等待本机处理结果。</p>
             <p class="muted">大图预览在中间。生产运行时这里显示本机真实预览；点一个决定后，自动显示下一张待确认图片。</p>
           </div>
 
           <div class="decision-actions" id="decisionActions">
-            <button type="button" class="primary-choice" data-decision="pass" disabled>通过</button>
-            <button type="button" class="warning" data-decision="needs_rework" disabled>需要返工</button>
-            <button type="button" class="secondary" data-decision="admin_handling" disabled>管理员处理</button>
-            <button type="button" class="secondary" data-decision="keep_original_trace" disabled>保留原貌痕迹</button>
+            <button type="button" class="primary-choice" data-decision="pass" disabled>确认通过</button>
+            <button type="button" class="warning" data-decision="needs_rework" disabled>退回重扫或重处理</button>
+            <button type="button" class="secondary" data-decision="admin_handling" disabled>交管理员处理</button>
+            <button type="button" class="secondary" data-decision="keep_original_trace" disabled>确认保留原貌</button>
           </div>
           <div class="decision-summary" id="decisionSummary">已决定 0 项，待决定 0 项。</div>
         </div>
@@ -765,6 +767,8 @@
       queueText: document.getElementById("queueText"),
       currentIssue: document.getElementById("currentIssue"),
       currentAdvice: document.getElementById("currentAdvice"),
+      reviewPositionText: document.getElementById("reviewPositionText"),
+      previewSourceText: document.getElementById("previewSourceText"),
       decisionActions: document.getElementById("decisionActions"),
       decisionSummary: document.getElementById("decisionSummary"),
       outputPanel: document.getElementById("outputPanel"),
@@ -843,6 +847,21 @@
       return state.reviewItems.find((item) => !item.decision) || state.reviewItems[state.reviewItems.length - 1];
     }
 
+    function currentItemNumber() {
+      const index = state.reviewItems.findIndex((item) => !item.decision);
+      if (index >= 0) return index + 1;
+      return state.reviewItems.length;
+    }
+
+    function previewSourceLabel(item, pending) {
+      if (!pending) return "预览来源：等待本机处理结果。";
+      if (item.previewSource === "processed") return "预览来源：处理后图片。";
+      if (item.previewSource === "original_fallback") return "预览来源：处理后图片暂不可用，当前显示原图。";
+      if (item.previewSource === "unavailable") return "预览来源：本机暂未找到可预览图片。";
+      if (item.previewUrl) return "预览来源：本机真实预览。";
+      return "预览来源：公开安全示意图。";
+    }
+
     function folderLabel(input, fallback) {
       if (!input.files || input.files.length === 0) return fallback;
       return `浏览器已看到 ${input.files.length} 个项目；请在下方填写并保存本机文件夹位置。`;
@@ -896,6 +915,10 @@
       els.queueText.textContent = state.reviewQueueText || (reviewMode ? `已决定 ${reviewedCount()} 项，待决定 ${pending} 项` : "等待处理开始。");
       els.currentIssue.textContent = reviewMode && pending ? item.issue : (state.operatorMessage || (pending ? "处理开始后在这里显示问题原因。" : "已经没有待确认图片。"));
       els.currentAdvice.textContent = reviewMode && pending ? item.advice : state.status === "failed" ? "请联系管理员处理后再继续。" : pending ? "可以开始处理后再确认。" : "可以导出复核决定。";
+      els.reviewPositionText.textContent = reviewMode && state.reviewItems.length
+        ? `当前第 ${currentItemNumber()} 张，共 ${state.reviewItems.length} 张；已确认 ${reviewedCount()} 张，剩余 ${pending} 张。`
+        : "当前第 0 张，共 0 张；已确认 0 张，剩余 0 张。";
+      els.previewSourceText.textContent = previewSourceLabel(item || {}, reviewMode && pending > 0);
       els.decisionActions.querySelectorAll("button").forEach((button) => {
         button.disabled = !(reviewMode && pending > 0);
         button.classList.toggle("primary-choice", reviewMode && pending > 0 && item.suggestedAction === button.dataset.decision);
@@ -981,6 +1004,7 @@
         severity: item.severity || "",
         sourceCategory: item.source_category || "",
         sourceRef: item.source_ref || "",
+        previewSource: item.preview_source || "",
         previewUrl: localApi.enabled && item.local_id ? `/api/preview/${encodeURIComponent(item.local_id)}` : "",
         decision: null
       };
