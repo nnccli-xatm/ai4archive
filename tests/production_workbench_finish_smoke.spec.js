@@ -74,6 +74,12 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.getByRole("button", { name: "保存文件夹" })).toBeVisible();
     await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
     await expect(page.locator("#loadStatus")).toHaveText("请先填写原图文件夹和输出文件夹，点击“保存文件夹”，确认可以开始后再点击“开始处理”。");
+    await expect(page.locator(".mode-selector")).toContainText("标准优化");
+    await expect(page.locator(".mode-selector")).toContainText("适合正常批量加工，自动做保守裁边、纠偏、去黑边、去明显小污点，原图不覆盖。");
+    await expect(page.locator(".mode-selector")).toContainText("轻度优化");
+    await expect(page.locator(".mode-selector")).toContainText("只做较少处理，适合担心过度处理的批次。");
+    await expect(page.locator(".mode-selector")).toContainText("只质检不修图");
+    await expect(page.locator(".mode-selector")).toContainText("只检查，不生成修图优化结果。");
 
     await expect(page.locator(".maintenance-loader")).not.toHaveAttribute("open", "");
     await expect(page.getByText("选择维护示例")).toBeHidden();

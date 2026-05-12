@@ -316,8 +316,8 @@
       display: grid;
       grid-template-columns: auto 1fr;
       gap: 8px;
-      align-items: center;
-      min-height: 34px;
+      align-items: start;
+      min-height: 42px;
       color: var(--ink-2);
       cursor: pointer;
     }
@@ -326,6 +326,23 @@
       width: 18px;
       height: 18px;
       accent-color: var(--green);
+      margin-top: 2px;
+    }
+
+    .mode-text {
+      display: grid;
+      gap: 3px;
+    }
+
+    .mode-title {
+      font-weight: 700;
+      color: var(--ink);
+    }
+
+    .mode-description {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
     }
 
     .mode-current {
@@ -914,9 +931,27 @@
         <div class="mode-selector">
           <fieldset>
             <legend>处理方式</legend>
-            <label class="mode-option"><input type="radio" name="processingMode" value="standard" checked>标准优化</label>
-            <label class="mode-option"><input type="radio" name="processingMode" value="qc_only">只质检不修图</label>
-            <label class="mode-option"><input type="radio" name="processingMode" value="light">轻度优化</label>
+            <label class="mode-option">
+              <input type="radio" name="processingMode" value="standard" checked>
+              <span class="mode-text">
+                <span class="mode-title">标准优化</span>
+                <span class="mode-description">适合正常批量加工，自动做保守裁边、纠偏、去黑边、去明显小污点，原图不覆盖。</span>
+              </span>
+            </label>
+            <label class="mode-option">
+              <input type="radio" name="processingMode" value="light">
+              <span class="mode-text">
+                <span class="mode-title">轻度优化</span>
+                <span class="mode-description">只做较少处理，适合担心过度处理的批次。</span>
+              </span>
+            </label>
+            <label class="mode-option">
+              <input type="radio" name="processingMode" value="qc_only">
+              <span class="mode-text">
+                <span class="mode-title">只质检不修图</span>
+                <span class="mode-description">只检查，不生成修图优化结果。</span>
+              </span>
+            </label>
           </fieldset>
           <small class="mode-current" id="modeStatus">当前处理方式：标准优化</small>
         </div>
