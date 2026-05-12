@@ -539,6 +539,16 @@
       gap: 8px;
     }
 
+    .review-navigation {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .review-navigation button:last-child {
+      grid-column: 1 / -1;
+    }
+
     .decision-actions button {
       width: 100%;
       min-height: 48px;
@@ -777,6 +787,11 @@
             <p class="muted">大图预览在中间。生产运行时这里显示本机真实预览；点一个决定后，自动显示下一张待确认图片。</p>
           </div>
 
+          <div class="review-navigation" aria-label="复核导航">
+            <button type="button" class="secondary" id="previousReviewedButton" disabled>上一张已确认</button>
+            <button type="button" class="secondary" id="nextPendingButton" disabled>下一张待确认</button>
+            <button type="button" class="secondary" id="clearDecisionButton" disabled>清除当前决定</button>
+          </div>
           <div class="decision-actions" id="decisionActions">
             <button type="button" class="primary-choice" data-decision="pass" disabled>确认通过</button>
             <button type="button" class="warning" data-decision="needs_rework" disabled>退回重扫或重处理</button>
@@ -842,6 +857,7 @@
       queueLoaded: false,
       queueSource: "内置演示",
       decisions: {},
+      currentIndex: 0,
       previewFit: true,
       previewZoom: 1
     };
@@ -877,6 +893,9 @@
       previewFrame: document.getElementById("previewFrame"),
       previewText: document.getElementById("previewText"),
       queueText: document.getElementById("queueText"),
+      previousReviewedButton: document.getElementById("previousReviewedButton"),
+      nextPendingButton: document.getElementById("nextPendingButton"),
+      clearDecisionButton: document.getElementById("clearDecisionButton"),
       recoveryBox: document.getElementById("recoveryBox"),
       recoveryTitle: document.getElementById("recoveryTitle"),
       recoveryMessage: document.getElementById("recoveryMessage"),
@@ -979,14 +998,64 @@
       return state.reviewItems.length - pendingCount();
     }
 
+    function clampCurrentIndex() {
+      if (state.reviewItems.length === 0) {
+        state.currentIndex = 0;
+        return;
+      }
+      state.currentIndex = Math.max(0, Math.min(state.currentIndex, state.reviewItems.length - 1));
+    }
+
+    function firstPendingIndex() {
+      return state.reviewItems.findIndex((item) => !item.decision);
+    }
+
+    function previousReviewedIndex() {
+      clampCurrentIndex();
+      for (let index = state.currentIndex - 1; index >= 0; index -= 1) {
+        if (state.reviewItems[index].decision) return index;
+      }
+      for (let index = state.reviewItems.length - 1; index > state.currentIndex; index -= 1) {
+        if (state.reviewItems[index].decision) return index;
+      }
+      return -1;
+    }
+
+    function nextPendingIndex() {
+      clampCurrentIndex();
+      for (let index = state.currentIndex + 1; index < state.reviewItems.length; index += 1) {
+        if (!state.reviewItems[index].decision) return index;
+      }
+      for (let index = 0; index <= state.currentIndex && index < state.reviewItems.length; index += 1) {
+        if (!state.reviewItems[index].decision) return index;
+      }
+      return -1;
+    }
+
+    function moveToNextPending() {
+      const index = nextPendingIndex();
+      if (index >= 0) state.currentIndex = index;
+    }
+
     function currentItem() {
-      return state.reviewItems.find((item) => !item.decision) || state.reviewItems[state.reviewItems.length - 1];
+      clampCurrentIndex();
+      return state.reviewItems[state.currentIndex] || null;
     }
 
     function currentItemNumber() {
-      const index = state.reviewItems.findIndex((item) => !item.decision);
-      if (index >= 0) return index + 1;
-      return state.reviewItems.length;
+      clampCurrentIndex();
+      return state.reviewItems.length ? state.currentIndex + 1 : 0;
+    }
+
+    function currentDecisionLabel(item) {
+      if (!item || !item.decision) return "当前决定：未决定。";
+      const labels = {
+        pass: "确认通过",
+        needs_rework: "退回重扫或重处理",
+        admin_handling: "交管理员处理",
+        keep_original_trace: "确认保留原貌"
+      };
+      return `当前决定：${labels[item.decision] || "已确认"}。`;
     }
 
     function previewSourceLabel(item, pending) {
@@ -1101,18 +1170,21 @@
       const pending = pendingCount();
       const reviewMode = state.status === "needs_review";
       els.queueText.textContent = state.reviewQueueText || (reviewMode ? `已决定 ${reviewedCount()} 项，待决定 ${pending} 项` : "等待处理开始。");
-      els.currentIssue.textContent = reviewMode && pending ? item.issue : (state.operatorMessage || (pending ? "处理开始后在这里显示问题原因。" : "已经没有待确认图片。"));
-      els.currentAdvice.textContent = reviewMode && pending ? item.advice : state.status === "failed" ? "请联系管理员处理后再继续。" : pending ? "可以开始处理后再确认。" : "可以完成并导出结果。";
+      els.currentIssue.textContent = reviewMode && item ? item.issue : (state.operatorMessage || (pending ? "处理开始后在这里显示问题原因。" : "已经没有待确认图片。"));
+      els.currentAdvice.textContent = reviewMode && item ? `${item.advice} ${currentDecisionLabel(item)}` : state.status === "failed" ? "请联系管理员处理后再继续。" : pending ? "可以开始处理后再确认。" : "可以完成并导出结果。";
       els.reviewPositionText.textContent = reviewMode && state.reviewItems.length
         ? `当前第 ${currentItemNumber()} 张，共 ${state.reviewItems.length} 张；已确认 ${reviewedCount()} 张，剩余 ${pending} 张。`
         : "当前第 0 张，共 0 张；已确认 0 张，剩余 0 张。";
-      els.previewSourceText.textContent = previewSourceLabel(item || {}, reviewMode && pending > 0);
+      els.previewSourceText.textContent = previewSourceLabel(item || {}, reviewMode && Boolean(item));
+      els.previousReviewedButton.disabled = !(reviewMode && previousReviewedIndex() >= 0);
+      els.nextPendingButton.disabled = !(reviewMode && nextPendingIndex() >= 0);
+      els.clearDecisionButton.disabled = !(reviewMode && item && item.decision);
       els.decisionActions.querySelectorAll("button").forEach((button) => {
-        button.disabled = !(reviewMode && pending > 0);
-        button.classList.toggle("primary-choice", reviewMode && pending > 0 && item.suggestedAction === button.dataset.decision);
+        button.disabled = !(reviewMode && item);
+        button.classList.toggle("primary-choice", reviewMode && item && item.suggestedAction === button.dataset.decision);
       });
       els.decisionSummary.textContent = `已决定 ${reviewedCount()} 项，待决定 ${pending} 项。`;
-      renderPreview(item, reviewMode && pending > 0);
+      renderPreview(item, reviewMode && Boolean(item));
     }
 
     function render() {
@@ -1314,6 +1386,7 @@
       state.queueSource = "本机复核队列";
       state.decisions = {};
       state.reviewItems = queue.items.map(queueItemToReviewItem);
+      state.currentIndex = Math.max(0, firstPendingIndex());
       state.attentionFiles = pendingCount();
       state.reviewQueueText = state.reviewItems.length
         ? `已加载复核队列 ${state.reviewItems.length} 项，待决定 ${pendingCount()} 项。`
@@ -1359,6 +1432,7 @@
         restored += 1;
       });
       if (restored === 0) return false;
+      state.currentIndex = Math.max(0, firstPendingIndex());
       state.attentionFiles = pendingCount();
       state.reviewQueueText = `已恢复上次进度：已决定 ${reviewedCount()} 项，待决定 ${pendingCount()} 项。`;
       state.lastDraftMessage = "已恢复上次进度";
@@ -1387,6 +1461,7 @@
       state.progress = deriveProgress(summary, progress);
       state.reviewItems = nextStatus === "needs_review" ? makeReviewItems(state.attentionFiles) : [];
       state.decisions = {};
+      state.currentIndex = 0;
       els.inputStatus.textContent = "已加载本机处理状态。";
       els.outputStatus.textContent = state.outputSummary;
       if (queue) applyReviewQueue(queue);
@@ -1745,6 +1820,7 @@
       state.queueLoaded = false;
       state.queueSource = "内置演示";
       state.decisions = {};
+      state.currentIndex = 0;
       state.previewFit = true;
       state.previewZoom = 1;
       els.inputFolder.value = "";
@@ -1767,11 +1843,40 @@
       const button = event.target.closest("button[data-decision]");
       if (!button || button.disabled) return;
       const item = currentItem();
+      if (!item) return;
       item.decision = button.dataset.decision;
       state.decisions[item.id] = item.decision;
       state.progress = pendingCount() === 0 ? 94 : Math.min(92, state.progress + 4);
       state.attentionFiles = pendingCount();
       state.reviewQueueText = `已决定 ${reviewedCount()} 项，待决定 ${pendingCount()} 项。`;
+      moveToNextPending();
+      render();
+      scheduleDraftSave();
+    });
+
+    els.previousReviewedButton.addEventListener("click", () => {
+      const index = previousReviewedIndex();
+      if (index < 0) return;
+      state.currentIndex = index;
+      state.reviewQueueText = `已返回上一张已确认图片；已决定 ${reviewedCount()} 项，待决定 ${pendingCount()} 项。`;
+      render();
+    });
+
+    els.nextPendingButton.addEventListener("click", () => {
+      const index = nextPendingIndex();
+      if (index < 0) return;
+      state.currentIndex = index;
+      state.reviewQueueText = `已显示下一张待确认图片；已决定 ${reviewedCount()} 项，待决定 ${pendingCount()} 项。`;
+      render();
+    });
+
+    els.clearDecisionButton.addEventListener("click", () => {
+      const item = currentItem();
+      if (!item || !item.decision) return;
+      item.decision = null;
+      delete state.decisions[item.id];
+      state.attentionFiles = pendingCount();
+      state.reviewQueueText = `已清除当前决定；已决定 ${reviewedCount()} 项，待决定 ${pendingCount()} 项。`;
       render();
       scheduleDraftSave();
     });
