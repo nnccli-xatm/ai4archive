@@ -202,10 +202,12 @@ class WorkbenchController:
         total_decisions = int(decision_summary.get("total_decisions") or 0)
         pending_decisions = int(decision_summary.get("pending") or 0)
         reviewed_decisions = max(0, total_decisions - pending_decisions)
+        operator_name = str(summary.get("operator_name") or "").strip()
         completion_note_path.write_text(
             "\n".join(
                 [
                     "本批次完成交接说明",
+                    f"复核人员：{operator_name or '未填写'}",
                     f"处理后图片文件夹：{derivatives_dir}",
                     f"复核结果保存位置：{summary_path}",
                     f"复核校验保存位置：{verification_path}",

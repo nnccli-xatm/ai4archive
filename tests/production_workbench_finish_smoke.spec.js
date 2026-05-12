@@ -155,6 +155,19 @@ test.describe("production workbench finish/export browser smoke", () => {
       const payload = JSON.parse(request.postData() || "{}");
       expect(payload.decisions).toHaveLength(3);
       expect(payload.aggregate_counts.review_completion.complete).toBe(true);
+      expect(payload.operator_name).toBe("复核员甲");
+      expect(payload.operator_decisions).toHaveLength(3);
+      expect(payload.operator_decisions[0]).toMatchObject({
+        local_id: "PRQ000001",
+        decision: "pass",
+        note_zh: "本张可以通过。",
+      });
+      expect(payload.operator_decisions[2]).toMatchObject({
+        local_id: "PRQ000003",
+        decision: "keep_original_trace",
+        note_zh: "保留原貌即可。",
+      });
+      expect(payload.operator_decisions.every((item) => typeof item.decided_at === "string" && item.decided_at.length > 0)).toBe(true);
       await route.fulfill({
         contentType: "application/json",
         body: JSON.stringify({
@@ -205,6 +218,8 @@ test.describe("production workbench finish/export browser smoke", () => {
     await page.getByRole("button", { name: "适合窗口" }).click();
     await expect(page.locator("#zoomState")).toHaveText("查看：适合窗口");
 
+    await page.locator("#operatorName").fill("复核员甲");
+    await page.locator("#decisionNote").fill("边缘不清楚，需要补扫。");
     await page.getByRole("button", { name: "需要重扫" }).click();
     await expect(page.locator("#previewSourceText")).toHaveText("预览：处理后图片不可用，正在显示原图。");
     await expect(page.getByText("处理后图片预览暂不可用。请查看原图，仍可选择一个处理决定。")).toBeVisible();
@@ -215,10 +230,13 @@ test.describe("production workbench finish/export browser smoke", () => {
     await page.getByRole("button", { name: "清除当前决定" }).click();
     await expect(page.locator("#decisionSummary")).toHaveText("已决定 0 项，待决定 3 项。");
     await expect(page.getByRole("button", { name: "完成并导出结果" })).toBeDisabled();
+    await page.locator("#decisionNote").fill("本张可以通过。");
     await page.getByRole("button", { name: "通过" }).click();
     await expect(page.locator("#reviewPositionText")).toHaveText("当前第 2 张 / 共 3 张 / 待确认 2 张。");
+    await expect(page.locator("#operatorName")).toHaveValue("复核员甲");
     await page.getByRole("button", { name: "重新处理" }).click();
     await expect(page.getByText("原图预览暂不可用。请查看处理后图片，仍可选择一个处理决定。")).toBeVisible();
+    await page.locator("#decisionNote").fill("保留原貌即可。");
     await page.getByRole("button", { name: "保留原貌" }).click();
     await expect(page.locator("#decisionSummary")).toHaveText("已决定 3 项，待决定 0 项。");
 
