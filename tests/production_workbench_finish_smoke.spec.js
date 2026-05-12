@@ -209,7 +209,7 @@ test.describe("production workbench finish/export browser smoke", () => {
         body: JSON.stringify({
           schema_version: "scan-qc.local-production-workbench.v1",
           finished: true,
-          message_zh: "完成并导出结果：处理后图片和复核结果已保存。",
+          message_zh: "完成并导出结果：处理后图片已保存到输出文件夹，复核结果和交接说明已保存到本机状态文件夹。",
           folders: {
             derivatives: "/tmp/synthetic-output",
             metadata: "/tmp/synthetic-output/_production_workbench",
@@ -221,15 +221,15 @@ test.describe("production workbench finish/export browser smoke", () => {
           },
           completion_panel: {
             title_zh: "完成并导出结果",
-            message_zh: "本批次已完成。处理后图片在输出文件夹，复核结果已保存到本机状态文件夹。",
+            message_zh: "处理后图片已保存到输出文件夹。复核结果和交接说明已保存到本机状态文件夹。",
             total_review_items: 3,
             reviewed_items: 3,
             pending_items: 0,
             derivatives_dir: "/tmp/synthetic-output",
             metadata_dir: "/tmp/synthetic-output/_production_workbench",
             completion_note_path: "/tmp/synthetic-output/_production_workbench/本批次完成交接说明.txt",
-            checklist_zh: ["处理后图片已准备好", "复核结果已保存", "交接说明已保存", "可以准备下一批"],
-            next_steps_zh: ["到处理后输出文件夹检查图片数量和文件是否齐全。", "点击准备下一批，重新选择新的扫描原图文件夹和输出文件夹。"],
+            checklist_zh: ["处理后图片已保存到输出文件夹", "复核结果和交接说明已保存到本机状态文件夹", "可以检查输出文件夹后准备下一批"],
+            next_steps_zh: ["检查输出文件夹里的处理后图片。", "需要继续加工时，点击准备下一批。", "重新选择新的扫描原图文件夹和输出文件夹。"],
           },
           decision_summary: { completion_status: "complete" },
         }),
@@ -306,7 +306,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.getByRole("heading", { name: "确认完成本批" })).toBeVisible();
     await expect(page.locator("#finishConfirmCounts")).toHaveText("共 3 项，已确认 3 项，待决定 0 项。");
     await expect(page.locator("#finishConfirmOutput")).toHaveText("处理后输出文件夹，已准备 3 张处理后图片");
-    await expect(page.getByText("确认完成后，系统会保存复核结果和交接说明。")).toBeVisible();
+    await expect(page.getByText("复核结果和交接说明将保存到本机状态文件夹。")).toBeVisible();
     await page.getByRole("button", { name: "返回继续检查" }).click();
     await expect(page.locator("#finishConfirmPanel")).toBeHidden();
     await expect(page.locator("#operatorName")).toHaveValue("复核员甲");
@@ -320,9 +320,10 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#completionCounts")).toHaveText("共 3 项，已确认 3 项，待决定 0 项。");
     await expect(page.locator("#outputPlace")).toHaveText("/tmp/synthetic-output");
     await expect(page.locator("#decisionSavePlace")).toHaveText("/tmp/synthetic-output/_production_workbench");
-    await expect(page.locator("#completionNotePlace")).toHaveText("/tmp/synthetic-output/_production_workbench/本批次完成交接说明.txt");
-    await expect(page.locator("#completionChecklist")).toHaveText("处理后图片已准备好复核结果已保存交接说明已保存可以准备下一批");
-    await expect(page.getByText("点击准备下一批，重新选择新的扫描原图文件夹和输出文件夹。")).toBeVisible();
+    await expect(page.locator("#completionNotePlace")).toHaveText("/tmp/synthetic-output/_production_workbench");
+    await expect(page.locator("#completionChecklist")).toHaveText("处理后图片已保存到输出文件夹复核结果和交接说明已保存到本机状态文件夹可以检查输出文件夹后准备下一批");
+    await expect(page.getByText("需要继续加工时，点击准备下一批。")).toBeVisible();
+    await expect(page.getByText("重新选择新的扫描原图文件夹和输出文件夹。")).toBeVisible();
     await page.getByRole("button", { name: "准备下一批" }).click();
     await expect(page.locator("#completionTitle")).toBeHidden();
     await expect(page.locator("#stateName")).toHaveText("填写原图");
@@ -458,15 +459,15 @@ test.describe("production workbench finish/export browser smoke", () => {
         body: JSON.stringify({
           schema_version: "scan-qc.local-production-workbench.v1",
           finished: true,
-          message_zh: "完成并导出结果：处理后图片和复核结果已保存。",
+          message_zh: "完成并导出结果：处理后图片已保存到输出文件夹，复核结果和交接说明已保存到本机状态文件夹。",
           completion_panel: {
             title_zh: "完成并导出结果",
-            message_zh: "本批次已完成。处理后图片在输出文件夹，复核结果已保存到本机状态文件夹。",
+            message_zh: "处理后图片已保存到输出文件夹。复核结果和交接说明已保存到本机状态文件夹。",
             total_review_items: 0,
             reviewed_items: 0,
             pending_items: 0,
-            checklist_zh: ["处理后图片已准备好", "复核结果已保存", "交接说明已保存", "可以准备下一批"],
-            next_steps_zh: ["到处理后输出文件夹检查图片数量和文件是否齐全。"],
+            checklist_zh: ["处理后图片已保存到输出文件夹", "复核结果和交接说明已保存到本机状态文件夹", "可以检查输出文件夹后准备下一批"],
+            next_steps_zh: ["检查输出文件夹里的处理后图片。"],
           },
         }),
       });
@@ -813,22 +814,22 @@ test.describe("production workbench finish/export browser smoke", () => {
         body: JSON.stringify({
           schema_version: "scan-qc.local-production-workbench.v1",
           finished: true,
-          message_zh: "完成并导出结果：处理后图片和复核结果已保存。",
+          message_zh: "完成并导出结果：处理后图片已保存到输出文件夹，复核结果和交接说明已保存到本机状态文件夹。",
           folders: {
             derivatives: "/tmp/no-review-output",
             metadata: "/tmp/no-review-output/_production_workbench",
           },
           completion_panel: {
             title_zh: "完成并导出结果",
-            message_zh: "本批次已完成。处理后图片在输出文件夹，复核结果已保存到本机状态文件夹。",
+            message_zh: "处理后图片已保存到输出文件夹。复核结果和交接说明已保存到本机状态文件夹。",
             total_review_items: 0,
             reviewed_items: 0,
             pending_items: 0,
             derivatives_dir: "/tmp/no-review-output",
             metadata_dir: "/tmp/no-review-output/_production_workbench",
             completion_note_path: "/tmp/no-review-output/_production_workbench/本批次完成交接说明.txt",
-            checklist_zh: ["处理后图片已准备好", "复核结果已保存", "交接说明已保存", "可以准备下一批"],
-            next_steps_zh: ["到处理后输出文件夹检查图片数量和文件是否齐全。", "把处理后图片交给验收或移交流程。", "点击准备下一批，重新选择新的扫描原图文件夹和输出文件夹。"],
+            checklist_zh: ["处理后图片已保存到输出文件夹", "复核结果和交接说明已保存到本机状态文件夹", "可以检查输出文件夹后准备下一批"],
+            next_steps_zh: ["检查输出文件夹里的处理后图片。", "需要继续加工时，点击准备下一批。", "重新选择新的扫描原图文件夹和输出文件夹。"],
           },
           decision_summary: { completion_status: "complete" },
         }),
@@ -849,8 +850,9 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#completionTitle")).toHaveText("完成并导出结果");
     await expect(page.locator("#completionCounts")).toHaveText("共 0 项，已确认 0 项，待决定 0 项。");
     await expect(page.locator("#outputPlace")).toHaveText("/tmp/no-review-output");
-    await expect(page.locator("#completionNotePlace")).toHaveText("/tmp/no-review-output/_production_workbench/本批次完成交接说明.txt");
-    await expect(page.locator("#completionSteps").getByText("把处理后图片交给验收或移交流程。")).toBeVisible();
+    await expect(page.locator("#completionNotePlace")).toHaveText("/tmp/no-review-output/_production_workbench");
+    await expect(page.locator("#completionSteps").getByText("检查输出文件夹里的处理后图片。")).toBeVisible();
+    await expect(page.locator("#completionSteps").getByText("需要继续加工时，点击准备下一批。")).toBeVisible();
 
     expect(consoleProblems).toEqual([]);
   });

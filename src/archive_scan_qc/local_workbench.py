@@ -225,8 +225,8 @@ class WorkbenchController:
                     f"复核总数：{total_decisions}",
                     f"已确认：{reviewed_decisions}",
                     f"待决定：{pending_decisions}",
-                    "交接事项：把处理后图片交给验收或移交流程。",
-                    "下一批：在工作台点击准备下一批，重新选择扫描原图文件夹和处理后输出文件夹。",
+                    "交接事项：处理后图片已保存到输出文件夹；复核结果和交接说明已保存到本机状态文件夹。",
+                    "下一批：检查输出文件夹后，在工作台点击准备下一批。",
                     "",
                 ]
             ),
@@ -235,7 +235,7 @@ class WorkbenchController:
         return {
             "schema_version": SERVER_SCHEMA,
             "finished": True,
-            "message_zh": "完成并导出结果：处理后图片和复核结果已保存。",
+            "message_zh": "完成并导出结果：处理后图片已保存到输出文件夹，复核结果和交接说明已保存到本机状态文件夹。",
             "folders": {
                 "derivatives": str(derivatives_dir),
                 "metadata": str(metadata_dir),
@@ -247,7 +247,7 @@ class WorkbenchController:
             },
             "completion_panel": {
                 "title_zh": "完成并导出结果",
-                "message_zh": "本批次已完成。处理后图片在输出文件夹，复核结果已保存到本机状态文件夹。",
+                "message_zh": "处理后图片已保存到输出文件夹。复核结果和交接说明已保存到本机状态文件夹。",
                 "total_review_items": total_decisions,
                 "reviewed_items": reviewed_decisions,
                 "pending_items": pending_decisions,
@@ -257,15 +257,14 @@ class WorkbenchController:
                 "verification_summary_path": str(verification_path),
                 "completion_note_path": str(completion_note_path),
                 "checklist_zh": [
-                    "处理后图片已准备好",
-                    "复核结果已保存",
-                    "交接说明已保存",
-                    "可以准备下一批",
+                    "处理后图片已保存到输出文件夹",
+                    "复核结果和交接说明已保存到本机状态文件夹",
+                    "可以检查输出文件夹后准备下一批",
                 ],
                 "next_steps_zh": [
-                    "到处理后输出文件夹检查图片数量和文件是否齐全。",
-                    "把处理后图片交给验收或移交流程。",
-                    "点击准备下一批，重新选择新的扫描原图文件夹和输出文件夹。",
+                    "检查输出文件夹里的处理后图片。",
+                    "需要继续加工时，点击准备下一批。",
+                    "重新选择新的扫描原图文件夹和输出文件夹。",
                 ],
             },
             "decision_summary": decision_summary,
@@ -1084,9 +1083,9 @@ def _status_recovery_guidance(
                 "title_zh": "没有剩余处理任务",
                 "message_zh": "本批次没有需要人工确认的图片，处理后图片已经准备好。",
                 "next_steps_zh": [
-                    "确认处理后图片数量正常。",
-                    "把处理后图片交给验收或移交流程。",
-                    "点击准备下一批，重新选择新的扫描原图文件夹和输出文件夹。",
+                    "确认处理后图片已保存到输出文件夹。",
+                    "检查输出文件夹里的处理后图片。",
+                    "需要继续加工时，点击准备下一批。",
                 ],
             }
     state = progress.get("state") if isinstance(progress, dict) else None

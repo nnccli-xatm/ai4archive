@@ -1104,9 +1104,9 @@
             <p><strong>保存位置：</strong><span id="finishConfirmOutput">处理后输出文件夹</span></p>
             <p><strong>接下来：</strong></p>
             <ul id="finishConfirmSteps">
-              <li>确认处理后图片数量和文件是否齐全。</li>
-              <li>把处理后图片交给验收或移交流程。</li>
-              <li>完成后可以准备下一批。</li>
+              <li>确认处理后图片已保存到输出文件夹。</li>
+              <li>确认复核结果和交接说明会保存到本机状态文件夹。</li>
+              <li>确认后可以检查输出文件夹，再准备下一批。</li>
             </ul>
             <div class="decision-actions">
               <button type="button" class="primary-choice" id="confirmFinishButton">确认完成本批</button>
@@ -1115,22 +1115,21 @@
           </div>
           <div class="handoff-box hidden" id="outputPanel">
             <h3 id="completionTitle">批次已完成</h3>
-            <p id="completionMessage">处理后图片和复核结果已保存。</p>
+            <p id="completionMessage">处理后图片已保存到输出文件夹。复核结果和交接说明已保存到本机状态文件夹。</p>
             <p><strong>本批复核：</strong><span id="completionCounts">已确认 0 项，待决定 0 项。</span></p>
             <p><strong>输出位置：</strong><span id="outputPlace">已选择的处理后输出文件夹</span></p>
             <p><strong>复核保存：</strong><span id="decisionSavePlace">已保存到本机状态文件夹</span></p>
             <p><strong>交接说明：</strong><span id="completionNotePlace">已保存到本机状态文件夹</span></p>
             <p><strong>完成检查清单：</strong></p>
             <ul id="completionChecklist" aria-label="完成检查清单">
-              <li>处理后图片已准备好</li>
-              <li>复核结果已保存</li>
-              <li>交接说明已保存</li>
-              <li>可以准备下一批</li>
+              <li>处理后图片已保存到输出文件夹</li>
+              <li>复核结果和交接说明已保存到本机状态文件夹</li>
+              <li>可以检查输出文件夹后准备下一批</li>
             </ul>
             <ul id="completionSteps">
-              <li>到处理后输出文件夹检查图片数量和文件是否齐全。</li>
-              <li>把处理后图片交给验收或移交流程。</li>
-              <li>点击准备下一批，重新选择新的扫描原图文件夹和输出文件夹。</li>
+              <li>检查输出文件夹里的处理后图片。</li>
+              <li>需要继续加工时，点击准备下一批。</li>
+              <li>重新选择新的扫描原图文件夹和输出文件夹。</li>
             </ul>
             <button type="button" class="secondary" id="nextBatchButton">准备下一批</button>
           </div>
@@ -1162,17 +1161,16 @@
       decisionSaveSummary: "已保存到本机状态文件夹",
       completionNoteSummary: "已保存到本机状态文件夹",
       completionTitle: "批次已完成",
-      completionMessage: "处理后图片和复核结果已保存。",
+      completionMessage: "处理后图片已保存到输出文件夹。复核结果和交接说明已保存到本机状态文件夹。",
       completionChecklist: [
-        "处理后图片已准备好",
-        "复核结果已保存",
-        "交接说明已保存",
-        "可以准备下一批"
+        "处理后图片已保存到输出文件夹",
+        "复核结果和交接说明已保存到本机状态文件夹",
+        "可以检查输出文件夹后准备下一批"
       ],
       completionSteps: [
-        "到处理后输出文件夹检查图片数量和文件是否齐全。",
-        "把处理后图片交给验收或移交流程。",
-        "点击准备下一批，重新选择新的扫描原图文件夹和输出文件夹。"
+        "检查输出文件夹里的处理后图片。",
+        "需要继续加工时，点击准备下一批。",
+        "重新选择新的扫描原图文件夹和输出文件夹。"
       ],
       finishConfirmationVisible: false,
       lastDraftMessage: "",
@@ -1278,7 +1276,7 @@
       processing: ["正在处理", "正在处理", "本机正在处理图片，请等待；完成后再进行复核。"],
       needs_review: ["需要确认", "有图片需要人工确认", "请看中间大图，然后在右侧选择处理决定。"],
       ready_to_finish: ["待完成", "没有需要人工确认", "处理后图片已准备好，请完成并导出结果。"],
-      complete: ["已完成", "完成并导出结果", "处理后图片和复核结果已保存，请查看输出位置。"],
+      complete: ["已完成", "完成并导出结果", "处理后图片已保存到输出文件夹，请检查后准备下一批。"],
       failed: ["处理失败", "处理失败", "请检查两个文件夹是否选对、磁盘空间是否足够，然后重新开始。"]
     };
 
@@ -1308,8 +1306,8 @@
 
     const operatorStateText = {
       running: ["正在处理", "正在处理", "本机正在处理图片，请等待；完成后再进行复核。"],
-      completed: ["已完成", "完成并导出结果", "处理后图片和复核结果已保存，请查看输出位置。"],
-      finished: ["已完成", "完成并导出结果", "处理后图片和复核结果已保存，请查看输出位置。"],
+      completed: ["已完成", "完成并导出结果", "处理后图片已保存到输出文件夹，请检查后准备下一批。"],
+      finished: ["已完成", "完成并导出结果", "处理后图片已保存到输出文件夹，请检查后准备下一批。"],
       ready_to_finish: ["待完成", "没有需要人工确认", "处理后图片已准备好，请完成并导出结果。"],
       needs_review: ["需要确认", "有图片需要人工确认", "请看中间大图，然后在右侧选择处理决定。"],
       blocked: ["需处理", "需要管理员处理", "有文件未能完成处理，请联系管理员查看。"],
@@ -1699,9 +1697,9 @@
       els.finishConfirmCounts.textContent = `共 ${state.reviewItems.length} 项，已确认 ${reviewedCount()} 项，待决定 ${pendingCount()} 项。`;
       els.finishConfirmOutput.textContent = finishOutputLabel();
       els.finishConfirmSteps.innerHTML = [
-        "到处理后输出文件夹检查图片数量和文件是否齐全。",
-        "把处理后图片交给验收或移交流程。",
-        "确认完成后，系统会保存复核结果和交接说明。"
+        "处理后图片已保存到输出文件夹。",
+        "复核结果和交接说明将保存到本机状态文件夹。",
+        "确认后可以检查输出文件夹，再准备下一批。"
       ].map((step) => `<li>${escapeHtml(step)}</li>`).join("");
       els.confirmFinishButton.disabled = pendingCount() > 0;
     }
@@ -1777,9 +1775,9 @@
           title_zh: "没有剩余处理任务",
           message_zh: "本批次没有需要人工确认的图片，处理后图片已经准备好。",
           next_steps_zh: [
-            "确认处理后图片数量正常。",
-            "把处理后图片交给验收或移交流程。",
-            "点击准备下一批，重新选择新的扫描原图文件夹和输出文件夹。"
+            "确认处理后图片已保存到输出文件夹。",
+            "检查输出文件夹里的处理后图片。",
+            "需要继续加工时，点击准备下一批。"
           ],
           failed_files: failed,
           retryable_files: retryable,
@@ -2056,13 +2054,14 @@
     function applyCompletionPanel(panel) {
       if (!panel) return;
       state.completionTitle = panel.title_zh || "完成并导出结果";
-      state.completionMessage = panel.message_zh || "处理后图片和复核结果已保存。";
+      state.completionMessage = panel.message_zh || "处理后图片已保存到输出文件夹。复核结果和交接说明已保存到本机状态文件夹。";
       if (Number.isFinite(Number(panel.total_review_items)) && Number.isFinite(Number(panel.reviewed_items)) && Number.isFinite(Number(panel.pending_items))) {
         els.completionCounts.textContent = `共 ${Number(panel.total_review_items)} 项，已确认 ${Number(panel.reviewed_items)} 项，待决定 ${Number(panel.pending_items)} 项。`;
       }
       if (panel.derivatives_dir) state.outputSummary = panel.derivatives_dir;
       if (panel.metadata_dir) state.decisionSaveSummary = panel.metadata_dir;
-      if (panel.completion_note_path) state.completionNoteSummary = panel.completion_note_path;
+      if (panel.metadata_dir) state.completionNoteSummary = panel.metadata_dir;
+      if (panel.completion_note_path && !panel.metadata_dir) state.completionNoteSummary = "已保存到本机状态文件夹";
       if (Array.isArray(panel.checklist_zh) && panel.checklist_zh.length) state.completionChecklist = panel.checklist_zh;
       if (Array.isArray(panel.next_steps_zh) && panel.next_steps_zh.length) state.completionSteps = panel.next_steps_zh;
     }
@@ -2350,7 +2349,7 @@
         state.progress = 100;
         state.finishConfirmationVisible = false;
         state.operatorMessage = payload.message_zh || "完成并导出结果。";
-        els.loadStatus.textContent = payload.message_zh || "完成并导出结果：处理后图片和复核结果已保存。";
+        els.loadStatus.textContent = payload.message_zh || "完成并导出结果：处理后图片已保存到输出文件夹，复核结果和交接说明已保存到本机状态文件夹。";
         render();
       } catch (error) {
         els.loadStatus.textContent = error.message || "完成并导出结果失败。";
@@ -2429,17 +2428,16 @@
       state.decisionSaveSummary = "已保存到本机状态文件夹";
       state.completionNoteSummary = "已保存到本机状态文件夹";
       state.completionTitle = "批次已完成";
-      state.completionMessage = "处理后图片和复核结果已保存。";
+      state.completionMessage = "处理后图片已保存到输出文件夹。复核结果和交接说明已保存到本机状态文件夹。";
       state.completionChecklist = [
-        "处理后图片已准备好",
-        "复核结果已保存",
-        "交接说明已保存",
-        "可以准备下一批"
+        "处理后图片已保存到输出文件夹",
+        "复核结果和交接说明已保存到本机状态文件夹",
+        "可以检查输出文件夹后准备下一批"
       ];
       state.completionSteps = [
-        "到处理后输出文件夹检查图片数量和文件是否齐全。",
-        "把处理后图片交给验收或移交流程。",
-        "点击准备下一批，重新选择新的扫描原图文件夹和输出文件夹。"
+        "检查输出文件夹里的处理后图片。",
+        "需要继续加工时，点击准备下一批。",
+        "重新选择新的扫描原图文件夹和输出文件夹。"
       ];
       state.finishConfirmationVisible = false;
       state.lastDraftMessage = "";

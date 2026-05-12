@@ -383,7 +383,10 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             result = controller.save_review_decisions(summary)
 
             self.assertTrue(result["finished"])
-            self.assertEqual(result["message_zh"], "完成并导出结果：处理后图片和复核结果已保存。")
+            self.assertEqual(
+                result["message_zh"],
+                "完成并导出结果：处理后图片已保存到输出文件夹，复核结果和交接说明已保存到本机状态文件夹。",
+            )
             self.assertEqual(result["decision_summary"]["completion_status"], "complete")
             self.assertEqual(result["completion_panel"]["title_zh"], "完成并导出结果")
             self.assertEqual(result["completion_panel"]["total_review_items"], 2)
@@ -396,7 +399,11 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertTrue(result["completion_panel"]["completion_note_path"].endswith(COMPLETION_NOTE_TXT))
             self.assertEqual(
                 result["completion_panel"]["checklist_zh"],
-                ["处理后图片已准备好", "复核结果已保存", "交接说明已保存", "可以准备下一批"],
+                [
+                    "处理后图片已保存到输出文件夹",
+                    "复核结果和交接说明已保存到本机状态文件夹",
+                    "可以检查输出文件夹后准备下一批",
+                ],
             )
             self.assertTrue((metadata_dir / REVIEW_DECISION_SUMMARY_JSON).exists())
             saved_summary = json.loads((metadata_dir / REVIEW_DECISION_SUMMARY_JSON).read_text(encoding="utf-8"))
@@ -407,6 +414,7 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertIn("复核人员：复核员乙", completion_note)
             self.assertIn("处理后图片文件夹：", completion_note)
             self.assertIn("复核结果保存位置：", completion_note)
+            self.assertIn("复核结果和交接说明已保存到本机状态文件夹", completion_note)
             self.assertIn("下一批：", completion_note)
             verification = json.loads((metadata_dir / REVIEW_DECISION_VERIFICATION_JSON).read_text(encoding="utf-8"))
             self.assertEqual(verification["status"], "pass")
