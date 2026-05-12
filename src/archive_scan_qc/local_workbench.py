@@ -127,6 +127,27 @@ class WorkbenchController:
             self.last_preflight_guidance = None
         return self.status()
 
+    def select_folder(self, folder_kind: str) -> dict[str, Any]:
+        kind = str(folder_kind or "").strip()
+        if kind not in {"input", "derivatives"}:
+            raise ValueError("文件夹选择类型不正确。")
+        title = "选择原图文件夹" if kind == "input" else "选择输出文件夹"
+        selected_path = _choose_local_folder(title)
+        if selected_path is None:
+            return {
+                "schema_version": SERVER_SCHEMA,
+                "selected": False,
+                "kind": kind,
+                "message_zh": "没有选择文件夹。",
+            }
+        return {
+            "schema_version": SERVER_SCHEMA,
+            "selected": True,
+            "kind": kind,
+            "path": str(selected_path),
+            "message_zh": "文件夹已选择。",
+        }
+
     def start(self) -> dict[str, Any]:
         return self._start_run()
 
@@ -504,6 +525,8 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
                     _optional_path(payload, "metadata_dir", "本机状态文件夹"),
                     str(payload.get("processing_mode") or DEFAULT_PROCESSING_MODE),
                 )
+            elif self.path == "/api/select-folder":
+                result = self.workbench_controller.select_folder(str(payload.get("kind") or ""))
             elif self.path == "/api/start":
                 result = self.workbench_controller.start()
             elif self.path == "/api/retry":
@@ -614,6 +637,25 @@ def _optional_path(payload: dict[str, Any], key: str, label_zh: str) -> Path | N
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"请填写{label_zh}，或留空使用默认位置。")
     return Path(value.strip())
+
+
+def _choose_local_folder(title: str) -> Path | None:
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except Exception as exc:  # pragma: no cover - depends on host desktop packages.
+        raise ValueError("本机文件夹选择窗口不能打开，请使用维护路径手动填写。") from exc
+    try:
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        selected = filedialog.askdirectory(title=title, mustexist=False)
+        root.destroy()
+    except Exception as exc:  # pragma: no cover - depends on host window manager.
+        raise ValueError("本机文件夹选择窗口不能打开，请使用维护路径手动填写。") from exc
+    if not selected:
+        return None
+    return _safe_resolve_path(Path(selected))
 
 
 def _safe_resolve_path(path: Path) -> Path:

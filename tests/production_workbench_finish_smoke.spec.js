@@ -56,24 +56,71 @@ test.describe("production workbench finish/export browser smoke", () => {
   });
 
   test("keeps the startup folder sequence primary and maintenance secondary", async ({ page }) => {
+    const configurePayloads = [];
     await page.route("**/api/status", async (route) => {
       await route.fulfill({
         contentType: "application/json",
         body: JSON.stringify({ schema_version: "scan-qc.local-production-workbench.v1", running: false }),
       });
     });
+    await page.route("**/api/select-folder", async (route) => {
+      const payload = JSON.parse(route.request().postData() || "{}");
+      const selectedPath = payload.kind === "input" ? "/placeholder/source-batch" : "/placeholder/output-batch";
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema_version: "scan-qc.local-production-workbench.v1",
+          selected: true,
+          kind: payload.kind,
+          path: selectedPath,
+          message_zh: "文件夹已选择。",
+        }),
+      });
+    });
+    await page.route("**/api/configure", async (route) => {
+      const payload = JSON.parse(route.request().postData() || "{}");
+      configurePayloads.push(payload);
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema_version: "scan-qc.local-production-workbench.v1",
+          running: false,
+          configured: true,
+          folders: {
+            input: payload.input_dir,
+            derivatives: payload.derivatives_dir,
+            metadata: `${payload.derivatives_dir}/_production_workbench`,
+          },
+          processing_mode: { id: "standard", label_zh: "标准优化" },
+          folder_readiness: {
+            schema_version: "scan-qc.local-folder-readiness.v1",
+            aggregate_only: true,
+            status: "ready",
+            ready_to_start: true,
+            supported_image_count: 4,
+            input_empty: false,
+            output_writable: true,
+            selected_processing_mode: { id: "standard", label_zh: "标准优化" },
+            title_zh: "文件夹可以开始处理",
+            message_zh: "发现 4 张可处理图片，输出文件夹可以写入。",
+            next_steps_zh: ["确认处理方式无误。", "点击开始处理。"],
+          },
+        }),
+      });
+    });
 
     await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
     await expect(page.getByRole("heading", { name: "批次准备" })).toBeVisible();
-    await expect(page.getByLabel("开始处理顺序")).toContainText("填写原图文件夹");
-    await expect(page.getByLabel("开始处理顺序")).toContainText("填写输出文件夹");
-    await expect(page.getByLabel("开始处理顺序")).toContainText("保存文件夹");
+    await expect(page.getByLabel("开始处理顺序")).toContainText("选择原图文件夹");
+    await expect(page.getByLabel("开始处理顺序")).toContainText("选择输出文件夹");
+    await expect(page.getByLabel("开始处理顺序")).toContainText("确认准备情况");
     await expect(page.getByLabel("开始处理顺序")).toContainText("开始处理");
-    await expect(page.locator("#inputStatus")).toHaveText("填写本批次扫描原图所在的本机文件夹位置。");
-    await expect(page.locator("#outputStatus")).toHaveText("填写处理后图片保存到的本机文件夹位置。");
-    await expect(page.getByRole("button", { name: "保存文件夹" })).toBeVisible();
+    await expect(page.locator("#inputStatus")).toHaveText("请选择本批次扫描原图所在的本机文件夹。");
+    await expect(page.locator("#outputStatus")).toHaveText("请选择处理后图片保存到的本机输出文件夹。");
+    await expect(page.getByRole("button", { name: "选择原图文件夹" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "选择输出文件夹" })).toBeVisible();
     await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
-    await expect(page.locator("#loadStatus")).toHaveText("请先填写原图文件夹和输出文件夹，点击“保存文件夹”，确认可以开始后再点击“开始处理”。");
+    await expect(page.locator("#loadStatus")).toHaveText("请先选择原图文件夹和输出文件夹，确认可以开始后再点击“开始处理”。");
     await expect(page.locator(".mode-selector")).toContainText("标准优化");
     await expect(page.locator(".mode-selector")).toContainText("适合正常批量加工，自动做保守裁边、纠偏、去黑边、去明显小污点，原图不覆盖。");
     await expect(page.locator(".mode-selector")).toContainText("轻度优化");
@@ -81,7 +128,23 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator(".mode-selector")).toContainText("只质检不修图");
     await expect(page.locator(".mode-selector")).toContainText("只检查，不生成修图优化结果。");
 
-    await expect(page.locator(".maintenance-loader")).not.toHaveAttribute("open", "");
+    await expect(page.locator(".maintenance-loader").first()).not.toHaveAttribute("open", "");
+    await expect(page.locator("#inputPath")).toBeHidden();
+    await page.getByRole("button", { name: "选择原图文件夹" }).click();
+    await expect(page.locator("#inputStatus")).toHaveText("原图文件夹已选择。");
+    await expect(page.locator("#inputPath")).toHaveValue("/placeholder/source-batch");
+    await page.getByRole("button", { name: "选择输出文件夹" }).click();
+    await expect.poll(() => configurePayloads.length).toBe(1);
+    await expect(page.locator("#outputStatus")).toHaveText("已保存处理后输出文件夹。");
+    await expect(page.locator("#readinessFacts")).toContainText("原图文件夹：已选择");
+    await expect(page.locator("#readinessFacts")).toContainText("输出文件夹：已选择");
+    await expect(page.locator("#readinessFacts")).toContainText("输出文件夹可写：是");
+    expect(configurePayloads[0]).toMatchObject({
+      input_dir: "/placeholder/source-batch",
+      derivatives_dir: "/placeholder/output-batch",
+      processing_mode: "standard",
+    });
+
     await expect(page.getByText("选择维护示例")).toBeHidden();
     await page.getByText("维护入口").click();
     await expect(page.getByText("管理员排查、演练或查看本机状态时使用；这不是正常加工步骤。")).toBeVisible();
@@ -338,7 +401,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.getByText("重新选择新的扫描原图文件夹和输出文件夹。")).toBeVisible();
     await page.getByRole("button", { name: "准备下一批" }).click();
     await expect(page.locator("#completionTitle")).toBeHidden();
-    await expect(page.locator("#stateName")).toHaveText("填写原图");
+    await expect(page.locator("#stateName")).toHaveText("选择原图");
     await expect(page.locator("#inputPath")).toHaveValue("");
     await expect(page.locator("#outputPath")).toHaveValue("");
     await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
@@ -701,13 +764,14 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#modeStatus")).toHaveText("当前处理方式：标准优化");
     await page.getByLabel("只质检不修图").check();
     await expect(page.locator("#modeStatus")).toHaveText("当前处理方式：只质检不修图");
+    await page.getByText("维护备用：手动填写文件夹位置").click();
     await page.locator("#inputPath").fill("/tmp/mode-input");
     await page.locator("#outputPath").fill("/tmp/mode-output");
     await page.getByRole("button", { name: "开始处理" }).click();
     await expect.poll(() => configurePayloads.length).toBeGreaterThan(0);
     await expect(page.locator("#readinessTitle")).toHaveText("文件夹可以开始处理");
     await expect(page.locator("#readinessFacts")).toContainText("可处理图片：2 张");
-    await expect(page.locator("#readinessFacts")).toContainText("输出文件夹：可以写入");
+    await expect(page.locator("#readinessFacts")).toContainText("输出文件夹可写：是");
     await expect(page.locator("#readinessFacts")).toContainText("处理方式：只质检不修图");
     expect(configurePayloads[0]).toMatchObject({
       input_dir: "/tmp/mode-input",
@@ -765,12 +829,13 @@ test.describe("production workbench finish/export browser smoke", () => {
     });
 
     await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
+    await page.getByText("维护备用：手动填写文件夹位置").click();
     await page.locator("#inputPath").fill("/tmp/unsupported-input");
     await page.locator("#outputPath").fill("/tmp/unsupported-output");
     await page.getByRole("button", { name: "保存文件夹" }).click();
     await expect(page.locator("#readinessTitle")).toHaveText("没有可处理的图片");
     await expect(page.locator("#readinessFacts")).toContainText("可处理图片：0 张");
-    await expect(page.locator("#readinessFacts")).toContainText("输出文件夹：可以写入");
+    await expect(page.locator("#readinessFacts")).toContainText("输出文件夹可写：是");
     await expect(page.getByText("确认原图是常见图片格式。")).toBeVisible();
     await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
 

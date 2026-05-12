@@ -901,7 +901,7 @@
       <div class="head-inner">
         <div class="head-copy">
           <h1>本地生产工作台</h1>
-          <p>面向扫描加工人员：填写原图文件夹和输出文件夹，开始处理后等待复核。</p>
+          <p>面向扫描加工人员：选择原图文件夹和输出文件夹，开始处理后等待复核。</p>
         </div>
         <div class="status-chip" aria-live="polite">
           <span>当前状态</span>
@@ -915,33 +915,46 @@
       <aside class="rail" aria-label="生产准备">
         <div class="rail-title">
           <h2>批次准备</h2>
-          <p>按下面顺序操作：填原图、填输出、保存文件夹、开始处理。</p>
+          <p>按下面顺序操作：选原图、选输出、确认准备情况、开始处理。</p>
         </div>
 
         <ol class="setup-steps" aria-label="开始处理顺序">
-          <li><span class="step-number">1</span><span>填写原图文件夹</span></li>
-          <li><span class="step-number">2</span><span>填写输出文件夹</span></li>
-          <li><span class="step-number">3</span><span>保存文件夹</span></li>
+          <li><span class="step-number">1</span><span>选择原图文件夹</span></li>
+          <li><span class="step-number">2</span><span>选择输出文件夹</span></li>
+          <li><span class="step-number">3</span><span>确认准备情况</span></li>
           <li><span class="step-number">4</span><span>开始处理</span></li>
         </ol>
 
         <div class="folder-stack">
           <div class="folder-row">
             <strong>原图文件夹</strong>
-            <small id="inputStatus">填写本批次扫描原图所在的本机文件夹位置。</small>
-            <label class="folder-trigger secondary" for="inputFolder">从浏览器辅助确认原图文件夹</label>
+            <small id="inputStatus">请选择本批次扫描原图所在的本机文件夹。</small>
+            <button id="selectInputFolderButton" type="button">选择原图文件夹</button>
+            <label class="folder-trigger secondary" for="inputFolder">浏览器备用确认原图文件夹</label>
             <input class="visually-hidden" id="inputFolder" type="file" webkitdirectory directory multiple>
-            <input class="path-input" id="inputPath" type="text" autocomplete="off" placeholder="填写原图文件夹位置">
           </div>
 
           <div class="folder-row">
             <strong>输出文件夹</strong>
-            <small id="outputStatus">填写处理后图片保存到的本机文件夹位置。</small>
-            <label class="folder-trigger secondary" for="outputFolder">从浏览器辅助确认输出文件夹</label>
+            <small id="outputStatus">请选择处理后图片保存到的本机输出文件夹。</small>
+            <button id="selectOutputFolderButton" type="button">选择输出文件夹</button>
+            <label class="folder-trigger secondary" for="outputFolder">浏览器备用确认输出文件夹</label>
             <input class="visually-hidden" id="outputFolder" type="file" webkitdirectory directory multiple>
-            <input class="path-input" id="outputPath" type="text" autocomplete="off" placeholder="填写输出文件夹位置">
           </div>
         </div>
+
+        <details class="maintenance-loader">
+          <summary>维护备用：手动填写文件夹位置</summary>
+          <label>
+            <span>原图文件夹位置</span>
+            <input class="path-input" id="inputPath" type="text" autocomplete="off" placeholder="维护人员手动填写原图文件夹位置">
+          </label>
+          <label>
+            <span>输出文件夹位置</span>
+            <input class="path-input" id="outputPath" type="text" autocomplete="off" placeholder="维护人员手动填写输出文件夹位置">
+          </label>
+          <small>本入口用于文件夹选择窗口不可用时的维护备用。</small>
+        </details>
 
         <div class="mode-selector">
           <fieldset>
@@ -977,7 +990,7 @@
           <button id="resetButton" class="secondary">重新开始</button>
         </div>
 
-        <p class="workbench-message" id="loadStatus">请先填写原图文件夹和输出文件夹，点击“保存文件夹”，确认可以开始后再点击“开始处理”。</p>
+        <p class="workbench-message" id="loadStatus">请先选择原图文件夹和输出文件夹，确认可以开始后再点击“开始处理”。</p>
         <div class="readiness-box hidden" id="readinessBox">
           <h3 id="readinessTitle">文件夹准备情况</h3>
           <p id="readinessMessage">请先保存扫描原图文件夹和处理后输出文件夹。文件夹可以开始处理时，会显示可处理图片、输出文件夹可以写入和确认处理方式无误。</p>
@@ -986,7 +999,7 @@
         </div>
         <div class="recovery-box hidden" id="recoveryBox">
           <h3 id="recoveryTitle">文件夹还没有准备好</h3>
-          <p id="recoveryMessage">请先填写扫描原图文件夹和处理后输出文件夹。</p>
+          <p id="recoveryMessage">请先选择扫描原图文件夹和处理后输出文件夹。</p>
           <div class="recovery-counts" id="recoveryCounts"></div>
           <ul id="recoverySteps"></ul>
           <button type="button" class="recovery-action hidden" id="retryButton">重试本批次</button>
@@ -1008,13 +1021,13 @@
           <small>只用于查看本机已经生成的处理状态，不会开始处理。</small>
         </details>
 
-        <p class="guard-note">原图不会被覆盖。浏览器辅助确认只会提示看到的项目数，操作员仍要确认输入框里的本机文件夹位置填写正确。单文件打开时不读取目录内容，不执行处理，不显示本机私有路径；从本机入口启动时由本机服务生成处理后图片。已预先填写演练文件夹时，打开后可直接查看批次状态。</p>
+        <p class="guard-note">原图不会被覆盖。单文件打开时不读取目录内容，不执行处理，不显示本机私有路径；从本机入口启动时由本机服务生成处理后图片。文件夹选择窗口不可用时，维护人员可以展开备用入口手动填写。已预先填写演练文件夹时，打开后可直接查看批次状态。</p>
       </aside>
 
       <section class="image-desk" aria-label="大图生产区">
         <div class="desk-toolbar">
           <div>
-            <h2 id="stateAction">请填写原图文件夹</h2>
+            <h2 id="stateAction">请选择原图文件夹</h2>
             <p id="stateHint">先选择本批次原图所在文件夹。</p>
           </div>
           <div class="progress-track">
@@ -1212,6 +1225,8 @@
       outputFolder: document.getElementById("outputFolder"),
       inputPath: document.getElementById("inputPath"),
       outputPath: document.getElementById("outputPath"),
+      selectInputFolderButton: document.getElementById("selectInputFolderButton"),
+      selectOutputFolderButton: document.getElementById("selectOutputFolderButton"),
       processingModeInputs: Array.from(document.querySelectorAll('input[name="processingMode"]')),
       modeStatus: document.getElementById("modeStatus"),
       summaryFile: document.getElementById("summaryFile"),
@@ -1286,8 +1301,8 @@
     };
 
     const copy = {
-      choose_input: ["填写原图", "请填写原图文件夹", "填写本批次原图所在的本机文件夹。"],
-      choose_output: ["填写输出", "请填写输出文件夹", "处理后图片会写入这里，原图不会被覆盖。"],
+      choose_input: ["选择原图", "请选择原图文件夹", "选择本批次原图所在的本机文件夹。"],
+      choose_output: ["选择输出", "请选择输出文件夹", "处理后图片会写入这里，原图不会被覆盖。"],
       ready: ["准备完成", "可以开始处理", "文件夹已准备好，点击开始处理。"],
       checking: ["检查文件夹", "正在检查文件夹", "正在确认原图和输出文件夹是否可用。"],
       processing: ["正在处理", "正在处理", "本机正在处理图片，请等待；完成后再进行复核。"],
@@ -1300,11 +1315,11 @@
     const setupRecoveryGuidance = {
       kind: "folder_setup_missing",
       title_zh: "文件夹还没有准备好",
-      message_zh: "请先填写扫描原图文件夹和处理后输出文件夹。",
+      message_zh: "请先选择扫描原图文件夹和处理后输出文件夹。",
       next_steps_zh: [
         "确认扫描原图文件夹存在，里面是本批次原图。",
         "确认处理后输出文件夹可以写入，磁盘空间足够。",
-        "保存文件夹后再开始处理。"
+        "确认准备情况后再开始处理。"
       ],
       failed_files: 0,
       retryable_files: 0,
@@ -1485,6 +1500,10 @@
     function folderLabel(input, fallback) {
       if (!input.files || input.files.length === 0) return fallback;
       return `浏览器看到 ${input.files.length} 个项目；请确认输入框里的本机文件夹位置填写正确。`;
+    }
+
+    function selectedFolderLabel(path, label) {
+      return path ? `${label}已选择。` : `请选择${label}。`;
     }
 
     function pathChosen(input) {
@@ -1852,9 +1871,10 @@
       els.readinessMessage.textContent = readiness.message_zh || "请按提示检查文件夹。";
       const mode = readiness.selected_processing_mode || {};
       const facts = [
+        ["原图文件夹", "已选择"],
+        ["输出文件夹", "已选择"],
         ["可处理图片", `${toNumber(readiness.supported_image_count)} 张`],
-        ["原图文件夹", readiness.input_empty ? "没有发现图片" : "已发现图片"],
-        ["输出文件夹", readiness.output_writable ? "可以写入" : "不能写入"],
+        ["输出文件夹可写", readiness.output_writable ? "是" : "否"],
         ["处理方式", mode.label_zh || state.processingModeLabel]
       ];
       els.readinessFacts.innerHTML = facts.map((item) => `<span>${item[0]}：${escapeHtml(item[1])}</span>`).join("");
@@ -2123,7 +2143,7 @@
         return;
       }
       if (!pathChosen(els.inputPath) || !pathChosen(els.outputPath)) {
-        els.loadStatus.textContent = "浏览器辅助确认只用于提示；请填写原图文件夹和输出文件夹。";
+        els.loadStatus.textContent = "请先选择原图文件夹和输出文件夹；维护人员也可以手动填写位置。";
         state.inputChosen = pathChosen(els.inputPath);
         state.outputChosen = pathChosen(els.outputPath);
         render();
@@ -2162,6 +2182,46 @@
       applyServerStatus(payload);
       els.loadStatus.textContent = "文件夹已保存，可以开始处理。";
       render();
+    }
+
+    async function selectLocalFolder(kind) {
+      if (!localApi.enabled) {
+        els.loadStatus.textContent = "请从本机入口启动后使用文件夹选择；维护人员可手动填写位置。";
+        render();
+        return;
+      }
+      const button = kind === "input" ? els.selectInputFolderButton : els.selectOutputFolderButton;
+      button.disabled = true;
+      els.loadStatus.textContent = kind === "input" ? "正在打开原图文件夹选择窗口。" : "正在打开输出文件夹选择窗口。";
+      try {
+        const payload = await apiPost("/api/select-folder", { kind });
+        if (!payload.selected) {
+          els.loadStatus.textContent = "没有选择文件夹，请重新选择。";
+          return;
+        }
+        if (kind === "input") {
+          els.inputPath.value = payload.path || "";
+          state.inputChosen = pathChosen(els.inputPath);
+          els.inputStatus.textContent = selectedFolderLabel(els.inputPath.value, "原图文件夹");
+          if (state.inputChosen && !state.outputChosen) state.status = "choose_output";
+        } else {
+          els.outputPath.value = payload.path || "";
+          state.outputChosen = pathChosen(els.outputPath);
+          els.outputStatus.textContent = selectedFolderLabel(els.outputPath.value, "输出文件夹");
+          if (state.inputChosen && state.outputChosen) setStatus("ready");
+        }
+        if (state.inputChosen && state.outputChosen) {
+          await saveFolders();
+        } else {
+          els.loadStatus.textContent = kind === "input" ? "原图文件夹已选择，请继续选择输出文件夹。" : "输出文件夹已选择，请继续选择原图文件夹。";
+          render();
+        }
+      } catch (error) {
+        els.loadStatus.textContent = `${error.message || "文件夹选择没有完成。"} 可使用维护备用手动填写。`;
+        render();
+      } finally {
+        button.disabled = false;
+      }
     }
 
     async function pollServerStatus() {
@@ -2411,14 +2471,14 @@
 
     els.inputFolder.addEventListener("change", () => {
       state.inputChosen = els.inputFolder.files.length > 0;
-      els.inputStatus.textContent = folderLabel(els.inputFolder, "填写本批次扫描原图所在的本机文件夹位置。");
+      els.inputStatus.textContent = folderLabel(els.inputFolder, "请选择本批次扫描原图所在的本机文件夹。");
       if (state.inputChosen && !state.outputChosen) state.status = "choose_output";
       render();
     });
 
     els.outputFolder.addEventListener("change", () => {
       state.outputChosen = els.outputFolder.files.length > 0;
-      els.outputStatus.textContent = folderLabel(els.outputFolder, "填写处理后图片保存到的本机文件夹位置。");
+      els.outputStatus.textContent = folderLabel(els.outputFolder, "请选择处理后图片保存到的本机输出文件夹。");
       if (state.inputChosen && state.outputChosen) setStatus("ready");
       render();
     });
@@ -2441,6 +2501,8 @@
     });
 
     let timer = null;
+    els.selectInputFolderButton.addEventListener("click", () => selectLocalFolder("input"));
+    els.selectOutputFolderButton.addEventListener("click", () => selectLocalFolder("derivatives"));
     els.saveFoldersButton.addEventListener("click", saveFolders);
     els.startButton.addEventListener("click", startLocalRun);
     els.retryButton.addEventListener("click", retryLocalRun);
@@ -2494,9 +2556,9 @@
       els.outputPath.value = "";
       els.summaryFile.value = "";
       els.fixtureSelect.value = "";
-      els.inputStatus.textContent = "填写本批次扫描原图所在的本机文件夹位置。";
-      els.outputStatus.textContent = "填写处理后图片保存到的本机文件夹位置。";
-      els.loadStatus.textContent = "请先填写原图文件夹和输出文件夹，点击“保存文件夹”，确认可以开始后再点击“开始处理”。";
+      els.inputStatus.textContent = "请选择本批次扫描原图所在的本机文件夹。";
+      els.outputStatus.textContent = "请选择处理后图片保存到的本机输出文件夹。";
+      els.loadStatus.textContent = "请先选择原图文件夹和输出文件夹，确认可以开始后再点击“开始处理”。";
       window.clearTimeout(timer);
       window.clearInterval(localApi.polling);
       window.clearTimeout(localApi.saveTimer);

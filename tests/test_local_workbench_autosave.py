@@ -152,6 +152,30 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertNotIn("nested", json.dumps(readiness, ensure_ascii=False))
             self.assertNotIn("a.png", json.dumps(readiness, ensure_ascii=False))
 
+    def test_selected_folders_can_configure_and_precheck_without_private_file_listing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "selected-input"
+            output_dir = root / "selected-output"
+            metadata_dir = root / "selected-metadata"
+            input_dir.mkdir()
+            (input_dir / "synthetic-page-001.png").write_bytes(b"image")
+            controller = WorkbenchController()
+
+            with patch("archive_scan_qc.local_workbench._choose_local_folder", side_effect=[input_dir, output_dir]):
+                input_selection = controller.select_folder("input")
+                output_selection = controller.select_folder("derivatives")
+
+            self.assertEqual(input_selection["path"], str(input_dir))
+            self.assertEqual(output_selection["path"], str(output_dir))
+            status = controller.configure(Path(input_selection["path"]), Path(output_selection["path"]), metadata_dir)
+
+            readiness_text = json.dumps(status["folder_readiness"], ensure_ascii=False)
+            self.assertEqual(status["folder_readiness"]["status"], "ready")
+            self.assertEqual(status["folder_readiness"]["supported_image_count"], 1)
+            self.assertTrue(status["folder_readiness"]["output_writable"])
+            self.assertNotIn("synthetic-page-001.png", readiness_text)
+
     def test_configure_readiness_guides_empty_folder(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
