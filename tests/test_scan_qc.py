@@ -6581,6 +6581,124 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn(str(input_dir), json.dumps(guidance, ensure_ascii=False))
             self.assertNotIn(".jpg", json.dumps(guidance, ensure_ascii=False))
 
+    def test_local_production_workbench_status_sanitizes_private_error_text_from_summary(self) -> None:
+        private_values = [
+            "/Users/private/archive/secret-root",
+            "Confidential_Case_0007.tif",
+            "a" * 64,
+            "PRIVATE_OCR: 张三身份证 110101199001010011",
+            'Traceback File "worker.py", line 42, in run RuntimeError',
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            metadata_dir = derivatives_dir / DEFAULT_METADATA_DIRNAME
+            input_dir.mkdir()
+            metadata_dir.mkdir(parents=True)
+            Image.new("RGB", (48, 36), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+            raw_private_message = " ".join(private_values)
+            (metadata_dir / "production_run_summary.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "scan-qc.production-run.v1",
+                        "status": "blocked",
+                        "operator_summary": {
+                            "message": raw_private_message,
+                            "message_zh": raw_private_message,
+                            "total_source_images": 1,
+                            "openable_source_images": 1,
+                            "derivative_images_ready": 0,
+                            "files_needing_attention": 1,
+                        },
+                        "recovery_guidance": {
+                            "schema_version": "scan-qc.local-recovery-guidance.v1",
+                            "aggregate_only": True,
+                            "kind": "processing_failed_admin",
+                            "title_zh": f"RuntimeError {private_values[1]}",
+                            "message_zh": raw_private_message,
+                            "next_steps_zh": [raw_private_message],
+                            "failed_files": 1,
+                            "retryable_files": 0,
+                            "derivative_images_ready": 0,
+                            "total_files": 1,
+                        },
+                        "counts": {
+                            "total_files": 1,
+                            "openable_files": 1,
+                            "processed_files": 0,
+                            "resumed_files": 0,
+                            "failed_files": 1,
+                            "retry_list_files": 0,
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            controller = WorkbenchController()
+            controller.configure(input_dir, derivatives_dir)
+            status = controller.status()
+            public_text = json.dumps(
+                {
+                    "last_error_zh": status["last_error_zh"],
+                    "operator_summary": status["summary"]["operator_summary"],
+                    "recovery_guidance": status["recovery_guidance"],
+                },
+                ensure_ascii=False,
+            )
+
+            for private_value in private_values:
+                self.assertNotIn(private_value, public_text)
+            self.assertIn("其他异常：本批次没有正常启动，请交管理员处理。", public_text)
+            self.assertEqual(status["recovery_guidance"]["title_zh"], "处理没有正常完成")
+
+    def test_local_production_workbench_runtime_error_keeps_admin_context_out_of_operator_status(self) -> None:
+        private_values = [
+            "/Users/private/archive/secret-root",
+            "Confidential_Case_0007.tif",
+            "b" * 64,
+            "PRIVATE_OCR: 档案正文片段",
+            "Traceback RuntimeError numpy stack",
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            metadata_dir = derivatives_dir / DEFAULT_METADATA_DIRNAME
+            input_dir.mkdir()
+            Image.new("RGB", (48, 36), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+
+            controller = WorkbenchController()
+            controller.configure(input_dir, derivatives_dir)
+            with mock.patch("archive_scan_qc.local_workbench.run_production_folder") as run_mock:
+                run_mock.side_effect = RuntimeError(" ".join(private_values))
+                controller.start()
+                deadline = time.time() + 10
+                status = controller.status()
+                while status["running"] and time.time() < deadline:
+                    time.sleep(0.05)
+                    status = controller.status()
+
+            public_text = json.dumps(
+                {
+                    "last_error_zh": status["last_error_zh"],
+                    "recovery_guidance": status["recovery_guidance"],
+                },
+                ensure_ascii=False,
+            )
+            for private_value in private_values:
+                self.assertNotIn(private_value, public_text)
+            self.assertEqual(status["last_error_zh"], "其他异常：本批次没有正常启动，请交管理员处理。")
+            maintenance_log = metadata_dir / "local_workbench_maintenance_errors.jsonl"
+            self.assertTrue(maintenance_log.exists())
+            maintenance_text = maintenance_log.read_text(encoding="utf-8")
+            self.assertIn("RuntimeError", maintenance_text)
+            self.assertIn("startup_or_processing_failed", maintenance_text)
+            for private_value in private_values:
+                self.assertNotIn(private_value, maintenance_text)
+
     def test_local_production_workbench_retry_reuses_saved_folder_configuration(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

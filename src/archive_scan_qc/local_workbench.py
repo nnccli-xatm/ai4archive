@@ -302,7 +302,8 @@ class WorkbenchController:
             processing_mode = self.processing_mode
             last_error = self.last_error
             last_preflight_guidance = self.last_preflight_guidance
-        summary = _read_json(Path(metadata_dir) / PRODUCTION_RUN_SUMMARY_JSON) if metadata_dir else None
+        raw_summary = _read_json(Path(metadata_dir) / PRODUCTION_RUN_SUMMARY_JSON) if metadata_dir else None
+        summary = _sanitize_operator_status_summary(raw_summary)
         progress = _read_json(Path(metadata_dir) / PRODUCTION_RUN_PROGRESS_JSON) if metadata_dir else None
         queue = self._queue_with_preview_sources(Path(metadata_dir)) if metadata_dir else None
         draft_decisions = _read_json(Path(metadata_dir) / REVIEW_DECISION_DRAFT_JSON) if metadata_dir else None
@@ -673,6 +674,50 @@ def sanitize_operator_error_zh(error: BaseException | str | None) -> str:
     if any(token in lowered for token in ["cannot identify image", "unidentifiedimageerror", "truncated", "image", "图片"]):
         return "图片无法打开：请检查原图图片是否损坏。"
     return "其他异常：本批次没有正常启动，请交管理员处理。"
+
+
+def _sanitize_operator_status_summary(summary: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(summary, dict):
+        return summary
+    sanitized = dict(summary)
+    operator = sanitized.get("operator_summary")
+    if isinstance(operator, dict):
+        sanitized_operator = dict(operator)
+        for key in ("message", "message_zh", "operator_message_zh", "last_error_zh"):
+            if isinstance(sanitized_operator.get(key), str):
+                sanitized_operator[key] = _sanitize_operator_visible_text_zh(sanitized_operator[key])
+        sanitized["operator_summary"] = sanitized_operator
+    guidance = sanitized.get("recovery_guidance")
+    if isinstance(guidance, dict):
+        sanitized["recovery_guidance"] = _sanitize_operator_guidance(guidance)
+    return sanitized
+
+
+def _sanitize_operator_guidance(guidance: dict[str, Any]) -> dict[str, Any]:
+    sanitized = dict(guidance)
+    if isinstance(sanitized.get("message_zh"), str):
+        sanitized["message_zh"] = _sanitize_operator_visible_text_zh(sanitized["message_zh"])
+    if isinstance(sanitized.get("title_zh"), str) and not _is_known_operator_guidance_text_zh(sanitized["title_zh"]):
+        sanitized["title_zh"] = "处理没有正常完成"
+    next_steps = sanitized.get("next_steps_zh")
+    if isinstance(next_steps, list):
+        sanitized["next_steps_zh"] = [
+            _sanitize_operator_visible_text_zh(step) if isinstance(step, str) else "其他异常：本批次没有正常启动，请交管理员处理。"
+            for step in next_steps
+        ]
+    return sanitized
+
+
+def _sanitize_operator_visible_text_zh(text: str) -> str:
+    return text if _is_known_operator_guidance_text_zh(text) else sanitize_operator_error_zh(text)
+
+
+def _is_known_operator_guidance_text_zh(text: str) -> bool:
+    if not text.strip():
+        return False
+    if any(pattern.search(text) for pattern in _PRIVATE_OR_TECHNICAL_ERROR_PATTERNS):
+        return False
+    return bool(re.search(r"[\u4e00-\u9fff]", text))
 
 
 def _is_known_operator_safe_message_zh(text: str) -> bool:
