@@ -204,7 +204,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.getByText("点击准备下一批，重新选择新的扫描原图文件夹和输出文件夹。")).toBeVisible();
     await page.getByRole("button", { name: "准备下一批" }).click();
     await expect(page.locator("#completionTitle")).toBeHidden();
-    await expect(page.locator("#stateName")).toHaveText("选择原图");
+    await expect(page.locator("#stateName")).toHaveText("填写原图");
     await expect(page.locator("#inputPath")).toHaveValue("");
     await expect(page.locator("#outputPath")).toHaveValue("");
     await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();

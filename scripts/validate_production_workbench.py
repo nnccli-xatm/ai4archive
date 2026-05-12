@@ -29,8 +29,12 @@ FIXTURE_STATES = {
 REQUIRED_TEXT = {
     "本地生产工作台",
     "管理维护工作台",
-    "选择扫描原图文件夹",
-    "选择处理后输出文件夹",
+    "原图文件夹",
+    "输出文件夹",
+    "请填写原图文件夹",
+    "请填写输出文件夹",
+    "开始处理",
+    "正在处理，请等待",
     "可以开始处理",
     "正在处理",
     "有图片需要人工确认",
@@ -72,7 +76,7 @@ REQUIRED_TEXT = {
     "维护入口",
     "选择维护示例",
     "选择本机状态",
-    "请先填写两个本机文件夹位置",
+    "请先填写原图文件夹和输出文件夹",
     "需留意文件",
     "原图总数",
     "需要管理员处理",
@@ -241,6 +245,7 @@ def main() -> int:
         'class="workbench-message" id="loadStatus"',
         '<details class="maintenance-loader">',
         "只有管理员排查或演练时使用，正常加工不需要打开。",
+        "辅助带入只能提示浏览器看到的项目数",
     ]:
         if simplified_flow_token not in html:
             errors.append(f"missing simplified operator-flow token: {simplified_flow_token}")
@@ -442,7 +447,7 @@ def main() -> int:
         "已自动保存",
         "已恢复上次进度",
         "复核保存",
-        "浏览器选择只用于提示",
+        "辅助带入只用于提示",
         "静态打开不会启动处理",
         "recovery_guidance",
         "renderRecoveryGuidance",
