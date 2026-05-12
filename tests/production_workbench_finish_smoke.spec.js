@@ -39,7 +39,7 @@ function waitForServer(url) {
 
 async function expectOperatorStatusHidesPaths(page, forbiddenPaths) {
   const operatorStatusText = await page
-    .locator("#outputPanel, #loadStatus, #inputStatus, #outputStatus, #stateName, #stateAction, #stateHint, #currentAdvice")
+    .locator("#outputPanel, #loadStatus, #inputStatus, #outputStatus, #stateName, #stateAction, #stateHint, #currentAdvice, #currentDecisionStatus")
     .allTextContents();
   const combined = operatorStatusText.join("\n");
   for (const value of ["/tmp", "/private", "/Users", ...forbiddenPaths]) {
@@ -255,6 +255,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#reviewPositionText")).toHaveText("当前第 1 张 / 共 3 张 / 待确认 3 张。");
     await expect(page.locator("#currentFocusHints")).toHaveText("看图片能否正常打开；重点判断是否需要重扫");
     await expect(page.locator("#currentRecommendation")).toHaveText("建议：退回重扫");
+    await expect(page.locator("#currentDecisionStatus")).toHaveText("当前决定：未决定");
     await expect(page.getByRole("button", { name: "退回重扫" })).toHaveClass(/recommended-choice/);
     await expect(page.getByRole("button", { name: "确认通过" })).toBeEnabled();
     await expect(page.getByRole("button", { name: "重新处理图片" })).toBeEnabled();
@@ -296,6 +297,10 @@ test.describe("production workbench finish/export browser smoke", () => {
 
     await page.locator("#decisionNote").fill("边缘不清楚，需要补扫。");
     await expect(page.getByText("选择一个处理决定后，会记录当前图片，并自动显示下一张待确认图片。")).toBeVisible();
+    await expect(page.getByRole("button", { name: "完成并导出结果" })).toBeEnabled();
+    await page.getByRole("button", { name: "完成并导出结果" }).click();
+    await expect(page.locator("#finishConfirmPanel")).toBeHidden();
+    await expect(page.locator("#loadStatus")).toHaveText("还有 3 张图片没有决定，暂不能完成。请先逐张选择确认通过、退回重扫、重新处理图片或确认保留原貌。");
     await page.getByRole("button", { name: "退回重扫" }).click();
     await expect(page.getByText("已记录：退回重扫。已自动显示下一张待确认图片。已决定 1 项，待决定 2 项。")).toBeVisible();
     await expect(page.locator("#currentRecommendation")).toHaveText("建议：重新处理图片");
@@ -306,10 +311,13 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#zoomState")).toHaveText("查看：适合窗口");
     await page.getByRole("button", { name: "上一张已确认" }).click();
     await expect(page.locator("#reviewPositionText")).toHaveText("当前第 1 张 / 共 3 张 / 待确认 2 张。");
-    await expect(page.locator("#currentAdvice")).toContainText("当前决定：退回重扫。");
-    await page.getByRole("button", { name: "清除当前决定" }).click();
+    await expect(page.locator("#currentDecisionStatus")).toHaveText("当前决定：退回重扫");
+    await expect(page.locator("#currentAdvice")).toHaveText("如果刚才点错了，可以撤销当前决定后重新选择。");
+    await page.getByRole("button", { name: "撤销当前决定" }).click();
     await expect(page.locator("#decisionSummary")).toHaveText("已决定 0 项，待决定 3 项。");
-    await expect(page.getByRole("button", { name: "完成并导出结果" })).toBeDisabled();
+    await expect(page.locator("#currentDecisionStatus")).toHaveText("当前决定：未决定");
+    await expect(page.locator("#loadStatus")).toHaveText("已自动保存");
+    await expect(page.getByRole("button", { name: "完成并导出结果" })).toBeEnabled();
     await page.locator("#decisionNote").fill("本张可以通过。");
     await page.getByRole("button", { name: "确认通过" }).click();
     await expect(page.locator("#reviewPositionText")).toHaveText("当前第 2 张 / 共 3 张 / 待确认 2 张。");

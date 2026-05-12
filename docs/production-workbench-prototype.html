@@ -812,6 +812,16 @@
       font-weight: 760;
     }
 
+    .current-decision {
+      border: 1px solid #d8c592;
+      background: #fff7df;
+      color: #5a3900;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 16px;
+      font-weight: 760;
+    }
+
     .decision-summary {
       border: 1px solid var(--line);
       background: var(--paper);
@@ -1122,6 +1132,7 @@
             <div class="reason-block">
               <h3>系统建议</h3>
               <p class="recommended-action" id="currentRecommendation">建议：等待处理</p>
+              <p class="current-decision" id="currentDecisionStatus">当前决定：未决定</p>
               <p id="currentAdvice">可以开始处理后再确认。</p>
             </div>
             <p class="muted" id="reviewPositionText">当前第 0 张 / 共 0 张 / 待确认 0 张。</p>
@@ -1132,7 +1143,7 @@
           <div class="review-navigation" aria-label="复核导航">
             <button type="button" class="secondary" id="previousReviewedButton" disabled>上一张已确认</button>
             <button type="button" class="secondary" id="nextPendingButton" disabled>下一张待确认</button>
-            <button type="button" class="secondary" id="clearDecisionButton" disabled>清除当前决定</button>
+            <button type="button" class="secondary" id="clearDecisionButton" disabled>撤销当前决定</button>
           </div>
           <div class="operator-context">
             <label for="operatorName">复核人员
@@ -1317,6 +1328,7 @@
       currentIssue: document.getElementById("currentIssue"),
       currentFocusHints: document.getElementById("currentFocusHints"),
       currentRecommendation: document.getElementById("currentRecommendation"),
+      currentDecisionStatus: document.getElementById("currentDecisionStatus"),
       currentAdvice: document.getElementById("currentAdvice"),
       reviewPositionText: document.getElementById("reviewPositionText"),
       previewSourceText: document.getElementById("previewSourceText"),
@@ -1512,8 +1524,14 @@
     }
 
     function currentDecisionLabel(item) {
-      if (!item || !item.decision) return "当前决定：未决定。";
-      return `当前决定：${decisionLabels[item.decision] || "已确认"}。`;
+      if (!item || !item.decision) return "当前决定：未决定";
+      return `当前决定：${decisionLabels[item.decision] || "已确认"}`;
+    }
+
+    function currentAdviceText(item) {
+      if (!item) return "可以开始处理后再确认。";
+      if (item.decision) return "如果刚才点错了，可以撤销当前决定后重新选择。";
+      return item.advice;
     }
 
     function recommendationLabel(item) {
@@ -1724,7 +1742,8 @@
       els.currentIssue.textContent = reviewMode && item ? item.issue : (state.operatorMessage || (pending ? "处理开始后在这里显示问题原因。" : "已经没有待确认图片。"));
       els.currentFocusHints.textContent = reviewMode && item ? item.focusHints : (pending ? "处理开始后在这里显示查看重点。" : "已经没有待确认图片。");
       els.currentRecommendation.textContent = reviewMode && item ? recommendationLabel(item) : "建议：等待处理";
-      els.currentAdvice.textContent = reviewMode && item ? `${item.advice} ${currentDecisionLabel(item)}` : state.status === "failed" ? "请联系管理员处理后再继续。" : pending ? "可以开始处理后再确认。" : "可以完成并导出结果。";
+      els.currentDecisionStatus.textContent = reviewMode && item ? currentDecisionLabel(item) : "当前决定：未决定";
+      els.currentAdvice.textContent = reviewMode && item ? currentAdviceText(item) : state.status === "failed" ? "请联系管理员处理后再继续。" : pending ? "可以开始处理后再确认。" : "可以完成并导出结果。";
       els.reviewPositionText.textContent = reviewMode && state.reviewItems.length
         ? reviewProgressLabel()
         : "当前第 0 张 / 共 0 张 / 待确认 0 张。";
@@ -1764,7 +1783,7 @@
       els.modeStatus.textContent = `当前处理方式：${state.processingModeLabel}`;
       els.startButton.disabled = state.status !== "ready" || (state.folderReadiness && state.folderReadiness.ready_to_start === false);
       els.exportButton.disabled = !(state.status === "needs_review" && state.reviewItems.length > 0);
-      els.completeButton.disabled = !((state.status === "needs_review" || state.status === "ready_to_finish") && pendingCount() === 0);
+      els.completeButton.disabled = !(state.status === "needs_review" || state.status === "ready_to_finish");
       els.finishConfirmPanel.classList.toggle("hidden", !state.finishConfirmationVisible || !["needs_review", "ready_to_finish"].includes(state.status));
       els.outputPanel.classList.toggle("hidden", state.status !== "complete");
       els.failurePanel.classList.toggle("hidden", state.status !== "failed");
@@ -2462,7 +2481,7 @@
 
     async function finishBatch() {
       if (pendingCount() > 0 || (state.reviewItems.length === 0 && state.status !== "ready_to_finish")) {
-        els.loadStatus.textContent = "还有图片没有决定，暂不能完成。";
+        els.loadStatus.textContent = `还有 ${pendingCount()} 张图片没有决定，暂不能完成。请先逐张选择确认通过、退回重扫、重新处理图片或确认保留原貌。`;
         state.finishConfirmationVisible = false;
         render();
         return;
@@ -2494,7 +2513,7 @@
 
     function showFinishConfirmation() {
       if (pendingCount() > 0 || (state.reviewItems.length === 0 && state.status !== "ready_to_finish")) {
-        els.loadStatus.textContent = "还有图片没有决定，暂不能完成。";
+        els.loadStatus.textContent = `还有 ${pendingCount()} 张图片没有决定，暂不能完成。请先逐张选择确认通过、退回重扫、重新处理图片或确认保留原貌。`;
         state.finishConfirmationVisible = false;
         render();
         return;
@@ -2645,7 +2664,7 @@
       item.decidedAt = "";
       delete state.decisions[item.id];
       state.attentionFiles = pendingCount();
-      state.reviewQueueText = `已清除当前决定；已决定 ${reviewedCount()} 项，待决定 ${pendingCount()} 项。`;
+      state.reviewQueueText = `已撤销当前决定；请重新选择。已决定 ${reviewedCount()} 项，待决定 ${pendingCount()} 项。`;
       render();
       scheduleDraftSave();
     });
