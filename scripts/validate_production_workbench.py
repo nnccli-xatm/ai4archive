@@ -77,12 +77,13 @@ REQUIRED_TEXT = {
     "本批没有需要人工确认的图片",
     "保存位置",
     "接下来",
-    "处理后图片和复核结果已保存",
+    "处理后图片已保存到输出文件夹",
+    "复核结果和交接说明已保存到本机状态文件夹",
     "完成检查清单",
     "处理后图片已准备好",
-    "复核结果已保存",
-    "交接说明已保存",
-    "可以准备下一批",
+    "可以检查输出文件夹后准备下一批",
+    "检查输出文件夹里的处理后图片",
+    "需要继续加工时",
     "准备下一批",
     "待决定",
     "记录当前图片",
@@ -568,7 +569,7 @@ def main() -> int:
         if required_script_token not in html:
             errors.append(f"missing review queue workflow script token: {required_script_token}")
 
-    for old_finish_copy in ["导出复核决定", "完成导出"]:
+    for old_finish_copy in ["导出复核决定", "完成导出", "把处理后图片交给验收或移交流程"]:
         if old_finish_copy in text:
             errors.append(f"old operator finish/export copy still visible: {old_finish_copy}")
 
