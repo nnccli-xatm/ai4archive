@@ -997,6 +997,11 @@ def _main_processing_plan(argv: list[str]) -> int:
         default="fallback",
         help="Despeckle planning backend. Defaults to conservative fallback; numpy is opt-in.",
     )
+    parser.add_argument(
+        "--reuse-scan-measurements",
+        action="store_true",
+        help="In safe cases, reuse measurements already present in the scan report while building the plan.",
+    )
     args = parser.parse_args(argv)
     try:
         json_path, csv_path, plan = write_processing_plan(
@@ -1009,6 +1014,7 @@ def _main_processing_plan(argv: list[str]) -> int:
                 trim_dark_border=args.trim_dark_border,
                 despeckle=args.despeckle,
                 despeckle_backend=args.despeckle_backend,
+                reuse_scan_measurements=args.reuse_scan_measurements,
             ),
         )
     except (OSError, ValueError) as exc:

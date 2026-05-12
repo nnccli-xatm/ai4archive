@@ -11,6 +11,7 @@ from PIL import Image, ImageDraw
 import archive_scan_qc.processing as processing_module
 from archive_scan_qc.cli import main
 from archive_scan_qc.processing import ProcessingOptions, process_images
+from archive_scan_qc.processing_plan import build_processing_plan
 from archive_scan_qc.scanner import ScanConfig, scan_batch
 
 
@@ -252,6 +253,69 @@ class ScanProcessingReuseTest(unittest.TestCase):
             self.assertTrue(payload["operations"]["reuse_scan_measurements"])
             self.assertEqual(payload["aggregate_counts"]["processing_scan_measurement_reused_files"], 1)
             self.assertTrue(payload["privacy_self_check"]["passed"])
+
+    def test_processing_plan_reuses_scan_measurements_when_enabled(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-reuse-plan-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            input_dir.mkdir()
+            _dark_border_page().save(input_dir / "page.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("project", "batch", input_dir, root / "scan", workers=1))
+            with (
+                mock.patch("archive_scan_qc.processing._detect_skew", wraps=processing_module._detect_skew) as skew,
+                mock.patch(
+                    "archive_scan_qc.processing._detect_dark_border_bbox",
+                    wraps=processing_module._detect_dark_border_bbox,
+                ) as dark_border,
+            ):
+                plan = build_processing_plan(
+                    report,
+                    input_dir,
+                    ProcessingOptions(trim_dark_border=True, deskew=True, reuse_scan_measurements=True, workers=1),
+                )
+
+            self.assertEqual(skew.call_count, 0)
+            self.assertEqual(dark_border.call_count, 0)
+            self.assertTrue(plan["operations"]["reuse_scan_measurements"])
+            record = plan["files"][0]
+            self.assertTrue(record["processing_audit"])
+            self.assertIn("skew_detect_reused_scan_measurement", record["proposed_operations"])
+            self.assertIn("dark_border_detect_reused_scan_measurement", record["proposed_operations"])
+
+    def test_processing_plan_cli_accepts_reuse_scan_measurements(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-reuse-plan-cli-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            report_dir = root / "scan"
+            plan_dir = root / "plan"
+            input_dir.mkdir()
+            _dark_border_page().save(input_dir / "page.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("project", "batch", input_dir, report_dir, workers=1))
+            report_dir.mkdir()
+            report_path = report_dir / "scan_qc_report.json"
+            report_path.write_text(json.dumps(report, ensure_ascii=False), encoding="utf-8")
+
+            exit_code = main(
+                [
+                    "processing-plan",
+                    "--report",
+                    str(report_path),
+                    "--input",
+                    str(input_dir),
+                    "--out",
+                    str(plan_dir),
+                    "--deskew",
+                    "--trim-dark-border",
+                    "--reuse-scan-measurements",
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            plan = json.loads((plan_dir / "processing_plan.json").read_text(encoding="utf-8"))
+            self.assertTrue(plan["operations"]["reuse_scan_measurements"])
+            self.assertTrue(plan["privacy"]["contains_file_list"])
 
 
 def _dark_border_page() -> Image.Image:

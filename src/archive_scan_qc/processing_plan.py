@@ -67,6 +67,7 @@ def build_processing_plan(
             "trim_dark_border": options.trim_dark_border,
             "despeckle": options.despeckle,
             "resume_processing": False,
+            "reuse_scan_measurements": options.reuse_scan_measurements,
         },
         "summary": counts,
         "privacy": {
@@ -133,7 +134,7 @@ def _plan_record(item: dict[str, Any], input_dir: Path, options: ProcessingOptio
     source = input_dir / relative_path
     try:
         with Image.open(source) as image:
-            _processed, operations, process_info = _process_image(image, options)
+            _processed, operations, process_info = _process_image(image, options, scan_record=item)
     except (UnidentifiedImageError, OSError, ValueError) as exc:
         record["status"] = "unopenable"
         record["failure_reason"] = str(exc)
