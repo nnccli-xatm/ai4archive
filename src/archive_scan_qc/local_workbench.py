@@ -87,6 +87,25 @@ class WorkbenchController:
         return self.status()
 
     def start(self) -> dict[str, Any]:
+        return self._start_run()
+
+    def retry(self) -> dict[str, Any]:
+        with self._lock:
+            summary = _read_json(self.metadata_dir / PRODUCTION_RUN_SUMMARY_JSON) if self.metadata_dir else None
+            progress = _read_json(self.metadata_dir / PRODUCTION_RUN_PROGRESS_JSON) if self.metadata_dir else None
+            guidance = _status_recovery_guidance(
+                configured=bool(self.input_dir and self.derivatives_dir and self.metadata_dir),
+                running=bool(self._thread and self._thread.is_alive()),
+                summary=summary,
+                progress=progress,
+                last_error=self.last_error,
+                last_preflight_guidance=self.last_preflight_guidance,
+            )
+        if guidance.get("kind") != "processing_failed_retryable":
+            raise ValueError("当前批次不能直接重试。请按提示检查文件夹，必要时交管理员处理。")
+        return self._start_run()
+
+    def _start_run(self) -> dict[str, Any]:
         with self._lock:
             if self._thread and self._thread.is_alive():
                 raise ValueError("当前批次正在处理。")
@@ -429,6 +448,8 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
                 )
             elif self.path == "/api/start":
                 result = self.workbench_controller.start()
+            elif self.path == "/api/retry":
+                result = self.workbench_controller.retry()
             elif self.path == "/api/finish-decisions":
                 result = self.workbench_controller.save_review_decisions(payload)
             elif self.path == "/api/save-draft-decisions":

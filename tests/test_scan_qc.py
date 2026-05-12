@@ -6490,6 +6490,91 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn(str(input_dir), json.dumps(guidance, ensure_ascii=False))
             self.assertNotIn(".jpg", json.dumps(guidance, ensure_ascii=False))
 
+    def test_local_production_workbench_retry_reuses_saved_folder_configuration(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            metadata_dir = derivatives_dir / DEFAULT_METADATA_DIRNAME
+            input_dir.mkdir()
+            metadata_dir.mkdir(parents=True)
+            Image.new("RGB", (48, 36), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+            (metadata_dir / "production_run_summary.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "scan-qc.production-run.v1",
+                        "status": "blocked",
+                        "counts": {
+                            "total_files": 1,
+                            "processed_files": 0,
+                            "resumed_files": 0,
+                            "failed_files": 1,
+                            "retry_list_files": 1,
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            controller = WorkbenchController()
+            controller.configure(input_dir, derivatives_dir)
+            with mock.patch("archive_scan_qc.local_workbench.run_production_folder") as run_mock:
+                run_mock.return_value = {
+                    "schema_version": "scan-qc.production-run.v1",
+                    "status": "finished",
+                    "artifacts": {},
+                    "counts": {"total_files": 1, "processed_files": 1, "resumed_files": 0, "failed_files": 0, "retry_list_files": 0},
+                }
+
+                controller.retry()
+                deadline = time.time() + 10
+                status = controller.status()
+                while status["running"] and time.time() < deadline:
+                    time.sleep(0.05)
+                    status = controller.status()
+
+            self.assertFalse(status["running"])
+            self.assertIsNone(status["last_error_zh"])
+            run_mock.assert_called_once()
+            config = run_mock.call_args.args[0]
+            self.assertEqual(config.input_dir, input_dir.resolve())
+            self.assertEqual(config.derivative_output_dir, derivatives_dir.resolve())
+            self.assertEqual(config.metadata_output_dir, metadata_dir.resolve())
+            self.assertTrue(config.resume_processing)
+            self.assertTrue(config.reuse_scan_measurements)
+
+    def test_local_production_workbench_retry_rejects_non_retryable_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            metadata_dir = derivatives_dir / DEFAULT_METADATA_DIRNAME
+            input_dir.mkdir()
+            metadata_dir.mkdir(parents=True)
+            Image.new("RGB", (48, 36), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+            (metadata_dir / "production_run_summary.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "scan-qc.production-run.v1",
+                        "status": "blocked",
+                        "counts": {
+                            "total_files": 1,
+                            "processed_files": 0,
+                            "failed_files": 1,
+                            "retry_list_files": 0,
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            controller = WorkbenchController()
+            controller.configure(input_dir, derivatives_dir)
+            with mock.patch("archive_scan_qc.local_workbench.run_production_folder") as run_mock:
+                with self.assertRaisesRegex(ValueError, "不能直接重试"):
+                    controller.retry()
+            run_mock.assert_not_called()
+
     def test_local_production_workbench_rejects_empty_configure_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

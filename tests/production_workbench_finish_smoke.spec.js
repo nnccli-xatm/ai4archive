@@ -310,6 +310,132 @@ test.describe("production workbench finish/export browser smoke", () => {
     expect(consoleProblems).toEqual([]);
   });
 
+  test("shows retry action for retryable failures and posts retry request", async ({ page }) => {
+    const consoleProblems = [];
+    let retryRequested = false;
+    page.on("console", (message) => {
+      if (["error", "warning"].includes(message.type())) consoleProblems.push(`${message.type()}: ${message.text()}`);
+    });
+    page.on("pageerror", (error) => consoleProblems.push(`pageerror: ${error.message}`));
+
+    await page.route("**/api/status", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema_version: "scan-qc.local-production-workbench.v1",
+          running: false,
+          configured: true,
+          folders: {
+            input: "/tmp/retry-input",
+            derivatives: "/tmp/retry-output",
+            metadata: "/tmp/retry-output/_production_workbench",
+          },
+          summary: {
+            schema_version: "scan-qc.production-run.v1",
+            status: "blocked",
+            operator_summary: {
+              message_zh: "有文件处理失败。",
+              total_source_images: 4,
+              openable_source_images: 4,
+              derivative_images_ready: 2,
+              files_needing_attention: 2,
+            },
+            counts: {
+              total_files: 4,
+              openable_files: 4,
+              processed_files: 2,
+              resumed_files: 0,
+              failed_files: 2,
+              retry_list_files: 2,
+            },
+          },
+          progress: { schema_version: "scan-qc.production-run-progress.v1", state: "blocked" },
+          queue: { schema_version: "scan-qc.production-review-queue.v1", items: [] },
+          draft_decisions: null,
+        }),
+      });
+    });
+    await page.route("**/api/retry", async (route) => {
+      retryRequested = true;
+      expect(route.request().postDataJSON()).toEqual({});
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema_version: "scan-qc.local-production-workbench.v1",
+          running: true,
+          configured: true,
+          folders: {
+            input: "/tmp/retry-input",
+            derivatives: "/tmp/retry-output",
+            metadata: "/tmp/retry-output/_production_workbench",
+          },
+          progress: { schema_version: "scan-qc.production-run-progress.v1", state: "running" },
+          recovery_guidance: {
+            schema_version: "scan-qc.local-recovery-guidance.v1",
+            aggregate_only: true,
+            kind: "processing_running",
+            title_zh: "正在处理",
+            message_zh: "本机正在生成处理后图片，请稍候。",
+            next_steps_zh: ["等待处理完成后查看结果。"],
+          },
+        }),
+      });
+    });
+
+    await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
+    await expect(page.locator("#recoveryTitle")).toHaveText("处理没有全部完成");
+    await expect(page.getByText("点击重试处理，系统会继续使用当前文件夹位置。")).toBeVisible();
+    await expect(page.getByRole("button", { name: "重试处理" })).toBeVisible();
+    await page.getByRole("button", { name: "重试处理" }).click();
+    await expect(page.locator("#loadStatus")).toHaveText("正在重试处理，请等待；系统会继续使用当前文件夹。");
+    expect(retryRequested).toBe(true);
+    expect(consoleProblems).toEqual([]);
+  });
+
+  test("does not offer retry for administrator failures", async ({ page }) => {
+    await page.route("**/api/status", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema_version: "scan-qc.local-production-workbench.v1",
+          running: false,
+          configured: true,
+          folders: {
+            input: "/tmp/admin-input",
+            derivatives: "/tmp/admin-output",
+            metadata: "/tmp/admin-output/_production_workbench",
+          },
+          summary: {
+            schema_version: "scan-qc.production-run.v1",
+            status: "blocked",
+            operator_summary: {
+              message_zh: "处理没有正常完成。",
+              total_source_images: 2,
+              openable_source_images: 2,
+              derivative_images_ready: 0,
+              files_needing_attention: 2,
+            },
+            counts: {
+              total_files: 2,
+              openable_files: 2,
+              processed_files: 0,
+              failed_files: 2,
+              retry_list_files: 0,
+            },
+          },
+          progress: { schema_version: "scan-qc.production-run-progress.v1", state: "blocked" },
+          queue: { schema_version: "scan-qc.production-review-queue.v1", items: [] },
+          draft_decisions: null,
+        }),
+      });
+    });
+
+    await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
+    await expect(page.locator("#recoveryTitle")).toHaveText("处理没有全部完成");
+    await expect(page.getByRole("button", { name: "重试处理" })).toBeHidden();
+    await expect(page.getByText("请交管理员查看本机状态文件夹")).toBeVisible();
+  });
+
   test("finishes and exports a no-review batch without console errors or warnings", async ({ page }) => {
     const consoleProblems = [];
     page.on("console", (message) => {
