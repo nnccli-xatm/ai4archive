@@ -32,7 +32,6 @@ REQUIRED_TEXT = {
     "选择处理后输出文件夹",
     "可以开始处理",
     "正在处理",
-    "已暂停，可以继续",
     "有图片需要人工确认",
     "批次已完成",
     "处理失败",
@@ -54,13 +53,15 @@ REQUIRED_TEXT = {
     "不读取目录内容",
     "不执行处理",
     "不显示本机私有路径",
-    "加载本机状态",
+    "本机处理状态",
     "已自动保存",
     "已恢复上次进度",
     "保存文件夹",
     "本机入口",
-    "选择状态示例",
-    "选择本机状态文件",
+    "维护入口",
+    "选择维护示例",
+    "选择本机状态",
+    "请先填写两个本机文件夹位置",
     "需留意文件",
     "原图总数",
     "需要管理员处理",
@@ -206,6 +207,22 @@ def main() -> int:
         errors.append("missing production-run status loader")
     if "operator_summary" not in html:
         errors.append("missing operator summary mapping")
+    for removed_primary_token in [
+        'id="pauseButton"',
+        'id="resumeButton"',
+        "已暂停，可以继续",
+        'setStatus("paused")',
+        ".status-loader",
+    ]:
+        if removed_primary_token in html:
+            errors.append(f"removed or demoted control still present in primary workbench: {removed_primary_token}")
+    for simplified_flow_token in [
+        'class="workbench-message" id="loadStatus"',
+        '<details class="maintenance-loader">',
+        "只有管理员排查或演练时使用，正常加工不需要打开。",
+    ]:
+        if simplified_flow_token not in html:
+            errors.append(f"missing simplified operator-flow token: {simplified_flow_token}")
     save_folders_match = re.search(r"async function saveFolders\(\) \{(?P<body>.*?)\n    \}", html, re.S)
     if not save_folders_match:
         errors.append("missing saveFolders implementation")
