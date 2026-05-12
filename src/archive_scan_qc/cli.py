@@ -472,7 +472,7 @@ def _main_production_rehearsal(argv: list[str]) -> int:
     print("下一步:")
     print("1. 运行: archive-scan-qc production-workbench")
     print("2. 在工作台中填写上面的扫描原图文件夹和处理后输出文件夹。")
-    print("3. 点击加载本机状态，查看这批合成图片并练习复核。")
+    print("3. 点击“保存文件夹”，状态会自动加载，然后查看合成图片并练习复核。")
     print("说明: 本演练只使用合成图片，不需要私有图片，也不会调用外部服务。")
     return 0
 

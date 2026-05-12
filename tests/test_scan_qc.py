@@ -6280,9 +6280,11 @@ class ScanQcTest(unittest.TestCase):
             output = stdout.getvalue()
             self.assertIn("本机生产演练已生成。", output)
             self.assertIn("下一步:", output)
+            self.assertIn("点击“保存文件夹”，状态会自动加载", output)
             self.assertIn("只使用合成图片", output)
             self.assertNotIn("JSON", output)
             self.assertNotIn("schema", output)
+            self.assertNotIn("点击加载本机状态", output)
             self.assertNotIn("私有图片文件夹", output)
 
             input_dir = root / "synthetic_input"
