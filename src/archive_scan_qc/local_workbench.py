@@ -121,10 +121,14 @@ class WorkbenchController:
             json.dumps(verification, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
+        decision_summary = verification.get("decision_summary") if isinstance(verification.get("decision_summary"), dict) else {}
+        total_decisions = int(decision_summary.get("total_decisions") or 0)
+        pending_decisions = int(decision_summary.get("pending") or 0)
+        reviewed_decisions = max(0, total_decisions - pending_decisions)
         return {
             "schema_version": SERVER_SCHEMA,
             "finished": True,
-            "message_zh": "批次已完成，复核决定已保存。",
+            "message_zh": "完成并导出结果：处理后图片和复核结果已保存。",
             "folders": {
                 "derivatives": str(derivatives_dir),
                 "metadata": str(metadata_dir),
@@ -133,7 +137,23 @@ class WorkbenchController:
                 "decision_summary": str(summary_path),
                 "verification_summary": str(verification_path),
             },
-            "decision_summary": verification.get("decision_summary"),
+            "completion_panel": {
+                "title_zh": "完成并导出结果",
+                "message_zh": "本批次已完成。处理后图片在输出文件夹，复核结果已保存到本机状态文件夹。",
+                "total_review_items": total_decisions,
+                "reviewed_items": reviewed_decisions,
+                "pending_items": pending_decisions,
+                "derivatives_dir": str(derivatives_dir),
+                "metadata_dir": str(metadata_dir),
+                "decision_summary_path": str(summary_path),
+                "verification_summary_path": str(verification_path),
+                "next_steps_zh": [
+                    "到处理后输出文件夹检查图片数量和文件是否齐全。",
+                    "把处理后图片交给验收或移交流程。",
+                    "开始下一批前，重新选择新的扫描原图文件夹和输出文件夹。",
+                ],
+            },
+            "decision_summary": decision_summary,
         }
 
     def save_draft_review_decisions(self, summary: dict[str, Any]) -> dict[str, Any]:
@@ -500,8 +520,8 @@ def _status_recovery_guidance(
                 **aggregate,
                 "kind": "no_remaining_work",
                 "title_zh": "没有剩余处理任务",
-                "message_zh": "处理后图片已生成，可以继续复核或完成导出。",
-                "next_steps_zh": ["确认处理后图片数量正常，然后完成导出。"],
+                "message_zh": "处理后图片已生成，可以继续复核或完成并导出结果。",
+                "next_steps_zh": ["确认处理后图片数量正常，然后完成并导出结果。"],
             }
     state = progress.get("state") if isinstance(progress, dict) else None
     return {

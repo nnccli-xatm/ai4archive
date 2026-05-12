@@ -49,7 +49,10 @@ REQUIRED_TEXT = {
     "处理后图片",
     "问题原因",
     "系统建议",
-    "导出复核决定",
+    "另存复核结果",
+    "完成并导出结果",
+    "处理后图片和复核结果已保存",
+    "开始下一批前",
     "待决定",
     "自动显示下一张待确认图片",
     "公开安全示意图",
@@ -410,9 +413,16 @@ def main() -> int:
         "processing_failed_retryable",
         "processing_failed_admin",
         "no_remaining_work",
+        "completion_panel",
+        "renderCompletionPanel",
+        "applyCompletionPanel",
     ]:
         if required_script_token not in html:
             errors.append(f"missing review queue workflow script token: {required_script_token}")
+
+    for old_finish_copy in ["导出复核决定", "完成导出"]:
+        if old_finish_copy in text:
+            errors.append(f"old operator finish/export copy still visible: {old_finish_copy}")
 
     if errors:
         for error in errors:

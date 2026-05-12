@@ -267,7 +267,7 @@ def _step(
 
 def _operator_message(status: str, p0_findings: int, failed_files: int) -> str:
     if status == "finished":
-        return "处理后图片已生成，可以完成导出。"
+        return "处理后图片已生成，可以完成并导出结果。"
     blockers = []
     if p0_findings:
         blockers.append(f"{p0_findings} 个质量问题需要人工确认")
@@ -308,8 +308,8 @@ def _recovery_guidance(status: str, processing_summary: dict[str, Any]) -> dict[
             {
                 "kind": "no_remaining_work",
                 "title_zh": "没有剩余处理任务",
-                "message_zh": "处理后图片已生成，可以继续复核或完成导出。",
-                "next_steps_zh": ["确认处理后图片数量正常，然后完成导出。"],
+                "message_zh": "处理后图片已生成，可以继续复核或完成并导出结果。",
+                "next_steps_zh": ["确认处理后图片数量正常，然后完成并导出结果。"],
             }
         )
     else:
