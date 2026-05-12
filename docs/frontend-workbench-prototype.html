@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="data:,">
-  <title>Scan QC Workbench Prototype</title>
+  <title>扫描质检工作台原型</title>
   <style>
     :root {
       color-scheme: light;
@@ -708,51 +708,51 @@
   <header>
     <div class="topbar">
       <div>
-        <h1>Scan QC Workbench Prototype</h1>
-        <p class="subtitle">Static operator and reviewer workbench for existing aggregate and scan report JSON artifacts.</p>
+        <h1>扫描质检工作台原型</h1>
+        <p class="subtitle">用于现有汇总与扫描报告 JSON 工件的静态操作员和复核工作台。</p>
       </div>
-      <p class="privacy-note">Local prototype only. Do not commit or share loaded private images, paths, hashes, OCR text, thumbnails, or row-level evidence.</p>
+      <p class="privacy-note">仅限本地原型。不要提交或共享已加载的私有图像、路径、哈希、OCR 文本、缩略图或行级证据。</p>
     </div>
   </header>
 
   <main>
     <section class="load-panel" aria-labelledby="load-title" data-region="artifact-loader">
       <div class="panel">
-        <h2 id="load-title">Load Artifact</h2>
-        <p class="muted">Choose a <span class="mono">run_plan_summary.json</span>, <span class="mono">scan_qc_report.json</span>, <span class="mono">workbench_public_summary.json</span>, <span class="mono">review_summary.json</span>, <span class="mono">review_decision_verification_summary.json</span>, <span class="mono">acceptance_summary.json</span>, <span class="mono">aggregate_evidence_bundle_summary.json</span>, <span class="mono">final_production_handoff_summary.json</span>, <span class="mono">release_candidate_summary.json</span>, <span class="mono">deep_inspection_candidate_summary.json</span>, or <span class="mono">public_safe_validation_index.json</span>. Files are parsed in this browser only.</p>
+        <h2 id="load-title">加载工件</h2>
+        <p class="muted">请选择 <span class="mono">run_plan_summary.json</span>, <span class="mono">scan_qc_report.json</span>, <span class="mono">workbench_public_summary.json</span>, <span class="mono">review_summary.json</span>, <span class="mono">review_decision_verification_summary.json</span>, <span class="mono">acceptance_summary.json</span>, <span class="mono">aggregate_evidence_bundle_summary.json</span>, <span class="mono">final_production_handoff_summary.json</span>, <span class="mono">release_candidate_summary.json</span>, <span class="mono">deep_inspection_candidate_summary.json</span> 或 <span class="mono">public_safe_validation_index.json</span>. 文件仅在此浏览器中解析。</p>
         <div class="file-row">
           <input id="artifactFile" type="file" accept="application/json,.json">
-          <button id="clearButton" class="secondary" type="button">Clear</button>
+          <button id="clearButton" class="secondary" type="button">清除</button>
         </div>
-        <div class="demo-gallery" aria-label="Public-safe demo fixture gallery">
-          <h3>Public-Safe Demo Fixture Gallery</h3>
-          <p class="muted">Synthetic aggregate-only fixtures for browser validation. Demo fixtures exclude private filenames, paths, hashes, OCR text, thumbnails, image content, manifests, row-level findings, reviewer notes, derivative image references, and local preview state.</p>
-          <label>Demo fixture
+        <div class="demo-gallery" aria-label="公开安全演示夹具库">
+          <h3>公开安全演示夹具库</h3>
+          <p class="muted">用于浏览器验证的合成纯汇总夹具。演示夹具不包含私有文件名、路径、哈希、OCR 文本、缩略图、图像内容、清单、行级发现、复核备注、衍生图像引用和本地预览状态。</p>
+          <label>演示夹具
             <select id="demoFixtureSelect"></select>
           </label>
           <div class="file-row" style="margin-top:0">
-            <button id="loadDemoFixtureButton" type="button">Load Demo Fixture</button>
+            <button id="loadDemoFixtureButton" type="button">加载演示夹具</button>
           </div>
         </div>
       </div>
-      <div id="statusBanner" class="status-banner" role="status" aria-live="polite">No artifact loaded. Overview, workflow, batches, findings, and preview will appear after loading JSON.</div>
+      <div id="statusBanner" class="status-banner" role="status" aria-live="polite">尚未加载工件。加载 JSON 后将显示概览、工作流、批次、发现和预览。</div>
     </section>
 
     <section class="panel" aria-labelledby="overview-title" data-region="overview-metrics">
-      <h2 id="overview-title">Overview Metrics</h2>
+      <h2 id="overview-title">概览指标</h2>
       <div id="metricGrid" class="metric-grid"></div>
     </section>
 
     <section class="panel" aria-labelledby="workflow-title" data-region="workflow-steps" style="margin-top:16px">
-      <h2 id="workflow-title">Workflow Steps</h2>
+      <h2 id="workflow-title">工作流步骤</h2>
       <div id="workflowGrid" class="workflow"></div>
     </section>
 
     <section class="panel" aria-labelledby="aggregate-title" data-region="aggregate-handoff" style="margin-top:16px">
       <div class="toolbar">
         <div>
-          <h2 id="aggregate-title">Aggregate Artifact Summary</h2>
-          <p class="muted">Public-safe aggregate summaries only after local policy review. For final handoff, inspect aggregate outputs from review-decision verification, evidence-bundle verification, and final handoff summary. This view never displays private filenames, paths, hashes, OCR text, thumbnails, image content, row-level findings, reviewer notes, prompts, provider commands, raw model output, object URLs, manifests, or derivative image references.</p>
+          <h2 id="aggregate-title">汇总工件摘要</h2>
+          <p class="muted">仅在本地策略复核后查看公开安全的汇总摘要。最终交接前，请检查复核决定验证、证据包验证和最终交接摘要的汇总输出。本视图绝不显示私有文件名、路径、哈希、OCR 文本、缩略图、图像内容、行级发现、复核备注、提示词、提供方命令、原始模型输出、对象 URL、清单或衍生图像引用。</p>
         </div>
       </div>
       <div id="aggregateHandoff"></div>
@@ -761,96 +761,96 @@
     <section class="panel" aria-labelledby="review-title" data-region="review-decisions" style="margin-top:16px">
       <div class="toolbar">
         <div>
-          <h2 id="review-title">Human Review Decisions</h2>
-          <p class="muted">Decision state stays in this browser tab and resets when an artifact is cleared or reloaded. Import accepts only privacy-safe summary JSON with synthetic/local IDs and decision statuses.</p>
+          <h2 id="review-title">人工复核决定</h2>
+          <p class="muted">决定状态仅保留在此浏览器标签页中；清除或重新加载工件时会重置。导入仅接受包含合成/本地 ID 和决定状态的隐私安全摘要 JSON。</p>
         </div>
         <div class="file-row" style="margin-top:0">
-          <label>Import privacy-safe summary
+          <label>导入隐私安全摘要
             <input id="reviewImportFile" type="file" accept="application/json,.json" aria-describedby="reviewImportStatus">
           </label>
-          <button id="exportReviewButton" type="button" disabled>Prepare Privacy-Safe Summary</button>
-          <button id="downloadReviewButton" class="secondary" type="button" disabled>Download JSON</button>
+          <button id="exportReviewButton" type="button" disabled>生成隐私安全摘要</button>
+          <button id="downloadReviewButton" class="secondary" type="button" disabled>下载 JSON</button>
         </div>
       </div>
-      <div id="reviewCompletionGate" class="status-banner" role="status" aria-live="polite" style="margin-bottom:12px">No review targets loaded. Completion gate warnings use aggregate counts only and do not block export.</div>
+      <div id="reviewCompletionGate" class="status-banner" role="status" aria-live="polite" style="margin-bottom:12px">尚未加载复核目标。完成门禁警告仅使用汇总计数，且不会阻止导出。</div>
       <div id="decisionSummary" class="decision-strip"></div>
-      <div class="review-filter-bar" aria-label="Review target filters">
-        <label>Decision
+      <div class="review-filter-bar" aria-label="复核目标筛选">
+        <label>决定
           <select id="reviewDecisionFilter">
-            <option value="all">All decisions</option>
-            <option value="pending">Pending</option>
-            <option value="accepted_issue">Accepted issue</option>
-            <option value="false_positive">False positive</option>
-            <option value="fixed_externally">Fixed externally</option>
-            <option value="needs_rescan">Needs rescan</option>
-            <option value="blocked">Blocked</option>
+            <option value="all">全部决定</option>
+            <option value="pending">待处理</option>
+            <option value="accepted_issue">确认问题</option>
+            <option value="false_positive">误报</option>
+            <option value="fixed_externally">外部已修复</option>
+            <option value="needs_rescan">需要重扫</option>
+            <option value="blocked">已阻塞</option>
           </select>
         </label>
-        <label>Scope
+        <label>范围
           <select id="reviewScopeFilter">
-            <option value="all">All scopes</option>
-            <option value="batch">Batch</option>
-            <option value="finding">Finding</option>
-            <option value="processing_review">Processing review</option>
+            <option value="all">全部范围</option>
+            <option value="batch">批次</option>
+            <option value="finding">发现</option>
+            <option value="processing_review">处理复核</option>
           </select>
         </label>
-        <label>Severity
+        <label>严重级别
           <select id="reviewSeverityFilter">
-            <option value="all">All severities</option>
+            <option value="all">全部严重级别</option>
             <option value="P0">P0</option>
             <option value="P1">P1</option>
             <option value="P2">P2</option>
-            <option value="none">None</option>
+            <option value="none">无</option>
           </select>
         </label>
-        <label>Status
+        <label>状态
           <select id="reviewStatusFilter">
-            <option value="all">All statuses</option>
-            <option value="processed">Processed</option>
-            <option value="failed">Failed</option>
-            <option value="skipped">Skipped</option>
-            <option value="blocked">Blocked</option>
-            <option value="warning">Warning</option>
-            <option value="local-review">Local review</option>
+            <option value="all">全部状态</option>
+            <option value="processed">已处理</option>
+            <option value="failed">失败</option>
+            <option value="skipped">已跳过</option>
+            <option value="blocked">已阻塞</option>
+            <option value="warning">警告</option>
+            <option value="local-review">本地复核</option>
           </select>
         </label>
-        <div id="reviewFilterCount" class="review-filter-count" role="status" aria-live="polite">Showing 0 of 0 targets</div>
+        <div id="reviewFilterCount" class="review-filter-count" role="status" aria-live="polite">显示 0 / 0 个目标</div>
       </div>
-      <div class="review-bulk-bar" aria-label="Filtered bulk review decision actions">
-        <label>Bulk visible decision
+      <div class="review-bulk-bar" aria-label="筛选后的批量复核决定操作">
+        <label>批量设置可见决定
           <select id="bulkReviewDecision">
-            <option value="accepted_issue">Accepted issue</option>
-            <option value="false_positive">False positive</option>
-            <option value="fixed_externally">Fixed externally</option>
-            <option value="needs_rescan">Needs rescan</option>
-            <option value="blocked">Blocked</option>
+            <option value="accepted_issue">确认问题</option>
+            <option value="false_positive">误报</option>
+            <option value="fixed_externally">外部已修复</option>
+            <option value="needs_rescan">需要重扫</option>
+            <option value="blocked">已阻塞</option>
           </select>
         </label>
-        <button id="applyBulkReviewDecisionButton" class="secondary" type="button" disabled>Apply to Visible Targets</button>
-        <div id="bulkReviewStatus" class="review-bulk-status" role="status" aria-live="polite">No filtered bulk decision applied. Bulk actions update only visible targets in this browser tab.</div>
+        <button id="applyBulkReviewDecisionButton" class="secondary" type="button" disabled>应用到可见目标</button>
+        <div id="bulkReviewStatus" class="review-bulk-status" role="status" aria-live="polite">尚未应用筛选后的批量决定。批量操作只更新此浏览器标签页中的可见目标。</div>
       </div>
       <div id="reviewTargetList" class="review-target-list" aria-live="polite"></div>
-      <div id="reviewImportStatus" class="status-banner" role="status" aria-live="polite" style="margin-bottom:12px">No review-decision summary imported. Imports restore only scope, synthetic/local ID, and decision status; private filenames, paths, hashes, OCR text, thumbnails, image content, row-level findings, reviewer notes, manifests, and derivative image references are ignored.</div>
-      <textarea id="reviewExport" aria-label="Privacy-safe review-decision JSON summary" readonly placeholder="Privacy-safe review-decision JSON summary will appear after a reviewer decision changes or after export is prepared."></textarea>
+      <div id="reviewImportStatus" class="status-banner" role="status" aria-live="polite" style="margin-bottom:12px">尚未导入复核决定摘要。导入只恢复范围、合成/本地 ID 和决定状态；私有文件名、路径、哈希、OCR 文本、缩略图、图像内容、行级发现、复核备注、清单和衍生图像引用会被忽略。</div>
+      <textarea id="reviewExport" aria-label="隐私安全复核决定 JSON 摘要" readonly placeholder="复核决定变更或生成导出后，将显示隐私安全复核决定 JSON 摘要。"></textarea>
     </section>
 
     <div class="grid" style="margin-top:16px">
       <div class="stack">
         <section class="panel" aria-labelledby="batch-title" data-region="batch-list">
           <div class="toolbar">
-            <h2 id="batch-title">Batch List</h2>
+            <h2 id="batch-title">批次列表</h2>
             <div class="filters">
-              <label>Status
+              <label>状态
                 <select id="statusFilter">
-                  <option value="all">All</option>
-                  <option value="passed">Passed</option>
-                  <option value="failed">Failed</option>
-                  <option value="warning">Warning</option>
+                  <option value="all">全部</option>
+                  <option value="passed">通过</option>
+                  <option value="failed">失败</option>
+                  <option value="warning">警告</option>
                 </select>
               </label>
-              <label>Severity
+              <label>严重级别
                 <select id="severityFilter">
-                  <option value="all">All</option>
+                  <option value="all">全部</option>
                   <option value="P0">P0</option>
                   <option value="P1">P1</option>
                   <option value="P2">P2</option>
@@ -863,11 +863,11 @@
 
         <section class="panel" aria-labelledby="finding-title" data-region="findings-list">
           <div class="toolbar">
-            <h2 id="finding-title">Findings List</h2>
+            <h2 id="finding-title">发现列表</h2>
             <div class="filters">
-              <label>Finding Severity
+              <label>发现严重级别
                 <select id="findingSeverityFilter">
-                  <option value="all">All</option>
+                  <option value="all">全部</option>
                   <option value="P0">P0</option>
                   <option value="P1">P1</option>
                   <option value="P2">P2</option>
@@ -881,20 +881,20 @@
 
       <aside class="stack">
         <section class="panel" aria-labelledby="detail-title" data-region="batch-detail">
-          <h2 id="detail-title">Batch Detail</h2>
-          <div id="batchDetail" class="empty">Select a batch or load a scan report to see summary details.</div>
+          <h2 id="detail-title">批次详情</h2>
+          <div id="batchDetail" class="empty">选择批次或加载扫描报告以查看摘要详情。</div>
         </section>
 
         <section class="panel" aria-labelledby="preview-title" data-region="image-preview">
-          <h2 id="preview-title">Image Previews</h2>
+          <h2 id="preview-title">图像预览</h2>
           <div class="preview-controls">
-            <p class="preview-copy">Local image preview scaffold: an operator may choose separate original/source and processed/QC output images for this browser tab only. The workbench creates temporary object URLs, revokes each one on clear, reload, or new selection, and never uploads, scans, transforms, or derives image paths from report JSON.</p>
-            <div class="preview-toolbar" aria-label="Local preview display controls">
+            <p class="preview-copy">本地图像预览脚手架：操作员可仅为此浏览器标签页分别选择原始/来源图像和处理后/质检输出图像。工作台会创建临时对象 URL，并在清除、重新加载或重新选择时撤销；绝不会上传、扫描、转换图像，也不会从报告 JSON 推导图像路径。</p>
+            <div class="preview-toolbar" aria-label="本地预览显示控件">
               <div class="preview-toolbar-actions">
-                <button id="fitPreviewButton" class="secondary" type="button">Fit to Panel</button>
-                <button id="resetPreviewZoomButton" class="secondary" type="button">Reset Zoom</button>
-                <label>Zoom
-                  <select id="previewZoomSelect" aria-label="Preview zoom level">
+                <button id="fitPreviewButton" class="secondary" type="button">适应面板</button>
+                <button id="resetPreviewZoomButton" class="secondary" type="button">重置缩放</button>
+                <label>缩放
+                  <select id="previewZoomSelect" aria-label="预览缩放级别">
                     <option value="0.5">50%</option>
                     <option value="0.75">75%</option>
                     <option value="1">100%</option>
@@ -904,41 +904,41 @@
                   </select>
                 </label>
               </div>
-              <span id="previewZoomStatus" class="preview-zoom-status" role="status" aria-live="polite">Preview display: fit to panel</span>
+              <span id="previewZoomStatus" class="preview-zoom-status" role="status" aria-live="polite">预览显示：适应面板</span>
             </div>
           </div>
           <div class="preview-slots">
             <div class="preview-slot" data-preview-slot="original">
-              <h3>Original/Source Image</h3>
+              <h3>原始/来源图像</h3>
               <div class="file-row">
                 <input id="originalPreviewFile" type="file" accept="image/*" aria-describedby="originalPreviewPrivacyCopy">
-                <button id="clearOriginalPreviewButton" class="secondary" type="button" disabled>Clear Original Preview</button>
+                <button id="clearOriginalPreviewButton" class="secondary" type="button" disabled>清除原始预览</button>
               </div>
               <div id="originalPreviewPrivacyCopy" class="preview-state" role="status" aria-live="polite">
-                <span>Selected original preview filename: none</span>
-                <span>Original preview is excluded from review-decision export JSON.</span>
+                <span>已选择原始预览文件名：无</span>
+                <span>原始预览不包含在复核决定导出 JSON 中。</span>
               </div>
               <div id="originalImagePreview" class="preview">
                 <div>
-                  <strong>Original preview placeholder</strong>
-                  <p class="muted">No source image is loaded or transformed in this static prototype.</p>
+                  <strong>原始预览占位</strong>
+                  <p class="muted">此静态原型未加载或转换来源图像。</p>
                 </div>
               </div>
             </div>
             <div class="preview-slot" data-preview-slot="processed">
-              <h3>Processed/QC Output Image</h3>
+              <h3>处理后/质检输出图像</h3>
               <div class="file-row">
                 <input id="processedPreviewFile" type="file" accept="image/*" aria-describedby="processedPreviewPrivacyCopy">
-                <button id="clearProcessedPreviewButton" class="secondary" type="button" disabled>Clear Processed Preview</button>
+                <button id="clearProcessedPreviewButton" class="secondary" type="button" disabled>清除处理后预览</button>
               </div>
               <div id="processedPreviewPrivacyCopy" class="preview-state" role="status" aria-live="polite">
-                <span>Selected processed preview filename: none</span>
-                <span>Processed preview is excluded from review-decision export JSON.</span>
+                <span>已选择处理后预览文件名：无</span>
+                <span>处理后预览不包含在复核决定导出 JSON 中。</span>
               </div>
               <div id="processedImagePreview" class="preview">
                 <div>
-                  <strong>Processed preview placeholder</strong>
-                  <p class="muted">No QC output image is loaded or transformed in this static prototype.</p>
+                  <strong>处理后预览占位</strong>
+                  <p class="muted">此静态原型未加载或转换质检输出图像。</p>
                 </div>
               </div>
             </div>
@@ -953,7 +953,7 @@
 
     const SAMPLE_EMPTY = {
       sourceType: "empty",
-      projectId: "No project loaded",
+      projectId: "未加载项目",
       generatedAt: "",
       metrics: {
         totalBatches: 0,
@@ -989,12 +989,12 @@
       },
       previews: {
         original: {
-          label: "Original",
+          label: "原始",
           fileName: "",
           objectUrl: ""
         },
         processed: {
-          label: "Processed",
+          label: "处理后",
           fileName: "",
           objectUrl: ""
         }
@@ -1006,12 +1006,12 @@
     };
 
     const REVIEW_DECISIONS = [
-      ["pending", "Pending"],
-      ["accepted_issue", "Accepted issue"],
-      ["false_positive", "False positive"],
-      ["fixed_externally", "Fixed externally"],
-      ["needs_rescan", "Needs rescan"],
-      ["blocked", "Blocked"]
+      ["pending", "待处理"],
+      ["accepted_issue", "确认问题"],
+      ["false_positive", "误报"],
+      ["fixed_externally", "外部已修复"],
+      ["needs_rescan", "需要重扫"],
+      ["blocked", "已阻塞"]
     ];
 
     const PUBLIC_SAFE_OMISSIONS = [
@@ -1063,23 +1063,23 @@
     }
 
     const PUBLIC_SAFE_READINESS_ROWS = {
-      "run_plan_summary.json": publicSafeReadinessRow("run_plan_summary.json", "run_plan", "Run plan summary", "2026-05-11T00:00:00Z"),
-      "workbench_public_summary.json": publicSafeReadinessRow("workbench_public_summary.json", "workbench_public_summary", "Workbench public summary", "2026-05-11T00:00:30Z", true),
-      "review_summary.json": publicSafeReadinessRow("review_summary.json", "review_summary", "Review summary", "2026-05-11T00:01:00Z"),
-      "acceptance_summary.json": publicSafeReadinessRow("acceptance_summary.json", "acceptance_summary", "Acceptance summary", "2026-05-11T00:02:00Z"),
-      "aggregate_evidence_bundle_summary.json": publicSafeReadinessRow("aggregate_evidence_bundle_summary.json", "aggregate_evidence_bundle", "Aggregate evidence bundle summary", "2026-05-11T00:03:00Z", true),
-      "release_candidate_summary.json": publicSafeReadinessRow("release_candidate_summary.json", "release_candidate_summary", "Release candidate summary", "2026-05-11T00:04:00Z"),
-      "final_production_handoff_summary.json": publicSafeReadinessRow("final_production_handoff_summary.json", "final_production_handoff", "Final production handoff summary", "2026-05-11T00:05:00Z", true),
-      "deep_inspection_candidate_summary.json": publicSafeReadinessRow("deep_inspection_candidate_summary.json", "deep_inspection_candidate_summary", "Deep-inspection candidate summary", "2026-05-11T00:05:30Z"),
-      "frontend_workbench_validation.json": publicSafeReadinessRow("frontend_workbench_validation.json", "frontend_workbench_validation", "Frontend workbench validation summary", "2026-05-11T00:05:40Z"),
-      "review_decision_verification_summary.json": publicSafeReadinessRow("review_decision_verification_summary.json", "review_decision_verification", "Review decision verification summary", "2026-05-11T00:05:45Z"),
-      "public_safe_validation_index.json": publicSafeReadinessRow("public_safe_validation_index.json", "public_safe_validation_index", "Public-safe validation index", "2026-05-11T00:06:00Z", true)
+      "run_plan_summary.json": publicSafeReadinessRow("run_plan_summary.json", "run_plan", "运行计划摘要", "2026-05-11T00:00:00Z"),
+      "workbench_public_summary.json": publicSafeReadinessRow("workbench_public_summary.json", "workbench_public_summary", "工作台公开摘要", "2026-05-11T00:00:30Z", true),
+      "review_summary.json": publicSafeReadinessRow("review_summary.json", "review_summary", "复核摘要", "2026-05-11T00:01:00Z"),
+      "acceptance_summary.json": publicSafeReadinessRow("acceptance_summary.json", "acceptance_summary", "验收摘要", "2026-05-11T00:02:00Z"),
+      "aggregate_evidence_bundle_summary.json": publicSafeReadinessRow("aggregate_evidence_bundle_summary.json", "aggregate_evidence_bundle", "汇总证据包摘要", "2026-05-11T00:03:00Z", true),
+      "release_candidate_summary.json": publicSafeReadinessRow("release_candidate_summary.json", "release_candidate_summary", "发布候选摘要", "2026-05-11T00:04:00Z"),
+      "final_production_handoff_summary.json": publicSafeReadinessRow("final_production_handoff_summary.json", "final_production_handoff", "最终生产交接摘要", "2026-05-11T00:05:00Z", true),
+      "deep_inspection_candidate_summary.json": publicSafeReadinessRow("deep_inspection_candidate_summary.json", "deep_inspection_candidate_summary", "深度检查候选摘要", "2026-05-11T00:05:30Z"),
+      "frontend_workbench_validation.json": publicSafeReadinessRow("frontend_workbench_validation.json", "frontend_workbench_validation", "前端工作台验证摘要", "2026-05-11T00:05:40Z"),
+      "review_decision_verification_summary.json": publicSafeReadinessRow("review_decision_verification_summary.json", "review_decision_verification", "复核决定验证摘要", "2026-05-11T00:05:45Z"),
+      "public_safe_validation_index.json": publicSafeReadinessRow("public_safe_validation_index.json", "public_safe_validation_index", "公开安全验证索引", "2026-05-11T00:06:00Z", true)
     };
 
     const DEMO_FIXTURES = [
       {
         id: "workbench-public-summary-pass",
-        label: "Passing workbench public summary",
+        label: "通过的工作台公开摘要",
         payload: {
           schema_version: "scan-qc.workbench-public-summary.v1",
           generated_at: "2026-05-11T00:08:00Z",
@@ -1191,7 +1191,7 @@
       },
       {
         id: "workbench-public-summary-blocked",
-        label: "Blocked workbench public summary",
+        label: "阻塞的工作台公开摘要",
         payload: {
           schema_version: "scan-qc.workbench-public-summary.v1",
           generated_at: "2026-05-11T00:09:00Z",
@@ -1270,7 +1270,7 @@
       },
       {
         id: "review-decision-verification-pass",
-        label: "Passing review decision verification summary",
+        label: "通过的复核决定验证摘要",
         payload: {
           schema_version: "scan-qc.review-decision-verification-summary.v1",
           generated_at: "2026-05-11T00:09:30Z",
@@ -1304,7 +1304,7 @@
       },
       {
         id: "review-decision-verification-blocked",
-        label: "Blocked review decision verification summary",
+        label: "阻塞的复核决定验证摘要",
         payload: {
           schema_version: "scan-qc.review-decision-verification-summary.v1",
           generated_at: "2026-05-11T00:09:45Z",
@@ -1341,7 +1341,7 @@
       },
       {
         id: "recognized-review-pass",
-        label: "Recognized passing review summary",
+        label: "已识别的通过复核摘要",
         payload: {
           schema_version: "scan-qc-review-summary.v1",
           generated_at: "2026-05-11T00:00:00Z",
@@ -1376,7 +1376,7 @@
       },
       {
         id: "acceptance-pass",
-        label: "Passing acceptance summary",
+        label: "通过的验收摘要",
         payload: {
           schema_version: "scan-qc-acceptance-summary.v1",
           generated_at: "2026-05-11T00:10:00Z",
@@ -1402,7 +1402,7 @@
       },
       {
         id: "complete-readiness-checklist",
-        label: "Complete public-safe readiness checklist",
+        label: "完整的公开安全就绪清单",
         payload: {
           schema_version: "scan-qc-artifact-readiness-checklist.v1",
           generated_at: "2026-05-11T00:20:00Z",
@@ -1447,7 +1447,7 @@
       },
       {
         id: "final-handoff-pass",
-        label: "Passing final production handoff",
+        label: "通过的最终生产交接",
         payload: {
           schema_version: "scan-qc-final-production-handoff-summary.v1",
           generated_at: "2026-05-11T01:00:00Z",
@@ -1478,7 +1478,7 @@
       },
       {
         id: "final-handoff-blocked",
-        label: "Blocked final production handoff",
+        label: "阻塞的最终生产交接",
         payload: {
           schema_version: "scan-qc-final-production-handoff-summary.v1",
           generated_at: "2026-05-11T01:10:00Z",
@@ -1507,7 +1507,7 @@
       },
       {
         id: "validation-index-pass",
-        label: "Passing public-safe validation index",
+        label: "通过的公开安全验证索引",
         payload: {
           schema_version: "scan-qc.public-safe-validation-index.v1",
           generated_at: "2026-05-11T01:12:00Z",
@@ -1581,7 +1581,7 @@
       },
       {
         id: "validation-index-blocked",
-        label: "Blocked public-safe validation index",
+        label: "阻塞的公开安全验证索引",
         payload: {
           schema_version: "scan-qc.public-safe-validation-index.v1",
           generated_at: "2026-05-11T01:14:00Z",
@@ -1617,7 +1617,7 @@
       },
       {
         id: "deep-inspection-candidate-summary",
-        label: "Deep-inspection candidate summary",
+        label: "深度检查候选摘要",
         payload: {
           schema_version: "scan-qc.deep-inspection-candidates.v1",
           generated_at: "2026-05-11T01:18:00Z",
@@ -1644,7 +1644,7 @@
       },
       {
         id: "provider-capability-probe-disabled",
-        label: "Disabled provider capability probe",
+        label: "已禁用的提供方能力探测",
         payload: {
           schema_version: "scan-qc-provider-capability-probe-summary.v1",
           generated_at: "2026-05-11T01:20:00Z",
@@ -1673,7 +1673,7 @@
       },
       {
         id: "processing-review-package-summary",
-        label: "Synthetic processing-review package summary",
+        label: "合成处理复核包摘要",
         payload: {
           schema_version: "scan-qc.processing-review.v1",
           generated_at: "2026-05-11T01:30:00Z",
@@ -1714,7 +1714,7 @@
       },
       {
         id: "unsupported-schema-warning",
-        label: "Unsupported schema compatibility warning",
+        label: "不支持架构的兼容性警告",
         payload: {
           schema_version: "scan-qc-artifact-readiness-checklist.v99",
           generated_at: "2026-05-11T00:30:00Z",
@@ -1729,7 +1729,7 @@
       },
       {
         id: "privacy-diagnostic-fail",
-        label: "Privacy summary failing diagnostic",
+        label: "隐私摘要失败诊断",
         payload: {
           schema_version: "scan-qc-acceptance-summary.v1",
           generated_at: "2026-05-11T00:40:00Z",
@@ -1757,7 +1757,7 @@
       },
       {
         id: "privacy-diagnostic-missing",
-        label: "Privacy summary missing diagnostic",
+        label: "隐私摘要缺失诊断",
         payload: {
           schema_version: "scan-qc-review-summary.v1",
           generated_at: "2026-05-11T00:50:00Z",
@@ -1824,7 +1824,7 @@
       findingSeverityFilter: document.getElementById("findingSeverityFilter")
     };
 
-    function text(value, fallback = "Not provided") {
+    function text(value, fallback = "未提供") {
       if (value === null || value === undefined || value === "") return fallback;
       return String(value);
     }
@@ -1846,7 +1846,7 @@
 
     function inferArtifact(payload) {
       if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-        throw new Error("JSON root must be an object.");
+        throw new Error("JSON 根必须是对象。");
       }
       if (Array.isArray(payload.batches) || String(payload.schema_version || "").includes("run-plan")) {
         return buildRunPlanModel(payload);
@@ -1857,7 +1857,7 @@
       if (payload.summary || Array.isArray(payload.findings) || Array.isArray(payload.files)) {
         return buildScanReportModel(payload);
       }
-      throw new Error("Unsupported artifact. Load run_plan_summary.json, scan_qc_report.json, workbench_public_summary.json, review_summary.json, acceptance_summary.json, aggregate_evidence_bundle_summary.json, final_production_handoff_summary.json, release_candidate_summary.json, deep_inspection_candidate_summary.json, frontend_workbench_validation.json, or public_safe_validation_index.json.");
+      throw new Error("不支持的工件。请加载 run_plan_summary.json、scan_qc_report.json、workbench_public_summary.json、review_summary.json、acceptance_summary.json、aggregate_evidence_bundle_summary.json、final_production_handoff_summary.json、release_candidate_summary.json、deep_inspection_candidate_summary.json、frontend_workbench_validation.json 或 public_safe_validation_index.json。");
     }
 
     function buildRunPlanModel(payload) {
@@ -1885,7 +1885,7 @@
 
       return {
         sourceType: "run-plan",
-        projectId: text(payload.project_id, "Unknown project"),
+        projectId: text(payload.project_id, "未知项目"),
         generatedAt: text(payload.generated_at || payload.finished_at, ""),
         metrics: {
           totalBatches: number(summary.total_batches || batches.length),
@@ -1923,8 +1923,8 @@
         severity: text(finding.severity, "P2"),
         source: text(finding.source, "rules"),
         confidence: text(finding.confidence, ""),
-        message: text(finding.message, "No message"),
-        relativePath: text(finding.relative_path, "Private path hidden")
+        message: text(finding.message, "无消息"),
+        relativePath: text(finding.relative_path, "私有路径已隐藏")
       })) : [];
 
       const batch = {
@@ -1932,7 +1932,7 @@
         localId: "B0001",
         status: number(summary.p0_findings) > 0 ? "failed" : "passed",
         failureStage: number(summary.p0_findings) > 0 ? "scan" : "",
-        failureReason: number(summary.p0_findings) > 0 ? "P0 findings present" : "",
+        failureReason: number(summary.p0_findings) > 0 ? "存在 P0 发现" : "",
         reportDir: "",
         processOut: "",
         totalFiles: number(summary.total_files),
@@ -1950,7 +1950,7 @@
 
       return {
         sourceType: "scan-report",
-        projectId: text(project.project_id, "Unknown project"),
+        projectId: text(project.project_id, "未知项目"),
         generatedAt: text(payload.generated_at, ""),
         metrics: {
           totalBatches: 1,
@@ -2026,9 +2026,9 @@
       const aggregateStatus = payload.status || production.status || (schema.includes("processing-review") ? "local-review" : "") || (payload.acceptance_passed === true || payload.pass === true || payload.ready === true ? "pass" : payload.acceptance_passed === false || payload.pass === false || payload.ready === false ? "fail" : "");
       const aggregate = {
         artifactType: aggregateArtifactType(schema, payload),
-        schemaVersion: schema || "Unknown aggregate schema",
+        schemaVersion: schema || "未知汇总架构",
         status: normalizeAggregateStatus(aggregateStatus),
-        readyFlagLabel: payload.ready_for_handoff !== undefined ? "Ready for handoff" : payload.ready_for_release_candidate !== undefined ? "Ready for release candidate" : "Ready flag",
+        readyFlagLabel: payload.ready_for_handoff !== undefined ? "交接就绪" : payload.ready_for_release_candidate !== undefined ? "发布候选就绪" : "就绪标志",
         readyFlag: payload.ready_for_handoff !== undefined ? Boolean(payload.ready_for_handoff) : payload.ready_for_release_candidate !== undefined ? Boolean(payload.ready_for_release_candidate) : payload.ready !== undefined ? Boolean(payload.ready) : normalizeAggregateStatus(aggregateStatus) === "pass",
         workflowState: aggregateWorkflowState(payload.workflow_state || payload.workflow_status || (payload.summary && (payload.summary.workflow_state || payload.summary.workflow_status))),
         checksPassed: firstNumber(payload.checks_passed, checks.passed, payload.summary && payload.summary.checks_passed),
@@ -2189,40 +2189,40 @@
         diagnostics.push({
           severity: "warning",
           code: "unsupported_public_safe_schema_version",
-          message: schema ? `Unsupported or unknown public-safe schema/version: ${schema}.` : "Unsupported or unknown public-safe schema/version: not provided."
+          message: schema ? `不支持或未知的公开安全架构/版本：${schema}。` : "不支持或未知的公开安全架构/版本：未提供。"
         });
       }
       if (!generatedPresent) {
         diagnostics.push({
           severity: "warning",
           code: "generated_timestamp_missing",
-          message: "Generated timestamp presence: missing."
+          message: "生成时间戳存在性：缺失。"
         });
       }
       if (missingStatusFields.length) {
         diagnostics.push({
           severity: "warning",
           code: "aggregate_status_fields_missing",
-          message: `Expected aggregate status fields missing: ${missingStatusFields.join(", ")}.`
+          message: `缺失的预期汇总状态字段：${missingStatusFields.join(", ")}。`
         });
       }
       if (!privacyPresent) {
         diagnostics.push({
           severity: "blocking",
           code: "privacy_summary_missing",
-          message: "Privacy summary present/missing/pass/fail: missing."
+          message: "隐私摘要存在/缺失/通过/失败：缺失。"
         });
       } else if (privacyFailing) {
         diagnostics.push({
           severity: "blocking",
           code: "privacy_summary_fail",
-          message: "Privacy summary present/missing/pass/fail: fail."
+          message: "隐私摘要存在/缺失/通过/失败：失败。"
         });
       } else if (!privacyPassing) {
         diagnostics.push({
           severity: "warning",
           code: "privacy_summary_incomplete",
-          message: "Privacy summary present/missing/pass/fail: present but not enough aggregate privacy flags to mark pass."
+          message: "隐私摘要存在/缺失/通过/失败：已存在，但汇总隐私标志不足以标记通过。"
         });
       }
 
@@ -2230,7 +2230,7 @@
       const warningCount = diagnostics.filter(item => item.severity === "warning").length;
       return {
         artifactType: aggregate.artifactType,
-        schemaVersion: schema || "Not provided",
+        schemaVersion: schema || "未提供",
         schemaRecognized: recognizedSchema,
         generatedTimestampPresent: generatedPresent,
         statusFieldsPresent: statusFields.filter(([, present]) => present).map(([label]) => label),
@@ -2258,7 +2258,7 @@
         const status = normalizeAggregateStatus(text(item.status || item.reported_status || (name === currentArtifactName ? aggregate.status : ""), present === false ? "missing" : "missing"));
         const blockingCount = firstNumber(item.blocking_count, item.blocking_item_count, item.blocking_items, name === currentArtifactName ? aggregate.blockingItemCount : 0);
         const warningCount = firstNumber(item.warning_count, item.warning_item_count, item.warnings, item.warning_items, name === currentArtifactName ? aggregate.warningCount : 0);
-        const privacyStatus = text(item.privacy_status || item.privacy || item.public_safe_status || (name === currentArtifactName ? aggregatePrivacyStatusLabel(aggregate.privacy) : ""), present === false ? "not evaluated" : "not provided");
+        const privacyStatus = text(item.privacy_status || item.privacy || item.public_safe_status || (name === currentArtifactName ? aggregatePrivacyStatusLabel(aggregate.privacy) : ""), present === false ? "not evaluated" : "未提供");
         return {
           name,
           present: present === null ? false : Boolean(present),
@@ -2278,7 +2278,7 @@
       const ready = missingCount === 0 && blockingCount === 0 && privacyBlockers === 0 && failingCount === 0;
       return {
         ready,
-        summary: ready ? "Ready for public handoff" : "Not ready for public handoff",
+        summary: ready ? "公开交接就绪" : "公开交接未就绪",
         missingCount,
         blockingCount,
         warningCount,
@@ -2290,12 +2290,12 @@
     }
 
     function aggregatePrivacyStatusLabel(privacy) {
-      if (!privacy) return "not provided";
-      if (privacy.localOnly) return "local-only";
+      if (!privacy) return "未提供";
+      if (privacy.localOnly) return "仅本地";
       if (privacy.privateIndicatorsFound || privacy.privateIndicatorCount > 0) return "private indicators found";
       if (privacy.aggregateOnly && privacy.redactsPrivateValues) return "public-safe";
       if (privacy.aggregateOnly) return "aggregate-only";
-      return "not provided";
+      return "未提供";
     }
 
     function isChecklistPrivacySafe(value) {
@@ -2344,7 +2344,7 @@
         name,
         present: Boolean(item && item.present),
         required: item && item.required !== undefined ? Boolean(item.required) : true,
-        category: text(item && item.category, "not provided"),
+        category: text(item && item.category, "未提供"),
         status: text(item && item.status, "unknown"),
         reportedStatus: text(item && (item.reported_status || item.public_status), "")
       }));
@@ -2391,9 +2391,9 @@
       if (!source) {
         return {
           recognized: false,
-          requestedBackend: "Not provided",
-          effectiveBackendMode: "Not provided",
-          backendMode: "Not provided",
+          requestedBackend: "未提供",
+          effectiveBackendMode: "未提供",
+          backendMode: "未提供",
           numpyAvailable: null,
           backendCounts: [],
           fallbackCount: null,
@@ -2404,7 +2404,7 @@
       const effectiveBackendMode = text(source.effective_backend_mode || source.backend_mode, "unknown");
       return {
         recognized: true,
-        requestedBackend: text(source.requested_backend, "Not provided"),
+        requestedBackend: text(source.requested_backend, "未提供"),
         effectiveBackendMode,
         backendMode: effectiveBackendMode,
         numpyAvailable: firstBoolean(source.numpy_available),
@@ -2431,10 +2431,10 @@
       ];
       const operations = ["auto_crop", "deskew", "trim_dark_border", "despeckle"];
       const labels = {
-        auto_crop: "Auto Crop",
-        deskew: "Deskew",
-        trim_dark_border: "Trim Dark Border",
-        despeckle: "Despeckle"
+        auto_crop: "自动裁切",
+        deskew: "纠偏",
+        trim_dark_border: "裁剪黑边",
+        despeckle: "去噪点"
       };
       const rows = [];
       operations.forEach(operation => {
@@ -2467,7 +2467,7 @@
         providerCount: firstNumber(source.provider_count),
         checksPassed: firstNumber(source.checks_passed_count, aggregateArrayCount(source.checks_passed)),
         checksFailed: firstNumber(source.checks_failed_count, aggregateArrayCount(source.checks_failed)),
-        privacyStatus: text(source.privacy_status || payload.privacy_status, "Not provided"),
+        privacyStatus: text(source.privacy_status || payload.privacy_status, "未提供"),
         noInferenceRun: firstBoolean(source.no_inference_run),
         checkCodesPassed: aggregateStringCodes(source.checks_passed),
         checkCodesFailed: aggregateStringCodes(source.checks_failed)
@@ -2583,7 +2583,7 @@
       );
       const reworkCount = firstNumber(source.rework_count, summary.rework_count, decisionSummary.rework, decisionSummary.rework_count, decisionCounts.rework, decisionCounts.needs_rework, nestedReworkCount);
       const complete = firstBoolean(source.complete, source.review_complete, summary.complete, decisionSummary.complete, completion.complete);
-      const completionStatus = text(source.completion_status || summary.completion_status || decisionSummary.completion_status || completion.status, complete === null ? "Not provided" : complete ? "complete" : "not complete");
+      const completionStatus = text(source.completion_status || summary.completion_status || decisionSummary.completion_status || completion.status, complete === null ? "未提供" : complete ? "已完成" : "未完成");
       return {
         recognized: true,
         status: normalizeAggregateStatus(source.status || source.reported_status || summary.status || (completionStatus === "complete" ? "pass" : completionStatus === "incomplete" ? "blocked" : complete === true && pendingCount === 0 ? "pass" : complete === false ? "blocked" : "")),
@@ -2660,7 +2660,7 @@
         visibleModelCount: firstNumber(probe.visible_model_count),
         optionalPackageVisibleCount: firstNumber(probe.optional_package_visible_count, probe.provider_packages_found_count),
         optionalPackageMissingCount: firstNumber(probe.optional_package_missing_count),
-        privacyStatus: text(probe.privacy_status, "Not provided")
+        privacyStatus: text(probe.privacy_status, "未提供")
       };
     }
 
@@ -2687,11 +2687,11 @@
       const selfCheck = payload.privacy_self_check || {};
       const sensitivity = text(payload.sensitivity, "");
       const sensitivityAggregateOnly = sensitivity.toLowerCase().includes("aggregate-only") || sensitivity.toLowerCase().includes("aggregate only");
-      const sensitivityLocalOnly = sensitivity.toLowerCase().includes("local-only") || sensitivity.toLowerCase().includes("local only");
+      const sensitivityLocalOnly = sensitivity.toLowerCase().includes("仅本地") || sensitivity.toLowerCase().includes("local only");
       return {
         aggregateOnly: Boolean(privacy.aggregate_only) || sensitivityAggregateOnly,
         localOnly: Boolean(privacy.local_only) || sensitivityLocalOnly,
-        sensitivity: sensitivity || "Not provided",
+        sensitivity: sensitivity || "未提供",
         omissions: aggregatePrivacyOmissions(privacy.omits),
         privateIndicatorsFound: Boolean(privacy.private_indicators_found),
         privateIndicatorCount: firstNumber(privacy.private_indicator_count),
@@ -2703,15 +2703,15 @@
         containsImageContent: Boolean(privacy.contains_image_content) && !privacyOmits(privacy.omits, "image content"),
         containsRowLevelFindings: Boolean(privacy.contains_row_level_findings) && !privacyOmits(privacy.omits, "row-level findings"),
         redactsPrivateValues: Boolean(privacy.redacts_private_values || payload.sensitive_values_omitted),
-        privacySelfCheckStatus: text(selfCheck.status, "Not provided"),
+        privacySelfCheckStatus: text(selfCheck.status, "未提供"),
         privacySelfCheckViolations: firstNullableNumber(selfCheck.violation_count)
       };
     }
 
     function aggregatePrivacyOmissions(items) {
-      if (!Array.isArray(items)) return "Not provided";
+      if (!Array.isArray(items)) return "未提供";
       const labels = items.map(item => text(item, "")).filter(Boolean);
-      return labels.length ? labels.join(", ") : "Not provided";
+      return labels.length ? labels.join(", ") : "未提供";
     }
 
     function privacyOmits(items, value) {
@@ -2748,12 +2748,12 @@
     }
 
     function aggregateWorkflowState(value) {
-      if (!value) return "Not provided";
-      if (typeof value !== "object" || Array.isArray(value)) return text(value, "Not provided");
+      if (!value) return "未提供";
+      if (typeof value !== "object" || Array.isArray(value)) return text(value, "未提供");
       const entries = Object.entries(value)
         .filter(([, status]) => status !== null && status !== undefined && status !== "")
         .map(([name, status]) => `${name}: ${status}`);
-      return entries.length ? entries.join("; ") : "Not provided";
+      return entries.length ? entries.join("; ") : "未提供";
     }
 
     function aggregateStringCodes(items) {
@@ -2867,6 +2867,36 @@
       return hasValue ? total : null;
     }
 
+    function sourceTypeLabel(value) {
+      const labels = {
+        "empty": "空状态",
+        "run-plan": "运行计划",
+        "scan-report": "扫描报告",
+        "aggregate-handoff": "汇总交接"
+      };
+      return labels[value] || text(value, "未提供");
+    }
+
+    function artifactTypeDisplay(value) {
+      const labels = {
+        "Processing-review package summary": "处理复核包摘要",
+        "Frontend workbench validation summary": "前端工作台验证摘要",
+        "Workbench public summary": "工作台公开摘要",
+        "Public-safe artifact readiness checklist": "公开安全工件就绪清单",
+        "Public-safe validation index": "公开安全验证索引",
+        "Deep-inspection candidate summary": "深度检查候选摘要",
+        "Review decision verification summary": "复核决定验证摘要",
+        "Provider capability probe summary": "提供方能力探测摘要",
+        "Review summary": "复核摘要",
+        "Final production handoff summary": "最终生产交接摘要",
+        "Aggregate evidence bundle summary": "汇总证据包摘要",
+        "Acceptance summary": "验收摘要",
+        "Release candidate summary": "发布候选摘要",
+        "Aggregate handoff summary": "汇总交接摘要"
+      };
+      return labels[value] || text(value, "未提供");
+    }
+
     function render() {
       renderStatus();
       renderMetrics();
@@ -2892,27 +2922,27 @@
         return;
       }
       els.status.classList.add("ok");
-      els.status.textContent = `Loaded ${state.model.sourceType} for ${state.model.projectId}. Missing optional fields are shown as empty values.`;
+      els.status.textContent = `已加载 ${sourceTypeLabel(state.model.sourceType)}：${state.model.projectId}。缺失的可选字段显示为空值。`;
     }
 
     function renderMetrics() {
       const metrics = state.model.metrics;
       const cards = [
-        ["Project", state.model.projectId],
-        ["Batches", metrics.totalBatches],
-        ["Passed", metrics.passedBatches],
-        ["Failed", metrics.failedBatches],
-        ["Files", metrics.totalFiles],
-        ["Findings", metrics.totalFindings],
+        ["项目", state.model.projectId],
+        ["批次数", metrics.totalBatches],
+        ["通过", metrics.passedBatches],
+        ["失败", metrics.failedBatches],
+        ["文件数", metrics.totalFiles],
+        ["发现数", metrics.totalFindings],
         ["P0", metrics.p0],
         ["P1", metrics.p1],
         ["P2", metrics.p2],
-        ["Preflight Errors", metrics.preflightErrors],
-        ["Processing Failed", metrics.processingFailed],
-        ["Processing Resumed", metrics.processingResumed],
-        ["Processing Duplicate Reused", metrics.processingDuplicateReused],
-        ["Processing Existing Derivative Reused", metrics.processingExistingDerivativeReused],
-        ["Generated", state.model.generatedAt || "Not provided"]
+        ["预检错误", metrics.preflightErrors],
+        ["处理失败", metrics.processingFailed],
+        ["处理已恢复", metrics.processingResumed],
+        ["处理重复复用", metrics.processingDuplicateReused],
+        ["处理已有衍生复用", metrics.processingExistingDerivativeReused],
+        ["生成时间", state.model.generatedAt || "未提供"]
       ];
       els.metrics.innerHTML = cards.map(([label, value]) => `
         <div class="metric">
@@ -2926,18 +2956,19 @@
       const hasData = state.model.sourceType !== "empty";
       const m = state.model.metrics;
       const steps = [
-        ["Configure Batches", hasData ? "done" : "pending", hasData ? "Artifact loaded" : "Waiting for JSON artifact"],
-        ["Preflight", m.preflightErrors > 0 ? "failed" : hasData ? "done" : "pending", m.preflightErrors > 0 ? `${m.preflightErrors} errors` : "Aggregate status only"],
-        ["QC Scan", m.p0 > 0 ? "failed" : hasData ? "done" : "pending", m.p0 > 0 ? "P0 review required" : "Summary available"],
-        ["Processing Copy", m.processingFailed > 0 ? "failed" : hasData ? "blocked" : "pending", hasData ? "Optional backend artifact only" : "No processing state"],
-        ["Review Export", reviewComplete() ? "done" : m.totalFindings > 0 || state.model.batches.length > 0 ? "blocked" : hasData ? "done" : "pending", reviewComplete() ? "Review summary ready" : m.totalFindings > 0 ? "Findings require review" : "No findings loaded"],
-        ["Acceptance Summary", m.failedBatches > 0 || m.p0 > 0 ? "blocked" : hasData ? "done" : "pending", state.model.sourceType === "aggregate-handoff" ? "Aggregate status loaded" : "Read-only prototype state"],
-        ["Handoff Manifest", state.model.sourceType === "aggregate-handoff" ? (state.model.aggregateHandoff.readyFlag ? "done" : "blocked") : hasData ? "blocked" : "pending", state.model.sourceType === "aggregate-handoff" ? state.model.aggregateHandoff.readyFlagLabel : "Use existing CLI/report artifacts"]
+        ["配置批次", hasData ? "done" : "pending", hasData ? "工件已加载" : "等待 JSON 工件"],
+        ["预检", m.preflightErrors > 0 ? "failed" : hasData ? "done" : "pending", m.preflightErrors > 0 ? `${m.preflightErrors} 个错误` : "仅汇总状态"],
+        ["质检扫描", m.p0 > 0 ? "failed" : hasData ? "done" : "pending", m.p0 > 0 ? "需要 P0 复核" : "摘要可用"],
+        ["处理副本", m.processingFailed > 0 ? "failed" : hasData ? "blocked" : "pending", hasData ? "仅可选后端工件" : "无处理状态"],
+        ["复核导出", reviewComplete() ? "done" : m.totalFindings > 0 || state.model.batches.length > 0 ? "blocked" : hasData ? "done" : "pending", reviewComplete() ? "复核摘要就绪" : m.totalFindings > 0 ? "发现需要复核" : "未加载发现"],
+        ["验收摘要", m.failedBatches > 0 || m.p0 > 0 ? "blocked" : hasData ? "done" : "pending", state.model.sourceType === "aggregate-handoff" ? "汇总状态已加载" : "只读原型状态"],
+        ["交接清单", state.model.sourceType === "aggregate-handoff" ? (state.model.aggregateHandoff.readyFlag ? "done" : "blocked") : hasData ? "blocked" : "pending", state.model.sourceType === "aggregate-handoff" ? state.model.aggregateHandoff.readyFlagLabel : "使用现有 CLI/报告工件"]
       ];
+      const statusLabels = { done: "完成", pending: "待处理", failed: "失败", blocked: "阻塞" };
       els.workflow.innerHTML = steps.map(([title, status, note]) => `
         <div class="step ${status}">
           <div class="step-title">${escapeHtml(title)}</div>
-          <span class="badge ${status === "failed" ? "fail" : status === "done" ? "pass" : status === "blocked" ? "warn" : ""}">${escapeHtml(status)}</span>
+          <span class="badge ${status === "failed" ? "fail" : status === "done" ? "pass" : status === "blocked" ? "warn" : ""}">${escapeHtml(statusLabels[status] || status)}</span>
           <br><small>${escapeHtml(note)}</small>
         </div>
       `).join("");
@@ -2950,68 +2981,68 @@
         return;
       }
       const privacyRows = [
-        ["Aggregate only", aggregate.privacy.aggregateOnly],
-        ["Local-only status", aggregate.privacy.localOnly],
-        ["Sensitivity", aggregate.privacy.sensitivity],
-        ["Omitted private evidence", aggregate.privacy.omissions],
-        ["Private indicators found", aggregate.privacy.privateIndicatorsFound],
-        ["Private indicator count", aggregate.privacy.privateIndicatorCount],
-        ["Contains paths", aggregate.privacy.containsPaths],
-        ["Contains filenames", aggregate.privacy.containsFilenames],
-        ["Contains hashes", aggregate.privacy.containsHashes],
-        ["Contains OCR text", aggregate.privacy.containsOcrText],
-        ["Contains thumbnails", aggregate.privacy.containsThumbnails],
-        ["Contains image content", aggregate.privacy.containsImageContent],
-        ["Contains row-level findings", aggregate.privacy.containsRowLevelFindings],
-        ["Redacts private values", aggregate.privacy.redactsPrivateValues],
-        ["Privacy self-check status", aggregate.privacy.privacySelfCheckStatus],
-        ["Privacy self-check violations", aggregate.privacy.privacySelfCheckViolations ?? "Not provided"]
+        ["仅汇总", aggregate.privacy.aggregateOnly],
+        ["仅本地状态", aggregate.privacy.localOnly],
+        ["敏感性", aggregate.privacy.sensitivity],
+        ["已省略私有证据", aggregate.privacy.omissions],
+        ["发现私有指示项", aggregate.privacy.privateIndicatorsFound],
+        ["私有指示项计数", aggregate.privacy.privateIndicatorCount],
+        ["包含路径", aggregate.privacy.containsPaths],
+        ["包含文件名", aggregate.privacy.containsFilenames],
+        ["包含哈希", aggregate.privacy.containsHashes],
+        ["包含 OCR 文本", aggregate.privacy.containsOcrText],
+        ["包含缩略图", aggregate.privacy.containsThumbnails],
+        ["包含图像内容", aggregate.privacy.containsImageContent],
+        ["包含行级发现", aggregate.privacy.containsRowLevelFindings],
+        ["遮蔽私有值", aggregate.privacy.redactsPrivateValues],
+        ["隐私自检状态", aggregate.privacy.privacySelfCheckStatus],
+        ["隐私自检违规数", aggregate.privacy.privacySelfCheckViolations ?? "未提供"]
       ];
       const readiness = state.model.artifactReadiness;
       const compatibility = state.model.artifactCompatibility;
       const validationIndexRows = [
-        ["Artifacts Present", aggregate.validationIndex.artifactsPresent],
-        ["Artifacts Passed", aggregate.validationIndex.artifactsPassed],
-        ["Artifacts Failed", aggregate.validationIndex.artifactsFailed],
-        ["Artifacts Missing", aggregate.validationIndex.artifactsMissing],
-        ["Unknown Inputs", aggregate.validationIndex.unknownInputs],
-        ["Validation Checks Passed", aggregate.validationIndex.checksPassed],
-        ["Validation Checks Failed", aggregate.validationIndex.checksFailed],
-        ["Validation Blocking Item Count", aggregate.validationIndex.blockingItemCount],
-        ["Privacy Aggregate-only Status", aggregatePrivacyStatusLabel(aggregate.privacy)]
+        ["工件存在数", aggregate.validationIndex.artifactsPresent],
+        ["工件通过数", aggregate.validationIndex.artifactsPassed],
+        ["工件失败数", aggregate.validationIndex.artifactsFailed],
+        ["工件缺失数", aggregate.validationIndex.artifactsMissing],
+        ["未知输入", aggregate.validationIndex.unknownInputs],
+        ["验证检查通过数", aggregate.validationIndex.checksPassed],
+        ["验证检查失败数", aggregate.validationIndex.checksFailed],
+        ["验证阻塞项数", aggregate.validationIndex.blockingItemCount],
+        ["隐私仅汇总状态", aggregatePrivacyStatusLabel(aggregate.privacy)]
       ];
       const processingReviewRows = [
-        ["Processed Count", aggregate.processingReview.processedCount],
-        ["Failed Count", aggregate.processingReview.failedCount],
-        ["Warning Count", aggregate.processingReview.warningCount],
-        ["Review Target Count", aggregate.processingReview.reviewTargetCount],
-        ["Sensitivity/Local-only Status", aggregate.processingReview.localOnly ? "local-only" : "not provided"],
-        ["Skipped Count", aggregate.processingReview.skippedCount],
-        ["Processing Resumed", aggregate.processingReview.resumedCount],
-        ["Processing Duplicate Reused", aggregate.processingReview.duplicateReusedCount],
-        ["Processing Existing Derivative Reused", aggregate.processingReview.existingDerivativeReusedCount],
-        ["Deskewed Count", aggregate.processingReview.deskewedCount],
-        ["Dark Border Trimmed Count", aggregate.processingReview.darkBorderTrimmedCount],
-        ["Cropped Count", aggregate.processingReview.croppedCount],
-        ["Despeckled Count", aggregate.processingReview.despeckledCount]
+        ["已处理数", aggregate.processingReview.processedCount],
+        ["失败数", aggregate.processingReview.failedCount],
+        ["警告数", aggregate.processingReview.warningCount],
+        ["复核目标数", aggregate.processingReview.reviewTargetCount],
+        ["敏感性/仅本地状态", aggregate.processingReview.localOnly ? "仅本地" : "未提供"],
+        ["跳过数", aggregate.processingReview.skippedCount],
+        ["处理已恢复", aggregate.processingReview.resumedCount],
+        ["处理重复复用", aggregate.processingReview.duplicateReusedCount],
+        ["处理已有衍生复用", aggregate.processingReview.existingDerivativeReusedCount],
+        ["纠偏数", aggregate.processingReview.deskewedCount],
+        ["黑边裁剪数", aggregate.processingReview.darkBorderTrimmedCount],
+        ["裁切数", aggregate.processingReview.croppedCount],
+        ["去噪点数", aggregate.processingReview.despeckledCount]
       ];
       const despeckleBackendRows = [
-        ["Requested Backend", aggregate.despeckleBackend.requestedBackend],
-        ["Effective Backend Mode", aggregate.despeckleBackend.effectiveBackendMode],
-        ["NumPy Available", aggregate.despeckleBackend.numpyAvailable === null ? "Not provided" : aggregate.despeckleBackend.numpyAvailable],
-        ["Fallback Count", aggregate.despeckleBackend.fallbackCount === null ? "Not provided" : aggregate.despeckleBackend.fallbackCount],
-        ["Requested NumPy Fallback Count", aggregate.despeckleBackend.requestedNumpyFallbackCount === null ? "Not provided" : aggregate.despeckleBackend.requestedNumpyFallbackCount]
+        ["请求后端", aggregate.despeckleBackend.requestedBackend],
+        ["有效后端模式", aggregate.despeckleBackend.effectiveBackendMode],
+        ["NumPy 可用", aggregate.despeckleBackend.numpyAvailable === null ? "未提供" : aggregate.despeckleBackend.numpyAvailable],
+        ["回退数", aggregate.despeckleBackend.fallbackCount === null ? "未提供" : aggregate.despeckleBackend.fallbackCount],
+        ["请求 NumPy 后回退数", aggregate.despeckleBackend.requestedNumpyFallbackCount === null ? "未提供" : aggregate.despeckleBackend.requestedNumpyFallbackCount]
       ];
       const providerProbeRows = [
-        ["Provider Count", aggregate.providerProbe.providerCount],
-        ["Configured Provider Count", aggregate.providerProbe.configuredProviderCount],
-        ["Disabled Provider Count", aggregate.providerProbe.disabledProviderCount],
-        ["Providers Configured", aggregate.providerProbe.providersConfigured === null ? "Not provided" : aggregate.providerProbe.providersConfigured],
-        ["Visible GPU Count", aggregate.providerProbe.visibleGpuCount],
-        ["Visible Model Count", aggregate.providerProbe.visibleModelCount],
-        ["Optional Package Visible Count", aggregate.providerProbe.optionalPackageVisibleCount],
-        ["Optional Package Missing Count", aggregate.providerProbe.optionalPackageMissingCount],
-        ["Probe Privacy Status", aggregate.providerProbe.privacyStatus]
+        ["提供方数", aggregate.providerProbe.providerCount],
+        ["已配置提供方数", aggregate.providerProbe.configuredProviderCount],
+        ["已禁用提供方数", aggregate.providerProbe.disabledProviderCount],
+        ["提供方已配置", aggregate.providerProbe.providersConfigured === null ? "未提供" : aggregate.providerProbe.providersConfigured],
+        ["可见 GPU 数", aggregate.providerProbe.visibleGpuCount],
+        ["可见模型数", aggregate.providerProbe.visibleModelCount],
+        ["可见可选包数", aggregate.providerProbe.optionalPackageVisibleCount],
+        ["缺失可选包数", aggregate.providerProbe.optionalPackageMissingCount],
+        ["探测隐私状态", aggregate.providerProbe.privacyStatus]
       ];
       els.aggregateHandoff.innerHTML = `
         <p class="muted">Aggregate-only status from locally reviewed public-safe summary artifacts. This view displays counts, statuses, and codes only, never private filenames, paths, hashes, OCR text, thumbnails, image content, row-level findings, reviewer notes, manifests, or derivative image references.</p>
@@ -3024,47 +3055,47 @@
         ${aggregate.deepInspectionCandidate ? deepInspectionCandidatePanel(aggregate.deepInspectionCandidate) : ""}
         ${aggregate.reviewDecisionVerification ? reviewDecisionVerificationPanel(aggregate.reviewDecisionVerification) : ""}
         <div class="metric-grid">
-          ${aggregateMetric("Artifact Type", aggregate.artifactType)}
-          ${aggregateMetric("Aggregate-only Status", statusBadge(aggregate.status), true)}
-          ${aggregateMetric("Workflow State", aggregate.workflowState)}
+          ${aggregateMetric("工件类型", artifactTypeDisplay(aggregate.artifactType))}
+          ${aggregateMetric("仅汇总状态", statusBadge(aggregate.status), true)}
+          ${aggregateMetric("工作流状态", aggregate.workflowState)}
           ${aggregateMetric(aggregate.readyFlagLabel, aggregate.readyFlag ? "true" : "false")}
-          ${aggregateMetric("Checks Passed", aggregate.checksPassed)}
-          ${aggregateMetric("Checks Failed", aggregate.checksFailed)}
-          ${aggregateMetric("Blocking Items", aggregate.blockingItemCount)}
-          ${aggregateMetric("Remaining P0", aggregate.remainingP0 ?? "Not provided")}
-          ${aggregateMetric("Remaining P1", aggregate.remainingP1 ?? "Not provided")}
-          ${aggregateMetric("Acceptance Passed", aggregate.acceptancePassed === null ? "Not provided" : aggregate.acceptancePassed)}
-          ${aggregateMetric("Warning Count", aggregate.warningCount)}
-          ${aggregateMetric("Review Target Count", aggregate.processingReview.reviewTargetCount || reviewTargets().length)}
-          ${aggregateMetric("Generated", aggregate.generatedAt || "Not provided")}
-          ${aggregateMetric("Total Files", aggregate.counts.totalFiles)}
-          ${aggregateMetric("Openable Files", aggregate.counts.openableFiles)}
-          ${aggregateMetric("Processed Files", aggregate.counts.processedFiles)}
-          ${aggregateMetric("Failed Batches", aggregate.counts.failedBatches)}
-          ${aggregateMetric("Processing Failed", aggregate.counts.processingFailedFiles)}
-          ${aggregateMetric("Processing Resumed", aggregate.counts.processingResumedFiles)}
-          ${aggregateMetric("Processing Duplicate Reused", aggregate.counts.processingDuplicateReusedFiles)}
-          ${aggregateMetric("Processing Existing Derivative Reused", aggregate.counts.processingExistingDerivativeReusedFiles)}
-          ${aggregateMetric("Scan Throughput", aggregate.throughput.scanFilesPerMinute ? `${aggregate.throughput.scanFilesPerMinute} files/min` : "Not provided")}
-          ${aggregateMetric("Processing Throughput", aggregate.throughput.processingFilesPerMinute ? `${aggregate.throughput.processingFilesPerMinute} files/min` : "Not provided")}
-          ${aggregateMetric("Scan Workers", workerRange(aggregate.workers.scanMin, aggregate.workers.scanMax))}
-          ${aggregateMetric("Processing Workers", workerRange(aggregate.workers.processingMin, aggregate.workers.processingMax))}
+          ${aggregateMetric("检查通过数", aggregate.checksPassed)}
+          ${aggregateMetric("检查失败数", aggregate.checksFailed)}
+          ${aggregateMetric("阻塞项", aggregate.blockingItemCount)}
+          ${aggregateMetric("剩余 P0", aggregate.remainingP0 ?? "未提供")}
+          ${aggregateMetric("剩余 P1", aggregate.remainingP1 ?? "未提供")}
+          ${aggregateMetric("验收通过", aggregate.acceptancePassed === null ? "未提供" : aggregate.acceptancePassed)}
+          ${aggregateMetric("警告数", aggregate.warningCount)}
+          ${aggregateMetric("复核目标数", aggregate.processingReview.reviewTargetCount || reviewTargets().length)}
+          ${aggregateMetric("生成时间", aggregate.generatedAt || "未提供")}
+          ${aggregateMetric("文件总数", aggregate.counts.totalFiles)}
+          ${aggregateMetric("可打开文件", aggregate.counts.openableFiles)}
+          ${aggregateMetric("已处理文件", aggregate.counts.processedFiles)}
+          ${aggregateMetric("失败批次", aggregate.counts.failedBatches)}
+          ${aggregateMetric("处理失败", aggregate.counts.processingFailedFiles)}
+          ${aggregateMetric("处理已恢复", aggregate.counts.processingResumedFiles)}
+          ${aggregateMetric("处理重复复用", aggregate.counts.processingDuplicateReusedFiles)}
+          ${aggregateMetric("处理已有衍生复用", aggregate.counts.processingExistingDerivativeReusedFiles)}
+          ${aggregateMetric("扫描吞吐", aggregate.throughput.scanFilesPerMinute ? `${aggregate.throughput.scanFilesPerMinute} files/min` : "未提供")}
+          ${aggregateMetric("处理吞吐", aggregate.throughput.processingFilesPerMinute ? `${aggregate.throughput.processingFilesPerMinute} files/min` : "未提供")}
+          ${aggregateMetric("扫描工作线程", workerRange(aggregate.workers.scanMin, aggregate.workers.scanMax))}
+          ${aggregateMetric("处理工作线程", workerRange(aggregate.workers.processingMin, aggregate.workers.processingMax))}
         </div>
         ${["Public-safe validation index", "Workbench public summary"].includes(aggregate.artifactType) ? validationIndexPanel(validationIndexRows, aggregate.validationIndexReviewDecisionCoverage) : ""}
         <div class="grid" style="margin-top:12px">
           <div>
-            <h3>Artifact Presence And Status</h3>
-            ${aggregate.artifactSummary.length ? aggregateArtifactTable(aggregate.artifactSummary) : `<div class="empty">No artifact presence/status section was present.</div>`}
-            <h3>Review Status Counts</h3>
-            ${aggregate.reviewStatusCounts.length ? aggregateCountTable(aggregate.reviewStatusCounts, "Status") : `<div class="empty">No review status counts were present.</div>`}
-            <h3>Severity Status Counts</h3>
-            ${aggregate.severityStatusCounts.length ? aggregateNestedCountTable(aggregate.severityStatusCounts, "Severity") : `<div class="empty">No severity/status counts were present.</div>`}
-            <h3>Blocking And Warning Codes</h3>
-            ${aggregateCodeList("Blocking codes", aggregate.blockingCodes)}
-            ${aggregateCodeList("Warning codes", aggregate.warningCodes)}
-            ${aggregate.blockingCodeCounts.length ? aggregateCountTable(aggregate.blockingCodeCounts, "Blocking Code") : `<div class="empty">No blocking counts by aggregate code were present.</div>`}
-            ${aggregate.warningCodeCounts.length ? aggregateCountTable(aggregate.warningCodeCounts, "Warning Code") : `<div class="empty">No warning counts by aggregate code were present.</div>`}
-            <h3>Provider Capability Probe</h3>
+            <h3>工件存在与状态</h3>
+            ${aggregate.artifactSummary.length ? aggregateArtifactTable(aggregate.artifactSummary) : `<div class="empty">未提供工件存在/状态区段。</div>`}
+            <h3>复核状态计数</h3>
+            ${aggregate.reviewStatusCounts.length ? aggregateCountTable(aggregate.reviewStatusCounts, "状态") : `<div class="empty">未提供复核状态计数。</div>`}
+            <h3>严重级别状态计数</h3>
+            ${aggregate.severityStatusCounts.length ? aggregateNestedCountTable(aggregate.severityStatusCounts, "严重级别") : `<div class="empty">未提供严重级别/状态计数。</div>`}
+            <h3>阻塞与警告代码</h3>
+            ${aggregateCodeList("阻塞代码", aggregate.blockingCodes)}
+            ${aggregateCodeList("警告代码", aggregate.warningCodes)}
+            ${aggregate.blockingCodeCounts.length ? aggregateCountTable(aggregate.blockingCodeCounts, "阻塞代码") : `<div class="empty">未提供按汇总代码统计的阻塞计数。</div>`}
+            ${aggregate.warningCodeCounts.length ? aggregateCountTable(aggregate.warningCodeCounts, "警告代码") : `<div class="empty">未提供按汇总代码统计的警告计数。</div>`}
+            <h3>提供方能力探测</h3>
             <p class="muted">Synthetic provider readiness aggregate only; displays configured state and optional package, GPU, and model visibility counts without command strings or local locations.</p>
             <div class="table-wrap">
               <table>
@@ -3073,72 +3104,72 @@
             </div>
           </div>
           <div>
-            <h3>Privacy Status</h3>
+            <h3>隐私状态</h3>
             <div class="table-wrap">
               <table>
                 <tbody>${privacyRows.map(([label, value]) => kv(label, value)).join("")}</tbody>
               </table>
             </div>
-            <h3>Rule Counts</h3>
-            ${aggregate.ruleCounts.length ? aggregateCountTable(aggregate.ruleCounts, "Rule") : `<div class="empty">No rule counts were present.</div>`}
-            <h3>Rule Status Counts</h3>
-            ${aggregate.ruleStatusCounts.length ? aggregateNestedCountTable(aggregate.ruleStatusCounts) : `<div class="empty">No rule/status counts were present.</div>`}
+            <h3>规则计数</h3>
+            ${aggregate.ruleCounts.length ? aggregateCountTable(aggregate.ruleCounts, "规则") : `<div class="empty">未提供规则计数。</div>`}
+            <h3>规则状态计数</h3>
+            ${aggregate.ruleStatusCounts.length ? aggregateNestedCountTable(aggregate.ruleStatusCounts) : `<div class="empty">未提供规则/状态计数。</div>`}
           </div>
         </div>`;
     }
 
     function frontendValidationPanel(summary) {
       const rows = [
-        ["Status", statusBadge(summary.status), true],
-        ["Error Count", summary.errorCount],
-        ["Validated HTML Path", summary.validatedHtmlPath]
+        ["状态", statusBadge(summary.status), true],
+        ["错误数", summary.errorCount],
+        ["已验证 HTML 路径", summary.validatedHtmlPath]
       ];
       return `
         <section class="subpanel">
-          <h3>Frontend Workbench Validation Summary</h3>
+          <h3>前端工作台验证摘要</h3>
           <p class="muted">Public-safe frontend validator summary. Shows aggregate status, counts, booleans, fixture groups, and sanitized error codes/messages only.</p>
           <div class="table-wrap">
             <table><tbody>${rows.map(([label, value, html]) => html ? `<tr><th>${escapeHtml(label)}</th><td class="truncate">${value}</td></tr>` : kv(label, value)).join("")}</tbody></table>
           </div>
           <div class="grid" style="margin-top:12px">
             <div>
-              <h3>Coverage Booleans</h3>
-              ${summary.coverage.length ? booleanTable(summary.coverage, "Coverage") : `<div class="empty">No coverage booleans were present.</div>`}
-              <h3>Count Summary</h3>
-              ${summary.counts.length ? aggregateCountTable(summary.counts, "Count") : `<div class="empty">No validator counts were present.</div>`}
+              <h3>覆盖布尔项</h3>
+              ${summary.coverage.length ? booleanTable(summary.coverage, "覆盖") : `<div class="empty">未提供覆盖布尔项。</div>`}
+              <h3>计数摘要</h3>
+              ${summary.counts.length ? aggregateCountTable(summary.counts, "计数") : `<div class="empty">未提供验证器计数。</div>`}
             </div>
             <div>
-              <h3>Privacy Booleans</h3>
-              ${summary.privacyChecks.length ? booleanTable(summary.privacyChecks, "Privacy Check") : `<div class="empty">No privacy booleans were present.</div>`}
-              <h3>Fixture Groups</h3>
-              ${summary.fixtureGroups.length ? aggregateCountTable(summary.fixtureGroups, "Fixture Group") : `<div class="empty">No fixture group counts were present.</div>`}
+              <h3>隐私布尔项</h3>
+              ${summary.privacyChecks.length ? booleanTable(summary.privacyChecks, "隐私检查") : `<div class="empty">未提供隐私布尔项。</div>`}
+              <h3>夹具分组</h3>
+              ${summary.fixtureGroups.length ? aggregateCountTable(summary.fixtureGroups, "夹具分组") : `<div class="empty">未提供夹具分组计数。</div>`}
             </div>
           </div>
-          <h3>Validation Error Codes</h3>
-          ${summary.errors.length ? frontendValidationErrorTable(summary.errors) : `<div class="empty">No validation errors were present.</div>`}
+          <h3>验证错误代码</h3>
+          ${summary.errors.length ? frontendValidationErrorTable(summary.errors) : `<div class="empty">未提供验证错误。</div>`}
         </section>`;
     }
 
     function booleanTable(rows, label) {
-      return `<div class="table-wrap"><table><thead><tr><th>${escapeHtml(label)}</th><th>Value</th></tr></thead><tbody>${rows.map(row => `<tr><td>${escapeHtml(row.name)}</td><td>${escapeHtml(String(row.value))}</td></tr>`).join("")}</tbody></table></div>`;
+      return `<div class="table-wrap"><table><thead><tr><th>${escapeHtml(label)}</th><th>值</th></tr></thead><tbody>${rows.map(row => `<tr><td>${escapeHtml(row.name)}</td><td>${escapeHtml(String(row.value))}</td></tr>`).join("")}</tbody></table></div>`;
     }
 
     function frontendValidationErrorTable(rows) {
-      return `<div class="table-wrap"><table><thead><tr><th>Error Code</th><th>Public-safe Message</th></tr></thead><tbody>${rows.map(row => `<tr><td>${escapeHtml(row.code)}</td><td>${escapeHtml(row.message)}</td></tr>`).join("")}</tbody></table></div>`;
+      return `<div class="table-wrap"><table><thead><tr><th>错误代码</th><th>公开安全消息</th></tr></thead><tbody>${rows.map(row => `<tr><td>${escapeHtml(row.code)}</td><td>${escapeHtml(row.message)}</td></tr>`).join("")}</tbody></table></div>`;
     }
 
     function despeckleBackendPanel(backend, rows) {
       return `
         <section class="subpanel">
-          <h3>Despeckle Backend Summary</h3>
+          <h3>去噪点后端摘要</h3>
           <p class="muted">Public-safe aggregate backend status. Shows only backend names, availability booleans, counts, and warning codes from aggregate summaries.</p>
           <div class="table-wrap">
             <table><tbody>${rows.map(([label, value]) => kv(label, value)).join("")}</tbody></table>
           </div>
-          <h3>Backend Counts</h3>
-          ${backend.backendCounts.length ? aggregateCountTable(backend.backendCounts, "Backend") : `<div class="empty">No despeckle backend counts were present.</div>`}
-          <h3>Despeckle Backend Warning Codes</h3>
-          ${aggregateCodeList("Despeckle backend warnings", backend.warningCodes)}
+          <h3>后端计数</h3>
+          ${backend.backendCounts.length ? aggregateCountTable(backend.backendCounts, "后端") : `<div class="empty">未提供去噪点后端计数。</div>`}
+          <h3>去噪点后端警告代码</h3>
+          ${aggregateCodeList("去噪点后端警告", backend.warningCodes)}
         </section>`;
     }
 
@@ -3146,19 +3177,19 @@
       if (!rows.length) return "";
       return `
         <section class="subpanel">
-          <h3>Processing Operation Timing Hotspots</h3>
+          <h3>处理操作耗时热点</h3>
           <p class="muted">Aggregate-only operation timings sorted by elapsed seconds. Shows only enabled state, file counts, durations, rates, and per-file averages.</p>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Operation</th><th>Enabled</th><th>Files</th><th>Elapsed Seconds</th><th>Files/Min</th><th>Avg Sec/File</th></tr></thead>
+              <thead><tr><th>操作</th><th>启用</th><th>文件数</th><th>耗时秒数</th><th>文件/分钟</th><th>平均秒/文件</th></tr></thead>
               <tbody>${rows.map(row => `
                 <tr>
                   <td>${escapeHtml(row.label)}</td>
-                  <td>${row.enabled === null ? "Not provided" : escapeHtml(String(row.enabled))}</td>
-                  <td>${row.fileCount === null ? "Not provided" : escapeHtml(String(row.fileCount))}</td>
-                  <td>${row.elapsedSeconds === null ? "Not provided" : escapeHtml(String(row.elapsedSeconds))}</td>
-                  <td>${row.filesPerMinute === null ? "Not provided" : escapeHtml(String(row.filesPerMinute))}</td>
-                  <td>${row.averageSecondsPerFile === null ? "Not provided" : escapeHtml(String(row.averageSecondsPerFile))}</td>
+                  <td>${row.enabled === null ? "未提供" : escapeHtml(String(row.enabled))}</td>
+                  <td>${row.fileCount === null ? "未提供" : escapeHtml(String(row.fileCount))}</td>
+                  <td>${row.elapsedSeconds === null ? "未提供" : escapeHtml(String(row.elapsedSeconds))}</td>
+                  <td>${row.filesPerMinute === null ? "未提供" : escapeHtml(String(row.filesPerMinute))}</td>
+                  <td>${row.averageSecondsPerFile === null ? "未提供" : escapeHtml(String(row.averageSecondsPerFile))}</td>
                 </tr>`).join("")}</tbody>
             </table>
           </div>
@@ -3167,67 +3198,67 @@
 
     function deepInspectionCandidatePanel(candidate) {
       const rows = [
-        ["Status", candidate.status],
-        ["Candidate Total", candidate.candidateTotal],
-        ["Provider Configured", candidate.providerConfigured === null ? "Not provided" : candidate.providerConfigured],
-        ["Provider Count", candidate.providerCount],
-        ["Checks Passed Count", candidate.checksPassed],
-        ["Checks Failed Count", candidate.checksFailed],
-        ["Privacy Status", candidate.privacyStatus],
-        ["No Inference Run", candidate.noInferenceRun === null ? "Not provided" : candidate.noInferenceRun]
+        ["状态", candidate.status],
+        ["候选总数", candidate.candidateTotal],
+        ["提供方已配置", candidate.providerConfigured === null ? "未提供" : candidate.providerConfigured],
+        ["提供方数", candidate.providerCount],
+        ["检查通过数", candidate.checksPassed],
+        ["检查失败数", candidate.checksFailed],
+        ["隐私状态", candidate.privacyStatus],
+        ["未运行推理", candidate.noInferenceRun === null ? "未提供" : candidate.noInferenceRun]
       ];
       return `
         <section class="subpanel">
-          <h3>Deep-Inspection Candidate Summary</h3>
+          <h3>深度检查候选摘要</h3>
           <p class="muted">Aggregate-only candidate evidence. Counts, statuses, and check codes are shown without filenames, paths, hashes, OCR text, images, row-level findings, provider commands, manifests, source roots, or environment values.</p>
           <div class="table-wrap">
             <table><tbody>${rows.map(([label, value, html]) => kv(label, value, html)).join("")}</tbody></table>
           </div>
           <div class="grid" style="margin-top:12px">
             <div>
-              <h3>Candidates By Reason</h3>
-              ${candidate.candidatesByReason.length ? aggregateCountTable(candidate.candidatesByReason, "Reason") : `<div class="empty">No candidate reason counts were present.</div>`}
+              <h3>按原因统计候选</h3>
+              ${candidate.candidatesByReason.length ? aggregateCountTable(candidate.candidatesByReason, "原因") : `<div class="empty">未提供候选原因计数。</div>`}
             </div>
             <div>
-              <h3>Candidates By Severity</h3>
-              ${candidate.candidatesBySeverity.length ? aggregateCountTable(candidate.candidatesBySeverity, "Severity") : `<div class="empty">No candidate severity counts were present.</div>`}
+              <h3>按严重级别统计候选</h3>
+              ${candidate.candidatesBySeverity.length ? aggregateCountTable(candidate.candidatesBySeverity, "严重级别") : `<div class="empty">未提供候选严重级别计数。</div>`}
             </div>
           </div>
-          ${aggregateCodeList("Passed check codes", candidate.checkCodesPassed)}
-          ${aggregateCodeList("Failed check codes", candidate.checkCodesFailed)}
+          ${aggregateCodeList("通过检查代码", candidate.checkCodesPassed)}
+          ${aggregateCodeList("失败检查代码", candidate.checkCodesFailed)}
         </section>`;
     }
 
     function reviewDecisionVerificationPanel(summary) {
       const rows = [
-        ["Status", statusBadge(summary.status), true],
-        ["Checks Passed", summary.checksPassed],
-        ["Checks Failed", summary.checksFailed],
-        ["Total Decisions", summary.totalDecisions],
-        ["Pending Decisions", summary.pendingCount],
-        ["Accepted Decisions", summary.acceptedCount],
-        ["Rejected Decisions", summary.rejectedCount],
-        ["Rework Decisions", summary.reworkCount],
-        ["Completion Status", summary.completionStatus],
-        ["Blocking Count", summary.blockingCount],
-        ["Warning Count", summary.warningCount],
-        ["Privacy Status", summary.privacyStatus]
+        ["状态", statusBadge(summary.status), true],
+        ["检查通过数", summary.checksPassed],
+        ["检查失败数", summary.checksFailed],
+        ["决定总数", summary.totalDecisions],
+        ["待处理决定", summary.pendingCount],
+        ["已确认决定", summary.acceptedCount],
+        ["已驳回决定", summary.rejectedCount],
+        ["返工决定", summary.reworkCount],
+        ["完成状态", summary.completionStatus],
+        ["阻塞数", summary.blockingCount],
+        ["警告数", summary.warningCount],
+        ["隐私状态", summary.privacyStatus]
       ];
       return `
         <section class="subpanel">
-          <h3>Review Decision Verification Summary</h3>
+          <h3>复核决定验证摘要</h3>
           <p class="muted">Aggregate-only decision verification. Counts, statuses, and aggregate codes are shown without source field names, source values, local IDs, paths, filenames, hashes, OCR text, thumbnails, object URLs, reviewer notes, prompts, provider commands, raw model output, or row-level findings.</p>
           <div class="table-wrap">
             <table><tbody>${rows.map(([label, value, html]) => html ? `<tr><th>${escapeHtml(label)}</th><td class="truncate">${value}</td></tr>` : kv(label, value)).join("")}</tbody></table>
           </div>
           <div class="grid" style="margin-top:12px">
             <div>
-              <h3>Blocking Counts By Code</h3>
-              ${summary.blockingCodeCounts.length ? aggregateCountTable(summary.blockingCodeCounts, "Blocking Code") : `<div class="empty">No blocking counts by aggregate code were present.</div>`}
+              <h3>按代码统计阻塞</h3>
+              ${summary.blockingCodeCounts.length ? aggregateCountTable(summary.blockingCodeCounts, "阻塞代码") : `<div class="empty">未提供按汇总代码统计的阻塞计数。</div>`}
             </div>
             <div>
-              <h3>Warning Counts By Code</h3>
-              ${summary.warningCodeCounts.length ? aggregateCountTable(summary.warningCodeCounts, "Warning Code") : `<div class="empty">No warning counts by aggregate code were present.</div>`}
+              <h3>按代码统计警告</h3>
+              ${summary.warningCodeCounts.length ? aggregateCountTable(summary.warningCodeCounts, "警告代码") : `<div class="empty">未提供按汇总代码统计的警告计数。</div>`}
             </div>
           </div>
         </section>`;
@@ -3235,7 +3266,7 @@
 
     function validationIndexPanel(rows, reviewDecisionCoverage = []) {
       return `
-        <h3>Public-Safe Validation Index</h3>
+        <h3>公开安全验证索引</h3>
         <p class="muted">Validation index view shows aggregate summary counts, artifact presence/category/status, and blocking item codes/counts only. Source values and private evidence are not displayed.</p>
         <div class="table-wrap" style="margin-top:12px">
           <table>
@@ -3244,29 +3275,29 @@
         </div>
         ${reviewDecisionCoverage.length ? `
           <section class="subpanel">
-            <h3>Review-Decision Handoff Coverage</h3>
+            <h3>复核决定交接覆盖</h3>
             <p class="muted">Coverage from the validation index is aggregate-only: artifact presence/status, privacy status, check counts, blocking/warning counts, and blocking/warning code counts.</p>
             ${reviewDecisionCoverage.map(item => `
               <h3>${escapeHtml(item.label)}</h3>
               <div class="table-wrap">
                 <table><tbody>
-                  ${kv("Present", item.present)}
-                  <tr><th>Status</th><td class="truncate">${statusBadge(item.status)}</td></tr>
-                  ${kv("Privacy Status", item.privacyStatus)}
-                  ${kv("Checks Passed", item.checksPassed)}
-                  ${kv("Checks Failed", item.checksFailed)}
-                  ${kv("Blocking Count", item.blockingCount)}
-                  ${kv("Warning Count", item.warningCount)}
+                  ${kv("存在", item.present)}
+                  <tr><th>状态</th><td class="truncate">${statusBadge(item.status)}</td></tr>
+                  ${kv("隐私状态", item.privacyStatus)}
+                  ${kv("检查通过数", item.checksPassed)}
+                  ${kv("检查失败数", item.checksFailed)}
+                  ${kv("阻塞数", item.blockingCount)}
+                  ${kv("警告数", item.warningCount)}
                 </tbody></table>
               </div>
               <div class="grid" style="margin-top:12px">
                 <div>
-                  <h3>Blocking Counts By Code</h3>
-                  ${item.blockingCodeCounts.length ? aggregateCountTable(item.blockingCodeCounts, "Blocking Code") : `<div class="empty">No blocking counts by aggregate code were present.</div>`}
+                  <h3>按代码统计阻塞</h3>
+                  ${item.blockingCodeCounts.length ? aggregateCountTable(item.blockingCodeCounts, "阻塞代码") : `<div class="empty">未提供按汇总代码统计的阻塞计数。</div>`}
                 </div>
                 <div>
-                  <h3>Warning Counts By Code</h3>
-                  ${item.warningCodeCounts.length ? aggregateCountTable(item.warningCodeCounts, "Warning Code") : `<div class="empty">No warning counts by aggregate code were present.</div>`}
+                  <h3>按代码统计警告</h3>
+                  ${item.warningCodeCounts.length ? aggregateCountTable(item.warningCodeCounts, "警告代码") : `<div class="empty">未提供按汇总代码统计的警告计数。</div>`}
                 </div>
               </div>
             `).join("")}
@@ -3275,40 +3306,40 @@
 
     function processingReviewPanel(processingReview, rows) {
       return `
-        <h3>Processing-Review Package Summary</h3>
+        <h3>处理复核包摘要</h3>
         <p class="muted">Local processing-review package summary view uses package-level counts and synthetic review IDs only; it does not parse or display processing manifests, derivative image references, preview filenames, paths, hashes, OCR text, thumbnails, image content, row-level private notes, or per-file records.</p>
         <div class="table-wrap" style="margin-top:12px">
           <table>
             <tbody>${rows.map(([label, value]) => kv(label, value)).join("")}</tbody>
           </table>
         </div>
-        <h3>Processing Status Counts</h3>
-        ${processingReview.statusCounts.length ? aggregateCountTable(processingReview.statusCounts, "Status") : `<div class="empty">No processing status counts were present.</div>`}`;
+        <h3>处理状态计数</h3>
+        ${processingReview.statusCounts.length ? aggregateCountTable(processingReview.statusCounts, "状态") : `<div class="empty">未提供处理状态计数。</div>`}`;
     }
 
     function artifactCompatibilityPanel(compatibility) {
       const items = compatibility.diagnostics.length ? compatibility.diagnostics : [{
         severity: "info",
         code: "artifact_compatibility_pass",
-        message: "Recognized public-safe aggregate schema with required aggregate compatibility signals present."
+        message: "已识别公开安全汇总架构，且必需的汇总兼容性信号存在。"
       }];
       return `
-        <h3>Public-Safe Artifact Compatibility Diagnostics</h3>
+        <h3>公开安全工件兼容性诊断</h3>
         <p class="muted">Compatibility diagnostic uses aggregate/public-safe fields only; no private filenames, paths, hashes, OCR text, thumbnails, image content, manifests, row-level findings, reviewer notes, or derivative image references are parsed or displayed.</p>
         <div class="metric-grid">
-          ${aggregateMetric("Recognized Artifact Type", compatibility.artifactType)}
-          ${aggregateMetric("Schema Version", compatibility.schemaVersion)}
-          ${aggregateMetric("Schema/Type Detection", compatibility.schemaRecognized ? "recognized" : "unsupported or unknown")}
-          ${aggregateMetric("Generated Timestamp Presence", compatibility.generatedTimestampPresent ? "present" : "missing")}
-          ${aggregateMetric("Privacy Summary", compatibility.privacySummaryStatus)}
-          ${aggregateMetric("Diagnostic Blocking Count", compatibility.blockingCount)}
-          ${aggregateMetric("Diagnostic Warning Count", compatibility.warningCount)}
+          ${aggregateMetric("已识别工件类型", artifactTypeDisplay(compatibility.artifactType))}
+          ${aggregateMetric("架构版本", compatibility.schemaVersion)}
+          ${aggregateMetric("架构/类型检测", compatibility.schemaRecognized ? "已识别" : "不支持或未知")}
+          ${aggregateMetric("生成时间戳存在性", compatibility.generatedTimestampPresent ? "存在" : "缺失")}
+          ${aggregateMetric("隐私摘要", compatibility.privacySummaryStatus)}
+          ${aggregateMetric("诊断阻塞数", compatibility.blockingCount)}
+          ${aggregateMetric("诊断警告数", compatibility.warningCount)}
         </div>
         <div class="table-wrap" style="margin-top:12px">
           <table>
             <tbody>
-              ${kv("Expected aggregate status fields present", compatibility.statusFieldsPresent.join(", ") || "None")}
-              ${kv("Expected aggregate status fields missing", compatibility.statusFieldsMissing.join(", ") || "None")}
+              ${kv("存在的预期汇总状态字段", compatibility.statusFieldsPresent.join(", ") || "无")}
+              ${kv("缺失的预期汇总状态字段", compatibility.statusFieldsMissing.join(", ") || "无")}
             </tbody>
           </table>
         </div>
@@ -3324,35 +3355,35 @@
 
     function artifactReadinessPanel(readiness) {
       return `
-        <h3>Public-Safe Artifact Readiness Checklist</h3>
+        <h3>公开安全工件就绪清单</h3>
         <div class="readiness-summary">
           <div class="readiness-verdict ${readiness.ready ? "ready" : "not-ready"}">
-            <span class="muted">Top-level readiness</span>
+            <span class="muted">顶层就绪状态</span>
             <strong>${escapeHtml(readiness.summary)}</strong>
             <p class="muted">Complete public-safe aggregate artifacts only; excludes local preview filename, preview content, and object URL state.</p>
           </div>
           <div class="metric-grid">
-            ${aggregateMetric("Expected Artifacts", EXPECTED_PUBLIC_SAFE_ARTIFACTS.length)}
-            ${aggregateMetric("Missing Artifacts", readiness.missingCount)}
-            ${aggregateMetric("Blocking Count", readiness.blockingCount)}
-            ${aggregateMetric("Warning Count", readiness.warningCount)}
-            ${aggregateMetric("Privacy Blockers", readiness.privacyBlockers)}
-            ${aggregateMetric("Stale Artifacts", readiness.staleCount)}
+            ${aggregateMetric("预期工件", EXPECTED_PUBLIC_SAFE_ARTIFACTS.length)}
+            ${aggregateMetric("缺失工件", readiness.missingCount)}
+            ${aggregateMetric("阻塞数", readiness.blockingCount)}
+            ${aggregateMetric("警告数", readiness.warningCount)}
+            ${aggregateMetric("隐私阻塞项", readiness.privacyBlockers)}
+            ${aggregateMetric("过期工件", readiness.staleCount)}
           </div>
         </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Artifact</th><th>Present/Missing</th><th>Status</th><th>Blocking Count</th><th>Warning Count</th><th>Privacy Status</th><th>Generated Timestamp</th></tr></thead>
+            <thead><tr><th>工件</th><th>存在/缺失</th><th>状态</th><th>阻塞数</th><th>警告数</th><th>隐私状态</th><th>生成时间戳</th></tr></thead>
             <tbody>
               ${readiness.rows.map(row => `
                 <tr>
                   <td class="mono">${escapeHtml(row.name)}</td>
-                  <td>${escapeHtml(row.present ? "present" : "missing")}</td>
+                  <td>${escapeHtml(row.present ? "存在" : "缺失")}</td>
                   <td>${statusBadge(row.status)}</td>
                   <td>${escapeHtml(row.blockingCount)}</td>
                   <td>${escapeHtml(row.warningCount)}</td>
                   <td>${escapeHtml(row.privacyStatus)}</td>
-                  <td>${escapeHtml(row.generatedAt || "Not provided")}</td>
+                  <td>${escapeHtml(row.generatedAt || "未提供")}</td>
                 </tr>
               `).join("")}
             </tbody>
@@ -3361,7 +3392,7 @@
     }
 
     function workerRange(min, max) {
-      if (min === null && max === null) return "Not provided";
+      if (min === null && max === null) return "未提供";
       if (min === max) return String(min);
       return `${min ?? "?"}-${max ?? "?"}`;
     }
@@ -3378,7 +3409,7 @@
       return `
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Artifact</th><th>Present</th><th>Required</th><th>Category</th><th>Status</th><th>Reported Status</th></tr></thead>
+            <thead><tr><th>工件</th><th>存在</th><th>必需</th><th>类别</th><th>状态</th><th>报告状态</th></tr></thead>
             <tbody>
               ${items.map(item => `
                 <tr>
@@ -3387,7 +3418,7 @@
                   <td>${escapeHtml(item.required)}</td>
                   <td>${escapeHtml(item.category)}</td>
                   <td>${statusBadge(item.status)}</td>
-                  <td>${escapeHtml(item.reportedStatus || "Not provided")}</td>
+                  <td>${escapeHtml(item.reportedStatus || "未提供")}</td>
                 </tr>
               `).join("")}
             </tbody>
@@ -3399,7 +3430,7 @@
       return `
         <div class="table-wrap">
           <table>
-            <thead><tr><th>${escapeHtml(nameLabel)}</th><th>Count</th></tr></thead>
+            <thead><tr><th>${escapeHtml(nameLabel)}</th><th>计数</th></tr></thead>
             <tbody>
               ${items.map(item => `
                 <tr>
@@ -3412,16 +3443,16 @@
         </div>`;
     }
 
-    function aggregateNestedCountTable(items, nameLabel = "Rule") {
+    function aggregateNestedCountTable(items, nameLabel = "规则") {
       return `
         <div class="table-wrap">
           <table>
-            <thead><tr><th>${escapeHtml(nameLabel)}</th><th>Status Counts</th></tr></thead>
+            <thead><tr><th>${escapeHtml(nameLabel)}</th><th>状态计数</th></tr></thead>
             <tbody>
               ${items.map(item => `
                 <tr>
                   <td class="mono">${escapeHtml(item.name)}</td>
-                  <td>${escapeHtml(item.statuses.map(status => `${status.name}: ${status.count}`).join(", ") || "Not provided")}</td>
+                  <td>${escapeHtml(item.statuses.map(status => `${status.name}: ${status.count}`).join(", ") || "未提供")}</td>
                 </tr>
               `).join("")}
             </tbody>
@@ -3433,7 +3464,7 @@
       return `
         <div class="table-wrap">
           <table>
-            <tbody>${kv(label, codes.length ? codes.join(", ") : "None")}</tbody>
+            <tbody>${kv(label, codes.length ? codes.join(", ") : "无")}</tbody>
           </table>
         </div>`;
     }
@@ -3445,13 +3476,13 @@
       if (statusFilter !== "all") batches = batches.filter(batch => batch.status === statusFilter);
       if (severityFilter !== "all") batches = batches.filter(batch => number(batch[severityFilter.toLowerCase()]) > 0);
       if (!batches.length) {
-        els.batchList.innerHTML = `<div class="empty">No batches match the current filters.</div>`;
+        els.batchList.innerHTML = `<div class="empty">没有批次匹配当前筛选条件。</div>`;
         return;
       }
       els.batchList.innerHTML = `
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Local ID</th><th>Batch</th><th>Status</th><th>Files</th><th>Findings</th><th>P0/P1/P2</th><th>Review Decision</th><th>Failure</th><th>Report</th></tr></thead>
+            <thead><tr><th>本地 ID</th><th>批次</th><th>状态</th><th>文件</th><th>发现</th><th>P0/P1/P2</th><th>复核决定</th><th>失败</th><th>报告</th></tr></thead>
             <tbody>
               ${batches.map(batch => `
                 <tr class="clickable-row" data-batch-id="${escapeHtml(batch.id)}">
@@ -3462,8 +3493,8 @@
                   <td>${escapeHtml(batch.totalFindings)}</td>
                   <td><span class="badge p0">${batch.p0}</span> <span class="badge p1">${batch.p1}</span> <span class="badge p2">${batch.p2}</span></td>
                   <td>${decisionSelect("batch", batch.localId)}</td>
-                  <td class="truncate">${escapeHtml([batch.failureStage, batch.failureReason].filter(Boolean).join(": ") || "None")}</td>
-                  <td class="truncate mono">${escapeHtml(batch.reportDir || "Not provided")}</td>
+                  <td class="truncate">${escapeHtml([batch.failureStage, batch.failureReason].filter(Boolean).join(": ") || "无")}</td>
+                  <td class="truncate mono">${escapeHtml(batch.reportDir || "未提供")}</td>
                 </tr>
               `).join("")}
             </tbody>
@@ -3483,13 +3514,13 @@
       const severity = els.findingSeverityFilter.value;
       if (severity !== "all") findings = findings.filter(finding => finding.severity === severity);
       if (!findings.length) {
-        els.findingsList.innerHTML = `<div class="empty">No scan report findings loaded for the current filter. Run-plan summaries expose aggregate counts only.</div>`;
+        els.findingsList.innerHTML = `<div class="empty">当前筛选条件下未加载扫描报告发现。运行计划摘要仅公开汇总计数。</div>`;
         return;
       }
       els.findingsList.innerHTML = `
         <div class="table-wrap">
           <table>
-            <thead><tr><th>ID</th><th>Severity</th><th>Rule</th><th>Source</th><th>Confidence</th><th>Review Decision</th><th>Message</th><th>Relative Path</th></tr></thead>
+            <thead><tr><th>ID</th><th>严重级别</th><th>规则</th><th>来源</th><th>置信度</th><th>复核决定</th><th>消息</th><th>相对路径</th></tr></thead>
             <tbody>
               ${findings.map(finding => `
                 <tr>
@@ -3512,7 +3543,7 @@
     function renderDetail() {
       const batch = state.model.batches.find(item => item.id === state.selectedBatchId) || state.model.batches[0];
       if (!batch) {
-        els.batchDetail.innerHTML = "Select a batch or load a scan report to see summary details.";
+        els.batchDetail.innerHTML = "选择批次或加载扫描报告以查看摘要详情。";
         els.batchDetail.className = "empty";
         return;
       }
@@ -3522,20 +3553,20 @@
         <div class="table-wrap">
           <table>
             <tbody>
-              ${kv("Batch", batch.id)}
-              ${kv("Local Review ID", batch.localId)}
-              ${kv("Review Decision", decisionLabel(getDecision("batch", batch.localId)))}
-              ${kv("Status", batch.status)}
-              ${kv("Openable Files", `${batch.openableFiles} / ${batch.totalFiles}`)}
-              ${kv("Findings", batch.totalFindings)}
-              ${kv("Preflight Errors", batch.preflightErrors)}
-              ${kv("Processing Failed", batch.processingFailed)}
-              ${kv("Processing Resumed", batch.processingResumed ?? "Not provided")}
-              ${kv("Processing Duplicate Reused", batch.processingDuplicateReused ?? "Not provided")}
-              ${kv("Processing Existing Derivative Reused", batch.processingExistingDerivativeReused ?? "Not provided")}
-              ${kv("Failure Stage", batch.failureStage || "None")}
-              ${kv("Failure Reason", batch.failureReason || "None")}
-              ${kv("Scan Throughput", perf.files_per_minute ? `${perf.files_per_minute} files/min` : "Not provided")}
+              ${kv("批次", batch.id)}
+              ${kv("本地复核 ID", batch.localId)}
+              ${kv("复核决定", decisionLabel(getDecision("batch", batch.localId)))}
+              ${kv("状态", batch.status)}
+              ${kv("可打开文件", `${batch.openableFiles} / ${batch.totalFiles}`)}
+              ${kv("发现数", batch.totalFindings)}
+              ${kv("预检错误", batch.preflightErrors)}
+              ${kv("处理失败", batch.processingFailed)}
+              ${kv("处理已恢复", batch.processingResumed ?? "未提供")}
+              ${kv("处理重复复用", batch.processingDuplicateReused ?? "未提供")}
+              ${kv("处理已有衍生复用", batch.processingExistingDerivativeReused ?? "未提供")}
+              ${kv("失败阶段", batch.failureStage || "无")}
+              ${kv("失败原因", batch.failureReason || "无")}
+              ${kv("扫描吞吐", perf.files_per_minute ? `${perf.files_per_minute} files/min` : "未提供")}
             </tbody>
           </table>
         </div>`;
@@ -3547,20 +3578,20 @@
       renderReviewCompletionGate(summary);
       els.decisionSummary.innerHTML = `
         <div class="decision-card">
-          <span>Total Targets</span>
+          <span>目标总数</span>
           <strong>${escapeHtml(summary.total)}</strong>
         </div>
         <div class="decision-card">
-          <span>Reviewed Targets</span>
+          <span>已复核目标</span>
           <strong>${escapeHtml(summary.reviewed)}</strong>
         </div>
         <div class="decision-card">
-          <span>Pending Targets</span>
+          <span>待处理目标</span>
           <strong>${escapeHtml(summary.pending)}</strong>
         </div>
         <div class="decision-card">
-          <span>Completion Status</span>
-          <strong>${escapeHtml(summary.complete ? "complete" : "not complete")}</strong>
+          <span>完成状态</span>
+          <strong>${escapeHtml(summary.complete ? "已完成" : "未完成")}</strong>
         </div>
         ${REVIEW_DECISIONS.filter(([value]) => value !== "pending").map(([value, label]) => `
         <div class="decision-card">
@@ -3586,36 +3617,36 @@
       els.reviewCompletionGate.className = "status-banner";
       const countText = reviewDecisionCountText(summary.counts);
       if (summary.total === 0) {
-        els.reviewCompletionGate.textContent = `No review targets loaded. Completion gate warnings use aggregate counts only and do not block export. Decision-status counts: ${countText}.`;
+        els.reviewCompletionGate.textContent = `尚未加载复核目标。完成门禁警告仅使用汇总计数，且不会阻止导出。决定状态计数：${countText}。`;
         return;
       }
       if (summary.complete) {
         els.reviewCompletionGate.classList.add("ok");
-        els.reviewCompletionGate.textContent = `Review completion gate: complete. Total targets: ${summary.total}. Reviewed targets: ${summary.reviewed}. Pending targets: ${summary.pending}. Decision-status counts: ${countText}. Export remains privacy-safe and schema-stable.`;
+        els.reviewCompletionGate.textContent = `复核完成门禁：已完成。目标总数：${summary.total}。已复核目标：${summary.reviewed}。待处理目标：${summary.pending}。决定状态计数：${countText}。导出保持隐私安全且架构稳定。`;
         return;
       }
       els.reviewCompletionGate.classList.add("warn");
-      els.reviewCompletionGate.textContent = `Review completion gate warning: not complete. Total targets: ${summary.total}. Reviewed targets: ${summary.reviewed}. Pending targets: ${summary.pending}. Decision-status counts: ${countText}. Export is advisory and remains available.`;
+      els.reviewCompletionGate.textContent = `复核完成门禁警告：未完成。目标总数：${summary.total}。已复核目标：${summary.reviewed}。待处理目标：${summary.pending}。决定状态计数：${countText}。导出仅供参考且仍可使用。`;
     }
 
     function renderReviewTargetList() {
       syncReviewFilterControls();
       const targets = reviewTargets();
       const visibleTargets = filteredReviewTargets(targets);
-      els.reviewFilterCount.textContent = `Showing ${visibleTargets.length} of ${targets.length} targets`;
+      els.reviewFilterCount.textContent = `显示 ${visibleTargets.length} / ${targets.length} 个目标`;
       els.applyBulkReviewDecisionButton.disabled = !visibleTargets.length;
       if (!targets.length) {
         els.reviewTargetList.innerHTML = "";
         return;
       }
       if (!visibleTargets.length) {
-        els.reviewTargetList.innerHTML = `<div class="empty">No review targets match the current filters.</div>`;
+        els.reviewTargetList.innerHTML = `<div class="empty">没有复核目标匹配当前筛选条件。</div>`;
         return;
       }
       els.reviewTargetList.innerHTML = `
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Scope</th><th>Local ID</th><th>Severity</th><th>Status</th><th>Decision State</th></tr></thead>
+            <thead><tr><th>范围</th><th>本地 ID</th><th>严重级别</th><th>状态</th><th>决定状态</th></tr></thead>
             <tbody>
               ${visibleTargets.map(target => `
                 <tr>
@@ -3646,7 +3677,7 @@
 
     function applyBulkVisibleReviewDecision(decision) {
       if (!allowedReviewDecision(decision) || decision === "pending") {
-        els.bulkReviewStatus.textContent = "No filtered bulk decision applied. Choose a non-pending review decision.";
+        els.bulkReviewStatus.textContent = "尚未应用筛选后的批量决定。请选择非待处理的复核决定。";
         return { visible: filteredReviewTargets(reviewTargets()).length, updated: 0 };
       }
       const visibleTargets = filteredReviewTargets(reviewTargets());
@@ -3660,7 +3691,7 @@
       });
       state.importStatus = null;
       state.exportSummary = JSON.stringify(buildReviewSummary(), null, 2);
-      els.bulkReviewStatus.textContent = `Applied ${decisionLabel(decision)} to visible targets. Visible targets: ${visibleTargets.length}. Updated targets: ${updated}.`;
+      els.bulkReviewStatus.textContent = `已将 ${decisionLabel(decision)} 应用到可见目标。可见目标：${visibleTargets.length}。已更新目标：${updated}。`;
       renderWorkflow();
       renderDetail();
       renderReview();
@@ -3691,7 +3722,7 @@
     function renderReviewImportStatus() {
       els.reviewImportStatus.className = "status-banner";
       if (!state.importStatus) {
-        els.reviewImportStatus.textContent = "No review-decision summary imported. Imports restore only scope, synthetic/local ID, and decision status; private filenames, paths, hashes, OCR text, thumbnails, image content, row-level findings, reviewer notes, manifests, and derivative image references are ignored.";
+        els.reviewImportStatus.textContent = "尚未导入复核决定摘要。导入只恢复范围、合成/本地 ID 和决定状态；私有文件名、路径、哈希、OCR 文本、缩略图、图像内容、行级发现、复核备注、清单和衍生图像引用会被忽略。";
         return;
       }
       if (state.importStatus.kind === "error") {
@@ -3699,9 +3730,9 @@
       } else if (state.importStatus.imported > 0) {
         els.reviewImportStatus.classList.add("ok");
       }
-      const warnings = state.importStatus.warnings.length ? ` Warnings: ${state.importStatus.warnings.join(" ")}` : "";
-      const validation = state.importStatus.validationCodes.length ? ` Validation codes: ${state.importStatus.validationCodes.join(", ")}.` : "";
-      els.reviewImportStatus.textContent = `Imported ${state.importStatus.imported} review decisions; skipped ${state.importStatus.skipped}. Last import: ${state.importStatus.importedAt}.${validation}${warnings}`;
+      const warnings = state.importStatus.warnings.length ? ` 警告：${state.importStatus.warnings.join(" ")}` : "";
+      const validation = state.importStatus.validationCodes.length ? ` 验证代码：${state.importStatus.validationCodes.join(", ")}。` : "";
+      els.reviewImportStatus.textContent = `已导入 ${state.importStatus.imported} 条复核决定；已跳过 ${state.importStatus.skipped} 条。最近导入：${state.importStatus.importedAt}。${validation}${warnings}`;
     }
 
     function previewSlotLabel(slot) {
@@ -3715,8 +3746,8 @@
       const hasPreview = Boolean(previewState.objectUrl);
       previewEls.clear.disabled = !hasPreview;
       previewEls.privacyCopy.innerHTML = `
-        <span>${label} preview status: ${hasPreview ? "selected" : "not selected"}</span>
-        <span>${label} preview local state is excluded from review-decision export JSON.</span>`;
+        <span>${label}预览状态：${hasPreview ? "已选择" : "未选择"}</span>
+        <span>${label}预览本地状态不包含在复核决定导出 JSON 中。</span>`;
       if (hasPreview) {
         const zoomStyle = state.previewDisplay.mode === "zoom" ? ` style="--preview-zoom: ${state.previewDisplay.zoom}"` : "";
         previewEls.preview.className = state.previewDisplay.mode === "zoom" ? "preview has-image preview-zoom" : "preview has-image";
@@ -3726,8 +3757,8 @@
       previewEls.preview.className = "preview";
       previewEls.preview.innerHTML = `
         <div>
-          <strong>${label} preview placeholder</strong>
-          <p class="muted">No ${slot} image is loaded or transformed in this static prototype. Use the separate image picker only for a controlled local tab preview.</p>
+          <strong>${label}预览占位</strong>
+          <p class="muted">此静态原型未加载或转换 ${slot} 图像。请仅使用单独的图像选择器进行受控的本地标签页预览。</p>
         </div>`;
     }
 
@@ -3736,7 +3767,7 @@
       els.previewZoomSelect.value = String(state.previewDisplay.zoom);
       els.fitPreviewButton.disabled = state.previewDisplay.mode === "fit";
       els.resetPreviewZoomButton.disabled = state.previewDisplay.mode === "fit" && state.previewDisplay.zoom === 1;
-      els.previewZoomStatus.textContent = state.previewDisplay.mode === "fit" ? "Preview display: fit to panel" : `Preview display: ${percent}% zoom`;
+      els.previewZoomStatus.textContent = state.previewDisplay.mode === "fit" ? "预览显示：适应面板" : `预览显示：${percent}% 缩放`;
     }
 
     function renderPreview() {
@@ -3768,7 +3799,7 @@
 
     function statusBadge(status) {
       const normalized = String(status).toLowerCase();
-      const cls = ["pass", "passed", "ready", "present", "ok"].includes(normalized) ? "pass" : ["fail", "failed", "blocked", "error", "missing"].includes(normalized) ? "fail" : ["warning", "warn", "stale"].includes(normalized) ? "warn" : "";
+      const cls = ["pass", "passed", "ready", "present", "存在", "ok"].includes(normalized) ? "pass" : ["fail", "failed", "blocked", "error", "missing", "缺失"].includes(normalized) ? "fail" : ["warning", "warn", "stale"].includes(normalized) ? "warn" : "";
       return `<span class="badge ${cls}">${escapeHtml(status)}</span>`;
     }
 
@@ -3787,7 +3818,7 @@
 
     function decisionLabel(value) {
       const match = REVIEW_DECISIONS.find(([decision]) => decision === value);
-      return match ? match[1] : "Pending";
+      return match ? match[1] : "待处理";
     }
 
     function decisionSelect(scope, localId) {
@@ -3882,7 +3913,7 @@
       state.importStatus = null;
       resetReviewFilters();
       els.reviewImportFile.value = "";
-      els.bulkReviewStatus.textContent = "No filtered bulk decision applied. Bulk actions update only visible targets in this browser tab.";
+      els.bulkReviewStatus.textContent = "尚未应用筛选后的批量决定。批量操作只更新此浏览器标签页中的可见目标。";
     }
 
     function allowedReviewDecision(value) {
@@ -3940,22 +3971,22 @@
 
     function parseReviewDecisionSummary(payload) {
       if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-        throw new Error("Review-decision import JSON root must be an object.");
+        throw new Error("复核决定导入 JSON 根必须是对象。");
       }
       if (payload.schema !== "scan-qc-review-decisions.local.v1") {
-        throw new Error("Schema mismatch: expected scan-qc-review-decisions.local.v1.");
+        throw new Error("架构不匹配：预期 scan-qc-review-decisions.local.v1。");
       }
       if (!Array.isArray(payload.decisions)) {
-        throw new Error("Review-decision summary is missing a decisions array.");
+        throw new Error("复核决定摘要缺少 decisions 数组。");
       }
       const warnings = [];
       if (payload.source_type && payload.source_type !== state.model.sourceType) {
-        warnings.push("Source mismatch: summary source_type does not match the loaded artifact.");
+        warnings.push("来源不匹配：摘要 source_type 与已加载工件不一致。");
       }
       const sourceTargetCount = Number(payload.source_target_count);
       const currentTargetCount = reviewTargets().length;
       if (Number.isFinite(sourceTargetCount) && sourceTargetCount !== currentTargetCount) {
-        warnings.push(`Target count mismatch: summary has ${sourceTargetCount}, loaded artifact has ${currentTargetCount}.`);
+        warnings.push(`目标数量不匹配：摘要为 ${sourceTargetCount}，已加载工件为 ${currentTargetCount}。`);
       }
       return { decisions: payload.decisions, warnings };
     }
@@ -3998,7 +4029,7 @@
         imported += 1;
       });
       if (imported === 0 && parsed.decisions.length > 0) {
-        parsed.warnings.push("No decisions matched the currently loaded artifact review targets.");
+        parsed.warnings.push("没有决定匹配当前已加载工件的复核目标。");
       }
       state.exportSummary = JSON.stringify(buildReviewSummary(), null, 2);
       state.importStatus = {
@@ -4020,7 +4051,7 @@
           imported: 0,
           skipped: 0,
           validationCodes: [],
-          warnings: ["Load a scan, run-plan, or aggregate handoff artifact before importing decisions."],
+          warnings: ["导入决定前请先加载扫描、运行计划或汇总交接工件。"],
           importedAt: new Date().toISOString()
         };
         renderReview();
@@ -4083,13 +4114,13 @@
         state.selectedBatchId = state.model.batches[0] ? state.model.batches[0].id : null;
         resetReviewState();
         render();
-        renderStatus("ok", `Loaded ${file.name}: ${state.model.sourceType} artifact with ${state.model.metrics.totalFindings} findings.`);
+        renderStatus("ok", `已加载 ${file.name}：${state.model.sourceType} 工件，包含 ${state.model.metrics.totalFindings} 条发现。`);
       } catch (error) {
         state.model = SAMPLE_EMPTY;
         state.selectedBatchId = null;
         resetReviewState();
         render();
-        renderStatus("error", `Could not load JSON: ${error.message}`);
+        renderStatus("error", `无法加载 JSON：${error.message}`);
       }
     }
 
@@ -4106,7 +4137,7 @@
     function loadDemoFixture(id) {
       const fixture = DEMO_FIXTURES.find(item => item.id === id);
       if (!fixture) {
-        renderStatus("error", "Could not load demo fixture: selected fixture was not found.");
+        renderStatus("error", "无法加载演示夹具：未找到所选夹具。");
         return;
       }
       try {
@@ -4114,13 +4145,13 @@
         state.selectedBatchId = state.model.batches[0] ? state.model.batches[0].id : null;
         resetReviewState();
         render();
-        renderStatus("ok", `Loaded public-safe demo fixture: ${fixture.label}.`);
+        renderStatus("ok", `已加载公开安全演示夹具：${fixture.label}。`);
       } catch (error) {
         state.model = SAMPLE_EMPTY;
         state.selectedBatchId = null;
         resetReviewState();
         render();
-        renderStatus("error", `Could not load demo fixture: ${error.message}`);
+        renderStatus("error", `无法加载演示夹具：${error.message}`);
       }
     }
 
