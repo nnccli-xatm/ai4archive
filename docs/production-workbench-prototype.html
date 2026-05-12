@@ -811,6 +811,13 @@
             <p><strong>输出位置：</strong><span id="outputPlace">已选择的处理后输出文件夹</span></p>
             <p><strong>复核保存：</strong><span id="decisionSavePlace">已保存到本机状态文件夹</span></p>
             <p><strong>交接说明：</strong><span id="completionNotePlace">已保存到本机状态文件夹</span></p>
+            <p><strong>完成检查清单：</strong></p>
+            <ul id="completionChecklist" aria-label="完成检查清单">
+              <li>处理后图片已准备好</li>
+              <li>复核结果已保存</li>
+              <li>交接说明已保存</li>
+              <li>可以准备下一批</li>
+            </ul>
             <ul id="completionSteps">
               <li>到处理后输出文件夹检查图片数量和文件是否齐全。</li>
               <li>把处理后图片交给验收或移交流程。</li>
@@ -847,6 +854,12 @@
       completionNoteSummary: "已保存到本机状态文件夹",
       completionTitle: "批次已完成",
       completionMessage: "处理后图片和复核结果已保存。",
+      completionChecklist: [
+        "处理后图片已准备好",
+        "复核结果已保存",
+        "交接说明已保存",
+        "可以准备下一批"
+      ],
       completionSteps: [
         "到处理后输出文件夹检查图片数量和文件是否齐全。",
         "把处理后图片交给验收或移交流程。",
@@ -918,6 +931,7 @@
       completionTitle: document.getElementById("completionTitle"),
       completionMessage: document.getElementById("completionMessage"),
       completionCounts: document.getElementById("completionCounts"),
+      completionChecklist: document.getElementById("completionChecklist"),
       completionSteps: document.getElementById("completionSteps"),
       nextBatchButton: document.getElementById("nextBatchButton")
     };
@@ -1228,6 +1242,7 @@
       els.outputPlace.textContent = state.outputSummary;
       els.decisionSavePlace.textContent = state.decisionSaveSummary;
       els.completionNotePlace.textContent = state.completionNoteSummary;
+      els.completionChecklist.innerHTML = state.completionChecklist.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
       els.completionSteps.innerHTML = state.completionSteps.map((step) => `<li>${escapeHtml(step)}</li>`).join("");
     }
 
@@ -1531,6 +1546,7 @@
       if (panel.derivatives_dir) state.outputSummary = panel.derivatives_dir;
       if (panel.metadata_dir) state.decisionSaveSummary = panel.metadata_dir;
       if (panel.completion_note_path) state.completionNoteSummary = panel.completion_note_path;
+      if (Array.isArray(panel.checklist_zh) && panel.checklist_zh.length) state.completionChecklist = panel.checklist_zh;
       if (Array.isArray(panel.next_steps_zh) && panel.next_steps_zh.length) state.completionSteps = panel.next_steps_zh;
     }
 
@@ -1820,6 +1836,12 @@
       state.completionNoteSummary = "已保存到本机状态文件夹";
       state.completionTitle = "批次已完成";
       state.completionMessage = "处理后图片和复核结果已保存。";
+      state.completionChecklist = [
+        "处理后图片已准备好",
+        "复核结果已保存",
+        "交接说明已保存",
+        "可以准备下一批"
+      ];
       state.completionSteps = [
         "到处理后输出文件夹检查图片数量和文件是否齐全。",
         "把处理后图片交给验收或移交流程。",
