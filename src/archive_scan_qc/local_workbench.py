@@ -9,10 +9,10 @@ import json
 import mimetypes
 import os
 from pathlib import Path
-import tempfile
 import threading
 from typing import Any
 from urllib.parse import unquote, urlparse
+import uuid
 import webbrowser
 
 from .processing_review import REVIEW_JSON as PROCESSING_REVIEW_JSON, write_processing_review_package
@@ -93,18 +93,22 @@ class WorkbenchController:
             raise ValueError("请填写处理后输出文件夹。")
         if metadata_dir is not None and str(metadata_dir).strip() in {"", "."}:
             raise ValueError("请填写本机状态文件夹，或留空使用默认位置。")
-        input_path = input_dir.expanduser().resolve()
-        output_path = derivatives_dir.expanduser().resolve()
-        metadata_path = (metadata_dir.expanduser().resolve() if metadata_dir else output_path / DEFAULT_METADATA_DIRNAME)
-        if not input_path.exists() or not input_path.is_dir():
+        input_path = _safe_resolve_path(input_dir)
+        output_path = _safe_resolve_path(derivatives_dir)
+        metadata_path = _safe_resolve_path(metadata_dir) if metadata_dir else output_path / DEFAULT_METADATA_DIRNAME
+        unsafe_guidance = _unsafe_folder_choice_guidance(input_path, output_path, metadata_path)
+        if unsafe_guidance is not None:
+            raise ValueError(str(unsafe_guidance["message_zh"]))
+        if not _path_is_existing_dir(input_path):
             raise ValueError("扫描原图文件夹不存在。")
-        if input_path == output_path or _is_relative_to(output_path, input_path):
-            raise ValueError("处理后输出文件夹不能和扫描原图文件夹相同，也不能放在原图文件夹里面。")
-        if _is_relative_to(metadata_path, input_path):
-            raise ValueError("本机状态文件夹不能放在扫描原图文件夹里面。")
+        if not _folder_can_be_listed(input_path):
+            raise ValueError("扫描原图文件夹现在不能读取。请重新选择可以打开的原图文件夹。")
         selected_mode = _normalize_processing_mode(processing_mode)
-        output_path.mkdir(parents=True, exist_ok=True)
-        metadata_path.mkdir(parents=True, exist_ok=True)
+        try:
+            output_path.mkdir(parents=True, exist_ok=True)
+            metadata_path.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            raise ValueError("输出文件夹或本机状态文件夹不能创建。请确认磁盘已连接、没有只读，并重新选择文件夹。") from None
         with self._lock:
             self.input_dir = input_path
             self.derivatives_dir = output_path
@@ -600,11 +604,52 @@ def _optional_path(payload: dict[str, Any], key: str, label_zh: str) -> Path | N
     return Path(value.strip())
 
 
+def _safe_resolve_path(path: Path) -> Path:
+    try:
+        return path.expanduser().resolve()
+    except OSError:
+        raise ValueError("文件夹位置无法读取。请重新选择本机可以打开的文件夹。") from None
+
+
+def _path_is_existing_dir(path: Path) -> bool:
+    try:
+        return path.exists() and path.is_dir()
+    except OSError:
+        return False
+
+
+def _folder_can_be_listed(path: Path) -> bool:
+    if not os.access(path, os.R_OK | os.X_OK):
+        return False
+    try:
+        next(path.iterdir(), None)
+    except StopIteration:
+        return True
+    except OSError:
+        return False
+    return True
+
+
 def _preflight_folder_guidance(input_dir: Path, derivatives_dir: Path, metadata_dir: Path) -> dict[str, Any] | None:
-    input_path = input_dir.expanduser().resolve()
-    output_path = derivatives_dir.expanduser().resolve()
-    metadata_path = metadata_dir.expanduser().resolve()
-    if not input_path.exists() or not input_path.is_dir():
+    try:
+        input_path = _safe_resolve_path(input_dir)
+        output_path = _safe_resolve_path(derivatives_dir)
+        metadata_path = _safe_resolve_path(metadata_dir)
+    except ValueError:
+        return _folder_preflight_guidance(
+            "folder_path_unreadable",
+            "文件夹位置不能读取",
+            "有文件夹位置当前不能读取，处理没有启动。",
+            [
+                "确认移动硬盘或共享盘已经连接到本机。",
+                "重新选择可以打开的扫描原图、输出和本机状态文件夹。",
+                "保存文件夹后再点击开始处理。",
+            ],
+        )
+    unsafe_guidance = _unsafe_folder_choice_guidance(input_path, output_path, metadata_path)
+    if unsafe_guidance is not None:
+        return unsafe_guidance
+    if not _path_is_existing_dir(input_path):
         return _folder_preflight_guidance(
             "input_folder_missing",
             "找不到扫描原图文件夹",
@@ -664,7 +709,7 @@ def _preflight_folder_guidance(input_dir: Path, derivatives_dir: Path, metadata_
             input_empty=False,
             supported_image_count=0,
         )
-    if not output_path.exists() or not output_path.is_dir():
+    if not _path_is_existing_dir(output_path):
         return _folder_preflight_guidance(
             "output_folder_unusable",
             "输出文件夹不能使用",
@@ -675,6 +720,21 @@ def _preflight_folder_guidance(input_dir: Path, derivatives_dir: Path, metadata_
                 "保存文件夹后再点击开始处理。",
             ],
         )
+    if not _folder_is_writable(output_path) or not _folder_is_writable(metadata_path):
+        return _folder_preflight_guidance(
+            "output_folder_unwritable",
+            "输出文件夹不能写入",
+            "处理后输出文件夹或本机状态文件夹不能写入，处理没有启动。",
+            [
+                "确认输出磁盘没有只读、已解锁，并且空间足够。",
+                "换一个可以写入的处理后输出文件夹。",
+                "保存文件夹后再点击开始处理。",
+            ],
+        )
+    return None
+
+
+def _unsafe_folder_choice_guidance(input_path: Path, output_path: Path, metadata_path: Path) -> dict[str, Any] | None:
     if input_path == output_path or _is_relative_to(output_path, input_path):
         return _folder_preflight_guidance(
             "unsafe_folder_choice",
@@ -695,17 +755,6 @@ def _preflight_folder_guidance(input_dir: Path, derivatives_dir: Path, metadata_
                 "使用默认状态文件夹，或选择输出文件夹里的状态文件夹。",
                 "不要把状态文件夹放进扫描原图文件夹。",
                 "重新保存文件夹后再开始处理。",
-            ],
-        )
-    if not _folder_is_writable(output_path) or not _folder_is_writable(metadata_path):
-        return _folder_preflight_guidance(
-            "output_folder_unwritable",
-            "输出文件夹不能写入",
-            "处理后输出文件夹或本机状态文件夹不能写入，处理没有启动。",
-            [
-                "确认输出磁盘没有只读、已解锁，并且空间足够。",
-                "换一个可以写入的处理后输出文件夹。",
-                "保存文件夹后再点击开始处理。",
             ],
         )
     return None
@@ -767,10 +816,28 @@ def _folder_readiness_summary(
             "message_zh": "请先保存扫描原图文件夹和处理后输出文件夹。",
             "next_steps_zh": ["填写两个文件夹位置。", "保存文件夹后查看准备情况。"],
         }
-    input_path = input_dir.expanduser().resolve()
-    output_path = derivatives_dir.expanduser().resolve()
-    metadata_path = metadata_dir.expanduser().resolve()
-    input_exists = input_path.exists() and input_path.is_dir()
+    try:
+        input_path = _safe_resolve_path(input_dir)
+        output_path = _safe_resolve_path(derivatives_dir)
+        metadata_path = _safe_resolve_path(metadata_dir)
+    except ValueError:
+        return {
+            **base,
+            "status": "blocked",
+            "title_zh": "文件夹位置不能读取",
+            "message_zh": "有文件夹位置当前不能读取。",
+            "next_steps_zh": ["重新选择本机可以打开的文件夹。", "保存文件夹后再查看准备情况。"],
+        }
+    unsafe_guidance = _unsafe_folder_choice_guidance(input_path, output_path, metadata_path)
+    if unsafe_guidance is not None:
+        return {
+            **base,
+            "status": "blocked",
+            "title_zh": unsafe_guidance["title_zh"],
+            "message_zh": unsafe_guidance["message_zh"],
+            "next_steps_zh": unsafe_guidance["next_steps_zh"],
+        }
+    input_exists = _path_is_existing_dir(input_path)
     input_readable = input_exists and os.access(input_path, os.R_OK | os.X_OK)
     input_empty = True
     supported_image_count = 0
@@ -862,28 +929,40 @@ def _processing_mode_payload(processing_mode: str) -> dict[str, Any]:
 
 
 def _folder_is_writable(path: Path) -> bool:
-    if not path.exists() or not path.is_dir() or not os.access(path, os.W_OK | os.X_OK):
+    if not _path_is_existing_dir(path) or not os.access(path, os.W_OK | os.X_OK):
         return False
-    probe_name: str | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=path,
-            prefix=".scan_qc_preflight_",
-            delete=False,
-        ) as handle:
-            handle.write("ok\n")
-            probe_name = handle.name
-    except OSError:
-        return False
-    finally:
-        if probe_name:
-            try:
-                Path(probe_name).unlink()
-            except OSError:
-                pass
-    return True
+    for _ in range(8):
+        probe_path = _unique_probe_path(path)
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        fd: int | None = None
+        created = False
+        try:
+            fd = os.open(probe_path, flags, 0o600)
+            created = True
+            os.write(fd, b"ok\n")
+            return True
+        except FileExistsError:
+            continue
+        except OSError:
+            return False
+        finally:
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            if created:
+                try:
+                    probe_path.unlink()
+                except OSError:
+                    pass
+    return False
+
+
+def _unique_probe_path(path: Path) -> Path:
+    return path / f".scan_qc_preflight_{uuid.uuid4().hex}.tmp"
 
 
 def _safe_relative_path(value: str) -> Path:

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from archive_scan_qc.local_workbench import (
     COMPLETION_NOTE_TXT,
@@ -11,6 +13,7 @@ from archive_scan_qc.local_workbench import (
     REVIEW_DECISION_SUMMARY_JSON,
     WorkbenchPreflightError,
     WorkbenchController,
+    _folder_is_writable,
 )
 from archive_scan_qc.production_runner import ProductionRunConfig, build_production_run_summary
 from archive_scan_qc.production_review_queue import PRODUCTION_REVIEW_QUEUE_JSON
@@ -57,6 +60,72 @@ def decision_summary(decisions: list[tuple[str, str]]) -> dict[str, object]:
 
 
 class LocalWorkbenchAutosaveTests(unittest.TestCase):
+    def test_configure_rejects_output_inside_source_before_creating_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = input_dir / "tool-output"
+            input_dir.mkdir()
+            controller = WorkbenchController()
+
+            with self.assertRaises(ValueError) as raised:
+                controller.configure(input_dir, output_dir)
+
+            self.assertIn("不能和扫描原图文件夹相同", str(raised.exception))
+            self.assertFalse(output_dir.exists())
+
+    def test_configure_rejects_metadata_inside_source_before_creating_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = input_dir / "tool-metadata"
+            input_dir.mkdir()
+            controller = WorkbenchController()
+
+            with self.assertRaises(ValueError) as raised:
+                controller.configure(input_dir, output_dir, metadata_dir)
+
+            self.assertIn("本机状态文件夹不能放在扫描原图文件夹里面", str(raised.exception))
+            self.assertFalse(output_dir.exists())
+            self.assertFalse(metadata_dir.exists())
+
+    def test_configure_unreadable_source_returns_generic_chinese_guidance_when_supported(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            input_dir.mkdir()
+            input_dir.chmod(0)
+            self.addCleanup(lambda: input_dir.chmod(0o700) if input_dir.exists() else None)
+            if input_dir.exists() and input_dir.is_dir() and os.access(input_dir, os.R_OK | os.X_OK):
+                self.skipTest("platform/user can still read chmod 0 directory")
+            controller = WorkbenchController()
+
+            with self.assertRaises(ValueError) as raised:
+                controller.configure(input_dir, output_dir)
+
+            message = str(raised.exception)
+            self.assertIn("扫描原图文件夹现在不能读取", message)
+            self.assertNotIn(str(input_dir), message)
+            self.assertFalse(output_dir.exists())
+
+    def test_write_probe_does_not_overwrite_or_delete_existing_probe_like_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder = Path(temp_dir)
+            existing_probe = folder / ".scan_qc_preflight_existing.tmp"
+            created_probe = folder / ".scan_qc_preflight_created.tmp"
+            existing_probe.write_text("operator file\n", encoding="utf-8")
+
+            with patch(
+                "archive_scan_qc.local_workbench._unique_probe_path",
+                side_effect=[existing_probe, created_probe],
+            ):
+                self.assertTrue(_folder_is_writable(folder))
+
+            self.assertEqual(existing_probe.read_text(encoding="utf-8"), "operator file\n")
+            self.assertFalse(created_probe.exists())
+
     def test_configure_returns_aggregate_folder_readiness(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
