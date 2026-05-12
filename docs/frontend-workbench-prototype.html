@@ -2552,7 +2552,14 @@
     function safeAggregateMessage(value) {
       const message = text(value, "");
       if (!message) return "";
-      if (message.includes("/") || message.includes("\\") || message.includes("blob:") || message.includes("data:") || /[A-Fa-f0-9]{32,}/.test(message)) return "redacted private diagnostic";
+      if (
+        message.includes("/") ||
+        message.includes("\\") ||
+        message.includes("blob:") ||
+        message.includes("data:") ||
+        /[A-Fa-f0-9]{32,}/.test(message) ||
+        /\b[\w.-]+\.(?:jpg|jpeg|png|tif|tiff|webp|bmp|gif|jp2|j2k)\b/i.test(message)
+      ) return "redacted private diagnostic";
       return message.slice(0, 160);
     }
 

@@ -1914,10 +1914,11 @@ vm.runInContext(workbenchScript + `
     schema_version: "scan-qc.frontend-workbench-validation.v1",
     status: "fail",
     validated_html_path: "/Users/example/private/frontend-workbench-prototype.html",
-    error_count: 2,
+    error_count: 3,
     errors: [
       {{ code: "missing_required_region", message: "Missing required region." }},
-      {{ code: "private_path_leak", message: "/Users/example/private/image.tif leaked in preview." }}
+      {{ code: "private_path_leak", message: "/Users/example/private/image.tif leaked in preview." }},
+      {{ code: "private_filename_leak", message: "private_scan_alpha.tif failed frontend validation." }}
     ],
     counts: {{ required_regions: 9, forbidden_pattern_checks: 8 }},
     coverage: {{ aggregate_summary: true, executable_fixtures: false, preview_lifecycle: true }},
@@ -1953,15 +1954,17 @@ vm.runInContext(workbenchScript + `
   assert(frontendValidationBlockedModel.sourceType === "aggregate-handoff", "blocked frontend validation fixture did not load as aggregate handoff");
   assert(frontendValidationBlockedModel.aggregateHandoff.artifactType === "Frontend workbench validation summary", "blocked frontend validation fixture did not classify correctly");
   assert(frontendValidationBlockedModel.aggregateHandoff.status === "fail", "blocked frontend validation status was not fail");
-  assert(frontendValidationBlockedModel.aggregateHandoff.frontendValidation.errorCount === 2, "blocked frontend validation error count was not preserved");
+  assert(frontendValidationBlockedModel.aggregateHandoff.frontendValidation.errorCount === 3, "blocked frontend validation error count was not preserved");
   assert(frontendValidationBlockedModel.aggregateHandoff.frontendValidation.validatedHtmlPath.includes("redacted"), "blocked frontend validation absolute path was not redacted");
   state.model = frontendValidationBlockedModel;
   renderAggregateHandoff();
   assert(els.aggregateHandoff.innerHTML.includes("missing_required_region"), "blocked frontend validation safe error code did not render");
   assert(els.aggregateHandoff.innerHTML.includes("private_path_leak"), "blocked frontend validation second error code did not render");
+  assert(els.aggregateHandoff.innerHTML.includes("private_filename_leak"), "blocked frontend validation bare filename error code did not render");
   assert(els.aggregateHandoff.innerHTML.includes("redacted private diagnostic"), "blocked frontend validation private error message was not redacted");
   assert(!els.aggregateHandoff.innerHTML.includes("/Users/example"), "blocked frontend validation rendered absolute path");
   assert(!els.aggregateHandoff.innerHTML.includes("image.tif"), "blocked frontend validation rendered private filename");
+  assert(!els.aggregateHandoff.innerHTML.includes("private_scan_alpha.tif"), "blocked frontend validation rendered bare private filename");
   assertPublicSafe(els.aggregateHandoff.innerHTML, "blocked frontend validation summary rendering");
 
   const deepInspectionCandidateModel = inferArtifact(deepInspectionCandidateFixture);
