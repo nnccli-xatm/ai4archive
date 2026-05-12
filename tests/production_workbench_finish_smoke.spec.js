@@ -147,6 +147,7 @@ test.describe("production workbench finish/export browser smoke", () => {
           saved: {
             decision_summary: "/tmp/synthetic-output/_production_workbench/scan-qc-review-decisions.summary.json",
             verification_summary: "/tmp/synthetic-output/_production_workbench/review_decision_verification_summary.json",
+            completion_note: "/tmp/synthetic-output/_production_workbench/本批次完成交接说明.txt",
           },
           completion_panel: {
             title_zh: "完成并导出结果",
@@ -156,7 +157,8 @@ test.describe("production workbench finish/export browser smoke", () => {
             pending_items: 0,
             derivatives_dir: "/tmp/synthetic-output",
             metadata_dir: "/tmp/synthetic-output/_production_workbench",
-            next_steps_zh: ["到处理后输出文件夹检查图片数量和文件是否齐全。", "开始下一批前，重新选择新的扫描原图文件夹和输出文件夹。"],
+            completion_note_path: "/tmp/synthetic-output/_production_workbench/本批次完成交接说明.txt",
+            next_steps_zh: ["到处理后输出文件夹检查图片数量和文件是否齐全。", "点击准备下一批，重新选择新的扫描原图文件夹和输出文件夹。"],
           },
           decision_summary: { completion_status: "complete" },
         }),
@@ -198,7 +200,14 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#completionCounts")).toHaveText("共 3 项，已确认 3 项，待决定 0 项。");
     await expect(page.locator("#outputPlace")).toHaveText("/tmp/synthetic-output");
     await expect(page.locator("#decisionSavePlace")).toHaveText("/tmp/synthetic-output/_production_workbench");
-    await expect(page.getByText("开始下一批前，重新选择新的扫描原图文件夹和输出文件夹。")).toBeVisible();
+    await expect(page.locator("#completionNotePlace")).toHaveText("/tmp/synthetic-output/_production_workbench/本批次完成交接说明.txt");
+    await expect(page.getByText("点击准备下一批，重新选择新的扫描原图文件夹和输出文件夹。")).toBeVisible();
+    await page.getByRole("button", { name: "准备下一批" }).click();
+    await expect(page.locator("#completionTitle")).toBeHidden();
+    await expect(page.locator("#stateName")).toHaveText("选择原图");
+    await expect(page.locator("#inputPath")).toHaveValue("");
+    await expect(page.locator("#outputPath")).toHaveValue("");
+    await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
 
     expect(consoleProblems).toEqual([]);
     expect(fs.existsSync(path.join(ROOT, "docs", "production-workbench-prototype.html"))).toBe(true);

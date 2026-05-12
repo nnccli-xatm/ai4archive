@@ -367,7 +367,7 @@ def _recovery_guidance(local_batch_state: str, processing_summary: dict[str, Any
                 "next_steps_zh": [
                     "确认处理后图片数量正常。",
                     "把处理后图片交给验收或移交流程。",
-                    "开始下一批前，重新选择新的扫描原图文件夹和输出文件夹。",
+                    "点击准备下一批，重新选择新的扫描原图文件夹和输出文件夹。",
                 ],
             }
         )

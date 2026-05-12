@@ -810,11 +810,13 @@
             <p><strong>本批复核：</strong><span id="completionCounts">已确认 0 项，待决定 0 项。</span></p>
             <p><strong>输出位置：</strong><span id="outputPlace">已选择的处理后输出文件夹</span></p>
             <p><strong>复核保存：</strong><span id="decisionSavePlace">已保存到本机状态文件夹</span></p>
+            <p><strong>交接说明：</strong><span id="completionNotePlace">已保存到本机状态文件夹</span></p>
             <ul id="completionSteps">
               <li>到处理后输出文件夹检查图片数量和文件是否齐全。</li>
               <li>把处理后图片交给验收或移交流程。</li>
-              <li>开始下一批前，重新选择新的扫描原图文件夹和输出文件夹。</li>
+              <li>点击准备下一批，重新选择新的扫描原图文件夹和输出文件夹。</li>
             </ul>
+            <button type="button" class="secondary" id="nextBatchButton">准备下一批</button>
           </div>
           <div class="handoff-box hidden" id="failurePanel">
             <h3>处理失败</h3>
@@ -842,12 +844,13 @@
       attentionFiles: 3,
       outputSummary: "已选择的处理后输出文件夹",
       decisionSaveSummary: "已保存到本机状态文件夹",
+      completionNoteSummary: "已保存到本机状态文件夹",
       completionTitle: "批次已完成",
       completionMessage: "处理后图片和复核结果已保存。",
       completionSteps: [
         "到处理后输出文件夹检查图片数量和文件是否齐全。",
         "把处理后图片交给验收或移交流程。",
-        "开始下一批前，重新选择新的扫描原图文件夹和输出文件夹。"
+        "点击准备下一批，重新选择新的扫描原图文件夹和输出文件夹。"
       ],
       lastDraftMessage: "",
       operatorMessage: "",
@@ -911,10 +914,12 @@
       failurePanel: document.getElementById("failurePanel"),
       outputPlace: document.getElementById("outputPlace"),
       decisionSavePlace: document.getElementById("decisionSavePlace"),
+      completionNotePlace: document.getElementById("completionNotePlace"),
       completionTitle: document.getElementById("completionTitle"),
       completionMessage: document.getElementById("completionMessage"),
       completionCounts: document.getElementById("completionCounts"),
-      completionSteps: document.getElementById("completionSteps")
+      completionSteps: document.getElementById("completionSteps"),
+      nextBatchButton: document.getElementById("nextBatchButton")
     };
 
     const copy = {
@@ -1218,6 +1223,7 @@
       els.completionCounts.textContent = `共 ${state.reviewItems.length} 项，已确认 ${reviewedCount()} 项，待决定 ${pendingCount()} 项。`;
       els.outputPlace.textContent = state.outputSummary;
       els.decisionSavePlace.textContent = state.decisionSaveSummary;
+      els.completionNotePlace.textContent = state.completionNoteSummary;
       els.completionSteps.innerHTML = state.completionSteps.map((step) => `<li>${escapeHtml(step)}</li>`).join("");
     }
 
@@ -1283,7 +1289,7 @@
           next_steps_zh: [
             "确认处理后图片数量正常。",
             "把处理后图片交给验收或移交流程。",
-            "开始下一批前，重新选择新的扫描原图文件夹和输出文件夹。"
+            "点击准备下一批，重新选择新的扫描原图文件夹和输出文件夹。"
           ],
           failed_files: failed,
           retryable_files: retryable,
@@ -1520,6 +1526,7 @@
       }
       if (panel.derivatives_dir) state.outputSummary = panel.derivatives_dir;
       if (panel.metadata_dir) state.decisionSaveSummary = panel.metadata_dir;
+      if (panel.completion_note_path) state.completionNoteSummary = panel.completion_note_path;
       if (Array.isArray(panel.next_steps_zh) && panel.next_steps_zh.length) state.completionSteps = panel.next_steps_zh;
     }
 
@@ -1795,7 +1802,7 @@
 
     els.completeButton.addEventListener("click", finishBatch);
     els.exportButton.addEventListener("click", exportDecisions);
-    els.resetButton.addEventListener("click", () => {
+    function prepareNextBatch() {
       state.inputChosen = false;
       state.outputChosen = false;
       state.status = "choose_input";
@@ -1805,12 +1812,13 @@
       state.attentionFiles = 3;
       state.outputSummary = "已选择的处理后输出文件夹";
       state.decisionSaveSummary = "已保存到本机状态文件夹";
+      state.completionNoteSummary = "已保存到本机状态文件夹";
       state.completionTitle = "批次已完成";
       state.completionMessage = "处理后图片和复核结果已保存。";
       state.completionSteps = [
         "到处理后输出文件夹检查图片数量和文件是否齐全。",
         "把处理后图片交给验收或移交流程。",
-        "开始下一批前，重新选择新的扫描原图文件夹和输出文件夹。"
+        "点击准备下一批，重新选择新的扫描原图文件夹和输出文件夹。"
       ];
       state.lastDraftMessage = "";
       state.operatorMessage = "";
@@ -1837,7 +1845,10 @@
       window.clearTimeout(localApi.saveTimer);
       localApi.polling = null;
       render();
-    });
+    }
+
+    els.resetButton.addEventListener("click", prepareNextBatch);
+    els.nextBatchButton.addEventListener("click", prepareNextBatch);
 
     els.decisionActions.addEventListener("click", (event) => {
       const button = event.target.closest("button[data-decision]");
