@@ -1,0 +1,10 @@
+{
+  "name": "ai4archive-workbench-smoke",
+  "private": true,
+  "scripts": {
+    "test:production-workbench-finish-smoke": "playwright test tests/production_workbench_finish_smoke.spec.js"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0"
+  }
+}

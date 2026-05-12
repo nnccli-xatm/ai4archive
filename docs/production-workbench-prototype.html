@@ -596,7 +596,7 @@
       <div class="head-inner">
         <div class="head-copy">
           <h1>本地生产工作台</h1>
-          <p>面向扫描加工人员：选文件夹、开始处理、看大图、点决定、完成导出。</p>
+          <p>面向扫描加工人员：选文件夹、开始处理、看大图、点决定、完成并导出结果。</p>
         </div>
         <div class="status-chip" aria-live="polite">
           <span>当前状态</span>
@@ -733,13 +733,19 @@
         </div>
 
         <div class="handoff">
-          <button id="exportButton" disabled>导出复核决定</button>
-          <button id="completeButton" disabled>完成导出</button>
+          <button id="exportButton" disabled>另存复核结果</button>
+          <button id="completeButton" disabled>完成并导出结果</button>
           <div class="handoff-box hidden" id="outputPanel">
-            <h3>批次已完成</h3>
+            <h3 id="completionTitle">批次已完成</h3>
+            <p id="completionMessage">处理后图片和复核结果已保存。</p>
+            <p><strong>本批复核：</strong><span id="completionCounts">已确认 0 项，待决定 0 项。</span></p>
             <p><strong>输出位置：</strong><span id="outputPlace">已选择的处理后输出文件夹</span></p>
             <p><strong>复核保存：</strong><span id="decisionSavePlace">已保存到本机状态文件夹</span></p>
-            <p>请把处理后图片交给验收或移交流程。</p>
+            <ul id="completionSteps">
+              <li>到处理后输出文件夹检查图片数量和文件是否齐全。</li>
+              <li>把处理后图片交给验收或移交流程。</li>
+              <li>开始下一批前，重新选择新的扫描原图文件夹和输出文件夹。</li>
+            </ul>
           </div>
           <div class="handoff-box hidden" id="failurePanel">
             <h3>处理失败</h3>
@@ -767,6 +773,13 @@
       attentionFiles: 3,
       outputSummary: "已选择的处理后输出文件夹",
       decisionSaveSummary: "已保存到本机状态文件夹",
+      completionTitle: "批次已完成",
+      completionMessage: "处理后图片和复核结果已保存。",
+      completionSteps: [
+        "到处理后输出文件夹检查图片数量和文件是否齐全。",
+        "把处理后图片交给验收或移交流程。",
+        "开始下一批前，重新选择新的扫描原图文件夹和输出文件夹。"
+      ],
       lastDraftMessage: "",
       operatorMessage: "",
       reviewQueueText: "",
@@ -817,7 +830,11 @@
       outputPanel: document.getElementById("outputPanel"),
       failurePanel: document.getElementById("failurePanel"),
       outputPlace: document.getElementById("outputPlace"),
-      decisionSavePlace: document.getElementById("decisionSavePlace")
+      decisionSavePlace: document.getElementById("decisionSavePlace"),
+      completionTitle: document.getElementById("completionTitle"),
+      completionMessage: document.getElementById("completionMessage"),
+      completionCounts: document.getElementById("completionCounts"),
+      completionSteps: document.getElementById("completionSteps")
     };
 
     const copy = {
@@ -826,7 +843,7 @@
       ready: ["准备完成", "可以开始处理", "文件夹已准备好，点击开始处理。"],
       processing: ["正在处理", "正在处理", "系统正在质检并生成处理后图片。"],
       needs_review: ["需要确认", "有图片需要人工确认", "请看中间大图，然后在右侧选择处理决定。"],
-      complete: ["已完成", "批次已完成", "处理后的图片已经准备好，请查看输出位置。"],
+      complete: ["已完成", "完成并导出结果", "处理后图片和复核结果已保存，请查看输出位置。"],
       failed: ["处理失败", "处理失败", "请检查两个文件夹是否选对、磁盘空间是否足够，然后重新开始。"]
     };
 
@@ -856,8 +873,8 @@
 
     const operatorStateText = {
       running: ["正在处理", "正在处理", "本机正在生成处理后图片，请稍候。"],
-      completed: ["已完成", "批次已完成", "处理后的图片已经准备好，请查看输出位置。"],
-      finished: ["已完成", "批次已完成", "处理后的图片已经准备好，请查看输出位置。"],
+      completed: ["已完成", "完成并导出结果", "处理后图片和复核结果已保存，请查看输出位置。"],
+      finished: ["已完成", "完成并导出结果", "处理后图片和复核结果已保存，请查看输出位置。"],
       needs_review: ["需要确认", "有图片需要人工确认", "请看中间大图，然后在右侧选择处理决定。"],
       blocked: ["需处理", "需要管理员处理", "有文件未能完成处理，请联系管理员查看。"],
       pending: ["准备完成", "可以开始处理", "文件夹已准备好，点击开始处理。"]
@@ -972,7 +989,7 @@
       const reviewMode = state.status === "needs_review";
       els.queueText.textContent = state.reviewQueueText || (reviewMode ? `已决定 ${reviewedCount()} 项，待决定 ${pending} 项` : "等待处理开始。");
       els.currentIssue.textContent = reviewMode && pending ? item.issue : (state.operatorMessage || (pending ? "处理开始后在这里显示问题原因。" : "已经没有待确认图片。"));
-      els.currentAdvice.textContent = reviewMode && pending ? item.advice : state.status === "failed" ? "请联系管理员处理后再继续。" : pending ? "可以开始处理后再确认。" : "可以导出复核决定。";
+      els.currentAdvice.textContent = reviewMode && pending ? item.advice : state.status === "failed" ? "请联系管理员处理后再继续。" : pending ? "可以开始处理后再确认。" : "可以完成并导出结果。";
       els.reviewPositionText.textContent = reviewMode && state.reviewItems.length
         ? `当前第 ${currentItemNumber()} 张，共 ${state.reviewItems.length} 张；已确认 ${reviewedCount()} 张，剩余 ${pending} 张。`
         : "当前第 0 张，共 0 张；已确认 0 张，剩余 0 张。";
@@ -1006,9 +1023,17 @@
       els.outputPanel.classList.toggle("hidden", state.status !== "complete");
       els.failurePanel.classList.toggle("hidden", state.status !== "failed");
       renderRecoveryGuidance();
+      renderCompletionPanel();
+      renderDecisionArea();
+    }
+
+    function renderCompletionPanel() {
+      els.completionTitle.textContent = state.completionTitle;
+      els.completionMessage.textContent = state.completionMessage;
+      els.completionCounts.textContent = `共 ${state.reviewItems.length} 项，已确认 ${reviewedCount()} 项，待决定 ${pendingCount()} 项。`;
       els.outputPlace.textContent = state.outputSummary;
       els.decisionSavePlace.textContent = state.decisionSaveSummary;
-      renderDecisionArea();
+      els.completionSteps.innerHTML = state.completionSteps.map((step) => `<li>${escapeHtml(step)}</li>`).join("");
     }
 
     function guidanceFromSummary(summary) {
@@ -1037,8 +1062,8 @@
         return {
           kind: "no_remaining_work",
           title_zh: "没有剩余处理任务",
-          message_zh: "处理后图片已生成，可以继续复核或完成导出。",
-          next_steps_zh: ["确认处理后图片数量正常，然后完成导出。"],
+          message_zh: "处理后图片已生成，可以继续复核或完成并导出结果。",
+          next_steps_zh: ["确认处理后图片数量正常，然后完成并导出结果。"],
           failed_files: failed,
           retryable_files: retryable,
           derivative_images_ready: ready,
@@ -1262,6 +1287,18 @@
       }
     }
 
+    function applyCompletionPanel(panel) {
+      if (!panel) return;
+      state.completionTitle = panel.title_zh || "完成并导出结果";
+      state.completionMessage = panel.message_zh || "处理后图片和复核结果已保存。";
+      if (Number.isFinite(Number(panel.total_review_items)) && Number.isFinite(Number(panel.reviewed_items)) && Number.isFinite(Number(panel.pending_items))) {
+        els.completionCounts.textContent = `共 ${Number(panel.total_review_items)} 项，已确认 ${Number(panel.reviewed_items)} 项，待决定 ${Number(panel.pending_items)} 项。`;
+      }
+      if (panel.derivatives_dir) state.outputSummary = panel.derivatives_dir;
+      if (panel.metadata_dir) state.decisionSaveSummary = panel.metadata_dir;
+      if (Array.isArray(panel.next_steps_zh) && panel.next_steps_zh.length) state.completionSteps = panel.next_steps_zh;
+    }
+
     async function apiPost(path, payload) {
       const response = await fetch(path, {
         method: "POST",
@@ -1435,7 +1472,7 @@
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
-      els.loadStatus.textContent = "已导出复核决定。";
+      els.loadStatus.textContent = "已另存复核结果。";
     }
 
     function scheduleDraftSave() {
@@ -1463,21 +1500,22 @@
       }
       if (!localApi.enabled) {
         setStatus("complete");
-        els.loadStatus.textContent = "批次已完成。请确认复核决定已保存。";
+        els.loadStatus.textContent = "完成并导出结果。请确认复核结果已保存。";
         return;
       }
       try {
-        els.loadStatus.textContent = "正在保存复核决定。";
+        els.loadStatus.textContent = "正在完成并导出结果。";
         const payload = await apiPost("/api/finish-decisions", decisionArtifact());
+        applyCompletionPanel(payload.completion_panel);
         if (payload.folders && payload.folders.derivatives) state.outputSummary = payload.folders.derivatives;
         if (payload.folders && payload.folders.metadata) state.decisionSaveSummary = payload.folders.metadata;
         state.status = "complete";
         state.progress = 100;
-        state.operatorMessage = payload.message_zh || "批次已完成。";
-        els.loadStatus.textContent = payload.message_zh || "批次已完成，复核决定已保存。";
+        state.operatorMessage = payload.message_zh || "完成并导出结果。";
+        els.loadStatus.textContent = payload.message_zh || "完成并导出结果：处理后图片和复核结果已保存。";
         render();
       } catch (error) {
-        els.loadStatus.textContent = error.message || "复核决定保存失败。";
+        els.loadStatus.textContent = error.message || "完成并导出结果失败。";
         render();
       }
     }
@@ -1522,6 +1560,13 @@
       state.attentionFiles = 3;
       state.outputSummary = "已选择的处理后输出文件夹";
       state.decisionSaveSummary = "已保存到本机状态文件夹";
+      state.completionTitle = "批次已完成";
+      state.completionMessage = "处理后图片和复核结果已保存。";
+      state.completionSteps = [
+        "到处理后输出文件夹检查图片数量和文件是否齐全。",
+        "把处理后图片交给验收或移交流程。",
+        "开始下一批前，重新选择新的扫描原图文件夹和输出文件夹。"
+      ];
       state.lastDraftMessage = "";
       state.operatorMessage = "";
       state.reviewQueueText = "";
