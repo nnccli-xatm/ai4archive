@@ -7,7 +7,9 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import mimetypes
+import os
 from pathlib import Path
+import tempfile
 import threading
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -38,6 +40,14 @@ COMPLETION_NOTE_TXT = "本批次完成交接说明.txt"
 PREVIEW_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"}
 
 
+class WorkbenchPreflightError(ValueError):
+    """Operator-safe folder preflight failure."""
+
+    def __init__(self, guidance: dict[str, Any]) -> None:
+        super().__init__(str(guidance.get("message_zh") or "文件夹预检没有通过。"))
+        self.guidance = guidance
+
+
 class WorkbenchController:
     """Small state holder shared by HTTP requests."""
 
@@ -48,6 +58,7 @@ class WorkbenchController:
         self.derivatives_dir: Path | None = None
         self.metadata_dir: Path | None = None
         self.last_error: str | None = None
+        self.last_preflight_guidance: dict[str, Any] | None = None
 
     def configure(self, input_dir: Path, derivatives_dir: Path, metadata_dir: Path | None = None) -> dict[str, Any]:
         if str(input_dir).strip() in {"", "."}:
@@ -61,6 +72,10 @@ class WorkbenchController:
         metadata_path = (metadata_dir.expanduser().resolve() if metadata_dir else output_path / DEFAULT_METADATA_DIRNAME)
         if not input_path.exists() or not input_path.is_dir():
             raise ValueError("扫描原图文件夹不存在。")
+        if input_path == output_path or _is_relative_to(output_path, input_path):
+            raise ValueError("处理后输出文件夹不能和扫描原图文件夹相同，也不能放在原图文件夹里面。")
+        if _is_relative_to(metadata_path, input_path):
+            raise ValueError("本机状态文件夹不能放在扫描原图文件夹里面。")
         output_path.mkdir(parents=True, exist_ok=True)
         metadata_path.mkdir(parents=True, exist_ok=True)
         with self._lock:
@@ -68,6 +83,7 @@ class WorkbenchController:
             self.derivatives_dir = output_path
             self.metadata_dir = metadata_path
             self.last_error = None
+            self.last_preflight_guidance = None
         return self.status()
 
     def start(self) -> dict[str, Any]:
@@ -76,7 +92,13 @@ class WorkbenchController:
                 raise ValueError("当前批次正在处理。")
             if self.input_dir is None or self.derivatives_dir is None or self.metadata_dir is None:
                 raise ValueError("请先填写并保存两个文件夹位置。")
+            guidance = _preflight_folder_guidance(self.input_dir, self.derivatives_dir, self.metadata_dir)
+            if guidance is not None:
+                self.last_error = None
+                self.last_preflight_guidance = guidance
+                raise WorkbenchPreflightError(guidance)
             self.last_error = None
+            self.last_preflight_guidance = None
             self._thread = threading.Thread(target=self._run_once, name="production-workbench-run", daemon=True)
             self._thread.start()
         return self.status()
@@ -211,6 +233,7 @@ class WorkbenchController:
             derivatives_dir = str(self.derivatives_dir) if self.derivatives_dir else None
             metadata_dir = str(self.metadata_dir) if self.metadata_dir else None
             last_error = self.last_error
+            last_preflight_guidance = self.last_preflight_guidance
         summary = _read_json(Path(metadata_dir) / PRODUCTION_RUN_SUMMARY_JSON) if metadata_dir else None
         progress = _read_json(Path(metadata_dir) / PRODUCTION_RUN_PROGRESS_JSON) if metadata_dir else None
         queue = self._queue_with_preview_sources(Path(metadata_dir)) if metadata_dir else None
@@ -221,12 +244,14 @@ class WorkbenchController:
             summary=summary,
             progress=progress,
             last_error=last_error,
+            last_preflight_guidance=last_preflight_guidance,
         )
         return {
             "schema_version": SERVER_SCHEMA,
             "running": running,
             "configured": bool(input_dir and derivatives_dir and metadata_dir),
             "last_error_zh": last_error,
+            "preflight_guidance": last_preflight_guidance,
             "recovery_guidance": recovery_guidance,
             "folders": {
                 "input": input_dir,
@@ -403,6 +428,15 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
                 self._send_json({"error_zh": "未知请求。"}, HTTPStatus.NOT_FOUND)
                 return
             self._send_json(result)
+        except WorkbenchPreflightError as exc:
+            self._send_json(
+                {
+                    "error_zh": str(exc),
+                    "preflight_guidance": exc.guidance,
+                    "recovery_guidance": exc.guidance,
+                },
+                HTTPStatus.BAD_REQUEST,
+            )
         except ValueError as exc:
             self._send_json({"error_zh": str(exc)}, HTTPStatus.BAD_REQUEST)
         except json.JSONDecodeError:
@@ -494,6 +528,143 @@ def _optional_path(payload: dict[str, Any], key: str, label_zh: str) -> Path | N
     return Path(value.strip())
 
 
+def _preflight_folder_guidance(input_dir: Path, derivatives_dir: Path, metadata_dir: Path) -> dict[str, Any] | None:
+    input_path = input_dir.expanduser().resolve()
+    output_path = derivatives_dir.expanduser().resolve()
+    metadata_path = metadata_dir.expanduser().resolve()
+    if not input_path.exists() or not input_path.is_dir():
+        return _folder_preflight_guidance(
+            "input_folder_missing",
+            "找不到扫描原图文件夹",
+            "扫描原图文件夹不存在或已经被移动，处理没有启动。",
+            [
+                "重新选择本批次的扫描原图文件夹。",
+                "确认移动硬盘或共享盘已经连接到本机。",
+                "保存文件夹后再点击开始处理。",
+            ],
+        )
+    if not os.access(input_path, os.R_OK | os.X_OK):
+        return _folder_preflight_guidance(
+            "input_folder_unreadable",
+            "原图文件夹不能读取",
+            "扫描原图文件夹现在不能读取，处理没有启动。",
+            [
+                "确认移动硬盘或共享盘已经连接，并且当前电脑有读取权限。",
+                "重新选择可以打开的扫描原图文件夹。",
+                "保存文件夹后再点击开始处理。",
+            ],
+        )
+    try:
+        input_is_empty = not any(input_path.iterdir())
+    except OSError:
+        return _folder_preflight_guidance(
+            "input_folder_unreadable",
+            "原图文件夹不能读取",
+            "扫描原图文件夹现在不能读取，处理没有启动。",
+            [
+                "确认移动硬盘或共享盘已经连接，并且当前电脑有读取权限。",
+                "重新选择可以打开的扫描原图文件夹。",
+                "保存文件夹后再点击开始处理。",
+            ],
+        )
+    if input_is_empty:
+        return _folder_preflight_guidance(
+            "input_folder_empty",
+            "原图文件夹是空的",
+            "扫描原图文件夹里没有文件，处理没有启动。",
+            [
+                "确认是否选到了本批次真正的扫描原图文件夹。",
+                "如果还没有扫描图片，请先完成扫描或把图片放入原图文件夹。",
+                "放好图片后，重新保存文件夹并开始处理。",
+            ],
+        )
+    if not output_path.exists() or not output_path.is_dir():
+        return _folder_preflight_guidance(
+            "output_folder_unusable",
+            "输出文件夹不能使用",
+            "处理后输出文件夹不存在或已经被移动，处理没有启动。",
+            [
+                "重新选择一个已经存在、可以写入的处理后输出文件夹。",
+                "确认移动硬盘或输出磁盘已经连接到本机。",
+                "保存文件夹后再点击开始处理。",
+            ],
+        )
+    if input_path == output_path or _is_relative_to(output_path, input_path):
+        return _folder_preflight_guidance(
+            "unsafe_folder_choice",
+            "原图和输出文件夹不能混在一起",
+            "处理后输出文件夹不能和扫描原图文件夹相同，也不能放在原图文件夹里面。",
+            [
+                "为处理后图片选择单独的输出文件夹。",
+                "不要把输出文件夹放进扫描原图文件夹。",
+                "重新保存文件夹后再开始处理。",
+            ],
+        )
+    if _is_relative_to(metadata_path, input_path):
+        return _folder_preflight_guidance(
+            "unsafe_metadata_folder",
+            "本机状态文件夹位置不安全",
+            "本机状态文件夹不能放在扫描原图文件夹里面，处理没有启动。",
+            [
+                "使用默认状态文件夹，或选择输出文件夹里的状态文件夹。",
+                "不要把状态文件夹放进扫描原图文件夹。",
+                "重新保存文件夹后再开始处理。",
+            ],
+        )
+    if not _folder_is_writable(output_path) or not _folder_is_writable(metadata_path):
+        return _folder_preflight_guidance(
+            "output_folder_unwritable",
+            "输出文件夹不能写入",
+            "处理后输出文件夹或本机状态文件夹不能写入，处理没有启动。",
+            [
+                "确认输出磁盘没有只读、已解锁，并且空间足够。",
+                "换一个可以写入的处理后输出文件夹。",
+                "保存文件夹后再点击开始处理。",
+            ],
+        )
+    return None
+
+
+def _folder_preflight_guidance(kind: str, title_zh: str, message_zh: str, next_steps_zh: list[str]) -> dict[str, Any]:
+    return {
+        "schema_version": "scan-qc.local-folder-preflight.v1",
+        "aggregate_only": True,
+        "kind": kind,
+        "title_zh": title_zh,
+        "message_zh": message_zh,
+        "next_steps_zh": next_steps_zh,
+        "failed_files": 0,
+        "retryable_files": 0,
+        "derivative_images_ready": 0,
+        "total_files": 0,
+    }
+
+
+def _folder_is_writable(path: Path) -> bool:
+    if not path.exists() or not path.is_dir() or not os.access(path, os.W_OK | os.X_OK):
+        return False
+    probe_name: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path,
+            prefix=".scan_qc_preflight_",
+            delete=False,
+        ) as handle:
+            handle.write("ok\n")
+            probe_name = handle.name
+    except OSError:
+        return False
+    finally:
+        if probe_name:
+            try:
+                Path(probe_name).unlink()
+            except OSError:
+                pass
+    return True
+
+
 def _safe_relative_path(value: str) -> Path:
     stripped = value.strip()
     candidate = Path(stripped)
@@ -509,6 +680,7 @@ def _status_recovery_guidance(
     summary: dict[str, Any] | None,
     progress: dict[str, Any] | None,
     last_error: str | None,
+    last_preflight_guidance: dict[str, Any] | None,
 ) -> dict[str, Any]:
     base = {
         "schema_version": "scan-qc.local-recovery-guidance.v1",
@@ -530,6 +702,8 @@ def _status_recovery_guidance(
                 "保存文件夹后再开始处理。",
             ],
         }
+    if isinstance(last_preflight_guidance, dict):
+        return last_preflight_guidance
     if last_error:
         return {
             **base,
