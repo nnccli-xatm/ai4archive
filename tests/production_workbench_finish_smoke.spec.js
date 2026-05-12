@@ -39,7 +39,7 @@ function waitForServer(url) {
 
 async function expectOperatorStatusHidesPaths(page, forbiddenPaths) {
   const operatorStatusText = await page
-    .locator("#outputPanel, #loadStatus, #inputStatus, #outputStatus, #stateName, #stateAction, #stateHint, #currentAdvice, #currentDecisionStatus, #previewSourceText, #previewFrame")
+    .locator("#outputPanel, #loadStatus, #inputStatus, #outputStatus, #readinessBox, #recoveryBox, #stateName, #stateAction, #stateHint, #currentAdvice, #currentDecisionStatus, #previewSourceText, #previewFrame")
     .allTextContents();
   const combined = operatorStatusText.join("\n");
   for (const value of ["/tmp", "/private", "/Users", ...forbiddenPaths]) {
@@ -806,7 +806,8 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#modeStatus")).toHaveText("当前处理方式：只质检不修图");
     await page.locator("#inputPath").fill("/tmp/mode-input");
     await page.locator("#outputPath").fill("/tmp/mode-output");
-    await page.getByRole("button", { name: "开始处理" }).click();
+    await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
+    await page.getByRole("button", { name: "保存文件夹" }).click();
     await expect.poll(() => configurePayloads.length).toBeGreaterThan(0);
     await expect(page.locator("#readinessTitle")).toHaveText("文件夹可以开始处理");
     await expect(page.locator("#readinessFacts")).toContainText("可处理图片：2 张");
@@ -818,9 +819,328 @@ test.describe("production workbench finish/export browser smoke", () => {
       processing_mode: "qc_only",
     });
     await expect(page.locator("#modeStatus")).toHaveText("当前处理方式：只质检不修图");
+    await expect(page.getByRole("button", { name: "开始处理" })).toBeEnabled();
+    await page.getByRole("button", { name: "开始处理" }).click();
     await expect(page.locator("#stateName")).toHaveText("正在处理");
 
     expect(consoleProblems).toEqual([]);
+  });
+
+  test("shows ready preflight guidance and starts only after folders are ready", async ({ page }) => {
+    let startRequested = false;
+    await page.route("**/api/status", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ schema_version: "scan-qc.local-production-workbench.v1", running: false }),
+      });
+    });
+    await page.route("**/api/configure", async (route) => {
+      const payload = JSON.parse(route.request().postData() || "{}");
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema_version: "scan-qc.local-production-workbench.v1",
+          running: false,
+          configured: true,
+          folders: {
+            input: payload.input_dir,
+            derivatives: payload.derivatives_dir,
+            metadata: `${payload.derivatives_dir}/_production_workbench`,
+          },
+          processing_mode: { id: "standard", label_zh: "标准优化" },
+          folder_readiness: {
+            schema_version: "scan-qc.local-folder-readiness.v1",
+            aggregate_only: true,
+            status: "ready",
+            ready_to_start: true,
+            supported_image_count: 3,
+            input_empty: false,
+            output_writable: true,
+            selected_processing_mode: { id: "standard", label_zh: "标准优化" },
+            title_zh: "文件夹可以开始处理",
+            message_zh: "发现 3 张可处理图片，输出文件夹可以写入。",
+            next_steps_zh: ["确认处理方式无误。", "点击开始处理。"],
+          },
+        }),
+      });
+    });
+    await page.route("**/api/start", async (route) => {
+      startRequested = true;
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ schema_version: "scan-qc.local-production-workbench.v1", running: true, configured: true }),
+      });
+    });
+
+    await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
+    await page.locator("#inputPath").fill("/tmp/ready-input");
+    await page.locator("#outputPath").fill("/tmp/ready-output");
+    await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
+    await page.getByRole("button", { name: "保存文件夹" }).click();
+    await expect(page.locator("#loadStatus")).toHaveText("文件夹已保存，可以开始处理。原图不会被覆盖，处理后图片会准备到输出文件夹。");
+    await expect(page.locator("#readinessTitle")).toHaveText("文件夹可以开始处理");
+    await expect(page.locator("#readinessFacts")).toContainText("可处理图片：3 张");
+    await expect(page.locator("#readinessFacts")).toContainText("输出文件夹：可以写入");
+    await expect(page.locator("#readinessFacts")).toContainText("处理方式：标准优化");
+    await expectOperatorStatusHidesPaths(page, ["/tmp/ready-input", "/tmp/ready-output", "ready-input", "ready-output"]);
+    await page.getByRole("button", { name: "开始处理" }).click();
+    await expect(page.locator("#loadStatus")).toHaveText("正在处理，请等待；处理完成后再复核。");
+    expect(startRequested).toBe(true);
+  });
+
+  test("saved-ready then path edit disables Start until folders are saved again", async ({ page }) => {
+    await page.route("**/api/status", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ schema_version: "scan-qc.local-production-workbench.v1", running: false }),
+      });
+    });
+    await page.route("**/api/configure", async (route) => {
+      const payload = JSON.parse(route.request().postData() || "{}");
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema_version: "scan-qc.local-production-workbench.v1",
+          running: false,
+          configured: true,
+          folders: {
+            input: payload.input_dir,
+            derivatives: payload.derivatives_dir,
+            metadata: `${payload.derivatives_dir}/_production_workbench`,
+          },
+          processing_mode: { id: "standard", label_zh: "标准优化" },
+          folder_readiness: {
+            schema_version: "scan-qc.local-folder-readiness.v1",
+            aggregate_only: true,
+            status: "ready",
+            ready_to_start: true,
+            supported_image_count: 2,
+            input_empty: false,
+            output_writable: true,
+            selected_processing_mode: { id: "standard", label_zh: "标准优化" },
+            title_zh: "文件夹可以开始处理",
+            message_zh: "发现 2 张可处理图片，输出文件夹可以写入。",
+            next_steps_zh: ["确认处理方式无误。", "点击开始处理。"],
+          },
+        }),
+      });
+    });
+
+    await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
+    await page.locator("#inputPath").fill("/tmp/saved-ready-input");
+    await page.locator("#outputPath").fill("/tmp/saved-ready-output");
+    await page.getByRole("button", { name: "保存文件夹" }).click();
+    await expect(page.getByRole("button", { name: "开始处理" })).toBeEnabled();
+
+    await page.locator("#inputPath").fill("/tmp/edited-ready-input");
+    await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
+    await expect(page.locator("#loadStatus")).toHaveText("扫描原图文件夹已更改，请重新保存文件夹。");
+    await expect(page.locator("#readinessBox")).toBeHidden();
+
+    await page.getByRole("button", { name: "保存文件夹" }).click();
+    await expect(page.getByRole("button", { name: "开始处理" })).toBeEnabled();
+    await page.locator("#outputPath").fill("/tmp/edited-ready-output");
+    await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
+    await expect(page.locator("#loadStatus")).toHaveText("处理后输出文件夹已更改，请重新保存文件夹。");
+  });
+
+  test("saved-ready then processing mode edit disables Start until folders are saved again", async ({ page }) => {
+    await page.route("**/api/status", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ schema_version: "scan-qc.local-production-workbench.v1", running: false }),
+      });
+    });
+    await page.route("**/api/configure", async (route) => {
+      const payload = JSON.parse(route.request().postData() || "{}");
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema_version: "scan-qc.local-production-workbench.v1",
+          running: false,
+          configured: true,
+          folders: {
+            input: payload.input_dir,
+            derivatives: payload.derivatives_dir,
+            metadata: `${payload.derivatives_dir}/_production_workbench`,
+          },
+          processing_mode: { id: payload.processing_mode, label_zh: payload.processing_mode === "light" ? "轻度优化" : "标准优化" },
+          folder_readiness: {
+            schema_version: "scan-qc.local-folder-readiness.v1",
+            aggregate_only: true,
+            status: "ready",
+            ready_to_start: true,
+            supported_image_count: 2,
+            input_empty: false,
+            output_writable: true,
+            selected_processing_mode: { id: payload.processing_mode, label_zh: payload.processing_mode === "light" ? "轻度优化" : "标准优化" },
+            title_zh: "文件夹可以开始处理",
+            message_zh: "发现 2 张可处理图片，输出文件夹可以写入。",
+            next_steps_zh: ["确认处理方式无误。", "点击开始处理。"],
+          },
+        }),
+      });
+    });
+
+    await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
+    await page.locator("#inputPath").fill("/tmp/mode-stale-input");
+    await page.locator("#outputPath").fill("/tmp/mode-stale-output");
+    await page.getByRole("button", { name: "保存文件夹" }).click();
+    await expect(page.getByRole("button", { name: "开始处理" })).toBeEnabled();
+
+    await page.getByLabel("轻度优化").check();
+    await expect(page.locator("#modeStatus")).toHaveText("当前处理方式：轻度优化");
+    await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
+    await expect(page.locator("#loadStatus")).toHaveText("处理方式已更改，请重新保存文件夹。");
+    await expect(page.locator("#readinessBox")).toBeHidden();
+  });
+
+  test("start reconfigure returning not-ready does not call start", async ({ page }) => {
+    let configureCount = 0;
+    let startRequested = false;
+    await page.route("**/api/status", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ schema_version: "scan-qc.local-production-workbench.v1", running: false }),
+      });
+    });
+    await page.route("**/api/configure", async (route) => {
+      configureCount += 1;
+      const payload = JSON.parse(route.request().postData() || "{}");
+      const ready = configureCount === 1;
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema_version: "scan-qc.local-production-workbench.v1",
+          running: false,
+          configured: true,
+          folders: {
+            input: payload.input_dir,
+            derivatives: payload.derivatives_dir,
+            metadata: `${payload.derivatives_dir}/_production_workbench`,
+          },
+          processing_mode: { id: "standard", label_zh: "标准优化" },
+          folder_readiness: {
+            schema_version: "scan-qc.local-folder-readiness.v1",
+            aggregate_only: true,
+            status: ready ? "ready" : "unsupported",
+            ready_to_start: ready,
+            supported_image_count: ready ? 2 : 0,
+            input_empty: false,
+            output_writable: true,
+            selected_processing_mode: { id: "standard", label_zh: "标准优化" },
+            title_zh: ready ? "文件夹可以开始处理" : "没有可处理的图片",
+            message_zh: ready ? "发现 2 张可处理图片，输出文件夹可以写入。" : "文件夹里没有找到当前支持处理的图片。",
+            next_steps_zh: ready ? ["确认处理方式无误。", "点击开始处理。"] : ["确认原图是常见图片格式。"],
+          },
+        }),
+      });
+    });
+    await page.route("**/api/start", async (route) => {
+      startRequested = true;
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ schema_version: "scan-qc.local-production-workbench.v1", running: true, configured: true }),
+      });
+    });
+
+    await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
+    await page.locator("#inputPath").fill("/tmp/recheck-input");
+    await page.locator("#outputPath").fill("/tmp/recheck-output");
+    await page.getByRole("button", { name: "保存文件夹" }).click();
+    await expect(page.getByRole("button", { name: "开始处理" })).toBeEnabled();
+    await page.getByRole("button", { name: "开始处理" }).click();
+    await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
+    await expect(page.locator("#loadStatus")).toHaveText("还不能开始：没有可处理的图片。确认原图是常见图片格式。");
+    expect(configureCount).toBe(2);
+    expect(startRequested).toBe(false);
+  });
+
+  test("shows one Chinese reason when source or output folder is missing", async ({ page }) => {
+    await page.route("**/api/status", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ schema_version: "scan-qc.local-production-workbench.v1", running: false }),
+      });
+    });
+
+    await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
+    await page.getByRole("button", { name: "保存文件夹" }).click();
+    await expect(page.locator("#loadStatus")).toHaveText("还不能开始：请先填写扫描原图文件夹。");
+    await page.locator("#inputPath").fill("/tmp/missing-output-input");
+    await page.getByRole("button", { name: "保存文件夹" }).click();
+    await expect(page.locator("#loadStatus")).toHaveText("还不能开始：请先填写处理后输出文件夹。");
+    await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
+  });
+
+  test("shows start-request preflight block without private paths", async ({ page }) => {
+    await page.route("**/api/status", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ schema_version: "scan-qc.local-production-workbench.v1", running: false }),
+      });
+    });
+    await page.route("**/api/configure", async (route) => {
+      const payload = JSON.parse(route.request().postData() || "{}");
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema_version: "scan-qc.local-production-workbench.v1",
+          running: false,
+          configured: true,
+          folders: {
+            input: payload.input_dir,
+            derivatives: payload.derivatives_dir,
+            metadata: `${payload.derivatives_dir}/_production_workbench`,
+          },
+          folder_readiness: {
+            schema_version: "scan-qc.local-folder-readiness.v1",
+            aggregate_only: true,
+            status: "ready",
+            ready_to_start: true,
+            supported_image_count: 1,
+            input_empty: false,
+            output_writable: true,
+            selected_processing_mode: { id: "standard", label_zh: "标准优化" },
+            title_zh: "文件夹可以开始处理",
+            message_zh: "发现 1 张可处理图片，输出文件夹可以写入。",
+            next_steps_zh: ["确认处理方式无误。", "点击开始处理。"],
+          },
+        }),
+      });
+    });
+    await page.route("**/api/start", async (route) => {
+      await route.fulfill({
+        status: 400,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error_zh: "原图文件夹是空的",
+          preflight_guidance: {
+            schema_version: "scan-qc.local-folder-preflight.v1",
+            aggregate_only: true,
+            kind: "input_folder_empty",
+            title_zh: "原图文件夹是空的",
+            message_zh: "扫描原图文件夹里没有文件，处理没有启动。",
+            next_steps_zh: ["确认是否选到了本批次真正的扫描原图文件夹。", "放好图片后，重新保存文件夹并开始处理。"],
+            failed_files: 0,
+            retryable_files: 0,
+            derivative_images_ready: 0,
+            total_files: 0,
+          },
+        }),
+      });
+    });
+
+    await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
+    await page.locator("#inputPath").fill("/tmp/start-empty-input");
+    await page.locator("#outputPath").fill("/tmp/start-empty-output");
+    await page.getByRole("button", { name: "保存文件夹" }).click();
+    await page.getByRole("button", { name: "开始处理" }).click();
+    await expect(page.locator("#loadStatus")).toHaveText("原图文件夹是空的");
+    await expect(page.locator("#recoveryTitle")).toHaveText("原图文件夹是空的");
+    await expect(page.getByText("扫描原图文件夹里没有文件，处理没有启动。")).toBeVisible();
+    await expect(page.getByText("放好图片后，重新保存文件夹并开始处理。")).toBeVisible();
+    await expectOperatorStatusHidesPaths(page, ["/tmp/start-empty-input", "/tmp/start-empty-output", "start-empty-input", "start-empty-output"]);
   });
 
   test("shows unsupported-folder readiness guidance before starting", async ({ page }) => {
@@ -874,7 +1194,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#readinessTitle")).toHaveText("没有可处理的图片");
     await expect(page.locator("#readinessFacts")).toContainText("可处理图片：0 张");
     await expect(page.locator("#readinessFacts")).toContainText("输出文件夹：可以写入");
-    await expect(page.getByText("确认原图是常见图片格式。")).toBeVisible();
+    await expect(page.locator("#readinessSteps").getByText("确认原图是常见图片格式。", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
 
     expect(consoleProblems).toEqual([]);

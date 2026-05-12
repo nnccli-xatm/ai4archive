@@ -559,7 +559,7 @@ def main() -> int:
         "本批次是否完成",
         "人工处理",
         "交管理员处理",
-        "浏览器辅助确认只用于提示",
+        "浏览器辅助确认只会提示看到的项目数",
         "静态打开不会启动处理",
         "recovery_guidance",
         "renderRecoveryGuidance",
