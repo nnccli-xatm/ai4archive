@@ -21,7 +21,7 @@ from PIL import Image, ImageDraw, ImageFilter
 from archive_scan_qc import __version__
 from archive_scan_qc.acceptance import build_acceptance_summary
 from archive_scan_qc.artifact_readiness import build_artifact_readiness_checklist
-from archive_scan_qc.benchmark import _recommendations
+from archive_scan_qc.benchmark import _comparison_plan, _recommendations
 from archive_scan_qc.capability_probe import CapabilityProbeConfig, run_capability_probe
 from archive_scan_qc.cli import main
 from archive_scan_qc.deep_inspection_provider import (
@@ -66,6 +66,7 @@ RELEASE_CANDIDATE_PATH = REPO_ROOT / "scripts" / "release_candidate_summary.py"
 FRONTEND_ISSUE_DRIVER_PATH = REPO_ROOT / "scripts" / "frontend_issue_driver.py"
 LOCAL_PROVIDER_EXAMPLE = REPO_ROOT / "examples" / "local_analysis_provider.py"
 ISSUE_PLAN_PATH = REPO_ROOT / "scripts" / "generate_issue_plan.py"
+SYNTHETIC_PERFORMANCE_PATH = REPO_ROOT / "scripts" / "run_synthetic_performance_comparison.py"
 
 
 def _load_private_integration_module():
@@ -132,6 +133,16 @@ def _load_issue_plan_module():
     spec = importlib.util.spec_from_file_location("generate_issue_plan", ISSUE_PLAN_PATH)
     if spec is None or spec.loader is None:
         raise RuntimeError("Could not load generate_issue_plan.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_synthetic_performance_module():
+    spec = importlib.util.spec_from_file_location("run_synthetic_performance_comparison", SYNTHETIC_PERFORMANCE_PATH)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Could not load run_synthetic_performance_comparison.py")
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
@@ -4248,6 +4259,50 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["total_files"], "2")
             self.assertEqual(rows[0]["openable_files"], "1")
+            self.assertEqual(payload["comparison_plan"]["schema_version"], "scan-qc.performance-comparison-plan.v1")
+            self.assertIn("private_puersai_policy", payload["comparison_plan"]["privacy_boundary"])
+            self.assertIn("pillow_version", payload["environment"])
+
+    def test_benchmark_comparison_plan_makes_production_decision(self) -> None:
+        plan = _comparison_plan(
+            [
+                _benchmark_run_stub(1, 1, 1, scan_rate=100.0, processing_rate=40.0),
+                _benchmark_run_stub(2, 1, 2, scan_rate=120.0, processing_rate=55.0),
+            ]
+        )
+
+        self.assertEqual(plan["schema_version"], "scan-qc.performance-comparison-plan.v1")
+        self.assertEqual(
+            [path["id"] for path in plan["paths"]],
+            [
+                "pillow_cpu_baseline",
+                "numpy_vectorized_hotspots",
+                "libvips_streaming_io",
+                "gpu_model_providers",
+            ],
+        )
+        self.assertEqual(plan["production_decision"]["worth_implementing_next"], "processing_worker_tuning")
+        self.assertIn("processed images/min", plan["production_decision"]["reason"])
+
+    def test_synthetic_performance_summary_ranks_variants(self) -> None:
+        module = _load_synthetic_performance_module()
+        variants = [
+            {
+                "id": "pillow_cpu_baseline",
+                "label": "Current Python/Pillow CPU baseline",
+                "best_processing_images_per_minute": 100.0,
+            },
+            {
+                "id": "numpy_vectorized_hotspots",
+                "label": "NumPy vectorized despeckle hotspot when available",
+                "best_processing_images_per_minute": 125.0,
+            },
+        ]
+
+        decision = module._production_decision(variants)
+
+        self.assertEqual(decision["worth_implementing_next"], "numpy_vectorized_hotspots")
+        self.assertIn("private aggregate validation", decision["reason"])
 
     def test_benchmark_workers_list_order_is_stable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

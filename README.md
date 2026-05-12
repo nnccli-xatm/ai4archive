@@ -975,10 +975,10 @@ These files are aggregate-only. They include total file count, openable count,
 finding counts by severity and rule, processing success/failure/skip counts,
 scan and processing elapsed seconds, aggregate per-operation processing timings,
 files per minute, requested and effective workers, operation flags, Python
-version, platform, CPU count, and best-effort memory/GPU fields. They do not
-include source images, filenames, relative
-paths, content hashes, thumbnails, per-file quality metrics, per-file finding
-rows, single-file manifests, or image content.
+version, Pillow version, platform, CPU count, and best-effort memory/GPU fields.
+They do not include source images, filenames, relative paths, content hashes,
+thumbnails, per-file quality metrics, per-file finding rows, single-file
+manifests, or image content.
 
 `benchmark_results.json` also includes a top-level `recommendations` object for
 capacity planning. It reports the best scan worker count, the best processing
@@ -989,6 +989,35 @@ threshold. The recommendation is based only on the aggregate data in the
 current benchmark run; it does not assume a fixed CPU, memory, storage, GPU, or
 private sample path. Keep `benchmark_results.csv` as run-level rows for
 existing consumers.
+
+The JSON also includes `comparison_plan`, which frames benchmark results as a
+production decision instead of an abstract score. Compare these paths with the
+same input set and worker sweep:
+
+- `pillow_cpu_baseline`: current Python/Pillow CPU processing, measured by
+  default.
+- `numpy_vectorized_hotspots`: optional vectorized hotspot evidence, currently
+  exposed by `--despeckle-backend numpy` when NumPy is available.
+- `libvips_streaming_io`: candidate streaming IO/output path. Record comparable
+  output timing and memory pressure before adding it as a dependency.
+- `gpu_model_providers`: optional ONNX Runtime, PaddleOCR, or similar provider
+  paths. Baseline operation must not require GPU; prioritize only if aggregate
+  review-needed counts or safe-retouch quality justify the extra failure risk.
+
+For a public-safe synthetic comparison that does not use private images:
+
+```bash
+PYTHONPATH=src python3 scripts/run_synthetic_performance_comparison.py \
+  --out /tmp/scan-qc-synthetic-comparison \
+  --image-count 8 \
+  --workers-list 1,2
+```
+
+The script generates synthetic page-like PNGs, runs the Pillow baseline and the
+optional NumPy despeckle variant through `archive-scan-qc benchmark`, and writes
+`synthetic_performance_comparison.json`. Use it for PR evidence and local
+sanity checks, then require aggregate-only puersai validation only for changes
+that alter algorithms, model inference, or private-image runtime behavior.
 
 For private local samples, share only `benchmark_results.json` and/or
 `benchmark_results.csv`. Do not share the image directory, generated derivative

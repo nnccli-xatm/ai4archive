@@ -14,6 +14,8 @@ import shutil
 import sys
 from typing import Any
 
+from PIL import Image
+
 from .processing import ProcessingOptions, process_images
 from .rules import RulesProfileError, load_rules_profile
 from .scanner import ScanConfig, scan_batch
@@ -22,6 +24,7 @@ from .scanner import ScanConfig, scan_batch
 BENCHMARK_JSON = "benchmark_results.json"
 BENCHMARK_CSV = "benchmark_results.csv"
 DIMINISHING_RETURNS_THRESHOLD_RATIO = 0.10
+COMPARISON_PLAN_VERSION = "scan-qc.performance-comparison-plan.v1"
 
 
 def positive_int(value: str, label: str) -> int:
@@ -168,8 +171,105 @@ def _payload(started_at: str, results: list[dict[str, Any]], finished_at: str | 
             ],
         },
         "environment": _environment(),
+        "comparison_plan": _comparison_plan(results),
         "recommendations": _recommendations(results),
         "runs": results,
+    }
+
+
+def _comparison_plan(runs: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "schema_version": COMPARISON_PLAN_VERSION,
+        "goal": (
+            "Compare production paths by operator wait reduction, review burden, safe automatic processing "
+            "quality, failure risk, and resource visibility."
+        ),
+        "privacy_boundary": {
+            "synthetic_or_local_public_safe_inputs": True,
+            "private_puersai_policy": (
+                "Private puersai validation is a later orchestrator-only run. Do not publish private source "
+                "images, paths, names, hashes, previews, OCR text, derivative images, or row-level results; "
+                "publish aggregate JSON/CSV fields only."
+            ),
+        },
+        "metrics": [
+            "processed_images_per_minute",
+            "scan_images_per_minute",
+            "failures",
+            "review_needed_counts_by_severity_and_rule",
+            "memory_cpu_gpu_visibility",
+            "quality_difference_summary",
+        ],
+        "paths": _comparison_paths(),
+        "production_decision": _production_decision(runs),
+    }
+
+
+def _comparison_paths() -> list[dict[str, Any]]:
+    return [
+        {
+            "id": "pillow_cpu_baseline",
+            "label": "Current Python/Pillow CPU baseline",
+            "status": "measured_by_default",
+            "run_hint": "archive-scan-qc benchmark --despeckle-backend fallback",
+            "quality_signal": "Reference aggregate finding counts and processing failures.",
+            "next_action_rule": "Keep as baseline unless another path improves throughput without higher failures or review counts.",
+        },
+        {
+            "id": "numpy_vectorized_hotspots",
+            "label": "OpenCV/NumPy-style vectorized hotspots",
+            "status": "optional_local_measurement",
+            "run_hint": "archive-scan-qc benchmark --despeckle --despeckle-backend numpy",
+            "quality_signal": "Compare operation timings, failures, and finding deltas against the Pillow baseline.",
+            "next_action_rule": "Prioritize if hotspot timings fall materially and aggregate quality/failure counts stay stable.",
+        },
+        {
+            "id": "libvips_streaming_io",
+            "label": "libvips streaming IO/output path",
+            "status": "candidate_not_required_for_baseline",
+            "run_hint": "Use the same synthetic/local corpus and record libvips output timing in the same summary schema.",
+            "quality_signal": "Compare output-path throughput, memory pressure, and derivative write failures.",
+            "next_action_rule": "Prioritize if processing is IO-bound or memory pressure is the observed bottleneck.",
+        },
+        {
+            "id": "gpu_model_providers",
+            "label": "Optional GPU/model provider paths: ONNX Runtime or PaddleOCR",
+            "status": "candidate_not_required_for_baseline",
+            "run_hint": "Run only where provider dependencies are installed; baseline operation must not require GPU.",
+            "quality_signal": "Compare review-needed counts, provider failures, GPU visibility, and safe-retouch confidence.",
+            "next_action_rule": "Prioritize only when reduced manual review burden offsets setup and failure risk.",
+        },
+    ]
+
+
+def _production_decision(runs: list[dict[str, Any]]) -> dict[str, Any]:
+    recommendations = _recommendations(runs)
+    scan = recommendations["scan_only"]
+    processing = recommendations["processing"]
+    if not runs:
+        return {
+            "worth_implementing_next": None,
+            "reason": "No benchmark runs have completed yet.",
+        }
+    if processing:
+        return {
+            "worth_implementing_next": "processing_worker_tuning",
+            "reason": (
+                f"Best measured processing throughput is {processing['files_per_minute']} processed images/min "
+                f"at requested workers={processing['best_requested_workers']}; compare candidate paths against this."
+            ),
+        }
+    if scan:
+        return {
+            "worth_implementing_next": "scan_worker_tuning",
+            "reason": (
+                f"Best measured scan throughput is {scan['files_per_minute']} images/min at requested "
+                f"workers={scan['best_requested_workers']}; processing candidates still need a measured run."
+            ),
+        }
+    return {
+        "worth_implementing_next": None,
+        "reason": "Runs completed but did not expose comparable throughput metrics.",
     }
 
 
@@ -309,6 +409,7 @@ def _environment() -> dict[str, Any]:
     return {
         "python_version": platform.python_version(),
         "python_implementation": platform.python_implementation(),
+        "pillow_version": Image.__version__,
         "platform": platform.platform(),
         "machine": platform.machine(),
         "processor": platform.processor() or None,
