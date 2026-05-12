@@ -220,6 +220,35 @@
       gap: 10px;
     }
 
+    .setup-steps {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 8px;
+    }
+
+    .setup-steps li {
+      display: grid;
+      grid-template-columns: 28px 1fr;
+      gap: 8px;
+      align-items: center;
+      color: var(--ink-2);
+      font-weight: 700;
+    }
+
+    .step-number {
+      display: grid;
+      place-items: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 999px;
+      background: var(--station);
+      color: #fff;
+      font-size: 14px;
+      font-weight: 780;
+    }
+
     .folder-row {
       display: grid;
       gap: 8px;
@@ -854,24 +883,31 @@
       <aside class="rail" aria-label="生产准备">
         <div class="rail-title">
           <h2>批次准备</h2>
-          <p>按顺序填写本机文件夹，然后开始处理。</p>
+          <p>按下面顺序操作：填原图、填输出、保存文件夹、开始处理。</p>
         </div>
+
+        <ol class="setup-steps" aria-label="开始处理顺序">
+          <li><span class="step-number">1</span><span>填写原图文件夹</span></li>
+          <li><span class="step-number">2</span><span>填写输出文件夹</span></li>
+          <li><span class="step-number">3</span><span>保存文件夹</span></li>
+          <li><span class="step-number">4</span><span>开始处理</span></li>
+        </ol>
 
         <div class="folder-stack">
           <div class="folder-row">
             <strong>原图文件夹</strong>
-            <small id="inputStatus">请填写本机扫描原图文件夹位置。</small>
-            <label class="folder-trigger secondary" for="inputFolder">辅助带入原图位置</label>
+            <small id="inputStatus">填写本批次扫描原图所在的本机文件夹位置。</small>
+            <label class="folder-trigger secondary" for="inputFolder">从浏览器辅助确认原图文件夹</label>
             <input class="visually-hidden" id="inputFolder" type="file" webkitdirectory directory multiple>
-            <input class="path-input" id="inputPath" type="text" autocomplete="off" placeholder="例如：本机原图文件夹位置">
+            <input class="path-input" id="inputPath" type="text" autocomplete="off" placeholder="填写原图文件夹位置">
           </div>
 
           <div class="folder-row">
             <strong>输出文件夹</strong>
-            <small id="outputStatus">请填写本机处理后输出文件夹位置。</small>
-            <label class="folder-trigger secondary" for="outputFolder">辅助带入输出位置</label>
+            <small id="outputStatus">填写处理后图片保存到的本机文件夹位置。</small>
+            <label class="folder-trigger secondary" for="outputFolder">从浏览器辅助确认输出文件夹</label>
             <input class="visually-hidden" id="outputFolder" type="file" webkitdirectory directory multiple>
-            <input class="path-input" id="outputPath" type="text" autocomplete="off" placeholder="例如：本机输出文件夹位置">
+            <input class="path-input" id="outputPath" type="text" autocomplete="off" placeholder="填写输出文件夹位置">
           </div>
         </div>
 
@@ -886,12 +922,12 @@
         </div>
 
         <div class="run-controls">
-          <button id="saveFoldersButton" class="secondary">只保存文件夹</button>
+          <button id="saveFoldersButton" class="secondary">保存文件夹</button>
           <button id="startButton" disabled>开始处理</button>
           <button id="resetButton" class="secondary">重新开始</button>
         </div>
 
-        <p class="workbench-message" id="loadStatus">请先填写原图文件夹和输出文件夹，然后点击“开始处理”。</p>
+        <p class="workbench-message" id="loadStatus">请先填写原图文件夹和输出文件夹，点击“保存文件夹”，确认可以开始后再点击“开始处理”。</p>
         <div class="readiness-box hidden" id="readinessBox">
           <h3 id="readinessTitle">文件夹准备情况</h3>
           <p id="readinessMessage">请先保存扫描原图文件夹和处理后输出文件夹。文件夹可以开始处理时，会显示可处理图片、输出文件夹可以写入和确认处理方式无误。</p>
@@ -908,7 +944,7 @@
 
         <details class="maintenance-loader">
           <summary>维护入口</summary>
-          <small>只有管理员排查或演练时使用，正常加工不需要打开。</small>
+          <small>管理员排查、演练或查看本机状态时使用；这不是正常加工步骤。</small>
           <select id="fixtureSelect" aria-label="选择维护示例">
             <option value="">选择维护示例</option>
             <option value="fixtures/production-run-running">正在处理</option>
@@ -919,10 +955,10 @@
           </select>
           <label class="folder-trigger" for="summaryFile">选择本机状态</label>
           <input class="visually-hidden" id="summaryFile" type="file" accept="application/json,.json" multiple>
-          <small>用于查看本机已经生成的处理状态。</small>
+          <small>只用于查看本机已经生成的处理状态，不会开始处理。</small>
         </details>
 
-        <p class="guard-note">原图不会被覆盖。辅助带入只能提示浏览器看到的项目数，仍需确认输入框里的本机文件夹位置。单文件打开时不读取目录内容，不执行处理，不显示本机私有路径；从本机入口启动时由本机服务生成处理后图片。已预先填写演练文件夹时，打开后可直接查看批次状态。</p>
+        <p class="guard-note">原图不会被覆盖。浏览器辅助确认只会提示看到的项目数，操作员仍要确认输入框里的本机文件夹位置填写正确。单文件打开时不读取目录内容，不执行处理，不显示本机私有路径；从本机入口启动时由本机服务生成处理后图片。已预先填写演练文件夹时，打开后可直接查看批次状态。</p>
       </aside>
 
       <section class="image-desk" aria-label="大图生产区">
@@ -1385,7 +1421,7 @@
 
     function folderLabel(input, fallback) {
       if (!input.files || input.files.length === 0) return fallback;
-      return `已辅助带入 ${input.files.length} 个项目；请确认输入框里的本机文件夹位置。`;
+      return `浏览器看到 ${input.files.length} 个项目；请确认输入框里的本机文件夹位置填写正确。`;
     }
 
     function pathChosen(input) {
@@ -2019,7 +2055,7 @@
         return;
       }
       if (!pathChosen(els.inputPath) || !pathChosen(els.outputPath)) {
-        els.loadStatus.textContent = "辅助带入只用于提示；请填写原图文件夹和输出文件夹。";
+        els.loadStatus.textContent = "浏览器辅助确认只用于提示；请填写原图文件夹和输出文件夹。";
         state.inputChosen = pathChosen(els.inputPath);
         state.outputChosen = pathChosen(els.outputPath);
         render();
@@ -2307,14 +2343,14 @@
 
     els.inputFolder.addEventListener("change", () => {
       state.inputChosen = els.inputFolder.files.length > 0;
-      els.inputStatus.textContent = folderLabel(els.inputFolder, "请填写本机扫描原图文件夹位置。");
+      els.inputStatus.textContent = folderLabel(els.inputFolder, "填写本批次扫描原图所在的本机文件夹位置。");
       if (state.inputChosen && !state.outputChosen) state.status = "choose_output";
       render();
     });
 
     els.outputFolder.addEventListener("change", () => {
       state.outputChosen = els.outputFolder.files.length > 0;
-      els.outputStatus.textContent = folderLabel(els.outputFolder, "请填写本机处理后输出文件夹位置。");
+      els.outputStatus.textContent = folderLabel(els.outputFolder, "填写处理后图片保存到的本机文件夹位置。");
       if (state.inputChosen && state.outputChosen) setStatus("ready");
       render();
     });
@@ -2391,9 +2427,9 @@
       els.outputPath.value = "";
       els.summaryFile.value = "";
       els.fixtureSelect.value = "";
-      els.inputStatus.textContent = "请填写本机扫描原图文件夹位置。";
-      els.outputStatus.textContent = "请填写本机处理后输出文件夹位置。";
-      els.loadStatus.textContent = "请先填写原图文件夹和输出文件夹，然后点击“开始处理”。";
+      els.inputStatus.textContent = "填写本批次扫描原图所在的本机文件夹位置。";
+      els.outputStatus.textContent = "填写处理后图片保存到的本机文件夹位置。";
+      els.loadStatus.textContent = "请先填写原图文件夹和输出文件夹，点击“保存文件夹”，确认可以开始后再点击“开始处理”。";
       window.clearTimeout(timer);
       window.clearInterval(localApi.polling);
       window.clearTimeout(localApi.saveTimer);

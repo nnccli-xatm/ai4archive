@@ -55,6 +55,33 @@ test.describe("production workbench finish/export browser smoke", () => {
     if (server) server.kill();
   });
 
+  test("keeps the startup folder sequence primary and maintenance secondary", async ({ page }) => {
+    await page.route("**/api/status", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ schema_version: "scan-qc.local-production-workbench.v1", running: false }),
+      });
+    });
+
+    await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
+    await expect(page.getByRole("heading", { name: "批次准备" })).toBeVisible();
+    await expect(page.getByLabel("开始处理顺序")).toContainText("填写原图文件夹");
+    await expect(page.getByLabel("开始处理顺序")).toContainText("填写输出文件夹");
+    await expect(page.getByLabel("开始处理顺序")).toContainText("保存文件夹");
+    await expect(page.getByLabel("开始处理顺序")).toContainText("开始处理");
+    await expect(page.locator("#inputStatus")).toHaveText("填写本批次扫描原图所在的本机文件夹位置。");
+    await expect(page.locator("#outputStatus")).toHaveText("填写处理后图片保存到的本机文件夹位置。");
+    await expect(page.getByRole("button", { name: "保存文件夹" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
+    await expect(page.locator("#loadStatus")).toHaveText("请先填写原图文件夹和输出文件夹，点击“保存文件夹”，确认可以开始后再点击“开始处理”。");
+
+    await expect(page.locator(".maintenance-loader")).not.toHaveAttribute("open", "");
+    await expect(page.getByText("选择维护示例")).toBeHidden();
+    await page.getByText("维护入口").click();
+    await expect(page.getByText("管理员排查、演练或查看本机状态时使用；这不是正常加工步骤。")).toBeVisible();
+    await expect(page.getByText("只用于查看本机已经生成的处理状态，不会开始处理。")).toBeVisible();
+  });
+
   test("finishes a synthetic review queue without console errors or warnings", async ({ page }) => {
     const consoleProblems = [];
     page.on("console", (message) => {
@@ -715,7 +742,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
     await page.locator("#inputPath").fill("/tmp/unsupported-input");
     await page.locator("#outputPath").fill("/tmp/unsupported-output");
-    await page.getByRole("button", { name: "只保存文件夹" }).click();
+    await page.getByRole("button", { name: "保存文件夹" }).click();
     await expect(page.locator("#readinessTitle")).toHaveText("没有可处理的图片");
     await expect(page.locator("#readinessFacts")).toContainText("可处理图片：0 张");
     await expect(page.locator("#readinessFacts")).toContainText("输出文件夹：可以写入");
