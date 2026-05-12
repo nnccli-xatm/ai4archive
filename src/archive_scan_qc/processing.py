@@ -867,16 +867,19 @@ def _process_image(
     with _operation_timer(operation_timings, "trim_dark_border", enabled=options.trim_dark_border):
         if options.trim_dark_border:
             reused_dark_border = reusable.get("dark_border")
-            if isinstance(reused_dark_border, DarkBorderDetection):
+            if isinstance(reused_dark_border, DarkBorderDetection) and not deskewed:
                 dark_border = reused_dark_border
                 operations.append("dark_border_detect_reused_scan_measurement")
                 operation_timings.setdefault("trim_dark_border", {})["reused_scan_measurement"] = True
             else:
                 dark_border = _detect_dark_border_bbox(processed)
                 if options.reuse_scan_measurements:
-                    operation_timings.setdefault("trim_dark_border", {})["fallback_reason"] = reusable.get(
-                        "fallback_reason", "scan measurements unavailable"
+                    fallback_reason = (
+                        "deskew changed coordinate space"
+                        if isinstance(reused_dark_border, DarkBorderDetection) and deskewed
+                        else reusable.get("fallback_reason", "scan measurements unavailable")
                     )
+                    operation_timings.setdefault("trim_dark_border", {})["fallback_reason"] = fallback_reason
             if dark_border.bbox:
                 processed = processed.crop(dark_border.bbox)
                 operations.append("dark_border_trim_conservative")

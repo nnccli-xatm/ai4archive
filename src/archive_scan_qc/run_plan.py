@@ -262,9 +262,9 @@ def _run_batch(project_id: str, batch: PlanBatch, index: int) -> dict[str, Any]:
                     "processing_resumed_files": processing_summary["resumed_files"],
                     "processing_duplicate_reused_files": processing_summary.get("duplicate_reused_files", 0),
                     "processing_existing_derivative_reused_files": processing_summary.get("existing_derivative_reused_files", 0),
-                    "processing_scan_measurement_reused_files": processing_summary.get("scan_measurement_reuse", {}).get(
-                        "files_with_any_reuse", 0
-                    ),
+                    "processing_scan_measurement_reused_files": processing_performance.get(
+                        "scan_measurement_reuse", {}
+                    ).get("files_with_any_reuse", 0),
                     "processing_elapsed_seconds": processing_performance["elapsed_seconds"],
                     "processing_files_per_minute": processing_performance["processed_files_per_minute"],
                     "processing_operation_timings": processing_performance.get("operation_timings", {}),

@@ -41,6 +41,7 @@ class ProductionRunConfig:
     despeckle: bool = False
     despeckle_backend: str = "fallback"
     resume_processing: bool = False
+    reuse_scan_measurements: bool = False
     workers: int | None = None
     analysis_provider_command: str | None = None
 
@@ -91,6 +92,7 @@ def run_production_folder(config: ProductionRunConfig) -> dict[str, Any]:
             despeckle=config.despeckle,
             despeckle_backend=config.despeckle_backend,
             resume_processing=config.resume_processing,
+            reuse_scan_measurements=config.reuse_scan_measurements,
             workers=config.workers,
         ),
     )

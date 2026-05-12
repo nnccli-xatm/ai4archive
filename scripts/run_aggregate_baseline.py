@@ -238,6 +238,7 @@ def _baseline_summary(args: argparse.Namespace, private_summary: dict[str, Any])
                 getattr(args, "despeckle_backend", "fallback"),
             ),
             "resume_processing": bool(args.resume_processing),
+            "reuse_scan_measurements": bool(getattr(args, "reuse_scan_measurements", False)),
         },
         "despeckle_backend": private_summary.get(
             "despeckle_backend",
@@ -267,6 +268,9 @@ def _baseline_summary(args: argparse.Namespace, private_summary: dict[str, Any])
             "processing_duplicate_reused_files": int(counts.get("processing_duplicate_reused_files", 0)),
             "processing_existing_derivative_reused_files": int(
                 counts.get("processing_existing_derivative_reused_files", 0)
+            ),
+            "processing_scan_measurement_reused_files": int(
+                counts.get("processing_scan_measurement_reused_files", 0)
             ),
             "failed_batches": int(counts["failed_batches"]),
             "preflight_errors": int(counts["preflight_errors"]),
