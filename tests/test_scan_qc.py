@@ -6337,6 +6337,50 @@ class ScanQcTest(unittest.TestCase):
             self.assertTrue((derivatives_dir / "images" / "A001_0001.jpg").exists())
             self.assertTrue((derivatives_dir / DEFAULT_METADATA_DIRNAME / "production_run_summary.json").exists())
 
+    def test_local_production_workbench_status_exposes_aggregate_recovery_guidance(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            metadata_dir = derivatives_dir / DEFAULT_METADATA_DIRNAME
+            input_dir.mkdir()
+            metadata_dir.mkdir(parents=True)
+            (metadata_dir / "production_run_summary.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "scan-qc.production-run.v1",
+                        "status": "blocked",
+                        "operator_summary": {
+                            "total_source_images": 5,
+                            "derivative_images_ready": 3,
+                            "files_needing_attention": 2,
+                        },
+                        "counts": {
+                            "total_files": 5,
+                            "processed_files": 3,
+                            "resumed_files": 0,
+                            "failed_files": 2,
+                            "retry_list_files": 2,
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            controller = WorkbenchController()
+            controller.configure(input_dir, derivatives_dir)
+            status = controller.status()
+
+            guidance = status["recovery_guidance"]
+            self.assertTrue(guidance["aggregate_only"])
+            self.assertEqual(guidance["kind"], "processing_failed_retryable")
+            self.assertEqual(guidance["failed_files"], 2)
+            self.assertEqual(guidance["retryable_files"], 2)
+            self.assertEqual(guidance["derivative_images_ready"], 3)
+            self.assertIn("磁盘空间", "".join(guidance["next_steps_zh"]))
+            self.assertNotIn(str(input_dir), json.dumps(guidance, ensure_ascii=False))
+            self.assertNotIn(".jpg", json.dumps(guidance, ensure_ascii=False))
+
     def test_local_production_workbench_rejects_empty_configure_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

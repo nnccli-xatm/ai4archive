@@ -71,6 +71,11 @@ REQUIRED_TEXT = {
     "需留意文件",
     "原图总数",
     "需要管理员处理",
+    "文件夹还没有准备好",
+    "处理没有全部完成",
+    "没有剩余处理任务",
+    "磁盘空间",
+    "可重试",
 }
 
 FORBIDDEN_VISIBLE_TERMS = {
@@ -313,6 +318,17 @@ def main() -> int:
         ]:
             if key not in operator:
                 errors.append(f"missing operator field for {fixture_name}: {key}")
+        guidance = summary.get("recovery_guidance")
+        if expected_status in {"blocked", "finished"} and not isinstance(guidance, dict):
+            errors.append(f"missing aggregate recovery guidance for {fixture_name}")
+        if isinstance(guidance, dict):
+            if guidance.get("aggregate_only") is not True:
+                errors.append(f"recovery guidance is not aggregate-only for {fixture_name}")
+            for key in ["kind", "title_zh", "message_zh", "next_steps_zh", "failed_files", "derivative_images_ready"]:
+                if key not in guidance:
+                    errors.append(f"missing recovery guidance field for {fixture_name}: {key}")
+            if not re.search(r"[\u4e00-\u9fff]", str(guidance.get("message_zh", ""))):
+                errors.append(f"recovery guidance message is not Chinese for {fixture_name}")
         for demo_only_key in ["output_folder_summary", "review_queue_state"]:
             if demo_only_key in operator:
                 errors.append(f"fixture uses non-production operator field for {fixture_name}: {demo_only_key}")
@@ -387,6 +403,13 @@ def main() -> int:
         "复核保存",
         "浏览器选择只用于提示",
         "静态打开不会启动处理",
+        "recovery_guidance",
+        "renderRecoveryGuidance",
+        "guidanceFromSummary",
+        "folder_setup_missing",
+        "processing_failed_retryable",
+        "processing_failed_admin",
+        "no_remaining_work",
     ]:
         if required_script_token not in html:
             errors.append(f"missing review queue workflow script token: {required_script_token}")
