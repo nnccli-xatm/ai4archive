@@ -101,6 +101,8 @@ REQUIRED_TEXT = {
     "已自动保存",
     "已恢复上次进度",
     "保存文件夹",
+    "填写原图文件夹",
+    "填写输出文件夹",
     "处理方式",
     "标准优化",
     "只质检不修图",
@@ -111,6 +113,8 @@ REQUIRED_TEXT = {
     "维护入口",
     "选择维护示例",
     "选择本机状态",
+    "这不是正常加工步骤",
+    "浏览器辅助确认",
     "请先填写原图文件夹和输出文件夹",
     "需留意文件",
     "原图总数",
@@ -284,8 +288,9 @@ def main() -> int:
     for simplified_flow_token in [
         'class="workbench-message" id="loadStatus"',
         '<details class="maintenance-loader">',
-        "只有管理员排查或演练时使用，正常加工不需要打开。",
-        "辅助带入只能提示浏览器看到的项目数",
+        "按下面顺序操作：填原图、填输出、保存文件夹、开始处理。",
+        "管理员排查、演练或查看本机状态时使用；这不是正常加工步骤。",
+        "浏览器辅助确认只会提示看到的项目数",
     ]:
         if simplified_flow_token not in html:
             errors.append(f"missing simplified operator-flow token: {simplified_flow_token}")
@@ -516,7 +521,7 @@ def main() -> int:
         "已自动保存",
         "已恢复上次进度",
         "复核保存",
-        "辅助带入只用于提示",
+        "浏览器辅助确认只用于提示",
         "静态打开不会启动处理",
         "recovery_guidance",
         "renderRecoveryGuidance",
