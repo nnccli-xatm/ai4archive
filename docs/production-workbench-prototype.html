@@ -354,6 +354,36 @@
       margin-top: 2px;
     }
 
+    .readiness-box {
+      border: 1px solid #b8d8ca;
+      border-radius: 8px;
+      background: #effaf4;
+      padding: 12px;
+      display: grid;
+      gap: 8px;
+    }
+
+    .readiness-box h3 {
+      color: var(--green-dark);
+    }
+
+    .readiness-box p,
+    .readiness-box li {
+      color: var(--ink-2);
+    }
+
+    .readiness-facts {
+      display: grid;
+      gap: 5px;
+      color: var(--ink-2);
+      font-size: 13px;
+    }
+
+    .readiness-box ul {
+      margin: 0;
+      padding-left: 20px;
+    }
+
     .maintenance-loader {
       display: grid;
       gap: 10px;
@@ -807,6 +837,12 @@
         </div>
 
         <p class="workbench-message" id="loadStatus">请先填写原图文件夹和输出文件夹，然后点击“开始处理”。</p>
+        <div class="readiness-box hidden" id="readinessBox">
+          <h3 id="readinessTitle">文件夹准备情况</h3>
+          <p id="readinessMessage">请先保存扫描原图文件夹和处理后输出文件夹。文件夹可以开始处理时，会显示可处理图片、输出文件夹可以写入和确认处理方式无误。</p>
+          <div class="readiness-facts" id="readinessFacts"></div>
+          <ul id="readinessSteps"></ul>
+        </div>
         <div class="recovery-box hidden" id="recoveryBox">
           <h3 id="recoveryTitle">文件夹还没有准备好</h3>
           <p id="recoveryMessage">请先填写扫描原图文件夹和处理后输出文件夹。</p>
@@ -983,6 +1019,7 @@
       operatorMessage: "",
       reviewQueueText: "",
       recoveryGuidance: null,
+      folderReadiness: null,
       reviewItems: initialReviewItems.map((item) => ({ ...item })),
       queueLoaded: false,
       queueSource: "内置演示",
@@ -1036,6 +1073,11 @@
       recoveryCounts: document.getElementById("recoveryCounts"),
       recoverySteps: document.getElementById("recoverySteps"),
       retryButton: document.getElementById("retryButton"),
+      readinessBox: document.getElementById("readinessBox"),
+      readinessTitle: document.getElementById("readinessTitle"),
+      readinessMessage: document.getElementById("readinessMessage"),
+      readinessFacts: document.getElementById("readinessFacts"),
+      readinessSteps: document.getElementById("readinessSteps"),
       currentIssue: document.getElementById("currentIssue"),
       currentAdvice: document.getElementById("currentAdvice"),
       reviewPositionText: document.getElementById("reviewPositionText"),
@@ -1408,12 +1450,13 @@
       els.sourceText.textContent = `${state.totalImages} 张`;
       els.readyText.textContent = `${state.readyImages} 张`;
       els.modeStatus.textContent = `当前处理方式：${state.processingModeLabel}`;
-      els.startButton.disabled = state.status !== "ready";
+      els.startButton.disabled = state.status !== "ready" || (state.folderReadiness && state.folderReadiness.ready_to_start === false);
       els.exportButton.disabled = !(state.status === "needs_review" && state.reviewItems.length > 0);
       els.completeButton.disabled = !((state.status === "needs_review" || state.status === "ready_to_finish") && pendingCount() === 0);
       els.outputPanel.classList.toggle("hidden", state.status !== "complete");
       els.failurePanel.classList.toggle("hidden", state.status !== "failed");
       renderRecoveryGuidance();
+      renderFolderReadiness();
       renderCompletionPanel();
       renderDecisionArea();
     }
@@ -1521,6 +1564,25 @@
       const retryable = guidance.kind === "processing_failed_retryable" && toNumber(guidance.retryable_files) > 0;
       els.retryButton.classList.toggle("hidden", !retryable);
       els.retryButton.disabled = !retryable || state.status === "processing" || state.status === "checking";
+    }
+
+    function renderFolderReadiness() {
+      const readiness = state.folderReadiness;
+      const show = readiness && ["ready", "failed", "choose_input", "choose_output"].includes(state.status);
+      els.readinessBox.classList.toggle("hidden", !show);
+      if (!show) return;
+      els.readinessTitle.textContent = readiness.title_zh || "文件夹准备情况";
+      els.readinessMessage.textContent = readiness.message_zh || "请按提示检查文件夹。";
+      const mode = readiness.selected_processing_mode || {};
+      const facts = [
+        ["可处理图片", `${toNumber(readiness.supported_image_count)} 张`],
+        ["原图文件夹", readiness.input_empty ? "没有发现图片" : "已发现图片"],
+        ["输出文件夹", readiness.output_writable ? "可以写入" : "不能写入"],
+        ["处理方式", mode.label_zh || state.processingModeLabel]
+      ];
+      els.readinessFacts.innerHTML = facts.map((item) => `<span>${item[0]}：${escapeHtml(item[1])}</span>`).join("");
+      const steps = Array.isArray(readiness.next_steps_zh) ? readiness.next_steps_zh : [];
+      els.readinessSteps.innerHTML = steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("");
     }
 
     function toNumber(value) {
@@ -1721,6 +1783,7 @@
         if (payload.folders.metadata) state.decisionSaveSummary = payload.folders.metadata;
       }
       if (payload.processing_mode) setProcessingMode(payload.processing_mode.id, payload.processing_mode.label_zh);
+      if (payload.folder_readiness) state.folderReadiness = payload.folder_readiness;
       if (payload.summary || payload.progress) {
         applyRunStatus(payload.summary || { status: payload.running ? "running" : "pending", operator_summary: {} }, payload.progress, payload.queue, payload.draft_decisions);
         if (payload.recovery_guidance && !state.recoveryGuidance) state.recoveryGuidance = payload.recovery_guidance;
@@ -2098,6 +2161,7 @@
       state.operatorMessage = "";
       state.reviewQueueText = "";
       state.recoveryGuidance = null;
+      state.folderReadiness = null;
       state.reviewItems = initialReviewItems.map((item) => ({ ...item }));
       state.queueLoaded = false;
       state.queueSource = "内置演示";

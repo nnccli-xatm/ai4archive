@@ -468,6 +468,22 @@ test.describe("production workbench finish/export browser smoke", () => {
             id: payload.processing_mode,
             label_zh: "只质检不修图",
           },
+          folder_readiness: {
+            schema_version: "scan-qc.local-folder-readiness.v1",
+            aggregate_only: true,
+            status: "ready",
+            ready_to_start: true,
+            supported_image_count: 2,
+            input_empty: false,
+            output_writable: true,
+            selected_processing_mode: {
+              id: payload.processing_mode,
+              label_zh: "只质检不修图",
+            },
+            title_zh: "文件夹可以开始处理",
+            message_zh: "发现 2 张可处理图片，输出文件夹可以写入。",
+            next_steps_zh: ["确认处理方式无误。", "点击开始处理。"],
+          },
         }),
       });
     });
@@ -494,6 +510,10 @@ test.describe("production workbench finish/export browser smoke", () => {
     await page.locator("#outputPath").fill("/tmp/mode-output");
     await page.getByRole("button", { name: "开始处理" }).click();
     await expect.poll(() => configurePayloads.length).toBeGreaterThan(0);
+    await expect(page.locator("#readinessTitle")).toHaveText("文件夹可以开始处理");
+    await expect(page.locator("#readinessFacts")).toContainText("可处理图片：2 张");
+    await expect(page.locator("#readinessFacts")).toContainText("输出文件夹：可以写入");
+    await expect(page.locator("#readinessFacts")).toContainText("处理方式：只质检不修图");
     expect(configurePayloads[0]).toMatchObject({
       input_dir: "/tmp/mode-input",
       derivatives_dir: "/tmp/mode-output",
@@ -501,6 +521,63 @@ test.describe("production workbench finish/export browser smoke", () => {
     });
     await expect(page.locator("#modeStatus")).toHaveText("当前处理方式：只质检不修图");
     await expect(page.locator("#stateName")).toHaveText("正在处理");
+
+    expect(consoleProblems).toEqual([]);
+  });
+
+  test("shows unsupported-folder readiness guidance before starting", async ({ page }) => {
+    const consoleProblems = [];
+    page.on("console", (message) => {
+      if (["error", "warning"].includes(message.type())) consoleProblems.push(`${message.type()}: ${message.text()}`);
+    });
+    page.on("pageerror", (error) => consoleProblems.push(`pageerror: ${error.message}`));
+
+    await page.route("**/api/status", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ schema_version: "scan-qc.local-production-workbench.v1", running: false }),
+      });
+    });
+    await page.route("**/api/configure", async (route) => {
+      const payload = JSON.parse(route.request().postData() || "{}");
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema_version: "scan-qc.local-production-workbench.v1",
+          running: false,
+          configured: true,
+          folders: {
+            input: payload.input_dir,
+            derivatives: payload.derivatives_dir,
+            metadata: `${payload.derivatives_dir}/_production_workbench`,
+          },
+          processing_mode: { id: "standard", label_zh: "标准优化" },
+          folder_readiness: {
+            schema_version: "scan-qc.local-folder-readiness.v1",
+            aggregate_only: true,
+            status: "unsupported",
+            ready_to_start: false,
+            supported_image_count: 0,
+            input_empty: false,
+            output_writable: true,
+            selected_processing_mode: { id: "standard", label_zh: "标准优化" },
+            title_zh: "没有可处理的图片",
+            message_zh: "文件夹里没有找到当前支持处理的图片。",
+            next_steps_zh: ["确认原图是常见图片格式。", "如果格式不对，请重新导出为支持的图片格式后再处理。"],
+          },
+        }),
+      });
+    });
+
+    await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
+    await page.locator("#inputPath").fill("/tmp/unsupported-input");
+    await page.locator("#outputPath").fill("/tmp/unsupported-output");
+    await page.getByRole("button", { name: "只保存文件夹" }).click();
+    await expect(page.locator("#readinessTitle")).toHaveText("没有可处理的图片");
+    await expect(page.locator("#readinessFacts")).toContainText("可处理图片：0 张");
+    await expect(page.locator("#readinessFacts")).toContainText("输出文件夹：可以写入");
+    await expect(page.getByText("确认原图是常见图片格式。")).toBeVisible();
+    await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
 
     expect(consoleProblems).toEqual([]);
   });
