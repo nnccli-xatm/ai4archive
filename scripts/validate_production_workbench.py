@@ -31,14 +31,15 @@ REQUIRED_TEXT = {
     "批次已完成",
     "处理失败",
     "通过",
-    "需要重扫",
-    "重新处理",
+    "需要返工",
+    "管理员处理",
     "保留原貌痕迹",
-    "跳过",
     "大图预览",
     "当前图片",
     "问题原因",
     "系统建议",
+    "导出复核决定",
+    "待决定",
     "自动显示下一张待确认图片",
     "公开安全示意图",
     "本机真实预览",
@@ -139,6 +140,7 @@ def main() -> int:
         fixture_dir = FIXTURE_ROOT / fixture_name
         summary_path = fixture_dir / "production_run_summary.json"
         progress_path = fixture_dir / "production_run_progress.json"
+        queue_path = fixture_dir / "production_review_queue.json"
         if fixture_name not in html:
             errors.append(f"fixture not referenced by workbench: {fixture_name}")
         if not summary_path.exists() or not progress_path.exists():
@@ -179,6 +181,49 @@ def main() -> int:
         leaked_terms = sorted(term for term in PRIVATE_FIXTURE_TERMS if term.lower() in raw_fixture.lower())
         if leaked_terms:
             errors.append(f"private or row-level fixture terms in {fixture_name}: {leaked_terms}")
+        if expected_status == "needs_review":
+            if not queue_path.exists():
+                errors.append(f"missing production review queue fixture: {fixture_name}")
+            else:
+                try:
+                    queue = json.loads(queue_path.read_text(encoding="utf-8"))
+                except json.JSONDecodeError as exc:
+                    errors.append(f"invalid production review queue JSON for {fixture_name}: {exc}")
+                    continue
+                if queue.get("schema_version") != "scan-qc.production-review-queue.v1":
+                    errors.append(f"unexpected review queue schema for {fixture_name}")
+                items = queue.get("items")
+                if not isinstance(items, list) or not items:
+                    errors.append(f"review queue fixture has no items: {fixture_name}")
+                else:
+                    for index, item in enumerate(items, start=1):
+                        if not isinstance(item, dict):
+                            errors.append(f"review queue item is not an object: {fixture_name} #{index}")
+                            continue
+                        for key in ["local_id", "reason_zh", "suggested_action", "severity"]:
+                            if key not in item:
+                                errors.append(f"missing review queue item field for {fixture_name} #{index}: {key}")
+                        if not re.search(r"[\u4e00-\u9fff]", str(item.get("reason_zh", ""))):
+                            errors.append(f"review queue reason is not Chinese for {fixture_name} #{index}")
+                        sensitivity = item.get("sensitivity")
+                        if not isinstance(sensitivity, dict) or sensitivity.get("local_only") is not True:
+                            errors.append(f"review queue item is not marked local-only for {fixture_name} #{index}")
+                    if len(items) != operator.get("files_needing_attention"):
+                        errors.append(f"review queue item count does not match operator pending count for {fixture_name}")
+                raw_queue = queue_path.read_text(encoding="utf-8").lower()
+                for forbidden in ["data:image", "base64,", "source_sha256", "output_sha256"]:
+                    if forbidden in raw_queue:
+                        errors.append(f"review queue fixture includes forbidden private payload marker: {forbidden}")
+
+    for required_script_token in [
+        "production_review_queue.json",
+        "applyReviewQueue",
+        "decisionArtifact",
+        "local_review_decisions.json",
+        "scan-qc.local-review-decisions.v1",
+    ]:
+        if required_script_token not in html:
+            errors.append(f"missing review queue workflow script token: {required_script_token}")
 
     if errors:
         for error in errors:

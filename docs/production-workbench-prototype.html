@@ -449,6 +449,14 @@
       font-size: 18px;
     }
 
+    .decision-summary {
+      border: 1px solid var(--line);
+      background: var(--paper);
+      border-radius: 8px;
+      padding: 10px;
+      color: var(--muted);
+    }
+
     .handoff {
       padding: 14px 16px;
       border-top: 1px solid var(--line);
@@ -641,15 +649,16 @@
           </div>
 
           <div class="decision-actions" id="decisionActions">
-            <button type="button" class="primary-choice" data-decision="通过" disabled>通过</button>
-            <button type="button" class="warning" data-decision="需要重扫" disabled>需要重扫</button>
-            <button type="button" class="secondary" data-decision="重新处理" disabled>重新处理</button>
-            <button type="button" class="secondary" data-decision="保留原貌痕迹" disabled>保留原貌痕迹</button>
-            <button type="button" class="secondary" data-decision="跳过" disabled>跳过</button>
+            <button type="button" class="primary-choice" data-decision="pass" disabled>通过</button>
+            <button type="button" class="warning" data-decision="needs_rework" disabled>需要返工</button>
+            <button type="button" class="secondary" data-decision="admin_handling" disabled>管理员处理</button>
+            <button type="button" class="secondary" data-decision="keep_original_trace" disabled>保留原貌痕迹</button>
           </div>
+          <div class="decision-summary" id="decisionSummary">已决定 0 项，待决定 0 项。</div>
         </div>
 
         <div class="handoff">
+          <button id="exportButton" disabled>导出复核决定</button>
           <button id="completeButton" disabled>完成导出</button>
           <div class="handoff-box hidden" id="outputPanel">
             <h3>批次已完成</h3>
@@ -667,9 +676,9 @@
 
   <script>
     const initialReviewItems = [
-      { name: "图片一", tone: "need", issue: "轻微倾斜，文字边缘可能影响阅读。", advice: "建议重新处理；如果仍保持档案原貌，可选择保留原貌痕迹。", decision: "未确认" },
-      { name: "图片二", tone: "stop", issue: "疑似漏扫、重扫或页面缺失。", advice: "建议需要重扫，确认后交回扫描工位补扫。", decision: "未确认" },
-      { name: "图片三", tone: "need", issue: "疑似档案原貌痕迹，不一定需要处理。", advice: "如果不影响档案真实性，可选择保留原貌痕迹。", decision: "未确认" }
+      { id: "演示一", name: "图片一", tone: "need", issue: "轻微倾斜，文字边缘可能影响阅读。", advice: "建议需要返工；如果仍保持档案原貌，可选择保留原貌痕迹。", suggestedAction: "needs_rework", decision: null },
+      { id: "演示二", name: "图片二", tone: "stop", issue: "疑似漏扫、重扫或页面缺失。", advice: "建议需要返工，确认后交回扫描工位补扫。", suggestedAction: "needs_rework", decision: null },
+      { id: "演示三", name: "图片三", tone: "need", issue: "疑似档案原貌痕迹，不一定需要处理。", advice: "如果不影响档案真实性，可选择保留原貌痕迹。", suggestedAction: "keep_original_trace", decision: null }
     ];
 
     const state = {
@@ -683,7 +692,10 @@
       outputSummary: "已选择的处理后输出文件夹",
       operatorMessage: "",
       reviewQueueText: "",
-      reviewItems: initialReviewItems.map((item) => ({ ...item }))
+      reviewItems: initialReviewItems.map((item) => ({ ...item })),
+      queueLoaded: false,
+      queueSource: "内置演示",
+      decisions: {}
     };
 
     const els = {
@@ -698,6 +710,7 @@
       pauseButton: document.getElementById("pauseButton"),
       resumeButton: document.getElementById("resumeButton"),
       resetButton: document.getElementById("resetButton"),
+      exportButton: document.getElementById("exportButton"),
       completeButton: document.getElementById("completeButton"),
       stateName: document.getElementById("stateName"),
       stateAction: document.getElementById("stateAction"),
@@ -713,6 +726,7 @@
       currentIssue: document.getElementById("currentIssue"),
       currentAdvice: document.getElementById("currentAdvice"),
       decisionActions: document.getElementById("decisionActions"),
+      decisionSummary: document.getElementById("decisionSummary"),
       outputPanel: document.getElementById("outputPanel"),
       failurePanel: document.getElementById("failurePanel"),
       outputPlace: document.getElementById("outputPlace")
@@ -747,8 +761,23 @@
       pending: ["准备完成", "可以开始处理", "文件夹已准备好，点击开始处理。"]
     };
 
+    const adviceByAction = {
+      pass: "系统建议通过。请确认画面可读、顺序正确后点击通过。",
+      needs_rework: "系统建议需要返工。请按情况需要重扫或重新处理。",
+      admin_handling: "系统建议管理员处理。普通操作人员无需查看后台细节。",
+      keep_original_trace: "系统建议保留原貌痕迹。请确认这不是扫描产生的新问题。"
+    };
+
+    const suggestedActionMap = {
+      pass: "pass",
+      rescan: "needs_rework",
+      reprocess: "needs_rework",
+      keep_original_trace: "keep_original_trace",
+      skip: "admin_handling"
+    };
+
     function pendingCount() {
-      return state.reviewItems.filter((item) => item.decision === "未确认").length;
+      return state.reviewItems.filter((item) => !item.decision).length;
     }
 
     function reviewedCount() {
@@ -756,7 +785,7 @@
     }
 
     function currentItem() {
-      return state.reviewItems.find((item) => item.decision === "未确认") || state.reviewItems[state.reviewItems.length - 1];
+      return state.reviewItems.find((item) => !item.decision) || state.reviewItems[state.reviewItems.length - 1];
     }
 
     function folderLabel(input, fallback) {
@@ -790,12 +819,14 @@
       const item = currentItem();
       const pending = pendingCount();
       const reviewMode = state.status === "needs_review";
-      els.queueText.textContent = state.reviewQueueText || (reviewMode ? `已确认 ${reviewedCount()} 张，待确认 ${pending} 张` : "等待处理开始。");
-      els.currentIssue.textContent = state.operatorMessage || (reviewMode && pending ? item.issue : pending ? "处理开始后在这里显示问题原因。" : "已经没有待确认图片。");
-      els.currentAdvice.textContent = reviewMode && pending ? item.advice : state.status === "failed" ? "请联系管理员处理后再继续。" : pending ? "可以开始处理后再确认。" : "可以点击完成导出。";
+      els.queueText.textContent = state.reviewQueueText || (reviewMode ? `已决定 ${reviewedCount()} 项，待决定 ${pending} 项` : "等待处理开始。");
+      els.currentIssue.textContent = reviewMode && pending ? item.issue : (state.operatorMessage || (pending ? "处理开始后在这里显示问题原因。" : "已经没有待确认图片。"));
+      els.currentAdvice.textContent = reviewMode && pending ? item.advice : state.status === "failed" ? "请联系管理员处理后再继续。" : pending ? "可以开始处理后再确认。" : "可以导出复核决定。";
       els.decisionActions.querySelectorAll("button").forEach((button) => {
         button.disabled = !(reviewMode && pending > 0);
+        button.classList.toggle("primary-choice", reviewMode && pending > 0 && item.suggestedAction === button.dataset.decision);
       });
+      els.decisionSummary.textContent = `已决定 ${reviewedCount()} 项，待决定 ${pending} 项。`;
       renderPreview(item, reviewMode && pending > 0);
     }
 
@@ -816,6 +847,7 @@
       els.startButton.disabled = state.status !== "ready";
       els.pauseButton.disabled = state.status !== "processing";
       els.resumeButton.disabled = state.status !== "paused";
+      els.exportButton.disabled = !(state.status === "needs_review" && state.reviewItems.length > 0);
       els.completeButton.disabled = !(state.status === "needs_review" && pendingCount() === 0);
       els.outputPanel.classList.toggle("hidden", state.status !== "complete");
       els.failurePanel.classList.toggle("hidden", state.status !== "failed");
@@ -844,15 +876,55 @@
 
     function makeReviewItems(count) {
       return Array.from({ length: Math.max(0, count) }, (_, index) => ({
+        id: `本机待确认 ${index + 1}`,
         name: `待确认图片 ${index + 1}`,
         tone: index % 2 ? "stop" : "need",
         issue: "这张图片需要人工确认。",
         advice: index % 2 ? "建议需要重扫，确认后交回扫描工位补扫。" : "请按实际情况选择右侧决定。",
-        decision: "未确认"
+        suggestedAction: index % 2 ? "needs_rework" : "pass",
+        decision: null
       }));
     }
 
-    function applyRunStatus(summary, progress) {
+    function itemName(index) {
+      return `待确认图片 ${index + 1}`;
+    }
+
+    function itemTone(item) {
+      return item.severity === "P0" ? "stop" : "need";
+    }
+
+    function queueItemToReviewItem(item, index) {
+      const suggestedAction = suggestedActionMap[item.suggested_action] || "admin_handling";
+      return {
+        id: item.local_id || `本机队列 ${index + 1}`,
+        name: itemName(index),
+        tone: itemTone(item),
+        issue: item.reason_zh || "这张图片需要人工确认。",
+        advice: adviceByAction[suggestedAction],
+        suggestedAction,
+        sourceAction: item.suggested_action || "",
+        severity: item.severity || "",
+        sourceCategory: item.source_category || "",
+        sourceRef: item.source_ref || "",
+        decision: null
+      };
+    }
+
+    function applyReviewQueue(queue) {
+      if (!queue || !Array.isArray(queue.items)) return;
+      state.queueLoaded = true;
+      state.queueSource = "本机复核队列";
+      state.decisions = {};
+      state.reviewItems = queue.items.map(queueItemToReviewItem);
+      state.attentionFiles = pendingCount();
+      state.reviewQueueText = state.reviewItems.length
+        ? `已加载复核队列 ${state.reviewItems.length} 项，待决定 ${pendingCount()} 项。`
+        : "没有待人工确认图片。";
+      render();
+    }
+
+    function applyRunStatus(summary, progress, queue) {
       const operator = summary.operator_summary || {};
       const rawStatus = summary.status || (progress && progress.state) || "pending";
       const nextStatus = runStateMap[rawStatus] || "failed";
@@ -871,20 +943,24 @@
         : "没有待人工确认图片。";
       state.progress = deriveProgress(summary, progress);
       state.reviewItems = nextStatus === "needs_review" ? makeReviewItems(state.attentionFiles) : [];
+      state.decisions = {};
       els.inputStatus.textContent = "已加载本机状态。";
       els.outputStatus.textContent = state.outputSummary;
+      if (queue) applyReviewQueue(queue);
       render();
     }
 
     async function loadFixture(baseName) {
       if (!baseName) return;
       els.loadStatus.textContent = "正在加载状态示例。";
-      const [summaryResponse, progressResponse] = await Promise.all([
+      const [summaryResponse, progressResponse, queueResponse] = await Promise.all([
         fetch(`${baseName}/production_run_summary.json`),
-        fetch(`${baseName}/production_run_progress.json`)
+        fetch(`${baseName}/production_run_progress.json`),
+        fetch(`${baseName}/production_review_queue.json`)
       ]);
       if (!summaryResponse.ok || !progressResponse.ok) throw new Error("状态读取失败");
-      applyRunStatus(await summaryResponse.json(), await progressResponse.json());
+      const queue = queueResponse.ok ? await queueResponse.json() : null;
+      applyRunStatus(await summaryResponse.json(), await progressResponse.json(), queue);
       els.loadStatus.textContent = "已加载状态示例。";
     }
 
@@ -895,8 +971,51 @@
       const payloads = await Promise.all(selected.map(async (file) => JSON.parse(await file.text())));
       const summary = payloads.find((item) => item && item.operator_summary) || payloads[0];
       const progress = payloads.find((item) => item && item.steps);
-      applyRunStatus(summary, progress);
+      const queue = payloads.find((item) => item && item.schema_version === "scan-qc.production-review-queue.v1");
+      applyRunStatus(summary, progress, queue);
       els.loadStatus.textContent = "已读取本机状态。";
+    }
+
+    function decisionArtifact() {
+      return {
+        schema_version: "scan-qc.local-review-decisions.v1",
+        created_by: "production_workbench_browser",
+        privacy: {
+          local_only: true,
+          contains_image_bytes: false,
+          contains_thumbnails: false,
+          contains_ocr_text: false,
+          contains_hashes: false
+        },
+        summary: {
+          total_review_items: state.reviewItems.length,
+          decided_items: reviewedCount(),
+          pending_items: pendingCount()
+        },
+        decisions: state.reviewItems
+          .filter((item) => item.decision)
+          .map((item) => ({
+            local_id: item.id,
+            decision: item.decision,
+            suggested_action: item.sourceAction || item.suggestedAction,
+            severity: item.severity || "",
+            source_category: item.sourceCategory || "",
+            source_ref: item.sourceRef || ""
+          }))
+      };
+    }
+
+    function exportDecisions() {
+      const blob = new Blob([JSON.stringify(decisionArtifact(), null, 2) + "\n"], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "local_review_decisions.json";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      els.loadStatus.textContent = "已导出复核决定。";
     }
 
     els.inputFolder.addEventListener("change", () => {
@@ -925,6 +1044,7 @@
     els.pauseButton.addEventListener("click", () => setStatus("paused"));
     els.resumeButton.addEventListener("click", () => setStatus("processing"));
     els.completeButton.addEventListener("click", () => setStatus("complete"));
+    els.exportButton.addEventListener("click", exportDecisions);
     els.resetButton.addEventListener("click", () => {
       state.inputChosen = false;
       state.outputChosen = false;
@@ -937,6 +1057,9 @@
       state.operatorMessage = "";
       state.reviewQueueText = "";
       state.reviewItems = initialReviewItems.map((item) => ({ ...item }));
+      state.queueLoaded = false;
+      state.queueSource = "内置演示";
+      state.decisions = {};
       els.inputFolder.value = "";
       els.outputFolder.value = "";
       els.summaryFile.value = "";
@@ -953,8 +1076,10 @@
       if (!button || button.disabled) return;
       const item = currentItem();
       item.decision = button.dataset.decision;
+      state.decisions[item.id] = item.decision;
       state.progress = pendingCount() === 0 ? 94 : Math.min(92, state.progress + 4);
       state.attentionFiles = pendingCount();
+      state.reviewQueueText = `已决定 ${reviewedCount()} 项，待决定 ${pendingCount()} 项。`;
       render();
     });
 

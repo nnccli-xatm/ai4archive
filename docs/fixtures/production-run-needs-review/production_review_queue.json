@@ -1,0 +1,133 @@
+{
+  "schema_version": "scan-qc.production-review-queue.v1",
+  "generated_at": "2026-05-12T00:00:00+08:00",
+  "sensitivity": "LOCAL-ONLY PRODUCTION REVIEW QUEUE. Contains row-level local paths and operator decision context; keep inside the approved local production environment and do not publish as public evidence.",
+  "privacy": {
+    "local_only": true,
+    "aggregate_only": false,
+    "contains_row_level_paths": true,
+    "contains_operator_messages": true,
+    "contains_hashes": false,
+    "contains_thumbnails": false,
+    "contains_image_bytes": false,
+    "contains_base64": false,
+    "contains_ocr_text": false,
+    "contains_public_evidence": false
+  },
+  "allowed_operator_actions": [
+    "pass",
+    "rescan",
+    "reprocess",
+    "keep_original_trace",
+    "skip"
+  ],
+  "source_categories": [
+    "scan_qc",
+    "processing_failure",
+    "guardrail_warning",
+    "rework_action"
+  ],
+  "sources": {
+    "scan_qc_report": "local scan quality report",
+    "processing_review_package": "local processing review package",
+    "rework_action_list": "local rework action list"
+  },
+  "project": {
+    "project_id": "local-demo",
+    "batch_id": "operator-review-demo"
+  },
+  "summary": {
+    "total_items": 4,
+    "items_by_severity": {
+      "P0": 1,
+      "P1": 2,
+      "P2": 1,
+      "P3": 0,
+      "info": 0
+    },
+    "items_by_source_category": {
+      "scan_qc": 2,
+      "processing_failure": 0,
+      "guardrail_warning": 1,
+      "rework_action": 1
+    },
+    "items_by_suggested_action": {
+      "pass": 1,
+      "rescan": 1,
+      "reprocess": 1,
+      "keep_original_trace": 1,
+      "skip": 0
+    },
+    "ready_for_operator_review": true
+  },
+  "items": [
+    {
+      "local_id": "PRQ000001",
+      "relative_path": "local-review-item-001",
+      "severity": "P0",
+      "source_category": "scan_qc",
+      "source_ref": "openable",
+      "reason_zh": "扫描质检发现阻断问题：源图无法打开。请优先重扫或剔除不可用源图。",
+      "suggested_action": "rescan",
+      "operator_note": "源图无法打开",
+      "sensitivity": {
+        "local_only": true,
+        "contains_image_bytes": false,
+        "contains_thumbnail": false,
+        "contains_hash": false,
+        "contains_ocr_text": false
+      }
+    },
+    {
+      "local_id": "PRQ000002",
+      "relative_path": "local-review-item-002",
+      "severity": "P1",
+      "source_category": "scan_qc",
+      "source_ref": "quality_suspected_blur",
+      "reason_zh": "扫描质检发现需处理问题：文字边缘疑似模糊。请决定重处理或保留原始轨迹。",
+      "suggested_action": "reprocess",
+      "operator_note": "文字边缘疑似模糊",
+      "sensitivity": {
+        "local_only": true,
+        "contains_image_bytes": false,
+        "contains_thumbnail": false,
+        "contains_hash": false,
+        "contains_ocr_text": false
+      }
+    },
+    {
+      "local_id": "PRQ000003",
+      "relative_path": "local-review-item-003",
+      "severity": "P1",
+      "source_category": "guardrail_warning",
+      "source_ref": "processing_guardrail",
+      "reason_zh": "处理保护线提示：处理后变化偏大。请人工确认成品，必要时保留原始轨迹。",
+      "suggested_action": "keep_original_trace",
+      "operator_note": "处理后变化偏大",
+      "sensitivity": {
+        "local_only": true,
+        "contains_image_bytes": false,
+        "contains_thumbnail": false,
+        "contains_hash": false,
+        "contains_ocr_text": false
+      }
+    },
+    {
+      "local_id": "PRQ000004",
+      "relative_path": "local-review-item-004",
+      "severity": "P2",
+      "source_category": "rework_action",
+      "source_ref": "informational_follow_up",
+      "reason_zh": "返工清单提示信息跟进：页面顺序需要人工确认。",
+      "suggested_action": "pass",
+      "operator_note": "页面顺序需要人工确认",
+      "sensitivity": {
+        "local_only": true,
+        "contains_image_bytes": false,
+        "contains_thumbnail": false,
+        "contains_hash": false,
+        "contains_ocr_text": false
+      }
+    }
+  ]
+}
