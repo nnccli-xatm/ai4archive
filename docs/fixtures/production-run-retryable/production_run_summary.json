@@ -6,17 +6,17 @@
   "recovery_guidance": {
     "schema_version": "scan-qc.local-recovery-guidance.v1",
     "aggregate_only": true,
-    "kind": "processing_failed_admin",
+    "kind": "processing_failed_retryable",
     "title_zh": "处理没有全部完成",
-    "message_zh": "本批次没有处理完，当前不能直接重试。",
+    "message_zh": "本批次有图片没有处理完，可以先检查文件夹后重试本批次。",
     "next_steps_zh": [
-      "确认扫描原图文件夹和处理后输出文件夹选对。",
-      "检查磁盘空间是否足够，原图是否能正常打开。",
-      "请交管理员处理，不要反复点击开始处理。",
+      "检查扫描原图文件夹和输出文件夹是否选对。",
+      "确认输出磁盘空间足够，原图图片可以正常打开。",
+      "点击重试本批次，系统会继续使用当前文件夹。",
       "如果文件夹选错了，请返回重新选择文件夹。"
     ],
     "failed_files": 3,
-    "retryable_files": 0,
+    "retryable_files": 3,
     "derivative_images_ready": 117,
     "total_files": 120
   },
@@ -32,7 +32,7 @@
     "total_files": 120,
     "processed_files": 117,
     "failed_files": 3,
-    "retry_list_files": 0
+    "retry_list_files": 3
   },
   "progress": {
     "state": "completed",

@@ -1000,6 +1000,7 @@
             <option value="fixtures/production-run-running">正在处理</option>
             <option value="fixtures/production-run-needs-review">需要人工确认</option>
             <option value="fixtures/production-run-finished">批次已完成</option>
+            <option value="fixtures/production-run-retryable">可重试失败</option>
             <option value="fixtures/production-run-blocked">需要管理员处理</option>
             <option value="fixtures/production-run-empty">原图文件夹是空的</option>
           </select>
@@ -1208,7 +1209,8 @@
       previewZoom: 1,
       comparisonMode: "processed",
       processingMode: "standard",
-      processingModeLabel: "标准优化"
+      processingModeLabel: "标准优化",
+      progressLabel: ""
     };
 
     const els = {
@@ -1704,7 +1706,7 @@
       els.stateAction.textContent = action;
       els.stateHint.textContent = hint;
       els.progressFill.style.width = `${state.progress}%`;
-      els.progressText.textContent = state.progress ? `进度：${state.progress}%` : "进度：未开始";
+      els.progressText.textContent = state.progressLabel || (state.progress ? `进度：${state.progress}%` : "进度：未开始");
       els.pendingText.textContent = `${state.attentionFiles} 个`;
       els.sourceText.textContent = `${state.totalImages} 张`;
       els.readyText.textContent = `${state.readyImages} 张`;
@@ -1900,6 +1902,43 @@
       return 0;
     }
 
+    function progressStageLabel(progressInfo) {
+      if (!progressInfo || typeof progressInfo !== "object") return "等待开始";
+      const activeStep = Array.isArray(progressInfo.steps)
+        ? progressInfo.steps.find((step) => step.id === progressInfo.current_step) || progressInfo.steps.find((step) => step.state === "running")
+        : null;
+      if (activeStep && activeStep.label) return activeStep.label;
+      if (progressInfo.state === "blocked") return "处理被阻断";
+      if (progressInfo.state === "needs_review") return "等待人工确认";
+      if (progressInfo.state === "finished" || progressInfo.state === "completed") return "整理处理结果";
+      if (progressInfo.state === "running") return "正在处理";
+      return "等待开始";
+    }
+
+    function progressStateLabel(summary, progressInfo) {
+      const rawState = (progressInfo && progressInfo.state) || (summary && summary.status) || "";
+      if (rawState === "running") return "正在处理";
+      if (rawState === "needs_review") return "需要人工确认";
+      if (rawState === "blocked") return "需要处理";
+      if (rawState === "finished" || rawState === "completed") return "已完成";
+      if (rawState === "pending") return "可以开始";
+      return "未开始";
+    }
+
+    function deriveProgressLabel(summary, progress) {
+      const progressInfo = progress || (summary && summary.progress) || {};
+      const counts = (summary && summary.counts) || {};
+      const operator = (summary && summary.operator_summary) || {};
+      const activeStep = Array.isArray(progressInfo.steps)
+        ? progressInfo.steps.find((step) => step.id === progressInfo.current_step) || progressInfo.steps.find((step) => step.state === "running")
+        : null;
+      const total = toNumber(operator.total_source_images || counts.total_files || (activeStep && activeStep.total_items));
+      const completed = toNumber(operator.derivative_images_ready || counts.processed_files || (activeStep && activeStep.completed_items));
+      const failed = toNumber(counts.failed_files);
+      if (total <= 0 && completed <= 0 && failed <= 0) return "";
+      return `阶段：${progressStageLabel(progressInfo)}；总数 ${total} 张，已完成 ${completed} 张，失败 ${failed} 张；状态：${progressStateLabel(summary, progressInfo)}`;
+    }
+
     function makeReviewItems(count) {
       return Array.from({ length: Math.max(0, count) }, (_, index) => ({
         id: `本机待确认 ${index + 1}`,
@@ -2039,6 +2078,7 @@
         ? (nextStatus === "failed" ? `需要管理员处理 ${state.attentionFiles} 个。` : `待人工确认 ${state.attentionFiles} 个。`)
         : "没有待人工确认图片。";
       state.progress = deriveProgress(summary, progress);
+      state.progressLabel = deriveProgressLabel(summary, progress);
       state.reviewItems = nextStatus === "needs_review" ? makeReviewItems(state.attentionFiles) : [];
       state.decisions = {};
       state.operatorName = "";
@@ -2462,6 +2502,7 @@
       state.outputChosen = false;
       state.status = "choose_input";
       state.progress = 0;
+      state.progressLabel = "";
       state.readyImages = 0;
       state.totalImages = 0;
       state.attentionFiles = 3;
