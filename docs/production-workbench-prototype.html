@@ -383,6 +383,13 @@
       color: var(--ink-2);
     }
 
+    .preview-frame img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+
     .desk-footer {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
@@ -801,7 +808,7 @@
     };
 
     const localApi = {
-      enabled: location.protocol === "http:" || location.protocol === "https:",
+      enabled: (location.protocol === "http:" || location.protocol === "https:") && ["127.0.0.1", "localhost", "::1"].includes(location.hostname),
       polling: null
     };
 
@@ -819,7 +826,7 @@
 
     function folderLabel(input, fallback) {
       if (!input.files || input.files.length === 0) return fallback;
-      return `已选择，包含 ${input.files.length} 个项目。`;
+      return `浏览器已看到 ${input.files.length} 个项目；请在下方填写并保存本机文件夹位置。`;
     }
 
     function pathChosen(input) {
@@ -850,7 +857,17 @@
     function renderPreview(item, pending) {
       els.previewFrame.classList.toggle("need", pending && item.tone === "need");
       els.previewFrame.classList.toggle("stop", pending && item.tone === "stop");
-      els.previewText.textContent = pending ? item.name : state.status === "complete" ? "确认完成" : "公开安全示意图";
+      if (pending && item.previewUrl) {
+        els.previewFrame.innerHTML = `<img src="${item.previewUrl}" alt="本机真实预览">`;
+      } else {
+        els.previewFrame.innerHTML = `
+          <div class="scan-line"></div>
+          <div class="scan-line mid"></div>
+          <div class="scan-line short"></div>
+          <div class="preview-label" id="previewText">${pending ? item.name : state.status === "complete" ? "确认完成" : "公开安全示意图"}</div>
+        `;
+        els.previewText = document.getElementById("previewText");
+      }
     }
 
     function renderDecisionArea() {
@@ -946,6 +963,7 @@
         severity: item.severity || "",
         sourceCategory: item.source_category || "",
         sourceRef: item.source_ref || "",
+        previewUrl: localApi.enabled && item.local_id ? `/api/preview/${encodeURIComponent(item.local_id)}` : "",
         decision: null
       };
     }
@@ -1031,8 +1049,15 @@
 
     async function saveFolders() {
       if (!localApi.enabled) {
-        els.loadStatus.textContent = "请从本机入口启动后保存文件夹。";
+        els.loadStatus.textContent = "请从本机入口启动后，在输入框填写本机文件夹位置再保存。";
         updateChosenFromPaths();
+        render();
+        return;
+      }
+      if (!pathChosen(els.inputPath) || !pathChosen(els.outputPath)) {
+        els.loadStatus.textContent = "浏览器选择只用于提示；请填写并保存两个本机文件夹位置。";
+        state.inputChosen = pathChosen(els.inputPath);
+        state.outputChosen = pathChosen(els.outputPath);
         render();
         return;
       }
@@ -1066,12 +1091,16 @@
     }
 
     async function startLocalRun() {
-      if (!localApi.enabled || (!pathChosen(els.inputPath) && !pathChosen(els.outputPath))) {
-        setStatus("processing");
-        window.clearTimeout(timer);
-        timer = window.setTimeout(() => {
-          if (state.status === "processing") setStatus("needs_review");
-        }, 650);
+      if (!localApi.enabled) {
+        els.loadStatus.textContent = "请从本机入口启动后处理真实文件夹；静态打开不会启动处理。";
+        render();
+        return;
+      }
+      if (!pathChosen(els.inputPath) || !pathChosen(els.outputPath)) {
+        els.loadStatus.textContent = "请先在输入框填写并保存两个本机文件夹位置。";
+        state.inputChosen = pathChosen(els.inputPath);
+        state.outputChosen = pathChosen(els.outputPath);
+        render();
         return;
       }
       try {

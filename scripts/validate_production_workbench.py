@@ -219,10 +219,16 @@ def main() -> int:
         "write_production_review_queue",
         "/api/start",
         "/api/status",
+        "/api/preview/",
+        "_required_path",
+        "PREVIEW_IMAGE_SUFFIXES",
+        "_is_loopback_client",
         "local-only",
     ]:
         if required_server_token not in local_workbench:
             errors.append(f"missing local workbench server token: {required_server_token}")
+    if 'Path(str(payload.get("input_dir", "")))' in local_workbench or 'Path(str(payload.get("derivatives_dir", "")))' in local_workbench:
+        errors.append("configure API converts possibly empty folder value to Path before validation")
     for fixture_name, expected_status in FIXTURE_STATES.items():
         fixture_dir = FIXTURE_ROOT / fixture_name
         summary_path = fixture_dir / "production_run_summary.json"
@@ -315,6 +321,9 @@ def main() -> int:
         "source_target_count",
         "review_counts",
         "review_completion",
+        "/api/preview/",
+        "浏览器选择只用于提示",
+        "静态打开不会启动处理",
     ]:
         if required_script_token not in html:
             errors.append(f"missing review queue workflow script token: {required_script_token}")

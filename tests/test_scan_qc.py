@@ -12,8 +12,11 @@ import shlex
 import shutil
 import sys
 import tempfile
+import threading
 import time
 import unittest
+import urllib.error
+import urllib.request
 from unittest import mock
 from pathlib import Path
 
@@ -34,7 +37,7 @@ from archive_scan_qc.deep_inspection_candidates import build_deep_inspection_can
 from archive_scan_qc.evidence_bundle import build_evidence_bundle_summary
 from archive_scan_qc.final_handoff import build_final_handoff_summary
 from archive_scan_qc.handoff import write_delivery_handoff_manifest
-from archive_scan_qc.local_workbench import DEFAULT_METADATA_DIRNAME, WorkbenchController
+from archive_scan_qc.local_workbench import DEFAULT_METADATA_DIRNAME, WorkbenchController, make_server
 from archive_scan_qc.processing import (
     ProcessingOptions,
     _despeckle_candidate_points,
@@ -6292,6 +6295,78 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(status["queue"]["schema_version"], "scan-qc.production-review-queue.v1")
             self.assertTrue((derivatives_dir / "images" / "A001_0001.jpg").exists())
             self.assertTrue((derivatives_dir / DEFAULT_METADATA_DIRNAME / "production_run_summary.json").exists())
+
+    def test_local_production_workbench_rejects_empty_configure_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            input_dir.mkdir()
+            controller = WorkbenchController()
+
+            with self.assertRaisesRegex(ValueError, "扫描原图文件夹|两个文件夹"):
+                controller.configure(Path(""), root / "derivatives")
+            with self.assertRaisesRegex(ValueError, "处理后输出文件夹|两个文件夹"):
+                controller.configure(input_dir, Path(""))
+
+            self.assertIsNone(controller.input_dir)
+            self.assertFalse((Path.cwd() / DEFAULT_METADATA_DIRNAME).exists())
+
+    def test_local_production_workbench_preview_route_serves_only_local_id_image(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            metadata_dir = derivatives_dir / DEFAULT_METADATA_DIRNAME
+            input_dir.mkdir()
+            metadata_dir.mkdir(parents=True)
+            Image.new("RGB", (48, 36), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+            (metadata_dir / "production_review_queue.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "scan-qc.production-review-queue.v1",
+                        "items": [
+                            {
+                                "local_id": "PRQ000001",
+                                "relative_path": "A001_0001.jpg",
+                                "severity": "P1",
+                                "reason_zh": "需要人工确认。",
+                                "suggested_action": "pass",
+                                "sensitivity": {"local_only": True},
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            server = make_server("127.0.0.1", 0)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                base_url = f"http://127.0.0.1:{server.server_port}"
+                configure_request = urllib.request.Request(
+                    f"{base_url}/api/configure",
+                    data=json.dumps({"input_dir": str(input_dir), "derivatives_dir": str(derivatives_dir)}).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(configure_request, timeout=5) as response:
+                    configured = json.loads(response.read().decode("utf-8"))
+                self.assertTrue(configured["configured"])
+
+                with urllib.request.urlopen(f"{base_url}/api/preview/PRQ000001", timeout=5) as response:
+                    body = response.read()
+                    content_type = response.headers.get("Content-Type", "")
+                self.assertIn(content_type, {"image/jpeg", "image/jpg"})
+                self.assertTrue(body.startswith(b"\xff\xd8"))
+
+                with self.assertRaises(urllib.error.HTTPError) as raised:
+                    urllib.request.urlopen(f"{base_url}/api/preview/../A001_0001.jpg", timeout=5)
+                self.assertEqual(raised.exception.code, 404)
+                raised.exception.close()
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
 
     def test_cli_production_workbench_rejects_non_loopback_host(self) -> None:
         stderr = io.StringIO()

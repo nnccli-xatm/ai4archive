@@ -6,6 +6,7 @@ import argparse
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import mimetypes
 from pathlib import Path
 import threading
 from typing import Any
@@ -27,6 +28,7 @@ WORKBENCH_HTML = ROOT / "docs" / "production-workbench-prototype.html"
 DOCS_DIR = ROOT / "docs"
 DEFAULT_METADATA_DIRNAME = "_production_workbench"
 SERVER_SCHEMA = "scan-qc.local-production-workbench.v1"
+PREVIEW_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"}
 
 
 class WorkbenchController:
@@ -41,8 +43,12 @@ class WorkbenchController:
         self.last_error: str | None = None
 
     def configure(self, input_dir: Path, derivatives_dir: Path, metadata_dir: Path | None = None) -> dict[str, Any]:
-        if not str(input_dir).strip() or not str(derivatives_dir).strip():
-            raise ValueError("请先填写两个文件夹位置。")
+        if str(input_dir).strip() in {"", "."}:
+            raise ValueError("请填写扫描原图文件夹。")
+        if str(derivatives_dir).strip() in {"", "."}:
+            raise ValueError("请填写处理后输出文件夹。")
+        if metadata_dir is not None and str(metadata_dir).strip() in {"", "."}:
+            raise ValueError("请填写本机状态文件夹，或留空使用默认位置。")
         input_path = input_dir.expanduser().resolve()
         output_path = derivatives_dir.expanduser().resolve()
         metadata_path = (metadata_dir.expanduser().resolve() if metadata_dir else output_path / DEFAULT_METADATA_DIRNAME)
@@ -67,6 +73,37 @@ class WorkbenchController:
             self._thread = threading.Thread(target=self._run_once, name="production-workbench-run", daemon=True)
             self._thread.start()
         return self.status()
+
+    def preview_path(self, local_id: str) -> Path:
+        safe_id = local_id.strip()
+        if not safe_id:
+            raise ValueError("预览请求缺少复核编号。")
+        with self._lock:
+            input_dir = self.input_dir
+            derivatives_dir = self.derivatives_dir
+            metadata_dir = self.metadata_dir
+        if input_dir is None or derivatives_dir is None or metadata_dir is None:
+            raise ValueError("请先保存文件夹并生成复核队列。")
+        queue = _read_json(metadata_dir / PRODUCTION_REVIEW_QUEUE_JSON)
+        items = queue.get("items") if isinstance(queue, dict) else None
+        if not isinstance(items, list):
+            raise ValueError("尚未生成可预览的复核队列。")
+        item = next((entry for entry in items if isinstance(entry, dict) and entry.get("local_id") == safe_id), None)
+        if not item:
+            raise ValueError("未找到这条复核记录。")
+        relative_path = _safe_relative_path(str(item.get("relative_path") or ""))
+        candidates = [
+            derivatives_dir / "images" / relative_path,
+            derivatives_dir / relative_path,
+            input_dir / relative_path,
+        ]
+        for candidate in candidates:
+            resolved = candidate.expanduser().resolve()
+            if resolved.suffix.lower() in PREVIEW_IMAGE_SUFFIXES and resolved.is_file() and (
+                _is_relative_to(resolved, input_dir) or _is_relative_to(resolved, derivatives_dir)
+            ):
+                return resolved
+        raise ValueError("未找到这条复核记录对应的本机预览图。")
 
     def status(self) -> dict[str, Any]:
         with self._lock:
@@ -149,7 +186,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.host not in {"127.0.0.1", "localhost", "::1"}:
         parser.error("production-workbench is local-only; use 127.0.0.1, localhost, or ::1.")
     server = make_server(args.host, args.port)
-    url = f"http://{args.host}:{server.server_port}/"
+    host_for_url = f"[{args.host}]" if ":" in args.host else args.host
+    url = f"http://{host_for_url}:{server.server_port}/"
     print(f"本地生产工作台: {url}")
     print("按 Ctrl+C 停止。")
     if not args.no_open:
@@ -177,8 +215,14 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib hook
         parsed = urlparse(self.path)
+        if not _is_loopback_client(self.client_address[0]):
+            self._send_json({"error_zh": "本机预览只允许回环地址访问。"}, HTTPStatus.FORBIDDEN)
+            return
         if parsed.path == "/api/status":
             self._send_json(self.workbench_controller.status())
+            return
+        if parsed.path.startswith("/api/preview/"):
+            self._serve_preview(unquote(parsed.path.removeprefix("/api/preview/")))
             return
         self._serve_static(parsed.path)
 
@@ -187,9 +231,9 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
             payload = self._read_payload()
             if self.path == "/api/configure":
                 result = self.workbench_controller.configure(
-                    Path(str(payload.get("input_dir", ""))),
-                    Path(str(payload.get("derivatives_dir", ""))),
-                    Path(str(payload["metadata_dir"])) if payload.get("metadata_dir") else None,
+                    _required_path(payload, "input_dir", "扫描原图文件夹"),
+                    _required_path(payload, "derivatives_dir", "处理后输出文件夹"),
+                    _optional_path(payload, "metadata_dir", "本机状态文件夹"),
                 )
             elif self.path == "/api/start":
                 result = self.workbench_controller.start()
@@ -226,6 +270,22 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _serve_preview(self, local_id: str) -> None:
+        try:
+            path = self.workbench_controller.preview_path(local_id)
+        except ValueError as exc:
+            self._send_json({"error_zh": str(exc)}, HTTPStatus.NOT_FOUND)
+            return
+        content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        body = path.read_bytes()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        self.wfile.write(body)
+
     def _read_payload(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0"))
         if length <= 0:
@@ -253,3 +313,39 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     except (OSError, json.JSONDecodeError):
         return None
     return payload if isinstance(payload, dict) else None
+
+
+def _required_path(payload: dict[str, Any], key: str, label_zh: str) -> Path:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"请填写{label_zh}。")
+    return Path(value.strip())
+
+
+def _optional_path(payload: dict[str, Any], key: str, label_zh: str) -> Path | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"请填写{label_zh}，或留空使用默认位置。")
+    return Path(value.strip())
+
+
+def _safe_relative_path(value: str) -> Path:
+    stripped = value.strip()
+    candidate = Path(stripped)
+    if not stripped or candidate.is_absolute() or ".." in candidate.parts:
+        raise ValueError("复核记录预览路径不安全。")
+    return candidate
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root.expanduser().resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def _is_loopback_client(host: str) -> bool:
+    return host in {"127.0.0.1", "::1"} or host.startswith("127.")
