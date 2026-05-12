@@ -178,6 +178,41 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertEqual(status["draft_decisions"], draft)
             self.assertEqual(status["queue"]["items"][0]["local_id"], "PRQ000001")
 
+    def test_status_reports_original_and_processed_preview_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = root / "metadata"
+            (input_dir / "nested").mkdir(parents=True)
+            (output_dir / "images" / "nested").mkdir(parents=True)
+            metadata_dir.mkdir()
+            (input_dir / "nested" / "a.png").write_bytes(b"original")
+            (output_dir / "images" / "nested" / "a.png").write_bytes(b"processed")
+            (metadata_dir / PRODUCTION_REVIEW_QUEUE_JSON).write_text(
+                json.dumps(
+                    {
+                        "schema_version": "scan-qc.production-review-queue.v1",
+                        "items": [
+                            {"local_id": "PRQ000001", "relative_path": "nested/a.png"},
+                            {"local_id": "PRQ000002", "relative_path": "missing.png"},
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            controller = WorkbenchController()
+            controller.configure(input_dir, output_dir, metadata_dir)
+
+            status = controller.status()
+
+            self.assertEqual(status["queue"]["items"][0]["preview_source"], "comparison")
+            self.assertEqual(status["queue"]["items"][0]["preview_sources"], {"original": True, "processed": True})
+            self.assertEqual(status["queue"]["items"][1]["preview_source"], "unavailable")
+            self.assertEqual(status["queue"]["items"][1]["preview_sources"], {"original": False, "processed": False})
+            self.assertEqual(controller.preview_path("PRQ000001", "original")[1], "original")
+            self.assertEqual(controller.preview_path("PRQ000001", "processed")[1], "processed")
+
     def test_final_completion_still_writes_verifier_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

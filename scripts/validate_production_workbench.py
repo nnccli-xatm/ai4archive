@@ -43,10 +43,10 @@ REQUIRED_TEXT = {
     "待完成",
     "批次已完成",
     "处理失败",
-    "确认通过",
-    "退回重扫或重处理",
-    "交管理员处理",
-    "确认保留原貌",
+    "通过",
+    "需要重扫",
+    "重新处理",
+    "保留原貌",
     "大图预览",
     "当前图片",
     "当前第",
@@ -54,6 +54,9 @@ REQUIRED_TEXT = {
     "待确认",
     "预览",
     "处理后图片不可用，正在显示原图",
+    "正在对比原图和处理后图片",
+    "原图预览暂不可用",
+    "处理后图片预览暂不可用",
     "处理后图片",
     "原图预览",
     "问题原因",
@@ -133,8 +136,8 @@ PRIVATE_FIXTURE_TERMS = {
 
 CONTRACT_DECISION_MAP = {
     "pass": "false_positive",
-    "needs_rework": "needs_rescan",
-    "admin_handling": "blocked",
+    "rescan": "needs_rescan",
+    "reprocess": "fixed_externally",
     "keep_original_trace": "false_positive",
 }
 
@@ -168,7 +171,7 @@ def review_decision_contract_fixture(queue: dict[str, object]) -> dict[str, obje
     items = queue.get("items")
     if not isinstance(items, list):
         items = []
-    operator_decisions = ["pass", "needs_rework", "admin_handling", "keep_original_trace"]
+    operator_decisions = ["pass", "rescan", "reprocess", "keep_original_trace"]
     rows = []
     counts = {
         "pending": 0,
@@ -300,7 +303,9 @@ def main() -> int:
         "_required_path",
         "PREVIEW_IMAGE_SUFFIXES",
         "preview_source",
+        "preview_sources",
         "original_fallback",
+        "comparison",
         "X-Preview-Source",
         "_is_loopback_client",
         "local-only",
@@ -416,6 +421,9 @@ def main() -> int:
         "finishBatch",
         "contractDecisionMap",
         "previewSourceLabel",
+        "originalPreviewUrl",
+        "processedPreviewUrl",
+        "preview-comparison",
         "reviewPositionText",
         "previewSourceText",
         "previousReviewedButton",

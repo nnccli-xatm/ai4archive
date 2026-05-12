@@ -473,6 +473,56 @@
       max-height: none;
     }
 
+    .preview-comparison {
+      width: min(100%, 980px);
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .comparison-pane {
+      min-width: 0;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 8px;
+    }
+
+    .comparison-title {
+      justify-self: center;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, .92);
+      color: var(--ink-2);
+      font-weight: 780;
+      padding: 6px 12px;
+    }
+
+    .preview-frame.compact {
+      width: 100%;
+      padding: 22px;
+      border-width: 8px;
+      box-shadow: 0 14px 34px rgba(25, 42, 35, .18);
+    }
+
+    .preview-frame.comparison-shell {
+      width: min(100%, 980px);
+      aspect-ratio: auto;
+      align-content: start;
+      padding: 22px;
+    }
+
+    .preview-fallback {
+      width: min(100%, 620px);
+      border: 1px solid #b8d8ca;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, .92);
+      color: var(--ink-2);
+      font-weight: 700;
+      line-height: 1.55;
+      padding: 12px 14px;
+      text-align: center;
+    }
+
     .desk-footer {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
@@ -639,6 +689,10 @@
         padding: 24px;
       }
 
+      .preview-comparison {
+        grid-template-columns: 1fr;
+      }
+
       .desk-stat {
         border-right: 0;
         border-bottom: 1px solid var(--line);
@@ -784,7 +838,7 @@
             </div>
             <p class="muted" id="reviewPositionText">当前第 0 张 / 共 0 张 / 待确认 0 张。</p>
             <p class="muted" id="previewSourceText">预览：等待本机处理结果。</p>
-            <p class="muted">大图预览在中间。生产运行时这里显示本机真实预览；点一个决定后，自动显示下一张待确认图片。</p>
+            <p class="muted">大图预览在中间。生产运行时这里显示本机真实预览；原图和处理后图片可对比。只有一张可预览时，按提示查看现有图片；点一个决定后，自动显示下一张待确认图片。</p>
           </div>
 
           <div class="review-navigation" aria-label="复核导航">
@@ -793,10 +847,10 @@
             <button type="button" class="secondary" id="clearDecisionButton" disabled>清除当前决定</button>
           </div>
           <div class="decision-actions" id="decisionActions">
-            <button type="button" class="primary-choice" data-decision="pass" disabled>确认通过</button>
-            <button type="button" class="warning" data-decision="needs_rework" disabled>退回重扫或重处理</button>
-            <button type="button" class="secondary" data-decision="admin_handling" disabled>交管理员处理</button>
-            <button type="button" class="secondary" data-decision="keep_original_trace" disabled>确认保留原貌</button>
+            <button type="button" class="primary-choice" data-decision="pass" disabled>通过</button>
+            <button type="button" class="warning" data-decision="rescan" disabled>需要重扫</button>
+            <button type="button" class="warning" data-decision="reprocess" disabled>重新处理</button>
+            <button type="button" class="secondary" data-decision="keep_original_trace" disabled>保留原貌</button>
           </div>
           <div class="decision-summary" id="decisionSummary">已决定 0 项，待决定 0 项。</div>
         </div>
@@ -836,8 +890,8 @@
 
   <script>
     const initialReviewItems = [
-      { id: "演示一", name: "图片一", tone: "need", issue: "轻微倾斜，文字边缘可能影响阅读。", advice: "建议需要返工；如果仍保持档案原貌，可选择保留原貌痕迹。", suggestedAction: "needs_rework", decision: null },
-      { id: "演示二", name: "图片二", tone: "stop", issue: "疑似漏扫、重扫或页面缺失。", advice: "建议需要返工，确认后交回扫描工位补扫。", suggestedAction: "needs_rework", decision: null },
+      { id: "演示一", name: "图片一", tone: "need", issue: "轻微倾斜，文字边缘可能影响阅读。", advice: "建议重新处理；如果仍保持档案原貌，可选择保留原貌。", suggestedAction: "reprocess", decision: null },
+      { id: "演示二", name: "图片二", tone: "stop", issue: "疑似漏扫、重扫或页面缺失。", advice: "建议需要重扫，确认后交回扫描工位补扫。", suggestedAction: "rescan", decision: null },
       { id: "演示三", name: "图片三", tone: "need", issue: "疑似档案原貌痕迹，不一定需要处理。", advice: "如果不影响档案真实性，可选择保留原貌痕迹。", suggestedAction: "keep_original_trace", decision: null }
     ];
 
@@ -984,23 +1038,23 @@
 
     const adviceByAction = {
       pass: "系统建议通过。请确认画面可读、顺序正确后点击通过。",
-      needs_rework: "系统建议需要返工。请按情况需要重扫或重新处理。",
-      admin_handling: "系统建议管理员处理。普通操作人员无需查看后台细节。",
+      rescan: "系统建议需要重扫。请确认原图是否缺页、打不开或质量不足。",
+      reprocess: "系统建议重新处理。请确认原图可用，但处理后图片需要重新生成。",
       keep_original_trace: "系统建议保留原貌痕迹。请确认这不是扫描产生的新问题。"
     };
 
     const suggestedActionMap = {
       pass: "pass",
-      rescan: "needs_rework",
-      reprocess: "needs_rework",
+      rescan: "rescan",
+      reprocess: "reprocess",
       keep_original_trace: "keep_original_trace",
-      skip: "admin_handling"
+      skip: "keep_original_trace"
     };
 
     const contractDecisionMap = {
       pass: "false_positive",
-      needs_rework: "needs_rescan",
-      admin_handling: "blocked",
+      rescan: "needs_rescan",
+      reprocess: "fixed_externally",
       keep_original_trace: "false_positive"
     };
 
@@ -1072,10 +1126,10 @@
     function currentDecisionLabel(item) {
       if (!item || !item.decision) return "当前决定：未决定。";
       const labels = {
-        pass: "确认通过",
-        needs_rework: "退回重扫或重处理",
-        admin_handling: "交管理员处理",
-        keep_original_trace: "确认保留原貌"
+        pass: "通过",
+        rescan: "需要重扫",
+        reprocess: "重新处理",
+        keep_original_trace: "保留原貌"
       };
       return `当前决定：${labels[item.decision] || "已确认"}。`;
     }
@@ -1086,10 +1140,11 @@
 
     function previewSourceLabel(item, pending) {
       if (!pending) return "预览：等待本机处理结果。";
+      if (item.previewSource === "comparison") return "预览：正在对比原图和处理后图片。";
       if (item.previewSource === "processed") return "预览：处理后图片。";
       if (item.previewSource === "original_fallback") return "预览：处理后图片不可用，正在显示原图。";
       if (item.previewSource === "unavailable") return "预览：本机暂未找到可预览图片。";
-      if (item.previewUrl) return "预览：原图预览。";
+      if (item.originalPreviewUrl) return "预览：原图预览。";
       return "预览：公开安全示意图。";
     }
 
@@ -1143,15 +1198,17 @@
     }
 
     function applyImageView() {
-      const image = els.previewFrame.querySelector("img");
-      if (!image) {
+      const images = Array.from(els.previewFrame.querySelectorAll("img"));
+      if (!images.length) {
         updatePreviewControls(false);
         return;
       }
-      image.classList.toggle("zoomed", !state.previewFit);
-      image.style.width = state.previewFit ? "100%" : `${Math.round(100 * state.previewZoom)}%`;
-      image.style.height = state.previewFit ? "100%" : "auto";
-      image.style.transform = "none";
+      images.forEach((image) => {
+        image.classList.toggle("zoomed", !state.previewFit);
+        image.style.width = state.previewFit ? "100%" : `${Math.round(100 * state.previewZoom)}%`;
+        image.style.height = state.previewFit ? "100%" : "auto";
+        image.style.transform = "none";
+      });
       updatePreviewControls(true);
     }
 
@@ -1173,19 +1230,55 @@
       applyImageView();
     }
 
+    function previewPlaceholder(label) {
+      return `
+        <div class="scan-line"></div>
+        <div class="scan-line mid"></div>
+        <div class="scan-line short"></div>
+        <div class="preview-label" id="previewText">${escapeHtml(label)}</div>
+      `;
+    }
+
+    function singlePreviewFrame(url, label, compact) {
+      if (url) {
+        return `<div class="preview-frame${compact ? " compact" : ""}"><img src="${url}" alt="${escapeHtml(label)}"></div>`;
+      }
+      return `<div class="preview-frame${compact ? " compact" : ""}">${previewPlaceholder(label)}</div>`;
+    }
+
     function renderPreview(item, pending) {
       els.previewFrame.classList.toggle("need", pending && item.tone === "need");
       els.previewFrame.classList.toggle("stop", pending && item.tone === "stop");
-      if (pending && item.previewUrl) {
-        els.previewFrame.innerHTML = `<img src="${item.previewUrl}" alt="本机真实预览">`;
+      els.previewFrame.classList.toggle("comparison-shell", pending && item && item.originalPreviewUrl && item.processedPreviewUrl);
+      if (pending && item && item.originalPreviewUrl && item.processedPreviewUrl) {
+        els.previewFrame.innerHTML = `
+          <div class="preview-comparison" aria-label="原图和处理后图片对比">
+            <div class="comparison-pane">
+              <div class="comparison-title">原图</div>
+              ${singlePreviewFrame(item.originalPreviewUrl, "本机原图预览", true)}
+            </div>
+            <div class="comparison-pane">
+              <div class="comparison-title">处理后图片</div>
+              ${singlePreviewFrame(item.processedPreviewUrl, "本机处理后预览", true)}
+            </div>
+          </div>
+          <div class="preview-fallback">请对比原图和处理后图片，再选择通过、需要重扫、重新处理或保留原貌。</div>
+        `;
+        applyImageView();
+      } else if (pending && item && (item.processedPreviewUrl || item.originalPreviewUrl)) {
+        const showingProcessed = Boolean(item.processedPreviewUrl);
+        const label = showingProcessed ? "处理后图片" : "原图";
+        const guidance = showingProcessed
+          ? "原图预览暂不可用。请查看处理后图片，仍可选择一个处理决定。"
+          : "处理后图片预览暂不可用。请查看原图，仍可选择一个处理决定。";
+        els.previewFrame.innerHTML = `
+          ${singlePreviewFrame(item.processedPreviewUrl || item.originalPreviewUrl, label, false)}
+          <div class="preview-fallback">${guidance}</div>
+        `;
         applyImageView();
       } else {
-        els.previewFrame.innerHTML = `
-          <div class="scan-line"></div>
-          <div class="scan-line mid"></div>
-          <div class="scan-line short"></div>
-          <div class="preview-label" id="previewText">${pending ? item.name : state.status === "complete" ? "确认完成" : "公开安全示意图"}</div>
-        `;
+        els.previewFrame.innerHTML = previewPlaceholder(pending && item ? item.name : state.status === "complete" ? "确认完成" : "公开安全示意图")
+          + (pending ? '<div class="preview-fallback">本机暂未找到原图或处理后图片预览。请按问题原因和本机文件夹检查后选择决定。</div>' : "");
         els.previewText = document.getElementById("previewText");
         updatePreviewControls(false);
       }
@@ -1376,7 +1469,7 @@
         tone: index % 2 ? "stop" : "need",
         issue: "这张图片需要人工确认。",
         advice: index % 2 ? "建议需要重扫，确认后交回扫描工位补扫。" : "请按实际情况选择右侧决定。",
-        suggestedAction: index % 2 ? "needs_rework" : "pass",
+        suggestedAction: index % 2 ? "rescan" : "pass",
         decision: null
       }));
     }
@@ -1390,7 +1483,10 @@
     }
 
     function queueItemToReviewItem(item, index) {
-      const suggestedAction = suggestedActionMap[item.suggested_action] || "admin_handling";
+      const suggestedAction = suggestedActionMap[item.suggested_action] || "keep_original_trace";
+      const previewSources = item.preview_sources && typeof item.preview_sources === "object" ? item.preview_sources : {};
+      const hasOriginal = item.preview_source === "comparison" || item.preview_source === "original_fallback" || previewSources.original === true;
+      const hasProcessed = item.preview_source === "comparison" || item.preview_source === "processed" || previewSources.processed === true;
       return {
         id: item.local_id || `本机队列 ${index + 1}`,
         name: itemName(index),
@@ -1403,7 +1499,8 @@
         sourceCategory: item.source_category || "",
         sourceRef: item.source_ref || "",
         previewSource: item.preview_source || "",
-        previewUrl: localApi.enabled && item.local_id && item.preview_source && item.preview_source !== "unavailable" ? `/api/preview/${encodeURIComponent(item.local_id)}` : "",
+        originalPreviewUrl: localApi.enabled && item.local_id && hasOriginal ? `/api/preview/${encodeURIComponent(item.local_id)}/original` : "",
+        processedPreviewUrl: localApi.enabled && item.local_id && hasProcessed ? `/api/preview/${encodeURIComponent(item.local_id)}/processed` : "",
         decision: null
       };
     }
@@ -1426,16 +1523,16 @@
       if (!draft || !Array.isArray(draft.decisions) || state.reviewItems.length === 0) return false;
       const operatorDecisionMap = {
         pass: "pass",
-        needs_rework: "needs_rework",
-        admin_handling: "admin_handling",
+        rescan: "rescan",
+        reprocess: "reprocess",
         keep_original_trace: "keep_original_trace"
       };
       const reverseDecisionMap = {
         accepted_issue: "pass",
         false_positive: "pass",
-        fixed_externally: "needs_rework",
-        needs_rescan: "needs_rework",
-        blocked: "admin_handling"
+        fixed_externally: "reprocess",
+        needs_rescan: "rescan",
+        blocked: "reprocess"
       };
       const byId = new Map(state.reviewItems.map((item) => [item.id, item]));
       let restored = 0;
