@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from html.parser import HTMLParser
@@ -10,6 +11,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKBENCH = ROOT / "docs" / "production-workbench-prototype.html"
+FIXTURE_ROOT = ROOT / "docs" / "fixtures"
+FIXTURE_STATES = {
+    "production-run-running": "running",
+    "production-run-needs-review": "needs_review",
+    "production-run-finished": "finished",
+    "production-run-blocked": "blocked",
+}
 
 REQUIRED_TEXT = {
     "本地生产工作台",
@@ -39,6 +47,12 @@ REQUIRED_TEXT = {
     "不读取目录内容",
     "不执行处理",
     "不显示本机私有路径",
+    "加载本机状态",
+    "选择状态示例",
+    "选择本机状态文件",
+    "需留意文件",
+    "原图总数",
+    "需要管理员处理",
 }
 
 FORBIDDEN_VISIBLE_TERMS = {
@@ -52,6 +66,23 @@ FORBIDDEN_VISIBLE_TERMS = {
     "private path",
     "raw evidence",
     "模拟失败",
+    "production_run_summary",
+    "production_run_progress",
+}
+
+PRIVATE_FIXTURE_TERMS = {
+    "PRIVATE",
+    "PUERSAI",
+    "relative_path",
+    "sha256",
+    "hash",
+    "OCR",
+    "/Users/",
+    "\\\\",
+    ".jpg",
+    ".png",
+    ".tif",
+    ".tiff",
 }
 
 
@@ -100,6 +131,54 @@ def main() -> int:
         errors.append("missing zh-CN document language")
     if "webkitdirectory" not in html:
         errors.append("missing local folder picker controls")
+    if "applyRunStatus" not in html:
+        errors.append("missing production-run status loader")
+    if "operator_summary" not in html:
+        errors.append("missing operator summary mapping")
+    for fixture_name, expected_status in FIXTURE_STATES.items():
+        fixture_dir = FIXTURE_ROOT / fixture_name
+        summary_path = fixture_dir / "production_run_summary.json"
+        progress_path = fixture_dir / "production_run_progress.json"
+        if fixture_name not in html:
+            errors.append(f"fixture not referenced by workbench: {fixture_name}")
+        if not summary_path.exists() or not progress_path.exists():
+            errors.append(f"missing production-run fixture pair: {fixture_name}")
+            continue
+        try:
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            progress = json.loads(progress_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            errors.append(f"invalid fixture JSON for {fixture_name}: {exc}")
+            continue
+        if summary.get("schema_version") != "scan-qc.production-run.v1":
+            errors.append(f"unexpected summary schema for {fixture_name}")
+        if progress.get("schema_version") != "scan-qc.production-run-progress.v1":
+            errors.append(f"unexpected progress schema for {fixture_name}")
+        if summary.get("status") != expected_status:
+            errors.append(f"unexpected summary status for {fixture_name}: {summary.get('status')}")
+        operator = summary.get("operator_summary")
+        if not isinstance(operator, dict):
+            errors.append(f"missing operator summary for {fixture_name}")
+            continue
+        for key in [
+            "message",
+            "message_zh",
+            "total_source_images",
+            "openable_source_images",
+            "derivative_images_ready",
+            "files_needing_attention",
+        ]:
+            if key not in operator:
+                errors.append(f"missing operator field for {fixture_name}: {key}")
+        for demo_only_key in ["output_folder_summary", "review_queue_state"]:
+            if demo_only_key in operator:
+                errors.append(f"fixture uses non-production operator field for {fixture_name}: {demo_only_key}")
+        if "completed_items" in progress or "total_items" in progress:
+            errors.append(f"progress fixture uses non-production top-level item counts: {fixture_name}")
+        raw_fixture = summary_path.read_text(encoding="utf-8") + progress_path.read_text(encoding="utf-8")
+        leaked_terms = sorted(term for term in PRIVATE_FIXTURE_TERMS if term.lower() in raw_fixture.lower())
+        if leaked_terms:
+            errors.append(f"private or row-level fixture terms in {fixture_name}: {leaked_terms}")
 
     if errors:
         for error in errors:

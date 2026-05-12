@@ -1,0 +1,28 @@
+{
+  "schema_version": "scan-qc.production-run-progress.v1",
+  "state": "running",
+  "state_label_zh": "处理中",
+  "message_zh": "正在生成处理后图片，请稍候。",
+  "current_step": "process",
+  "completed_steps": 1,
+  "total_steps": 3,
+  "steps": [
+    {
+      "id": "scan",
+      "label": "检查扫描图片",
+      "state": "completed"
+    },
+    {
+      "id": "process",
+      "label": "生成处理后图片",
+      "state": "running",
+      "total_items": 120,
+      "completed_items": 48
+    },
+    {
+      "id": "summarize",
+      "label": "整理处理结果",
+      "state": "pending"
+    }
+  ]
+}

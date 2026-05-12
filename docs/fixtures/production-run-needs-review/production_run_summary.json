@@ -1,0 +1,24 @@
+{
+  "schema_version": "scan-qc.production-run.v1",
+  "status": "needs_review",
+  "status_label_zh": "需要人工复核",
+  "operator_summary": {
+    "message": "已完成自动处理，有图片需要人工确认。",
+    "message_zh": "已完成自动处理，有图片需要人工确认。",
+    "total_source_images": 120,
+    "openable_source_images": 120,
+    "derivative_images_ready": 116,
+    "files_needing_attention": 4
+  },
+  "counts": {
+    "total_files": 120,
+    "processed_files": 116,
+    "failed_files": 0,
+    "p0_findings": 4
+  },
+  "progress": {
+    "state": "completed",
+    "total_items": 120,
+    "completed_items": 120
+  }
+}

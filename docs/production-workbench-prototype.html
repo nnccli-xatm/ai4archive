@@ -254,6 +254,30 @@
       width: 100%;
     }
 
+    .status-loader {
+      display: grid;
+      gap: 10px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      background: var(--paper);
+      border-radius: 8px;
+    }
+
+    .status-loader select {
+      width: 100%;
+      min-height: 42px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      background: var(--field);
+      color: var(--ink);
+      padding: 8px 10px;
+      font: inherit;
+    }
+
+    .status-loader small {
+      color: var(--muted);
+    }
+
     .image-desk {
       border-radius: 10px;
       display: grid;
@@ -541,6 +565,20 @@
           <button id="resetButton" class="secondary">重新开始</button>
         </div>
 
+        <div class="status-loader">
+          <strong>加载本机状态</strong>
+          <select id="fixtureSelect" aria-label="加载本机状态示例">
+            <option value="">选择状态示例</option>
+            <option value="fixtures/production-run-running">正在处理</option>
+            <option value="fixtures/production-run-needs-review">需要人工确认</option>
+            <option value="fixtures/production-run-finished">批次已完成</option>
+            <option value="fixtures/production-run-blocked">需要管理员处理</option>
+          </select>
+          <label class="folder-trigger" for="summaryFile">选择本机状态文件</label>
+          <input class="visually-hidden" id="summaryFile" type="file" accept="application/json,.json" multiple>
+          <small id="loadStatus">可加载公开示例或本机生成的状态文件。</small>
+        </div>
+
         <p class="guard-note">原图不会被覆盖。本原型不读取目录内容，不执行处理，不显示本机私有路径。生产运行时由本机服务生成处理后图片。</p>
       </aside>
 
@@ -569,12 +607,12 @@
 
         <div class="desk-footer">
           <div class="desk-stat">
-            <span>待人工确认</span>
+            <span>需留意文件</span>
             <strong id="pendingText">0 张</strong>
           </div>
           <div class="desk-stat">
-            <span>已确认</span>
-            <strong id="reviewedText">0 张</strong>
+            <span>原图总数</span>
+            <strong id="sourceText">0 张</strong>
           </div>
           <div class="desk-stat">
             <span>处理后图片</span>
@@ -628,22 +666,32 @@
   </div>
 
   <script>
+    const initialReviewItems = [
+      { name: "图片一", tone: "need", issue: "轻微倾斜，文字边缘可能影响阅读。", advice: "建议重新处理；如果仍保持档案原貌，可选择保留原貌痕迹。", decision: "未确认" },
+      { name: "图片二", tone: "stop", issue: "疑似漏扫、重扫或页面缺失。", advice: "建议需要重扫，确认后交回扫描工位补扫。", decision: "未确认" },
+      { name: "图片三", tone: "need", issue: "疑似档案原貌痕迹，不一定需要处理。", advice: "如果不影响档案真实性，可选择保留原貌痕迹。", decision: "未确认" }
+    ];
+
     const state = {
       inputChosen: false,
       outputChosen: false,
       status: "choose_input",
       progress: 0,
       readyImages: 0,
-      reviewItems: [
-        { name: "图片一", tone: "need", issue: "轻微倾斜，文字边缘可能影响阅读。", advice: "建议重新处理；如果仍保持档案原貌，可选择保留原貌痕迹。", decision: "未确认" },
-        { name: "图片二", tone: "stop", issue: "疑似漏扫、重扫或页面缺失。", advice: "建议需要重扫，确认后交回扫描工位补扫。", decision: "未确认" },
-        { name: "图片三", tone: "need", issue: "疑似档案原貌痕迹，不一定需要处理。", advice: "如果不影响档案真实性，可选择保留原貌痕迹。", decision: "未确认" }
-      ]
+      totalImages: 0,
+      attentionFiles: 3,
+      outputSummary: "已选择的处理后输出文件夹",
+      operatorMessage: "",
+      reviewQueueText: "",
+      reviewItems: initialReviewItems.map((item) => ({ ...item }))
     };
 
     const els = {
       inputFolder: document.getElementById("inputFolder"),
       outputFolder: document.getElementById("outputFolder"),
+      summaryFile: document.getElementById("summaryFile"),
+      fixtureSelect: document.getElementById("fixtureSelect"),
+      loadStatus: document.getElementById("loadStatus"),
       inputStatus: document.getElementById("inputStatus"),
       outputStatus: document.getElementById("outputStatus"),
       startButton: document.getElementById("startButton"),
@@ -657,7 +705,7 @@
       progressFill: document.getElementById("progressFill"),
       progressText: document.getElementById("progressText"),
       pendingText: document.getElementById("pendingText"),
-      reviewedText: document.getElementById("reviewedText"),
+      sourceText: document.getElementById("sourceText"),
       readyText: document.getElementById("readyText"),
       previewFrame: document.getElementById("previewFrame"),
       previewText: document.getElementById("previewText"),
@@ -681,6 +729,24 @@
       failed: ["处理失败", "处理失败", "请检查两个文件夹是否选对、磁盘空间是否足够，然后重新开始。"]
     };
 
+    const runStateMap = {
+      running: "processing",
+      completed: "complete",
+      finished: "complete",
+      needs_review: "needs_review",
+      blocked: "failed",
+      pending: "ready"
+    };
+
+    const operatorStateText = {
+      running: ["正在处理", "正在处理", "本机正在生成处理后图片，请稍候。"],
+      completed: ["已完成", "批次已完成", "处理后的图片已经准备好，请查看输出位置。"],
+      finished: ["已完成", "批次已完成", "处理后的图片已经准备好，请查看输出位置。"],
+      needs_review: ["需要确认", "有图片需要人工确认", "请看中间大图，然后在右侧选择处理决定。"],
+      blocked: ["需处理", "需要管理员处理", "有文件未能完成处理，请联系管理员查看。"],
+      pending: ["准备完成", "可以开始处理", "文件夹已准备好，点击开始处理。"]
+    };
+
     function pendingCount() {
       return state.reviewItems.filter((item) => item.decision === "未确认").length;
     }
@@ -702,7 +768,7 @@
       state.status = next;
       if (next === "processing") {
         state.progress = 48;
-        state.readyImages = 0;
+        state.readyImages = state.readyImages || 0;
       }
       if (next === "needs_review") {
         state.progress = 82;
@@ -724,9 +790,9 @@
       const item = currentItem();
       const pending = pendingCount();
       const reviewMode = state.status === "needs_review";
-      els.queueText.textContent = reviewMode ? `已确认 ${reviewedCount()} 张，待确认 ${pending} 张` : "等待处理开始。";
-      els.currentIssue.textContent = reviewMode && pending ? item.issue : pending ? "处理开始后在这里显示问题原因。" : "已经没有待确认图片。";
-      els.currentAdvice.textContent = reviewMode && pending ? item.advice : pending ? "可以开始处理后再确认。" : "可以点击完成导出。";
+      els.queueText.textContent = state.reviewQueueText || (reviewMode ? `已确认 ${reviewedCount()} 张，待确认 ${pending} 张` : "等待处理开始。");
+      els.currentIssue.textContent = state.operatorMessage || (reviewMode && pending ? item.issue : pending ? "处理开始后在这里显示问题原因。" : "已经没有待确认图片。");
+      els.currentAdvice.textContent = reviewMode && pending ? item.advice : state.status === "failed" ? "请联系管理员处理后再继续。" : pending ? "可以开始处理后再确认。" : "可以点击完成导出。";
       els.decisionActions.querySelectorAll("button").forEach((button) => {
         button.disabled = !(reviewMode && pending > 0);
       });
@@ -744,8 +810,8 @@
       els.stateHint.textContent = hint;
       els.progressFill.style.width = `${state.progress}%`;
       els.progressText.textContent = state.progress ? `进度：${state.progress}%` : "进度：未开始";
-      els.pendingText.textContent = `${pendingCount()} 张`;
-      els.reviewedText.textContent = `${reviewedCount()} 张`;
+      els.pendingText.textContent = `${state.attentionFiles} 个`;
+      els.sourceText.textContent = `${state.totalImages} 张`;
       els.readyText.textContent = `${state.readyImages} 张`;
       els.startButton.disabled = state.status !== "ready";
       els.pauseButton.disabled = state.status !== "processing";
@@ -753,7 +819,84 @@
       els.completeButton.disabled = !(state.status === "needs_review" && pendingCount() === 0);
       els.outputPanel.classList.toggle("hidden", state.status !== "complete");
       els.failurePanel.classList.toggle("hidden", state.status !== "failed");
+      els.outputPlace.textContent = state.outputSummary;
       renderDecisionArea();
+    }
+
+    function toNumber(value) {
+      return Number.isFinite(Number(value)) ? Number(value) : 0;
+    }
+
+    function deriveProgress(summary, progress) {
+      const progressInfo = progress || summary.progress || {};
+      const activeStep = Array.isArray(progressInfo.steps)
+        ? progressInfo.steps.find((step) => step.id === progressInfo.current_step) || progressInfo.steps.find((step) => step.state === "running")
+        : null;
+      const completed = toNumber((activeStep && activeStep.completed_items) || progressInfo.completed_items || progressInfo.completed_steps);
+      const total = toNumber((activeStep && activeStep.total_items) || progressInfo.total_items || progressInfo.total_steps);
+      if (total > 0) return Math.min(100, Math.round((completed / total) * 100));
+      if (summary.status === "finished") return 100;
+      if (summary.status === "needs_review") return 82;
+      if (summary.status === "blocked") return 100;
+      if (summary.status === "running") return 48;
+      return 0;
+    }
+
+    function makeReviewItems(count) {
+      return Array.from({ length: Math.max(0, count) }, (_, index) => ({
+        name: `待确认图片 ${index + 1}`,
+        tone: index % 2 ? "stop" : "need",
+        issue: "这张图片需要人工确认。",
+        advice: index % 2 ? "建议需要重扫，确认后交回扫描工位补扫。" : "请按实际情况选择右侧决定。",
+        decision: "未确认"
+      }));
+    }
+
+    function applyRunStatus(summary, progress) {
+      const operator = summary.operator_summary || {};
+      const rawStatus = summary.status || (progress && progress.state) || "pending";
+      const nextStatus = runStateMap[rawStatus] || "failed";
+      const text = operatorStateText[rawStatus] || operatorStateText.blocked;
+      copy[nextStatus] = text;
+      state.inputChosen = true;
+      state.outputChosen = true;
+      state.status = nextStatus;
+      state.totalImages = toNumber(operator.total_source_images || (summary.counts && summary.counts.total_files));
+      state.readyImages = toNumber(operator.derivative_images_ready || (summary.counts && summary.counts.processed_files));
+      state.attentionFiles = toNumber(operator.files_needing_attention);
+      state.outputSummary = state.readyImages ? `已准备 ${state.readyImages} 张处理后图片` : "处理后图片将写入已选择的输出文件夹";
+      state.operatorMessage = operator.message_zh || operator.message || (progress && progress.message_zh) || text[2];
+      state.reviewQueueText = state.attentionFiles
+        ? (nextStatus === "failed" ? `需要管理员处理 ${state.attentionFiles} 个。` : `待人工确认 ${state.attentionFiles} 个。`)
+        : "没有待人工确认图片。";
+      state.progress = deriveProgress(summary, progress);
+      state.reviewItems = nextStatus === "needs_review" ? makeReviewItems(state.attentionFiles) : [];
+      els.inputStatus.textContent = "已加载本机状态。";
+      els.outputStatus.textContent = state.outputSummary;
+      render();
+    }
+
+    async function loadFixture(baseName) {
+      if (!baseName) return;
+      els.loadStatus.textContent = "正在加载状态示例。";
+      const [summaryResponse, progressResponse] = await Promise.all([
+        fetch(`${baseName}/production_run_summary.json`),
+        fetch(`${baseName}/production_run_progress.json`)
+      ]);
+      if (!summaryResponse.ok || !progressResponse.ok) throw new Error("状态读取失败");
+      applyRunStatus(await summaryResponse.json(), await progressResponse.json());
+      els.loadStatus.textContent = "已加载状态示例。";
+    }
+
+    async function loadSelectedFiles(files) {
+      const selected = Array.from(files || []);
+      if (selected.length === 0) return;
+      els.loadStatus.textContent = "正在读取本机状态。";
+      const payloads = await Promise.all(selected.map(async (file) => JSON.parse(await file.text())));
+      const summary = payloads.find((item) => item && item.operator_summary) || payloads[0];
+      const progress = payloads.find((item) => item && item.steps);
+      applyRunStatus(summary, progress);
+      els.loadStatus.textContent = "已读取本机状态。";
     }
 
     els.inputFolder.addEventListener("change", () => {
@@ -788,11 +931,19 @@
       state.status = "choose_input";
       state.progress = 0;
       state.readyImages = 0;
-      state.reviewItems.forEach((item) => { item.decision = "未确认"; });
+      state.totalImages = 0;
+      state.attentionFiles = 3;
+      state.outputSummary = "已选择的处理后输出文件夹";
+      state.operatorMessage = "";
+      state.reviewQueueText = "";
+      state.reviewItems = initialReviewItems.map((item) => ({ ...item }));
       els.inputFolder.value = "";
       els.outputFolder.value = "";
+      els.summaryFile.value = "";
+      els.fixtureSelect.value = "";
       els.inputStatus.textContent = "尚未选择扫描原图文件夹。";
       els.outputStatus.textContent = "尚未选择处理后输出文件夹。";
+      els.loadStatus.textContent = "可加载公开示例或本机生成的状态文件。";
       window.clearTimeout(timer);
       render();
     });
@@ -803,7 +954,24 @@
       const item = currentItem();
       item.decision = button.dataset.decision;
       state.progress = pendingCount() === 0 ? 94 : Math.min(92, state.progress + 4);
+      state.attentionFiles = pendingCount();
       render();
+    });
+
+    els.fixtureSelect.addEventListener("change", async () => {
+      try {
+        await loadFixture(els.fixtureSelect.value);
+      } catch (error) {
+        els.loadStatus.textContent = "状态示例读取失败。";
+      }
+    });
+
+    els.summaryFile.addEventListener("change", async () => {
+      try {
+        await loadSelectedFiles(els.summaryFile.files);
+      } catch (error) {
+        els.loadStatus.textContent = "本机状态读取失败。";
+      }
     });
 
     render();

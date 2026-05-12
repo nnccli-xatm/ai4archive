@@ -1,0 +1,23 @@
+{
+  "schema_version": "scan-qc.production-run.v1",
+  "status": "running",
+  "status_label_zh": "处理中",
+  "operator_summary": {
+    "message": "正在生成处理后图片，请保持本机和磁盘可用。",
+    "message_zh": "正在生成处理后图片，请保持本机和磁盘可用。",
+    "total_source_images": 120,
+    "openable_source_images": 120,
+    "derivative_images_ready": 48,
+    "files_needing_attention": 0
+  },
+  "counts": {
+    "total_files": 120,
+    "processed_files": 48,
+    "failed_files": 0
+  },
+  "progress": {
+    "state": "running",
+    "total_items": 120,
+    "completed_items": 48
+  }
+}
