@@ -369,6 +369,7 @@ REQUIRED_AGGREGATE_FIELDS = {
     "compatibility diagnostics": "buildArtifactCompatibilityDiagnostics",
     "deep inspection candidate summary": "aggregateDeepInspectionCandidateSummary",
     "deep inspection candidate source": "deepInspectionCandidateSource",
+    "frontend workbench validation summary": "aggregateFrontendValidationSummary",
     "provider capability probe": "aggregateProviderProbe",
     "processing review summary": "aggregateProcessingReview",
     "processing review targets": "buildProcessingReviewTargets",
@@ -536,7 +537,7 @@ def new_summary(workbench: Path) -> dict[str, Any]:
             "executable_preview_lifecycle_checks": 6,
         },
         "fixture_groups": {
-            "aggregate_executable_fixture_groups": 11,
+            "aggregate_executable_fixture_groups": 12,
             "demo_fixture_labels_required": len(REQUIRED_DEMO_FIXTURE_LABELS),
             "preview_lifecycle_synthetic_slots": 2,
         },
@@ -872,9 +873,9 @@ vm.runInContext(workbenchScript + `
     status: "pass",
     ready: true,
     summary: {{
-      known_artifacts: 10,
-      artifacts_present: 10,
-      artifacts_passed: 10,
+      known_artifacts: 11,
+      artifacts_present: 11,
+      artifacts_passed: 11,
       artifacts_failed: 0,
       required_missing_count: 0,
       optional_missing_count: 0,
@@ -885,9 +886,9 @@ vm.runInContext(workbenchScript + `
       privacy_blocker_count: 0
     }},
     aggregate_counts: {{
-      known_artifacts: 10,
-      artifacts_present: 10,
-      artifacts_passed: 10,
+      known_artifacts: 11,
+      artifacts_present: 11,
+      artifacts_passed: 11,
       artifacts_failed: 0,
       required_missing_count: 0,
       optional_missing_count: 0,
@@ -917,6 +918,7 @@ vm.runInContext(workbenchScript + `
       "release_candidate_summary.json": publicSafeReadinessRow("release_candidate_summary.json", "release_candidate_summary", "Release candidate summary", "2026-05-11T00:04:00Z"),
       "final_production_handoff_summary.json": publicSafeReadinessRow("final_production_handoff_summary.json", "final_production_handoff", "Final production handoff summary", "2026-05-11T00:05:00Z", true),
       "deep_inspection_candidate_summary.json": publicSafeReadinessRow("deep_inspection_candidate_summary.json", "deep_inspection_candidate_summary", "Deep-inspection candidate summary", "2026-05-11T00:05:30Z"),
+      "frontend_workbench_validation.json": publicSafeReadinessRow("frontend_workbench_validation.json", "frontend_workbench_validation", "Frontend workbench validation summary", "2026-05-11T00:05:40Z"),
       "review_decision_verification_summary.json": publicSafeReadinessRow("review_decision_verification_summary.json", "review_decision_verification", "Review decision verification summary", "2026-05-11T00:05:45Z"),
       "public_safe_validation_index.json": publicSafeReadinessRow("public_safe_validation_index.json", "public_safe_validation_index", "Public-safe validation index", "2026-05-11T00:06:00Z", true)
     }},
@@ -1867,7 +1869,7 @@ vm.runInContext(workbenchScript + `
   assert(completeChecklistModel.sourceType === "aggregate-handoff", "complete checklist fixture did not load as aggregate handoff");
   assert(completeChecklistModel.artifactReadiness.ready === true, "complete checklist fixture was not ready");
   assert(completeChecklistModel.artifactReadiness.missingCount === 0, "complete checklist fixture reported missing artifacts");
-  assert(completeChecklistModel.artifactReadiness.rows.length === 10, "complete checklist fixture did not cover ten expected artifacts");
+  assert(completeChecklistModel.artifactReadiness.rows.length === 11, "complete checklist fixture did not cover eleven expected artifacts");
   assert(completeChecklistModel.aggregateHandoff.status === "pass", "complete checklist fixture did not preserve aggregate pass status");
   assert(completeChecklistModel.aggregateHandoff.blockingItemCount === 0, "complete checklist fixture did not preserve aggregate blocking count");
   assert(completeChecklistModel.aggregateHandoff.warningCount === 0, "complete checklist fixture did not preserve aggregate warning count");
