@@ -9,7 +9,9 @@ import json
 import mimetypes
 import os
 from pathlib import Path
+import re
 import threading
+import traceback
 from typing import Any
 from urllib.parse import unquote, urlparse
 import uuid
@@ -35,6 +37,7 @@ WORKBENCH_HTML = ROOT / "docs" / "production-workbench-prototype.html"
 DOCS_DIR = ROOT / "docs"
 DEFAULT_METADATA_DIRNAME = "_production_workbench"
 SERVER_SCHEMA = "scan-qc.local-production-workbench.v1"
+MAINTENANCE_ERROR_LOG_JSONL = "local_workbench_maintenance_errors.jsonl"
 REVIEW_DECISION_SUMMARY_JSON = "scan-qc-review-decisions.summary.json"
 REVIEW_DECISION_DRAFT_JSON = "scan-qc-review-decisions.draft.json"
 COMPLETION_NOTE_TXT = "本批次完成交接说明.txt"
@@ -299,7 +302,8 @@ class WorkbenchController:
             processing_mode = self.processing_mode
             last_error = self.last_error
             last_preflight_guidance = self.last_preflight_guidance
-        summary = _read_json(Path(metadata_dir) / PRODUCTION_RUN_SUMMARY_JSON) if metadata_dir else None
+        raw_summary = _read_json(Path(metadata_dir) / PRODUCTION_RUN_SUMMARY_JSON) if metadata_dir else None
+        summary = _sanitize_operator_status_summary(raw_summary)
         progress = _read_json(Path(metadata_dir) / PRODUCTION_RUN_PROGRESS_JSON) if metadata_dir else None
         queue = self._queue_with_preview_sources(Path(metadata_dir)) if metadata_dir else None
         draft_decisions = _read_json(Path(metadata_dir) / REVIEW_DECISION_DRAFT_JSON) if metadata_dir else None
@@ -383,8 +387,9 @@ class WorkbenchController:
             summary = run_production_folder(config)
             self._write_review_queue(summary)
         except Exception as exc:  # pragma: no cover - exercised through status in integration use.
+            _write_maintenance_error(self.metadata_dir, exc)
             with self._lock:
-                self.last_error = f"本机处理失败：{exc}"
+                self.last_error = sanitize_operator_error_zh(exc)
 
     def _write_review_queue(self, summary: dict[str, Any]) -> None:
         with self._lock:
@@ -521,7 +526,7 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
                 HTTPStatus.BAD_REQUEST,
             )
         except ValueError as exc:
-            self._send_json({"error_zh": str(exc)}, HTTPStatus.BAD_REQUEST)
+            self._send_json({"error_zh": sanitize_operator_error_zh(exc)}, HTTPStatus.BAD_REQUEST)
         except json.JSONDecodeError:
             self._send_json({"error_zh": "请求内容无法读取。"}, HTTPStatus.BAD_REQUEST)
 
@@ -616,6 +621,146 @@ def _safe_resolve_path(path: Path) -> Path:
         return path.expanduser().resolve()
     except OSError:
         raise ValueError("文件夹位置无法读取。请重新选择本机可以打开的文件夹。") from None
+
+
+_PRIVATE_OR_TECHNICAL_ERROR_PATTERNS = [
+    re.compile(r"(/Users/|/Volumes/|/private/|/[A-Za-z0-9_. -]+/[A-Za-z0-9_. /-]+)"),
+    re.compile(r"[A-Za-z]:\\"),
+    re.compile(r"\b[\w.-]+\.(?:tif|tiff|jpg|jpeg|png|bmp|webp|pdf|csv|json|py)\b", re.IGNORECASE),
+    re.compile(r"\b[a-f0-9]{32,128}\b", re.IGNORECASE),
+    re.compile(r"\b(?:Traceback|File \"|line \d+|Exception|Error|OSError|ValueError|RuntimeError|PermissionError)\b"),
+    re.compile(r"\b(?:OCR|PRIVATE_OCR|sha256|hash|stack|numpy|PIL|cv2|python)\b", re.IGNORECASE),
+]
+
+_OPERATOR_SAFE_ERROR_MESSAGES_ZH = {
+    "请填写扫描原图文件夹。",
+    "请填写处理后输出文件夹。",
+    "请填写本机状态文件夹，或留空使用默认位置。",
+    "扫描原图文件夹不存在。",
+    "扫描原图文件夹现在不能读取。请重新选择可以打开的原图文件夹。",
+    "输出文件夹或本机状态文件夹不能创建。请确认磁盘已连接、没有只读，并重新选择文件夹。",
+    "当前批次不能直接重试。请按提示检查文件夹，必要时交管理员处理。",
+    "当前批次正在处理。",
+    "请先填写并保存两个文件夹位置。",
+    "预览请求缺少复核编号。",
+    "预览来源不正确。",
+    "请先保存文件夹并生成复核队列。",
+    "尚未生成可预览的复核队列。",
+    "未找到这条复核记录。",
+    "未找到这条复核记录对应的本机预览图。",
+    "复核决定还不能完成，请检查是否还有待处理图片。",
+    "复核进度暂不能保存，请重新选择。",
+    "请求内容格式不正确。",
+    "处理方式不正确，请重新选择。",
+    "文件夹位置无法读取。请重新选择本机可以打开的文件夹。",
+    "请同时提供扫描原图文件夹和处理后输出文件夹。",
+    "处理后输出文件夹不能和扫描原图文件夹相同，也不能放在原图文件夹里面。",
+    "本机状态文件夹不能放在扫描原图文件夹里面，处理没有启动。",
+}
+
+
+def sanitize_operator_error_zh(error: BaseException | str | None) -> str:
+    """Return operator-safe Chinese guidance without raw local details."""
+    text = str(error or "").strip()
+    if not text:
+        return "本批次没有正常启动，请交管理员处理。"
+    lowered = text.lower()
+    if _is_known_operator_safe_message_zh(text):
+        return text
+    if any(token in lowered for token in ["permission", "denied", "access", "not permitted", "无法读取", "不能读取"]):
+        return "文件夹无法读取：请检查扫描原图文件夹是否存在、是否有权限。"
+    if any(token in lowered for token in ["no such file", "not found", "不存在", "moved"]):
+        return "文件夹无法读取：请检查扫描原图文件夹是否存在、是否有权限。"
+    if any(token in lowered for token in ["read-only", "readonly", "no space", "disk", "write", "写入", "空间"]):
+        return "输出文件夹无法写入：请检查输出文件夹和磁盘空间。"
+    if any(token in lowered for token in ["cannot identify image", "unidentifiedimageerror", "truncated", "image", "图片"]):
+        return "图片无法打开：请检查原图图片是否损坏。"
+    return "其他异常：本批次没有正常启动，请交管理员处理。"
+
+
+def _sanitize_operator_status_summary(summary: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(summary, dict):
+        return summary
+    sanitized = dict(summary)
+    for key in ("message", "message_zh", "operator_message_zh", "last_error_zh"):
+        if isinstance(sanitized.get(key), str):
+            sanitized[key] = _sanitize_operator_visible_text_zh(sanitized[key])
+    operator = sanitized.get("operator_summary")
+    if isinstance(operator, dict):
+        sanitized_operator = dict(operator)
+        for key in ("message", "message_zh", "operator_message_zh", "last_error_zh"):
+            if isinstance(sanitized_operator.get(key), str):
+                sanitized_operator[key] = _sanitize_operator_visible_text_zh(sanitized_operator[key])
+        sanitized["operator_summary"] = sanitized_operator
+    guidance = sanitized.get("recovery_guidance")
+    if isinstance(guidance, dict):
+        sanitized["recovery_guidance"] = _sanitize_operator_guidance(guidance)
+    return sanitized
+
+
+def _sanitize_operator_guidance(guidance: dict[str, Any]) -> dict[str, Any]:
+    sanitized = dict(guidance)
+    if isinstance(sanitized.get("message_zh"), str):
+        sanitized["message_zh"] = _sanitize_operator_visible_text_zh(sanitized["message_zh"])
+    if isinstance(sanitized.get("title_zh"), str) and not _is_known_operator_guidance_text_zh(sanitized["title_zh"]):
+        sanitized["title_zh"] = "处理没有正常完成"
+    next_steps = sanitized.get("next_steps_zh")
+    if isinstance(next_steps, list):
+        sanitized["next_steps_zh"] = [
+            _sanitize_operator_visible_text_zh(step) if isinstance(step, str) else "其他异常：本批次没有正常启动，请交管理员处理。"
+            for step in next_steps
+        ]
+    return sanitized
+
+
+def _sanitize_operator_visible_text_zh(text: str) -> str:
+    return text if _is_known_operator_guidance_text_zh(text) else sanitize_operator_error_zh(text)
+
+
+def _is_known_operator_guidance_text_zh(text: str) -> bool:
+    if not text.strip():
+        return False
+    if any(pattern.search(text) for pattern in _PRIVATE_OR_TECHNICAL_ERROR_PATTERNS):
+        return False
+    return bool(re.search(r"[\u4e00-\u9fff]", text))
+
+
+def _is_known_operator_safe_message_zh(text: str) -> bool:
+    if text not in _OPERATOR_SAFE_ERROR_MESSAGES_ZH:
+        return False
+    return not any(pattern.search(text) for pattern in _PRIVATE_OR_TECHNICAL_ERROR_PATTERNS)
+
+
+def _write_maintenance_error(metadata_dir: Path | None, exc: BaseException) -> None:
+    if metadata_dir is None:
+        return
+    try:
+        metadata_dir.mkdir(parents=True, exist_ok=True)
+        safe_message = sanitize_operator_error_zh(exc)
+        record = {
+            "schema_version": "scan-qc.local-workbench-maintenance-error.v1",
+            "privacy": "default metadata-safe; raw exception text and traceback omitted",
+            "error_type": type(exc).__name__,
+            "operator_message_zh": safe_message,
+            "category": _maintenance_error_category(safe_message),
+            "traceback_frame_count": len(traceback.extract_tb(exc.__traceback__)) if exc.__traceback__ else 0,
+            "admin_note_zh": "默认本机状态文件不保存原始异常、路径、文件名、哈希、OCR文本或堆栈内容。",
+        }
+        path = metadata_dir / MAINTENANCE_ERROR_LOG_JSONL
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+    except OSError:
+        return
+
+
+def _maintenance_error_category(safe_message_zh: str) -> str:
+    if safe_message_zh.startswith("文件夹无法读取"):
+        return "input_folder_unreadable"
+    if safe_message_zh.startswith("输出文件夹无法写入"):
+        return "output_folder_unwritable"
+    if safe_message_zh.startswith("图片无法打开"):
+        return "image_unopenable"
+    return "startup_or_processing_failed"
 
 
 def _path_is_existing_dir(path: Path) -> bool:

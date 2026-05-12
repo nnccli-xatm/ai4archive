@@ -9,11 +9,13 @@ from unittest.mock import patch
 
 from archive_scan_qc.local_workbench import (
     COMPLETION_NOTE_TXT,
+    MAINTENANCE_ERROR_LOG_JSONL,
     REVIEW_DECISION_DRAFT_JSON,
     REVIEW_DECISION_SUMMARY_JSON,
     WorkbenchPreflightError,
     WorkbenchController,
     _folder_is_writable,
+    sanitize_operator_error_zh,
 )
 from archive_scan_qc.production_runner import ProductionRunConfig, build_production_run_summary
 from archive_scan_qc.production_review_queue import PRODUCTION_REVIEW_QUEUE_JSON
@@ -459,6 +461,103 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 controller.save_draft_review_decisions(draft)
             self.assertFalse((metadata_dir / REVIEW_DECISION_DRAFT_JSON).exists())
+
+    def test_run_exception_is_sanitized_for_operator_status_and_default_metadata(self) -> None:
+        private_path = "/Users/example/private-root/private_scan_alpha.tif"
+        private_hash = "a" * 64
+        private_ocr = "PRIVATE_OCR_TEXT_12345"
+        private_chinese_ocr = "张三档案题名"
+        raw_error = (
+            f"Traceback File \"/tmp/provider.py\", line 42: RuntimeError cannot identify image file "
+            f"{private_path} sha256={private_hash} OCR={private_ocr} text={private_chinese_ocr}"
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            (input_dir / "page.png").write_bytes(b"fake image placeholder")
+            controller = WorkbenchController()
+            controller.configure(input_dir, output_dir, metadata_dir)
+
+            with patch("archive_scan_qc.local_workbench.run_production_folder", side_effect=RuntimeError(raw_error)):
+                controller._run_once()
+
+            status = controller.status()
+            operator_json = json.dumps(
+                {
+                    "last_error_zh": status["last_error_zh"],
+                    "recovery_guidance": status["recovery_guidance"],
+                },
+                ensure_ascii=False,
+            )
+            self.assertEqual(status["last_error_zh"], "图片无法打开：请检查原图图片是否损坏。")
+            self.assertEqual(status["recovery_guidance"]["kind"], "processing_failed_admin")
+            self.assertIn("请交管理员处理", " ".join(status["recovery_guidance"]["next_steps_zh"]))
+            for forbidden in [
+                private_path,
+                "private_scan_alpha.tif",
+                private_hash,
+                private_ocr,
+                private_chinese_ocr,
+                "Traceback",
+                "RuntimeError",
+            ]:
+                self.assertNotIn(forbidden, operator_json)
+
+            maintenance_log = (metadata_dir / MAINTENANCE_ERROR_LOG_JSONL).read_text(encoding="utf-8")
+            self.assertIn("scan-qc.local-workbench-maintenance-error.v1", maintenance_log)
+            self.assertIn("image_unopenable", maintenance_log)
+            self.assertIn("RuntimeError", maintenance_log)
+            for forbidden in [
+                private_path,
+                "private_scan_alpha.tif",
+                private_hash,
+                private_ocr,
+                private_chinese_ocr,
+                "Traceback File",
+                "/tmp/provider.py",
+                "sha256",
+            ]:
+                self.assertNotIn(forbidden, maintenance_log)
+
+    def test_operator_error_sanitizer_keeps_known_guidance_but_rewrites_private_or_technical_text(self) -> None:
+        safe_message = "当前批次正在处理。"
+        self.assertEqual(sanitize_operator_error_zh(safe_message), safe_message)
+
+        cases = [
+            (
+                "PermissionError: [Errno 13] Permission denied: '/Users/example/private-root/private_scan_beta.tif'",
+                "文件夹无法读取：请检查扫描原图文件夹是否存在、是否有权限。",
+            ),
+            (
+                "OSError: No space left on device while writing C:\\Users\\example\\private\\output.json",
+                "输出文件夹无法写入：请检查输出文件夹和磁盘空间。",
+            ),
+            (
+                "ValueError: hash deadbeefdeadbeefdeadbeefdeadbeef PRIVATE_OCR_TEXT stack frame",
+                "其他异常：本批次没有正常启动，请交管理员处理。",
+            ),
+            (
+                "图片打不开：张三档案题名 PRIVATE_CHINESE_OCR_001",
+                "图片无法打开：请检查原图图片是否损坏。",
+            ),
+            (
+                "处理失败：张三档案题名",
+                "其他异常：本批次没有正常启动，请交管理员处理。",
+            ),
+        ]
+        for raw, expected in cases:
+            with self.subTest(raw=raw):
+                sanitized = sanitize_operator_error_zh(raw)
+                self.assertEqual(sanitized, expected)
+                self.assertNotIn("/Users/example", sanitized)
+                self.assertNotIn("private_scan_beta.tif", sanitized)
+                self.assertNotIn("deadbeef", sanitized)
+                self.assertNotIn("PRIVATE_OCR_TEXT", sanitized)
+                self.assertNotIn("张三档案题名", sanitized)
+                self.assertNotIn("stack", sanitized.lower())
 
 
 if __name__ == "__main__":
