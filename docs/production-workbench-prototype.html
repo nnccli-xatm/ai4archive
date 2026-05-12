@@ -2194,23 +2194,34 @@
       button.disabled = true;
       els.loadStatus.textContent = kind === "input" ? "正在打开原图文件夹选择窗口。" : "正在打开输出文件夹选择窗口。";
       try {
-        const payload = await apiPost("/api/select-folder", { kind });
+        const request = { kind, processing_mode: selectedProcessingMode() };
+        if (kind === "input" && pathChosen(els.outputPath)) request.derivatives_dir = els.outputPath.value.trim();
+        if (kind === "derivatives" && pathChosen(els.inputPath)) request.input_dir = els.inputPath.value.trim();
+        const payload = await apiPost("/api/select-folder", request);
         if (!payload.selected) {
           els.loadStatus.textContent = "没有选择文件夹，请重新选择。";
           return;
         }
+        const selectedPath = payload.path || payload.selected_path || "";
         if (kind === "input") {
-          els.inputPath.value = payload.path || "";
+          els.inputPath.value = selectedPath;
           state.inputChosen = pathChosen(els.inputPath);
           els.inputStatus.textContent = selectedFolderLabel(els.inputPath.value, "原图文件夹");
           if (state.inputChosen && !state.outputChosen) state.status = "choose_output";
         } else {
-          els.outputPath.value = payload.path || "";
+          els.outputPath.value = selectedPath;
           state.outputChosen = pathChosen(els.outputPath);
           els.outputStatus.textContent = selectedFolderLabel(els.outputPath.value, "输出文件夹");
           if (state.inputChosen && state.outputChosen) setStatus("ready");
         }
-        if (state.inputChosen && state.outputChosen) {
+        if (payload.configured) {
+          state.inputChosen = true;
+          state.outputChosen = true;
+          state.status = "ready";
+          applyServerStatus(payload);
+          els.loadStatus.textContent = "文件夹已选择并保存，可以开始处理。";
+          render();
+        } else if (state.inputChosen && state.outputChosen) {
           await saveFolders();
         } else {
           els.loadStatus.textContent = kind === "input" ? "原图文件夹已选择，请继续选择输出文件夹。" : "输出文件夹已选择，请继续选择原图文件夹。";

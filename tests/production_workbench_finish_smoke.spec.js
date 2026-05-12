@@ -57,6 +57,7 @@ test.describe("production workbench finish/export browser smoke", () => {
 
   test("keeps the startup folder sequence primary and maintenance secondary", async ({ page }) => {
     const configurePayloads = [];
+    const selectFolderPayloads = [];
     await page.route("**/api/status", async (route) => {
       await route.fulfill({
         contentType: "application/json",
@@ -65,7 +66,42 @@ test.describe("production workbench finish/export browser smoke", () => {
     });
     await page.route("**/api/select-folder", async (route) => {
       const payload = JSON.parse(route.request().postData() || "{}");
+      selectFolderPayloads.push(payload);
       const selectedPath = payload.kind === "input" ? "/placeholder/source-batch" : "/placeholder/output-batch";
+      if (payload.kind === "derivatives" && payload.input_dir) {
+        await route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({
+            schema_version: "scan-qc.local-production-workbench.v1",
+            running: false,
+            selected: true,
+            selected_kind: payload.kind,
+            selected_path: selectedPath,
+            message_zh: "文件夹已选择并保存。",
+            configured: true,
+            folders: {
+              input: payload.input_dir,
+              derivatives: selectedPath,
+              metadata: `${selectedPath}/_production_workbench`,
+            },
+            processing_mode: { id: payload.processing_mode, label_zh: "标准优化" },
+            folder_readiness: {
+              schema_version: "scan-qc.local-folder-readiness.v1",
+              aggregate_only: true,
+              status: "ready",
+              ready_to_start: true,
+              supported_image_count: 4,
+              input_empty: false,
+              output_writable: true,
+              selected_processing_mode: { id: payload.processing_mode, label_zh: "标准优化" },
+              title_zh: "文件夹可以开始处理",
+              message_zh: "发现 4 张可处理图片，输出文件夹可以写入。",
+              next_steps_zh: ["确认处理方式无误。", "点击开始处理。"],
+            },
+          }),
+        });
+        return;
+      }
       await route.fulfill({
         contentType: "application/json",
         body: JSON.stringify({
@@ -134,14 +170,15 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#inputStatus")).toHaveText("原图文件夹已选择。");
     await expect(page.locator("#inputPath")).toHaveValue("/placeholder/source-batch");
     await page.getByRole("button", { name: "选择输出文件夹" }).click();
-    await expect.poll(() => configurePayloads.length).toBe(1);
+    await expect.poll(() => selectFolderPayloads.length).toBe(2);
     await expect(page.locator("#outputStatus")).toHaveText("已保存处理后输出文件夹。");
     await expect(page.locator("#readinessFacts")).toContainText("原图文件夹：已选择");
     await expect(page.locator("#readinessFacts")).toContainText("输出文件夹：已选择");
     await expect(page.locator("#readinessFacts")).toContainText("输出文件夹可写：是");
-    expect(configurePayloads[0]).toMatchObject({
+    expect(configurePayloads).toEqual([]);
+    expect(selectFolderPayloads[1]).toMatchObject({
+      kind: "derivatives",
       input_dir: "/placeholder/source-batch",
-      derivatives_dir: "/placeholder/output-batch",
       processing_mode: "standard",
     });
 

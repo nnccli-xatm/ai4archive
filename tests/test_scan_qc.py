@@ -6462,6 +6462,54 @@ class ScanQcTest(unittest.TestCase):
             self.assertTrue((derivatives_dir / "images" / "A001_0001.jpg").exists())
             self.assertTrue((derivatives_dir / DEFAULT_METADATA_DIRNAME / "production_run_summary.json").exists())
 
+    def test_local_production_workbench_selected_output_configures_ready_folders(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "placeholder-input"
+            selected_output = root / "placeholder-output"
+            input_dir.mkdir()
+            Image.new("RGB", (48, 36), "white").save(input_dir / "SYNTHETIC_0001.jpg", dpi=(300, 300))
+
+            controller = WorkbenchController()
+            with mock.patch("archive_scan_qc.local_workbench._choose_local_folder", return_value=selected_output):
+                payload = controller.select_folder("derivatives", companion_dir=input_dir, processing_mode="light")
+
+            self.assertTrue(payload["selected"])
+            self.assertTrue(payload["configured"])
+            self.assertEqual(payload["selected_kind"], "derivatives")
+            self.assertEqual(Path(payload["folders"]["input"]), input_dir.resolve())
+            self.assertEqual(Path(payload["folders"]["derivatives"]), selected_output.resolve())
+            self.assertEqual(payload["processing_mode"]["id"], "light")
+            readiness = payload["folder_readiness"]
+            self.assertEqual(readiness["status"], "ready")
+            self.assertEqual(readiness["supported_image_count"], 1)
+            self.assertTrue(readiness["output_writable"])
+            self.assertTrue(readiness["ready_to_start"])
+
+    def test_local_production_workbench_selected_input_preserves_empty_precheck(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            selected_input = root / "placeholder-empty-input"
+            derivatives_dir = root / "placeholder-output"
+            selected_input.mkdir()
+
+            controller = WorkbenchController()
+            with mock.patch("archive_scan_qc.local_workbench._choose_local_folder", return_value=selected_input):
+                payload = controller.select_folder("input", companion_dir=derivatives_dir)
+
+            self.assertTrue(payload["selected"])
+            self.assertTrue(payload["configured"])
+            self.assertEqual(payload["folder_readiness"]["status"], "empty")
+            self.assertEqual(payload["folder_readiness"]["supported_image_count"], 0)
+            self.assertTrue(payload["folder_readiness"]["output_writable"])
+
+            with self.assertRaisesRegex(ValueError, "扫描原图文件夹里没有文件"):
+                controller.start()
+
+            guidance = controller.status()["recovery_guidance"]
+            self.assertEqual(guidance["kind"], "input_folder_empty")
+            self.assertNotIn(str(selected_input), json.dumps(guidance, ensure_ascii=False))
+
     def test_local_production_workbench_processing_modes_handoff_existing_options(self) -> None:
         expected_modes = {
             "standard": {

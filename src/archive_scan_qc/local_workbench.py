@@ -127,7 +127,13 @@ class WorkbenchController:
             self.last_preflight_guidance = None
         return self.status()
 
-    def select_folder(self, folder_kind: str) -> dict[str, Any]:
+    def select_folder(
+        self,
+        folder_kind: str,
+        companion_dir: Path | None = None,
+        metadata_dir: Path | None = None,
+        processing_mode: str | None = None,
+    ) -> dict[str, Any]:
         kind = str(folder_kind or "").strip()
         if kind not in {"input", "derivatives"}:
             raise ValueError("文件夹选择类型不正确。")
@@ -139,6 +145,18 @@ class WorkbenchController:
                 "selected": False,
                 "kind": kind,
                 "message_zh": "没有选择文件夹。",
+            }
+        if companion_dir is not None:
+            if kind == "input":
+                configured = self.configure(selected_path, companion_dir, metadata_dir, processing_mode)
+            else:
+                configured = self.configure(companion_dir, selected_path, metadata_dir, processing_mode)
+            return {
+                **configured,
+                "selected": True,
+                "selected_kind": kind,
+                "selected_path": str(selected_path),
+                "message_zh": "文件夹已选择并保存。",
             }
         return {
             "schema_version": SERVER_SCHEMA,
@@ -526,7 +544,14 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
                     str(payload.get("processing_mode") or DEFAULT_PROCESSING_MODE),
                 )
             elif self.path == "/api/select-folder":
-                result = self.workbench_controller.select_folder(str(payload.get("kind") or ""))
+                kind = str(payload.get("kind") or "")
+                companion_field = "derivatives_dir" if kind == "input" else "input_dir"
+                result = self.workbench_controller.select_folder(
+                    kind,
+                    _optional_path(payload, companion_field, "另一个文件夹"),
+                    _optional_path(payload, "metadata_dir", "本机状态文件夹"),
+                    str(payload.get("processing_mode") or DEFAULT_PROCESSING_MODE),
+                )
             elif self.path == "/api/start":
                 result = self.workbench_controller.start()
             elif self.path == "/api/retry":
