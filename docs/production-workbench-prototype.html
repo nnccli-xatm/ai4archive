@@ -1135,7 +1135,7 @@
             <p><strong>本批复核：</strong><span id="completionCounts">已确认 0 项，待决定 0 项。</span></p>
             <p><strong>输出位置：</strong><span id="outputPlace">已选择的处理后输出文件夹</span></p>
             <p><strong>复核保存：</strong><span id="decisionSavePlace">已保存到本机状态文件夹</span></p>
-            <p><strong>交接说明：</strong><span id="completionNotePlace">已保存到本机状态文件夹</span></p>
+            <p><strong>交接说明：</strong><span id="completionNotePlace">交接说明已保存</span></p>
             <p><strong>完成检查清单：</strong></p>
             <ul id="completionChecklist" aria-label="完成检查清单">
               <li>处理后图片已保存到输出文件夹</li>
@@ -1165,6 +1165,10 @@
       { id: "演示三", name: "图片三", tone: "need", issue: "疑似档案原貌痕迹，不一定需要处理。", advice: "请确认这是档案原貌。", suggestedAction: "keep_original_trace", decision: null }
     ];
 
+    const OUTPUT_LOCATION_LABEL = "已选择的处理后输出文件夹";
+    const DECISION_SAVE_LABEL = "已保存到本机状态文件夹";
+    const COMPLETION_NOTE_LABEL = "交接说明已保存";
+
     const state = {
       inputChosen: false,
       outputChosen: false,
@@ -1173,9 +1177,9 @@
       readyImages: 0,
       totalImages: 0,
       attentionFiles: 3,
-      outputSummary: "已选择的处理后输出文件夹",
-      decisionSaveSummary: "已保存到本机状态文件夹",
-      completionNoteSummary: "已保存到本机状态文件夹",
+      outputSummary: OUTPUT_LOCATION_LABEL,
+      decisionSaveSummary: DECISION_SAVE_LABEL,
+      completionNoteSummary: COMPLETION_NOTE_LABEL,
       completionTitle: "批次已完成",
       completionMessage: "处理后图片已保存到输出文件夹。复核结果和交接说明已保存到本机状态文件夹。",
       completionChecklist: [
@@ -1723,6 +1727,11 @@
       return "处理后输出文件夹";
     }
 
+    function outputSummaryLabel() {
+      if (state.readyImages > 0) return `已准备 ${state.readyImages} 张处理后图片`;
+      return OUTPUT_LOCATION_LABEL;
+    }
+
     function renderFinishConfirmation() {
       els.finishConfirmMessage.textContent = state.reviewItems.length
         ? "所有需要确认的图片都已有决定。请确认无误后完成本批。"
@@ -2023,7 +2032,7 @@
       const text = canFinishWithoutReview ? operatorStateText.ready_to_finish : (operatorStateText[rawStatus] || operatorStateText.blocked);
       copy[nextStatus] = text;
       state.status = nextStatus;
-      state.outputSummary = state.readyImages ? `已准备 ${state.readyImages} 张处理后图片` : "处理后图片将写入已选择的输出文件夹";
+      state.outputSummary = outputSummaryLabel();
       state.operatorMessage = operator.message_zh || operator.message || (progress && progress.message_zh) || text[2];
       state.recoveryGuidance = guidanceFromSummary(summary);
       state.reviewQueueText = state.attentionFiles
@@ -2068,9 +2077,9 @@
         if (payload.folders.derivatives) {
           els.outputPath.value = payload.folders.derivatives;
           els.outputStatus.textContent = "已保存处理后输出文件夹。";
-          state.outputSummary = payload.folders.derivatives;
+          state.outputSummary = outputSummaryLabel();
         }
-        if (payload.folders.metadata) state.decisionSaveSummary = payload.folders.metadata;
+        if (payload.folders.metadata) state.decisionSaveSummary = DECISION_SAVE_LABEL;
       }
       if (payload.processing_mode) setProcessingMode(payload.processing_mode.id, payload.processing_mode.label_zh);
       if (payload.folder_readiness) state.folderReadiness = payload.folder_readiness;
@@ -2092,10 +2101,9 @@
       if (Number.isFinite(Number(panel.total_review_items)) && Number.isFinite(Number(panel.reviewed_items)) && Number.isFinite(Number(panel.pending_items))) {
         els.completionCounts.textContent = `共 ${Number(panel.total_review_items)} 项，已确认 ${Number(panel.reviewed_items)} 项，待决定 ${Number(panel.pending_items)} 项。`;
       }
-      if (panel.derivatives_dir) state.outputSummary = panel.derivatives_dir;
-      if (panel.metadata_dir) state.decisionSaveSummary = panel.metadata_dir;
-      if (panel.metadata_dir) state.completionNoteSummary = panel.metadata_dir;
-      if (panel.completion_note_path && !panel.metadata_dir) state.completionNoteSummary = "已保存到本机状态文件夹";
+      if (panel.derivatives_dir) state.outputSummary = outputSummaryLabel();
+      if (panel.metadata_dir) state.decisionSaveSummary = DECISION_SAVE_LABEL;
+      if (panel.metadata_dir || panel.completion_note_path) state.completionNoteSummary = COMPLETION_NOTE_LABEL;
       if (Array.isArray(panel.checklist_zh) && panel.checklist_zh.length) state.completionChecklist = panel.checklist_zh;
       if (Array.isArray(panel.next_steps_zh) && panel.next_steps_zh.length) state.completionSteps = panel.next_steps_zh;
     }
@@ -2377,8 +2385,8 @@
         els.loadStatus.textContent = "正在完成并导出结果。";
         const payload = await apiPost("/api/finish-decisions", decisionArtifact());
         applyCompletionPanel(payload.completion_panel);
-        if (payload.folders && payload.folders.derivatives) state.outputSummary = payload.folders.derivatives;
-        if (payload.folders && payload.folders.metadata) state.decisionSaveSummary = payload.folders.metadata;
+        if (payload.folders && payload.folders.derivatives) state.outputSummary = outputSummaryLabel();
+        if (payload.folders && payload.folders.metadata) state.decisionSaveSummary = DECISION_SAVE_LABEL;
         state.status = "complete";
         state.progress = 100;
         state.finishConfirmationVisible = false;
@@ -2457,10 +2465,10 @@
       state.readyImages = 0;
       state.totalImages = 0;
       state.attentionFiles = 3;
-      state.outputSummary = "已选择的处理后输出文件夹";
+      state.outputSummary = OUTPUT_LOCATION_LABEL;
       setProcessingMode("standard");
-      state.decisionSaveSummary = "已保存到本机状态文件夹";
-      state.completionNoteSummary = "已保存到本机状态文件夹";
+      state.decisionSaveSummary = DECISION_SAVE_LABEL;
+      state.completionNoteSummary = COMPLETION_NOTE_LABEL;
       state.completionTitle = "批次已完成";
       state.completionMessage = "处理后图片已保存到输出文件夹。复核结果和交接说明已保存到本机状态文件夹。";
       state.completionChecklist = [
