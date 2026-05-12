@@ -446,6 +446,10 @@ def _main_production_rehearsal(argv: list[str]) -> int:
     parser.add_argument("--batch", default="synthetic-batch", help="批次编号。")
     parser.add_argument("--workers", default=1, type=_positive_int, help="本机最大工作线程数，填 1 表示单线程。")
     parser.add_argument("--keep-existing", action="store_true", help="允许使用已有内容的演练根文件夹。")
+    parser.add_argument("--launch-workbench", action="store_true", help="生成演练后立即打开已预填文件夹的本地生产工作台。")
+    parser.add_argument("--host", default="127.0.0.1", help="启动工作台时使用的本机地址，只允许回环地址。")
+    parser.add_argument("--port", default=8765, type=int, help="启动工作台时使用的本机端口。")
+    parser.add_argument("--no-open", action="store_true", help="启动工作台时不自动打开浏览器。")
     args = parser.parse_args(argv)
     try:
         rehearsal = run_production_rehearsal(
@@ -470,10 +474,29 @@ def _main_production_rehearsal(argv: list[str]) -> int:
     print(f"已生成处理后图片: {rehearsal['derivative_count']}")
     print(f"待人工确认条目: {rehearsal['review_queue_items']}")
     print("下一步:")
-    print("1. 运行: archive-scan-qc production-workbench")
-    print("2. 在工作台中填写上面的扫描原图文件夹和处理后输出文件夹。")
-    print("3. 点击“保存文件夹”，状态会自动加载，然后查看合成图片并练习复核。")
+    print("1. 运行: archive-scan-qc production-rehearsal --launch-workbench")
+    print("2. 工作台会自动带入演练文件夹；也可以继续手动填写文件夹。")
+    print("3. 查看合成图片并练习开始、复核、完成并导出。")
     print("说明: 本演练只使用合成图片，不需要私有图片，也不会调用外部服务。")
+    if args.launch_workbench:
+        from .local_workbench import main as local_workbench_main
+
+        print("正在启动本地生产工作台。")
+        return local_workbench_main(
+            [
+                "--host",
+                args.host,
+                "--port",
+                str(args.port),
+                "--input-dir",
+                str(rehearsal["input_dir"]),
+                "--derivatives-dir",
+                str(rehearsal["derivatives_dir"]),
+                "--metadata-dir",
+                str(rehearsal["metadata_dir"]),
+                *(["--no-open"] if args.no_open else []),
+            ]
+        )
     return 0
 
 

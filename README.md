@@ -158,16 +158,18 @@ under the output folder's `_production_workbench` directory, polls progress, and
 emits a local review queue plus verifier-compatible review-decision export.
 
 To rehearse the same local flow without private images, generate a synthetic
-batch and workbench-ready outputs with one command:
+batch, workbench-ready outputs, and an already configured local workbench with
+one command:
 
 ```bash
-archive-scan-qc production-rehearsal
+archive-scan-qc production-rehearsal --launch-workbench
 ```
 
 The command creates a temporary rehearsal folder, writes synthetic source
 images, runs local scan QC and derivative processing, builds the local review
-queue, and prints Chinese next steps for opening the workbench and loading the
-sample batch.
+queue, starts the loopback-only workbench, and opens a browser with the sample
+batch already loaded. Omit `--launch-workbench` if you only want to generate
+the rehearsal folders and keep using manual folder entry.
 
 The optional manifest CSV must include a `relative_path` column whose values
 are expected image paths relative to `--input`. Manifests may also include one
