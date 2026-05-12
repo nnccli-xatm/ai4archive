@@ -261,6 +261,49 @@
       gap: 8px;
     }
 
+    .mode-selector {
+      display: grid;
+      gap: 8px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      background: var(--paper);
+      border-radius: 8px;
+    }
+
+    .mode-selector fieldset {
+      display: grid;
+      gap: 6px;
+      margin: 0;
+      padding: 0;
+      border: 0;
+    }
+
+    .mode-selector legend {
+      margin-bottom: 2px;
+      font-weight: 740;
+    }
+
+    .mode-option {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 8px;
+      align-items: center;
+      min-height: 34px;
+      color: var(--ink-2);
+      cursor: pointer;
+    }
+
+    .mode-option input {
+      width: 18px;
+      height: 18px;
+      accent-color: var(--green);
+    }
+
+    .mode-current {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
     .run-controls button {
       width: 100%;
     }
@@ -747,6 +790,16 @@
           </div>
         </div>
 
+        <div class="mode-selector">
+          <fieldset>
+            <legend>处理方式</legend>
+            <label class="mode-option"><input type="radio" name="processingMode" value="standard" checked>标准优化</label>
+            <label class="mode-option"><input type="radio" name="processingMode" value="qc_only">只质检不修图</label>
+            <label class="mode-option"><input type="radio" name="processingMode" value="light">轻度优化</label>
+          </fieldset>
+          <small class="mode-current" id="modeStatus">当前处理方式：标准优化</small>
+        </div>
+
         <div class="run-controls">
           <button id="saveFoldersButton" class="secondary">只保存文件夹</button>
           <button id="startButton" disabled>开始处理</button>
@@ -936,7 +989,9 @@
       decisions: {},
       currentIndex: 0,
       previewFit: true,
-      previewZoom: 1
+      previewZoom: 1,
+      processingMode: "standard",
+      processingModeLabel: "标准优化"
     };
 
     const els = {
@@ -944,6 +999,8 @@
       outputFolder: document.getElementById("outputFolder"),
       inputPath: document.getElementById("inputPath"),
       outputPath: document.getElementById("outputPath"),
+      processingModeInputs: Array.from(document.querySelectorAll('input[name="processingMode"]')),
+      modeStatus: document.getElementById("modeStatus"),
       summaryFile: document.getElementById("summaryFile"),
       fixtureSelect: document.getElementById("fixtureSelect"),
       loadStatus: document.getElementById("loadStatus"),
@@ -1068,6 +1125,12 @@
 
     const draftDecisionFileName = "scan-qc-review-decisions.draft.json";
 
+    const processingModeLabels = {
+      standard: "标准优化",
+      qc_only: "只质检不修图",
+      light: "轻度优化"
+    };
+
     const localApi = {
       enabled: (location.protocol === "http:" || location.protocol === "https:") && ["127.0.0.1", "localhost", "::1"].includes(location.hostname),
       polling: null,
@@ -1168,6 +1231,21 @@
     function updateChosenFromPaths() {
       state.inputChosen = state.inputChosen || pathChosen(els.inputPath);
       state.outputChosen = state.outputChosen || pathChosen(els.outputPath);
+    }
+
+    function selectedProcessingMode() {
+      const selected = els.processingModeInputs.find((input) => input.checked);
+      return selected ? selected.value : "standard";
+    }
+
+    function setProcessingMode(mode, label) {
+      const nextMode = processingModeLabels[mode] ? mode : "standard";
+      state.processingMode = nextMode;
+      state.processingModeLabel = label || processingModeLabels[nextMode];
+      els.processingModeInputs.forEach((input) => {
+        input.checked = input.value === nextMode;
+      });
+      els.modeStatus.textContent = `当前处理方式：${state.processingModeLabel}`;
     }
 
     function setStatus(next) {
@@ -1329,6 +1407,7 @@
       els.pendingText.textContent = `${state.attentionFiles} 个`;
       els.sourceText.textContent = `${state.totalImages} 张`;
       els.readyText.textContent = `${state.readyImages} 张`;
+      els.modeStatus.textContent = `当前处理方式：${state.processingModeLabel}`;
       els.startButton.disabled = state.status !== "ready";
       els.exportButton.disabled = !(state.status === "needs_review" && state.reviewItems.length > 0);
       els.completeButton.disabled = !((state.status === "needs_review" || state.status === "ready_to_finish") && pendingCount() === 0);
@@ -1578,6 +1657,9 @@
 
     function applyRunStatus(summary, progress, queue, draftDecisions) {
       const operator = summary.operator_summary || {};
+      const summaryMode = summary.options && summary.options.processing_mode;
+      const summaryModeLabel = (summary.options && summary.options.processing_mode_label_zh) || operator.processing_mode_label_zh;
+      if (summaryMode || operator.processing_mode) setProcessingMode(summaryMode || operator.processing_mode, summaryModeLabel);
       const rawStatus = summary.status || (progress && progress.state) || "pending";
       let nextStatus = runStateMap[rawStatus] || "failed";
       state.inputChosen = true;
@@ -1638,6 +1720,7 @@
         }
         if (payload.folders.metadata) state.decisionSaveSummary = payload.folders.metadata;
       }
+      if (payload.processing_mode) setProcessingMode(payload.processing_mode.id, payload.processing_mode.label_zh);
       if (payload.summary || payload.progress) {
         applyRunStatus(payload.summary || { status: payload.running ? "running" : "pending", operator_summary: {} }, payload.progress, payload.queue, payload.draft_decisions);
         if (payload.recovery_guidance && !state.recoveryGuidance) state.recoveryGuidance = payload.recovery_guidance;
@@ -1697,7 +1780,8 @@
         els.loadStatus.textContent = "正在保存文件夹。";
         payload = await apiPost("/api/configure", {
           input_dir: els.inputPath.value.trim(),
-          derivatives_dir: els.outputPath.value.trim()
+          derivatives_dir: els.outputPath.value.trim(),
+          processing_mode: selectedProcessingMode()
         });
       } catch (error) {
         els.loadStatus.textContent = `${error.message || "文件夹没有保存成功。"} 请确认文件夹位置存在、没有填错。`;
@@ -1971,6 +2055,13 @@
       render();
     });
 
+    els.processingModeInputs.forEach((input) => {
+      input.addEventListener("change", () => {
+        setProcessingMode(input.value);
+        render();
+      });
+    });
+
     let timer = null;
     els.saveFoldersButton.addEventListener("click", saveFolders);
     els.startButton.addEventListener("click", startLocalRun);
@@ -1987,6 +2078,7 @@
       state.totalImages = 0;
       state.attentionFiles = 3;
       state.outputSummary = "已选择的处理后输出文件夹";
+      setProcessingMode("standard");
       state.decisionSaveSummary = "已保存到本机状态文件夹";
       state.completionNoteSummary = "已保存到本机状态文件夹";
       state.completionTitle = "批次已完成";

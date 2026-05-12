@@ -22,6 +22,11 @@ STEP_LABELS = {
     "process": "生成处理后图片",
     "summarize": "整理处理结果",
 }
+PROCESSING_MODE_LABELS_ZH = {
+    "standard": "标准优化",
+    "qc_only": "只质检不修图",
+    "light": "轻度优化",
+}
 
 
 @dataclass(frozen=True)
@@ -44,6 +49,7 @@ class ProductionRunConfig:
     reuse_scan_measurements: bool = False
     workers: int | None = None
     analysis_provider_command: str | None = None
+    processing_mode: str = "standard"
 
 
 def run_production_folder(config: ProductionRunConfig) -> dict[str, Any]:
@@ -146,6 +152,8 @@ def build_production_run_summary(
     operator_message = _operator_message(local_batch_state, p0_findings, failed_files)
     derivative_image_dir = Path(processing_manifest["image_root"])
     options = {
+        "processing_mode": config.processing_mode,
+        "processing_mode_label_zh": PROCESSING_MODE_LABELS_ZH.get(config.processing_mode, config.processing_mode),
         "auto_crop": config.auto_crop,
         "deskew": config.deskew,
         "trim_dark_border": config.trim_dark_border,
@@ -177,6 +185,8 @@ def build_production_run_summary(
         "operator_summary": {
             "message": operator_message,
             "message_zh": operator_message,
+            "processing_mode": config.processing_mode,
+            "processing_mode_label_zh": PROCESSING_MODE_LABELS_ZH.get(config.processing_mode, config.processing_mode),
             "input_folder": str(config.input_dir.resolve()),
             "derivative_image_folder": str(derivative_image_dir),
             "metadata_folder": str(config.metadata_output_dir.resolve()),

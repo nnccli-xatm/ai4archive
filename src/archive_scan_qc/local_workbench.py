@@ -18,6 +18,7 @@ import webbrowser
 from .processing_review import REVIEW_JSON as PROCESSING_REVIEW_JSON, write_processing_review_package
 from .production_review_queue import PRODUCTION_REVIEW_QUEUE_JSON, write_production_review_queue
 from .production_runner import (
+    PROCESSING_MODE_LABELS_ZH,
     PRODUCTION_RUN_PROGRESS_JSON,
     PRODUCTION_RUN_SUMMARY_JSON,
     ProductionRunConfig,
@@ -38,6 +39,24 @@ REVIEW_DECISION_SUMMARY_JSON = "scan-qc-review-decisions.summary.json"
 REVIEW_DECISION_DRAFT_JSON = "scan-qc-review-decisions.draft.json"
 COMPLETION_NOTE_TXT = "本批次完成交接说明.txt"
 PREVIEW_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"}
+DEFAULT_PROCESSING_MODE = "standard"
+PROCESSING_MODE_OPTIONS: dict[str, dict[str, Any]] = {
+    "standard": {
+        "label_zh": PROCESSING_MODE_LABELS_ZH["standard"],
+        "auto_crop": True,
+        "deskew": True,
+    },
+    "qc_only": {
+        "label_zh": PROCESSING_MODE_LABELS_ZH["qc_only"],
+        "auto_crop": False,
+        "deskew": False,
+    },
+    "light": {
+        "label_zh": PROCESSING_MODE_LABELS_ZH["light"],
+        "auto_crop": True,
+        "deskew": False,
+    },
+}
 
 
 class WorkbenchPreflightError(ValueError):
@@ -57,10 +76,17 @@ class WorkbenchController:
         self.input_dir: Path | None = None
         self.derivatives_dir: Path | None = None
         self.metadata_dir: Path | None = None
+        self.processing_mode = DEFAULT_PROCESSING_MODE
         self.last_error: str | None = None
         self.last_preflight_guidance: dict[str, Any] | None = None
 
-    def configure(self, input_dir: Path, derivatives_dir: Path, metadata_dir: Path | None = None) -> dict[str, Any]:
+    def configure(
+        self,
+        input_dir: Path,
+        derivatives_dir: Path,
+        metadata_dir: Path | None = None,
+        processing_mode: str | None = None,
+    ) -> dict[str, Any]:
         if str(input_dir).strip() in {"", "."}:
             raise ValueError("请填写扫描原图文件夹。")
         if str(derivatives_dir).strip() in {"", "."}:
@@ -76,12 +102,14 @@ class WorkbenchController:
             raise ValueError("处理后输出文件夹不能和扫描原图文件夹相同，也不能放在原图文件夹里面。")
         if _is_relative_to(metadata_path, input_path):
             raise ValueError("本机状态文件夹不能放在扫描原图文件夹里面。")
+        selected_mode = _normalize_processing_mode(processing_mode)
         output_path.mkdir(parents=True, exist_ok=True)
         metadata_path.mkdir(parents=True, exist_ok=True)
         with self._lock:
             self.input_dir = input_path
             self.derivatives_dir = output_path
             self.metadata_dir = metadata_path
+            self.processing_mode = selected_mode
             self.last_error = None
             self.last_preflight_guidance = None
         return self.status()
@@ -257,6 +285,7 @@ class WorkbenchController:
             input_dir = str(self.input_dir) if self.input_dir else None
             derivatives_dir = str(self.derivatives_dir) if self.derivatives_dir else None
             metadata_dir = str(self.metadata_dir) if self.metadata_dir else None
+            processing_mode = self.processing_mode
             last_error = self.last_error
             last_preflight_guidance = self.last_preflight_guidance
         summary = _read_json(Path(metadata_dir) / PRODUCTION_RUN_SUMMARY_JSON) if metadata_dir else None
@@ -283,6 +312,7 @@ class WorkbenchController:
                 "derivatives": derivatives_dir,
                 "metadata": metadata_dir,
             },
+            "processing_mode": _processing_mode_payload(processing_mode),
             "summary": summary,
             "progress": progress,
             "queue": queue,
@@ -319,14 +349,17 @@ class WorkbenchController:
                 assert self.input_dir is not None
                 assert self.derivatives_dir is not None
                 assert self.metadata_dir is not None
+                processing_mode = self.processing_mode
+                processing_options = PROCESSING_MODE_OPTIONS[processing_mode]
                 config = ProductionRunConfig(
                     input_dir=self.input_dir,
                     derivative_output_dir=self.derivatives_dir,
                     metadata_output_dir=self.metadata_dir,
-                    auto_crop=True,
-                    deskew=True,
+                    auto_crop=bool(processing_options["auto_crop"]),
+                    deskew=bool(processing_options["deskew"]),
                     resume_processing=True,
                     reuse_scan_measurements=True,
+                    processing_mode=processing_mode,
                 )
             summary = run_production_folder(config)
             self._write_review_queue(summary)
@@ -445,6 +478,7 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
                     _required_path(payload, "input_dir", "扫描原图文件夹"),
                     _required_path(payload, "derivatives_dir", "处理后输出文件夹"),
                     _optional_path(payload, "metadata_dir", "本机状态文件夹"),
+                    str(payload.get("processing_mode") or DEFAULT_PROCESSING_MODE),
                 )
             elif self.path == "/api/start":
                 result = self.workbench_controller.start()
@@ -667,6 +701,26 @@ def _folder_preflight_guidance(kind: str, title_zh: str, message_zh: str, next_s
         "retryable_files": 0,
         "derivative_images_ready": 0,
         "total_files": 0,
+    }
+
+
+def _normalize_processing_mode(processing_mode: str | None) -> str:
+    mode = (processing_mode or DEFAULT_PROCESSING_MODE).strip()
+    if mode not in PROCESSING_MODE_OPTIONS:
+        raise ValueError("处理方式不正确，请重新选择。")
+    return mode
+
+
+def _processing_mode_payload(processing_mode: str) -> dict[str, Any]:
+    mode = _normalize_processing_mode(processing_mode)
+    option = PROCESSING_MODE_OPTIONS[mode]
+    return {
+        "id": mode,
+        "label_zh": option["label_zh"],
+        "available_modes": [
+            {"id": mode_id, "label_zh": values["label_zh"]}
+            for mode_id, values in PROCESSING_MODE_OPTIONS.items()
+        ],
     }
 
 
