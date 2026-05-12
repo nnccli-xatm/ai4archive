@@ -33,6 +33,11 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   without private filenames, roots, hashes, OCR text, thumbnails, row-level
   findings, reviewer notes, prompts, provider commands, raw model output,
   object URLs, or sample data.
+- Confirm `PYTHONPATH=src python3 scripts/validate_frontend_workbench.py
+  --json-out /placeholder/private-validation-output/release-candidate/frontend_workbench_validation.json`
+  creates a public-safe aggregate frontend workbench validation summary with
+  pass/fail status, coverage counts, fixture groups, and privacy-check outcomes
+  only.
 - Confirm CI is green for Python 3.10, 3.11, and 3.12.
 
 ## Package and install checks
@@ -240,6 +245,9 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 
   archive-scan-qc artifact-readiness-checklist \
     --evidence-dir /placeholder/private-validation-output/release-candidate
+
+  PYTHONPATH=src python3 scripts/validate_frontend_workbench.py \
+    --json-out /placeholder/private-validation-output/release-candidate/frontend_workbench_validation.json
   ```
 
   Share `artifact_readiness_checklist.json` when the release or workbench
@@ -250,11 +258,19 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   reviewer notes, provider commands, raw model output, prompts, embeddings,
   environment values, network/cloud locations, and preview state are not
   shareable checklist inputs or outputs.
+- Share `frontend_workbench_validation.json` only as aggregate/public-safe
+  static workbench validation evidence after local policy review. It is not a
+  private evidence package and must not include private filenames, paths,
+  images, OCR text, hashes, thumbnails, row-level reports, review notes, object
+  URLs, manifests, derivative image references, command lines, or environment
+  values.
 - Optionally open `docs/frontend-workbench-prototype.html` locally and load
   `final_production_handoff_summary.json`,
-  `artifact_readiness_checklist.json`, or `workbench_public_summary.json` for
-  static inspection of aggregate readiness and code/count diagnostics. Do not
-  load or publish private source artifacts, object URLs, row-level findings,
+  `artifact_readiness_checklist.json`, `frontend_workbench_validation.json`, or
+  `workbench_public_summary.json` for static inspection of aggregate readiness,
+  validation coverage, privacy diagnostics, and code/count diagnostics. Do not
+  load or publish private source artifacts, object URLs, manifests, derivative
+  image references, command lines, environment values, row-level findings,
   reviewer notes, prompts, provider commands, raw model output, or actual
   sample data through the workbench.
 
@@ -285,6 +301,10 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 - Do not publish delivery handoff manifest rows classified as
   `sensitive_local_evidence`; they can contain local paths and hashes for
   row-level artifacts.
+- Do not publish frontend workbench validation evidence that contains private
+  filenames, paths, images, OCR text, hashes, thumbnails, row-level reports,
+  review notes, object URLs, manifests, derivative image references, command
+  lines, or environment values.
 
 ## Performance record
 

@@ -1207,6 +1207,9 @@ archive-scan-qc public-safe-validation-index \
 
 archive-scan-qc artifact-readiness-checklist \
   --evidence-dir /placeholder/private-validation-output/release-candidate
+
+PYTHONPATH=src python3 scripts/validate_frontend_workbench.py \
+  --json-out /placeholder/private-validation-output/release-candidate/frontend_workbench_validation.json
 ```
 
 `final-handoff-summary` writes `final_production_handoff_summary.json`, a
@@ -1227,6 +1230,16 @@ artifacts private, including source images, row-level reports, manifests, OCR
 text, thumbnails, hashes, private filenames/roots, derivative images, reviewer
 notes, provider commands, prompts, raw model output, embeddings, environment
 values, network/cloud locations, and preview state.
+
+`scripts/validate_frontend_workbench.py --json-out` writes
+`frontend_workbench_validation.json`, a public-safe aggregate validation summary
+for the static workbench HTML and its demo/fixture coverage. Generate it with
+the final handoff evidence when the recipient will inspect aggregate artifacts
+in `docs/frontend-workbench-prototype.html`. It reports validator status,
+coverage counts, fixture groups, and privacy-check outcomes only; it is not a
+private evidence package and must not include private filenames, paths, images,
+OCR text, hashes, thumbnails, row-level reports, review notes, object URLs,
+manifests, derivative image references, command lines, or environment values.
 
 To load multiple approved aggregate artifacts in the static workbench, build a
 single public-safe summary bundle:
