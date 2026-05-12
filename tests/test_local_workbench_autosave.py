@@ -203,6 +203,10 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertTrue(result["completion_panel"]["decision_summary_path"].endswith(REVIEW_DECISION_SUMMARY_JSON))
             self.assertTrue(result["completion_panel"]["verification_summary_path"].endswith(REVIEW_DECISION_VERIFICATION_JSON))
             self.assertTrue(result["completion_panel"]["completion_note_path"].endswith(COMPLETION_NOTE_TXT))
+            self.assertEqual(
+                result["completion_panel"]["checklist_zh"],
+                ["处理后图片已准备好", "复核结果已保存", "交接说明已保存", "可以准备下一批"],
+            )
             self.assertTrue((metadata_dir / REVIEW_DECISION_SUMMARY_JSON).exists())
             completion_note = (metadata_dir / COMPLETION_NOTE_TXT).read_text(encoding="utf-8")
             self.assertIn("处理后图片文件夹：", completion_note)

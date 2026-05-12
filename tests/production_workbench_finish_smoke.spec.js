@@ -158,6 +158,7 @@ test.describe("production workbench finish/export browser smoke", () => {
             derivatives_dir: "/tmp/synthetic-output",
             metadata_dir: "/tmp/synthetic-output/_production_workbench",
             completion_note_path: "/tmp/synthetic-output/_production_workbench/本批次完成交接说明.txt",
+            checklist_zh: ["处理后图片已准备好", "复核结果已保存", "交接说明已保存", "可以准备下一批"],
             next_steps_zh: ["到处理后输出文件夹检查图片数量和文件是否齐全。", "点击准备下一批，重新选择新的扫描原图文件夹和输出文件夹。"],
           },
           decision_summary: { completion_status: "complete" },
@@ -202,6 +203,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#outputPlace")).toHaveText("/tmp/synthetic-output");
     await expect(page.locator("#decisionSavePlace")).toHaveText("/tmp/synthetic-output/_production_workbench");
     await expect(page.locator("#completionNotePlace")).toHaveText("/tmp/synthetic-output/_production_workbench/本批次完成交接说明.txt");
+    await expect(page.locator("#completionChecklist")).toHaveText("处理后图片已准备好复核结果已保存交接说明已保存可以准备下一批");
     await expect(page.getByText("点击准备下一批，重新选择新的扫描原图文件夹和输出文件夹。")).toBeVisible();
     await page.getByRole("button", { name: "准备下一批" }).click();
     await expect(page.locator("#completionTitle")).toBeHidden();

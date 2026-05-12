@@ -169,6 +169,12 @@ class WorkbenchController:
                 "decision_summary_path": str(summary_path),
                 "verification_summary_path": str(verification_path),
                 "completion_note_path": str(completion_note_path),
+                "checklist_zh": [
+                    "处理后图片已准备好",
+                    "复核结果已保存",
+                    "交接说明已保存",
+                    "可以准备下一批",
+                ],
                 "next_steps_zh": [
                     "到处理后输出文件夹检查图片数量和文件是否齐全。",
                     "把处理后图片交给验收或移交流程。",
