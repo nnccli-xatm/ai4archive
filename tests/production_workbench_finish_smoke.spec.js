@@ -285,6 +285,99 @@ test.describe("production workbench finish/export browser smoke", () => {
     expect(consoleProblems).toEqual([]);
   });
 
+  test("finishes and exports a no-review batch without console errors or warnings", async ({ page }) => {
+    const consoleProblems = [];
+    page.on("console", (message) => {
+      if (["error", "warning"].includes(message.type())) consoleProblems.push(`${message.type()}: ${message.text()}`);
+    });
+    page.on("pageerror", (error) => consoleProblems.push(`pageerror: ${error.message}`));
+
+    await page.route("**/api/status", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema_version: "scan-qc.local-production-workbench.v1",
+          running: false,
+          configured: true,
+          folders: {
+            input: "/tmp/no-review-input",
+            derivatives: "/tmp/no-review-output",
+            metadata: "/tmp/no-review-output/_production_workbench",
+          },
+          summary: {
+            schema_version: "scan-qc.production-run.v1",
+            status: "finished",
+            ready_for_operator_handoff: true,
+            operator_summary: {
+              message_zh: "处理后图片已生成，可以完成并导出结果。",
+              total_source_images: 2,
+              openable_source_images: 2,
+              derivative_images_ready: 2,
+              files_needing_attention: 0,
+            },
+            counts: {
+              total_files: 2,
+              openable_files: 2,
+              processed_files: 2,
+              failed_files: 0,
+              retry_list_files: 0,
+            },
+          },
+          progress: { schema_version: "scan-qc.production-run-progress.v1", state: "finished" },
+          queue: { schema_version: "scan-qc.production-review-queue.v1", items: [] },
+          draft_decisions: null,
+        }),
+      });
+    });
+    await page.route("**/api/finish-decisions", async (route) => {
+      const payload = JSON.parse(route.request().postData() || "{}");
+      expect(payload.decisions).toHaveLength(0);
+      expect(payload.aggregate_counts.review_completion.complete).toBe(true);
+      expect(payload.aggregate_counts.review_completion.total).toBe(0);
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema_version: "scan-qc.local-production-workbench.v1",
+          finished: true,
+          message_zh: "完成并导出结果：处理后图片和复核结果已保存。",
+          folders: {
+            derivatives: "/tmp/no-review-output",
+            metadata: "/tmp/no-review-output/_production_workbench",
+          },
+          completion_panel: {
+            title_zh: "完成并导出结果",
+            message_zh: "本批次已完成。处理后图片在输出文件夹，复核结果已保存到本机状态文件夹。",
+            total_review_items: 0,
+            reviewed_items: 0,
+            pending_items: 0,
+            derivatives_dir: "/tmp/no-review-output",
+            metadata_dir: "/tmp/no-review-output/_production_workbench",
+            completion_note_path: "/tmp/no-review-output/_production_workbench/本批次完成交接说明.txt",
+            checklist_zh: ["处理后图片已准备好", "复核结果已保存", "交接说明已保存", "可以准备下一批"],
+            next_steps_zh: ["到处理后输出文件夹检查图片数量和文件是否齐全。", "把处理后图片交给验收或移交流程。", "点击准备下一批，重新选择新的扫描原图文件夹和输出文件夹。"],
+          },
+          decision_summary: { completion_status: "complete" },
+        }),
+      });
+    });
+
+    await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
+    await expect(page.locator("#stateName")).toHaveText("待完成");
+    await expect(page.locator("#stateAction")).toHaveText("没有需要人工确认");
+    await expect(page.locator("#queueText")).toHaveText("没有待人工确认图片。");
+    await expect(page.locator("#currentAdvice")).toHaveText("可以完成并导出结果。");
+    await expect(page.getByRole("button", { name: "完成并导出结果" })).toBeEnabled();
+
+    await page.getByRole("button", { name: "完成并导出结果" }).click();
+    await expect(page.locator("#completionTitle")).toHaveText("完成并导出结果");
+    await expect(page.locator("#completionCounts")).toHaveText("共 0 项，已确认 0 项，待决定 0 项。");
+    await expect(page.locator("#outputPlace")).toHaveText("/tmp/no-review-output");
+    await expect(page.locator("#completionNotePlace")).toHaveText("/tmp/no-review-output/_production_workbench/本批次完成交接说明.txt");
+    await expect(page.locator("#completionSteps").getByText("把处理后图片交给验收或移交流程。")).toBeVisible();
+
+    expect(consoleProblems).toEqual([]);
+  });
+
   test("renders maintained fixture states without console errors or warnings", async ({ page }) => {
     const consoleProblems = [];
     page.on("console", (message) => {
@@ -305,7 +398,7 @@ test.describe("production workbench finish/export browser smoke", () => {
       ["fixtures/production-run-empty", "#recoveryTitle", "原图文件夹是空的"],
       ["fixtures/production-run-running", "#stateAction", "正在处理"],
       ["fixtures/production-run-needs-review", "#stateAction", "有图片需要人工确认"],
-      ["fixtures/production-run-finished", "#stateAction", "完成并导出结果"],
+      ["fixtures/production-run-finished", "#stateAction", "没有需要人工确认"],
       ["fixtures/production-run-blocked", "#stateAction", "需要管理员处理"],
     ];
 

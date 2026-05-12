@@ -3910,6 +3910,14 @@ class ScanQcTest(unittest.TestCase):
         self.assertEqual(summary["blocking_counts_by_code"], {})
         self.assertTrue(summary["privacy"]["aggregate_only"])
 
+    def test_review_decisions_verify_treats_zero_review_items_as_complete(self) -> None:
+        result = build_review_decision_verification_summary(_review_decision_export_fixture(decisions=()))
+
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["decision_summary"]["total_decisions"], 0)
+        self.assertEqual(result["decision_summary"]["pending"], 0)
+        self.assertEqual(result["decision_summary"]["completion_status"], "complete")
+
     def test_review_decisions_verify_allows_incomplete_without_blocking(self) -> None:
         fixture = _review_decision_export_fixture(decisions=("accepted_issue", "pending", "needs_rescan"))
         result = build_review_decision_verification_summary(fixture)
@@ -8202,7 +8210,7 @@ def _review_decision_export_fixture(
                 "total": len(decision_rows),
                 "reviewed": reviewed,
                 "pending": pending,
-                "complete": len(decision_rows) > 0 and pending == 0,
+                "complete": pending == 0,
                 "counts": counts,
             },
         },
