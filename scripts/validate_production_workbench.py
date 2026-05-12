@@ -68,6 +68,7 @@ REQUIRED_TEXT = {
     "已恢复上次进度",
     "保存文件夹",
     "本机入口",
+    "已预先填写演练文件夹",
     "维护入口",
     "选择维护示例",
     "选择本机状态",
@@ -265,6 +266,9 @@ def main() -> int:
     for required_entrypoint_token in [
         "production-workbench",
         "local_workbench_main",
+        "--launch-workbench",
+        "--input-dir",
+        "--derivatives-dir",
     ]:
         if required_entrypoint_token not in cli:
             errors.append(f"missing local workbench CLI entrypoint token: {required_entrypoint_token}")
@@ -286,6 +290,8 @@ def main() -> int:
         "X-Preview-Source",
         "_is_loopback_client",
         "local-only",
+        "已预先填写演练文件夹",
+        "metadata_dir",
     ]:
         if required_server_token not in local_workbench:
             errors.append(f"missing local workbench server token: {required_server_token}")

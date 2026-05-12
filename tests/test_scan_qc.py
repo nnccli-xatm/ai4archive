@@ -49,6 +49,7 @@ from archive_scan_qc.processing import (
 )
 from archive_scan_qc.processing_plan import build_processing_plan
 from archive_scan_qc.processing_review import build_processing_review_package
+from archive_scan_qc.production_rehearsal import ProductionRehearsalConfig, run_production_rehearsal
 from archive_scan_qc.production_runner import ProductionRunConfig, run_production_folder
 from archive_scan_qc.reports import build_review_summary, write_reports, write_review_export, write_review_summary
 from archive_scan_qc.review_decisions import build_review_decision_verification_summary
@@ -6280,7 +6281,8 @@ class ScanQcTest(unittest.TestCase):
             output = stdout.getvalue()
             self.assertIn("本机生产演练已生成。", output)
             self.assertIn("下一步:", output)
-            self.assertIn("点击“保存文件夹”，状态会自动加载", output)
+            self.assertIn("production-rehearsal --launch-workbench", output)
+            self.assertIn("工作台会自动带入演练文件夹", output)
             self.assertIn("只使用合成图片", output)
             self.assertNotIn("JSON", output)
             self.assertNotIn("schema", output)
@@ -6308,6 +6310,38 @@ class ScanQcTest(unittest.TestCase):
             self.assertTrue(queue["summary"]["ready_for_operator_review"])
             self.assertTrue(queue["privacy"]["local_only"])
             self.assertFalse(queue["privacy"]["contains_image_bytes"])
+
+    def test_local_production_workbench_server_prefills_rehearsal_folders(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir) / "rehearsal"
+            rehearsal = run_production_rehearsal(
+                ProductionRehearsalConfig(root_dir=root, workers=1)
+            )
+
+            server = make_server(
+                "127.0.0.1",
+                0,
+                input_dir=Path(rehearsal["input_dir"]),
+                derivatives_dir=Path(rehearsal["derivatives_dir"]),
+                metadata_dir=Path(rehearsal["metadata_dir"]),
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                with urllib.request.urlopen(f"http://127.0.0.1:{server.server_port}/api/status", timeout=5) as response:
+                    status = json.loads(response.read().decode("utf-8"))
+
+                self.assertTrue(status["configured"])
+                self.assertEqual(status["folders"]["input"], rehearsal["input_dir"])
+                self.assertEqual(status["folders"]["derivatives"], rehearsal["derivatives_dir"])
+                self.assertEqual(status["folders"]["metadata"], rehearsal["metadata_dir"])
+                self.assertEqual(status["summary"]["schema_version"], "scan-qc.production-run.v1")
+                self.assertEqual(status["queue"]["schema_version"], "scan-qc.production-review-queue.v1")
+                self.assertGreaterEqual(status["queue"]["summary"]["total_items"], 1)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
 
     def test_local_production_workbench_controller_runs_folder_loop(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

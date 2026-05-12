@@ -285,13 +285,29 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--host", default="127.0.0.1", help="只建议使用 127.0.0.1。")
     parser.add_argument("--port", default=8765, type=int, help="本机端口。")
     parser.add_argument("--no-open", action="store_true", help="只启动服务，不自动打开浏览器。")
+    parser.add_argument("--input-dir", default=None, type=Path, help="预先填写扫描原图文件夹。")
+    parser.add_argument("--derivatives-dir", default=None, type=Path, help="预先填写处理后输出文件夹。")
+    parser.add_argument("--metadata-dir", default=None, type=Path, help="预先填写本机状态文件夹；默认使用输出文件夹下的状态文件夹。")
     args = parser.parse_args(argv)
     if args.host not in {"127.0.0.1", "localhost", "::1"}:
         parser.error("production-workbench is local-only; use 127.0.0.1, localhost, or ::1.")
-    server = make_server(args.host, args.port)
+    if bool(args.input_dir) != bool(args.derivatives_dir):
+        parser.error("请同时提供 --input-dir 和 --derivatives-dir，或都不提供。")
+    try:
+        server = make_server(
+            args.host,
+            args.port,
+            input_dir=args.input_dir,
+            derivatives_dir=args.derivatives_dir,
+            metadata_dir=args.metadata_dir,
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
     host_for_url = f"[{args.host}]" if ":" in args.host else args.host
     url = f"http://{host_for_url}:{server.server_port}/"
     print(f"本地生产工作台: {url}")
+    if args.input_dir and args.derivatives_dir:
+        print("已预先填写演练文件夹，打开后可直接查看批次状态。")
     print("按 Ctrl+C 停止。")
     if not args.no_open:
         webbrowser.open(url)
@@ -304,8 +320,19 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def make_server(host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
+def make_server(
+    host: str = "127.0.0.1",
+    port: int = 8765,
+    *,
+    input_dir: Path | None = None,
+    derivatives_dir: Path | None = None,
+    metadata_dir: Path | None = None,
+) -> ThreadingHTTPServer:
     controller = WorkbenchController()
+    if input_dir is not None or derivatives_dir is not None or metadata_dir is not None:
+        if input_dir is None or derivatives_dir is None:
+            raise ValueError("请同时提供扫描原图文件夹和处理后输出文件夹。")
+        controller.configure(input_dir, derivatives_dir, metadata_dir)
 
     class Handler(WorkbenchRequestHandler):
         workbench_controller = controller
