@@ -436,6 +436,75 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.getByText("请交管理员查看本机状态文件夹")).toBeVisible();
   });
 
+  test("sends selected processing mode before starting a local run", async ({ page }) => {
+    const consoleProblems = [];
+    const configurePayloads = [];
+    page.on("console", (message) => {
+      if (["error", "warning"].includes(message.type())) consoleProblems.push(`${message.type()}: ${message.text()}`);
+    });
+    page.on("pageerror", (error) => consoleProblems.push(`pageerror: ${error.message}`));
+
+    await page.route("**/api/status", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ schema_version: "scan-qc.local-production-workbench.v1", running: false }),
+      });
+    });
+    await page.route("**/api/configure", async (route) => {
+      const payload = JSON.parse(route.request().postData() || "{}");
+      configurePayloads.push(payload);
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema_version: "scan-qc.local-production-workbench.v1",
+          running: false,
+          configured: true,
+          folders: {
+            input: payload.input_dir,
+            derivatives: payload.derivatives_dir,
+            metadata: `${payload.derivatives_dir}/_production_workbench`,
+          },
+          processing_mode: {
+            id: payload.processing_mode,
+            label_zh: "只质检不修图",
+          },
+        }),
+      });
+    });
+    await page.route("**/api/start", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema_version: "scan-qc.local-production-workbench.v1",
+          running: true,
+          configured: true,
+          processing_mode: {
+            id: "qc_only",
+            label_zh: "只质检不修图",
+          },
+        }),
+      });
+    });
+
+    await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
+    await expect(page.locator("#modeStatus")).toHaveText("当前处理方式：标准优化");
+    await page.getByLabel("只质检不修图").check();
+    await expect(page.locator("#modeStatus")).toHaveText("当前处理方式：只质检不修图");
+    await page.locator("#inputPath").fill("/tmp/mode-input");
+    await page.locator("#outputPath").fill("/tmp/mode-output");
+    await page.getByRole("button", { name: "开始处理" }).click();
+    await expect.poll(() => configurePayloads.length).toBeGreaterThan(0);
+    expect(configurePayloads[0]).toMatchObject({
+      input_dir: "/tmp/mode-input",
+      derivatives_dir: "/tmp/mode-output",
+      processing_mode: "qc_only",
+    });
+    await expect(page.locator("#modeStatus")).toHaveText("当前处理方式：只质检不修图");
+    await expect(page.locator("#stateName")).toHaveText("正在处理");
+
+    expect(consoleProblems).toEqual([]);
+  });
+
   test("finishes and exports a no-review batch without console errors or warnings", async ({ page }) => {
     const consoleProblems = [];
     page.on("console", (message) => {

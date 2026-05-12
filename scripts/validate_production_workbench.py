@@ -83,6 +83,11 @@ REQUIRED_TEXT = {
     "已自动保存",
     "已恢复上次进度",
     "保存文件夹",
+    "处理方式",
+    "标准优化",
+    "只质检不修图",
+    "轻度优化",
+    "当前处理方式：标准优化",
     "本机入口",
     "已预先填写演练文件夹",
     "维护入口",
@@ -269,6 +274,7 @@ def main() -> int:
         for required_token in [
             'input_dir: els.inputPath.value.trim()',
             'derivatives_dir: els.outputPath.value.trim()',
+            'processing_mode: selectedProcessingMode()',
             'state.status = "ready";',
             'els.loadStatus.textContent = "文件夹已保存，可以开始处理。";',
         ]:
@@ -311,6 +317,9 @@ def main() -> int:
         "local-only",
         "已预先填写演练文件夹",
         "metadata_dir",
+        "DEFAULT_PROCESSING_MODE",
+        "PROCESSING_MODE_OPTIONS",
+        "processing_mode",
     ]:
         if required_server_token not in local_workbench:
             errors.append(f"missing local workbench server token: {required_server_token}")
@@ -492,6 +501,11 @@ def main() -> int:
         "prepareNextBatch",
         "renderCompletionPanel",
         "applyCompletionPanel",
+        "processingModeInputs",
+        "selectedProcessingMode",
+        "setProcessingMode",
+        "processingModeLabels",
+        "当前处理方式",
     ]:
         if required_script_token not in html:
             errors.append(f"missing review queue workflow script token: {required_script_token}")

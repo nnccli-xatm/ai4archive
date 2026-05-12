@@ -37,7 +37,7 @@ from archive_scan_qc.deep_inspection_candidates import build_deep_inspection_can
 from archive_scan_qc.evidence_bundle import build_evidence_bundle_summary
 from archive_scan_qc.final_handoff import build_final_handoff_summary
 from archive_scan_qc.handoff import write_delivery_handoff_manifest
-from archive_scan_qc.local_workbench import DEFAULT_METADATA_DIRNAME, WorkbenchController, make_server
+from archive_scan_qc.local_workbench import DEFAULT_METADATA_DIRNAME, DEFAULT_PROCESSING_MODE, WorkbenchController, make_server
 from archive_scan_qc.processing import (
     ProcessingOptions,
     _despeckle_candidate_points,
@@ -6441,10 +6441,62 @@ class ScanQcTest(unittest.TestCase):
             self.assertFalse(status["running"])
             self.assertIsNone(status["last_error_zh"])
             self.assertEqual(status["summary"]["status"], "finished")
+            self.assertEqual(status["processing_mode"]["id"], DEFAULT_PROCESSING_MODE)
+            self.assertEqual(status["summary"]["options"]["processing_mode"], DEFAULT_PROCESSING_MODE)
+            self.assertTrue(status["summary"]["options"]["auto_crop"])
+            self.assertTrue(status["summary"]["options"]["deskew"])
             self.assertEqual(status["progress"]["state"], "finished")
             self.assertEqual(status["queue"]["schema_version"], "scan-qc.production-review-queue.v1")
             self.assertTrue((derivatives_dir / "images" / "A001_0001.jpg").exists())
             self.assertTrue((derivatives_dir / DEFAULT_METADATA_DIRNAME / "production_run_summary.json").exists())
+
+    def test_local_production_workbench_processing_mode_handoff_uses_existing_options(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            input_dir.mkdir()
+            Image.new("RGB", (48, 36), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+
+            controller = WorkbenchController()
+            configured = controller.configure(input_dir, derivatives_dir, processing_mode="qc_only")
+            self.assertEqual(configured["processing_mode"]["id"], "qc_only")
+            self.assertEqual(configured["processing_mode"]["label_zh"], "只质检不修图")
+
+            with mock.patch("archive_scan_qc.local_workbench.run_production_folder") as run_mock:
+                run_mock.return_value = {
+                    "schema_version": "scan-qc.production-run.v1",
+                    "status": "finished",
+                    "artifacts": {},
+                    "counts": {"total_files": 1, "processed_files": 1, "resumed_files": 0, "failed_files": 0, "retry_list_files": 0},
+                }
+                controller.start()
+                deadline = time.time() + 10
+                status = controller.status()
+                while status["running"] and time.time() < deadline:
+                    time.sleep(0.05)
+                    status = controller.status()
+
+            self.assertFalse(status["running"])
+            run_mock.assert_called_once()
+            config = run_mock.call_args.args[0]
+            self.assertEqual(config.processing_mode, "qc_only")
+            self.assertFalse(config.auto_crop)
+            self.assertFalse(config.deskew)
+            self.assertTrue(config.resume_processing)
+            self.assertTrue(config.reuse_scan_measurements)
+
+    def test_local_production_workbench_rejects_unknown_processing_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            input_dir.mkdir()
+            controller = WorkbenchController()
+
+            with self.assertRaisesRegex(ValueError, "处理方式不正确"):
+                controller.configure(input_dir, root / "derivatives", processing_mode="experimental")
+
+            self.assertIsNone(controller.input_dir)
 
     def test_local_production_workbench_status_exposes_aggregate_recovery_guidance(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
