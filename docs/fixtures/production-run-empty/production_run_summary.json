@@ -1,0 +1,44 @@
+{
+  "schema_version": "scan-qc.production-run.v1",
+  "status": "finished",
+  "status_label_zh": "已完成",
+  "ready_for_operator_handoff": false,
+  "local_batch_state": "empty_input_folder",
+  "recovery_guidance": {
+    "schema_version": "scan-qc.local-recovery-guidance.v1",
+    "aggregate_only": true,
+    "kind": "empty_input_folder",
+    "title_zh": "原图文件夹是空的",
+    "message_zh": "这个扫描原图文件夹里没有发现可处理文件。",
+    "next_steps_zh": [
+      "确认是否选到了本批次真正的扫描原图文件夹。",
+      "如果还没有扫描图片，请先完成扫描或把图片放入原图文件夹。",
+      "放好图片后，重新保存文件夹并开始处理。"
+    ],
+    "failed_files": 0,
+    "retryable_files": 0,
+    "derivative_images_ready": 0,
+    "total_files": 0
+  },
+  "operator_summary": {
+    "message": "扫描原图文件夹里没有可处理文件，请确认是否选错文件夹。",
+    "message_zh": "扫描原图文件夹里没有可处理文件，请确认是否选错文件夹。",
+    "total_source_images": 0,
+    "openable_source_images": 0,
+    "derivative_images_ready": 0,
+    "files_needing_attention": 0
+  },
+  "counts": {
+    "total_files": 0,
+    "openable_files": 0,
+    "processed_files": 0,
+    "resumed_files": 0,
+    "failed_files": 0,
+    "p0_findings": 0
+  },
+  "progress": {
+    "state": "completed",
+    "total_items": 0,
+    "completed_items": 0
+  }
+}

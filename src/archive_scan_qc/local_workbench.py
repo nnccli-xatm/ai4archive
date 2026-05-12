@@ -503,6 +503,19 @@ def _status_recovery_guidance(
             "derivative_images_ready": derivative_images_ready,
             "total_files": total_files,
         }
+        openable_files = int(counts.get("openable_files") or 0)
+        if total_files == 0:
+            return {
+                **aggregate,
+                "kind": "empty_input_folder",
+                "title_zh": "原图文件夹是空的",
+                "message_zh": "这个扫描原图文件夹里没有发现可处理文件。",
+                "next_steps_zh": [
+                    "确认是否选到了本批次真正的扫描原图文件夹。",
+                    "如果还没有扫描图片，请先完成扫描或把图片放入原图文件夹。",
+                    "放好图片后，重新保存文件夹并开始处理。",
+                ],
+            }
         if summary.get("status") == "blocked" or failed_files:
             return {
                 **aggregate,
@@ -515,13 +528,29 @@ def _status_recovery_guidance(
                     "重新开始处理；如果仍失败，请交管理员查看本机状态文件夹。",
                 ],
             }
+        if openable_files == 0:
+            return {
+                **aggregate,
+                "kind": "no_supported_images",
+                "title_zh": "没有可处理的图片",
+                "message_zh": "文件夹里没有找到当前支持处理的图片，或图片无法正常打开。",
+                "next_steps_zh": [
+                    "确认选对了扫描原图文件夹。",
+                    "确认原图是常见图片格式，并且能用本机图片查看器打开。",
+                    "如果文件格式不对，请重新导出为支持的图片格式后再处理。",
+                ],
+            }
         if summary.get("status") == "finished":
             return {
                 **aggregate,
                 "kind": "no_remaining_work",
                 "title_zh": "没有剩余处理任务",
-                "message_zh": "处理后图片已生成，可以继续复核或完成并导出结果。",
-                "next_steps_zh": ["确认处理后图片数量正常，然后完成并导出结果。"],
+                "message_zh": "本批次没有需要人工确认的图片，处理后图片已经准备好。",
+                "next_steps_zh": [
+                    "确认处理后图片数量正常。",
+                    "把处理后图片交给验收或移交流程。",
+                    "开始下一批前，重新选择新的扫描原图文件夹和输出文件夹。",
+                ],
             }
     state = progress.get("state") if isinstance(progress, dict) else None
     return {

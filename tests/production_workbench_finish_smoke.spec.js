@@ -182,4 +182,73 @@ test.describe("production workbench finish/export browser smoke", () => {
     expect(consoleProblems).toEqual([]);
     expect(fs.existsSync(path.join(ROOT, "docs", "production-workbench-prototype.html"))).toBe(true);
   });
+
+  test("shows empty-folder next steps without console errors or warnings", async ({ page }) => {
+    const consoleProblems = [];
+    page.on("console", (message) => {
+      if (["error", "warning"].includes(message.type())) consoleProblems.push(`${message.type()}: ${message.text()}`);
+    });
+    page.on("pageerror", (error) => consoleProblems.push(`pageerror: ${error.message}`));
+
+    await page.route("**/api/status", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema_version: "scan-qc.local-production-workbench.v1",
+          running: false,
+          configured: true,
+          folders: {
+            input: "/tmp/empty-input",
+            derivatives: "/tmp/empty-output",
+            metadata: "/tmp/empty-output/_production_workbench",
+          },
+          summary: {
+            schema_version: "scan-qc.production-run.v1",
+            status: "finished",
+            ready_for_operator_handoff: false,
+            local_batch_state: "empty_input_folder",
+            operator_summary: {
+              message_zh: "扫描原图文件夹里没有可处理文件，请确认是否选错文件夹。",
+              total_source_images: 0,
+              openable_source_images: 0,
+              derivative_images_ready: 0,
+              files_needing_attention: 0,
+            },
+            counts: {
+              total_files: 0,
+              openable_files: 0,
+              processed_files: 0,
+              resumed_files: 0,
+              failed_files: 0,
+              retry_list_files: 0,
+            },
+            recovery_guidance: {
+              schema_version: "scan-qc.local-recovery-guidance.v1",
+              aggregate_only: true,
+              kind: "empty_input_folder",
+              title_zh: "原图文件夹是空的",
+              message_zh: "这个扫描原图文件夹里没有发现可处理文件。",
+              next_steps_zh: ["确认是否选到了本批次真正的扫描原图文件夹。", "放好图片后，重新保存文件夹并开始处理。"],
+              failed_files: 0,
+              retryable_files: 0,
+              derivative_images_ready: 0,
+              total_files: 0,
+            },
+          },
+          progress: { schema_version: "scan-qc.production-run-progress.v1", state: "finished" },
+          queue: { schema_version: "scan-qc.production-review-queue.v1", items: [] },
+          draft_decisions: null,
+        }),
+      });
+    });
+
+    await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
+    await expect(page.locator("#recoveryTitle")).toHaveText("原图文件夹是空的");
+    await expect(page.getByText("确认是否选到了本批次真正的扫描原图文件夹。")).toBeVisible();
+    await expect(page.locator("#queueText")).toHaveText("没有待人工确认图片。");
+    await expect(page.locator("#sourceText")).toHaveText("0 张");
+    await expect(page.locator("#readyText")).toHaveText("0 张");
+
+    expect(consoleProblems).toEqual([]);
+  });
 });

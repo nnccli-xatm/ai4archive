@@ -138,8 +138,12 @@ def build_production_run_summary(
     processing_summary = processing_manifest["summary"]
     failed_files = int(processing_summary["failed_files"])
     p0_findings = int(scan_summary["p0_findings"])
+    total_files = int(scan_summary["total_files"])
+    openable_files = int(scan_summary["openable_files"])
+    derivative_images_ready = int(processing_summary["processed_files"]) + int(processing_summary["resumed_files"])
+    local_batch_state = _local_batch_state(total_files, openable_files, derivative_images_ready, p0_findings, failed_files)
     status = _production_status(p0_findings, failed_files)
-    operator_message = _operator_message(status, p0_findings, failed_files)
+    operator_message = _operator_message(local_batch_state, p0_findings, failed_files)
     derivative_image_dir = Path(processing_manifest["image_root"])
     options = {
         "auto_crop": config.auto_crop,
@@ -167,8 +171,9 @@ def build_production_run_summary(
         "generated_at": generated_at or datetime.now(timezone.utc).isoformat(),
         "status": status,
         "status_label_zh": _status_label_zh(status),
-        "ready_for_operator_handoff": status == "finished",
-        "recovery_guidance": _recovery_guidance(status, processing_summary),
+        "ready_for_operator_handoff": local_batch_state == "no_review_items",
+        "local_batch_state": local_batch_state,
+        "recovery_guidance": _recovery_guidance(local_batch_state, processing_summary),
         "operator_summary": {
             "message": operator_message,
             "message_zh": operator_message,
@@ -177,7 +182,7 @@ def build_production_run_summary(
             "metadata_folder": str(config.metadata_output_dir.resolve()),
             "total_source_images": scan_summary["total_files"],
             "openable_source_images": scan_summary["openable_files"],
-            "derivative_images_ready": processing_summary["processed_files"] + processing_summary["resumed_files"],
+            "derivative_images_ready": derivative_images_ready,
             "files_needing_attention": failed_files + p0_findings,
         },
         "counts": {
@@ -265,8 +270,32 @@ def _step(
     }
 
 
-def _operator_message(status: str, p0_findings: int, failed_files: int) -> str:
-    if status == "finished":
+def _local_batch_state(
+    total_files: int,
+    openable_files: int,
+    derivative_images_ready: int,
+    p0_findings: int,
+    failed_files: int,
+) -> str:
+    if total_files == 0:
+        return "empty_input_folder"
+    if failed_files:
+        return "processing_blocked"
+    if openable_files == 0:
+        return "no_supported_images"
+    if p0_findings:
+        return "review_required"
+    if derivative_images_ready == 0:
+        return "no_derivative_images"
+    return "no_review_items"
+
+
+def _operator_message(local_batch_state: str, p0_findings: int, failed_files: int) -> str:
+    if local_batch_state == "empty_input_folder":
+        return "扫描原图文件夹里没有可处理文件，请确认是否选错文件夹。"
+    if local_batch_state == "no_supported_images":
+        return "没有找到可处理的图片，请确认原图是常见图片格式且可以打开。"
+    if local_batch_state == "no_review_items":
         return "处理后图片已生成，可以完成并导出结果。"
     blockers = []
     if p0_findings:
@@ -276,7 +305,7 @@ def _operator_message(status: str, p0_findings: int, failed_files: int) -> str:
     return "需要处理：" + "，".join(blockers) + "。"
 
 
-def _recovery_guidance(status: str, processing_summary: dict[str, Any]) -> dict[str, Any]:
+def _recovery_guidance(local_batch_state: str, processing_summary: dict[str, Any]) -> dict[str, Any]:
     failed_files = int(processing_summary.get("failed_files", 0))
     retry_list_files = int(processing_summary.get("retry_list_files", 0))
     derivative_images_ready = int(processing_summary.get("processed_files", 0)) + int(processing_summary.get("resumed_files", 0))
@@ -289,7 +318,33 @@ def _recovery_guidance(status: str, processing_summary: dict[str, Any]) -> dict[
         "derivative_images_ready": derivative_images_ready,
         "total_files": total_files,
     }
-    if status == "blocked":
+    if local_batch_state == "empty_input_folder":
+        guidance.update(
+            {
+                "kind": "empty_input_folder",
+                "title_zh": "原图文件夹是空的",
+                "message_zh": "这个扫描原图文件夹里没有发现可处理文件。",
+                "next_steps_zh": [
+                    "确认是否选到了本批次真正的扫描原图文件夹。",
+                    "如果还没有扫描图片，请先完成扫描或把图片放入原图文件夹。",
+                    "放好图片后，重新保存文件夹并开始处理。",
+                ],
+            }
+        )
+    elif local_batch_state == "no_supported_images":
+        guidance.update(
+            {
+                "kind": "no_supported_images",
+                "title_zh": "没有可处理的图片",
+                "message_zh": "文件夹里没有找到当前支持处理的图片，或图片无法正常打开。",
+                "next_steps_zh": [
+                    "确认选对了扫描原图文件夹。",
+                    "确认原图是常见图片格式，并且能用本机图片查看器打开。",
+                    "如果文件格式不对，请重新导出为支持的图片格式后再处理。",
+                ],
+            }
+        )
+    elif local_batch_state == "processing_blocked":
         guidance.update(
             {
                 "kind": "processing_failed_retryable" if retry_list_files else "processing_failed_admin",
@@ -303,13 +358,30 @@ def _recovery_guidance(status: str, processing_summary: dict[str, Any]) -> dict[
                 ],
             }
         )
-    elif status == "finished":
+    elif local_batch_state == "no_review_items":
         guidance.update(
             {
                 "kind": "no_remaining_work",
                 "title_zh": "没有剩余处理任务",
-                "message_zh": "处理后图片已生成，可以继续复核或完成并导出结果。",
-                "next_steps_zh": ["确认处理后图片数量正常，然后完成并导出结果。"],
+                "message_zh": "本批次没有需要人工确认的图片，处理后图片已经准备好。",
+                "next_steps_zh": [
+                    "确认处理后图片数量正常。",
+                    "把处理后图片交给验收或移交流程。",
+                    "开始下一批前，重新选择新的扫描原图文件夹和输出文件夹。",
+                ],
+            }
+        )
+    elif local_batch_state == "no_derivative_images":
+        guidance.update(
+            {
+                "kind": "no_derivative_images",
+                "title_zh": "没有生成处理后图片",
+                "message_zh": "本批次没有生成处理后图片，请检查原图是否能正常打开。",
+                "next_steps_zh": [
+                    "确认扫描原图文件夹和处理后输出文件夹选对。",
+                    "确认原图能用本机图片查看器打开。",
+                    "重新开始处理；如果仍没有结果，请交管理员查看本机状态文件夹。",
+                ],
             }
         )
     else:

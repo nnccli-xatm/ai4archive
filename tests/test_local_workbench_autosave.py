@@ -10,6 +10,7 @@ from archive_scan_qc.local_workbench import (
     REVIEW_DECISION_SUMMARY_JSON,
     WorkbenchController,
 )
+from archive_scan_qc.production_runner import ProductionRunConfig, build_production_run_summary
 from archive_scan_qc.production_review_queue import PRODUCTION_REVIEW_QUEUE_JSON
 from archive_scan_qc.review_decisions import REVIEW_DECISION_VERIFICATION_JSON
 
@@ -54,6 +55,92 @@ def decision_summary(decisions: list[tuple[str, str]]) -> dict[str, object]:
 
 
 class LocalWorkbenchAutosaveTests(unittest.TestCase):
+    def test_empty_batch_summary_gives_operator_next_steps(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = root / "metadata"
+            admin_dir = metadata_dir / "admin_reports"
+            input_dir.mkdir()
+            summary = build_production_run_summary(
+                config=ProductionRunConfig(input_dir=input_dir, derivative_output_dir=output_dir, metadata_output_dir=metadata_dir),
+                report={
+                    "summary": {
+                        "total_files": 0,
+                        "openable_files": 0,
+                        "p0_findings": 0,
+                        "p1_findings": 0,
+                        "p2_findings": 0,
+                        "total_findings": 0,
+                        "performance": {},
+                    }
+                },
+                processing_manifest={
+                    "image_root": str(output_dir / "images"),
+                    "summary": {
+                        "total_files": 0,
+                        "processed_files": 0,
+                        "resumed_files": 0,
+                        "skipped_files": 0,
+                        "failed_files": 0,
+                        "retry_list_files": 0,
+                        "performance": {},
+                    },
+                },
+                admin_report_dir=admin_dir,
+                generated_at="2026-01-01T00:00:00+00:00",
+            )
+
+            self.assertEqual(summary["status"], "finished")
+            self.assertFalse(summary["ready_for_operator_handoff"])
+            self.assertEqual(summary["local_batch_state"], "empty_input_folder")
+            self.assertEqual(summary["recovery_guidance"]["kind"], "empty_input_folder")
+            self.assertIn("原图文件夹", summary["recovery_guidance"]["title_zh"])
+            self.assertEqual(summary["operator_summary"]["files_needing_attention"], 0)
+
+    def test_unsupported_only_batch_summary_gives_plain_guidance(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = root / "metadata"
+            admin_dir = metadata_dir / "admin_reports"
+            input_dir.mkdir()
+            summary = build_production_run_summary(
+                config=ProductionRunConfig(input_dir=input_dir, derivative_output_dir=output_dir, metadata_output_dir=metadata_dir),
+                report={
+                    "summary": {
+                        "total_files": 2,
+                        "openable_files": 0,
+                        "p0_findings": 0,
+                        "p1_findings": 2,
+                        "p2_findings": 0,
+                        "total_findings": 2,
+                        "performance": {},
+                    }
+                },
+                processing_manifest={
+                    "image_root": str(output_dir / "images"),
+                    "summary": {
+                        "total_files": 2,
+                        "processed_files": 0,
+                        "resumed_files": 0,
+                        "skipped_files": 2,
+                        "failed_files": 0,
+                        "retry_list_files": 0,
+                        "performance": {},
+                    },
+                },
+                admin_report_dir=admin_dir,
+                generated_at="2026-01-01T00:00:00+00:00",
+            )
+
+            self.assertEqual(summary["local_batch_state"], "no_supported_images")
+            self.assertFalse(summary["ready_for_operator_handoff"])
+            self.assertEqual(summary["recovery_guidance"]["kind"], "no_supported_images")
+            self.assertIn("常见图片格式", " ".join(summary["recovery_guidance"]["next_steps_zh"]))
+
     def test_draft_decisions_are_saved_and_returned_by_status(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
