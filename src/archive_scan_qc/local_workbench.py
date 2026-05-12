@@ -1016,11 +1016,12 @@ def _status_recovery_guidance(
             **base,
             "kind": "processing_failed_admin",
             "title_zh": "本机处理启动失败",
-            "message_zh": "处理没有正常完成，请检查文件夹、磁盘空间和图片是否能打开。",
+            "message_zh": "本批次没有正常启动，当前不能直接重试。",
             "next_steps_zh": [
-                "确认两个文件夹位置没有填错。",
-                "确认磁盘空间足够，图片文件可以正常打开。",
-                "重新开始处理；如果仍失败，请交管理员查看本机状态文件夹。",
+                "检查扫描原图文件夹和输出文件夹是否选对。",
+                "确认输出磁盘空间足够，原图图片可以正常打开。",
+                "请交管理员处理，不要反复点击开始处理。",
+                "如果文件夹选错了，请返回重新选择文件夹。",
             ],
         }
     if isinstance(summary, dict):
@@ -1057,11 +1058,20 @@ def _status_recovery_guidance(
                 **aggregate,
                 "kind": "processing_failed_retryable" if retryable_files else "processing_failed_admin",
                 "title_zh": "处理没有全部完成",
-                "message_zh": "有文件处理失败。请检查文件夹、磁盘空间和图片是否能打开。",
+                "message_zh": (
+                    "本批次有图片没有处理完，可以先检查文件夹后重试本批次。"
+                    if retryable_files
+                    else "本批次没有处理完，当前不能直接重试。"
+                ),
                 "next_steps_zh": [
-                    "确认扫描原图文件夹和处理后输出文件夹选对。",
-                    "检查磁盘空间是否足够，原图是否能正常打开。",
-                    "重新开始处理；如果仍失败，请交管理员查看本机状态文件夹。",
+                    "检查扫描原图文件夹和输出文件夹是否选对。",
+                    "确认输出磁盘空间足够，原图图片可以正常打开。",
+                    (
+                        "点击重试本批次，系统会继续使用当前文件夹。"
+                        if retryable_files
+                        else "请交管理员处理，不要反复点击开始处理。"
+                    ),
+                    "如果文件夹选错了，请返回重新选择文件夹。",
                 ],
             }
         if openable_files == 0:
