@@ -85,7 +85,7 @@ test.describe("production workbench finish/export browser smoke", () => {
       schema_version: "scan-qc.production-review-queue.v1",
       items: [
         { local_id: "PRQ000001", reason_zh: "画面需要确认。", suggested_action: "rescan", severity: "P1", preview_source: "processed" },
-        { local_id: "PRQ000002", reason_zh: "页面顺序需要确认。", suggested_action: "keep_original_trace", severity: "P2", preview_source: "unavailable" },
+        { local_id: "PRQ000002", reason_zh: "页面顺序需要确认。", suggested_action: "keep_original_trace", severity: "P2", preview_source: "original_fallback" },
         { local_id: "PRQ000003", reason_zh: "质量结果需要确认。", suggested_action: "skip", severity: "P0", preview_source: "unavailable" },
       ],
     };
@@ -168,7 +168,8 @@ test.describe("production workbench finish/export browser smoke", () => {
     await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
     await expect(page.getByRole("heading", { name: "当前图片" })).toBeVisible();
     await expect(page.getByText("已加载复核队列 3 项，待决定 3 项。")).toBeVisible();
-    await expect(page.locator("#previewSourceText")).toHaveText("预览来源：处理后图片。");
+    await expect(page.locator("#reviewPositionText")).toHaveText("当前第 1 张 / 共 3 张 / 待确认 3 张。");
+    await expect(page.locator("#previewSourceText")).toHaveText("预览：处理后图片。");
     await expect(page.locator("#zoomState")).toHaveText("查看：适合窗口");
 
     await page.getByRole("button", { name: "放大" }).click();
@@ -181,16 +182,16 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#zoomState")).toHaveText("查看：适合窗口");
 
     await page.getByRole("button", { name: "退回重扫或重处理" }).click();
-    await expect(page.locator("#previewSourceText")).toHaveText("预览来源：本机暂未找到可预览图片。");
-    await expect(page.locator("#zoomState")).toHaveText("查看：等待图片");
+    await expect(page.locator("#previewSourceText")).toHaveText("预览：处理后图片不可用，正在显示原图。");
+    await expect(page.locator("#zoomState")).toHaveText("查看：适合窗口");
     await page.getByRole("button", { name: "上一张已确认" }).click();
-    await expect(page.locator("#reviewPositionText")).toHaveText("当前第 1 张，共 3 张；已确认 1 张，剩余 2 张。");
+    await expect(page.locator("#reviewPositionText")).toHaveText("当前第 1 张 / 共 3 张 / 待确认 2 张。");
     await expect(page.locator("#currentAdvice")).toContainText("当前决定：退回重扫或重处理。");
     await page.getByRole("button", { name: "清除当前决定" }).click();
     await expect(page.locator("#decisionSummary")).toHaveText("已决定 0 项，待决定 3 项。");
     await expect(page.getByRole("button", { name: "完成并导出结果" })).toBeDisabled();
     await page.getByRole("button", { name: "确认通过" }).click();
-    await expect(page.locator("#reviewPositionText")).toHaveText("当前第 2 张，共 3 张；已确认 1 张，剩余 2 张。");
+    await expect(page.locator("#reviewPositionText")).toHaveText("当前第 2 张 / 共 3 张 / 待确认 2 张。");
     await page.getByRole("button", { name: "确认保留原貌" }).click();
     await page.getByRole("button", { name: "交管理员处理" }).click();
     await expect(page.locator("#decisionSummary")).toHaveText("已决定 3 项，待决定 0 项。");
@@ -278,6 +279,40 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#queueText")).toHaveText("没有待人工确认图片。");
     await expect(page.locator("#sourceText")).toHaveText("0 张");
     await expect(page.locator("#readyText")).toHaveText("0 张");
+
+    expect(consoleProblems).toEqual([]);
+  });
+
+  test("renders maintained fixture states without console errors or warnings", async ({ page }) => {
+    const consoleProblems = [];
+    page.on("console", (message) => {
+      if (["error", "warning"].includes(message.type())) consoleProblems.push(`${message.type()}: ${message.text()}`);
+    });
+    page.on("pageerror", (error) => consoleProblems.push(`pageerror: ${error.message}`));
+
+    await page.route("**/api/status", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ schema_version: "scan-qc.local-production-workbench.v1", running: false }),
+      });
+    });
+
+    await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
+    await page.getByText("维护入口").click();
+    const fixtures = [
+      ["fixtures/production-run-empty", "#recoveryTitle", "原图文件夹是空的"],
+      ["fixtures/production-run-running", "#stateAction", "正在处理"],
+      ["fixtures/production-run-needs-review", "#stateAction", "有图片需要人工确认"],
+      ["fixtures/production-run-finished", "#stateAction", "完成并导出结果"],
+      ["fixtures/production-run-blocked", "#stateAction", "需要管理员处理"],
+    ];
+
+    for (const [fixture, selector, visibleText] of fixtures) {
+      await page.locator("#fixtureSelect").selectOption(fixture);
+      await expect(page.locator(selector)).toHaveText(visibleText);
+      await expect(page.locator("#reviewPositionText")).toContainText("当前第");
+      await expect(page.locator("#previewSourceText")).toContainText("预览");
+    }
 
     expect(consoleProblems).toEqual([]);
   });
