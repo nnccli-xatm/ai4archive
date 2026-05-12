@@ -157,6 +157,18 @@ Starting a batch runs the existing local `production-run` flow, writes metadata
 under the output folder's `_production_workbench` directory, polls progress, and
 emits a local review queue plus verifier-compatible review-decision export.
 
+To rehearse the same local flow without private images, generate a synthetic
+batch and workbench-ready outputs with one command:
+
+```bash
+archive-scan-qc production-rehearsal
+```
+
+The command creates a temporary rehearsal folder, writes synthetic source
+images, runs local scan QC and derivative processing, builds the local review
+queue, and prints Chinese next steps for opening the workbench and loading the
+sample batch.
+
 The optional manifest CSV must include a `relative_path` column whose values
 are expected image paths relative to `--input`. Manifests may also include one
 page/order column named `sequence`, `page_sequence`, `page_number`, or
