@@ -6877,6 +6877,62 @@ class ScanQcTest(unittest.TestCase):
             self.assertFalse(metadata_inside_input.exists())
             self.assertIsNone(controller.input_dir)
 
+    def test_local_production_workbench_configure_api_keeps_unsafe_folder_guidance_private_safe(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            private_root = root / "Users" / "private" / "archive"
+            input_dir = private_root / "Confidential_Batch_0099"
+            output_inside_input = input_dir / "derivatives"
+            metadata_inside_input = input_dir / "metadata"
+            safe_output = private_root / "safe-output"
+            input_dir.mkdir(parents=True)
+            server = make_server("127.0.0.1", 0)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                base_url = f"http://127.0.0.1:{server.server_port}"
+                cases = [
+                    (
+                        {
+                            "input_dir": str(input_dir),
+                            "derivatives_dir": str(output_inside_input),
+                        },
+                        "处理后输出文件夹不能和扫描原图文件夹相同，也不能放在原图文件夹里面。",
+                    ),
+                    (
+                        {
+                            "input_dir": str(input_dir),
+                            "derivatives_dir": str(safe_output),
+                            "metadata_dir": str(metadata_inside_input),
+                        },
+                        "本机状态文件夹不能放在扫描原图文件夹里面，处理没有启动。",
+                    ),
+                ]
+                for payload, expected_error in cases:
+                    with self.subTest(expected_error=expected_error):
+                        request = urllib.request.Request(
+                            f"{base_url}/api/configure",
+                            data=json.dumps(payload).encode("utf-8"),
+                            headers={"Content-Type": "application/json"},
+                            method="POST",
+                        )
+                        with self.assertRaises(urllib.error.HTTPError) as raised:
+                            urllib.request.urlopen(request, timeout=5)
+                        self.assertEqual(raised.exception.code, 400)
+                        response_payload = json.loads(raised.exception.read().decode("utf-8"))
+                        raised.exception.close()
+                        response_text = json.dumps(response_payload, ensure_ascii=False)
+
+                        self.assertEqual(response_payload["error_zh"], expected_error)
+                        self.assertNotIn(str(input_dir), response_text)
+                        self.assertNotIn("Confidential_Batch_0099", response_text)
+                        self.assertNotIn(str(output_inside_input), response_text)
+                        self.assertNotIn(str(metadata_inside_input), response_text)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
     def test_local_production_workbench_preflight_rejects_empty_input_before_start(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
