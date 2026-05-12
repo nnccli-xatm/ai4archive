@@ -34,6 +34,7 @@ from .processing import ProcessingOptions, process_images
 from .processing_plan import write_processing_plan
 from .processing_review import write_processing_review_package
 from .production_review_queue import PRODUCTION_REVIEW_QUEUE_JSON, write_production_review_queue
+from .production_rehearsal import ProductionRehearsalConfig, run_production_rehearsal
 from .reports import write_reports, write_review_export, write_review_summary
 from .review_decisions import write_review_decision_verification_summary
 from .rework import write_rework_action_list
@@ -189,6 +190,8 @@ def main(argv: list[str] | None = None) -> int:
         return _main_preflight(argv[1:])
     if argv and argv[0] == "production-run":
         return _main_production_run(argv[1:])
+    if argv and argv[0] == "production-rehearsal":
+        return _main_production_rehearsal(argv[1:])
     if argv and argv[0] == "production-workbench":
         from .local_workbench import main as local_workbench_main
 
@@ -426,6 +429,52 @@ def _main_production_run(argv: list[str]) -> int:
     print(f"处理进度: {args.metadata_out / PRODUCTION_RUN_PROGRESS_JSON}")
     print("原图是否被修改: 否")
     return 0 if summary["ready_for_operator_handoff"] else 1
+
+
+def _main_production_rehearsal(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="archive-scan-qc production-rehearsal",
+        description="生成合成图片并一键演练本机生产处理和复核产物。",
+    )
+    parser.add_argument(
+        "--root",
+        default=None,
+        type=Path,
+        help="可选演练根文件夹。默认创建一个临时文件夹。",
+    )
+    parser.add_argument("--project", default="local-rehearsal", help="项目编号。")
+    parser.add_argument("--batch", default="synthetic-batch", help="批次编号。")
+    parser.add_argument("--workers", default=1, type=_positive_int, help="本机最大工作线程数，填 1 表示单线程。")
+    parser.add_argument("--keep-existing", action="store_true", help="允许使用已有内容的演练根文件夹。")
+    args = parser.parse_args(argv)
+    try:
+        rehearsal = run_production_rehearsal(
+            ProductionRehearsalConfig(
+                root_dir=args.root,
+                project_id=args.project,
+                batch_id=args.batch,
+                workers=args.workers,
+                keep_existing=args.keep_existing,
+            )
+        )
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    print("本机生产演练已生成。")
+    print(f"演练文件夹: {rehearsal['root_dir']}")
+    print(f"扫描原图文件夹: {rehearsal['input_dir']}")
+    print(f"处理后输出文件夹: {rehearsal['derivatives_dir']}")
+    print(f"本机状态文件夹: {rehearsal['metadata_dir']}")
+    print(f"生产状态: {rehearsal['status_label_zh']}")
+    print(f"操作提示: {rehearsal['operator_message_zh']}")
+    print(f"合成原图数量: {rehearsal['source_count']}")
+    print(f"已生成处理后图片: {rehearsal['derivative_count']}")
+    print(f"待人工确认条目: {rehearsal['review_queue_items']}")
+    print("下一步:")
+    print("1. 运行: archive-scan-qc production-workbench")
+    print("2. 在工作台中填写上面的扫描原图文件夹和处理后输出文件夹。")
+    print("3. 点击“保存文件夹”，状态会自动加载，然后查看合成图片并练习复核。")
+    print("说明: 本演练只使用合成图片，不需要私有图片，也不会调用外部服务。")
+    return 0
 
 
 def _main_capability_probe(argv: list[str]) -> int:
