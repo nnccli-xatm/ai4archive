@@ -1019,9 +1019,9 @@
             <div class="zoom-state" id="zoomState" aria-live="polite">查看：适合窗口</div>
           </div>
           <div class="comparison-controls" id="comparisonControls" aria-label="原图处理后查看方式">
-            <button type="button" class="secondary active" data-comparison-mode="side_by_side">左右对比</button>
-            <button type="button" class="secondary" data-comparison-mode="original">只看原图</button>
-            <button type="button" class="secondary" data-comparison-mode="processed">只看处理后</button>
+            <button type="button" class="secondary active" data-comparison-mode="processed">查看处理后图片</button>
+            <button type="button" class="secondary" data-comparison-mode="original">查看原图</button>
+            <button type="button" class="secondary" data-comparison-mode="side_by_side">对比查看</button>
           </div>
           <div class="preview-frame" id="previewFrame">
             <div class="scan-line"></div>
@@ -1186,7 +1186,7 @@
       currentIndex: 0,
       previewFit: true,
       previewZoom: 1,
-      comparisonMode: "side_by_side",
+      comparisonMode: "processed",
       processingMode: "standard",
       processingModeLabel: "标准优化"
     };
@@ -1441,8 +1441,8 @@
     function previewSourceLabel(item, pending) {
       if (!pending) return "预览：等待本机处理结果。";
       if (hasBothPreviews(item)) {
-        if (state.comparisonMode === "original") return "预览：正在只看原图。";
-        if (state.comparisonMode === "processed") return "预览：正在只看处理后图片。";
+        if (state.comparisonMode === "original") return "预览：正在查看原图。";
+        if (state.comparisonMode === "processed") return "预览：正在查看处理后图片。";
         return "预览：正在对比原图和处理后图片。";
       }
       if (item.previewSource === "processed") return "预览：处理后图片。";
@@ -1587,12 +1587,12 @@
         if (state.comparisonMode === "original") {
           els.previewFrame.innerHTML = `
             ${singlePreviewFrame(item.originalPreviewUrl, "本机原图预览", false)}
-            <div class="preview-fallback">正在只看原图。可切回左右对比或只看处理后图片。</div>
+            <div class="preview-fallback">正在查看原图。可切到对比查看或查看处理后图片。</div>
           `;
         } else if (state.comparisonMode === "processed") {
           els.previewFrame.innerHTML = `
             ${singlePreviewFrame(item.processedPreviewUrl, "本机处理后预览", false)}
-            <div class="preview-fallback">正在只看处理后图片。可切回左右对比或只看原图。</div>
+            <div class="preview-fallback">正在查看处理后图片。可切到对比查看或查看原图。</div>
           `;
         } else {
           els.previewFrame.innerHTML = `
