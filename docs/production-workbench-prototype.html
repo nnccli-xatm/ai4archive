@@ -776,6 +776,13 @@
       skip: "admin_handling"
     };
 
+    const contractDecisionMap = {
+      pass: "false_positive",
+      needs_rework: "needs_rescan",
+      admin_handling: "blocked",
+      keep_original_trace: "false_positive"
+    };
+
     function pendingCount() {
       return state.reviewItems.filter((item) => !item.decision).length;
     }
@@ -977,31 +984,47 @@
     }
 
     function decisionArtifact() {
+      const decisions = state.reviewItems.map((item) => ({
+        scope: "production_review_queue",
+        local_id: item.id,
+        decision: contractDecisionMap[item.decision] || "pending"
+      }));
+      const reviewCounts = {
+        pending: 0,
+        accepted_issue: 0,
+        false_positive: 0,
+        fixed_externally: 0,
+        needs_rescan: 0,
+        blocked: 0
+      };
+      decisions.forEach((item) => {
+        reviewCounts[item.decision] += 1;
+      });
       return {
-        schema_version: "scan-qc.local-review-decisions.v1",
-        created_by: "production_workbench_browser",
+        schema: "scan-qc-review-decisions.local.v1",
+        source_type: "production_workbench",
+        source_target_count: state.reviewItems.length,
+        generated_in_browser: true,
         privacy: {
-          local_only: true,
-          contains_image_bytes: false,
-          contains_thumbnails: false,
-          contains_ocr_text: false,
-          contains_hashes: false
+          summary_only: true
         },
-        summary: {
-          total_review_items: state.reviewItems.length,
-          decided_items: reviewedCount(),
-          pending_items: pendingCount()
+        aggregate_counts: {
+          total_batches: 1,
+          total_findings: state.reviewItems.length,
+          p0: state.reviewItems.filter((item) => item.severity === "P0").length,
+          p1: state.reviewItems.filter((item) => item.severity === "P1").length,
+          p2: state.reviewItems.filter((item) => item.severity === "P2").length,
+          review_completion: {
+            total: state.reviewItems.length,
+            reviewed: reviewedCount(),
+            pending: pendingCount(),
+            complete: state.reviewItems.length > 0 && pendingCount() === 0,
+            counts: reviewCounts
+          }
         },
-        decisions: state.reviewItems
-          .filter((item) => item.decision)
-          .map((item) => ({
-            local_id: item.id,
-            decision: item.decision,
-            suggested_action: item.sourceAction || item.suggestedAction,
-            severity: item.severity || "",
-            source_category: item.sourceCategory || "",
-            source_ref: item.sourceRef || ""
-          }))
+        review_counts: reviewCounts,
+        reviewed_targets: reviewedCount(),
+        decisions
       };
     }
 
@@ -1010,7 +1033,7 @@
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = "local_review_decisions.json";
+      link.download = "scan-qc-review-decisions.summary.json";
       document.body.appendChild(link);
       link.click();
       link.remove();

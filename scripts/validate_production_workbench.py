@@ -10,6 +10,10 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from archive_scan_qc.review_decisions import build_review_decision_verification_summary
+
 WORKBENCH = ROOT / "docs" / "production-workbench-prototype.html"
 FIXTURE_ROOT = ROOT / "docs" / "fixtures"
 FIXTURE_STATES = {
@@ -86,6 +90,13 @@ PRIVATE_FIXTURE_TERMS = {
     ".tiff",
 }
 
+CONTRACT_DECISION_MAP = {
+    "pass": "false_positive",
+    "needs_rework": "needs_rescan",
+    "admin_handling": "blocked",
+    "keep_original_trace": "false_positive",
+}
+
 
 class VisibleTextParser(HTMLParser):
     def __init__(self) -> None:
@@ -110,6 +121,59 @@ def visible_text(html: str) -> str:
     parser = VisibleTextParser()
     parser.feed(html)
     return re.sub(r"\s+", " ", " ".join(parser.parts)).strip()
+
+
+def review_decision_contract_fixture(queue: dict[str, object]) -> dict[str, object]:
+    items = queue.get("items")
+    if not isinstance(items, list):
+        items = []
+    operator_decisions = ["pass", "needs_rework", "admin_handling", "keep_original_trace"]
+    rows = []
+    counts = {
+        "pending": 0,
+        "accepted_issue": 0,
+        "false_positive": 0,
+        "fixed_externally": 0,
+        "needs_rescan": 0,
+        "blocked": 0,
+    }
+    severities = {"P0": 0, "P1": 0, "P2": 0}
+    for index, item in enumerate(items):
+        decision = CONTRACT_DECISION_MAP[operator_decisions[index % len(operator_decisions)]]
+        counts[decision] += 1
+        if isinstance(item, dict) and item.get("severity") in severities:
+            severities[str(item["severity"])] += 1
+        rows.append(
+            {
+                "scope": "production_review_queue",
+                "local_id": item.get("local_id") if isinstance(item, dict) else f"PRQ{index + 1:06d}",
+                "decision": decision,
+            }
+        )
+    return {
+        "schema": "scan-qc-review-decisions.local.v1",
+        "source_type": "production_workbench",
+        "source_target_count": len(rows),
+        "generated_in_browser": True,
+        "privacy": {"summary_only": True},
+        "aggregate_counts": {
+            "total_batches": 1,
+            "total_findings": len(rows),
+            "p0": severities["P0"],
+            "p1": severities["P1"],
+            "p2": severities["P2"],
+            "review_completion": {
+                "total": len(rows),
+                "reviewed": len(rows),
+                "pending": 0,
+                "complete": len(rows) > 0,
+                "counts": counts,
+            },
+        },
+        "review_counts": counts,
+        "reviewed_targets": len(rows),
+        "decisions": rows,
+    }
 
 
 def main() -> int:
@@ -214,13 +278,20 @@ def main() -> int:
                 for forbidden in ["data:image", "base64,", "source_sha256", "output_sha256"]:
                     if forbidden in raw_queue:
                         errors.append(f"review queue fixture includes forbidden private payload marker: {forbidden}")
+                decision_summary = build_review_decision_verification_summary(review_decision_contract_fixture(queue))
+                if decision_summary.get("status") != "pass":
+                    errors.append(f"production workbench decision export contract does not verify for {fixture_name}: {decision_summary.get('blocking_counts_by_code')}")
 
     for required_script_token in [
         "production_review_queue.json",
         "applyReviewQueue",
         "decisionArtifact",
-        "local_review_decisions.json",
-        "scan-qc.local-review-decisions.v1",
+        "contractDecisionMap",
+        "scan-qc-review-decisions.summary.json",
+        "scan-qc-review-decisions.local.v1",
+        "source_target_count",
+        "review_counts",
+        "review_completion",
     ]:
         if required_script_token not in html:
             errors.append(f"missing review queue workflow script token: {required_script_token}")
