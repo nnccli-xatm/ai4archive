@@ -60,6 +60,8 @@ REQUIRED_TEXT = {
     "处理后图片",
     "原图预览",
     "问题原因",
+    "重点查看",
+    "等待处理开始后显示查看重点",
     "系统建议",
     "另存复核结果",
     "完成并导出结果",
@@ -409,11 +411,22 @@ def main() -> int:
                         if not isinstance(item, dict):
                             errors.append(f"review queue item is not an object: {fixture_name} #{index}")
                             continue
-                        for key in ["local_id", "reason_zh", "suggested_action", "severity"]:
+                        for key in ["local_id", "reason_zh", "focus_hints_zh", "suggested_action", "severity"]:
                             if key not in item:
                                 errors.append(f"missing review queue item field for {fixture_name} #{index}: {key}")
                         if not re.search(r"[\u4e00-\u9fff]", str(item.get("reason_zh", ""))):
                             errors.append(f"review queue reason is not Chinese for {fixture_name} #{index}")
+                        focus_hints = item.get("focus_hints_zh")
+                        if not isinstance(focus_hints, list) or not focus_hints:
+                            errors.append(f"review queue focus hints missing for {fixture_name} #{index}")
+                        else:
+                            for hint in focus_hints:
+                                hint_text = str(hint)
+                                if not re.search(r"[\u4e00-\u9fff]", hint_text):
+                                    errors.append(f"review queue focus hint is not Chinese for {fixture_name} #{index}")
+                                for forbidden_term in ["JSON", "schema", "P0", "P1", "P2", "OCR", "hash", "sha256"]:
+                                    if forbidden_term.lower() in hint_text.lower():
+                                        errors.append(f"review queue focus hint includes technical term for {fixture_name} #{index}: {forbidden_term}")
                         sensitivity = item.get("sensitivity")
                         if not isinstance(sensitivity, dict) or sensitivity.get("local_only") is not True:
                             errors.append(f"review queue item is not marked local-only for {fixture_name} #{index}")
@@ -451,6 +464,8 @@ def main() -> int:
         "preview-comparison",
         "reviewPositionText",
         "previewSourceText",
+        "currentFocusHints",
+        "focus_hints_zh",
         "previousReviewedButton",
         "nextPendingButton",
         "clearDecisionButton",

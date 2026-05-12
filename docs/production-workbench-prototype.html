@@ -962,6 +962,10 @@
               <p id="currentIssue">还没有需要确认的图片。</p>
             </div>
             <div class="reason-block">
+              <h3>重点查看</h3>
+              <p id="currentFocusHints">等待处理开始后显示查看重点。</p>
+            </div>
+            <div class="reason-block">
               <h3>系统建议</h3>
               <p id="currentAdvice">可以开始处理后再确认。</p>
             </div>
@@ -1123,6 +1127,7 @@
       readinessFacts: document.getElementById("readinessFacts"),
       readinessSteps: document.getElementById("readinessSteps"),
       currentIssue: document.getElementById("currentIssue"),
+      currentFocusHints: document.getElementById("currentFocusHints"),
       currentAdvice: document.getElementById("currentAdvice"),
       reviewPositionText: document.getElementById("reviewPositionText"),
       previewSourceText: document.getElementById("previewSourceText"),
@@ -1478,6 +1483,7 @@
       const reviewMode = state.status === "needs_review";
       els.queueText.textContent = state.reviewQueueText || (reviewMode ? `已决定 ${reviewedCount()} 项，待决定 ${pending} 项` : "等待处理开始。");
       els.currentIssue.textContent = reviewMode && item ? item.issue : (state.operatorMessage || (pending ? "处理开始后在这里显示问题原因。" : "已经没有待确认图片。"));
+      els.currentFocusHints.textContent = reviewMode && item ? item.focusHints : (pending ? "处理开始后在这里显示查看重点。" : "已经没有待确认图片。");
       els.currentAdvice.textContent = reviewMode && item ? `${item.advice} ${currentDecisionLabel(item)}` : state.status === "failed" ? "请联系管理员处理后再继续。" : pending ? "可以开始处理后再确认。" : "可以完成并导出结果。";
       els.reviewPositionText.textContent = reviewMode && state.reviewItems.length
         ? reviewProgressLabel()
@@ -1710,6 +1716,7 @@
         name: itemName(index),
         tone: itemTone(item),
         issue: item.reason_zh || "这张图片需要人工确认。",
+        focusHints: Array.isArray(item.focus_hints_zh) && item.focus_hints_zh.length ? item.focus_hints_zh.join("；") : "看画面是否完整可读；确认后再选择处理决定",
         advice: adviceByAction[suggestedAction],
         suggestedAction,
         sourceAction: item.suggested_action || "",

@@ -68,6 +68,11 @@
       "source_category": "scan_qc",
       "source_ref": "openable",
       "reason_zh": "扫描质检发现阻断问题：源图无法打开。请优先重扫或剔除不可用源图。",
+      "focus_hints_zh": [
+        "看图片能否正常打开",
+        "打不开就按重扫处理",
+        "重点判断是否需要重扫"
+      ],
       "suggested_action": "rescan",
       "operator_note": "源图无法打开",
       "sensitivity": {
@@ -85,6 +90,11 @@
       "source_category": "scan_qc",
       "source_ref": "quality_suspected_blur",
       "reason_zh": "扫描质检发现需处理问题：文字边缘疑似模糊。请决定重处理或保留原始轨迹。",
+      "focus_hints_zh": [
+        "看文字边缘是否模糊",
+        "不清楚就重扫",
+        "重点判断是否需要重新处理"
+      ],
       "suggested_action": "reprocess",
       "operator_note": "文字边缘疑似模糊",
       "sensitivity": {
@@ -102,6 +112,11 @@
       "source_category": "guardrail_warning",
       "source_ref": "processing_guardrail",
       "reason_zh": "处理保护线提示：处理后变化偏大。请人工确认成品，必要时保留原始轨迹。",
+      "focus_hints_zh": [
+        "对比原图和处理后图片",
+        "留意内容是否被裁掉或变暗变亮",
+        "重点判断是否保留原貌"
+      ],
       "suggested_action": "keep_original_trace",
       "operator_note": "处理后变化偏大",
       "sensitivity": {
@@ -119,6 +134,10 @@
       "source_category": "rework_action",
       "source_ref": "informational_follow_up",
       "reason_zh": "返工清单提示信息跟进：页面顺序需要人工确认。",
+      "focus_hints_zh": [
+        "看提示问题是否属实",
+        "确认后再通过"
+      ],
       "suggested_action": "pass",
       "operator_note": "页面顺序需要人工确认",
       "sensitivity": {

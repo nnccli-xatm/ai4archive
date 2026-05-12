@@ -216,6 +216,7 @@ def _item(
         "source_category": source_category,
         "source_ref": source_ref,
         "reason_zh": reason_zh,
+        "focus_hints_zh": _focus_hints_zh(source_category, source_ref, suggested_action, operator_note),
         "suggested_action": suggested_action,
         "operator_note": operator_note,
         "sensitivity": {
@@ -320,6 +321,68 @@ def _scan_operator_note_zh(rule: str, message: str) -> str:
     if note:
         return _append_first_number(note, message)
     return "质检规则触发，请人工复核"
+
+
+def _focus_hints_zh(source_category: str, source_ref: str, suggested_action: str, operator_note: str) -> list[str]:
+    hints_by_ref = {
+        "openability": ["看图片能否正常打开", "打不开就按重扫处理"],
+        "openable": ["看图片能否正常打开", "打不开就按重扫处理"],
+        "unsupported_format": ["看图片是否能正常预览", "确认是否需要换成常用图片格式"],
+        "dpi_minimum": ["看文字和细节是否清楚", "不清楚就重扫"],
+        "dpi_missing": ["看文字和细节是否清楚", "确认扫描设置是否一致"],
+        "dimensions": ["看图片是否完整显示", "确认画面有没有异常缺失"],
+        "multi_page_image_container": ["看是否夹带多页画面", "确认是否需要拆成单页"],
+        "name_pattern": ["看页面是否放在正确批次", "确认顺序和命名是否需要修正"],
+        "quality_near_blank_page": ["看页面是否真的空白", "留意是否漏扫正文"],
+        "quality_too_dark": ["看页面是否偏暗", "确认文字和印章是否可读"],
+        "quality_too_bright": ["看页面是否过亮", "确认浅色文字是否丢失"],
+        "quality_low_contrast": ["看文字和背景是否分得清", "确认细节是否可读"],
+        "quality_suspected_blur": ["看文字边缘是否模糊", "不清楚就重扫"],
+        "quality_skew_candidate": ["看页面是否倾斜", "确认是否需要重新处理"],
+        "quality_dark_border_candidate": ["看页面四边是否有黑边", "确认裁边后不能切到内容"],
+        "quality_scanline_candidate": ["看页面是否有横线或条纹", "确认是否影响阅读"],
+        "quality_content_edge_cutoff_candidate": ["看页面边缘内容是否被切掉", "留意页码、印章和边注"],
+        "duplicate_name": ["看是否重复放入同一页", "确认是否缺页或顺序错误"],
+        "duplicate_file": ["看是否重复扫描同一页", "确认是否少了相邻页面"],
+        "batch_format_consistency": ["看本页是否属于当前批次", "确认图片能正常预览"],
+        "batch_color_mode_consistency": ["看颜色是否和同批明显不同", "确认是否影响阅读"],
+        "batch_dpi_consistency": ["看清晰度是否和同批明显不同", "确认是否需要重扫"],
+        "batch_orientation_consistency": ["看页面方向是否正确", "确认前后页顺序是否正常"],
+        "processing_failed": ["看原图是否能打开", "能打开就重新处理，打不开就重扫"],
+        "processing_guardrail": ["对比原图和处理后图片", "留意内容是否被裁掉或变暗变亮"],
+        "rescan_required": ["看原图质量是否足够", "确认是否需要重新扫描"],
+        "reprocess_candidate": ["看原图是否可用", "确认处理后图片是否需要重新生成"],
+        "manual_review": ["看画面是否完整可读", "确认是否需要人工处理"],
+        "duplicate_manifest_correction": ["看是否重复或缺页", "确认页面顺序是否要修正"],
+        "processing_retry": ["看原图是否能打开", "确认是否重新处理"],
+        "informational_follow_up": ["看提示问题是否属实", "确认后再通过"],
+    }
+    hints = list(hints_by_ref.get(source_ref, []))
+    note = operator_note
+    if not hints:
+        if "无法打开" in note:
+            hints = ["看图片能否正常打开", "打不开就按重扫处理"]
+        elif "重复" in note:
+            hints = ["看是否重复扫描同一页", "确认是否少了相邻页面"]
+        elif "顺序" in note:
+            hints = ["看前后页顺序是否正常", "确认是否缺页或重复"]
+        elif "黑边" in note or "裁" in note:
+            hints = ["看页面四边是否异常", "确认内容没有被切掉"]
+        elif "倾斜" in note:
+            hints = ["看页面是否倾斜", "确认是否需要重新处理"]
+        elif "偏暗" in note or "亮度" in note:
+            hints = ["看页面明暗是否合适", "确认文字和印章是否可读"]
+        elif "模糊" in note or "清晰" in note:
+            hints = ["看文字边缘是否清楚", "不清楚就重扫"]
+        else:
+            hints = ["看画面是否完整可读", "确认后再选择处理决定"]
+    if suggested_action == "rescan":
+        hints.append("重点判断是否需要重扫")
+    elif suggested_action == "reprocess":
+        hints.append("重点判断是否需要重新处理")
+    elif suggested_action == "keep_original_trace":
+        hints.append("重点判断是否保留原貌")
+    return list(dict.fromkeys(hints))[:3]
 
 
 def _processing_failure_note_zh(reason: str) -> str:

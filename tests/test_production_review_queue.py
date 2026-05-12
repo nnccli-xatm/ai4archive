@@ -88,6 +88,10 @@ class ProductionReviewQueueTests(unittest.TestCase):
         self.assertEqual(by_path["005_duplicate.png"]["suggested_action"], "skip")
         self.assertIn("扫描质检", by_path["001_unopenable.png"]["reason_zh"])
         self.assertIn("处理失败", by_path["003_failed.png"]["reason_zh"])
+        self.assertEqual(by_path["001_unopenable.png"]["focus_hints_zh"][0], "看图片能否正常打开")
+        self.assertIn("看文字边缘是否模糊", by_path["002_blur.png"]["focus_hints_zh"])
+        self.assertIn("看原图是否能打开", by_path["003_failed.png"]["focus_hints_zh"])
+        self.assertIn("看是否重复或缺页", by_path["005_duplicate.png"]["focus_hints_zh"])
         self.assertTrue(all(item["sensitivity"]["local_only"] for item in queue["items"]))
 
         raw = json.dumps(queue, ensure_ascii=False)
@@ -255,9 +259,10 @@ class ProductionReviewQueueTests(unittest.TestCase):
             "crop ratio",
         ]
         for item in queue["items"]:
-            visible = f"{item['reason_zh']} {item['operator_note']}"
+            visible = f"{item['reason_zh']} {item['operator_note']} {' '.join(item['focus_hints_zh'])}"
             self.assertRegex(visible, r"[\u4e00-\u9fff]")
             self.assertIsNone(re.search(r"[A-Za-z_]", visible))
+            self.assertTrue(item["focus_hints_zh"])
             self.assertIsNone(re.search("|".join(re.escape(phrase) for phrase in forbidden_phrases), visible, re.IGNORECASE))
 
 
