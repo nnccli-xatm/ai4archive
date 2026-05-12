@@ -47,6 +47,15 @@ async function expectOperatorStatusHidesPaths(page, forbiddenPaths) {
   }
 }
 
+async function expectProcessingModeRadiosDisabled(page, disabled) {
+  const radios = page.locator('input[name="processingMode"]');
+  await expect(radios).toHaveCount(3);
+  for (let index = 0; index < 3; index += 1) {
+    if (disabled) await expect(radios.nth(index)).toBeDisabled();
+    else await expect(radios.nth(index)).toBeEnabled();
+  }
+}
+
 test.describe("production workbench finish/export browser smoke", () => {
   let server;
   let baseUrl;
@@ -728,10 +737,145 @@ test.describe("production workbench finish/export browser smoke", () => {
 
     await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
     await expect(page.locator("#stateName")).toHaveText("正在处理");
+    await expect(page.locator("#loadStatus")).toHaveText("正在处理，请不要关闭页面或更改文件夹。");
     await expect(page.locator("#progressText")).toHaveText("阶段：生成处理后图片；总数 120 张，已完成 48 张，失败 0 张；状态：正在处理");
     await expect(page.locator("#sourceText")).toHaveText("120 张");
     await expect(page.locator("#readyText")).toHaveText("48 张");
+    await expect(page.locator("#inputPath")).toBeDisabled();
+    await expect(page.locator("#outputPath")).toBeDisabled();
+    await expect(page.locator("#inputFolder")).toBeDisabled();
+    await expect(page.locator("#outputFolder")).toBeDisabled();
+    await expectProcessingModeRadiosDisabled(page, true);
+    await expect(page.getByRole("button", { name: "保存文件夹" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "完成并导出结果" })).toBeDisabled();
     await expectOperatorStatusHidesPaths(page, ["/tmp/running-input", "/tmp/running-output"]);
+  });
+
+  test("locks setup controls during processing and unlocks the right controls after status transitions", async ({ page }) => {
+    let statusState = "running";
+    await page.route("**/api/status", async (route) => {
+      const basePayload = {
+        schema_version: "scan-qc.local-production-workbench.v1",
+        configured: true,
+        folders: {
+          input: "/tmp/transition-input",
+          derivatives: "/tmp/transition-output",
+          metadata: "/tmp/transition-output/_production_workbench",
+        },
+        processing_mode: { id: "standard", label_zh: "标准优化" },
+      };
+      if (statusState === "running") {
+        await route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({
+            ...basePayload,
+            running: true,
+            summary: {
+              schema_version: "scan-qc.production-run.v1",
+              status: "running",
+              operator_summary: {
+                message_zh: "正在生成处理后图片，请保持本机和磁盘可用。",
+                total_source_images: 8,
+                derivative_images_ready: 3,
+                files_needing_attention: 0,
+              },
+              counts: { total_files: 8, processed_files: 3, failed_files: 0 },
+            },
+            progress: {
+              schema_version: "scan-qc.production-run-progress.v1",
+              state: "running",
+              current_step: "process",
+              steps: [{ id: "process", label: "生成处理后图片", state: "running", total_items: 8, completed_items: 3 }],
+            },
+            queue: { schema_version: "scan-qc.production-review-queue.v1", items: [] },
+          }),
+        });
+        return;
+      }
+      if (statusState === "needs_review") {
+        await route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({
+            ...basePayload,
+            running: false,
+            summary: {
+              schema_version: "scan-qc.production-run.v1",
+              status: "needs_review",
+              operator_summary: {
+                message_zh: "有图片需要人工确认。",
+                total_source_images: 8,
+                derivative_images_ready: 8,
+                files_needing_attention: 1,
+              },
+              counts: { total_files: 8, processed_files: 8, failed_files: 0 },
+            },
+            progress: { schema_version: "scan-qc.production-run-progress.v1", state: "needs_review" },
+            queue: {
+              schema_version: "scan-qc.production-review-queue.v1",
+              items: [{
+                local_id: "PRQ000010",
+                reason_zh: "画面需要确认。",
+                focus_hints_zh: ["看图片能否正常打开"],
+                suggested_action: "pass",
+                severity: "P1",
+                preview_source: "unavailable",
+                preview_sources: { original: false, processed: false },
+              }],
+            },
+          }),
+        });
+        return;
+      }
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...basePayload,
+          running: false,
+          summary: {
+            schema_version: "scan-qc.production-run.v1",
+            status: "blocked",
+            operator_summary: {
+              message_zh: "处理没有正常完成。",
+              total_source_images: 8,
+              derivative_images_ready: 3,
+              files_needing_attention: 5,
+            },
+            counts: { total_files: 8, processed_files: 3, failed_files: 5, retry_list_files: 0 },
+          },
+          progress: { schema_version: "scan-qc.production-run-progress.v1", state: "blocked" },
+          queue: { schema_version: "scan-qc.production-review-queue.v1", items: [] },
+        }),
+      });
+    });
+
+    await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
+    await expect(page.locator("#loadStatus")).toHaveText("正在处理，请不要关闭页面或更改文件夹。");
+    await expect(page.locator("#inputPath")).toBeDisabled();
+    await expect(page.locator("#outputPath")).toBeDisabled();
+    await expectProcessingModeRadiosDisabled(page, true);
+    await expect(page.getByRole("button", { name: "保存文件夹" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
+
+    statusState = "needs_review";
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await page.waitForTimeout(1300);
+    await expect(page.locator("#stateName")).toHaveText("需要确认");
+    await expect(page.getByRole("button", { name: "确认通过" })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "完成并导出结果" })).toBeEnabled();
+    await expect(page.locator("#inputPath")).toBeDisabled();
+    await expect(page.getByRole("button", { name: "保存文件夹" })).toBeDisabled();
+
+    statusState = "failed";
+    await page.reload();
+    await expect(page.locator("#stateName")).toHaveText("需处理");
+    await expect(page.locator("#inputPath")).toBeEnabled();
+    await expect(page.locator("#outputPath")).toBeEnabled();
+    await expectProcessingModeRadiosDisabled(page, false);
+    await expect(page.getByRole("button", { name: "保存文件夹" })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "完成并导出结果" })).toBeDisabled();
+    await expectOperatorStatusHidesPaths(page, ["/tmp/transition-input", "/tmp/transition-output"]);
   });
 
   test("sends selected processing mode before starting a local run", async ({ page }) => {

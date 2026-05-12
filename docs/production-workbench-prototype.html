@@ -84,6 +84,12 @@
       background: var(--green-dark);
     }
 
+    .folder-trigger.disabled {
+      opacity: .45;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+
     button:disabled {
       opacity: .45;
       cursor: not-allowed;
@@ -1626,6 +1632,20 @@
       render();
     }
 
+    function setupControlsLocked() {
+      return ["checking", "processing", "needs_review", "ready_to_finish", "complete"].includes(state.status);
+    }
+
+    function inRunStatus() {
+      return state.status === "checking" || state.status === "processing";
+    }
+
+    function setFolderTriggerLocked(label, locked) {
+      label.classList.toggle("disabled", locked);
+      label.setAttribute("aria-disabled", locked ? "true" : "false");
+      label.tabIndex = locked ? -1 : 0;
+    }
+
     function previewZoomPercent() {
       return `${Math.round(state.previewZoom * 100)}%`;
     }
@@ -1805,7 +1825,18 @@
       els.sourceText.textContent = `${state.totalImages} 张`;
       els.readyText.textContent = `${state.readyImages} 张`;
       els.modeStatus.textContent = `当前处理方式：${state.processingModeLabel}`;
-      els.startButton.disabled = !canStartProcessing();
+      const locked = setupControlsLocked();
+      els.inputFolder.disabled = locked;
+      els.outputFolder.disabled = locked;
+      els.inputPath.disabled = locked;
+      els.outputPath.disabled = locked;
+      setFolderTriggerLocked(document.querySelector('label[for="inputFolder"]'), locked);
+      setFolderTriggerLocked(document.querySelector('label[for="outputFolder"]'), locked);
+      els.processingModeInputs.forEach((input) => {
+        input.disabled = locked;
+      });
+      els.saveFoldersButton.disabled = locked;
+      els.startButton.disabled = locked || !canStartProcessing();
       els.exportButton.disabled = !(state.status === "needs_review" && state.reviewItems.length > 0);
       els.completeButton.disabled = !(state.status === "needs_review" || state.status === "ready_to_finish");
       els.finishConfirmPanel.classList.toggle("hidden", !state.finishConfirmationVisible || !["needs_review", "ready_to_finish"].includes(state.status));
@@ -2198,6 +2229,9 @@
       if (draftDecisions && restoreDraftDecisions(draftDecisions)) {
         state.progress = pendingCount() === 0 ? Math.max(state.progress, 94) : Math.max(state.progress, 82);
       }
+      if (inRunStatus()) {
+        els.loadStatus.textContent = "正在处理，请不要关闭页面或更改文件夹。";
+      }
       render();
     }
 
@@ -2237,6 +2271,7 @@
         if (payload.recovery_guidance && !state.recoveryGuidance) state.recoveryGuidance = payload.recovery_guidance;
       } else if (payload.running) {
         setStatus("processing");
+        els.loadStatus.textContent = "正在处理，请不要关闭页面或更改文件夹。";
       } else if (payload.recovery_guidance) {
         state.recoveryGuidance = payload.recovery_guidance;
         render();
@@ -2332,7 +2367,9 @@
         if (!response.ok) return;
         const payload = await response.json();
         applyServerStatus(payload);
-        if (!payload.running && localApi.polling) {
+        if (payload.running && !localApi.polling) {
+          localApi.polling = window.setInterval(pollServerStatus, 1200);
+        } else if (!payload.running && localApi.polling) {
           window.clearInterval(localApi.polling);
           localApi.polling = null;
         }
