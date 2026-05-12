@@ -350,22 +350,43 @@
       font-size: 13px;
     }
 
-    .comparison-controls {
+    .preview-controls {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: minmax(300px, 1fr) minmax(300px, auto) minmax(126px, auto);
       gap: 8px;
+      width: min(100%, 980px);
       padding: 10px;
       border-bottom: 1px solid var(--line);
       background: #ffffff;
+      align-items: center;
     }
 
-    .comparison-controls button {
+    .view-mode-controls,
+    .zoom-controls {
+      display: grid;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .view-mode-controls {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .zoom-controls {
+      grid-template-columns: repeat(4, minmax(0, auto));
+      justify-content: end;
+    }
+
+    .view-mode-controls button,
+    .zoom-controls button {
       min-height: 40px;
+      padding: 7px 11px;
       border-color: var(--line-strong);
       background: var(--field);
+      white-space: nowrap;
     }
 
-    .comparison-controls button.active {
+    .view-mode-controls button.active {
       border-color: #22533d;
       background: #e7f4ec;
       color: #173d2c;
@@ -578,23 +599,8 @@
       background-size: 34px 34px;
     }
 
-    .preview-controls {
-      width: min(100%, 640px);
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, auto)) minmax(120px, 1fr);
-      gap: 8px;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .preview-controls button {
-      min-height: 38px;
-      padding: 7px 11px;
-      white-space: nowrap;
-    }
-
     .zoom-state {
-      min-height: 38px;
+      min-height: 40px;
       display: grid;
       align-items: center;
       border: 1px solid var(--line);
@@ -923,11 +929,20 @@
       }
 
       .preview-controls {
+        grid-template-columns: 1fr;
+      }
+
+      .view-mode-controls {
+        grid-template-columns: 1fr;
+      }
+
+      .zoom-controls {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+        justify-content: stretch;
       }
 
       .zoom-state {
-        grid-column: 1 / -1;
+        width: 100%;
       }
 
       .preview-frame {
@@ -1078,16 +1093,18 @@
 
         <div class="preview-zone">
           <div class="preview-controls" aria-label="图片查看控制">
-            <button type="button" class="secondary" id="fitPreviewButton">适合窗口</button>
-            <button type="button" class="secondary" id="zoomOutButton">缩小</button>
-            <button type="button" class="secondary" id="zoomInButton">放大</button>
-            <button type="button" class="secondary" id="resetPreviewButton">还原</button>
+            <div class="view-mode-controls" id="comparisonControls" aria-label="原图处理后查看方式">
+              <button type="button" class="secondary" data-comparison-mode="original">查看原图</button>
+              <button type="button" class="secondary active" data-comparison-mode="processed">查看处理后图片</button>
+              <button type="button" class="secondary" data-comparison-mode="side_by_side">对比查看</button>
+            </div>
+            <div class="zoom-controls" aria-label="图片大小控制">
+              <button type="button" class="secondary" id="zoomInButton">放大</button>
+              <button type="button" class="secondary" id="zoomOutButton">缩小</button>
+              <button type="button" class="secondary" id="fitPreviewButton">适合窗口</button>
+              <button type="button" class="secondary" id="resetPreviewButton">还原</button>
+            </div>
             <div class="zoom-state" id="zoomState" aria-live="polite">查看：适合窗口</div>
-          </div>
-          <div class="comparison-controls" id="comparisonControls" aria-label="原图处理后查看方式">
-            <button type="button" class="secondary active" data-comparison-mode="processed">查看处理后图片</button>
-            <button type="button" class="secondary" data-comparison-mode="original">查看原图</button>
-            <button type="button" class="secondary" data-comparison-mode="side_by_side">对比查看</button>
           </div>
           <div class="preview-frame" id="previewFrame">
             <div class="scan-line"></div>
@@ -1136,8 +1153,8 @@
               <p id="currentAdvice">可以开始处理后再确认。</p>
             </div>
             <p class="muted" id="reviewPositionText">当前第 0 张 / 共 0 张 / 待确认 0 张。</p>
-            <p class="muted" id="previewSourceText">预览：等待本机处理结果。</p>
-            <p class="muted">大图预览在中间。生产运行时这里显示本机真实预览；原图和处理后图片可对比。只有一张可预览时，按提示查看现有图片；选择一个处理决定后，会记录当前图片，并自动显示下一张待确认图片。</p>
+            <p class="muted" id="previewSourceText">图片查看：等待本机处理结果。</p>
+            <p class="muted">大图查看在中间。生产运行时这里显示本机真实图片；原图和处理后图片可对比。只有一张可查看时，按提示查看现有图片；选择一个处理决定后，会记录当前图片，并自动显示下一张待确认图片。</p>
           </div>
 
           <div class="review-navigation" aria-label="复核导航">
@@ -1544,17 +1561,17 @@
     }
 
     function previewSourceLabel(item, pending) {
-      if (!pending) return "预览：等待本机处理结果。";
+      if (!pending) return "图片查看：等待本机处理结果。";
       if (hasBothPreviews(item)) {
-        if (state.comparisonMode === "original") return "预览：正在查看原图。";
-        if (state.comparisonMode === "processed") return "预览：正在查看处理后图片。";
-        return "预览：正在对比原图和处理后图片。";
+        if (state.comparisonMode === "original") return "图片查看：正在查看原图。";
+        if (state.comparisonMode === "processed") return "图片查看：正在查看处理后图片。";
+        return "图片查看：正在对比原图和处理后图片。";
       }
-      if (item.previewSource === "processed") return "预览：处理后图片。";
-      if (item.previewSource === "original_fallback") return "预览：处理后图片不可用，正在显示原图。";
-      if (item.previewSource === "unavailable") return "预览：本机暂未找到可预览图片。";
-      if (item.originalPreviewUrl) return "预览：原图预览。";
-      return "预览：公开安全示意图。";
+      if (item.previewSource === "processed") return "图片查看：正在查看处理后图片。";
+      if (item.previewSource === "original_fallback") return "图片查看：处理后图片不可用，正在显示原图。";
+      if (item.previewSource === "unavailable") return "图片查看：本机暂未找到可查看图片。";
+      if (item.originalPreviewUrl) return "图片查看：正在查看原图。";
+      return "图片查看：公开安全示意图。";
     }
 
     function folderLabel(input, fallback) {
@@ -1613,7 +1630,7 @@
       els.zoomInButton.disabled = disabled || state.previewZoom >= 3;
       els.resetPreviewButton.disabled = disabled;
       if (!hasImage) {
-        els.zoomState.textContent = "查看：等待图片";
+        els.zoomState.textContent = "查看：暂无图片";
       } else if (state.previewFit) {
         els.zoomState.textContent = "查看：适合窗口";
       } else {
@@ -1691,12 +1708,12 @@
       if (canCompare) {
         if (state.comparisonMode === "original") {
           els.previewFrame.innerHTML = `
-            ${singlePreviewFrame(item.originalPreviewUrl, "本机原图预览", false)}
+            ${singlePreviewFrame(item.originalPreviewUrl, "原图", false)}
             <div class="preview-fallback">正在查看原图。可切到对比查看或查看处理后图片。</div>
           `;
         } else if (state.comparisonMode === "processed") {
           els.previewFrame.innerHTML = `
-            ${singlePreviewFrame(item.processedPreviewUrl, "本机处理后预览", false)}
+            ${singlePreviewFrame(item.processedPreviewUrl, "处理后图片", false)}
             <div class="preview-fallback">正在查看处理后图片。可切到对比查看或查看原图。</div>
           `;
         } else {
@@ -1704,11 +1721,11 @@
             <div class="preview-comparison" aria-label="原图和处理后图片对比">
               <div class="comparison-pane">
                 <div class="comparison-title">原图</div>
-                ${singlePreviewFrame(item.originalPreviewUrl, "本机原图预览", true)}
+                ${singlePreviewFrame(item.originalPreviewUrl, "原图", true)}
               </div>
               <div class="comparison-pane">
                 <div class="comparison-title">处理后图片</div>
-                ${singlePreviewFrame(item.processedPreviewUrl, "本机处理后预览", true)}
+                ${singlePreviewFrame(item.processedPreviewUrl, "处理后图片", true)}
               </div>
             </div>
             <div class="preview-fallback">请对比原图和处理后图片，再选择确认通过、退回重扫、重新处理图片或确认保留原貌。</div>
@@ -1719,8 +1736,8 @@
         const showingProcessed = Boolean(item.processedPreviewUrl);
         const label = showingProcessed ? "处理后图片" : "原图";
         const guidance = showingProcessed
-          ? "原图预览暂不可用。请查看处理后图片，仍可选择一个处理决定。"
-          : "处理后图片预览暂不可用。请查看原图，仍可选择一个处理决定。";
+          ? "原图暂不可用。请先查看处理后图片，仍可选择一个处理决定。"
+          : "处理后图片暂不可用。请先查看原图，仍可选择一个处理决定。";
         els.previewFrame.innerHTML = `
           ${singlePreviewFrame(item.processedPreviewUrl || item.originalPreviewUrl, label, false)}
           <div class="preview-fallback">${guidance}</div>
@@ -1728,7 +1745,7 @@
         applyImageView();
       } else {
         els.previewFrame.innerHTML = previewPlaceholder(pending && item ? item.name : state.status === "complete" ? "确认完成" : "公开安全示意图")
-          + (pending ? '<div class="preview-fallback">本机暂未找到原图或处理后图片预览。请按问题原因和本机文件夹检查后选择决定。</div>' : "");
+          + (pending ? '<div class="preview-fallback">本机暂未找到原图或处理后图片。请检查本机文件夹是否还在，必要时交管理员处理。</div>' : "");
         els.previewText = document.getElementById("previewText");
         updatePreviewControls(false);
       }
