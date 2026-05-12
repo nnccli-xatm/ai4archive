@@ -390,7 +390,10 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
                 "完成并导出结果：处理后图片已保存到输出文件夹，复核结果和交接说明已保存到本机状态文件夹。",
             )
             self.assertEqual(result["decision_summary"]["completion_status"], "complete")
-            self.assertEqual(result["completion_panel"]["title_zh"], "完成并导出结果")
+            self.assertEqual(result["completion_panel"]["title_zh"], "本批次已完成")
+            self.assertEqual(result["completion_panel"]["completion_status_zh"], "已完成")
+            self.assertEqual(result["completion_panel"]["manual_work_zh"], "没有待人工处理图片")
+            self.assertEqual(result["completion_panel"]["admin_handoff_zh"], "不需要")
             self.assertEqual(result["completion_panel"]["total_review_items"], 2)
             self.assertEqual(result["completion_panel"]["reviewed_items"], 2)
             self.assertEqual(result["completion_panel"]["pending_items"], 0)
@@ -400,12 +403,8 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertTrue(result["completion_panel"]["verification_summary_path"].endswith(REVIEW_DECISION_VERIFICATION_JSON))
             self.assertTrue(result["completion_panel"]["completion_note_path"].endswith(COMPLETION_NOTE_TXT))
             self.assertEqual(
-                result["completion_panel"]["checklist_zh"],
-                [
-                    "处理后图片已保存到输出文件夹",
-                    "复核结果和交接说明已保存到本机状态文件夹",
-                    "可以检查输出文件夹后准备下一批",
-                ],
+                result["completion_panel"]["next_steps_zh"],
+                ["查看处理后图片。", "需要继续加工时，点击准备下一批。", "如果仍有异常或不能交接，请交管理员处理。"],
             )
             self.assertTrue((metadata_dir / REVIEW_DECISION_SUMMARY_JSON).exists())
             saved_summary = json.loads((metadata_dir / REVIEW_DECISION_SUMMARY_JSON).read_text(encoding="utf-8"))
