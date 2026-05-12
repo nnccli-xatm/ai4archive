@@ -181,6 +181,14 @@ test.describe("production workbench finish/export browser smoke", () => {
     await page.getByRole("button", { name: "退回重扫或重处理" }).click();
     await expect(page.locator("#previewSourceText")).toHaveText("预览来源：本机暂未找到可预览图片。");
     await expect(page.locator("#zoomState")).toHaveText("查看：等待图片");
+    await page.getByRole("button", { name: "上一张已确认" }).click();
+    await expect(page.locator("#reviewPositionText")).toHaveText("当前第 1 张，共 3 张；已确认 1 张，剩余 2 张。");
+    await expect(page.locator("#currentAdvice")).toContainText("当前决定：退回重扫或重处理。");
+    await page.getByRole("button", { name: "清除当前决定" }).click();
+    await expect(page.locator("#decisionSummary")).toHaveText("已决定 0 项，待决定 3 项。");
+    await expect(page.getByRole("button", { name: "完成并导出结果" })).toBeDisabled();
+    await page.getByRole("button", { name: "确认通过" }).click();
+    await expect(page.locator("#reviewPositionText")).toHaveText("当前第 2 张，共 3 张；已确认 1 张，剩余 2 张。");
     await page.getByRole("button", { name: "确认保留原貌" }).click();
     await page.getByRole("button", { name: "交管理员处理" }).click();
     await expect(page.locator("#decisionSummary")).toHaveText("已决定 3 项，待决定 0 项。");
