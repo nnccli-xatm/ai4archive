@@ -241,6 +241,11 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.getByText("已加载复核队列 3 项，待决定 3 项。")).toBeVisible();
     await expect(page.locator("#reviewPositionText")).toHaveText("当前第 1 张 / 共 3 张 / 待确认 3 张。");
     await expect(page.locator("#currentFocusHints")).toHaveText("看图片能否正常打开；重点判断是否需要重扫");
+    await expect(page.locator("#currentRecommendation")).toHaveText("建议：退回重扫");
+    await expect(page.getByRole("button", { name: "退回重扫" })).toHaveClass(/recommended-choice/);
+    await expect(page.getByRole("button", { name: "确认通过" })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "重新处理图片" })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "确认保留原貌" })).toBeEnabled();
     await expect(page.locator("#previewSourceText")).toHaveText("预览：正在查看处理后图片。");
     await expect(page.locator(".comparison-title")).toHaveCount(0);
     await expect(page.getByText("正在查看处理后图片。可切到对比查看或查看原图。")).toBeVisible();
@@ -279,6 +284,9 @@ test.describe("production workbench finish/export browser smoke", () => {
     await page.locator("#decisionNote").fill("边缘不清楚，需要补扫。");
     await expect(page.getByText("选择一个处理决定后，会记录当前图片，并自动显示下一张待确认图片。")).toBeVisible();
     await page.getByRole("button", { name: "退回重扫" }).click();
+    await expect(page.getByText("已记录：退回重扫。已自动显示下一张待确认图片。已决定 1 项，待决定 2 项。")).toBeVisible();
+    await expect(page.locator("#currentRecommendation")).toHaveText("建议：重新处理图片");
+    await expect(page.getByRole("button", { name: "重新处理图片" })).toHaveClass(/recommended-choice/);
     await expect(page.locator("#previewSourceText")).toHaveText("预览：处理后图片不可用，正在显示原图。");
     await expect(page.getByText("处理后图片预览暂不可用。请查看原图，仍可选择一个处理决定。")).toBeVisible();
     await expect(page.getByRole("button", { name: "对比查看" })).toBeHidden();
@@ -293,10 +301,14 @@ test.describe("production workbench finish/export browser smoke", () => {
     await page.getByRole("button", { name: "确认通过" }).click();
     await expect(page.locator("#reviewPositionText")).toHaveText("当前第 2 张 / 共 3 张 / 待确认 2 张。");
     await expect(page.locator("#operatorName")).toHaveValue("复核员甲");
+    await expect(page.locator("#currentRecommendation")).toHaveText("建议：重新处理图片");
     await page.getByRole("button", { name: "重新处理图片" }).click();
+    await expect(page.getByText("已记录：重新处理图片。已自动显示下一张待确认图片。已决定 2 项，待决定 1 项。")).toBeVisible();
+    await expect(page.locator("#currentRecommendation")).toHaveText("建议：确认保留原貌");
     await expect(page.getByText("原图预览暂不可用。请查看处理后图片，仍可选择一个处理决定。")).toBeVisible();
     await page.locator("#decisionNote").fill("保留原貌即可。");
     await page.getByRole("button", { name: "确认保留原貌" }).click();
+    await expect(page.getByText("已记录：确认保留原貌。所有待确认图片已有决定，可以完成并导出结果。")).toBeVisible();
     await expect(page.locator("#decisionSummary")).toHaveText("已决定 3 项，待决定 0 项。");
     await page.getByRole("button", { name: "放大" }).click();
     await expect(page.locator("#zoomState")).toHaveText("查看：125%");
