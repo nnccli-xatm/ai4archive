@@ -588,6 +588,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     });
 
     await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
+    await expect(page.locator("#progressText")).toHaveText("阶段：处理被阻断；总数 4 张，已完成 2 张，失败 2 张；状态：需要处理");
     await expect(page.locator("#recoveryTitle")).toHaveText("处理没有全部完成");
     await expect(page.locator("#recoveryMessage")).toHaveText("本批次有图片没有处理完，可以先检查文件夹后重试本批次。");
     await expect(page.getByText("检查扫描原图文件夹和输出文件夹是否选对。")).toBeVisible();
@@ -639,11 +640,67 @@ test.describe("production workbench finish/export browser smoke", () => {
     });
 
     await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
+    await expect(page.locator("#progressText")).toHaveText("阶段：处理被阻断；总数 2 张，已完成 0 张，失败 2 张；状态：需要处理");
     await expect(page.locator("#recoveryTitle")).toHaveText("处理没有全部完成");
     await expect(page.locator("#recoveryMessage")).toHaveText("本批次没有处理完，当前不能直接重试。");
     await expect(page.getByRole("button", { name: "重试本批次" })).toBeHidden();
     await expect(page.getByText("请交管理员处理，不要反复点击开始处理。")).toBeVisible();
     await expect(page.getByText("如果文件夹选错了，请返回重新选择文件夹。")).toBeVisible();
+  });
+
+  test("shows aggregate in-progress counts and current stage without private paths", async ({ page }) => {
+    await page.route("**/api/status", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema_version: "scan-qc.local-production-workbench.v1",
+          running: true,
+          configured: true,
+          folders: {
+            input: "/tmp/running-input",
+            derivatives: "/tmp/running-output",
+            metadata: "/tmp/running-output/_production_workbench",
+          },
+          summary: {
+            schema_version: "scan-qc.production-run.v1",
+            status: "running",
+            operator_summary: {
+              message_zh: "正在生成处理后图片，请保持本机和磁盘可用。",
+              total_source_images: 120,
+              openable_source_images: 120,
+              derivative_images_ready: 48,
+              files_needing_attention: 0,
+            },
+            counts: {
+              total_files: 120,
+              processed_files: 48,
+              failed_files: 0,
+            },
+          },
+          progress: {
+            schema_version: "scan-qc.production-run-progress.v1",
+            state: "running",
+            current_step: "process",
+            completed_steps: 1,
+            total_steps: 3,
+            steps: [
+              { id: "scan", label: "检查扫描图片", state: "completed" },
+              { id: "process", label: "生成处理后图片", state: "running", total_items: 120, completed_items: 48 },
+              { id: "summarize", label: "整理处理结果", state: "pending" },
+            ],
+          },
+          queue: { schema_version: "scan-qc.production-review-queue.v1", items: [] },
+          draft_decisions: null,
+        }),
+      });
+    });
+
+    await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
+    await expect(page.locator("#stateName")).toHaveText("正在处理");
+    await expect(page.locator("#progressText")).toHaveText("阶段：生成处理后图片；总数 120 张，已完成 48 张，失败 0 张；状态：正在处理");
+    await expect(page.locator("#sourceText")).toHaveText("120 张");
+    await expect(page.locator("#readyText")).toHaveText("48 张");
+    await expectOperatorStatusHidesPaths(page, ["/tmp/running-input", "/tmp/running-output"]);
   });
 
   test("sends selected processing mode before starting a local run", async ({ page }) => {
@@ -916,6 +973,7 @@ test.describe("production workbench finish/export browser smoke", () => {
       ["fixtures/production-run-running", "#stateAction", "正在处理"],
       ["fixtures/production-run-needs-review", "#stateAction", "有图片需要人工确认"],
       ["fixtures/production-run-finished", "#stateAction", "没有需要人工确认"],
+      ["fixtures/production-run-retryable", "#recoveryTitle", "处理没有全部完成"],
       ["fixtures/production-run-blocked", "#stateAction", "需要管理员处理"],
     ];
 

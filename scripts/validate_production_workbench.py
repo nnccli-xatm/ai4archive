@@ -22,6 +22,7 @@ FIXTURE_STATES = {
     "production-run-running": "running",
     "production-run-needs-review": "needs_review",
     "production-run-finished": "finished",
+    "production-run-retryable": "blocked",
     "production-run-blocked": "blocked",
     "production-run-empty": "finished",
 }
@@ -35,6 +36,10 @@ REQUIRED_TEXT = {
     "请填写输出文件夹",
     "开始处理",
     "正在处理，请等待",
+    "阶段：",
+    "总数",
+    "已完成",
+    "失败",
     "正在检查文件夹",
     "可以开始处理",
     "正在处理",
