@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -113,6 +114,7 @@ def _scan_qc_items(report: dict[str, Any]) -> list[dict[str, Any]]:
             action = "keep_original_trace"
         rule = _text(finding.get("rule"))
         message = _text(finding.get("message"))
+        operator_note = _scan_operator_note_zh(rule, message)
         items.append(
             _item(
                 source_category="scan_qc",
@@ -120,8 +122,8 @@ def _scan_qc_items(report: dict[str, Any]) -> list[dict[str, Any]]:
                 relative_path=_text(finding.get("relative_path")),
                 severity=severity or "P2",
                 suggested_action=action,
-                reason_zh=_scan_reason_zh(severity, rule, message),
-                operator_note=message,
+                reason_zh=_scan_reason_zh(severity, rule, operator_note),
+                operator_note=operator_note,
             )
         )
     return items
@@ -138,6 +140,7 @@ def _processing_review_items(package: dict[str, Any]) -> list[dict[str, Any]]:
         guardrails = [_text(value) for value in record.get("guardrail_failures") or [] if _text(value)]
         if status == "failed":
             reason = _text(record.get("failure_reason") or record.get("error") or "processing failed")
+            operator_note = _processing_failure_note_zh(reason)
             items.append(
                 _item(
                     source_category="processing_failure",
@@ -145,11 +148,12 @@ def _processing_review_items(package: dict[str, Any]) -> list[dict[str, Any]]:
                     relative_path=path,
                     severity="P0",
                     suggested_action="reprocess",
-                    reason_zh=f"处理失败：{reason}。请重新处理，若源图无法打开则转为重扫。",
-                    operator_note=reason,
+                    reason_zh=f"处理失败：{operator_note}。请重新处理，若源图无法打开则转为重扫。",
+                    operator_note=operator_note,
                 )
             )
         for warning in warnings + guardrails:
+            operator_note = _processing_guardrail_note_zh(warning)
             items.append(
                 _item(
                     source_category="guardrail_warning",
@@ -157,8 +161,8 @@ def _processing_review_items(package: dict[str, Any]) -> list[dict[str, Any]]:
                     relative_path=path,
                     severity="P1",
                     suggested_action="keep_original_trace",
-                    reason_zh=f"处理保护线提示：{warning}。请人工确认成品，必要时保留原始轨迹。",
-                    operator_note=warning,
+                    reason_zh=f"处理保护线提示：{operator_note}。请人工确认成品，必要时保留原始轨迹。",
+                    operator_note=operator_note,
                 )
             )
     return items
@@ -178,7 +182,7 @@ def _rework_action_items(action_list: dict[str, Any]) -> list[dict[str, Any]]:
             for record in action.get("processing_retry_evidence", [])
             if isinstance(record, dict)
         ]
-        note = "; ".join(value for value in messages + retry_messages if value)
+        note = _rework_operator_note_zh(action_type, messages, retry_messages)
         items.append(
             _item(
                 source_category="rework_action",
@@ -287,6 +291,99 @@ def _scan_reason_zh(severity: str, rule: str, message: str) -> str:
     return f"扫描质检提示：{message or rule}。确认无影响后可通过。"
 
 
+def _scan_operator_note_zh(rule: str, message: str) -> str:
+    rule_notes = {
+        "openability": "源图无法打开",
+        "unsupported_format": "文件格式不在本批次支持范围内",
+        "dpi_minimum": "图片扫描分辨率低于最低要求",
+        "dpi_missing": "图片缺少水平或垂直扫描分辨率信息",
+        "dimensions": "图片宽度或高度信息缺失",
+        "multi_page_image_container": "图片容器包含多页或多帧，请确认交付规范",
+        "name_pattern": "文件名不符合本批次命名规则",
+        "quality_near_blank_page": "页面疑似空白或内容过少，请确认是否漏扫",
+        "quality_too_dark": "页面亮度偏暗，请确认是否需要重扫或重处理",
+        "quality_too_bright": "页面亮度偏高且对比度偏低，请确认成像质量",
+        "quality_low_contrast": "页面对比度偏低，请确认文字或图像是否清晰",
+        "quality_suspected_blur": "文字边缘疑似模糊，请确认是否需要重扫",
+        "quality_skew_candidate": "页面疑似轻微倾斜，请确认是否需要纠偏处理",
+        "quality_dark_border_candidate": "页面边缘疑似存在黑边，请确认是否需要裁边处理",
+        "quality_scanline_candidate": "页面疑似存在扫描线或条纹，请复核源图",
+        "quality_content_edge_cutoff_candidate": "页面边缘疑似有正文、印章或页码被裁切，请复核源图",
+        "duplicate_name": "同一文件夹内存在重名文件，请修正清单或文件名",
+        "duplicate_file": "发现重复文件，请确认是否需要剔除",
+        "batch_format_consistency": "同批可打开图片格式不一致，请确认批次配置",
+        "batch_color_mode_consistency": "同批可打开图片颜色模式不一致，请确认批次配置",
+        "batch_dpi_consistency": "同批可打开图片扫描分辨率不一致，请确认扫描参数",
+        "batch_orientation_consistency": "同批图片方向不一致，请确认页面方向或清单顺序",
+    }
+    note = rule_notes.get(rule)
+    if note:
+        return _append_first_number(note, message)
+    return "质检规则触发，请人工复核"
+
+
+def _processing_failure_note_zh(reason: str) -> str:
+    normalized = reason.lower()
+    if "openable" in normalized or "cannot open" in normalized or "could not be opened" in normalized:
+        return "源图无法打开"
+    if "guardrail" in normalized:
+        return "处理保护线触发导致处理失败"
+    if "missing relative_path" in normalized:
+        return "处理清单缺少相对路径"
+    if "duplicate derivative source output is missing" in normalized:
+        return "重复源图的派生成品缺失"
+    if "preflight failed" in normalized:
+        return "预检未通过"
+    return "处理失败，请重新处理并复核源图"
+
+
+def _processing_guardrail_note_zh(warning: str) -> str:
+    normalized = warning.lower()
+    if "pixel_change_ratio" in normalized:
+        return "处理后像素变化比例超过复核阈值"
+    if "crop_ratio" in normalized or "crop ratio" in normalized:
+        return "裁切比例超过保护线"
+    if "brightness_delta" in normalized:
+        return "处理前后亮度变化超过保护线"
+    if "contrast_delta" in normalized:
+        return "处理前后对比度变化超过保护线"
+    if "deskew" in normalized:
+        return "纠偏处理结果需要人工复核"
+    if "guardrail" in normalized:
+        return "处理保护线触发"
+    return "处理保护线触发，请人工复核成品"
+
+
+def _rework_operator_note_zh(action_type: str, messages: list[str], retry_messages: list[str]) -> str:
+    notes = [_rework_message_note_zh(message) for message in messages + retry_messages if message]
+    notes = [note for note in notes if note]
+    if notes:
+        return "；".join(dict.fromkeys(notes))
+    return {
+        "rescan_required": "需要重扫",
+        "reprocess_candidate": "建议重新处理",
+        "manual_review": "需要人工复核",
+        "duplicate_manifest_correction": "清单或顺序需要修正",
+        "processing_retry": "需要重新处理",
+        "informational_follow_up": "提示信息需要跟进",
+    }.get(action_type, "需要人工确认")
+
+
+def _rework_message_note_zh(message: str) -> str:
+    normalized = message.lower()
+    if "duplicate" in normalized:
+        return "疑似重复记录需要修正"
+    if "sequence" in normalized or "order" in normalized:
+        return "页面顺序需要人工确认"
+    if "openable" in normalized or "cannot open" in normalized or "could not be opened" in normalized:
+        return "源图无法打开"
+    if "guardrail" in normalized:
+        return "处理保护线触发"
+    if "filename" in normalized or "name" in normalized:
+        return "文件名需要人工确认"
+    return "返工信息需要人工确认"
+
+
 def _rework_reason_zh(action_type: str, note: str) -> str:
     prefix = {
         "rescan_required": "返工清单要求重扫",
@@ -296,7 +393,7 @@ def _rework_reason_zh(action_type: str, note: str) -> str:
         "processing_retry": "返工清单要求处理重试",
         "informational_follow_up": "返工清单提示信息跟进",
     }.get(action_type, "返工清单要求人工确认")
-    return f"{prefix}：{note or action_type}。"
+    return f"{prefix}：{note or '需要人工确认'}。"
 
 
 def _severity(value: Any) -> str:
@@ -306,3 +403,8 @@ def _severity(value: Any) -> str:
 
 def _text(value: Any) -> str:
     return str(value).strip() if value is not None else ""
+
+
+def _append_first_number(text: str, source: str) -> str:
+    match = re.search(r"\d+(?:\.\d+)?", source)
+    return f"{text}（参考值 {match.group(0)}）" if match else text

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -191,6 +192,73 @@ class ProductionReviewQueueTests(unittest.TestCase):
             self.assertEqual([item["relative_path"] for item in saved["items"]], ["b.png", "a.png", "c.png"])
             self.assertIn("LOCAL-ONLY PRODUCTION REVIEW QUEUE", first)
             self.assertNotIn("sha256", first.lower())
+
+    def test_operator_visible_queue_text_localizes_known_english_rule_phrases(self) -> None:
+        scan_qc_report = {
+            "schema_version": "scan-qc.phase1.v1",
+            "findings": [
+                {
+                    "relative_path": "low_dpi.png",
+                    "rule": "dpi_minimum",
+                    "severity": "P0",
+                    "message": "Image DPI is below minimum 200.",
+                },
+                {
+                    "relative_path": "dpi_mixed.png",
+                    "rule": "batch_dpi_consistency",
+                    "severity": "P2",
+                    "message": "Openable files in batch use multiple DPI values: 150x150, 300x300",
+                },
+                {
+                    "relative_path": "scanline.png",
+                    "rule": "quality_scanline_candidate",
+                    "severity": "P2",
+                    "message": (
+                        "Conservative scan-time detector found a horizontal scanline/streak candidate "
+                        "with score 0.9, location ratio 0.5, and band width 3; "
+                        "review source image for scanner artifact."
+                    ),
+                },
+                {
+                    "relative_path": "skew.png",
+                    "rule": "quality_skew_candidate",
+                    "severity": "P2",
+                    "message": "Conservative scan-time skew estimate is 2.0 degrees with confidence 0.5; review for deskew.",
+                },
+            ],
+        }
+        processing_review_package = {
+            "schema_version": "scan-qc.processing-review.v1",
+            "files": [
+                {
+                    "source_relative_path": "guardrail.png",
+                    "status": "processed",
+                    "processing_warnings": ["pixel_change_ratio exceeds review threshold"],
+                    "guardrail_failures": ["crop ratio over safety limit"],
+                }
+            ],
+        }
+
+        queue = build_production_review_queue(
+            scan_qc_report=scan_qc_report,
+            processing_review_package=processing_review_package,
+        )
+
+        forbidden_phrases = [
+            "Image DPI is below minimum",
+            "Openable files in batch",
+            "Conservative scan-time",
+            "review source image",
+            "scanner artifact",
+            "deskew",
+            "pixel_change_ratio",
+            "crop ratio",
+        ]
+        for item in queue["items"]:
+            visible = f"{item['reason_zh']} {item['operator_note']}"
+            self.assertRegex(visible, r"[\u4e00-\u9fff]")
+            self.assertIsNone(re.search(r"[A-Za-z_]", visible))
+            self.assertIsNone(re.search("|".join(re.escape(phrase) for phrase in forbidden_phrases), visible, re.IGNORECASE))
 
 
 if __name__ == "__main__":
