@@ -1071,6 +1071,7 @@
       state.status = "ready";
       applyServerStatus(payload);
       els.loadStatus.textContent = "文件夹已保存，可以开始处理。";
+      render();
     }
 
     async function pollServerStatus() {

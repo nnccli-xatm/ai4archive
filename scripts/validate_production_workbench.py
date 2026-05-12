@@ -204,6 +204,23 @@ def main() -> int:
         errors.append("missing production-run status loader")
     if "operator_summary" not in html:
         errors.append("missing operator summary mapping")
+    save_folders_match = re.search(r"async function saveFolders\(\) \{(?P<body>.*?)\n    \}", html, re.S)
+    if not save_folders_match:
+        errors.append("missing saveFolders implementation")
+    else:
+        save_folders_body = save_folders_match.group("body")
+        for required_token in [
+            'input_dir: els.inputPath.value.trim()',
+            'derivatives_dir: els.outputPath.value.trim()',
+            'state.status = "ready";',
+            'els.loadStatus.textContent = "文件夹已保存，可以开始处理。";',
+        ]:
+            if required_token not in save_folders_body:
+                errors.append(f"saved-folder configure flow missing token: {required_token}")
+        success_copy_index = save_folders_body.find('els.loadStatus.textContent = "文件夹已保存，可以开始处理。";')
+        render_after_success_index = save_folders_body.find("render();", success_copy_index)
+        if success_copy_index == -1 or render_after_success_index == -1:
+            errors.append("saved-folder configure flow does not render after successful save")
     cli = CLI.read_text(encoding="utf-8")
     local_workbench = LOCAL_WORKBENCH.read_text(encoding="utf-8")
     for required_entrypoint_token in [
