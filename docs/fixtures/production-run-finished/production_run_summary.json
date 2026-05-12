@@ -3,6 +3,20 @@
   "status": "finished",
   "status_label_zh": "已完成",
   "ready_for_operator_handoff": true,
+  "recovery_guidance": {
+    "schema_version": "scan-qc.local-recovery-guidance.v1",
+    "aggregate_only": true,
+    "kind": "no_remaining_work",
+    "title_zh": "没有剩余处理任务",
+    "message_zh": "处理后图片已生成，可以继续复核或完成导出。",
+    "next_steps_zh": [
+      "确认处理后图片数量正常，然后完成导出。"
+    ],
+    "failed_files": 0,
+    "retryable_files": 0,
+    "derivative_images_ready": 120,
+    "total_files": 120
+  },
   "operator_summary": {
     "message": "处理后图片已生成，可以完成导出。",
     "message_zh": "处理后图片已生成，可以完成导出。",

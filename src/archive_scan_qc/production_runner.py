@@ -168,6 +168,7 @@ def build_production_run_summary(
         "status": status,
         "status_label_zh": _status_label_zh(status),
         "ready_for_operator_handoff": status == "finished",
+        "recovery_guidance": _recovery_guidance(status, processing_summary),
         "operator_summary": {
             "message": operator_message,
             "message_zh": operator_message,
@@ -273,6 +274,54 @@ def _operator_message(status: str, p0_findings: int, failed_files: int) -> str:
     if failed_files:
         blockers.append(f"{failed_files} 个文件处理失败")
     return "需要处理：" + "，".join(blockers) + "。"
+
+
+def _recovery_guidance(status: str, processing_summary: dict[str, Any]) -> dict[str, Any]:
+    failed_files = int(processing_summary.get("failed_files", 0))
+    retry_list_files = int(processing_summary.get("retry_list_files", 0))
+    derivative_images_ready = int(processing_summary.get("processed_files", 0)) + int(processing_summary.get("resumed_files", 0))
+    total_files = int(processing_summary.get("total_files", 0))
+    guidance = {
+        "schema_version": "scan-qc.local-recovery-guidance.v1",
+        "aggregate_only": True,
+        "failed_files": failed_files,
+        "retryable_files": retry_list_files,
+        "derivative_images_ready": derivative_images_ready,
+        "total_files": total_files,
+    }
+    if status == "blocked":
+        guidance.update(
+            {
+                "kind": "processing_failed_retryable" if retry_list_files else "processing_failed_admin",
+                "title_zh": "处理没有全部完成",
+                "message_zh": "有文件处理失败。请先检查原图是否能打开、文件夹是否选对、磁盘空间是否足够。",
+                "next_steps_zh": [
+                    "确认扫描原图文件夹和处理后输出文件夹选对。",
+                    "检查磁盘空间是否足够，原图是否能正常打开。",
+                    "如果只是少量文件失败，可重新开始处理；系统会尽量复用已经生成的处理后图片。",
+                    "如果再次失败，请交管理员查看本机状态文件夹中的报告。",
+                ],
+            }
+        )
+    elif status == "finished":
+        guidance.update(
+            {
+                "kind": "no_remaining_work",
+                "title_zh": "没有剩余处理任务",
+                "message_zh": "处理后图片已生成，可以继续复核或完成导出。",
+                "next_steps_zh": ["确认处理后图片数量正常，然后完成导出。"],
+            }
+        )
+    else:
+        guidance.update(
+            {
+                "kind": "review_required",
+                "title_zh": "需要人工确认",
+                "message_zh": "自动处理已完成，仍有图片需要人工确认。",
+                "next_steps_zh": ["查看大图后选择确认通过、返工或交管理员处理。"],
+            }
+        )
+    return guidance
 
 
 def _production_status(p0_findings: int, failed_files: int) -> str:

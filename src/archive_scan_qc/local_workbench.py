@@ -167,11 +167,19 @@ class WorkbenchController:
         progress = _read_json(Path(metadata_dir) / PRODUCTION_RUN_PROGRESS_JSON) if metadata_dir else None
         queue = self._queue_with_preview_sources(Path(metadata_dir)) if metadata_dir else None
         draft_decisions = _read_json(Path(metadata_dir) / REVIEW_DECISION_DRAFT_JSON) if metadata_dir else None
+        recovery_guidance = _status_recovery_guidance(
+            configured=bool(input_dir and derivatives_dir and metadata_dir),
+            running=running,
+            summary=summary,
+            progress=progress,
+            last_error=last_error,
+        )
         return {
             "schema_version": SERVER_SCHEMA,
             "running": running,
             "configured": bool(input_dir and derivatives_dir and metadata_dir),
             "last_error_zh": last_error,
+            "recovery_guidance": recovery_guidance,
             "folders": {
                 "input": input_dir,
                 "derivatives": derivatives_dir,
@@ -417,6 +425,92 @@ def _safe_relative_path(value: str) -> Path:
     if not stripped or candidate.is_absolute() or ".." in candidate.parts:
         raise ValueError("复核记录预览路径不安全。")
     return candidate
+
+
+def _status_recovery_guidance(
+    *,
+    configured: bool,
+    running: bool,
+    summary: dict[str, Any] | None,
+    progress: dict[str, Any] | None,
+    last_error: str | None,
+) -> dict[str, Any]:
+    base = {
+        "schema_version": "scan-qc.local-recovery-guidance.v1",
+        "aggregate_only": True,
+        "failed_files": 0,
+        "retryable_files": 0,
+        "derivative_images_ready": 0,
+        "total_files": 0,
+    }
+    if not configured:
+        return {
+            **base,
+            "kind": "folder_setup_missing",
+            "title_zh": "文件夹还没有准备好",
+            "message_zh": "请先填写扫描原图文件夹和处理后输出文件夹。",
+            "next_steps_zh": [
+                "确认扫描原图文件夹存在，里面是本批次原图。",
+                "确认处理后输出文件夹可以写入，磁盘空间足够。",
+                "保存文件夹后再开始处理。",
+            ],
+        }
+    if last_error:
+        return {
+            **base,
+            "kind": "processing_failed_admin",
+            "title_zh": "本机处理启动失败",
+            "message_zh": "处理没有正常完成，请检查文件夹、磁盘空间和图片是否能打开。",
+            "next_steps_zh": [
+                "确认两个文件夹位置没有填错。",
+                "确认磁盘空间足够，图片文件可以正常打开。",
+                "重新开始处理；如果仍失败，请交管理员查看本机状态文件夹。",
+            ],
+        }
+    if isinstance(summary, dict):
+        guidance = summary.get("recovery_guidance")
+        if isinstance(guidance, dict):
+            return guidance
+        counts = summary.get("counts") if isinstance(summary.get("counts"), dict) else {}
+        failed_files = int(counts.get("failed_files") or 0)
+        retryable_files = int(counts.get("retry_list_files") or 0)
+        derivative_images_ready = int(counts.get("processed_files") or 0) + int(counts.get("resumed_files") or 0)
+        total_files = int(counts.get("total_files") or 0)
+        aggregate = {
+            **base,
+            "failed_files": failed_files,
+            "retryable_files": retryable_files,
+            "derivative_images_ready": derivative_images_ready,
+            "total_files": total_files,
+        }
+        if summary.get("status") == "blocked" or failed_files:
+            return {
+                **aggregate,
+                "kind": "processing_failed_retryable" if retryable_files else "processing_failed_admin",
+                "title_zh": "处理没有全部完成",
+                "message_zh": "有文件处理失败。请检查文件夹、磁盘空间和图片是否能打开。",
+                "next_steps_zh": [
+                    "确认扫描原图文件夹和处理后输出文件夹选对。",
+                    "检查磁盘空间是否足够，原图是否能正常打开。",
+                    "重新开始处理；如果仍失败，请交管理员查看本机状态文件夹。",
+                ],
+            }
+        if summary.get("status") == "finished":
+            return {
+                **aggregate,
+                "kind": "no_remaining_work",
+                "title_zh": "没有剩余处理任务",
+                "message_zh": "处理后图片已生成，可以继续复核或完成导出。",
+                "next_steps_zh": ["确认处理后图片数量正常，然后完成导出。"],
+            }
+    state = progress.get("state") if isinstance(progress, dict) else None
+    return {
+        **base,
+        "kind": "processing_running" if running or state == "running" else "ready_to_start",
+        "title_zh": "正在处理" if running or state == "running" else "可以开始处理",
+        "message_zh": "本机正在生成处理后图片，请稍候。" if running or state == "running" else "文件夹已保存，可以开始处理。",
+        "next_steps_zh": ["等待处理完成后查看结果。"] if running or state == "running" else ["点击开始处理。"],
+    }
 
 
 def _preview_candidates(input_dir: Path, derivatives_dir: Path, relative_path: Path) -> list[tuple[Path, str]]:

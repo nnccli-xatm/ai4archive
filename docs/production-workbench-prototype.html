@@ -274,6 +274,37 @@
       color: var(--muted);
     }
 
+    .recovery-box {
+      border: 1px solid #d99c4a;
+      border-radius: 8px;
+      background: #fff8ed;
+      padding: 12px;
+      display: grid;
+      gap: 8px;
+    }
+
+    .recovery-box h3 {
+      color: #783b08;
+    }
+
+    .recovery-box p,
+    .recovery-box li {
+      color: var(--ink-2);
+    }
+
+    .recovery-box ul {
+      margin: 0;
+      padding-left: 20px;
+    }
+
+    .recovery-counts {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
     .maintenance-loader {
       display: grid;
       gap: 10px;
@@ -607,6 +638,12 @@
         </div>
 
         <p class="workbench-message" id="loadStatus">请先填写两个本机文件夹位置，然后点击“保存文件夹”。</p>
+        <div class="recovery-box hidden" id="recoveryBox">
+          <h3 id="recoveryTitle">文件夹还没有准备好</h3>
+          <p id="recoveryMessage">请先填写扫描原图文件夹和处理后输出文件夹。</p>
+          <div class="recovery-counts" id="recoveryCounts"></div>
+          <ul id="recoverySteps"></ul>
+        </div>
 
         <details class="maintenance-loader">
           <summary>维护入口</summary>
@@ -706,7 +743,7 @@
           </div>
           <div class="handoff-box hidden" id="failurePanel">
             <h3>处理失败</h3>
-            <p>请检查文件夹、磁盘空间和管理员提示，然后重新开始。</p>
+            <p>请按左侧提示检查文件夹、磁盘空间和图片是否能打开；需要时重新开始或交管理员处理。</p>
           </div>
         </div>
       </aside>
@@ -733,6 +770,7 @@
       lastDraftMessage: "",
       operatorMessage: "",
       reviewQueueText: "",
+      recoveryGuidance: null,
       reviewItems: initialReviewItems.map((item) => ({ ...item })),
       queueLoaded: false,
       queueSource: "内置演示",
@@ -765,6 +803,11 @@
       previewFrame: document.getElementById("previewFrame"),
       previewText: document.getElementById("previewText"),
       queueText: document.getElementById("queueText"),
+      recoveryBox: document.getElementById("recoveryBox"),
+      recoveryTitle: document.getElementById("recoveryTitle"),
+      recoveryMessage: document.getElementById("recoveryMessage"),
+      recoveryCounts: document.getElementById("recoveryCounts"),
+      recoverySteps: document.getElementById("recoverySteps"),
       currentIssue: document.getElementById("currentIssue"),
       currentAdvice: document.getElementById("currentAdvice"),
       reviewPositionText: document.getElementById("reviewPositionText"),
@@ -785,6 +828,21 @@
       needs_review: ["需要确认", "有图片需要人工确认", "请看中间大图，然后在右侧选择处理决定。"],
       complete: ["已完成", "批次已完成", "处理后的图片已经准备好，请查看输出位置。"],
       failed: ["处理失败", "处理失败", "请检查两个文件夹是否选对、磁盘空间是否足够，然后重新开始。"]
+    };
+
+    const setupRecoveryGuidance = {
+      kind: "folder_setup_missing",
+      title_zh: "文件夹还没有准备好",
+      message_zh: "请先填写扫描原图文件夹和处理后输出文件夹。",
+      next_steps_zh: [
+        "确认扫描原图文件夹存在，里面是本批次原图。",
+        "确认处理后输出文件夹可以写入，磁盘空间足够。",
+        "保存文件夹后再开始处理。"
+      ],
+      failed_files: 0,
+      retryable_files: 0,
+      derivative_images_ready: 0,
+      total_files: 0
     };
 
     const runStateMap = {
@@ -947,13 +1005,79 @@
       els.completeButton.disabled = !(state.status === "needs_review" && pendingCount() === 0);
       els.outputPanel.classList.toggle("hidden", state.status !== "complete");
       els.failurePanel.classList.toggle("hidden", state.status !== "failed");
+      renderRecoveryGuidance();
       els.outputPlace.textContent = state.outputSummary;
       els.decisionSavePlace.textContent = state.decisionSaveSummary;
       renderDecisionArea();
     }
 
+    function guidanceFromSummary(summary) {
+      if (summary && summary.recovery_guidance) return summary.recovery_guidance;
+      const counts = (summary && summary.counts) || {};
+      const failed = toNumber(counts.failed_files);
+      const retryable = toNumber(counts.retry_list_files);
+      const ready = toNumber(counts.processed_files) + toNumber(counts.resumed_files);
+      if (summary && (summary.status === "blocked" || failed > 0)) {
+        return {
+          kind: retryable > 0 ? "processing_failed_retryable" : "processing_failed_admin",
+          title_zh: "处理没有全部完成",
+          message_zh: "有文件处理失败。请检查文件夹、磁盘空间和图片是否能打开。",
+          next_steps_zh: [
+            "确认扫描原图文件夹和处理后输出文件夹选对。",
+            "检查磁盘空间是否足够，原图是否能正常打开。",
+            "重新开始处理；如果仍失败，请交管理员查看本机状态文件夹。"
+          ],
+          failed_files: failed,
+          retryable_files: retryable,
+          derivative_images_ready: ready,
+          total_files: toNumber(counts.total_files)
+        };
+      }
+      if (summary && summary.status === "finished") {
+        return {
+          kind: "no_remaining_work",
+          title_zh: "没有剩余处理任务",
+          message_zh: "处理后图片已生成，可以继续复核或完成导出。",
+          next_steps_zh: ["确认处理后图片数量正常，然后完成导出。"],
+          failed_files: failed,
+          retryable_files: retryable,
+          derivative_images_ready: ready,
+          total_files: toNumber(counts.total_files)
+        };
+      }
+      return null;
+    }
+
+    function renderRecoveryGuidance() {
+      const guidance = state.recoveryGuidance || (!state.inputChosen || !state.outputChosen ? setupRecoveryGuidance : null);
+      const show = guidance && ["failed", "choose_input", "choose_output", "ready", "complete"].includes(state.status);
+      els.recoveryBox.classList.toggle("hidden", !show);
+      if (!show) return;
+      els.recoveryTitle.textContent = guidance.title_zh || "下一步";
+      els.recoveryMessage.textContent = guidance.message_zh || "请按提示继续。";
+      const counts = [
+        ["失败文件", guidance.failed_files],
+        ["可重试", guidance.retryable_files],
+        ["已生成", guidance.derivative_images_ready],
+        ["原图总数", guidance.total_files]
+      ].filter((item) => toNumber(item[1]) > 0);
+      els.recoveryCounts.innerHTML = counts.map((item) => `<span>${item[0]}：${toNumber(item[1])}</span>`).join("");
+      const steps = Array.isArray(guidance.next_steps_zh) ? guidance.next_steps_zh : [];
+      els.recoverySteps.innerHTML = steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("");
+    }
+
     function toNumber(value) {
       return Number.isFinite(Number(value)) ? Number(value) : 0;
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      })[char]);
     }
 
     function deriveProgress(summary, progress) {
@@ -1082,6 +1206,7 @@
       state.attentionFiles = toNumber(operator.files_needing_attention);
       state.outputSummary = state.readyImages ? `已准备 ${state.readyImages} 张处理后图片` : "处理后图片将写入已选择的输出文件夹";
       state.operatorMessage = operator.message_zh || operator.message || (progress && progress.message_zh) || text[2];
+      state.recoveryGuidance = guidanceFromSummary(summary);
       state.reviewQueueText = state.attentionFiles
         ? (nextStatus === "failed" ? `需要管理员处理 ${state.attentionFiles} 个。` : `待人工确认 ${state.attentionFiles} 个。`)
         : "没有待人工确认图片。";
@@ -1104,6 +1229,12 @@
         state.outputChosen = true;
         state.status = "failed";
         state.operatorMessage = payload.last_error_zh;
+        state.recoveryGuidance = payload.recovery_guidance || {
+          kind: "processing_failed_admin",
+          title_zh: "本机处理启动失败",
+          message_zh: "处理没有正常完成，请检查文件夹、磁盘空间和图片是否能打开。",
+          next_steps_zh: ["确认两个文件夹位置没有填错。", "确认磁盘空间足够，图片文件可以正常打开。", "重新开始处理；如果仍失败，请交管理员查看本机状态文件夹。"]
+        };
         els.loadStatus.textContent = payload.last_error_zh;
         render();
         return;
@@ -1122,8 +1253,12 @@
       }
       if (payload.summary || payload.progress) {
         applyRunStatus(payload.summary || { status: payload.running ? "running" : "pending", operator_summary: {} }, payload.progress, payload.queue, payload.draft_decisions);
+        if (payload.recovery_guidance && !state.recoveryGuidance) state.recoveryGuidance = payload.recovery_guidance;
       } else if (payload.running) {
         setStatus("processing");
+      } else if (payload.recovery_guidance) {
+        state.recoveryGuidance = payload.recovery_guidance;
+        render();
       }
     }
 
@@ -1390,6 +1525,7 @@
       state.lastDraftMessage = "";
       state.operatorMessage = "";
       state.reviewQueueText = "";
+      state.recoveryGuidance = null;
       state.reviewItems = initialReviewItems.map((item) => ({ ...item }));
       state.queueLoaded = false;
       state.queueSource = "内置演示";

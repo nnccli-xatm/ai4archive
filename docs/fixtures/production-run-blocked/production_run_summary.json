@@ -3,6 +3,23 @@
   "status": "blocked",
   "status_label_zh": "已阻断",
   "ready_for_operator_handoff": false,
+  "recovery_guidance": {
+    "schema_version": "scan-qc.local-recovery-guidance.v1",
+    "aggregate_only": true,
+    "kind": "processing_failed_retryable",
+    "title_zh": "处理没有全部完成",
+    "message_zh": "有文件处理失败。请先检查原图是否能打开、文件夹是否选对、磁盘空间是否足够。",
+    "next_steps_zh": [
+      "确认扫描原图文件夹和处理后输出文件夹选对。",
+      "检查磁盘空间是否足够，原图是否能正常打开。",
+      "如果只是少量文件失败，可重新开始处理；系统会尽量复用已经生成的处理后图片。",
+      "如果再次失败，请交管理员查看本机状态文件夹中的报告。"
+    ],
+    "failed_files": 3,
+    "retryable_files": 3,
+    "derivative_images_ready": 117,
+    "total_files": 120
+  },
   "operator_summary": {
     "message": "有文件未能完成处理，请联系管理员查看。",
     "message_zh": "有文件未能完成处理，请联系管理员查看。",
@@ -14,7 +31,8 @@
   "counts": {
     "total_files": 120,
     "processed_files": 117,
-    "failed_files": 3
+    "failed_files": 3,
+    "retry_list_files": 3
   },
   "progress": {
     "state": "completed",
