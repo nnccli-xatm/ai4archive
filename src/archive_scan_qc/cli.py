@@ -29,6 +29,7 @@ from .evidence_bundle import EVIDENCE_BUNDLE_JSON, write_evidence_bundle_summary
 from .final_handoff import FINAL_HANDOFF_JSON, write_final_handoff_summary
 from .handoff import write_delivery_handoff_manifest
 from .preflight import PreflightConfig, run_preflight, write_preflight_report
+from .production_runner import PRODUCTION_RUN_PROGRESS_JSON, PRODUCTION_RUN_SUMMARY_JSON, ProductionRunConfig, run_production_folder
 from .processing import ProcessingOptions, process_images
 from .processing_plan import write_processing_plan
 from .processing_review import write_processing_review_package
@@ -180,6 +181,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_plan_main(argv[1:])
     if argv and argv[0] == "preflight":
         return _main_preflight(argv[1:])
+    if argv and argv[0] == "production-run":
+        return _main_production_run(argv[1:])
     if argv and argv[0] == "capability-probe":
         return _main_capability_probe(argv[1:])
     if argv and argv[0] == "deep-inspection-provider-probe":
@@ -330,6 +333,80 @@ def _main_preflight(argv: list[str]) -> int:
     print(f"Warnings: {len(report['warnings'])}")
     print(f"Preflight report: {path}")
     return 0 if report["status"] == "pass" else 1
+
+
+def _main_production_run(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="archive-scan-qc production-run",
+        description="运行本地扫描图片批量质检和处理后图片生成流程，并写出生产界面可读取的状态文件。",
+    )
+    parser.add_argument("--input", required=True, type=Path, help="要处理的扫描图片文件夹。")
+    parser.add_argument("--derivatives-out", required=True, type=Path, help="处理后图片输出文件夹。")
+    parser.add_argument(
+        "--metadata-out",
+        required=True,
+        type=Path,
+        help="生产摘要、进度和后台报告输出文件夹。",
+    )
+    parser.add_argument("--project", default="default-project", help="项目编号。")
+    parser.add_argument("--batch", default="default-batch", help="批次编号。")
+    parser.add_argument("--min-dpi", default=None, type=int, help="最低 DPI 要求。")
+    parser.add_argument("--name-pattern", default=None, help="可选文件名规则。")
+    parser.add_argument("--manifest-csv", default=None, type=Path, help="可选批次清单 CSV，需包含 relative_path 列。")
+    parser.add_argument("--rules-profile", default=None, type=Path, help="可选质检规则配置 JSON。")
+    parser.add_argument("--auto-crop", action="store_true", help="保守裁切处理后图片边缘。")
+    parser.add_argument("--deskew", action="store_true", help="保守校正处理后图片的小角度倾斜。")
+    parser.add_argument("--trim-dark-border", action="store_true", help="保守清理扫描黑边。")
+    parser.add_argument("--despeckle", action="store_true", help="清理孤立黑点。")
+    parser.add_argument(
+        "--despeckle-backend",
+        choices=("fallback", "numpy"),
+        default="fallback",
+        help="去黑点处理后端，默认使用保守模式，numpy 需显式开启。",
+    )
+    parser.add_argument("--resume-processing", action="store_true", help="尽量跳过已经成功生成的处理后图片。")
+    parser.add_argument("--workers", default=None, type=_positive_int, help="本机最大工作线程数，填 1 表示单线程。")
+    parser.add_argument(
+        "--analysis-provider-command",
+        default=None,
+        help="可选本地离线深度分析命令。",
+    )
+    args = parser.parse_args(argv)
+    rules_profile = _load_rules_profile(parser, args)
+    try:
+        summary = run_production_folder(
+            ProductionRunConfig(
+                project_id=args.project,
+                batch_id=args.batch,
+                input_dir=args.input,
+                derivative_output_dir=args.derivatives_out,
+                metadata_output_dir=args.metadata_out,
+                min_dpi=args.min_dpi if args.min_dpi is not None else 200,
+                name_pattern=args.name_pattern,
+                manifest_csv=args.manifest_csv,
+                rules_profile=rules_profile,
+                auto_crop=args.auto_crop,
+                deskew=args.deskew,
+                trim_dark_border=args.trim_dark_border,
+                despeckle=args.despeckle,
+                despeckle_backend=args.despeckle_backend,
+                resume_processing=args.resume_processing,
+                workers=args.workers,
+                analysis_provider_command=args.analysis_provider_command,
+            )
+        )
+    except (AnalysisProviderError, OSError, ValueError) as exc:
+        parser.error(str(exc))
+    print(f"生产状态: {summary['status_label_zh']} ({summary['status']})")
+    print(f"操作提示: {summary['operator_summary']['message_zh']}")
+    print(f"扫描原图数量: {summary['operator_summary']['total_source_images']}")
+    print(f"已生成处理后图片: {summary['operator_summary']['derivative_images_ready']}")
+    print(f"需要人工处理: {summary['operator_summary']['files_needing_attention']}")
+    print(f"处理后图片文件夹: {summary['operator_summary']['derivative_image_folder']}")
+    print(f"生产摘要: {args.metadata_out / PRODUCTION_RUN_SUMMARY_JSON}")
+    print(f"处理进度: {args.metadata_out / PRODUCTION_RUN_PROGRESS_JSON}")
+    print("原图是否被修改: 否")
+    return 0 if summary["ready_for_operator_handoff"] else 1
 
 
 def _main_capability_probe(argv: list[str]) -> int:

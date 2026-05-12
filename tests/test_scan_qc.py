@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import csv
+import hashlib
 import importlib.util
 import io
 import json
@@ -43,6 +44,7 @@ from archive_scan_qc.processing import (
 )
 from archive_scan_qc.processing_plan import build_processing_plan
 from archive_scan_qc.processing_review import build_processing_review_package
+from archive_scan_qc.production_runner import ProductionRunConfig, run_production_folder
 from archive_scan_qc.reports import build_review_summary, write_reports, write_review_export, write_review_summary
 from archive_scan_qc.review_decisions import build_review_decision_verification_summary
 from archive_scan_qc.rework import build_rework_action_list, write_rework_action_list
@@ -6129,6 +6131,83 @@ class ScanQcTest(unittest.TestCase):
             self.assertIn("Processing workers:", output)
             self.assertIn("Processing files/min:", output)
 
+    def test_production_runner_writes_derivatives_summary_and_progress_without_modifying_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            source = input_dir / "A001_0001.jpg"
+            Image.new("RGB", (48, 36), "white").save(source, dpi=(300, 300))
+            original_sha = _sha256_for_test(source)
+
+            summary = run_production_folder(
+                ProductionRunConfig(
+                    input_dir=input_dir,
+                    derivative_output_dir=derivatives_dir,
+                    metadata_output_dir=metadata_dir,
+                    project_id="project",
+                    batch_id="batch",
+                    workers=1,
+                    auto_crop=True,
+                )
+            )
+
+            self.assertEqual(summary["schema_version"], "scan-qc.production-run.v1")
+            self.assertEqual(summary["status"], "finished")
+            self.assertEqual(summary["status_label_zh"], "已完成")
+            self.assertTrue(summary["ready_for_operator_handoff"])
+            self.assertIn("处理后图片已生成", summary["operator_summary"]["message_zh"])
+            self.assertEqual(summary["operator_summary"]["total_source_images"], 1)
+            self.assertEqual(summary["operator_summary"]["derivative_images_ready"], 1)
+            self.assertFalse(summary["source_images_modified"])
+            self.assertEqual(_sha256_for_test(source), original_sha)
+            self.assertTrue((derivatives_dir / "images" / "A001_0001.jpg").exists())
+            self.assertTrue((derivatives_dir / "processing_manifest.json").exists())
+            self.assertTrue((metadata_dir / "production_run_summary.json").exists())
+            self.assertTrue((metadata_dir / "production_run_progress.json").exists())
+            self.assertTrue((metadata_dir / "admin_reports" / "scan_qc_report.json").exists())
+            progress = json.loads((metadata_dir / "production_run_progress.json").read_text(encoding="utf-8"))
+            self.assertEqual(progress["state"], "finished")
+            self.assertEqual(progress["state_label_zh"], "已完成")
+            self.assertEqual(progress["steps"][0]["label"], "检查扫描图片")
+            self.assertEqual(progress["completed_steps"], 3)
+
+    def test_cli_production_run_is_operator_friendly(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            Image.new("RGB", (48, 36), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "production-run",
+                        "--input",
+                        str(input_dir),
+                        "--derivatives-out",
+                        str(derivatives_dir),
+                        "--metadata-out",
+                        str(metadata_dir),
+                        "--workers",
+                        "1",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            output = stdout.getvalue()
+            self.assertIn("生产状态: 已完成 (finished)", output)
+            self.assertIn("处理后图片文件夹:", output)
+            self.assertIn("原图是否被修改: 否", output)
+            saved = json.loads((metadata_dir / "production_run_summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(saved["operator_summary"]["files_needing_attention"], 0)
+            self.assertEqual(saved["operator_summary"]["message"], saved["operator_summary"]["message_zh"])
+
     def test_cli_rejects_invalid_workers_without_writing_reports(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -6954,6 +7033,14 @@ def _synthetic_text_page() -> Image.Image:
     for y in range(42, 132, 18):
         draw.rectangle((48, y, 190, y + 4), fill=(20, 20, 20))
     return image
+
+
+def _sha256_for_test(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _synthetic_ink_text_page() -> Image.Image:
