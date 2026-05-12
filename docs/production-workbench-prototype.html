@@ -1074,7 +1074,7 @@
           <small>只用于查看本机已经生成的处理状态，不会开始处理。</small>
         </details>
 
-        <p class="guard-note">原图不会被覆盖。浏览器辅助确认只用于提示；浏览器辅助确认只会提示看到的项目数，操作员仍要确认输入框里的本机文件夹位置填写正确。单文件打开时不读取目录内容，不执行处理，不显示本机私有路径；从本机入口启动时由本机服务生成处理后图片。已预先填写演练文件夹时，打开后可直接查看批次状态。</p>
+        <p class="guard-note">原图不会被覆盖。浏览器辅助确认只会提示看到的项目数，操作员仍要确认输入框里的本机文件夹位置填写正确。单文件打开时不读取目录内容，不执行处理，不显示本机私有路径；从本机入口启动时由本机服务生成处理后图片。已预先填写演练文件夹时，打开后可直接查看批次状态。</p>
       </aside>
 
       <section class="image-desk" aria-label="大图生产区">
@@ -1601,6 +1601,13 @@
         input.checked = input.value === nextMode;
       });
       els.modeStatus.textContent = `当前处理方式：${state.processingModeLabel}`;
+    }
+
+    function invalidateFolderReadiness(message) {
+      if (!state.folderReadiness) return;
+      state.folderReadiness = null;
+      if (state.status === "ready") state.status = "choose_input";
+      els.loadStatus.textContent = message || "文件夹已更改，请重新保存文件夹。";
     }
 
     function setStatus(next) {
@@ -2272,14 +2279,14 @@
         els.loadStatus.textContent = "请从本机入口启动后，在输入框填写本机文件夹位置再保存。";
         updateChosenFromPaths();
         render();
-        return;
+        return false;
       }
       if (!pathChosen(els.inputPath) || !pathChosen(els.outputPath)) {
         state.inputChosen = pathChosen(els.inputPath);
         state.outputChosen = pathChosen(els.outputPath);
         els.loadStatus.textContent = blockedStartMessage();
         render();
-        return;
+        return false;
       }
       let payload;
       try {
@@ -2306,7 +2313,7 @@
           total_files: 0
         };
         render();
-        return;
+        return false;
       }
       state.inputChosen = true;
       state.outputChosen = true;
@@ -2315,6 +2322,7 @@
       els.loadStatus.textContent = "文件夹已保存，可以开始处理。";
       els.loadStatus.textContent = canStartProcessing() ? "文件夹已保存，可以开始处理。原图不会被覆盖，处理后图片会准备到输出文件夹。" : blockedStartMessage();
       render();
+      return canStartProcessing();
     }
 
     async function pollServerStatus() {
@@ -2356,7 +2364,12 @@
         state.status = "checking";
         els.loadStatus.textContent = "正在检查文件夹。";
         render();
-        await saveFolders();
+        const readyAfterSave = await saveFolders();
+        if (!readyAfterSave || !canStartProcessing()) {
+          els.loadStatus.textContent = blockedStartMessage();
+          render();
+          return;
+        }
         const payload = await apiPost("/api/start", {});
         applyServerStatus(payload);
         els.loadStatus.textContent = "正在处理，请等待；处理完成后再复核。";
@@ -2582,17 +2595,20 @@
     });
 
     els.inputPath.addEventListener("input", () => {
+      invalidateFolderReadiness("扫描原图文件夹已更改，请重新保存文件夹。");
       state.inputChosen = pathChosen(els.inputPath) || (els.inputFolder.files && els.inputFolder.files.length > 0);
       render();
     });
 
     els.outputPath.addEventListener("input", () => {
+      invalidateFolderReadiness("处理后输出文件夹已更改，请重新保存文件夹。");
       state.outputChosen = pathChosen(els.outputPath) || (els.outputFolder.files && els.outputFolder.files.length > 0);
       render();
     });
 
     els.processingModeInputs.forEach((input) => {
       input.addEventListener("change", () => {
+        invalidateFolderReadiness("处理方式已更改，请重新保存文件夹。");
         setProcessingMode(input.value);
         render();
       });
