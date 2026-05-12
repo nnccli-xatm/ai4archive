@@ -1100,6 +1100,20 @@
           warning_items: [{ code: "aggregate_warning_review_backlog" }],
           blocking_counts_by_code: {},
           warning_counts_by_code: { aggregate_warning_review_backlog: 1 },
+          despeckle_backend: {
+            requested_backend: "numpy",
+            effective_backend_mode: "numpy",
+            numpy_available: true,
+            backend_counts: {
+              numpy: 7,
+              fallback: 0,
+              not_applicable: 0,
+              unknown: 0
+            },
+            fallback_count: 0,
+            requested_numpy_fallback_count: 0,
+            warning_codes: []
+          },
           summary: {
             known_artifacts: 12,
             artifacts_present: 9,
@@ -1193,18 +1207,41 @@
           checks_passed: 11,
           checks_failed: 2,
           blocking_item_count: 3,
-          warning_item_count: 2,
+          warning_item_count: 4,
           blocking_items: [
             { code: "aggregate_artifact_missing" },
             { code: "unsupported_input" }
           ],
-          warning_items: [{ code: "aggregate_warning_review_backlog" }],
+          warning_items: [
+            { code: "aggregate_warning_review_backlog" },
+            { code: "despeckle_numpy_unavailable_fallback" },
+            { code: "despeckle_numpy_requested_all_fallback" }
+          ],
           blocking_counts_by_code: {
             aggregate_artifact_missing: 2,
             unsupported_input: 1
           },
           warning_counts_by_code: {
-            aggregate_warning_review_backlog: 2
+            aggregate_warning_review_backlog: 2,
+            despeckle_numpy_unavailable_fallback: 1,
+            despeckle_numpy_requested_all_fallback: 1
+          },
+          despeckle_backend: {
+            requested_backend: "numpy",
+            effective_backend_mode: "fallback",
+            numpy_available: false,
+            backend_counts: {
+              numpy: 0,
+              fallback: 7,
+              not_applicable: 0,
+              unknown: 0
+            },
+            fallback_count: 7,
+            requested_numpy_fallback_count: 7,
+            warning_codes: [
+              "despeckle_numpy_unavailable_fallback",
+              "despeckle_numpy_requested_all_fallback"
+            ]
           },
           summary: {
             known_artifacts: 12,
@@ -2322,7 +2359,9 @@
       const throughput = objectValue(payload.throughput);
       const timing = objectValue(payload.timing);
       const performance = objectValue(summary.performance || payload.performance);
+      const direct = objectValue(payload.despeckle_backend || summary.despeckle_backend);
       const candidates = [
+        direct,
         objectValue(summary.processing_operation_timings).despeckle,
         objectValue(throughput.processing_operation_timings).despeckle,
         objectValue(payload.processing_operation_timings).despeckle,
@@ -2333,22 +2372,38 @@
       ].filter(item => item && typeof item === "object" && !Array.isArray(item));
       const source = candidates.find(item =>
         item.backend_mode !== undefined ||
+        item.effective_backend_mode !== undefined ||
+        item.requested_backend !== undefined ||
         item.numpy_available !== undefined ||
+        item.fallback_count !== undefined ||
+        item.requested_numpy_fallback_count !== undefined ||
+        Array.isArray(item.warning_codes) ||
         (item.backend_counts && typeof item.backend_counts === "object" && !Array.isArray(item.backend_counts))
       );
       if (!source) {
         return {
           recognized: false,
+          requestedBackend: "Not provided",
+          effectiveBackendMode: "Not provided",
           backendMode: "Not provided",
           numpyAvailable: null,
-          backendCounts: []
+          backendCounts: [],
+          fallbackCount: null,
+          requestedNumpyFallbackCount: null,
+          warningCodes: []
         };
       }
+      const effectiveBackendMode = text(source.effective_backend_mode || source.backend_mode, "unknown");
       return {
         recognized: true,
-        backendMode: text(source.backend_mode, "unknown"),
+        requestedBackend: text(source.requested_backend, "Not provided"),
+        effectiveBackendMode,
+        backendMode: effectiveBackendMode,
         numpyAvailable: firstBoolean(source.numpy_available),
-        backendCounts: aggregateCodeCounts(source.backend_counts)
+        backendCounts: aggregateCodeCounts(source.backend_counts),
+        fallbackCount: firstNullableNumber(source.fallback_count),
+        requestedNumpyFallbackCount: firstNullableNumber(source.requested_numpy_fallback_count),
+        warningCodes: aggregateStringCodes(source.warning_codes)
       };
     }
 
@@ -2867,8 +2922,11 @@
         ["Despeckled Count", aggregate.processingReview.despeckledCount]
       ];
       const despeckleBackendRows = [
-        ["Backend Mode", aggregate.despeckleBackend.backendMode],
-        ["NumPy Available", aggregate.despeckleBackend.numpyAvailable === null ? "Not provided" : aggregate.despeckleBackend.numpyAvailable]
+        ["Requested Backend", aggregate.despeckleBackend.requestedBackend],
+        ["Effective Backend Mode", aggregate.despeckleBackend.effectiveBackendMode],
+        ["NumPy Available", aggregate.despeckleBackend.numpyAvailable === null ? "Not provided" : aggregate.despeckleBackend.numpyAvailable],
+        ["Fallback Count", aggregate.despeckleBackend.fallbackCount === null ? "Not provided" : aggregate.despeckleBackend.fallbackCount],
+        ["Requested NumPy Fallback Count", aggregate.despeckleBackend.requestedNumpyFallbackCount === null ? "Not provided" : aggregate.despeckleBackend.requestedNumpyFallbackCount]
       ];
       const providerProbeRows = [
         ["Provider Count", aggregate.providerProbe.providerCount],
@@ -2958,12 +3016,14 @@
       return `
         <section class="subpanel">
           <h3>Despeckle Backend Summary</h3>
-          <p class="muted">Public-safe aggregate backend status. Shows only backend mode, NumPy availability, and aggregate backend counts from operation timing summaries.</p>
+          <p class="muted">Public-safe aggregate backend status. Shows only backend names, availability booleans, counts, and warning codes from aggregate summaries.</p>
           <div class="table-wrap">
             <table><tbody>${rows.map(([label, value]) => kv(label, value)).join("")}</tbody></table>
           </div>
           <h3>Backend Counts</h3>
           ${backend.backendCounts.length ? aggregateCountTable(backend.backendCounts, "Backend") : `<div class="empty">No despeckle backend counts were present.</div>`}
+          <h3>Despeckle Backend Warning Codes</h3>
+          ${aggregateCodeList("Despeckle backend warnings", backend.warningCodes)}
         </section>`;
     }
 
