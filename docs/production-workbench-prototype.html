@@ -305,6 +305,12 @@
       font-size: 13px;
     }
 
+    .recovery-action {
+      justify-self: start;
+      min-height: 40px;
+      margin-top: 2px;
+    }
+
     .maintenance-loader {
       display: grid;
       gap: 10px;
@@ -753,6 +759,7 @@
           <p id="recoveryMessage">请先填写扫描原图文件夹和处理后输出文件夹。</p>
           <div class="recovery-counts" id="recoveryCounts"></div>
           <ul id="recoverySteps"></ul>
+          <button type="button" class="recovery-action hidden" id="retryButton">重试处理</button>
         </div>
 
         <details class="maintenance-loader">
@@ -971,6 +978,7 @@
       recoveryMessage: document.getElementById("recoveryMessage"),
       recoveryCounts: document.getElementById("recoveryCounts"),
       recoverySteps: document.getElementById("recoverySteps"),
+      retryButton: document.getElementById("retryButton"),
       currentIssue: document.getElementById("currentIssue"),
       currentAdvice: document.getElementById("currentAdvice"),
       reviewPositionText: document.getElementById("reviewPositionText"),
@@ -1356,7 +1364,7 @@
           next_steps_zh: [
             "确认扫描原图文件夹和处理后输出文件夹选对。",
             "检查磁盘空间是否足够，原图是否能正常打开。",
-            "重新开始处理；如果仍失败，请交管理员查看本机状态文件夹。"
+            retryable > 0 ? "点击重试处理，系统会继续使用当前文件夹位置。" : "如果仍失败，请交管理员查看本机状态文件夹。"
           ],
           failed_files: failed,
           retryable_files: retryable,
@@ -1431,6 +1439,9 @@
       els.recoveryCounts.innerHTML = counts.map((item) => `<span>${item[0]}：${toNumber(item[1])}</span>`).join("");
       const steps = Array.isArray(guidance.next_steps_zh) ? guidance.next_steps_zh : [];
       els.recoverySteps.innerHTML = steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("");
+      const retryable = guidance.kind === "processing_failed_retryable" && toNumber(guidance.retryable_files) > 0;
+      els.retryButton.classList.toggle("hidden", !retryable);
+      els.retryButton.disabled = !retryable || state.status === "processing" || state.status === "checking";
     }
 
     function toNumber(value) {
@@ -1609,7 +1620,7 @@
           kind: "processing_failed_admin",
           title_zh: "本机处理启动失败",
           message_zh: "处理没有正常完成，请检查文件夹、磁盘空间和图片是否能打开。",
-          next_steps_zh: ["确认两个文件夹位置没有填错。", "确认磁盘空间足够，图片文件可以正常打开。", "重新开始处理；如果仍失败，请交管理员查看本机状态文件夹。"]
+          next_steps_zh: ["确认两个文件夹位置没有填错。", "确认磁盘空间足够，图片文件可以正常打开。", "如果仍失败，请交管理员查看本机状态文件夹。"]
         };
         els.loadStatus.textContent = payload.last_error_zh;
         render();
@@ -1764,6 +1775,33 @@
           state.recoveryGuidance = guidance;
           render();
         }
+      }
+    }
+
+    async function retryLocalRun() {
+      if (!localApi.enabled) {
+        els.loadStatus.textContent = "请从本机入口启动后重试真实批次；静态打开不会启动处理。";
+        render();
+        return;
+      }
+      try {
+        state.status = "checking";
+        els.loadStatus.textContent = "正在按当前文件夹重试处理。";
+        render();
+        const payload = await apiPost("/api/retry", {});
+        applyServerStatus(payload);
+        els.loadStatus.textContent = "正在重试处理，请等待；系统会继续使用当前文件夹。";
+        window.clearInterval(localApi.polling);
+        localApi.polling = window.setInterval(pollServerStatus, 1200);
+      } catch (error) {
+        els.loadStatus.textContent = error.message || "重试处理没有启动。";
+        const guidance = error.payload && (error.payload.preflight_guidance || error.payload.recovery_guidance);
+        if (guidance) {
+          state.status = "failed";
+          state.operatorMessage = error.message || guidance.message_zh || "重试处理没有启动。";
+          state.recoveryGuidance = guidance;
+        }
+        render();
       }
     }
 
@@ -1936,6 +1974,7 @@
     let timer = null;
     els.saveFoldersButton.addEventListener("click", saveFolders);
     els.startButton.addEventListener("click", startLocalRun);
+    els.retryButton.addEventListener("click", retryLocalRun);
 
     els.completeButton.addEventListener("click", finishBatch);
     els.exportButton.addEventListener("click", exportDecisions);
