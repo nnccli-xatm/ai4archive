@@ -87,6 +87,7 @@ test.describe("production workbench finish/export browser smoke", () => {
         {
           local_id: "PRQ000001",
           reason_zh: "画面需要确认。",
+          focus_hints_zh: ["看图片能否正常打开", "重点判断是否需要重扫"],
           suggested_action: "rescan",
           severity: "P1",
           preview_source: "comparison",
@@ -95,6 +96,7 @@ test.describe("production workbench finish/export browser smoke", () => {
         {
           local_id: "PRQ000002",
           reason_zh: "页面顺序需要确认。",
+          focus_hints_zh: ["看页面是否倾斜", "确认是否需要重新处理"],
           suggested_action: "reprocess",
           severity: "P2",
           preview_source: "original_fallback",
@@ -103,6 +105,7 @@ test.describe("production workbench finish/export browser smoke", () => {
         {
           local_id: "PRQ000003",
           reason_zh: "质量结果需要确认。",
+          focus_hints_zh: ["对比原图和处理后图片", "重点判断是否保留原貌"],
           suggested_action: "keep_original_trace",
           severity: "P0",
           preview_source: "processed",
@@ -204,6 +207,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.getByRole("heading", { name: "当前图片" })).toBeVisible();
     await expect(page.getByText("已加载复核队列 3 项，待决定 3 项。")).toBeVisible();
     await expect(page.locator("#reviewPositionText")).toHaveText("当前第 1 张 / 共 3 张 / 待确认 3 张。");
+    await expect(page.locator("#currentFocusHints")).toHaveText("看图片能否正常打开；重点判断是否需要重扫");
     await expect(page.locator("#previewSourceText")).toHaveText("预览：正在对比原图和处理后图片。");
     await expect(page.locator(".comparison-title", { hasText: "原图" })).toBeVisible();
     await expect(page.locator(".comparison-title", { hasText: "处理后图片" })).toBeVisible();
