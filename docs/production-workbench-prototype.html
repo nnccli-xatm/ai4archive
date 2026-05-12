@@ -63,6 +63,7 @@
     }
 
     button,
+    input[type="text"],
     .folder-trigger,
     .admin-link {
       min-height: 42px;
@@ -77,6 +78,16 @@
       cursor: pointer;
       text-align: center;
       text-decoration: none;
+    }
+
+    input[type="text"] {
+      width: 100%;
+      border-color: var(--line-strong);
+      background: var(--field);
+      color: var(--ink);
+      cursor: text;
+      font-weight: 520;
+      text-align: left;
     }
 
     button:hover,
@@ -554,6 +565,7 @@
           <div class="folder-row">
             <strong>选择扫描原图文件夹</strong>
             <small id="inputStatus">尚未选择扫描原图文件夹。</small>
+            <input id="inputPath" type="text" autocomplete="off" placeholder="填写本机原图文件夹路径">
             <label class="folder-trigger" for="inputFolder">选择原图</label>
             <input class="visually-hidden" id="inputFolder" type="file" webkitdirectory directory multiple>
           </div>
@@ -561,12 +573,14 @@
           <div class="folder-row">
             <strong>选择处理后输出文件夹</strong>
             <small id="outputStatus">尚未选择处理后输出文件夹。</small>
+            <input id="outputPath" type="text" autocomplete="off" placeholder="填写本机输出文件夹路径">
             <label class="folder-trigger" for="outputFolder">选择输出</label>
             <input class="visually-hidden" id="outputFolder" type="file" webkitdirectory directory multiple>
           </div>
         </div>
 
         <div class="run-controls">
+          <button id="saveFoldersButton" class="secondary">保存文件夹</button>
           <button id="startButton" disabled>开始处理</button>
           <button id="pauseButton" class="warning" disabled>暂停</button>
           <button id="resumeButton" class="secondary" disabled>继续处理</button>
@@ -701,11 +715,14 @@
     const els = {
       inputFolder: document.getElementById("inputFolder"),
       outputFolder: document.getElementById("outputFolder"),
+      inputPath: document.getElementById("inputPath"),
+      outputPath: document.getElementById("outputPath"),
       summaryFile: document.getElementById("summaryFile"),
       fixtureSelect: document.getElementById("fixtureSelect"),
       loadStatus: document.getElementById("loadStatus"),
       inputStatus: document.getElementById("inputStatus"),
       outputStatus: document.getElementById("outputStatus"),
+      saveFoldersButton: document.getElementById("saveFoldersButton"),
       startButton: document.getElementById("startButton"),
       pauseButton: document.getElementById("pauseButton"),
       resumeButton: document.getElementById("resumeButton"),
@@ -800,6 +817,10 @@
       return `已选择，包含 ${input.files.length} 个项目。`;
     }
 
+    function pathLabel(path, fallback) {
+      return path ? "文件夹已保存。" : fallback;
+    }
+
     function setStatus(next) {
       state.status = next;
       if (next === "processing") {
@@ -838,7 +859,7 @@
     }
 
     function render() {
-      if (!state.inputChosen) state.status = "choose_input";
+      if (!state.inputChosen && state.status !== "failed") state.status = "choose_input";
       else if (!state.outputChosen && state.status !== "failed") state.status = "choose_output";
       else if (state.inputChosen && state.outputChosen && state.status === "choose_output") state.status = "ready";
 
@@ -860,6 +881,54 @@
       els.failurePanel.classList.toggle("hidden", state.status !== "failed");
       els.outputPlace.textContent = state.outputSummary;
       renderDecisionArea();
+    }
+
+    async function saveFolderConfiguration() {
+      const inputPath = els.inputPath.value.trim();
+      const outputPath = els.outputPath.value.trim();
+      if (!inputPath || !outputPath) {
+        state.inputChosen = Boolean(inputPath);
+        state.outputChosen = Boolean(outputPath);
+        state.status = inputPath ? "choose_output" : "choose_input";
+        els.inputStatus.textContent = pathLabel(inputPath, "请填写扫描原图文件夹。");
+        els.outputStatus.textContent = pathLabel(outputPath, "请填写处理后输出文件夹。");
+        els.loadStatus.textContent = "两个文件夹都填写后才能保存。";
+        render();
+        return;
+      }
+
+      els.saveFoldersButton.disabled = true;
+      els.loadStatus.textContent = "正在保存文件夹。";
+      try {
+        const response = await fetch("/api/configure", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ input_path: inputPath, output_path: outputPath })
+        });
+        if (!response.ok) throw new Error("configure failed");
+        const payload = await response.json().catch(() => ({}));
+        state.inputChosen = true;
+        state.outputChosen = true;
+        state.status = "ready";
+        state.progress = 0;
+        state.readyImages = 0;
+        state.totalImages = toNumber(payload.total_source_images);
+        state.outputSummary = "已选择的处理后输出文件夹";
+        state.operatorMessage = "";
+        state.reviewQueueText = "";
+        els.inputStatus.textContent = "文件夹已保存。";
+        els.outputStatus.textContent = "文件夹已保存。";
+        els.loadStatus.textContent = "文件夹已保存，可以开始处理。";
+        render();
+      } catch (error) {
+        state.status = "failed";
+        state.inputChosen = false;
+        state.outputChosen = false;
+        els.loadStatus.textContent = "本机服务未连接，文件夹未保存。";
+        render();
+      } finally {
+        els.saveFoldersButton.disabled = false;
+      }
     }
 
     function toNumber(value) {
@@ -1055,6 +1124,8 @@
       render();
     });
 
+    els.saveFoldersButton.addEventListener("click", saveFolderConfiguration);
+
     let timer = null;
     els.startButton.addEventListener("click", () => {
       setStatus("processing");
@@ -1085,6 +1156,8 @@
       state.decisions = {};
       els.inputFolder.value = "";
       els.outputFolder.value = "";
+      els.inputPath.value = "";
+      els.outputPath.value = "";
       els.summaryFile.value = "";
       els.fixtureSelect.value = "";
       els.inputStatus.textContent = "尚未选择扫描原图文件夹。";

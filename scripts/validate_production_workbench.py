@@ -28,6 +28,7 @@ REQUIRED_TEXT = {
     "管理维护工作台",
     "选择扫描原图文件夹",
     "选择处理后输出文件夹",
+    "保存文件夹",
     "可以开始处理",
     "正在处理",
     "已暂停，可以继续",
@@ -96,6 +97,51 @@ CONTRACT_DECISION_MAP = {
     "admin_handling": "blocked",
     "keep_original_trace": "false_positive",
 }
+
+
+def validate_saved_folder_start_flow(html: str) -> list[str]:
+    """Catch regressions where saved valid folders do not unlock the start button."""
+    errors: list[str] = []
+    required_tokens = [
+        'id="inputPath"',
+        'id="outputPath"',
+        'id="saveFoldersButton"',
+        'fetch("/api/configure"',
+        "saveFoldersButton.addEventListener(\"click\", saveFolderConfiguration)",
+        "两个文件夹都填写后才能保存。",
+        "文件夹已保存，可以开始处理。",
+        "本机服务未连接，文件夹未保存。",
+        'startButton.addEventListener("click"',
+    ]
+    for token in required_tokens:
+        if token not in html:
+            errors.append(f"missing saved-folder start-flow token: {token}")
+
+    configure_match = re.search(r"async function saveFolderConfiguration\(\) \{(?P<body>.*?)\n    \}", html, re.S)
+    if not configure_match:
+        errors.append("missing saveFolderConfiguration implementation")
+        return errors
+
+    body = configure_match.group("body")
+    for token in [
+        "const inputPath = els.inputPath.value.trim();",
+        "const outputPath = els.outputPath.value.trim();",
+        "if (!inputPath || !outputPath)",
+        "state.inputChosen = true;",
+        "state.outputChosen = true;",
+        'state.status = "ready";',
+        "render();",
+    ]:
+        if token not in body:
+            errors.append(f"saved-folder configure flow does not preserve ready state: {token}")
+
+    ready_index = body.find('state.status = "ready";')
+    render_index = body.find("render();", ready_index)
+    if ready_index == -1 or render_index == -1 or render_index < ready_index:
+        errors.append("saved-folder configure flow does not render after setting ready state")
+    if 'els.startButton.disabled = state.status !== "ready";' not in html:
+        errors.append("start button is not enabled from the ready state")
+    return errors
 
 
 class VisibleTextParser(HTMLParser):
@@ -200,6 +246,7 @@ def main() -> int:
         errors.append("missing production-run status loader")
     if "operator_summary" not in html:
         errors.append("missing operator summary mapping")
+    errors.extend(validate_saved_folder_start_flow(html))
     for fixture_name, expected_status in FIXTURE_STATES.items():
         fixture_dir = FIXTURE_ROOT / fixture_name
         summary_path = fixture_dir / "production_run_summary.json"

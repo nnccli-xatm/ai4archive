@@ -67,12 +67,24 @@ FRONTEND_ISSUE_DRIVER_PATH = REPO_ROOT / "scripts" / "frontend_issue_driver.py"
 LOCAL_PROVIDER_EXAMPLE = REPO_ROOT / "examples" / "local_analysis_provider.py"
 ISSUE_PLAN_PATH = REPO_ROOT / "scripts" / "generate_issue_plan.py"
 SYNTHETIC_PERFORMANCE_PATH = REPO_ROOT / "scripts" / "run_synthetic_performance_comparison.py"
+PRODUCTION_WORKBENCH_PATH = REPO_ROOT / "docs" / "production-workbench-prototype.html"
+PRODUCTION_WORKBENCH_VALIDATOR_PATH = REPO_ROOT / "scripts" / "validate_production_workbench.py"
 
 
 def _load_private_integration_module():
     spec = importlib.util.spec_from_file_location("run_private_integration", PRIVATE_INTEGRATION_PATH)
     if spec is None or spec.loader is None:
         raise RuntimeError("Could not load run_private_integration.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_production_workbench_validator_module():
+    spec = importlib.util.spec_from_file_location("validate_production_workbench", PRODUCTION_WORKBENCH_VALIDATOR_PATH)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Could not load validate_production_workbench.py")
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
@@ -160,6 +172,16 @@ def _load_frontend_issue_driver_module():
 
 
 class ScanQcTest(unittest.TestCase):
+    def test_production_workbench_saved_folders_enable_start_flow(self) -> None:
+        module = _load_production_workbench_validator_module()
+        html = PRODUCTION_WORKBENCH_PATH.read_text(encoding="utf-8")
+
+        self.assertEqual(module.validate_saved_folder_start_flow(html), [])
+        self.assertIn('fetch("/api/configure"', html)
+        self.assertIn('state.status = "ready";', html)
+        self.assertIn('els.startButton.disabled = state.status !== "ready";', html)
+        self.assertIn('startButton.addEventListener("click"', html)
+
     def test_issue_plan_script_writes_one_task_issue_drafts(self) -> None:
         module = _load_issue_plan_module()
         with tempfile.TemporaryDirectory(prefix="issue-plan-") as temp_dir:
