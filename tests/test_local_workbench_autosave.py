@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from archive_scan_qc.local_workbench import (
+    COMPLETION_NOTE_TXT,
     REVIEW_DECISION_DRAFT_JSON,
     REVIEW_DECISION_SUMMARY_JSON,
     WorkbenchController,
@@ -201,7 +202,12 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertEqual(result["completion_panel"]["metadata_dir"], str(metadata_dir.resolve()))
             self.assertTrue(result["completion_panel"]["decision_summary_path"].endswith(REVIEW_DECISION_SUMMARY_JSON))
             self.assertTrue(result["completion_panel"]["verification_summary_path"].endswith(REVIEW_DECISION_VERIFICATION_JSON))
+            self.assertTrue(result["completion_panel"]["completion_note_path"].endswith(COMPLETION_NOTE_TXT))
             self.assertTrue((metadata_dir / REVIEW_DECISION_SUMMARY_JSON).exists())
+            completion_note = (metadata_dir / COMPLETION_NOTE_TXT).read_text(encoding="utf-8")
+            self.assertIn("处理后图片文件夹：", completion_note)
+            self.assertIn("复核结果保存位置：", completion_note)
+            self.assertIn("下一批：", completion_note)
             verification = json.loads((metadata_dir / REVIEW_DECISION_VERIFICATION_JSON).read_text(encoding="utf-8"))
             self.assertEqual(verification["status"], "pass")
 

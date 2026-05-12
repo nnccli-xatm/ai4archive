@@ -34,6 +34,7 @@ DEFAULT_METADATA_DIRNAME = "_production_workbench"
 SERVER_SCHEMA = "scan-qc.local-production-workbench.v1"
 REVIEW_DECISION_SUMMARY_JSON = "scan-qc-review-decisions.summary.json"
 REVIEW_DECISION_DRAFT_JSON = "scan-qc-review-decisions.draft.json"
+COMPLETION_NOTE_TXT = "本批次完成交接说明.txt"
 PREVIEW_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"}
 
 
@@ -116,6 +117,7 @@ class WorkbenchController:
         metadata_dir.mkdir(parents=True, exist_ok=True)
         summary_path = metadata_dir / REVIEW_DECISION_SUMMARY_JSON
         verification_path = metadata_dir / REVIEW_DECISION_VERIFICATION_JSON
+        completion_note_path = metadata_dir / COMPLETION_NOTE_TXT
         summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         verification_path.write_text(
             json.dumps(verification, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
@@ -125,6 +127,24 @@ class WorkbenchController:
         total_decisions = int(decision_summary.get("total_decisions") or 0)
         pending_decisions = int(decision_summary.get("pending") or 0)
         reviewed_decisions = max(0, total_decisions - pending_decisions)
+        completion_note_path.write_text(
+            "\n".join(
+                [
+                    "本批次完成交接说明",
+                    f"处理后图片文件夹：{derivatives_dir}",
+                    f"复核结果保存位置：{summary_path}",
+                    f"复核校验保存位置：{verification_path}",
+                    f"本机状态文件夹：{metadata_dir}",
+                    f"复核总数：{total_decisions}",
+                    f"已确认：{reviewed_decisions}",
+                    f"待决定：{pending_decisions}",
+                    "交接事项：把处理后图片交给验收或移交流程。",
+                    "下一批：在工作台点击准备下一批，重新选择扫描原图文件夹和处理后输出文件夹。",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
         return {
             "schema_version": SERVER_SCHEMA,
             "finished": True,
@@ -136,6 +156,7 @@ class WorkbenchController:
             "saved": {
                 "decision_summary": str(summary_path),
                 "verification_summary": str(verification_path),
+                "completion_note": str(completion_note_path),
             },
             "completion_panel": {
                 "title_zh": "完成并导出结果",
@@ -147,10 +168,11 @@ class WorkbenchController:
                 "metadata_dir": str(metadata_dir),
                 "decision_summary_path": str(summary_path),
                 "verification_summary_path": str(verification_path),
+                "completion_note_path": str(completion_note_path),
                 "next_steps_zh": [
                     "到处理后输出文件夹检查图片数量和文件是否齐全。",
                     "把处理后图片交给验收或移交流程。",
-                    "开始下一批前，重新选择新的扫描原图文件夹和输出文件夹。",
+                    "点击准备下一批，重新选择新的扫描原图文件夹和输出文件夹。",
                 ],
             },
             "decision_summary": decision_summary,
@@ -576,7 +598,7 @@ def _status_recovery_guidance(
                 "next_steps_zh": [
                     "确认处理后图片数量正常。",
                     "把处理后图片交给验收或移交流程。",
-                    "开始下一批前，重新选择新的扫描原图文件夹和输出文件夹。",
+                    "点击准备下一批，重新选择新的扫描原图文件夹和输出文件夹。",
                 ],
             }
     state = progress.get("state") if isinstance(progress, dict) else None
