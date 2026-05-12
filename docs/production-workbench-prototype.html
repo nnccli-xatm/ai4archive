@@ -304,6 +304,28 @@
       font-size: 13px;
     }
 
+    .comparison-controls {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      padding: 10px;
+      border-bottom: 1px solid var(--line);
+      background: #ffffff;
+    }
+
+    .comparison-controls button {
+      min-height: 40px;
+      border-color: var(--line-strong);
+      background: var(--field);
+    }
+
+    .comparison-controls button.active {
+      border-color: #22533d;
+      background: #e7f4ec;
+      color: #173d2c;
+      box-shadow: inset 0 0 0 1px #22533d;
+    }
+
     .run-controls button {
       width: 100%;
     }
@@ -925,6 +947,11 @@
             <button type="button" class="secondary" id="resetPreviewButton">还原</button>
             <div class="zoom-state" id="zoomState" aria-live="polite">查看：适合窗口</div>
           </div>
+          <div class="comparison-controls" id="comparisonControls" aria-label="原图处理后查看方式">
+            <button type="button" class="secondary active" data-comparison-mode="side_by_side">左右对比</button>
+            <button type="button" class="secondary" data-comparison-mode="original">只看原图</button>
+            <button type="button" class="secondary" data-comparison-mode="processed">只看处理后</button>
+          </div>
           <div class="preview-frame" id="previewFrame">
             <div class="scan-line"></div>
             <div class="scan-line mid"></div>
@@ -1073,6 +1100,7 @@
       currentIndex: 0,
       previewFit: true,
       previewZoom: 1,
+      comparisonMode: "side_by_side",
       processingMode: "standard",
       processingModeLabel: "标准优化"
     };
@@ -1107,6 +1135,7 @@
       zoomInButton: document.getElementById("zoomInButton"),
       resetPreviewButton: document.getElementById("resetPreviewButton"),
       zoomState: document.getElementById("zoomState"),
+      comparisonControls: document.getElementById("comparisonControls"),
       previewFrame: document.getElementById("previewFrame"),
       previewText: document.getElementById("previewText"),
       queueText: document.getElementById("queueText"),
@@ -1318,7 +1347,11 @@
 
     function previewSourceLabel(item, pending) {
       if (!pending) return "预览：等待本机处理结果。";
-      if (item.previewSource === "comparison") return "预览：正在对比原图和处理后图片。";
+      if (hasBothPreviews(item)) {
+        if (state.comparisonMode === "original") return "预览：正在只看原图。";
+        if (state.comparisonMode === "processed") return "预览：正在只看处理后图片。";
+        return "预览：正在对比原图和处理后图片。";
+      }
       if (item.previewSource === "processed") return "预览：处理后图片。";
       if (item.previewSource === "original_fallback") return "预览：处理后图片不可用，正在显示原图。";
       if (item.previewSource === "unavailable") return "预览：本机暂未找到可预览图片。";
@@ -1423,6 +1456,18 @@
       applyImageView();
     }
 
+    function hasBothPreviews(item) {
+      return Boolean(item && item.originalPreviewUrl && item.processedPreviewUrl);
+    }
+
+    function updateComparisonControls(enabled) {
+      els.comparisonControls.classList.toggle("hidden", !enabled);
+      els.comparisonControls.querySelectorAll("button[data-comparison-mode]").forEach((button) => {
+        button.disabled = !enabled;
+        button.classList.toggle("active", enabled && button.dataset.comparisonMode === state.comparisonMode);
+      });
+    }
+
     function previewPlaceholder(label) {
       return `
         <div class="scan-line"></div>
@@ -1442,21 +1487,35 @@
     function renderPreview(item, pending) {
       els.previewFrame.classList.toggle("need", pending && item.tone === "need");
       els.previewFrame.classList.toggle("stop", pending && item.tone === "stop");
-      els.previewFrame.classList.toggle("comparison-shell", pending && item && item.originalPreviewUrl && item.processedPreviewUrl);
-      if (pending && item && item.originalPreviewUrl && item.processedPreviewUrl) {
-        els.previewFrame.innerHTML = `
-          <div class="preview-comparison" aria-label="原图和处理后图片对比">
-            <div class="comparison-pane">
-              <div class="comparison-title">原图</div>
-              ${singlePreviewFrame(item.originalPreviewUrl, "本机原图预览", true)}
+      const canCompare = pending && hasBothPreviews(item);
+      updateComparisonControls(canCompare);
+      els.previewFrame.classList.toggle("comparison-shell", canCompare && state.comparisonMode === "side_by_side");
+      if (canCompare) {
+        if (state.comparisonMode === "original") {
+          els.previewFrame.innerHTML = `
+            ${singlePreviewFrame(item.originalPreviewUrl, "本机原图预览", false)}
+            <div class="preview-fallback">正在只看原图。可切回左右对比或只看处理后图片。</div>
+          `;
+        } else if (state.comparisonMode === "processed") {
+          els.previewFrame.innerHTML = `
+            ${singlePreviewFrame(item.processedPreviewUrl, "本机处理后预览", false)}
+            <div class="preview-fallback">正在只看处理后图片。可切回左右对比或只看原图。</div>
+          `;
+        } else {
+          els.previewFrame.innerHTML = `
+            <div class="preview-comparison" aria-label="原图和处理后图片对比">
+              <div class="comparison-pane">
+                <div class="comparison-title">原图</div>
+                ${singlePreviewFrame(item.originalPreviewUrl, "本机原图预览", true)}
+              </div>
+              <div class="comparison-pane">
+                <div class="comparison-title">处理后图片</div>
+                ${singlePreviewFrame(item.processedPreviewUrl, "本机处理后预览", true)}
+              </div>
             </div>
-            <div class="comparison-pane">
-              <div class="comparison-title">处理后图片</div>
-              ${singlePreviewFrame(item.processedPreviewUrl, "本机处理后预览", true)}
-            </div>
-          </div>
-          <div class="preview-fallback">请对比原图和处理后图片，再选择通过、需要重扫、重新处理或保留原貌。</div>
-        `;
+            <div class="preview-fallback">请对比原图和处理后图片，再选择通过、需要重扫、重新处理或保留原貌。</div>
+          `;
+        }
         applyImageView();
       } else if (pending && item && (item.processedPreviewUrl || item.originalPreviewUrl)) {
         const showingProcessed = Boolean(item.processedPreviewUrl);
@@ -2255,6 +2314,7 @@
       state.currentIndex = 0;
       state.previewFit = true;
       state.previewZoom = 1;
+      state.comparisonMode = "side_by_side";
       els.inputFolder.value = "";
       els.outputFolder.value = "";
       els.inputPath.value = "";
@@ -2322,6 +2382,12 @@
     els.zoomOutButton.addEventListener("click", () => setPreviewZoom(state.previewZoom - 0.25));
     els.zoomInButton.addEventListener("click", () => setPreviewZoom(state.previewZoom + 0.25));
     els.resetPreviewButton.addEventListener("click", resetPreviewView);
+    els.comparisonControls.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-comparison-mode]");
+      if (!button || button.disabled) return;
+      state.comparisonMode = button.dataset.comparisonMode || "side_by_side";
+      render();
+    });
 
     els.operatorName.addEventListener("input", () => {
       state.operatorName = els.operatorName.value.trim();

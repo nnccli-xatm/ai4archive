@@ -211,10 +211,31 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#previewSourceText")).toHaveText("预览：正在对比原图和处理后图片。");
     await expect(page.locator(".comparison-title", { hasText: "原图" })).toBeVisible();
     await expect(page.locator(".comparison-title", { hasText: "处理后图片" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "左右对比" })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "只看原图" })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "只看处理后" })).toBeEnabled();
     await expect(page.locator("#zoomState")).toHaveText("查看：适合窗口");
 
     await page.getByRole("button", { name: "放大" }).click();
     await expect(page.locator("#zoomState")).toHaveText("查看：125%");
+    await page.locator("#operatorName").fill("复核员甲");
+    await page.locator("#decisionNote").fill("切换查看方式时保留备注。");
+    await page.getByRole("button", { name: "只看原图" }).click();
+    await expect(page.locator("#previewSourceText")).toHaveText("预览：正在只看原图。");
+    await expect(page.locator(".comparison-title")).toHaveCount(0);
+    await expect(page.getByText("正在只看原图。可切回左右对比或只看处理后图片。")).toBeVisible();
+    await expect(page.locator("#zoomState")).toHaveText("查看：125%");
+    await expect(page.locator("#operatorName")).toHaveValue("复核员甲");
+    await expect(page.locator("#decisionNote")).toHaveValue("切换查看方式时保留备注。");
+    await page.getByRole("button", { name: "只看处理后" }).click();
+    await expect(page.locator("#previewSourceText")).toHaveText("预览：正在只看处理后图片。");
+    await expect(page.getByText("正在只看处理后图片。可切回左右对比或只看原图。")).toBeVisible();
+    await expect(page.locator("#zoomState")).toHaveText("查看：125%");
+    await page.getByRole("button", { name: "左右对比" }).click();
+    await expect(page.locator("#previewSourceText")).toHaveText("预览：正在对比原图和处理后图片。");
+    await expect(page.locator(".comparison-title", { hasText: "原图" })).toBeVisible();
+    await expect(page.locator(".comparison-title", { hasText: "处理后图片" })).toBeVisible();
+    await expect(page.locator("#decisionNote")).toHaveValue("切换查看方式时保留备注。");
     await page.getByRole("button", { name: "缩小" }).click();
     await expect(page.locator("#zoomState")).toHaveText("查看：100%");
     await page.getByRole("button", { name: "还原" }).click();
@@ -222,11 +243,11 @@ test.describe("production workbench finish/export browser smoke", () => {
     await page.getByRole("button", { name: "适合窗口" }).click();
     await expect(page.locator("#zoomState")).toHaveText("查看：适合窗口");
 
-    await page.locator("#operatorName").fill("复核员甲");
     await page.locator("#decisionNote").fill("边缘不清楚，需要补扫。");
     await page.getByRole("button", { name: "需要重扫" }).click();
     await expect(page.locator("#previewSourceText")).toHaveText("预览：处理后图片不可用，正在显示原图。");
     await expect(page.getByText("处理后图片预览暂不可用。请查看原图，仍可选择一个处理决定。")).toBeVisible();
+    await expect(page.getByRole("button", { name: "左右对比" })).toBeHidden();
     await expect(page.locator("#zoomState")).toHaveText("查看：适合窗口");
     await page.getByRole("button", { name: "上一张已确认" }).click();
     await expect(page.locator("#reviewPositionText")).toHaveText("当前第 1 张 / 共 3 张 / 待确认 2 张。");
