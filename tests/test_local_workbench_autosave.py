@@ -45,7 +45,7 @@ def decision_summary(decisions: list[tuple[str, str]]) -> dict[str, object]:
                 "total": len(rows),
                 "reviewed": sum(1 for _, decision in decisions if decision != "pending"),
                 "pending": counts["pending"],
-                "complete": len(rows) > 0 and counts["pending"] == 0,
+                "complete": counts["pending"] == 0,
                 "counts": counts,
             },
         },
@@ -212,6 +212,30 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertIn("处理后图片文件夹：", completion_note)
             self.assertIn("复核结果保存位置：", completion_note)
             self.assertIn("下一批：", completion_note)
+            verification = json.loads((metadata_dir / REVIEW_DECISION_VERIFICATION_JSON).read_text(encoding="utf-8"))
+            self.assertEqual(verification["status"], "pass")
+
+    def test_final_completion_allows_no_review_items(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            controller = WorkbenchController()
+            controller.configure(input_dir, output_dir, metadata_dir)
+
+            summary = decision_summary([])
+            result = controller.save_review_decisions(summary)
+
+            self.assertTrue(result["finished"])
+            self.assertEqual(result["decision_summary"]["completion_status"], "complete")
+            self.assertEqual(result["completion_panel"]["total_review_items"], 0)
+            self.assertEqual(result["completion_panel"]["reviewed_items"], 0)
+            self.assertEqual(result["completion_panel"]["pending_items"], 0)
+            self.assertTrue((metadata_dir / REVIEW_DECISION_SUMMARY_JSON).exists())
+            completion_note = (metadata_dir / COMPLETION_NOTE_TXT).read_text(encoding="utf-8")
+            self.assertIn("复核总数：0", completion_note)
             verification = json.loads((metadata_dir / REVIEW_DECISION_VERIFICATION_JSON).read_text(encoding="utf-8"))
             self.assertEqual(verification["status"], "pass")
 

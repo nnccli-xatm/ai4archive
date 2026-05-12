@@ -189,7 +189,7 @@ def build_review_decision_verification_summary(summary: dict[str, Any]) -> dict[
         for field, expected in completion_expectations.items():
             if _safe_int(completion.get(field)) != expected:
                 _add(blocking, "review_completion_count_mismatch")
-        if not isinstance(completion.get("complete"), bool) or completion.get("complete") != (valid_decisions > 0 and decision_counts["pending"] == 0):
+        if not isinstance(completion.get("complete"), bool) or completion.get("complete") != (decision_counts["pending"] == 0):
             _add(blocking, "review_completion_status_mismatch")
 
     total_decisions = valid_decisions
@@ -210,7 +210,7 @@ def build_review_decision_verification_summary(summary: dict[str, Any]) -> dict[
             "accepted": decision_counts["accepted_issue"],
             "rejected": decision_counts["false_positive"],
             "rework": decision_counts["fixed_externally"] + decision_counts["needs_rescan"] + decision_counts["blocked"],
-            "completion_status": "complete" if total_decisions > 0 and decision_counts["pending"] == 0 else "incomplete",
+            "completion_status": "complete" if decision_counts["pending"] == 0 else "incomplete",
             "decision_counts": decision_counts,
         },
         "blocking_counts_by_code": dict(sorted(blocking.items())),

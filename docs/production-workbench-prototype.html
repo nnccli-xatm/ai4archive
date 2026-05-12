@@ -940,8 +940,10 @@
       choose_input: ["填写原图", "请填写原图文件夹", "填写本批次原图所在的本机文件夹。"],
       choose_output: ["填写输出", "请填写输出文件夹", "处理后图片会写入这里，原图不会被覆盖。"],
       ready: ["准备完成", "可以开始处理", "文件夹已准备好，点击开始处理。"],
+      checking: ["检查文件夹", "正在检查文件夹", "正在确认原图和输出文件夹是否可用。"],
       processing: ["正在处理", "正在处理", "本机正在处理图片，请等待；完成后再进行复核。"],
       needs_review: ["需要确认", "有图片需要人工确认", "请看中间大图，然后在右侧选择处理决定。"],
+      ready_to_finish: ["待完成", "没有需要人工确认", "处理后图片已准备好，请完成并导出结果。"],
       complete: ["已完成", "完成并导出结果", "处理后图片和复核结果已保存，请查看输出位置。"],
       failed: ["处理失败", "处理失败", "请检查两个文件夹是否选对、磁盘空间是否足够，然后重新开始。"]
     };
@@ -974,6 +976,7 @@
       running: ["正在处理", "正在处理", "本机正在处理图片，请等待；完成后再进行复核。"],
       completed: ["已完成", "完成并导出结果", "处理后图片和复核结果已保存，请查看输出位置。"],
       finished: ["已完成", "完成并导出结果", "处理后图片和复核结果已保存，请查看输出位置。"],
+      ready_to_finish: ["待完成", "没有需要人工确认", "处理后图片已准备好，请完成并导出结果。"],
       needs_review: ["需要确认", "有图片需要人工确认", "请看中间大图，然后在右侧选择处理决定。"],
       blocked: ["需处理", "需要管理员处理", "有文件未能完成处理，请联系管理员查看。"],
       pending: ["准备完成", "可以开始处理", "文件夹已准备好，点击开始处理。"]
@@ -1227,7 +1230,7 @@
       els.readyText.textContent = `${state.readyImages} 张`;
       els.startButton.disabled = state.status !== "ready";
       els.exportButton.disabled = !(state.status === "needs_review" && state.reviewItems.length > 0);
-      els.completeButton.disabled = !(state.status === "needs_review" && pendingCount() === 0);
+      els.completeButton.disabled = !((state.status === "needs_review" || state.status === "ready_to_finish") && pendingCount() === 0);
       els.outputPanel.classList.toggle("hidden", state.status !== "complete");
       els.failurePanel.classList.toggle("hidden", state.status !== "failed");
       renderRecoveryGuidance();
@@ -1468,15 +1471,17 @@
     function applyRunStatus(summary, progress, queue, draftDecisions) {
       const operator = summary.operator_summary || {};
       const rawStatus = summary.status || (progress && progress.state) || "pending";
-      const nextStatus = runStateMap[rawStatus] || "failed";
-      const text = operatorStateText[rawStatus] || operatorStateText.blocked;
-      copy[nextStatus] = text;
+      let nextStatus = runStateMap[rawStatus] || "failed";
       state.inputChosen = true;
       state.outputChosen = true;
-      state.status = nextStatus;
       state.totalImages = toNumber(operator.total_source_images || (summary.counts && summary.counts.total_files));
       state.readyImages = toNumber(operator.derivative_images_ready || (summary.counts && summary.counts.processed_files));
       state.attentionFiles = toNumber(operator.files_needing_attention);
+      const canFinishWithoutReview = rawStatus === "finished" && state.attentionFiles === 0 && state.totalImages > 0 && state.readyImages > 0;
+      if (canFinishWithoutReview) nextStatus = "ready_to_finish";
+      const text = canFinishWithoutReview ? operatorStateText.ready_to_finish : (operatorStateText[rawStatus] || operatorStateText.blocked);
+      copy[nextStatus] = text;
+      state.status = nextStatus;
       state.outputSummary = state.readyImages ? `已准备 ${state.readyImages} 张处理后图片` : "处理后图片将写入已选择的输出文件夹";
       state.operatorMessage = operator.message_zh || operator.message || (progress && progress.message_zh) || text[2];
       state.recoveryGuidance = guidanceFromSummary(summary);
@@ -1644,6 +1649,9 @@
         return;
       }
       try {
+        state.status = "checking";
+        els.loadStatus.textContent = "正在检查文件夹。";
+        render();
         await saveFolders();
         const payload = await apiPost("/api/start", {});
         applyServerStatus(payload);
@@ -1724,7 +1732,7 @@
             total: state.reviewItems.length,
             reviewed: reviewedCount(),
             pending: pendingCount(),
-            complete: state.reviewItems.length > 0 && pendingCount() === 0,
+            complete: pendingCount() === 0,
             counts: reviewCounts
           }
         },
@@ -1777,7 +1785,7 @@
     }
 
     async function finishBatch() {
-      if (pendingCount() > 0 || state.reviewItems.length === 0) {
+      if (pendingCount() > 0 || (state.reviewItems.length === 0 && state.status !== "ready_to_finish")) {
         els.loadStatus.textContent = "还有图片没有决定，暂不能完成。";
         render();
         return;
