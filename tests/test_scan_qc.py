@@ -6654,6 +6654,61 @@ class ScanQcTest(unittest.TestCase):
             self.assertIn("其他异常：本批次没有正常启动，请交管理员处理。", public_text)
             self.assertEqual(status["recovery_guidance"]["title_zh"], "处理没有正常完成")
 
+    def test_local_production_workbench_status_sanitizes_top_level_operator_messages(self) -> None:
+        private_values = [
+            "/Volumes/Archive/SecretRoot",
+            "Hidden_Batch_0099.png",
+            "c" * 64,
+            "OCR snippet: private row text",
+            'Traceback File "private_worker.py", line 99, in run RuntimeError',
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            metadata_dir = derivatives_dir / DEFAULT_METADATA_DIRNAME
+            input_dir.mkdir()
+            metadata_dir.mkdir(parents=True)
+            Image.new("RGB", (48, 36), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+            raw_private_message = " ".join(private_values)
+            (metadata_dir / "production_run_summary.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "scan-qc.production-run.v1",
+                        "status": "blocked",
+                        "message": raw_private_message,
+                        "message_zh": raw_private_message,
+                        "operator_message_zh": raw_private_message,
+                        "last_error_zh": raw_private_message,
+                        "operator_summary": {
+                            "total_source_images": 1,
+                            "openable_source_images": 1,
+                            "derivative_images_ready": 0,
+                            "files_needing_attention": 1,
+                        },
+                        "counts": {
+                            "total_files": 1,
+                            "openable_files": 1,
+                            "processed_files": 0,
+                            "resumed_files": 0,
+                            "failed_files": 1,
+                            "retry_list_files": 0,
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            controller = WorkbenchController()
+            controller.configure(input_dir, derivatives_dir)
+            status = controller.status()
+            public_text = json.dumps(status["summary"], ensure_ascii=False)
+
+            for private_value in private_values:
+                self.assertNotIn(private_value, public_text)
+            self.assertEqual(status["summary"]["operator_message_zh"], "其他异常：本批次没有正常启动，请交管理员处理。")
+
     def test_local_production_workbench_runtime_error_keeps_admin_context_out_of_operator_status(self) -> None:
         private_values = [
             "/Users/private/archive/secret-root",

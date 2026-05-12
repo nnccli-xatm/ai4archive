@@ -680,6 +680,9 @@ def _sanitize_operator_status_summary(summary: dict[str, Any] | None) -> dict[st
     if not isinstance(summary, dict):
         return summary
     sanitized = dict(summary)
+    for key in ("message", "message_zh", "operator_message_zh", "last_error_zh"):
+        if isinstance(sanitized.get(key), str):
+            sanitized[key] = _sanitize_operator_visible_text_zh(sanitized[key])
     operator = sanitized.get("operator_summary")
     if isinstance(operator, dict):
         sanitized_operator = dict(operator)
