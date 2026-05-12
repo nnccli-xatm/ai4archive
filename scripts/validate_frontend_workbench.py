@@ -336,6 +336,13 @@ FORBIDDEN_EXPORT_FIELDS = {
     "derivative_image",
 }
 
+FORBIDDEN_PREVIEW_FIELDS = {
+    "preview_filename",
+    "preview_object_url",
+    "preview_display_mode",
+    "preview_zoom_level",
+}
+
 REQUIRED_AGGREGATE_FIELDS = {
     "acceptance pass/fail": "acceptancePassed",
     "artifact type": "aggregateArtifactType",
@@ -516,12 +523,15 @@ def new_summary(workbench: Path) -> dict[str, Any]:
             "required_preview_lifecycle_strings": len(REQUIRED_PREVIEW_LIFECYCLE_STRINGS),
             "forbidden_pattern_checks": len(FORBIDDEN_PATTERNS),
             "forbidden_export_field_checks": len(FORBIDDEN_EXPORT_FIELDS),
+            "forbidden_preview_field_checks": len(FORBIDDEN_PREVIEW_FIELDS),
             "forbidden_aggregate_payload_field_checks": len(FORBIDDEN_AGGREGATE_PAYLOAD_FIELDS),
             "forbidden_demo_fixture_field_checks": len(FORBIDDEN_DEMO_FIXTURE_FIELDS),
+            "executable_preview_lifecycle_checks": 6,
         },
         "fixture_groups": {
             "aggregate_executable_fixture_groups": 11,
             "demo_fixture_labels_required": len(REQUIRED_DEMO_FIXTURE_LABELS),
+            "preview_lifecycle_synthetic_slots": 2,
         },
         "coverage": {
             "aggregate_summary": False,
@@ -544,6 +554,7 @@ def new_summary(workbench: Path) -> dict[str, Any]:
             "preview_lifecycle_public_safe": False,
             "forbidden_field_check_count": (
                 len(FORBIDDEN_EXPORT_FIELDS) * 2
+                + len(FORBIDDEN_PREVIEW_FIELDS) * 3
                 + len(FORBIDDEN_AGGREGATE_PAYLOAD_FIELDS)
                 + len(FORBIDDEN_DEMO_FIXTURE_FIELDS)
             ),
@@ -2622,19 +2633,20 @@ vm.runInContext(workbenchScript + `
     {{ scope: "finding", local_id: "F9999", decision: "accepted_issue" }},
     {{ scope: "finding", local_id: "F0002", decision: "not_a_status" }},
     {{ scope: "finding", local_id: "F0002", decision: "accepted_issue", reviewer_notes: "synthetic note" }},
+    {{ scope: "finding", local_id: "F0002", decision: "accepted_issue", preview_display_mode: "zoom", preview_zoom_level: 2 }},
     {{ scope: "finding", local_id: "F0002", decision: "accepted_issue", extra_public_field: "ignored" }},
     "bad-entry"
   ];
   applyReviewDecisionSummary(invalidPayload);
   assert(state.importStatus.imported === 3, "invalid/private-bearing summary imported wrong count");
-  assert(state.importStatus.skipped === 5, "invalid/private-bearing summary skipped wrong count");
+  assert(state.importStatus.skipped === 6, "invalid/private-bearing summary skipped wrong count");
   assert(getDecision("batch", "B0001") === "fixed_externally", "valid entry in conflict import was not applied");
   assert(getDecision("finding", "F0001") === "false_positive", "valid entry with ignored private field was not applied");
   assert(getDecision("finding", "F0002") === "needs_rescan", "first valid duplicate target decision was not preserved");
   assert(buildReviewSummary().aggregate_counts.review_completion.complete === true, "conflict import did not preserve completion recalculation");
   [
-    "duplicate_decision=2",
-    "ignored_private_field=3",
+    "duplicate_decision=3",
+    "ignored_private_field=4",
     "ignored_extra_field=1",
     "unknown_review_target=1",
     "unsupported_decision_status=1",
@@ -2817,7 +2829,7 @@ def validate_workbench(workbench: Path = WORKBENCH) -> dict[str, Any]:
         add_error(summary, "missing_review_export_builder", "missing privacy-safe review export builder")
     else:
         export_block = html[export_start : html.find("function resetReviewState", export_start)]
-        for field in sorted(FORBIDDEN_EXPORT_FIELDS):
+        for field in sorted(FORBIDDEN_EXPORT_FIELDS | FORBIDDEN_PREVIEW_FIELDS):
             if re.search(rf"\b{re.escape(field)}\b\s*:", export_block):
                 add_error(
                     summary,
@@ -2833,7 +2845,7 @@ def validate_workbench(workbench: Path = WORKBENCH) -> dict[str, Any]:
         add_error(summary, "missing_review_import_parser", "missing privacy-safe review import parser")
     else:
         import_block = html[import_start : html.find("function clearPreviewState", import_start)]
-        for field in sorted(FORBIDDEN_EXPORT_FIELDS):
+        for field in sorted(FORBIDDEN_EXPORT_FIELDS | FORBIDDEN_PREVIEW_FIELDS):
             if re.search(rf"\b{re.escape(field)}\b\s*:", import_block):
                 add_error(
                     summary,
