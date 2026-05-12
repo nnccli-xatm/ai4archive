@@ -12,6 +12,7 @@ import shlex
 import shutil
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -33,6 +34,7 @@ from archive_scan_qc.deep_inspection_candidates import build_deep_inspection_can
 from archive_scan_qc.evidence_bundle import build_evidence_bundle_summary
 from archive_scan_qc.final_handoff import build_final_handoff_summary
 from archive_scan_qc.handoff import write_delivery_handoff_manifest
+from archive_scan_qc.local_workbench import DEFAULT_METADATA_DIRNAME, WorkbenchController
 from archive_scan_qc.processing import (
     ProcessingOptions,
     _despeckle_candidate_points,
@@ -6262,6 +6264,41 @@ class ScanQcTest(unittest.TestCase):
             saved = json.loads((metadata_dir / "production_run_summary.json").read_text(encoding="utf-8"))
             self.assertEqual(saved["operator_summary"]["files_needing_attention"], 0)
             self.assertEqual(saved["operator_summary"]["message"], saved["operator_summary"]["message_zh"])
+
+    def test_local_production_workbench_controller_runs_folder_loop(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            input_dir.mkdir()
+            Image.new("RGB", (48, 36), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+
+            controller = WorkbenchController()
+            configured = controller.configure(input_dir, derivatives_dir)
+            self.assertTrue(configured["configured"])
+            self.assertEqual(Path(configured["folders"]["metadata"]).name, DEFAULT_METADATA_DIRNAME)
+
+            controller.start()
+            deadline = time.time() + 10
+            status = controller.status()
+            while status["running"] and time.time() < deadline:
+                time.sleep(0.05)
+                status = controller.status()
+
+            self.assertFalse(status["running"])
+            self.assertIsNone(status["last_error_zh"])
+            self.assertEqual(status["summary"]["status"], "finished")
+            self.assertEqual(status["progress"]["state"], "finished")
+            self.assertEqual(status["queue"]["schema_version"], "scan-qc.production-review-queue.v1")
+            self.assertTrue((derivatives_dir / "images" / "A001_0001.jpg").exists())
+            self.assertTrue((derivatives_dir / DEFAULT_METADATA_DIRNAME / "production_run_summary.json").exists())
+
+    def test_cli_production_workbench_rejects_non_loopback_host(self) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+            main(["production-workbench", "--host", "0.0.0.0", "--no-open"])
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("local-only", stderr.getvalue())
 
     def test_cli_rejects_invalid_workers_without_writing_reports(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

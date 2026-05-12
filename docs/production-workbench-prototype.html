@@ -239,6 +239,17 @@
       overflow-wrap: anywhere;
     }
 
+    .path-input {
+      width: 100%;
+      min-height: 40px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      background: var(--field);
+      color: var(--ink);
+      padding: 8px 10px;
+      font: inherit;
+    }
+
     .guard-note {
       border-top: 1px solid var(--line);
       padding-top: 12px;
@@ -556,6 +567,7 @@
             <small id="inputStatus">尚未选择扫描原图文件夹。</small>
             <label class="folder-trigger" for="inputFolder">选择原图</label>
             <input class="visually-hidden" id="inputFolder" type="file" webkitdirectory directory multiple>
+            <input class="path-input" id="inputPath" type="text" autocomplete="off" placeholder="本机原图文件夹位置">
           </div>
 
           <div class="folder-row">
@@ -563,10 +575,12 @@
             <small id="outputStatus">尚未选择处理后输出文件夹。</small>
             <label class="folder-trigger" for="outputFolder">选择输出</label>
             <input class="visually-hidden" id="outputFolder" type="file" webkitdirectory directory multiple>
+            <input class="path-input" id="outputPath" type="text" autocomplete="off" placeholder="本机输出文件夹位置">
           </div>
         </div>
 
         <div class="run-controls">
+          <button id="saveFoldersButton" class="secondary">保存文件夹</button>
           <button id="startButton" disabled>开始处理</button>
           <button id="pauseButton" class="warning" disabled>暂停</button>
           <button id="resumeButton" class="secondary" disabled>继续处理</button>
@@ -587,7 +601,7 @@
           <small id="loadStatus">可加载公开示例或本机生成的状态文件。</small>
         </div>
 
-        <p class="guard-note">原图不会被覆盖。本原型不读取目录内容，不执行处理，不显示本机私有路径。生产运行时由本机服务生成处理后图片。</p>
+        <p class="guard-note">原图不会被覆盖。单文件打开时不读取目录内容，不执行处理，不显示本机私有路径；从本机入口启动时由本机服务生成处理后图片。</p>
       </aside>
 
       <section class="image-desk" aria-label="大图生产区">
@@ -701,11 +715,14 @@
     const els = {
       inputFolder: document.getElementById("inputFolder"),
       outputFolder: document.getElementById("outputFolder"),
+      inputPath: document.getElementById("inputPath"),
+      outputPath: document.getElementById("outputPath"),
       summaryFile: document.getElementById("summaryFile"),
       fixtureSelect: document.getElementById("fixtureSelect"),
       loadStatus: document.getElementById("loadStatus"),
       inputStatus: document.getElementById("inputStatus"),
       outputStatus: document.getElementById("outputStatus"),
+      saveFoldersButton: document.getElementById("saveFoldersButton"),
       startButton: document.getElementById("startButton"),
       pauseButton: document.getElementById("pauseButton"),
       resumeButton: document.getElementById("resumeButton"),
@@ -783,6 +800,11 @@
       keep_original_trace: "false_positive"
     };
 
+    const localApi = {
+      enabled: location.protocol === "http:" || location.protocol === "https:",
+      polling: null
+    };
+
     function pendingCount() {
       return state.reviewItems.filter((item) => !item.decision).length;
     }
@@ -798,6 +820,15 @@
     function folderLabel(input, fallback) {
       if (!input.files || input.files.length === 0) return fallback;
       return `已选择，包含 ${input.files.length} 个项目。`;
+    }
+
+    function pathChosen(input) {
+      return input.value.trim().length > 0;
+    }
+
+    function updateChosenFromPaths() {
+      state.inputChosen = state.inputChosen || pathChosen(els.inputPath);
+      state.outputChosen = state.outputChosen || pathChosen(els.outputPath);
     }
 
     function setStatus(next) {
@@ -838,6 +869,7 @@
     }
 
     function render() {
+      updateChosenFromPaths();
       if (!state.inputChosen) state.status = "choose_input";
       else if (!state.outputChosen && state.status !== "failed") state.status = "choose_output";
       else if (state.inputChosen && state.outputChosen && state.status === "choose_output") state.status = "ready";
@@ -957,6 +989,103 @@
       render();
     }
 
+    function applyServerStatus(payload) {
+      if (!payload) return;
+      if (payload.last_error_zh) {
+        state.inputChosen = true;
+        state.outputChosen = true;
+        state.status = "failed";
+        state.operatorMessage = payload.last_error_zh;
+        els.loadStatus.textContent = payload.last_error_zh;
+        render();
+        return;
+      }
+      if (payload.folders) {
+        if (payload.folders.input) {
+          els.inputPath.value = payload.folders.input;
+          els.inputStatus.textContent = "已保存扫描原图文件夹。";
+        }
+        if (payload.folders.derivatives) {
+          els.outputPath.value = payload.folders.derivatives;
+          els.outputStatus.textContent = "已保存处理后输出文件夹。";
+          state.outputSummary = "处理后图片将写入已保存的输出文件夹";
+        }
+      }
+      if (payload.summary || payload.progress) {
+        applyRunStatus(payload.summary || { status: payload.running ? "running" : "pending", operator_summary: {} }, payload.progress, payload.queue);
+      } else if (payload.running) {
+        setStatus("processing");
+      }
+    }
+
+    async function apiPost(path, payload) {
+      const response = await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload || {})
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error_zh || "本机服务请求失败");
+      return data;
+    }
+
+    async function saveFolders() {
+      if (!localApi.enabled) {
+        els.loadStatus.textContent = "请从本机入口启动后保存文件夹。";
+        updateChosenFromPaths();
+        render();
+        return;
+      }
+      els.loadStatus.textContent = "正在保存文件夹。";
+      const payload = await apiPost("/api/configure", {
+        input_dir: els.inputPath.value.trim(),
+        derivatives_dir: els.outputPath.value.trim()
+      });
+      state.inputChosen = true;
+      state.outputChosen = true;
+      state.status = "ready";
+      applyServerStatus(payload);
+      els.loadStatus.textContent = "文件夹已保存，可以开始处理。";
+    }
+
+    async function pollServerStatus() {
+      if (!localApi.enabled) return;
+      try {
+        const response = await fetch("/api/status");
+        if (!response.ok) return;
+        const payload = await response.json();
+        applyServerStatus(payload);
+        if (!payload.running && localApi.polling) {
+          window.clearInterval(localApi.polling);
+          localApi.polling = null;
+        }
+      } catch (error) {
+        window.clearInterval(localApi.polling);
+        localApi.polling = null;
+      }
+    }
+
+    async function startLocalRun() {
+      if (!localApi.enabled || (!pathChosen(els.inputPath) && !pathChosen(els.outputPath))) {
+        setStatus("processing");
+        window.clearTimeout(timer);
+        timer = window.setTimeout(() => {
+          if (state.status === "processing") setStatus("needs_review");
+        }, 650);
+        return;
+      }
+      try {
+        await saveFolders();
+        const payload = await apiPost("/api/start", {});
+        applyServerStatus(payload);
+        els.loadStatus.textContent = "已开始本机处理。";
+        window.clearInterval(localApi.polling);
+        localApi.polling = window.setInterval(pollServerStatus, 1200);
+      } catch (error) {
+        els.loadStatus.textContent = error.message || "本机处理启动失败。";
+      }
+    }
+
     async function loadFixture(baseName) {
       if (!baseName) return;
       els.loadStatus.textContent = "正在加载状态示例。";
@@ -1055,14 +1184,19 @@
       render();
     });
 
-    let timer = null;
-    els.startButton.addEventListener("click", () => {
-      setStatus("processing");
-      window.clearTimeout(timer);
-      timer = window.setTimeout(() => {
-        if (state.status === "processing") setStatus("needs_review");
-      }, 650);
+    els.inputPath.addEventListener("input", () => {
+      state.inputChosen = pathChosen(els.inputPath) || (els.inputFolder.files && els.inputFolder.files.length > 0);
+      render();
     });
+
+    els.outputPath.addEventListener("input", () => {
+      state.outputChosen = pathChosen(els.outputPath) || (els.outputFolder.files && els.outputFolder.files.length > 0);
+      render();
+    });
+
+    let timer = null;
+    els.saveFoldersButton.addEventListener("click", saveFolders);
+    els.startButton.addEventListener("click", startLocalRun);
 
     els.pauseButton.addEventListener("click", () => setStatus("paused"));
     els.resumeButton.addEventListener("click", () => setStatus("processing"));
@@ -1085,12 +1219,16 @@
       state.decisions = {};
       els.inputFolder.value = "";
       els.outputFolder.value = "";
+      els.inputPath.value = "";
+      els.outputPath.value = "";
       els.summaryFile.value = "";
       els.fixtureSelect.value = "";
       els.inputStatus.textContent = "尚未选择扫描原图文件夹。";
       els.outputStatus.textContent = "尚未选择处理后输出文件夹。";
       els.loadStatus.textContent = "可加载公开示例或本机生成的状态文件。";
       window.clearTimeout(timer);
+      window.clearInterval(localApi.polling);
+      localApi.polling = null;
       render();
     });
 
@@ -1122,6 +1260,7 @@
       }
     });
 
+    pollServerStatus();
     render();
   </script>
 </body>

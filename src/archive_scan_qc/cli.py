@@ -189,6 +189,10 @@ def main(argv: list[str] | None = None) -> int:
         return _main_preflight(argv[1:])
     if argv and argv[0] == "production-run":
         return _main_production_run(argv[1:])
+    if argv and argv[0] == "production-workbench":
+        from .local_workbench import main as local_workbench_main
+
+        return local_workbench_main(argv[1:])
     if argv and argv[0] == "capability-probe":
         return _main_capability_probe(argv[1:])
     if argv and argv[0] == "deep-inspection-provider-probe":

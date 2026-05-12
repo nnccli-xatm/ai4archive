@@ -15,6 +15,8 @@ sys.path.insert(0, str(ROOT / "src"))
 from archive_scan_qc.review_decisions import build_review_decision_verification_summary
 
 WORKBENCH = ROOT / "docs" / "production-workbench-prototype.html"
+CLI = ROOT / "src" / "archive_scan_qc" / "cli.py"
+LOCAL_WORKBENCH = ROOT / "src" / "archive_scan_qc" / "local_workbench.py"
 FIXTURE_ROOT = ROOT / "docs" / "fixtures"
 FIXTURE_STATES = {
     "production-run-running": "running",
@@ -53,6 +55,8 @@ REQUIRED_TEXT = {
     "不执行处理",
     "不显示本机私有路径",
     "加载本机状态",
+    "保存文件夹",
+    "本机入口",
     "选择状态示例",
     "选择本机状态文件",
     "需留意文件",
@@ -200,6 +204,25 @@ def main() -> int:
         errors.append("missing production-run status loader")
     if "operator_summary" not in html:
         errors.append("missing operator summary mapping")
+    cli = CLI.read_text(encoding="utf-8")
+    local_workbench = LOCAL_WORKBENCH.read_text(encoding="utf-8")
+    for required_entrypoint_token in [
+        "production-workbench",
+        "local_workbench_main",
+    ]:
+        if required_entrypoint_token not in cli:
+            errors.append(f"missing local workbench CLI entrypoint token: {required_entrypoint_token}")
+    for required_server_token in [
+        "ThreadingHTTPServer",
+        "127.0.0.1",
+        "run_production_folder",
+        "write_production_review_queue",
+        "/api/start",
+        "/api/status",
+        "local-only",
+    ]:
+        if required_server_token not in local_workbench:
+            errors.append(f"missing local workbench server token: {required_server_token}")
     for fixture_name, expected_status in FIXTURE_STATES.items():
         fixture_dir = FIXTURE_ROOT / fixture_name
         summary_path = fixture_dir / "production_run_summary.json"

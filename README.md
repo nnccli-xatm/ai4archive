@@ -142,6 +142,21 @@ Use `run` only for plans whose validation commands fully automate the work
 between issues. Use `--dry-run` to confirm plan parsing and state transitions
 without changing Linear or running validation commands.
 
+### Local production workbench
+
+For a single-machine operator loop, start the Chinese production workbench on
+loopback:
+
+```bash
+archive-scan-qc production-workbench
+```
+
+The command serves `docs/production-workbench-prototype.html` at a local browser
+URL, opens it by default, and accepts source/output folder paths from the page.
+Starting a batch runs the existing local `production-run` flow, writes metadata
+under the output folder's `_production_workbench` directory, polls progress, and
+emits a local review queue plus verifier-compatible review-decision export.
+
 The optional manifest CSV must include a `relative_path` column whose values
 are expected image paths relative to `--input`. Manifests may also include one
 page/order column named `sequence`, `page_sequence`, `page_number`, or
