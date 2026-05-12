@@ -6287,6 +6287,9 @@ class ScanQcTest(unittest.TestCase):
                     batch_id="batch",
                     workers=1,
                     auto_crop=True,
+                    deskew=True,
+                    trim_dark_border=True,
+                    despeckle=True,
                 )
             )
 
@@ -6298,6 +6301,13 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(summary["operator_summary"]["total_source_images"], 1)
             self.assertEqual(summary["operator_summary"]["derivative_images_ready"], 1)
             self.assertFalse(summary["source_images_modified"])
+            self.assertEqual(summary["options"]["processing_mode"], "standard")
+            self.assertEqual(summary["options"]["processing_mode_label_zh"], "标准优化")
+            self.assertTrue(summary["options"]["auto_crop"])
+            self.assertTrue(summary["options"]["deskew"])
+            self.assertTrue(summary["options"]["trim_dark_border"])
+            self.assertTrue(summary["options"]["despeckle"])
+            self.assertEqual(summary["options"]["despeckle_backend"], "fallback")
             self.assertEqual(_sha256_for_test(source), original_sha)
             self.assertTrue((derivatives_dir / "images" / "A001_0001.jpg").exists())
             self.assertTrue((derivatives_dir / "processing_manifest.json").exists())
@@ -6445,46 +6455,75 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(status["summary"]["options"]["processing_mode"], DEFAULT_PROCESSING_MODE)
             self.assertTrue(status["summary"]["options"]["auto_crop"])
             self.assertTrue(status["summary"]["options"]["deskew"])
+            self.assertTrue(status["summary"]["options"]["trim_dark_border"])
+            self.assertTrue(status["summary"]["options"]["despeckle"])
             self.assertEqual(status["progress"]["state"], "finished")
             self.assertEqual(status["queue"]["schema_version"], "scan-qc.production-review-queue.v1")
             self.assertTrue((derivatives_dir / "images" / "A001_0001.jpg").exists())
             self.assertTrue((derivatives_dir / DEFAULT_METADATA_DIRNAME / "production_run_summary.json").exists())
 
-    def test_local_production_workbench_processing_mode_handoff_uses_existing_options(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            input_dir = root / "input"
-            derivatives_dir = root / "derivatives"
-            input_dir.mkdir()
-            Image.new("RGB", (48, 36), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+    def test_local_production_workbench_processing_modes_handoff_existing_options(self) -> None:
+        expected_modes = {
+            "standard": {
+                "label_zh": "标准优化",
+                "auto_crop": True,
+                "deskew": True,
+                "trim_dark_border": True,
+                "despeckle": True,
+            },
+            "light": {
+                "label_zh": "轻度优化",
+                "auto_crop": True,
+                "deskew": False,
+                "trim_dark_border": False,
+                "despeckle": False,
+            },
+            "qc_only": {
+                "label_zh": "只质检不修图",
+                "auto_crop": False,
+                "deskew": False,
+                "trim_dark_border": False,
+                "despeckle": False,
+            },
+        }
+        for mode, expected in expected_modes.items():
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                input_dir = root / "input"
+                derivatives_dir = root / "derivatives"
+                input_dir.mkdir()
+                Image.new("RGB", (48, 36), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
 
-            controller = WorkbenchController()
-            configured = controller.configure(input_dir, derivatives_dir, processing_mode="qc_only")
-            self.assertEqual(configured["processing_mode"]["id"], "qc_only")
-            self.assertEqual(configured["processing_mode"]["label_zh"], "只质检不修图")
+                controller = WorkbenchController()
+                configured = controller.configure(input_dir, derivatives_dir, processing_mode=mode)
+                self.assertEqual(configured["processing_mode"]["id"], mode)
+                self.assertEqual(configured["processing_mode"]["label_zh"], expected["label_zh"])
 
-            with mock.patch("archive_scan_qc.local_workbench.run_production_folder") as run_mock:
-                run_mock.return_value = {
-                    "schema_version": "scan-qc.production-run.v1",
-                    "status": "finished",
-                    "artifacts": {},
-                    "counts": {"total_files": 1, "processed_files": 1, "resumed_files": 0, "failed_files": 0, "retry_list_files": 0},
-                }
-                controller.start()
-                deadline = time.time() + 10
-                status = controller.status()
-                while status["running"] and time.time() < deadline:
-                    time.sleep(0.05)
+                with mock.patch("archive_scan_qc.local_workbench.run_production_folder") as run_mock:
+                    run_mock.return_value = {
+                        "schema_version": "scan-qc.production-run.v1",
+                        "status": "finished",
+                        "artifacts": {},
+                        "counts": {"total_files": 1, "processed_files": 1, "resumed_files": 0, "failed_files": 0, "retry_list_files": 0},
+                    }
+                    controller.start()
+                    deadline = time.time() + 10
                     status = controller.status()
+                    while status["running"] and time.time() < deadline:
+                        time.sleep(0.05)
+                        status = controller.status()
 
-            self.assertFalse(status["running"])
-            run_mock.assert_called_once()
-            config = run_mock.call_args.args[0]
-            self.assertEqual(config.processing_mode, "qc_only")
-            self.assertFalse(config.auto_crop)
-            self.assertFalse(config.deskew)
-            self.assertTrue(config.resume_processing)
-            self.assertTrue(config.reuse_scan_measurements)
+                self.assertFalse(status["running"])
+                run_mock.assert_called_once()
+                config = run_mock.call_args.args[0]
+                self.assertEqual(config.processing_mode, mode)
+                self.assertEqual(config.auto_crop, expected["auto_crop"])
+                self.assertEqual(config.deskew, expected["deskew"])
+                self.assertEqual(config.trim_dark_border, expected["trim_dark_border"])
+                self.assertEqual(config.despeckle, expected["despeckle"])
+                self.assertEqual(config.despeckle_backend, "fallback")
+                self.assertTrue(config.resume_processing)
+                self.assertTrue(config.reuse_scan_measurements)
 
     def test_local_production_workbench_rejects_unknown_processing_mode(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

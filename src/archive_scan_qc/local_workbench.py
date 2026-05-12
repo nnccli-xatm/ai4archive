@@ -45,16 +45,22 @@ PROCESSING_MODE_OPTIONS: dict[str, dict[str, Any]] = {
         "label_zh": PROCESSING_MODE_LABELS_ZH["standard"],
         "auto_crop": True,
         "deskew": True,
+        "trim_dark_border": True,
+        "despeckle": True,
     },
     "qc_only": {
         "label_zh": PROCESSING_MODE_LABELS_ZH["qc_only"],
         "auto_crop": False,
         "deskew": False,
+        "trim_dark_border": False,
+        "despeckle": False,
     },
     "light": {
         "label_zh": PROCESSING_MODE_LABELS_ZH["light"],
         "auto_crop": True,
         "deskew": False,
+        "trim_dark_border": False,
+        "despeckle": False,
     },
 }
 
@@ -369,6 +375,8 @@ class WorkbenchController:
                     metadata_output_dir=self.metadata_dir,
                     auto_crop=bool(processing_options["auto_crop"]),
                     deskew=bool(processing_options["deskew"]),
+                    trim_dark_border=bool(processing_options["trim_dark_border"]),
+                    despeckle=bool(processing_options["despeckle"]),
                     resume_processing=True,
                     reuse_scan_measurements=True,
                     processing_mode=processing_mode,
