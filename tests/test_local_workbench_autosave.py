@@ -228,8 +228,15 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             )
 
             draft = decision_summary([("PRQ000001", "needs_rescan"), ("PRQ000002", "pending")])
+            draft["operator_name"] = "复核员甲"
             draft["operator_decisions"] = [
-                {"scope": "production_review_queue", "local_id": "PRQ000001", "decision": "keep_original_trace"}
+                {
+                    "scope": "production_review_queue",
+                    "local_id": "PRQ000001",
+                    "decision": "keep_original_trace",
+                    "decided_at": "2026-05-13T10:20:30.000Z",
+                    "note_zh": "本张保留原貌痕迹。",
+                }
             ]
             result = controller.save_draft_review_decisions(draft)
 
@@ -287,6 +294,23 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             controller.configure(input_dir, output_dir, metadata_dir)
 
             summary = decision_summary([("PRQ000001", "needs_rescan"), ("PRQ000002", "false_positive")])
+            summary["operator_name"] = "复核员乙"
+            summary["operator_decisions"] = [
+                {
+                    "scope": "production_review_queue",
+                    "local_id": "PRQ000001",
+                    "decision": "rescan",
+                    "decided_at": "2026-05-13T11:00:00.000Z",
+                    "note_zh": "边缘不清楚，需要补扫。",
+                },
+                {
+                    "scope": "production_review_queue",
+                    "local_id": "PRQ000002",
+                    "decision": "pass",
+                    "decided_at": "2026-05-13T11:01:00.000Z",
+                    "note_zh": "",
+                },
+            ]
             result = controller.save_review_decisions(summary)
 
             self.assertTrue(result["finished"])
@@ -306,7 +330,12 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
                 ["处理后图片已准备好", "复核结果已保存", "交接说明已保存", "可以准备下一批"],
             )
             self.assertTrue((metadata_dir / REVIEW_DECISION_SUMMARY_JSON).exists())
+            saved_summary = json.loads((metadata_dir / REVIEW_DECISION_SUMMARY_JSON).read_text(encoding="utf-8"))
+            self.assertEqual(saved_summary["operator_name"], "复核员乙")
+            self.assertEqual(saved_summary["operator_decisions"][0]["note_zh"], "边缘不清楚，需要补扫。")
+            self.assertEqual(saved_summary["operator_decisions"][0]["decided_at"], "2026-05-13T11:00:00.000Z")
             completion_note = (metadata_dir / COMPLETION_NOTE_TXT).read_text(encoding="utf-8")
+            self.assertIn("复核人员：复核员乙", completion_note)
             self.assertIn("处理后图片文件夹：", completion_note)
             self.assertIn("复核结果保存位置：", completion_note)
             self.assertIn("下一批：", completion_note)

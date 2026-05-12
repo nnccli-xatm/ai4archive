@@ -697,6 +697,39 @@
       color: var(--muted);
     }
 
+    .operator-context {
+      display: grid;
+      gap: 8px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+    }
+
+    .operator-context label {
+      display: grid;
+      gap: 5px;
+      color: var(--ink-2);
+      font-weight: 740;
+    }
+
+    .operator-field,
+    .operator-note {
+      width: 100%;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      background: var(--field);
+      color: var(--ink);
+      padding: 8px 10px;
+      font: inherit;
+      font-weight: 400;
+    }
+
+    .operator-note {
+      min-height: 76px;
+      resize: vertical;
+    }
+
     .handoff {
       padding: 14px 16px;
       border-top: 1px solid var(--line);
@@ -942,6 +975,14 @@
             <button type="button" class="secondary" id="nextPendingButton" disabled>下一张待确认</button>
             <button type="button" class="secondary" id="clearDecisionButton" disabled>清除当前决定</button>
           </div>
+          <div class="operator-context">
+            <label for="operatorName">复核人员
+              <input class="operator-field" id="operatorName" type="text" autocomplete="off" placeholder="填写姓名或工号">
+            </label>
+            <label for="decisionNote">本张备注
+              <textarea class="operator-note" id="decisionNote" maxlength="500" placeholder="可填写中文备注，留空也可以"></textarea>
+            </label>
+          </div>
           <div class="decision-actions" id="decisionActions">
             <button type="button" class="primary-choice" data-decision="pass" disabled>通过</button>
             <button type="button" class="warning" data-decision="rescan" disabled>需要重扫</button>
@@ -1024,6 +1065,7 @@
       queueLoaded: false,
       queueSource: "内置演示",
       decisions: {},
+      operatorName: "",
       currentIndex: 0,
       previewFit: true,
       previewZoom: 1,
@@ -1067,6 +1109,8 @@
       previousReviewedButton: document.getElementById("previousReviewedButton"),
       nextPendingButton: document.getElementById("nextPendingButton"),
       clearDecisionButton: document.getElementById("clearDecisionButton"),
+      operatorName: document.getElementById("operatorName"),
+      decisionNote: document.getElementById("decisionNote"),
       recoveryBox: document.getElementById("recoveryBox"),
       recoveryTitle: document.getElementById("recoveryTitle"),
       recoveryMessage: document.getElementById("recoveryMessage"),
@@ -1229,6 +1273,22 @@
     function currentItem() {
       clampCurrentIndex();
       return state.reviewItems[state.currentIndex] || null;
+    }
+
+    function currentNote() {
+      const item = currentItem();
+      return item && typeof item.note === "string" ? item.note : "";
+    }
+
+    function updateCurrentNote(value) {
+      const item = currentItem();
+      if (!item) return;
+      item.note = String(value || "").slice(0, 500);
+    }
+
+    function stampDecision(item) {
+      if (!item) return;
+      item.decidedAt = new Date().toISOString();
     }
 
     function currentItemNumber() {
@@ -1426,6 +1486,10 @@
       els.previousReviewedButton.disabled = !(reviewMode && previousReviewedIndex() >= 0);
       els.nextPendingButton.disabled = !(reviewMode && nextPendingIndex() >= 0);
       els.clearDecisionButton.disabled = !(reviewMode && item && item.decision);
+      els.operatorName.disabled = !reviewMode;
+      els.operatorName.value = state.operatorName;
+      els.decisionNote.disabled = !(reviewMode && item);
+      if (els.decisionNote.value !== currentNote()) els.decisionNote.value = currentNote();
       els.decisionActions.querySelectorAll("button").forEach((button) => {
         button.disabled = !(reviewMode && item);
         button.classList.toggle("primary-choice", reviewMode && item && item.suggestedAction === button.dataset.decision);
@@ -1622,7 +1686,9 @@
         issue: "这张图片需要人工确认。",
         advice: index % 2 ? "建议需要重扫，确认后交回扫描工位补扫。" : "请按实际情况选择右侧决定。",
         suggestedAction: index % 2 ? "rescan" : "pass",
-        decision: null
+        decision: null,
+        note: "",
+        decidedAt: ""
       }));
     }
 
@@ -1653,7 +1719,9 @@
         previewSource: item.preview_source || "",
         originalPreviewUrl: localApi.enabled && item.local_id && hasOriginal ? `/api/preview/${encodeURIComponent(item.local_id)}/original` : "",
         processedPreviewUrl: localApi.enabled && item.local_id && hasProcessed ? `/api/preview/${encodeURIComponent(item.local_id)}/processed` : "",
-        decision: null
+        decision: null,
+        note: "",
+        decidedAt: ""
       };
     }
 
@@ -1673,6 +1741,11 @@
 
     function restoreDraftDecisions(draft) {
       if (!draft || !Array.isArray(draft.decisions) || state.reviewItems.length === 0) return false;
+      let restoredOperator = false;
+      if (typeof draft.operator_name === "string") {
+        state.operatorName = draft.operator_name;
+        restoredOperator = state.operatorName.trim().length > 0;
+      }
       const operatorDecisionMap = {
         pass: "pass",
         rescan: "rescan",
@@ -1695,6 +1768,8 @@
           const restoredDecision = operatorDecisionMap[decision.decision];
           if (!item || !restoredDecision) return;
           item.decision = restoredDecision;
+          item.note = typeof decision.note_zh === "string" ? decision.note_zh : "";
+          item.decidedAt = typeof decision.decided_at === "string" ? decision.decided_at : "";
           state.decisions[item.id] = restoredDecision;
           restored += 1;
         });
@@ -1708,7 +1783,7 @@
         state.decisions[item.id] = restoredDecision;
         restored += 1;
       });
-      if (restored === 0) return false;
+      if (restored === 0 && !restoredOperator) return false;
       state.currentIndex = Math.max(0, firstPendingIndex());
       state.attentionFiles = pendingCount();
       state.reviewQueueText = `已恢复上次进度：已决定 ${reviewedCount()} 项，待决定 ${pendingCount()} 项。`;
@@ -1743,6 +1818,7 @@
       state.progress = deriveProgress(summary, progress);
       state.reviewItems = nextStatus === "needs_review" ? makeReviewItems(state.attentionFiles) : [];
       state.decisions = {};
+      state.operatorName = "";
       state.currentIndex = 0;
       els.inputStatus.textContent = "已加载本机处理状态。";
       els.outputStatus.textContent = state.outputSummary;
@@ -2001,6 +2077,7 @@
         source_type: "production_workbench",
         source_target_count: state.reviewItems.length,
         generated_in_browser: true,
+        operator_name: state.operatorName.trim(),
         privacy: {
           summary_only: true
         },
@@ -2020,20 +2097,21 @@
         },
         review_counts: reviewCounts,
         reviewed_targets: reviewedCount(),
+        operator_decisions: state.reviewItems
+          .filter((item) => item.decision)
+          .map((item) => ({
+            scope: "production_review_queue",
+            local_id: item.id,
+            decision: item.decision,
+            decided_at: item.decidedAt || new Date().toISOString(),
+            note_zh: String(item.note || "").trim()
+          })),
         decisions
       };
     }
 
     function draftDecisionArtifact() {
-      const artifact = decisionArtifact();
-      artifact.operator_decisions = state.reviewItems
-        .filter((item) => item.decision)
-        .map((item) => ({
-          scope: "production_review_queue",
-          local_id: item.id,
-          decision: item.decision
-        }));
-      return artifact;
+      return decisionArtifact();
     }
 
     function exportDecisions() {
@@ -2166,6 +2244,7 @@
       state.queueLoaded = false;
       state.queueSource = "内置演示";
       state.decisions = {};
+      state.operatorName = "";
       state.currentIndex = 0;
       state.previewFit = true;
       state.previewZoom = 1;
@@ -2194,6 +2273,7 @@
       const item = currentItem();
       if (!item) return;
       item.decision = button.dataset.decision;
+      stampDecision(item);
       state.decisions[item.id] = item.decision;
       state.progress = pendingCount() === 0 ? 94 : Math.min(92, state.progress + 4);
       state.attentionFiles = pendingCount();
@@ -2223,6 +2303,7 @@
       const item = currentItem();
       if (!item || !item.decision) return;
       item.decision = null;
+      item.decidedAt = "";
       delete state.decisions[item.id];
       state.attentionFiles = pendingCount();
       state.reviewQueueText = `已清除当前决定；已决定 ${reviewedCount()} 项，待决定 ${pendingCount()} 项。`;
@@ -2234,6 +2315,16 @@
     els.zoomOutButton.addEventListener("click", () => setPreviewZoom(state.previewZoom - 0.25));
     els.zoomInButton.addEventListener("click", () => setPreviewZoom(state.previewZoom + 0.25));
     els.resetPreviewButton.addEventListener("click", resetPreviewView);
+
+    els.operatorName.addEventListener("input", () => {
+      state.operatorName = els.operatorName.value.trim();
+      scheduleDraftSave();
+    });
+
+    els.decisionNote.addEventListener("input", () => {
+      updateCurrentNote(els.decisionNote.value);
+      scheduleDraftSave();
+    });
 
     els.fixtureSelect.addEventListener("change", async () => {
       try {
