@@ -1026,6 +1026,22 @@
         <div class="handoff">
           <button id="exportButton" disabled>另存复核结果</button>
           <button id="completeButton" disabled>完成并导出结果</button>
+          <div class="handoff-box hidden" id="finishConfirmPanel">
+            <h3>确认完成本批</h3>
+            <p id="finishConfirmMessage">请确认本批已经检查完，再完成并交接。</p>
+            <p><strong>复核情况：</strong><span id="finishConfirmCounts">已确认 0 项，待决定 0 项。</span></p>
+            <p><strong>保存位置：</strong><span id="finishConfirmOutput">处理后输出文件夹</span></p>
+            <p><strong>接下来：</strong></p>
+            <ul id="finishConfirmSteps">
+              <li>确认处理后图片数量和文件是否齐全。</li>
+              <li>把处理后图片交给验收或移交流程。</li>
+              <li>完成后可以准备下一批。</li>
+            </ul>
+            <div class="decision-actions">
+              <button type="button" class="primary-choice" id="confirmFinishButton">确认完成本批</button>
+              <button type="button" class="secondary" id="returnReviewButton">返回继续检查</button>
+            </div>
+          </div>
           <div class="handoff-box hidden" id="outputPanel">
             <h3 id="completionTitle">批次已完成</h3>
             <p id="completionMessage">处理后图片和复核结果已保存。</p>
@@ -1087,6 +1103,7 @@
         "把处理后图片交给验收或移交流程。",
         "点击准备下一批，重新选择新的扫描原图文件夹和输出文件夹。"
       ],
+      finishConfirmationVisible: false,
       lastDraftMessage: "",
       operatorMessage: "",
       reviewQueueText: "",
@@ -1164,6 +1181,13 @@
       decisionSummary: document.getElementById("decisionSummary"),
       outputPanel: document.getElementById("outputPanel"),
       failurePanel: document.getElementById("failurePanel"),
+      finishConfirmPanel: document.getElementById("finishConfirmPanel"),
+      finishConfirmMessage: document.getElementById("finishConfirmMessage"),
+      finishConfirmCounts: document.getElementById("finishConfirmCounts"),
+      finishConfirmOutput: document.getElementById("finishConfirmOutput"),
+      finishConfirmSteps: document.getElementById("finishConfirmSteps"),
+      confirmFinishButton: document.getElementById("confirmFinishButton"),
+      returnReviewButton: document.getElementById("returnReviewButton"),
       outputPlace: document.getElementById("outputPlace"),
       decisionSavePlace: document.getElementById("decisionSavePlace"),
       completionNotePlace: document.getElementById("completionNotePlace"),
@@ -1582,12 +1606,33 @@
       els.startButton.disabled = state.status !== "ready" || (state.folderReadiness && state.folderReadiness.ready_to_start === false);
       els.exportButton.disabled = !(state.status === "needs_review" && state.reviewItems.length > 0);
       els.completeButton.disabled = !((state.status === "needs_review" || state.status === "ready_to_finish") && pendingCount() === 0);
+      els.finishConfirmPanel.classList.toggle("hidden", !state.finishConfirmationVisible || !["needs_review", "ready_to_finish"].includes(state.status));
       els.outputPanel.classList.toggle("hidden", state.status !== "complete");
       els.failurePanel.classList.toggle("hidden", state.status !== "failed");
       renderRecoveryGuidance();
       renderFolderReadiness();
+      renderFinishConfirmation();
       renderCompletionPanel();
       renderDecisionArea();
+    }
+
+    function finishOutputLabel() {
+      if (state.readyImages > 0) return `处理后输出文件夹，已准备 ${state.readyImages} 张处理后图片`;
+      return "处理后输出文件夹";
+    }
+
+    function renderFinishConfirmation() {
+      els.finishConfirmMessage.textContent = state.reviewItems.length
+        ? "所有需要确认的图片都已有决定。请确认无误后完成本批。"
+        : "本批没有需要人工确认的图片。请确认处理后图片已准备好，再完成本批。";
+      els.finishConfirmCounts.textContent = `共 ${state.reviewItems.length} 项，已确认 ${reviewedCount()} 项，待决定 ${pendingCount()} 项。`;
+      els.finishConfirmOutput.textContent = finishOutputLabel();
+      els.finishConfirmSteps.innerHTML = [
+        "到处理后输出文件夹检查图片数量和文件是否齐全。",
+        "把处理后图片交给验收或移交流程。",
+        "确认完成后，系统会保存复核结果和交接说明。"
+      ].map((step) => `<li>${escapeHtml(step)}</li>`).join("");
+      els.confirmFinishButton.disabled = pendingCount() > 0;
     }
 
     function renderCompletionPanel() {
@@ -2213,15 +2258,18 @@
     async function finishBatch() {
       if (pendingCount() > 0 || (state.reviewItems.length === 0 && state.status !== "ready_to_finish")) {
         els.loadStatus.textContent = "还有图片没有决定，暂不能完成。";
+        state.finishConfirmationVisible = false;
         render();
         return;
       }
       if (!localApi.enabled) {
+        state.finishConfirmationVisible = false;
         setStatus("complete");
         els.loadStatus.textContent = "完成并导出结果。请确认复核结果已保存。";
         return;
       }
       try {
+        state.finishConfirmationVisible = false;
         els.loadStatus.textContent = "正在完成并导出结果。";
         const payload = await apiPost("/api/finish-decisions", decisionArtifact());
         applyCompletionPanel(payload.completion_panel);
@@ -2229,6 +2277,7 @@
         if (payload.folders && payload.folders.metadata) state.decisionSaveSummary = payload.folders.metadata;
         state.status = "complete";
         state.progress = 100;
+        state.finishConfirmationVisible = false;
         state.operatorMessage = payload.message_zh || "完成并导出结果。";
         els.loadStatus.textContent = payload.message_zh || "完成并导出结果：处理后图片和复核结果已保存。";
         render();
@@ -2236,6 +2285,24 @@
         els.loadStatus.textContent = error.message || "完成并导出结果失败。";
         render();
       }
+    }
+
+    function showFinishConfirmation() {
+      if (pendingCount() > 0 || (state.reviewItems.length === 0 && state.status !== "ready_to_finish")) {
+        els.loadStatus.textContent = "还有图片没有决定，暂不能完成。";
+        state.finishConfirmationVisible = false;
+        render();
+        return;
+      }
+      state.finishConfirmationVisible = true;
+      els.loadStatus.textContent = "请确认本批已经检查完，再完成并导出结果。";
+      render();
+    }
+
+    function returnToReviewFromFinishConfirmation() {
+      state.finishConfirmationVisible = false;
+      els.loadStatus.textContent = state.reviewItems.length ? "已返回继续检查。" : "已返回完成前检查。";
+      render();
     }
 
     els.inputFolder.addEventListener("change", () => {
@@ -2274,7 +2341,9 @@
     els.startButton.addEventListener("click", startLocalRun);
     els.retryButton.addEventListener("click", retryLocalRun);
 
-    els.completeButton.addEventListener("click", finishBatch);
+    els.completeButton.addEventListener("click", showFinishConfirmation);
+    els.confirmFinishButton.addEventListener("click", finishBatch);
+    els.returnReviewButton.addEventListener("click", returnToReviewFromFinishConfirmation);
     els.exportButton.addEventListener("click", exportDecisions);
     function prepareNextBatch() {
       state.inputChosen = false;
@@ -2301,6 +2370,7 @@
         "把处理后图片交给验收或移交流程。",
         "点击准备下一批，重新选择新的扫描原图文件夹和输出文件夹。"
       ];
+      state.finishConfirmationVisible = false;
       state.lastDraftMessage = "";
       state.operatorMessage = "";
       state.reviewQueueText = "";

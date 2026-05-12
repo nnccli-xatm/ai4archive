@@ -264,8 +264,24 @@ test.describe("production workbench finish/export browser smoke", () => {
     await page.locator("#decisionNote").fill("保留原貌即可。");
     await page.getByRole("button", { name: "保留原貌" }).click();
     await expect(page.locator("#decisionSummary")).toHaveText("已决定 3 项，待决定 0 项。");
+    await page.getByRole("button", { name: "放大" }).click();
+    await expect(page.locator("#zoomState")).toHaveText("查看：125%");
 
     await page.getByRole("button", { name: "完成并导出结果" }).click();
+    await expect(page.locator("#finishConfirmPanel")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "确认完成本批" })).toBeVisible();
+    await expect(page.locator("#finishConfirmCounts")).toHaveText("共 3 项，已确认 3 项，待决定 0 项。");
+    await expect(page.locator("#finishConfirmOutput")).toHaveText("处理后输出文件夹，已准备 3 张处理后图片");
+    await expect(page.getByText("确认完成后，系统会保存复核结果和交接说明。")).toBeVisible();
+    await page.getByRole("button", { name: "返回继续检查" }).click();
+    await expect(page.locator("#finishConfirmPanel")).toBeHidden();
+    await expect(page.locator("#operatorName")).toHaveValue("复核员甲");
+    await expect(page.locator("#decisionNote")).toHaveValue("保留原貌即可。");
+    await expect(page.locator("#decisionSummary")).toHaveText("已决定 3 项，待决定 0 项。");
+    await expect(page.locator("#zoomState")).toHaveText("查看：125%");
+
+    await page.getByRole("button", { name: "完成并导出结果" }).click();
+    await page.getByRole("button", { name: "确认完成本批" }).click();
     await expect(page.locator("#completionTitle")).toHaveText("完成并导出结果");
     await expect(page.locator("#completionCounts")).toHaveText("共 3 项，已确认 3 项，待决定 0 项。");
     await expect(page.locator("#outputPlace")).toHaveText("/tmp/synthetic-output");
@@ -350,6 +366,90 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#sourceText")).toHaveText("0 张");
     await expect(page.locator("#readyText")).toHaveText("0 张");
 
+    expect(consoleProblems).toEqual([]);
+  });
+
+  test("confirms no-review batches before finishing", async ({ page }) => {
+    const consoleProblems = [];
+    let finishRequested = false;
+    page.on("console", (message) => {
+      if (["error", "warning"].includes(message.type())) consoleProblems.push(`${message.type()}: ${message.text()}`);
+    });
+    page.on("pageerror", (error) => consoleProblems.push(`pageerror: ${error.message}`));
+
+    await page.route("**/api/status", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema_version: "scan-qc.local-production-workbench.v1",
+          running: false,
+          configured: true,
+          folders: {
+            input: "/tmp/no-review-input",
+            derivatives: "/tmp/no-review-output",
+            metadata: "/tmp/no-review-output/_production_workbench",
+          },
+          summary: {
+            schema_version: "scan-qc.production-run.v1",
+            status: "finished",
+            operator_summary: {
+              message_zh: "处理后图片已生成，可以完成并导出结果。",
+              total_source_images: 2,
+              openable_source_images: 2,
+              derivative_images_ready: 2,
+              files_needing_attention: 0,
+            },
+            counts: {
+              total_files: 2,
+              openable_files: 2,
+              processed_files: 2,
+              resumed_files: 0,
+              failed_files: 0,
+              retry_list_files: 0,
+            },
+          },
+          progress: { schema_version: "scan-qc.production-run-progress.v1", state: "finished" },
+          queue: { schema_version: "scan-qc.production-review-queue.v1", items: [] },
+          draft_decisions: null,
+        }),
+      });
+    });
+    await page.route("**/api/finish-decisions", async (route) => {
+      finishRequested = true;
+      const payload = JSON.parse(route.request().postData() || "{}");
+      expect(payload.decisions).toHaveLength(0);
+      expect(payload.aggregate_counts.review_completion.complete).toBe(true);
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema_version: "scan-qc.local-production-workbench.v1",
+          finished: true,
+          message_zh: "完成并导出结果：处理后图片和复核结果已保存。",
+          completion_panel: {
+            title_zh: "完成并导出结果",
+            message_zh: "本批次已完成。处理后图片在输出文件夹，复核结果已保存到本机状态文件夹。",
+            total_review_items: 0,
+            reviewed_items: 0,
+            pending_items: 0,
+            checklist_zh: ["处理后图片已准备好", "复核结果已保存", "交接说明已保存", "可以准备下一批"],
+            next_steps_zh: ["到处理后输出文件夹检查图片数量和文件是否齐全。"],
+          },
+        }),
+      });
+    });
+
+    await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
+    await expect(page.locator("#stateName")).toHaveText("待完成");
+    await page.getByRole("button", { name: "完成并导出结果" }).click();
+    await expect(page.locator("#finishConfirmPanel")).toBeVisible();
+    await expect(page.locator("#finishConfirmMessage")).toHaveText("本批没有需要人工确认的图片。请确认处理后图片已准备好，再完成本批。");
+    await page.getByRole("button", { name: "返回继续检查" }).click();
+    await expect(page.locator("#stateName")).toHaveText("待完成");
+    await expect(finishRequested).toBe(false);
+    await page.getByRole("button", { name: "完成并导出结果" }).click();
+    await page.getByRole("button", { name: "确认完成本批" }).click();
+    await expect(page.locator("#completionTitle")).toHaveText("完成并导出结果");
+    expect(finishRequested).toBe(true);
     expect(consoleProblems).toEqual([]);
   });
 
@@ -709,6 +809,9 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.getByRole("button", { name: "完成并导出结果" })).toBeEnabled();
 
     await page.getByRole("button", { name: "完成并导出结果" }).click();
+    await expect(page.locator("#finishConfirmPanel")).toBeVisible();
+    await expect(page.locator("#finishConfirmCounts")).toHaveText("共 0 项，已确认 0 项，待决定 0 项。");
+    await page.getByRole("button", { name: "确认完成本批" }).click();
     await expect(page.locator("#completionTitle")).toHaveText("完成并导出结果");
     await expect(page.locator("#completionCounts")).toHaveText("共 0 项，已确认 0 项，待决定 0 项。");
     await expect(page.locator("#outputPlace")).toHaveText("/tmp/no-review-output");
