@@ -526,6 +526,23 @@ retry, and informational follow-up actions. They are clearly marked local-only
 sensitive evidence because they include paths, hashes, row-level messages, and
 processing errors; they do not embed thumbnails, image bytes, or source images.
 
+For the redesigned Chinese production workbench, generate the focused local
+operator queue from the same private artifacts:
+
+```bash
+archive-scan-qc production-review-queue \
+  --scan-qc-report /approved-work/qc-reports/batch-001/scan_qc_report.json \
+  --processing-review-package /approved-work/processed-derivatives/batch-001/local-review/processing_review_package.json \
+  --rework-action-list /approved-work/qc-reports/batch-001/rework_action_list.json \
+  --out /approved-work/qc-reports/batch-001/production_review_queue.json
+```
+
+`production_review_queue.json` contains Chinese reasons, stable local queue
+IDs, severity, source category, suggested operator actions (`pass`, `rescan`,
+`reprocess`, `keep_original_trace`, or `skip`), and local-only sensitivity
+metadata. It is for the approved local production environment only and does not
+embed image bytes, thumbnails, base64 data, OCR text, or hashes.
+
 `review_summary.json` includes severity, rule, status, severity/status, and
 rule/status counts, remaining P0/P1 counts, and `acceptance_passed`. It contains
 no row-level path list, filenames, hashes, messages, or reviewer notes. P0/P1

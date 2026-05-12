@@ -33,6 +33,7 @@ from .production_runner import PRODUCTION_RUN_PROGRESS_JSON, PRODUCTION_RUN_SUMM
 from .processing import ProcessingOptions, process_images
 from .processing_plan import write_processing_plan
 from .processing_review import write_processing_review_package
+from .production_review_queue import PRODUCTION_REVIEW_QUEUE_JSON, write_production_review_queue
 from .reports import write_reports, write_review_export, write_review_summary
 from .review_decisions import write_review_decision_verification_summary
 from .rework import write_rework_action_list
@@ -219,6 +220,8 @@ def main(argv: list[str] | None = None) -> int:
         return _main_processing_plan(argv[1:])
     if argv and argv[0] == "rework-action-list":
         return _main_rework_action_list(argv[1:])
+    if argv and argv[0] == "production-review-queue":
+        return _main_production_review_queue(argv[1:])
     parser = build_parser()
     args = parser.parse_args(argv)
     _validate_processing_flags(parser, args)
@@ -968,6 +971,41 @@ def _main_rework_action_list(argv: list[str]) -> int:
         print(f"Rework action list CSV: {csv_path}")
     print(f"Actions: {payload['summary']['total_actions']}")
     print("Sensitivity: LOCAL-ONLY sensitive row-level evidence; contains paths/hashes/messages, no thumbnails or image content.")
+    return 0
+
+
+def _main_production_review_queue(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="archive-scan-qc production-review-queue",
+        description="Write a local-only Chinese operator production review queue from scan QC and processing artifacts.",
+    )
+    parser.add_argument("--scan-qc-report", default=None, type=Path, help="Optional path to scan_qc_report.json.")
+    parser.add_argument(
+        "--processing-review-package",
+        default=None,
+        type=Path,
+        help="Optional path to processing_review_package.json.",
+    )
+    parser.add_argument("--rework-action-list", default=None, type=Path, help="Optional path to rework_action_list.json.")
+    parser.add_argument(
+        "--out",
+        required=True,
+        type=Path,
+        help=f"Output JSON path for {PRODUCTION_REVIEW_QUEUE_JSON}.",
+    )
+    args = parser.parse_args(argv)
+    try:
+        json_path, payload = write_production_review_queue(
+            args.out,
+            scan_qc_report_path=args.scan_qc_report,
+            processing_review_package_path=args.processing_review_package,
+            rework_action_list_path=args.rework_action_list,
+        )
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    print(f"Production review queue JSON: {json_path}")
+    print(f"Queue items: {payload['summary']['total_items']}")
+    print("Sensitivity: LOCAL-ONLY production queue; no images/base64/OCR text/hashes are embedded.")
     return 0
 
 
