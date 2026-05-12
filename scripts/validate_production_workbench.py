@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
+import tempfile
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -144,6 +146,179 @@ def validate_saved_folder_start_flow(html: str) -> list[str]:
     return errors
 
 
+def validate_executable_saved_folder_start_flow(html: str) -> list[str]:
+    """Execute the saved-folder workflow so button state regressions are caught."""
+    script_match = re.search(r"<script>(?P<script>.*?)</script>", html, re.DOTALL)
+    if not script_match:
+        return ["missing executable workbench script"]
+
+    runner = f"""
+const vm = require("node:vm");
+const workbenchScript = {script_match.group("script")!r};
+const elements = new Map();
+const eventHandlers = {{}};
+const fetchCalls = [];
+const decisionButtons = ["pass", "needs_rework", "admin_handling", "keep_original_trace"].map((decision) => element("decision-" + decision));
+decisionButtons.forEach((button) => {{
+  button.dataset.decision = button.id.replace("decision-", "");
+}});
+
+function makeClassList(target) {{
+  return {{
+    toggle(cls, force) {{
+      const classes = new Set(String(target.className || "").split(/\\s+/).filter(Boolean));
+      const shouldHave = force === undefined ? !classes.has(cls) : Boolean(force);
+      if (shouldHave) classes.add(cls);
+      else classes.delete(cls);
+      target.className = Array.from(classes).join(" ");
+    }},
+    add(cls) {{
+      const classes = new Set(String(target.className || "").split(/\\s+/).filter(Boolean));
+      classes.add(cls);
+      target.className = Array.from(classes).join(" ");
+    }},
+    remove(cls) {{
+      const classes = new Set(String(target.className || "").split(/\\s+/).filter(Boolean));
+      classes.delete(cls);
+      target.className = Array.from(classes).join(" ");
+    }}
+  }};
+}}
+
+function element(id) {{
+  if (!elements.has(id)) {{
+    const node = {{
+      id,
+      value: "",
+      innerHTML: "",
+      textContent: "",
+      className: "",
+      disabled: false,
+      files: [],
+      dataset: {{}},
+      style: {{}},
+      addEventListener(type, handler) {{
+        eventHandlers[id + ":" + type] = handler;
+      }},
+      querySelectorAll(selector) {{
+        if (id === "decisionActions" && selector === "button") return decisionButtons;
+        return [];
+      }},
+      closest(selector) {{
+        if (selector === "button[data-decision]" && this.dataset && this.dataset.decision) return this;
+        return null;
+      }},
+      click() {{
+        const handler = eventHandlers[id + ":click"];
+        if (handler) return handler({{ target: this }});
+      }}
+    }};
+    node.classList = makeClassList(node);
+    elements.set(id, node);
+  }}
+  return elements.get(id);
+}}
+
+function assert(condition, message) {{
+  if (!condition) throw new Error(message);
+}}
+
+const context = {{
+  assert,
+  console,
+  Date,
+  Map,
+  Number,
+  Object,
+  Promise,
+  Set,
+  String,
+  JSON,
+  Array,
+  Boolean,
+  Error,
+  eventHandlers,
+  fetchCalls,
+  fetch(url, options) {{
+    fetchCalls.push({{ url, options }});
+    assert(url === "/api/configure", "saved folder flow called unexpected URL: " + url);
+    return Promise.resolve({{
+      ok: true,
+      json() {{
+        return Promise.resolve({{ total_source_images: 12 }});
+      }}
+    }});
+  }},
+  document: {{
+    getElementById: element,
+    createElement: element
+  }},
+  window: {{
+    clearTimeout() {{}},
+    setTimeout(handler) {{
+      handler();
+      return 1;
+    }}
+  }},
+  Blob: function Blob() {{}},
+  URL: {{
+    createObjectURL() {{ return "blob:synthetic-download"; }},
+    revokeObjectURL() {{}}
+  }}
+}};
+
+vm.createContext(context);
+const check = vm.runInContext(workbenchScript + `
+  (async () => {{
+    assert(els.stateAction.textContent === "请选择扫描原图文件夹", "initial state action changed");
+    assert(els.startButton.disabled === true, "start button should start disabled");
+    els.inputPath.value = "/tmp/scan-input";
+    els.outputPath.value = "/tmp/scan-output";
+    await eventHandlers["saveFoldersButton:click"]();
+    assert(fetchCalls.length === 1, "configure endpoint was not called once");
+    const body = JSON.parse(fetchCalls[0].options.body);
+    assert(body.input_path === "/tmp/scan-input", "configure input path was not submitted");
+    assert(body.output_path === "/tmp/scan-output", "configure output path was not submitted");
+    assert(state.status === "ready", "saved folders did not keep ready status");
+    assert(els.stateName.textContent === "准备完成", "ready state name did not render");
+    assert(els.stateAction.textContent === "可以开始处理", "ready state action did not render");
+    assert(els.loadStatus.textContent === "文件夹已保存，可以开始处理。", "saved folder success copy did not render");
+    assert(els.startButton.disabled === false, "start button did not become enabled after saved folders");
+    eventHandlers["startButton:click"]();
+    assert(state.status === "needs_review", "synthetic processing did not advance after start click");
+    assert(els.stateAction.textContent === "有图片需要人工确认", "post-start synthetic processing state did not render");
+  }})()
+`, context);
+
+Promise.resolve(check).catch((error) => {{
+  console.error(error && error.stack ? error.stack : error);
+  process.exit(1);
+}});
+"""
+
+    with tempfile.NamedTemporaryFile("w", suffix=".js", encoding="utf-8", delete=False) as handle:
+        handle.write(runner)
+        runner_path = Path(handle.name)
+
+    try:
+        completed = subprocess.run(
+            ["node", str(runner_path)],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return ["Node.js is required for executable saved-folder checks but was not found on PATH"]
+    finally:
+        runner_path.unlink(missing_ok=True)
+
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or completed.stdout.strip() or f"node exited {completed.returncode}"
+        return [f"executable saved-folder start-flow check failed: {detail}"]
+    return []
+
+
 class VisibleTextParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
@@ -247,6 +422,7 @@ def main() -> int:
     if "operator_summary" not in html:
         errors.append("missing operator summary mapping")
     errors.extend(validate_saved_folder_start_flow(html))
+    errors.extend(validate_executable_saved_folder_start_flow(html))
     for fixture_name, expected_status in FIXTURE_STATES.items():
         fixture_dir = FIXTURE_ROOT / fixture_name
         summary_path = fixture_dir / "production_run_summary.json"
