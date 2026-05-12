@@ -84,6 +84,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Despeckle processing backend. Defaults to conservative fallback; numpy is opt-in.",
     )
     parser.add_argument("--resume-processing", action="store_true")
+    parser.add_argument("--reuse-scan-measurements", action="store_true")
     parser.add_argument("--manifest-csv", default=None, type=Path)
     parser.add_argument("--rules-profile", default=None, type=Path)
     parser.add_argument("--min-dpi", default=None, type=int)

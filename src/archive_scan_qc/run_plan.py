@@ -41,6 +41,7 @@ class PlanBatch:
     despeckle: bool
     despeckle_backend: str
     resume_processing: bool
+    reuse_scan_measurements: bool = False
 
 
 @dataclass(frozen=True)
@@ -156,6 +157,7 @@ def _run_batch(project_id: str, batch: PlanBatch, index: int) -> dict[str, Any]:
         "processing_resumed_files": 0,
         "processing_duplicate_reused_files": 0,
         "processing_existing_derivative_reused_files": 0,
+        "processing_scan_measurement_reused_files": 0,
         "scan_elapsed_seconds": 0.0,
         "scan_files_per_minute": 0.0,
         "processing_elapsed_seconds": 0.0,
@@ -247,6 +249,7 @@ def _run_batch(project_id: str, batch: PlanBatch, index: int) -> dict[str, Any]:
                     despeckle=batch.despeckle,
                     despeckle_backend=batch.despeckle_backend,
                     resume_processing=batch.resume_processing,
+                    reuse_scan_measurements=batch.reuse_scan_measurements,
                     workers=batch.workers,
                 ),
             )
@@ -259,6 +262,9 @@ def _run_batch(project_id: str, batch: PlanBatch, index: int) -> dict[str, Any]:
                     "processing_resumed_files": processing_summary["resumed_files"],
                     "processing_duplicate_reused_files": processing_summary.get("duplicate_reused_files", 0),
                     "processing_existing_derivative_reused_files": processing_summary.get("existing_derivative_reused_files", 0),
+                    "processing_scan_measurement_reused_files": processing_summary.get("scan_measurement_reuse", {}).get(
+                        "files_with_any_reuse", 0
+                    ),
                     "processing_elapsed_seconds": processing_performance["elapsed_seconds"],
                     "processing_files_per_minute": processing_performance["processed_files_per_minute"],
                     "processing_operation_timings": processing_performance.get("operation_timings", {}),
@@ -311,6 +317,9 @@ def _build_summary(
         "processing_duplicate_reused_files": sum(int(batch["processing_duplicate_reused_files"]) for batch in batches),
         "processing_existing_derivative_reused_files": sum(
             int(batch["processing_existing_derivative_reused_files"]) for batch in batches
+        ),
+        "processing_scan_measurement_reused_files": sum(
+            int(batch["processing_scan_measurement_reused_files"]) for batch in batches
         ),
     }
     scan_elapsed = round(sum(float(batch["scan_elapsed_seconds"]) for batch in batches), 6)
@@ -440,6 +449,7 @@ def _write_summary(payload: dict[str, Any], output_root: Path) -> None:
         "processing_resumed_files",
         "processing_duplicate_reused_files",
         "processing_existing_derivative_reused_files",
+        "processing_scan_measurement_reused_files",
         "scan_elapsed_seconds",
         "scan_files_per_minute",
         "processing_elapsed_seconds",
@@ -506,6 +516,7 @@ def _batch_from_row(row: dict[str, Any], index: int, plan_dir: Path, output_root
         despeckle=_bool(normalized.get("despeckle"), "despeckle", index),
         despeckle_backend=_despeckle_backend(normalized.get("despeckle_backend"), index),
         resume_processing=_bool(normalized.get("resume_processing"), "resume_processing", index),
+        reuse_scan_measurements=_bool(normalized.get("reuse_scan_measurements"), "reuse_scan_measurements", index),
     )
 
 
