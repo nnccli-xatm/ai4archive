@@ -562,10 +562,13 @@ test.describe("production workbench finish/export browser smoke", () => {
 
     await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
     await expect(page.locator("#recoveryTitle")).toHaveText("处理没有全部完成");
-    await expect(page.getByText("点击重试处理，系统会继续使用当前文件夹位置。")).toBeVisible();
-    await expect(page.getByRole("button", { name: "重试处理" })).toBeVisible();
-    await page.getByRole("button", { name: "重试处理" }).click();
-    await expect(page.locator("#loadStatus")).toHaveText("正在重试处理，请等待；系统会继续使用当前文件夹。");
+    await expect(page.locator("#recoveryMessage")).toHaveText("本批次有图片没有处理完，可以先检查文件夹后重试本批次。");
+    await expect(page.getByText("检查扫描原图文件夹和输出文件夹是否选对。")).toBeVisible();
+    await expect(page.getByText("点击重试本批次，系统会继续使用当前文件夹。")).toBeVisible();
+    await expect(page.getByText("如果文件夹选错了，请返回重新选择文件夹。")).toBeVisible();
+    await expect(page.getByRole("button", { name: "重试本批次" })).toBeVisible();
+    await page.getByRole("button", { name: "重试本批次" }).click();
+    await expect(page.locator("#loadStatus")).toHaveText("正在重试本批次，请等待；系统会继续使用当前文件夹。");
     expect(retryRequested).toBe(true);
     expect(consoleProblems).toEqual([]);
   });
@@ -610,8 +613,10 @@ test.describe("production workbench finish/export browser smoke", () => {
 
     await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
     await expect(page.locator("#recoveryTitle")).toHaveText("处理没有全部完成");
-    await expect(page.getByRole("button", { name: "重试处理" })).toBeHidden();
-    await expect(page.getByText("请交管理员查看本机状态文件夹")).toBeVisible();
+    await expect(page.locator("#recoveryMessage")).toHaveText("本批次没有处理完，当前不能直接重试。");
+    await expect(page.getByRole("button", { name: "重试本批次" })).toBeHidden();
+    await expect(page.getByText("请交管理员处理，不要反复点击开始处理。")).toBeVisible();
+    await expect(page.getByText("如果文件夹选错了，请返回重新选择文件夹。")).toBeVisible();
   });
 
   test("sends selected processing mode before starting a local run", async ({ page }) => {
