@@ -37,6 +37,7 @@ class ProcessingOptions:
     despeckle: bool = False
     despeckle_backend: str = "fallback"
     resume_processing: bool = False
+    reuse_scan_measurements: bool = False
     deskew_max_degrees: float = 5.0
     deskew_min_confidence: float = 0.08
     audit_max_size_change_ratio: float = 0.55
@@ -104,6 +105,7 @@ def process_images(
         workers=worker_metadata(options.workers, process_workers),
     )
     performance["operation_timings"] = _aggregate_operation_timings(records, options)
+    performance["scan_measurement_reuse"] = _aggregate_scan_measurement_reuse(records)
     for record in records:
         record.pop("operation_timings", None)
         record.pop("_existing_derivative_reused", None)
@@ -138,6 +140,7 @@ def process_images(
             "dark_border_trim_conservative" if options.trim_dark_border else "dark_border_trim_disabled",
             "auto_crop_conservative" if options.auto_crop else "auto_crop_disabled",
             "despeckle_isolated_pixels" if options.despeckle else "despeckle_disabled",
+            "reuse_scan_measurements" if options.reuse_scan_measurements else "reuse_scan_measurements_disabled",
             "autocontrast_cutoff_0_5",
             "preserve_source_relative_path",
         ],
@@ -148,6 +151,7 @@ def process_images(
             "reprocessed_files": reprocessed_files,
             "duplicate_reused_files": duplicate_reused_files,
             "existing_derivative_reused_files": existing_derivative_reused_files,
+            "scan_measurement_reuse": performance["scan_measurement_reuse"],
         },
         "files": records,
     }
@@ -382,6 +386,7 @@ def _process_record(
         "reprocessed": False,
         "duplicate_derivative_reused": False,
         "_existing_derivative_reused": False,
+        "scan_measurements_reused": False,
         "processing_options_fingerprint": _processing_options_fingerprint(options),
         "operations": [],
         "error": None,
@@ -414,7 +419,7 @@ def _process_record(
         if source.resolve() == target.resolve():
             raise ValueError("derivative target would overwrite the source image")
         with Image.open(source) as image:
-            processed, operations, process_info = _process_image(image, options)
+            processed, operations, process_info = _process_image(image, options, scan_record=item)
             guardrail_failures = process_info["processing_audit"].get("guardrail_failures", [])
             if guardrail_failures:
                 raise ValueError("processing guardrail exceeded: " + "; ".join(guardrail_failures))
@@ -444,6 +449,7 @@ def _process_record(
                 "processing_audit": process_info["processing_audit"],
                 "processing_warnings": process_info["processing_warnings"],
                 "operation_timings": process_info["operation_timings"],
+                "scan_measurements_reused": process_info["scan_measurements_reused"],
                 "status": "processed",
                 "processing_options_fingerprint": _processing_options_fingerprint(options),
                 "operations": operations,
@@ -476,6 +482,7 @@ def _process_record(
                     "processing_audit": process_info["processing_audit"],
                     "processing_warnings": process_info["processing_warnings"],
                     "operation_timings": process_info["operation_timings"],
+                    "scan_measurements_reused": process_info["scan_measurements_reused"],
                     "operations": operations,
                 }
             )
@@ -537,6 +544,7 @@ def _processing_options_fingerprint(options: ProcessingOptions) -> str:
         "trim_dark_border": options.trim_dark_border,
         "despeckle": options.despeckle,
         "despeckle_backend": options.despeckle_backend,
+        "reuse_scan_measurements": options.reuse_scan_measurements,
         "deskew_max_degrees": options.deskew_max_degrees,
         "deskew_min_confidence": options.deskew_min_confidence,
         "audit_max_size_change_ratio": options.audit_max_size_change_ratio,
@@ -587,6 +595,7 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "trim_dark_border": options.trim_dark_border,
             "despeckle": options.despeckle,
             "resume_processing": options.resume_processing,
+            "reuse_scan_measurements": options.reuse_scan_measurements,
         },
         "workers": {
             "requested_workers": performance["requested_workers"],
@@ -599,6 +608,7 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "finished_at": performance["finished_at"],
             "elapsed_seconds": performance["elapsed_seconds"],
             "operation_timings": operation_timings,
+            "scan_measurement_reuse": performance.get("scan_measurement_reuse", _empty_scan_measurement_reuse()),
         },
         "counts": {
             "total_files": summary["total_files"],
@@ -675,10 +685,51 @@ def _aggregate_operation_timings(records: list[dict[str, Any]], options: Process
             "elapsed_seconds": elapsed_seconds,
             "files_per_minute": _files_per_minute(len(values), elapsed_seconds),
             "average_seconds_per_file": round(elapsed_seconds / len(values), 6) if values else None,
+            "reused_scan_measurement_files": _operation_reuse_count(records, operation),
         }
         if operation == "despeckle":
             timings[operation].update(_aggregate_despeckle_backend(records, is_enabled))
     return timings
+
+
+def _operation_reuse_count(records: list[dict[str, Any]], operation: str) -> int:
+    return sum(
+        1
+        for record in records
+        if isinstance(record.get("operation_timings"), dict)
+        and isinstance(record["operation_timings"].get(operation), dict)
+        and record["operation_timings"][operation].get("reused_scan_measurement") is True
+    )
+
+
+def _aggregate_scan_measurement_reuse(records: list[dict[str, Any]]) -> dict[str, Any]:
+    operations = ("deskew", "trim_dark_border")
+    reused = {operation: _operation_reuse_count(records, operation) for operation in operations}
+    fallback = {
+        operation: sum(
+            1
+            for record in records
+            if isinstance(record.get("operation_timings"), dict)
+            and isinstance(record["operation_timings"].get(operation), dict)
+            and record["operation_timings"][operation].get("fallback_reason")
+        )
+        for operation in operations
+    }
+    return {
+        "enabled": any(record.get("scan_measurements_reused") for record in records if isinstance(record, dict)),
+        "files_with_any_reuse": sum(1 for record in records if record.get("scan_measurements_reused")),
+        "operations_skipped": {operation: count for operation, count in reused.items() if count},
+        "fallback_operations": {operation: count for operation, count in fallback.items() if count},
+    }
+
+
+def _empty_scan_measurement_reuse() -> dict[str, Any]:
+    return {
+        "enabled": False,
+        "files_with_any_reuse": 0,
+        "operations_skipped": {},
+        "fallback_operations": {},
+    }
 
 
 def _aggregate_despeckle_backend(records: list[dict[str, Any]], enabled: bool) -> dict[str, Any]:
@@ -756,7 +807,12 @@ def _reason_counts(reasons: list[str]) -> dict[str, int]:
     return counts
 
 
-def _process_image(image: Image.Image, options: ProcessingOptions) -> tuple[Image.Image, list[str], dict[str, Any]]:
+def _process_image(
+    image: Image.Image,
+    options: ProcessingOptions,
+    *,
+    scan_record: dict[str, Any] | None = None,
+) -> tuple[Image.Image, list[str], dict[str, Any]]:
     operations: list[str] = []
     operation_timings: dict[str, dict[str, Any]] = {}
     processed = ImageOps.exif_transpose(image)
@@ -767,12 +823,22 @@ def _process_image(image: Image.Image, options: ProcessingOptions) -> tuple[Imag
         processed = processed.convert("RGB")
         operations.append("convert_to_rgb")
     audit_source = processed.copy()
+    reusable = _scan_measurements_for_processing(scan_record, processed) if options.reuse_scan_measurements else {}
 
     pre_deskew_size = list(processed.size)
     post_deskew_size = list(processed.size)
     with _operation_timer(operation_timings, "deskew", enabled=options.deskew):
-        skew = _detect_skew(processed)
-        operations.append("skew_detect_projection")
+        skew = reusable.get("skew")
+        if isinstance(skew, SkewDetection):
+            operations.append("skew_detect_reused_scan_measurement")
+            operation_timings.setdefault("deskew", {})["reused_scan_measurement"] = True
+        else:
+            skew = _detect_skew(processed)
+            operations.append("skew_detect_projection")
+            if options.reuse_scan_measurements and options.deskew:
+                operation_timings.setdefault("deskew", {})["fallback_reason"] = reusable.get(
+                    "fallback_reason", "scan measurements unavailable"
+                )
         deskewed = False
         deskew_reason = skew.reason
         if not options.deskew:
@@ -800,7 +866,20 @@ def _process_image(image: Image.Image, options: ProcessingOptions) -> tuple[Imag
     dark_border_trimmed = False
     with _operation_timer(operation_timings, "trim_dark_border", enabled=options.trim_dark_border):
         if options.trim_dark_border:
-            dark_border = _detect_dark_border_bbox(processed)
+            reused_dark_border = reusable.get("dark_border")
+            if isinstance(reused_dark_border, DarkBorderDetection) and not deskewed:
+                dark_border = reused_dark_border
+                operations.append("dark_border_detect_reused_scan_measurement")
+                operation_timings.setdefault("trim_dark_border", {})["reused_scan_measurement"] = True
+            else:
+                dark_border = _detect_dark_border_bbox(processed)
+                if options.reuse_scan_measurements:
+                    fallback_reason = (
+                        "deskew changed coordinate space"
+                        if isinstance(reused_dark_border, DarkBorderDetection) and deskewed
+                        else reusable.get("fallback_reason", "scan measurements unavailable")
+                    )
+                    operation_timings.setdefault("trim_dark_border", {})["fallback_reason"] = fallback_reason
             if dark_border.bbox:
                 processed = processed.crop(dark_border.bbox)
                 operations.append("dark_border_trim_conservative")
@@ -870,6 +949,9 @@ def _process_image(image: Image.Image, options: ProcessingOptions) -> tuple[Imag
         "processing_audit": processing_audit,
         "processing_warnings": processing_warnings,
         "operation_timings": operation_timings,
+        "scan_measurements_reused": any(
+            timing.get("reused_scan_measurement") is True for timing in operation_timings.values()
+        ),
     }
     return processed, operations, crop_info
 
@@ -886,9 +968,8 @@ class _operation_timer:
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
         if self.enabled:
-            self.timings[self.operation] = {
-                "elapsed_seconds": max(0.0, round(time.perf_counter() - self.started_at, 6)),
-            }
+            timing = self.timings.setdefault(self.operation, {})
+            timing["elapsed_seconds"] = max(0.0, round(time.perf_counter() - self.started_at, 6))
 
 
 def _processing_audit(
@@ -929,6 +1010,60 @@ def _processing_audit(
     }
     failures = _audit_guardrail_failures(metrics, options)
     return {**metrics, "guardrail_failures": failures}
+
+
+def _scan_measurements_for_processing(scan_record: dict[str, Any] | None, image: Image.Image) -> dict[str, Any]:
+    if not isinstance(scan_record, dict):
+        return {"fallback_reason": "scan record unavailable"}
+    if scan_record.get("openable") is not True:
+        return {"fallback_reason": "scan record is not openable"}
+    if scan_record.get("exif_orientation_requires_transpose") is True:
+        return {"fallback_reason": "scan measurements predate EXIF transpose"}
+    if scan_record.get("width") != image.width or scan_record.get("height") != image.height:
+        return {"fallback_reason": "scan measurement dimensions do not match processing image"}
+
+    skew = _scan_record_skew(scan_record)
+    dark_border = _scan_record_dark_border(scan_record, image.size)
+    if not skew and not dark_border:
+        return {"fallback_reason": "complete reusable scan measurements unavailable"}
+
+    reusable: dict[str, Any] = {}
+    if skew:
+        reusable["skew"] = skew
+    if dark_border:
+        reusable["dark_border"] = dark_border
+    return reusable
+
+
+def _scan_record_skew(scan_record: dict[str, Any]) -> SkewDetection | None:
+    angle = scan_record.get("quality_skew_angle_degrees")
+    confidence = scan_record.get("quality_skew_confidence")
+    reason = scan_record.get("quality_skew_reason")
+    if angle is not None and not isinstance(angle, int | float):
+        return None
+    if not isinstance(confidence, int | float) or not isinstance(reason, str):
+        return None
+    return SkewDetection(float(angle) if angle is not None else None, float(confidence), reason)
+
+
+def _scan_record_dark_border(scan_record: dict[str, Any], size: tuple[int, int]) -> DarkBorderDetection | None:
+    bbox_value = scan_record.get("quality_dark_border_bbox")
+    reason = scan_record.get("quality_dark_border_reason")
+    if not isinstance(reason, str):
+        return None
+    if bbox_value is None:
+        return DarkBorderDetection(None, reason)
+    if (
+        not isinstance(bbox_value, list | tuple)
+        or len(bbox_value) != 4
+        or not all(isinstance(value, int) for value in bbox_value)
+    ):
+        return None
+    left, top, right, bottom = bbox_value
+    width, height = size
+    if left < 0 or top < 0 or right > width or bottom > height or left >= right or top >= bottom:
+        return None
+    return DarkBorderDetection((left, top, right, bottom), reason)
 
 
 def _trim_margins(size: tuple[int, int], bbox: tuple[int, int, int, int] | None) -> dict[str, float]:

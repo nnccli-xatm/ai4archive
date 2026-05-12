@@ -67,6 +67,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--trim-dark-border", action="store_true", help="Enable conservative dark-border trim during processing.")
     parser.add_argument("--despeckle", action="store_true", help="Enable conservative despeckle during processing.")
     parser.add_argument(
+        "--reuse-scan-measurements",
+        action="store_true",
+        help="Reuse complete scan-stage processing measurements when available.",
+    )
+    parser.add_argument(
         "--despeckle-backend",
         choices=("fallback", "numpy"),
         default="fallback",
@@ -137,6 +142,7 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
                         trim_dark_border=args.trim_dark_border,
                         despeckle=args.despeckle,
                         despeckle_backend=despeckle_backend,
+                        reuse_scan_measurements=getattr(args, "reuse_scan_measurements", False),
                         workers=workers,
                     ),
                 )
@@ -461,6 +467,7 @@ def _aggregate_run(
             "effective_workers": processing_performance["effective_workers"] if processing_performance else None,
             "worker_mode": processing_performance["mode"] if processing_performance else None,
             "operation_timings": _processing_operation_timings(processing_manifest),
+            "scan_measurement_reuse": _processing_scan_measurement_reuse(processing_manifest),
         },
         "scan": {
             "elapsed_seconds": scan_performance["elapsed_seconds"],
@@ -503,6 +510,20 @@ def _processing_operation_timings(processing_manifest: dict[str, Any] | None) ->
     return timings
 
 
+def _processing_scan_measurement_reuse(processing_manifest: dict[str, Any] | None) -> dict[str, Any]:
+    if not processing_manifest:
+        return {}
+    summary = processing_manifest.get("summary")
+    if isinstance(summary, dict):
+        performance = summary.get("performance")
+        if isinstance(performance, dict) and isinstance(performance.get("scan_measurement_reuse"), dict):
+            return performance["scan_measurement_reuse"]
+        reuse = summary.get("scan_measurement_reuse")
+        if isinstance(reuse, dict):
+            return reuse
+    return {}
+
+
 def _files_per_minute(file_count: int, elapsed_seconds: float) -> float:
     if elapsed_seconds <= 0:
         return 0.0
@@ -516,6 +537,7 @@ def _operations(args: argparse.Namespace) -> dict[str, bool | str]:
         "trim_dark_border": args.trim_dark_border,
         "despeckle": args.despeckle,
         "despeckle_backend": getattr(args, "despeckle_backend", "fallback"),
+        "reuse_scan_measurements": getattr(args, "reuse_scan_measurements", False),
     }
 
 
@@ -548,6 +570,7 @@ def _csv_fields() -> list[str]:
         "auto_crop",
         "trim_dark_border",
         "despeckle",
+        "reuse_scan_measurements",
         "total_files",
         "openable_files",
         "p0_findings",
@@ -557,6 +580,7 @@ def _csv_fields() -> list[str]:
         "processed_files",
         "processing_failed_files",
         "processing_skipped_files",
+        "processing_scan_measurement_reused_files",
         "scan_elapsed_seconds",
         "scan_files_per_minute",
         "scan_openable_files_per_minute",
@@ -587,6 +611,7 @@ def _csv_row(run: dict[str, Any], environment: dict[str, Any]) -> dict[str, Any]
         "auto_crop": operations["auto_crop"],
         "trim_dark_border": operations["trim_dark_border"],
         "despeckle": operations["despeckle"],
+        "reuse_scan_measurements": operations.get("reuse_scan_measurements", False),
         "total_files": run["total_files"],
         "openable_files": run["openable_files"],
         "p0_findings": severities["P0"],
@@ -596,6 +621,9 @@ def _csv_row(run: dict[str, Any], environment: dict[str, Any]) -> dict[str, Any]
         "processed_files": processing["processed_files"],
         "processing_failed_files": processing["failed_files"],
         "processing_skipped_files": processing["skipped_files"],
+        "processing_scan_measurement_reused_files": processing.get("scan_measurement_reuse", {}).get(
+            "files_with_any_reuse", 0
+        ),
         "scan_elapsed_seconds": scan["elapsed_seconds"],
         "scan_files_per_minute": scan["files_per_minute"],
         "scan_openable_files_per_minute": scan["openable_files_per_minute"],

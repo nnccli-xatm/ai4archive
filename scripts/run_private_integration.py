@@ -82,6 +82,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Despeckle processing backend. Defaults to conservative fallback; numpy is opt-in.",
     )
     parser.add_argument("--resume-processing", action="store_true", help="Resume derivative processing.")
+    parser.add_argument(
+        "--reuse-scan-measurements",
+        action="store_true",
+        help="Reuse complete scan-stage processing measurements when available.",
+    )
     parser.add_argument("--manifest-csv", default=None, type=Path, help="Optional private manifest CSV.")
     parser.add_argument("--rules-profile", default=None, type=Path, help="Optional private rules profile JSON.")
     parser.add_argument("--min-dpi", default=None, type=int, help="Optional minimum DPI override.")
@@ -154,6 +159,7 @@ def run_private_integration(args: argparse.Namespace) -> PrivateIntegrationResul
                 despeckle=args.despeckle,
                 despeckle_backend=despeckle_backend,
                 resume_processing=args.resume_processing,
+                reuse_scan_measurements=args.reuse_scan_measurements,
             )
         ],
     )
@@ -254,6 +260,7 @@ def _public_summary(
             "benchmark_enabled": benchmark_summary is not None,
             "benchmark_run_count": len(benchmark_runs),
             "despeckle_backend_requested": despeckle_backend["requested_backend"],
+            "reuse_scan_measurements": bool(getattr(args, "reuse_scan_measurements", False)),
         },
         "despeckle_backend": despeckle_backend,
         "warning_item_count": len(warning_items),
@@ -273,6 +280,9 @@ def _public_summary(
             "processing_duplicate_reused_files": int(run_counts.get("processing_duplicate_reused_files", 0)),
             "processing_existing_derivative_reused_files": int(
                 run_counts.get("processing_existing_derivative_reused_files", 0)
+            ),
+            "processing_scan_measurement_reused_files": int(
+                run_counts.get("processing_scan_measurement_reused_files", 0)
             ),
             "failed_batches": failed_batches,
             "preflight_errors": int(run_counts["preflight_error_count"]),
@@ -620,6 +630,7 @@ def _benchmark_args(args: argparse.Namespace, input_dir: Path, output_root: Path
         name_pattern=args.name_pattern,
         manifest_csv=args.manifest_csv,
         rules_profile=args.rules_profile,
+        reuse_scan_measurements=getattr(args, "reuse_scan_measurements", False),
     )
 
 

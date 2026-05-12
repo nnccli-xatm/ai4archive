@@ -152,6 +152,11 @@ def _add_scan_arguments(parser: argparse.ArgumentParser, *, include_scan_overrid
         help="Resume derivative processing by skipping existing successful derivatives. Requires --process-out.",
     )
     parser.add_argument(
+        "--reuse-scan-measurements",
+        action="store_true",
+        help="Reuse complete scan-stage measurements during derivative processing when safe. Requires --process-out.",
+    )
+    parser.add_argument(
         "--workers",
         default=None,
         type=_positive_int,
@@ -257,6 +262,7 @@ def main(argv: list[str] | None = None) -> int:
                 despeckle=args.despeckle,
                 despeckle_backend=args.despeckle_backend,
                 resume_processing=args.resume_processing,
+                reuse_scan_measurements=args.reuse_scan_measurements,
                 workers=args.workers,
             ),
         )
@@ -368,6 +374,11 @@ def _main_production_run(argv: list[str]) -> int:
         help="去黑点处理后端，默认使用保守模式，numpy 需显式开启。",
     )
     parser.add_argument("--resume-processing", action="store_true", help="尽量跳过已经成功生成的处理后图片。")
+    parser.add_argument(
+        "--reuse-scan-measurements",
+        action="store_true",
+        help="在安全时复用质检阶段已完成的测量结果，加快处理后图片生成。",
+    )
     parser.add_argument("--workers", default=None, type=_positive_int, help="本机最大工作线程数，填 1 表示单线程。")
     parser.add_argument(
         "--analysis-provider-command",
@@ -394,6 +405,7 @@ def _main_production_run(argv: list[str]) -> int:
                 despeckle=args.despeckle,
                 despeckle_backend=args.despeckle_backend,
                 resume_processing=args.resume_processing,
+                reuse_scan_measurements=args.reuse_scan_measurements,
                 workers=args.workers,
                 analysis_provider_command=args.analysis_provider_command,
             )
