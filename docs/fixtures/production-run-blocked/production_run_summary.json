@@ -1,0 +1,24 @@
+{
+  "schema_version": "scan-qc.production-run.v1",
+  "status": "blocked",
+  "status_label_zh": "已阻断",
+  "ready_for_operator_handoff": false,
+  "operator_summary": {
+    "message": "有文件未能完成处理，请联系管理员查看。",
+    "message_zh": "有文件未能完成处理，请联系管理员查看。",
+    "total_source_images": 120,
+    "openable_source_images": 120,
+    "derivative_images_ready": 117,
+    "files_needing_attention": 3
+  },
+  "counts": {
+    "total_files": 120,
+    "processed_files": 117,
+    "failed_files": 3
+  },
+  "progress": {
+    "state": "completed",
+    "total_items": 120,
+    "completed_items": 120
+  }
+}
