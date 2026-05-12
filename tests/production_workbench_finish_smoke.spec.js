@@ -39,7 +39,7 @@ function waitForServer(url) {
 
 async function expectOperatorStatusHidesPaths(page, forbiddenPaths) {
   const operatorStatusText = await page
-    .locator("#outputPanel, #loadStatus, #inputStatus, #outputStatus, #stateName, #stateAction, #stateHint, #currentAdvice, #currentDecisionStatus")
+    .locator("#outputPanel, #loadStatus, #inputStatus, #outputStatus, #stateName, #stateAction, #stateHint, #currentAdvice, #currentDecisionStatus, #previewSourceText, #previewFrame")
     .allTextContents();
   const combined = operatorStatusText.join("\n");
   for (const value of ["/tmp", "/private", "/Users", ...forbiddenPaths]) {
@@ -260,31 +260,48 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.getByRole("button", { name: "确认通过" })).toBeEnabled();
     await expect(page.getByRole("button", { name: "重新处理图片" })).toBeEnabled();
     await expect(page.getByRole("button", { name: "确认保留原貌" })).toBeEnabled();
-    await expect(page.locator("#previewSourceText")).toHaveText("预览：正在查看处理后图片。");
+    await expect(page.locator("#previewSourceText")).toHaveText("图片查看：正在查看处理后图片。");
     await expect(page.locator(".comparison-title")).toHaveCount(0);
     await expect(page.getByText("正在查看处理后图片。可切到对比查看或查看原图。")).toBeVisible();
     await expect(page.getByRole("button", { name: "查看处理后图片" })).toBeEnabled();
     await expect(page.getByRole("button", { name: "查看原图" })).toBeEnabled();
     await expect(page.getByRole("button", { name: "对比查看" })).toBeEnabled();
+    await expect(page.locator("#comparisonControls button").nth(0)).toHaveText("查看原图");
+    await expect(page.locator("#comparisonControls button").nth(1)).toHaveText("查看处理后图片");
+    await expect(page.locator("#comparisonControls button").nth(2)).toHaveText("对比查看");
     await expect(page.locator("#zoomState")).toHaveText("查看：适合窗口");
+    await expectOperatorStatusHidesPaths(page, [
+      "/tmp/synthetic-input",
+      "/tmp/synthetic-output",
+      "synthetic-input",
+      "synthetic-output",
+      "PRIVATE",
+      "PUERSAI",
+      "sha256",
+      "OCR",
+      "PRQ000001",
+      ".jpg",
+      ".png",
+      ".tif",
+    ]);
 
     await page.getByRole("button", { name: "放大" }).click();
     await expect(page.locator("#zoomState")).toHaveText("查看：125%");
     await page.locator("#operatorName").fill("复核员甲");
     await page.locator("#decisionNote").fill("切换查看方式时保留备注。");
     await page.getByRole("button", { name: "查看原图" }).click();
-    await expect(page.locator("#previewSourceText")).toHaveText("预览：正在查看原图。");
+    await expect(page.locator("#previewSourceText")).toHaveText("图片查看：正在查看原图。");
     await expect(page.locator(".comparison-title")).toHaveCount(0);
     await expect(page.getByText("正在查看原图。可切到对比查看或查看处理后图片。")).toBeVisible();
     await expect(page.locator("#zoomState")).toHaveText("查看：125%");
     await expect(page.locator("#operatorName")).toHaveValue("复核员甲");
     await expect(page.locator("#decisionNote")).toHaveValue("切换查看方式时保留备注。");
     await page.getByRole("button", { name: "查看处理后图片" }).click();
-    await expect(page.locator("#previewSourceText")).toHaveText("预览：正在查看处理后图片。");
+    await expect(page.locator("#previewSourceText")).toHaveText("图片查看：正在查看处理后图片。");
     await expect(page.getByText("正在查看处理后图片。可切到对比查看或查看原图。")).toBeVisible();
     await expect(page.locator("#zoomState")).toHaveText("查看：125%");
     await page.getByRole("button", { name: "对比查看" }).click();
-    await expect(page.locator("#previewSourceText")).toHaveText("预览：正在对比原图和处理后图片。");
+    await expect(page.locator("#previewSourceText")).toHaveText("图片查看：正在对比原图和处理后图片。");
     await expect(page.locator(".comparison-title", { hasText: "原图" })).toBeVisible();
     await expect(page.locator(".comparison-title", { hasText: "处理后图片" })).toBeVisible();
     await expect(page.locator("#decisionNote")).toHaveValue("切换查看方式时保留备注。");
@@ -305,8 +322,8 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.getByText("已记录：退回重扫。已自动显示下一张待确认图片。已决定 1 项，待决定 2 项。")).toBeVisible();
     await expect(page.locator("#currentRecommendation")).toHaveText("建议：重新处理图片");
     await expect(page.getByRole("button", { name: "重新处理图片" })).toHaveClass(/recommended-choice/);
-    await expect(page.locator("#previewSourceText")).toHaveText("预览：处理后图片不可用，正在显示原图。");
-    await expect(page.getByText("处理后图片预览暂不可用。请查看原图，仍可选择一个处理决定。")).toBeVisible();
+    await expect(page.locator("#previewSourceText")).toHaveText("图片查看：处理后图片不可用，正在显示原图。");
+    await expect(page.getByText("处理后图片暂不可用。请先查看原图，仍可选择一个处理决定。")).toBeVisible();
     await expect(page.getByRole("button", { name: "对比查看" })).toBeHidden();
     await expect(page.locator("#zoomState")).toHaveText("查看：适合窗口");
     await page.getByRole("button", { name: "上一张已确认" }).click();
@@ -326,7 +343,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     await page.getByRole("button", { name: "重新处理图片" }).click();
     await expect(page.getByText("已记录：重新处理图片。已自动显示下一张待确认图片。已决定 2 项，待决定 1 项。")).toBeVisible();
     await expect(page.locator("#currentRecommendation")).toHaveText("建议：确认保留原貌");
-    await expect(page.getByText("原图预览暂不可用。请查看处理后图片，仍可选择一个处理决定。")).toBeVisible();
+    await expect(page.getByText("原图暂不可用。请先查看处理后图片，仍可选择一个处理决定。")).toBeVisible();
     await page.locator("#decisionNote").fill("保留原貌即可。");
     await page.getByRole("button", { name: "确认保留原貌" }).click();
     await expect(page.getByText("已记录：确认保留原貌。所有待确认图片已有决定，可以完成并导出结果。")).toBeVisible();
@@ -999,7 +1016,7 @@ test.describe("production workbench finish/export browser smoke", () => {
       await page.locator("#fixtureSelect").selectOption(fixture);
       await expect(page.locator(selector)).toHaveText(visibleText);
       await expect(page.locator("#reviewPositionText")).toContainText("当前第");
-      await expect(page.locator("#previewSourceText")).toContainText("预览");
+      await expect(page.locator("#previewSourceText")).toContainText("图片查看");
     }
 
     expect(consoleProblems).toEqual([]);
