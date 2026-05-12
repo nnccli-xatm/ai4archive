@@ -80,7 +80,7 @@ class WorkbenchController:
             self._thread.start()
         return self.status()
 
-    def preview_path(self, local_id: str) -> Path:
+    def preview_path(self, local_id: str) -> tuple[Path, str]:
         safe_id = local_id.strip()
         if not safe_id:
             raise ValueError("预览请求缺少复核编号。")
@@ -98,17 +98,9 @@ class WorkbenchController:
         if not item:
             raise ValueError("未找到这条复核记录。")
         relative_path = _safe_relative_path(str(item.get("relative_path") or ""))
-        candidates = [
-            derivatives_dir / "images" / relative_path,
-            derivatives_dir / relative_path,
-            input_dir / relative_path,
-        ]
-        for candidate in candidates:
-            resolved = candidate.expanduser().resolve()
-            if resolved.suffix.lower() in PREVIEW_IMAGE_SUFFIXES and resolved.is_file() and (
-                _is_relative_to(resolved, input_dir) or _is_relative_to(resolved, derivatives_dir)
-            ):
-                return resolved
+        for candidate, source in _preview_candidates(input_dir, derivatives_dir, relative_path):
+            if _valid_preview_path(candidate, input_dir, derivatives_dir):
+                return candidate.expanduser().resolve(), source
         raise ValueError("未找到这条复核记录对应的本机预览图。")
 
     def save_review_decisions(self, summary: dict[str, Any]) -> dict[str, Any]:
@@ -173,7 +165,7 @@ class WorkbenchController:
             last_error = self.last_error
         summary = _read_json(Path(metadata_dir) / PRODUCTION_RUN_SUMMARY_JSON) if metadata_dir else None
         progress = _read_json(Path(metadata_dir) / PRODUCTION_RUN_PROGRESS_JSON) if metadata_dir else None
-        queue = _read_json(Path(metadata_dir) / PRODUCTION_REVIEW_QUEUE_JSON) if metadata_dir else None
+        queue = self._queue_with_preview_sources(Path(metadata_dir)) if metadata_dir else None
         draft_decisions = _read_json(Path(metadata_dir) / REVIEW_DECISION_DRAFT_JSON) if metadata_dir else None
         return {
             "schema_version": SERVER_SCHEMA,
@@ -190,6 +182,28 @@ class WorkbenchController:
             "queue": queue,
             "draft_decisions": draft_decisions,
         }
+
+    def _queue_with_preview_sources(self, metadata_dir: Path) -> dict[str, Any] | None:
+        queue = _read_json(metadata_dir / PRODUCTION_REVIEW_QUEUE_JSON)
+        if not isinstance(queue, dict):
+            return None
+        with self._lock:
+            input_dir = self.input_dir
+            derivatives_dir = self.derivatives_dir
+        items = queue.get("items")
+        if input_dir is None or derivatives_dir is None or not isinstance(items, list):
+            return queue
+        enriched = dict(queue)
+        enriched_items = []
+        for item in items:
+            if not isinstance(item, dict):
+                enriched_items.append(item)
+                continue
+            enriched_item = dict(item)
+            enriched_item["preview_source"] = _preview_source_for_item(item, input_dir, derivatives_dir)
+            enriched_items.append(enriched_item)
+        enriched["items"] = enriched_items
+        return enriched
 
     def _run_once(self) -> None:
         try:
@@ -337,7 +351,7 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
 
     def _serve_preview(self, local_id: str) -> None:
         try:
-            path = self.workbench_controller.preview_path(local_id)
+            path, source = self.workbench_controller.preview_path(local_id)
         except ValueError as exc:
             self._send_json({"error_zh": str(exc)}, HTTPStatus.NOT_FOUND)
             return
@@ -348,6 +362,7 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Preview-Source", source)
         self.end_headers()
         self.wfile.write(body)
 
@@ -402,6 +417,32 @@ def _safe_relative_path(value: str) -> Path:
     if not stripped or candidate.is_absolute() or ".." in candidate.parts:
         raise ValueError("复核记录预览路径不安全。")
     return candidate
+
+
+def _preview_candidates(input_dir: Path, derivatives_dir: Path, relative_path: Path) -> list[tuple[Path, str]]:
+    return [
+        (derivatives_dir / "images" / relative_path, "processed"),
+        (derivatives_dir / relative_path, "processed"),
+        (input_dir / relative_path, "original_fallback"),
+    ]
+
+
+def _valid_preview_path(candidate: Path, input_dir: Path, derivatives_dir: Path) -> bool:
+    resolved = candidate.expanduser().resolve()
+    return resolved.suffix.lower() in PREVIEW_IMAGE_SUFFIXES and resolved.is_file() and (
+        _is_relative_to(resolved, input_dir) or _is_relative_to(resolved, derivatives_dir)
+    )
+
+
+def _preview_source_for_item(item: dict[str, Any], input_dir: Path, derivatives_dir: Path) -> str:
+    try:
+        relative_path = _safe_relative_path(str(item.get("relative_path") or ""))
+    except ValueError:
+        return "unavailable"
+    for candidate, source in _preview_candidates(input_dir, derivatives_dir, relative_path):
+        if _valid_preview_path(candidate, input_dir, derivatives_dir):
+            return source
+    return "unavailable"
 
 
 def _is_relative_to(path: Path, root: Path) -> bool:

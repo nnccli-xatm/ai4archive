@@ -6397,8 +6397,14 @@ class ScanQcTest(unittest.TestCase):
                 with urllib.request.urlopen(f"{base_url}/api/preview/PRQ000001", timeout=5) as response:
                     body = response.read()
                     content_type = response.headers.get("Content-Type", "")
+                    preview_source = response.headers.get("X-Preview-Source", "")
                 self.assertIn(content_type, {"image/jpeg", "image/jpg"})
+                self.assertEqual(preview_source, "original_fallback")
                 self.assertTrue(body.startswith(b"\xff\xd8"))
+
+                with urllib.request.urlopen(f"{base_url}/api/status", timeout=5) as response:
+                    status = json.loads(response.read().decode("utf-8"))
+                self.assertEqual(status["queue"]["items"][0]["preview_source"], "original_fallback")
 
                 with self.assertRaises(urllib.error.HTTPError) as raised:
                     urllib.request.urlopen(f"{base_url}/api/preview/../A001_0001.jpg", timeout=5)
