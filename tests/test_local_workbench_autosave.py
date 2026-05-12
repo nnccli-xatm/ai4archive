@@ -9,6 +9,7 @@ from archive_scan_qc.local_workbench import (
     COMPLETION_NOTE_TXT,
     REVIEW_DECISION_DRAFT_JSON,
     REVIEW_DECISION_SUMMARY_JSON,
+    WorkbenchPreflightError,
     WorkbenchController,
 )
 from archive_scan_qc.production_runner import ProductionRunConfig, build_production_run_summary
@@ -56,6 +57,68 @@ def decision_summary(decisions: list[tuple[str, str]]) -> dict[str, object]:
 
 
 class LocalWorkbenchAutosaveTests(unittest.TestCase):
+    def test_configure_returns_aggregate_folder_readiness(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = root / "metadata"
+            (input_dir / "nested").mkdir(parents=True)
+            (input_dir / "nested" / "a.png").write_bytes(b"image")
+            (input_dir / "notes.txt").write_text("not an image", encoding="utf-8")
+            controller = WorkbenchController()
+
+            status = controller.configure(input_dir, output_dir, metadata_dir, processing_mode="light")
+
+            readiness = status["folder_readiness"]
+            self.assertTrue(readiness["aggregate_only"])
+            self.assertEqual(readiness["status"], "ready")
+            self.assertTrue(readiness["ready_to_start"])
+            self.assertEqual(readiness["supported_image_count"], 1)
+            self.assertFalse(readiness["input_empty"])
+            self.assertTrue(readiness["output_writable"])
+            self.assertEqual(readiness["selected_processing_mode"]["id"], "light")
+            self.assertNotIn("nested", json.dumps(readiness, ensure_ascii=False))
+            self.assertNotIn("a.png", json.dumps(readiness, ensure_ascii=False))
+
+    def test_configure_readiness_guides_empty_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            controller = WorkbenchController()
+
+            readiness = controller.configure(input_dir, output_dir, metadata_dir)["folder_readiness"]
+
+            self.assertEqual(readiness["status"], "empty")
+            self.assertFalse(readiness["ready_to_start"])
+            self.assertEqual(readiness["supported_image_count"], 0)
+            self.assertTrue(readiness["input_empty"])
+            self.assertIn("原图文件夹", readiness["title_zh"])
+            self.assertIn("放好图片", " ".join(readiness["next_steps_zh"]))
+
+    def test_start_blocks_unsupported_folder_with_plain_guidance(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            (input_dir / "notes.txt").write_text("not an image", encoding="utf-8")
+            controller = WorkbenchController()
+            readiness = controller.configure(input_dir, output_dir, metadata_dir)["folder_readiness"]
+
+            self.assertEqual(readiness["status"], "unsupported")
+            self.assertFalse(readiness["ready_to_start"])
+            with self.assertRaises(WorkbenchPreflightError) as raised:
+                controller.start()
+            guidance = raised.exception.guidance
+            self.assertEqual(guidance["kind"], "no_supported_images")
+            self.assertEqual(guidance["supported_image_count"], 0)
+            self.assertIn("常见图片格式", " ".join(guidance["next_steps_zh"]))
+
     def test_empty_batch_summary_gives_operator_next_steps(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

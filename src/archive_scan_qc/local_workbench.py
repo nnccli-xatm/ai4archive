@@ -313,6 +313,12 @@ class WorkbenchController:
                 "metadata": metadata_dir,
             },
             "processing_mode": _processing_mode_payload(processing_mode),
+            "folder_readiness": _folder_readiness_summary(
+                Path(input_dir) if input_dir else None,
+                Path(derivatives_dir) if derivatives_dir else None,
+                Path(metadata_dir) if metadata_dir else None,
+                processing_mode,
+            ),
             "summary": summary,
             "progress": progress,
             "queue": queue,
@@ -642,6 +648,20 @@ def _preflight_folder_guidance(input_dir: Path, derivatives_dir: Path, metadata_
                 "放好图片后，重新保存文件夹并开始处理。",
             ],
         )
+    supported_image_count = _supported_image_count(input_path)
+    if supported_image_count == 0:
+        return _folder_preflight_guidance(
+            "no_supported_images",
+            "没有可处理的图片",
+            "扫描原图文件夹里没有找到当前支持处理的图片，处理没有启动。",
+            [
+                "确认选对了本批次的扫描原图文件夹。",
+                "确认原图是常见图片格式，并且能用本机图片查看器打开。",
+                "如果文件格式不对，请重新导出为支持的图片格式后再处理。",
+            ],
+            input_empty=False,
+            supported_image_count=0,
+        )
     if not output_path.exists() or not output_path.is_dir():
         return _folder_preflight_guidance(
             "output_folder_unusable",
@@ -689,8 +709,17 @@ def _preflight_folder_guidance(input_dir: Path, derivatives_dir: Path, metadata_
     return None
 
 
-def _folder_preflight_guidance(kind: str, title_zh: str, message_zh: str, next_steps_zh: list[str]) -> dict[str, Any]:
-    return {
+def _folder_preflight_guidance(
+    kind: str,
+    title_zh: str,
+    message_zh: str,
+    next_steps_zh: list[str],
+    *,
+    input_empty: bool | None = None,
+    supported_image_count: int | None = None,
+    output_writable: bool | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
         "schema_version": "scan-qc.local-folder-preflight.v1",
         "aggregate_only": True,
         "kind": kind,
@@ -702,6 +731,112 @@ def _folder_preflight_guidance(kind: str, title_zh: str, message_zh: str, next_s
         "derivative_images_ready": 0,
         "total_files": 0,
     }
+    if input_empty is not None:
+        payload["input_empty"] = input_empty
+    if supported_image_count is not None:
+        payload["supported_image_count"] = max(0, supported_image_count)
+    if output_writable is not None:
+        payload["output_writable"] = output_writable
+    return payload
+
+
+def _folder_readiness_summary(
+    input_dir: Path | None,
+    derivatives_dir: Path | None,
+    metadata_dir: Path | None,
+    processing_mode: str,
+) -> dict[str, Any]:
+    selected_mode = _normalize_processing_mode(processing_mode)
+    mode_payload = _processing_mode_payload(selected_mode)
+    base: dict[str, Any] = {
+        "schema_version": "scan-qc.local-folder-readiness.v1",
+        "aggregate_only": True,
+        "selected_processing_mode": mode_payload,
+        "supported_image_count": 0,
+        "input_empty": True,
+        "output_writable": False,
+        "ready_to_start": False,
+    }
+    if input_dir is None or derivatives_dir is None or metadata_dir is None:
+        return {
+            **base,
+            "status": "not_configured",
+            "title_zh": "文件夹还没有保存",
+            "message_zh": "请先保存扫描原图文件夹和处理后输出文件夹。",
+            "next_steps_zh": ["填写两个文件夹位置。", "保存文件夹后查看准备情况。"],
+        }
+    input_path = input_dir.expanduser().resolve()
+    output_path = derivatives_dir.expanduser().resolve()
+    metadata_path = metadata_dir.expanduser().resolve()
+    input_exists = input_path.exists() and input_path.is_dir()
+    input_readable = input_exists and os.access(input_path, os.R_OK | os.X_OK)
+    input_empty = True
+    supported_image_count = 0
+    if input_readable:
+        try:
+            input_empty = not any(input_path.iterdir())
+        except OSError:
+            input_readable = False
+        if input_readable and not input_empty:
+            supported_image_count = _supported_image_count(input_path)
+    output_writable = _folder_is_writable(output_path) and _folder_is_writable(metadata_path)
+    summary = {
+        **base,
+        "input_empty": input_empty,
+        "supported_image_count": supported_image_count,
+        "output_writable": output_writable,
+    }
+    if not input_exists or not input_readable:
+        return {
+            **summary,
+            "status": "blocked",
+            "title_zh": "原图文件夹不能使用",
+            "message_zh": "扫描原图文件夹不存在，或当前电脑不能读取。",
+            "next_steps_zh": ["重新选择本批次的扫描原图文件夹。", "保存文件夹后再查看准备情况。"],
+        }
+    if input_empty:
+        return {
+            **summary,
+            "status": "empty",
+            "title_zh": "原图文件夹是空的",
+            "message_zh": "这个扫描原图文件夹里没有发现可处理文件。",
+            "next_steps_zh": ["确认是否选到了本批次真正的扫描原图文件夹。", "放好图片后，重新保存文件夹。"],
+        }
+    if supported_image_count == 0:
+        return {
+            **summary,
+            "status": "unsupported",
+            "title_zh": "没有可处理的图片",
+            "message_zh": "文件夹里没有找到当前支持处理的图片。",
+            "next_steps_zh": ["确认原图是常见图片格式。", "如果格式不对，请重新导出为支持的图片格式后再处理。"],
+        }
+    if not output_writable:
+        return {
+            **summary,
+            "status": "blocked",
+            "title_zh": "输出文件夹不能写入",
+            "message_zh": "处理后输出文件夹或本机状态文件夹不能写入。",
+            "next_steps_zh": ["确认输出磁盘没有只读、已解锁，并且空间足够。", "换一个可以写入的输出文件夹后重新保存。"],
+        }
+    return {
+        **summary,
+        "status": "ready",
+        "ready_to_start": True,
+        "title_zh": "文件夹可以开始处理",
+        "message_zh": f"发现 {supported_image_count} 张可处理图片，输出文件夹可以写入。",
+        "next_steps_zh": ["确认处理方式无误。", "点击开始处理。"],
+    }
+
+
+def _supported_image_count(input_dir: Path) -> int:
+    count = 0
+    try:
+        for candidate in input_dir.rglob("*"):
+            if candidate.is_file() and candidate.suffix.lower() in PREVIEW_IMAGE_SUFFIXES:
+                count += 1
+    except OSError:
+        return 0
+    return count
 
 
 def _normalize_processing_mode(processing_mode: str | None) -> str:
