@@ -8,20 +8,22 @@
   <style>
     :root {
       color-scheme: light;
-      --bg: #f6f7f4;
-      --surface: #ffffff;
-      --surface-2: #eef3ef;
-      --text: #17211b;
-      --muted: #66746b;
-      --border: #d9e0db;
-      --line: #e7ebe7;
-      --primary: #167256;
-      --primary-dark: #0f5f46;
-      --danger: #b42318;
-      --warning: #aa5b00;
-      --info: #175cd3;
-      --ok: #16803c;
-      --shadow: 0 16px 40px rgba(35, 49, 43, .08);
+      --ink: #18231f;
+      --ink-2: #31413a;
+      --muted: #66736d;
+      --line: #d7ded9;
+      --line-strong: #b9c6bf;
+      --paper: #fbfcfa;
+      --wash: #eef2ed;
+      --field: #ffffff;
+      --station: #132820;
+      --station-2: #1d3c31;
+      --green: #117654;
+      --green-dark: #0d5f44;
+      --amber: #b76012;
+      --red: #b3261e;
+      --blue: #1f63b7;
+      --shadow: 0 18px 50px rgba(25, 42, 35, .11);
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
     }
 
@@ -29,511 +31,601 @@
 
     body {
       margin: 0;
-      background: var(--bg);
-      color: var(--text);
+      min-height: 100vh;
+      background:
+        linear-gradient(180deg, #eef2ed 0, #f7f8f5 42%, #edf1ec 100%);
+      color: var(--ink);
       font-size: 15px;
       line-height: 1.5;
-    }
-
-    header {
-      background: #17382f;
-      color: #f7fbf8;
-      border-bottom: 1px solid #0c261f;
-    }
-
-    .topbar {
-      max-width: 1180px;
-      margin: 0 auto;
-      padding: 18px 22px;
-      display: flex;
-      justify-content: space-between;
-      gap: 18px;
-      align-items: center;
     }
 
     h1, h2, h3, p { margin: 0; }
 
     h1 {
-      font-size: 24px;
-      font-weight: 720;
+      font-size: 25px;
+      line-height: 1.18;
+      font-weight: 760;
       letter-spacing: 0;
     }
 
     h2 {
-      font-size: 19px;
-      font-weight: 700;
+      font-size: 18px;
+      line-height: 1.28;
+      font-weight: 740;
       letter-spacing: 0;
     }
 
     h3 {
-      font-size: 16px;
-      font-weight: 700;
-      letter-spacing: 0;
-    }
-
-    .subtitle {
-      margin-top: 4px;
-      color: #c9dbd1;
-    }
-
-    .maintenance-link {
-      color: #dcece4;
-      border: 1px solid rgba(255, 255, 255, .24);
-      border-radius: 6px;
-      padding: 8px 10px;
-      text-decoration: none;
-      white-space: nowrap;
-    }
-
-    main {
-      max-width: 1180px;
-      margin: 0 auto;
-      padding: 18px 22px 34px;
-    }
-
-    .workflow {
-      display: grid;
-      grid-template-columns: minmax(300px, .92fr) minmax(360px, 1.08fr);
-      gap: 16px;
-      align-items: start;
-    }
-
-    .panel {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      box-shadow: var(--shadow);
-      padding: 18px;
-      min-width: 0;
-    }
-
-    .panel + .panel,
-    .stack > * + * {
-      margin-top: 14px;
-    }
-
-    .step-list {
-      display: grid;
-      gap: 10px;
-      margin-top: 14px;
-    }
-
-    .step {
-      display: grid;
-      grid-template-columns: 34px 1fr;
-      gap: 10px;
-      align-items: start;
-      border: 1px solid var(--line);
-      background: #fbfcfb;
-      border-radius: 8px;
-      padding: 12px;
-    }
-
-    .step-number {
-      width: 28px;
-      height: 28px;
-      display: grid;
-      place-items: center;
-      border-radius: 50%;
-      background: var(--surface-2);
-      color: var(--primary-dark);
-      font-weight: 760;
-    }
-
-    .step.done .step-number {
-      background: #def4e8;
-      color: var(--ok);
-    }
-
-    .step.active {
-      border-color: #97c9b7;
-      background: #f3fbf7;
-    }
-
-    .step-title {
-      font-weight: 700;
-    }
-
-    .step-copy {
-      color: var(--muted);
-      margin-top: 2px;
-      overflow-wrap: anywhere;
-    }
-
-    .setup-grid {
-      display: grid;
-      gap: 12px;
-      margin-top: 16px;
-    }
-
-    label {
-      display: grid;
-      gap: 7px;
-      font-weight: 700;
-    }
-
-    input[type="file"] {
-      width: 100%;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      background: #fff;
-      padding: 9px;
-      font: inherit;
-      color: var(--text);
-    }
-
-    .folder-status {
-      color: var(--muted);
-      font-weight: 500;
-      min-height: 24px;
-      overflow-wrap: anywhere;
-    }
-
-    .notice {
-      border: 1px solid #cbd7cf;
-      border-radius: 8px;
-      background: #f8faf8;
-      padding: 12px;
-      color: var(--muted);
-    }
-
-    .state-banner {
-      display: grid;
-      gap: 6px;
-      border-radius: 8px;
-      border: 1px solid #b8d8ca;
-      background: #effaf4;
-      padding: 14px;
-      min-height: 82px;
-    }
-
-    .state-banner.warning {
-      border-color: #e7c483;
-      background: #fff8eb;
-    }
-
-    .state-banner.danger {
-      border-color: #e9a8a2;
-      background: #fff4f2;
-    }
-
-    .state-name {
-      font-size: 22px;
-      font-weight: 780;
-      letter-spacing: 0;
-    }
-
-    .state-action {
-      color: var(--muted);
       font-size: 15px;
+      line-height: 1.3;
+      font-weight: 740;
+      letter-spacing: 0;
     }
 
-    .actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      margin-top: 14px;
-    }
-
-    button {
-      min-height: 38px;
-      border: 1px solid var(--primary-dark);
-      border-radius: 6px;
-      background: var(--primary);
+    button,
+    .folder-trigger,
+    .admin-link {
+      min-height: 42px;
+      border: 1px solid var(--green-dark);
+      border-radius: 7px;
+      background: var(--green);
       color: #fff;
-      padding: 8px 13px;
+      padding: 9px 14px;
       font: inherit;
-      font-weight: 700;
+      font-weight: 720;
+      letter-spacing: 0;
       cursor: pointer;
+      text-align: center;
+      text-decoration: none;
     }
 
-    button.secondary {
-      background: #fff;
-      color: var(--text);
-      border-color: var(--border);
-    }
-
-    button.warning {
-      background: var(--warning);
-      border-color: #874900;
-    }
-
-    button.danger {
-      background: var(--danger);
-      border-color: #8d1c13;
+    button:hover,
+    .folder-trigger:hover {
+      background: var(--green-dark);
     }
 
     button:disabled {
+      opacity: .45;
       cursor: not-allowed;
-      opacity: .55;
+    }
+
+    .secondary {
+      background: var(--field);
+      color: var(--ink);
+      border-color: var(--line-strong);
+    }
+
+    .secondary:hover {
+      background: #eef3ef;
+    }
+
+    .warning {
+      background: var(--amber);
+      border-color: #96500f;
     }
 
     button:focus-visible,
-    input:focus-visible {
-      outline: 3px solid rgba(22, 114, 86, .22);
+    .folder-trigger:focus-visible,
+    .admin-link:focus-visible {
+      outline: 3px solid rgba(17, 118, 84, .25);
       outline-offset: 2px;
     }
 
-    .progress-wrap {
-      display: grid;
-      gap: 9px;
-      margin-top: 14px;
-    }
-
-    .progress-line {
-      height: 12px;
-      border-radius: 999px;
-      background: #e4ebe6;
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
       overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap;
     }
 
-    .progress-fill {
-      height: 100%;
-      width: 0;
-      background: linear-gradient(90deg, #167256, #2f9d72);
-      transition: width .22s ease;
+    .station-shell {
+      min-height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr;
     }
 
-    .progress-meta {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
+    .station-head {
+      background: var(--station);
+      color: #f7fbf8;
+      border-bottom: 1px solid #081c16;
+    }
+
+    .head-inner {
+      max-width: 1360px;
+      margin: 0 auto;
+      padding: 14px 22px;
+      display: grid;
+      grid-template-columns: minmax(240px, 1fr) auto auto;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .head-copy {
+      display: grid;
+      gap: 3px;
+      min-width: 0;
+    }
+
+    .head-copy p {
+      color: #c6d8cf;
+      overflow-wrap: anywhere;
+    }
+
+    .status-chip {
+      display: grid;
+      gap: 2px;
+      min-width: 170px;
+      border-left: 1px solid rgba(255, 255, 255, .18);
+      padding-left: 16px;
+    }
+
+    .status-chip span {
+      color: #b9cdc4;
+      font-size: 13px;
+    }
+
+    .status-chip strong {
+      font-size: 20px;
+      font-weight: 780;
+    }
+
+    .admin-link {
+      background: transparent;
+      border-color: rgba(255, 255, 255, .28);
+      color: #f7fbf8;
+      white-space: nowrap;
+    }
+
+    .station-main {
+      width: min(100%, 1360px);
+      margin: 0 auto;
+      padding: 18px 22px 24px;
+      display: grid;
+      grid-template-columns: 250px minmax(420px, 1fr) 320px;
+      gap: 16px;
+      align-items: stretch;
+    }
+
+    .rail,
+    .image-desk,
+    .decision-desk {
+      min-width: 0;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, .86);
+      box-shadow: var(--shadow);
+    }
+
+    .rail {
+      border-radius: 10px;
+      padding: 14px;
+      display: grid;
+      gap: 14px;
+      align-content: start;
+    }
+
+    .rail-title {
+      display: grid;
+      gap: 4px;
+    }
+
+    .rail-title p,
+    .muted {
       color: var(--muted);
     }
 
-    .review-list {
+    .folder-stack {
       display: grid;
       gap: 10px;
-      margin-top: 14px;
     }
 
-    .review-card {
-      border: 1px solid var(--line);
-      border-radius: 8px;
+    .folder-row {
+      display: grid;
+      gap: 8px;
       padding: 12px;
-      display: grid;
-      grid-template-columns: 82px 1fr;
-      gap: 12px;
-      background: #fbfcfb;
+      border: 1px solid var(--line);
+      background: var(--paper);
+      border-radius: 8px;
     }
 
-    .thumb {
-      aspect-ratio: 3 / 4;
-      border-radius: 6px;
-      border: 1px solid var(--border);
-      background:
-        linear-gradient(135deg, rgba(22, 114, 86, .16), rgba(255, 255, 255, 0) 48%),
-        repeating-linear-gradient(0deg, #eef2ef 0 9px, #f9faf9 9px 18px);
-      display: grid;
-      place-items: center;
+    .folder-row strong {
+      font-size: 16px;
+    }
+
+    .folder-row small {
       color: var(--muted);
-      font-weight: 700;
-      text-align: center;
-      padding: 8px;
+      font-size: 13px;
+      overflow-wrap: anywhere;
     }
 
-    .tag-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 7px;
-      margin: 8px 0;
+    .guard-note {
+      border-top: 1px solid var(--line);
+      padding-top: 12px;
+      color: var(--muted);
     }
 
-    .tag {
-      border-radius: 999px;
-      border: 1px solid var(--border);
-      background: #fff;
-      padding: 3px 8px;
+    .run-controls {
+      display: grid;
+      gap: 8px;
+    }
+
+    .run-controls button {
+      width: 100%;
+    }
+
+    .image-desk {
+      border-radius: 10px;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      overflow: hidden;
+      background: #f8faf7;
+    }
+
+    .desk-toolbar {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      align-items: center;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      background: #ffffff;
+    }
+
+    .desk-toolbar p {
+      color: var(--muted);
+    }
+
+    .progress-track {
+      width: 210px;
+      display: grid;
+      gap: 6px;
       color: var(--muted);
       font-size: 13px;
     }
 
-    .tag.p0 { color: var(--danger); border-color: #efb4af; background: #fff5f4; }
-    .tag.p1 { color: var(--warning); border-color: #efc27e; background: #fff8eb; }
-    .tag.p2 { color: var(--info); border-color: #b7c9f7; background: #f4f7ff; }
-
-    .review-actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-top: 8px;
+    .progress-bar {
+      height: 12px;
+      border-radius: 999px;
+      background: #dde6df;
+      overflow: hidden;
     }
 
-    .review-actions button {
-      min-height: 34px;
-      padding: 6px 10px;
-      font-size: 14px;
+    .progress-fill {
+      width: 0;
+      height: 100%;
+      background: linear-gradient(90deg, var(--green), #5aa680);
+      transition: width .22s ease;
     }
 
-    .output-box {
+    .preview-zone {
+      display: grid;
+      place-items: center;
+      padding: 22px;
+      background:
+        linear-gradient(45deg, rgba(19, 40, 32, .05) 25%, transparent 25%),
+        linear-gradient(-45deg, rgba(19, 40, 32, .05) 25%, transparent 25%),
+        #edf2ed;
+      background-size: 34px 34px;
+    }
+
+    .preview-frame {
+      width: min(100%, 520px);
+      aspect-ratio: 3 / 4;
+      background: #fdfefd;
+      border: 10px solid #cbd7d0;
+      border-radius: 6px;
+      box-shadow: 0 22px 54px rgba(25, 42, 35, .22);
+      padding: 36px;
+      display: grid;
+      align-content: center;
+      justify-items: center;
+      gap: 22px;
+      text-align: center;
+    }
+
+    .preview-frame.need {
+      border-color: #d99c4a;
+    }
+
+    .preview-frame.stop {
+      border-color: #d75b51;
+    }
+
+    .scan-line {
+      width: 84%;
+      height: 16px;
+      border-radius: 999px;
+      background: #c7d2cc;
+    }
+
+    .scan-line.short { width: 58%; }
+    .scan-line.mid { width: 72%; }
+
+    .preview-label {
+      font-size: 24px;
+      font-weight: 780;
+      color: var(--ink-2);
+    }
+
+    .desk-footer {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      border-top: 1px solid var(--line);
+      background: #ffffff;
+    }
+
+    .desk-stat {
+      padding: 12px 14px;
+      border-right: 1px solid var(--line);
+    }
+
+    .desk-stat:last-child {
+      border-right: 0;
+    }
+
+    .desk-stat span {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .desk-stat strong {
+      font-size: 22px;
+      font-weight: 780;
+    }
+
+    .decision-desk {
+      border-radius: 10px;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      overflow: hidden;
+    }
+
+    .decision-head {
+      padding: 14px 16px;
+      background: #ffffff;
+      border-bottom: 1px solid var(--line);
+      display: grid;
+      gap: 4px;
+    }
+
+    .decision-body {
+      padding: 16px;
+      display: grid;
+      gap: 14px;
+      align-content: start;
+    }
+
+    .reason-block {
+      display: grid;
+      gap: 6px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .reason-block p {
+      font-size: 17px;
+      color: var(--ink-2);
+    }
+
+    .decision-actions {
       display: grid;
       gap: 8px;
-      margin-top: 14px;
+    }
+
+    .decision-actions button {
+      width: 100%;
+      min-height: 48px;
+      font-size: 16px;
+    }
+
+    .decision-actions .primary-choice {
+      min-height: 54px;
+      font-size: 18px;
+    }
+
+    .handoff {
+      padding: 14px 16px;
+      border-top: 1px solid var(--line);
+      background: #f8faf8;
+      display: grid;
+      gap: 10px;
+    }
+
+    .handoff-box {
       border: 1px solid #b8d8ca;
-      background: #f3fbf7;
+      background: #effaf4;
       border-radius: 8px;
       padding: 12px;
+      display: grid;
+      gap: 6px;
     }
 
     .hidden { display: none !important; }
 
-    @media (max-width: 860px) {
-      .topbar,
-      .workflow {
-        display: grid;
-        grid-template-columns: 1fr;
+    @media (max-width: 1080px) {
+      .station-main {
+        grid-template-columns: 230px minmax(360px, 1fr);
       }
 
-      .maintenance-link {
-        justify-self: start;
+      .decision-desk {
+        grid-column: 1 / -1;
+        grid-template-rows: auto;
+      }
+
+      .decision-body {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .decision-actions {
+        align-content: start;
       }
     }
 
-    @media (max-width: 560px) {
-      main,
-      .topbar {
-        padding-left: 14px;
-        padding-right: 14px;
-      }
-
-      .review-card {
+    @media (max-width: 760px) {
+      .head-inner,
+      .station-main,
+      .desk-toolbar,
+      .desk-footer,
+      .decision-body {
         grid-template-columns: 1fr;
       }
 
-      .thumb {
-        max-width: 120px;
+      .station-main {
+        padding: 12px;
       }
 
-      .progress-meta {
-        display: grid;
+      .progress-track {
+        width: 100%;
+      }
+
+      .preview-zone {
+        padding: 14px;
+      }
+
+      .preview-frame {
+        padding: 24px;
+      }
+
+      .desk-stat {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
       }
     }
   </style>
 </head>
 <body>
-  <header>
-    <div class="topbar">
-      <div>
-        <h1>本地生产工作台</h1>
-        <p class="subtitle">给扫描处理人员使用：选择原图文件夹，选择输出文件夹，开始处理，确认少量问题图片，完成交付。</p>
+  <div class="station-shell">
+    <header class="station-head">
+      <div class="head-inner">
+        <div class="head-copy">
+          <h1>本地生产工作台</h1>
+          <p>面向扫描加工人员：选文件夹、开始处理、看大图、点决定、完成导出。</p>
+        </div>
+        <div class="status-chip" aria-live="polite">
+          <span>当前状态</span>
+          <strong id="stateName">选择原图</strong>
+        </div>
+        <a class="admin-link" href="frontend-workbench-prototype.html">管理维护工作台</a>
       </div>
-      <a class="maintenance-link" href="frontend-workbench-prototype.html">管理维护工作台</a>
-    </div>
-  </header>
+    </header>
 
-  <main>
-    <section class="workflow" aria-label="生产流程">
-      <div class="stack">
-        <section class="panel">
-          <h2>今天要做的事</h2>
-          <div class="step-list" id="stepList">
-            <div class="step active" data-step="input">
-              <div class="step-number">1</div>
-              <div>
-                <p class="step-title">选择扫描原图文件夹</p>
-                <p class="step-copy">选中本批次扫描图片所在的本地文件夹。</p>
-              </div>
-            </div>
-            <div class="step" data-step="output">
-              <div class="step-number">2</div>
-              <div>
-                <p class="step-title">选择处理后输出文件夹</p>
-                <p class="step-copy">处理后的图片会放到这里，原图不会被覆盖。</p>
-              </div>
-            </div>
-            <div class="step" data-step="start">
-              <div class="step-number">3</div>
-              <div>
-                <p class="step-title">开始质检和安全修图</p>
-                <p class="step-copy">系统只做保守处理，拿不准的图片会交给人工确认。</p>
-              </div>
-            </div>
-            <div class="step" data-step="review">
-              <div class="step-number">4</div>
-              <div>
-                <p class="step-title">确认问题图片</p>
-                <p class="step-copy">只看需要判断的图片，选择通过、需要重扫、重新处理、保留原貌痕迹或跳过。</p>
-              </div>
-            </div>
-            <div class="step" data-step="done">
-              <div class="step-number">5</div>
-              <div>
-                <p class="step-title">完成导出</p>
-                <p class="step-copy">确认输出位置，交给下一步验收或移交。</p>
-              </div>
-            </div>
-          </div>
-        </section>
+    <main class="station-main">
+      <aside class="rail" aria-label="生产准备">
+        <div class="rail-title">
+          <h2>批次准备</h2>
+          <p>按顺序完成三件事，不需要查看后台数据。</p>
+        </div>
 
-        <section class="panel">
-          <h2>文件夹</h2>
-          <div class="setup-grid">
-            <label>
-              扫描原图文件夹
-              <input id="inputFolder" type="file" webkitdirectory directory multiple>
-              <span class="folder-status" id="inputStatus">尚未选择扫描原图文件夹。</span>
-            </label>
-            <label>
-              处理后输出文件夹
-              <input id="outputFolder" type="file" webkitdirectory directory multiple>
-              <span class="folder-status" id="outputStatus">尚未选择处理后输出文件夹。</span>
-            </label>
-          </div>
-          <p class="notice" style="margin-top: 14px;">这是单机原型页面，只记录你选择了文件夹，不读取目录内容，不执行处理，也不显示本机私有路径。</p>
-        </section>
-      </div>
-
-      <div class="stack">
-        <section class="panel">
-          <div class="state-banner" id="stateBanner">
-            <p class="state-name" id="stateName">请选择扫描原图文件夹</p>
-            <p class="state-action" id="stateAction">先选择本批次原图所在文件夹。</p>
+        <div class="folder-stack">
+          <div class="folder-row">
+            <strong>选择扫描原图文件夹</strong>
+            <small id="inputStatus">尚未选择扫描原图文件夹。</small>
+            <label class="folder-trigger" for="inputFolder">选择原图</label>
+            <input class="visually-hidden" id="inputFolder" type="file" webkitdirectory directory multiple>
           </div>
 
-          <div class="progress-wrap">
-            <div class="progress-line" aria-label="处理进度">
+          <div class="folder-row">
+            <strong>选择处理后输出文件夹</strong>
+            <small id="outputStatus">尚未选择处理后输出文件夹。</small>
+            <label class="folder-trigger" for="outputFolder">选择输出</label>
+            <input class="visually-hidden" id="outputFolder" type="file" webkitdirectory directory multiple>
+          </div>
+        </div>
+
+        <div class="run-controls">
+          <button id="startButton" disabled>开始处理</button>
+          <button id="pauseButton" class="warning" disabled>暂停</button>
+          <button id="resumeButton" class="secondary" disabled>继续处理</button>
+          <button id="resetButton" class="secondary">重新开始</button>
+        </div>
+
+        <p class="guard-note">原图不会被覆盖。本原型不读取目录内容，不执行处理，不显示本机私有路径。生产运行时由本机服务生成处理后图片。</p>
+      </aside>
+
+      <section class="image-desk" aria-label="大图生产区">
+        <div class="desk-toolbar">
+          <div>
+            <h2 id="stateAction">请选择扫描原图文件夹</h2>
+            <p id="stateHint">先选择本批次原图所在文件夹。</p>
+          </div>
+          <div class="progress-track">
+            <span id="progressText">进度：未开始</span>
+            <div class="progress-bar" aria-label="处理进度">
               <div class="progress-fill" id="progressFill"></div>
             </div>
-            <div class="progress-meta">
-              <span id="progressText">进度：未开始</span>
-              <span id="reviewText">待人工确认：0 张</span>
+          </div>
+        </div>
+
+        <div class="preview-zone">
+          <div class="preview-frame" id="previewFrame">
+            <div class="scan-line"></div>
+            <div class="scan-line mid"></div>
+            <div class="scan-line short"></div>
+            <div class="preview-label" id="previewText">公开安全示意图</div>
+          </div>
+        </div>
+
+        <div class="desk-footer">
+          <div class="desk-stat">
+            <span>待人工确认</span>
+            <strong id="pendingText">0 张</strong>
+          </div>
+          <div class="desk-stat">
+            <span>已确认</span>
+            <strong id="reviewedText">0 张</strong>
+          </div>
+          <div class="desk-stat">
+            <span>处理后图片</span>
+            <strong id="readyText">0 张</strong>
+          </div>
+        </div>
+      </section>
+
+      <aside class="decision-desk" aria-label="人工确认">
+        <div class="decision-head">
+          <h2>当前图片</h2>
+          <p class="muted" id="queueText">等待处理开始。</p>
+        </div>
+
+        <div class="decision-body">
+          <div>
+            <div class="reason-block">
+              <h3>问题原因</h3>
+              <p id="currentIssue">还没有需要确认的图片。</p>
             </div>
+            <div class="reason-block">
+              <h3>系统建议</h3>
+              <p id="currentAdvice">可以开始处理后再确认。</p>
+            </div>
+            <p class="muted">大图预览在中间。生产运行时这里显示本机真实预览；点一个决定后，自动显示下一张待确认图片。</p>
           </div>
 
-          <div class="actions">
-            <button id="startButton" disabled>开始处理</button>
-            <button id="pauseButton" class="warning" disabled>暂停</button>
-            <button id="resumeButton" class="secondary" disabled>继续处理</button>
-            <button id="reviewButton" class="secondary" disabled>查看需确认图片</button>
-            <button id="completeButton" disabled>完成导出</button>
-            <button id="resetButton" class="secondary">重新开始</button>
+          <div class="decision-actions" id="decisionActions">
+            <button type="button" class="primary-choice" data-decision="通过" disabled>通过</button>
+            <button type="button" class="warning" data-decision="需要重扫" disabled>需要重扫</button>
+            <button type="button" class="secondary" data-decision="重新处理" disabled>重新处理</button>
+            <button type="button" class="secondary" data-decision="保留原貌痕迹" disabled>保留原貌痕迹</button>
+            <button type="button" class="secondary" data-decision="跳过" disabled>跳过</button>
           </div>
-        </section>
+        </div>
 
-        <section class="panel hidden" id="reviewPanel">
-          <h2>需要人工确认的图片</h2>
-          <p class="notice">按页面文字判断下一步：可以通过、需要重扫、重新处理、保留原貌痕迹，或暂时跳过。</p>
-          <div class="review-list" id="reviewList"></div>
-        </section>
-
-        <section class="panel hidden" id="outputPanel">
-          <h2>批次完成</h2>
-          <div class="output-box">
+        <div class="handoff">
+          <button id="completeButton" disabled>完成导出</button>
+          <div class="handoff-box hidden" id="outputPanel">
+            <h3>批次已完成</h3>
             <p><strong>输出位置：</strong><span id="outputPlace">已选择的处理后输出文件夹</span></p>
-            <p><strong>下一步：</strong>请把该文件夹交给验收或移交流程。</p>
+            <p>请把处理后图片交给验收或移交流程。</p>
           </div>
-        </section>
-
-        <section class="panel hidden" id="failurePanel">
-          <h2>处理失败</h2>
-          <div class="state-banner danger">
-            <p class="state-name">本批次没有完成</p>
-            <p class="state-action">请检查两个文件夹是否选对、磁盘空间是否足够，然后重新开始。仍失败时交给管理员处理。</p>
+          <div class="handoff-box hidden" id="failurePanel">
+            <h3>处理失败</h3>
+            <p>请检查文件夹、磁盘空间和管理员提示，然后重新开始。</p>
           </div>
-        </section>
-      </div>
-    </section>
-  </main>
+        </div>
+      </aside>
+    </main>
+  </div>
 
   <script>
     const state = {
@@ -541,10 +633,11 @@
       outputChosen: false,
       status: "choose_input",
       progress: 0,
+      readyImages: 0,
       reviewItems: [
-        { id: "page-a", name: "图片一", level: "需要确认", levelClass: "warning", issue: "轻微倾斜", action: "建议重新处理", decision: "未确认" },
-        { id: "page-b", name: "图片二", level: "需要重扫", levelClass: "p0", issue: "疑似漏扫或重扫", action: "建议重扫", decision: "未确认" },
-        { id: "page-c", name: "图片三", level: "请确认", levelClass: "p2", issue: "疑似档案原貌痕迹", action: "请人工确认", decision: "未确认" }
+        { name: "图片一", tone: "need", issue: "轻微倾斜，文字边缘可能影响阅读。", advice: "建议重新处理；如果仍保持档案原貌，可选择保留原貌痕迹。", decision: "未确认" },
+        { name: "图片二", tone: "stop", issue: "疑似漏扫、重扫或页面缺失。", advice: "建议需要重扫，确认后交回扫描工位补扫。", decision: "未确认" },
+        { name: "图片三", tone: "need", issue: "疑似档案原貌痕迹，不一定需要处理。", advice: "如果不影响档案真实性，可选择保留原貌痕迹。", decision: "未确认" }
       ]
     };
 
@@ -553,95 +646,91 @@
       outputFolder: document.getElementById("outputFolder"),
       inputStatus: document.getElementById("inputStatus"),
       outputStatus: document.getElementById("outputStatus"),
-      stateBanner: document.getElementById("stateBanner"),
-      stateName: document.getElementById("stateName"),
-      stateAction: document.getElementById("stateAction"),
-      progressFill: document.getElementById("progressFill"),
-      progressText: document.getElementById("progressText"),
-      reviewText: document.getElementById("reviewText"),
       startButton: document.getElementById("startButton"),
       pauseButton: document.getElementById("pauseButton"),
       resumeButton: document.getElementById("resumeButton"),
-      reviewButton: document.getElementById("reviewButton"),
-      completeButton: document.getElementById("completeButton"),
       resetButton: document.getElementById("resetButton"),
-      reviewPanel: document.getElementById("reviewPanel"),
+      completeButton: document.getElementById("completeButton"),
+      stateName: document.getElementById("stateName"),
+      stateAction: document.getElementById("stateAction"),
+      stateHint: document.getElementById("stateHint"),
+      progressFill: document.getElementById("progressFill"),
+      progressText: document.getElementById("progressText"),
+      pendingText: document.getElementById("pendingText"),
+      reviewedText: document.getElementById("reviewedText"),
+      readyText: document.getElementById("readyText"),
+      previewFrame: document.getElementById("previewFrame"),
+      previewText: document.getElementById("previewText"),
+      queueText: document.getElementById("queueText"),
+      currentIssue: document.getElementById("currentIssue"),
+      currentAdvice: document.getElementById("currentAdvice"),
+      decisionActions: document.getElementById("decisionActions"),
       outputPanel: document.getElementById("outputPanel"),
       failurePanel: document.getElementById("failurePanel"),
-      reviewList: document.getElementById("reviewList"),
-      outputPlace: document.getElementById("outputPlace"),
-      stepList: document.getElementById("stepList")
+      outputPlace: document.getElementById("outputPlace")
     };
 
-    const stateCopy = {
-      choose_input: ["请选择扫描原图文件夹", "先选择本批次原图所在文件夹。", "input"],
-      choose_output: ["请选择处理后输出文件夹", "再选择处理后图片要保存到哪里。", "output"],
-      ready: ["可以开始处理", "文件夹已准备好，点击开始处理。", "start"],
-      processing: ["正在处理", "系统正在质检并做安全修图，可以暂停。", "start"],
-      paused: ["已暂停，可以继续", "需要离开时可保持暂停，回来后继续处理。", "start"],
-      needs_review: ["有图片需要人工确认", "请查看问题图片，并选择通过、需要重扫、重新处理、保留原貌痕迹或跳过。", "review"],
-      complete: ["批次已完成", "处理后的图片已经准备好，请查看输出位置。", "done"],
-      failed: ["处理失败", "请检查文件夹和磁盘空间，然后重新开始；仍失败时交给管理员。", "start"]
+    const copy = {
+      choose_input: ["选择原图", "请选择扫描原图文件夹", "先选择本批次原图所在文件夹。"],
+      choose_output: ["选择输出", "请选择处理后输出文件夹", "处理后图片会写入这里，原图不会被覆盖。"],
+      ready: ["准备完成", "可以开始处理", "文件夹已准备好，点击开始处理。"],
+      processing: ["正在处理", "正在处理", "系统正在质检并生成处理后图片。"],
+      paused: ["已暂停", "已暂停，可以继续", "需要离开时可保持暂停，回来后继续处理。"],
+      needs_review: ["需要确认", "有图片需要人工确认", "请看中间大图，然后在右侧选择处理决定。"],
+      complete: ["已完成", "批次已完成", "处理后的图片已经准备好，请查看输出位置。"],
+      failed: ["处理失败", "处理失败", "请检查两个文件夹是否选对、磁盘空间是否足够，然后重新开始。"]
     };
+
+    function pendingCount() {
+      return state.reviewItems.filter((item) => item.decision === "未确认").length;
+    }
+
+    function reviewedCount() {
+      return state.reviewItems.length - pendingCount();
+    }
+
+    function currentItem() {
+      return state.reviewItems.find((item) => item.decision === "未确认") || state.reviewItems[state.reviewItems.length - 1];
+    }
 
     function folderLabel(input, fallback) {
       if (!input.files || input.files.length === 0) return fallback;
       return `已选择，包含 ${input.files.length} 个项目。`;
     }
 
-    function pendingReviews() {
-      return state.reviewItems.filter((item) => item.decision === "未确认").length;
-    }
-
     function setStatus(next) {
       state.status = next;
-      if (next === "processing") state.progress = 46;
-      if (next === "needs_review") state.progress = 82;
-      if (next === "complete") state.progress = 100;
+      if (next === "processing") {
+        state.progress = 48;
+        state.readyImages = 0;
+      }
+      if (next === "needs_review") {
+        state.progress = 82;
+        state.readyImages = 24;
+      }
+      if (next === "complete") {
+        state.progress = 100;
+      }
       render();
     }
 
-    function renderSteps(activeKey) {
-      els.stepList.querySelectorAll(".step").forEach((step) => {
-        const key = step.dataset.step;
-        const doneMap = {
-          input: state.inputChosen,
-          output: state.outputChosen,
-          start: ["processing", "paused", "needs_review", "complete"].includes(state.status),
-          review: ["complete"].includes(state.status) || (state.status === "needs_review" && pendingReviews() === 0),
-          done: state.status === "complete"
-        };
-        step.classList.toggle("done", Boolean(doneMap[key]));
-        step.classList.toggle("active", key === activeKey);
-      });
+    function renderPreview(item, pending) {
+      els.previewFrame.classList.toggle("need", pending && item.tone === "need");
+      els.previewFrame.classList.toggle("stop", pending && item.tone === "stop");
+      els.previewText.textContent = pending ? item.name : state.status === "complete" ? "确认完成" : "公开安全示意图";
     }
 
-    function renderReviewList() {
-      els.reviewList.innerHTML = "";
-      state.reviewItems.forEach((item) => {
-        const card = document.createElement("article");
-        card.className = "review-card";
-        card.innerHTML = `
-          <div class="thumb">${item.name}</div>
-          <div>
-            <h3>${item.name}需要确认</h3>
-            <div class="tag-row">
-              <span class="tag ${item.levelClass}">${item.level}</span>
-              <span class="tag">${item.issue}</span>
-              <span class="tag">${item.decision}</span>
-            </div>
-            <p class="step-copy">${item.action}。请只根据本地图片和项目要求判断，不需要查看技术数据。</p>
-            <div class="review-actions">
-              <button type="button" data-decision="通过" data-id="${item.id}">通过</button>
-              <button type="button" class="warning" data-decision="需要重扫" data-id="${item.id}">需要重扫</button>
-              <button type="button" class="secondary" data-decision="重新处理" data-id="${item.id}">重新处理</button>
-              <button type="button" class="secondary" data-decision="保留原貌痕迹" data-id="${item.id}">保留原貌痕迹</button>
-              <button type="button" class="secondary" data-decision="跳过" data-id="${item.id}">跳过</button>
-            </div>
-          </div>
-        `;
-        els.reviewList.appendChild(card);
+    function renderDecisionArea() {
+      const item = currentItem();
+      const pending = pendingCount();
+      const reviewMode = state.status === "needs_review";
+      els.queueText.textContent = reviewMode ? `已确认 ${reviewedCount()} 张，待确认 ${pending} 张` : "等待处理开始。";
+      els.currentIssue.textContent = reviewMode && pending ? item.issue : pending ? "处理开始后在这里显示问题原因。" : "已经没有待确认图片。";
+      els.currentAdvice.textContent = reviewMode && pending ? item.advice : pending ? "可以开始处理后再确认。" : "可以点击完成导出。";
+      els.decisionActions.querySelectorAll("button").forEach((button) => {
+        button.disabled = !(reviewMode && pending > 0);
       });
+      renderPreview(item, reviewMode && pending > 0);
     }
 
     function render() {
@@ -649,24 +738,22 @@
       else if (!state.outputChosen && state.status !== "failed") state.status = "choose_output";
       else if (state.inputChosen && state.outputChosen && state.status === "choose_output") state.status = "ready";
 
-      const [name, action, activeStep] = stateCopy[state.status];
+      const [name, action, hint] = copy[state.status];
       els.stateName.textContent = name;
       els.stateAction.textContent = action;
-      els.stateBanner.classList.toggle("warning", ["paused", "needs_review"].includes(state.status));
-      els.stateBanner.classList.toggle("danger", state.status === "failed");
+      els.stateHint.textContent = hint;
       els.progressFill.style.width = `${state.progress}%`;
       els.progressText.textContent = state.progress ? `进度：${state.progress}%` : "进度：未开始";
-      els.reviewText.textContent = `待人工确认：${pendingReviews()} 张`;
+      els.pendingText.textContent = `${pendingCount()} 张`;
+      els.reviewedText.textContent = `${reviewedCount()} 张`;
+      els.readyText.textContent = `${state.readyImages} 张`;
       els.startButton.disabled = state.status !== "ready";
       els.pauseButton.disabled = state.status !== "processing";
       els.resumeButton.disabled = state.status !== "paused";
-      els.reviewButton.disabled = state.status !== "needs_review";
-      els.completeButton.disabled = !(state.status === "needs_review" && pendingReviews() === 0);
-      els.reviewPanel.classList.toggle("hidden", !["needs_review", "complete"].includes(state.status));
+      els.completeButton.disabled = !(state.status === "needs_review" && pendingCount() === 0);
       els.outputPanel.classList.toggle("hidden", state.status !== "complete");
       els.failurePanel.classList.toggle("hidden", state.status !== "failed");
-      renderSteps(activeStep);
-      renderReviewList();
+      renderDecisionArea();
     }
 
     els.inputFolder.addEventListener("change", () => {
@@ -683,42 +770,39 @@
       render();
     });
 
-    let processingTimer = null;
-
+    let timer = null;
     els.startButton.addEventListener("click", () => {
       setStatus("processing");
-      window.clearTimeout(processingTimer);
-      processingTimer = window.setTimeout(() => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
         if (state.status === "processing") setStatus("needs_review");
-      }, 700);
+      }, 650);
     });
+
     els.pauseButton.addEventListener("click", () => setStatus("paused"));
     els.resumeButton.addEventListener("click", () => setStatus("processing"));
-    els.reviewButton.addEventListener("click", () => setStatus("needs_review"));
     els.completeButton.addEventListener("click", () => setStatus("complete"));
     els.resetButton.addEventListener("click", () => {
       state.inputChosen = false;
       state.outputChosen = false;
       state.status = "choose_input";
       state.progress = 0;
-      window.clearTimeout(processingTimer);
+      state.readyImages = 0;
       state.reviewItems.forEach((item) => { item.decision = "未确认"; });
       els.inputFolder.value = "";
       els.outputFolder.value = "";
       els.inputStatus.textContent = "尚未选择扫描原图文件夹。";
       els.outputStatus.textContent = "尚未选择处理后输出文件夹。";
+      window.clearTimeout(timer);
       render();
     });
 
-    els.reviewList.addEventListener("click", (event) => {
-      const button = event.target.closest("button[data-id]");
-      if (!button) return;
-      const item = state.reviewItems.find((candidate) => candidate.id === button.dataset.id);
-      if (!item) return;
+    els.decisionActions.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-decision]");
+      if (!button || button.disabled) return;
+      const item = currentItem();
       item.decision = button.dataset.decision;
-      if (pendingReviews() === 0) {
-        state.progress = 94;
-      }
+      state.progress = pendingCount() === 0 ? 94 : Math.min(92, state.progress + 4);
       render();
     });
 
