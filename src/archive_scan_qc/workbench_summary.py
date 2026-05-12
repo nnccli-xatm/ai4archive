@@ -88,6 +88,12 @@ KNOWN_WORKBENCH_ARTIFACTS = (
         "Deep-inspection provider probe",
         "scan-qc.deep-inspection-provider.",
     ),
+    WorkbenchArtifact(
+        "frontend_workbench_validation.json",
+        "frontend_workbench_validation",
+        "Frontend workbench validation summary",
+        "scan-qc.frontend-workbench-validation.",
+    ),
     WorkbenchArtifact("capability_probe.json", "provider_capability_probe", "Provider capability probe", "scan-qc.capability-probe."),
     WorkbenchArtifact(
         "public_safe_validation_index.json",
@@ -345,7 +351,8 @@ def _artifact_record(
     if isinstance(schema, str):
         base["schema_version"] = schema
     if expected.schema_prefix and (not isinstance(schema, str) or not schema.startswith(expected.schema_prefix)):
-        blockers.append(_blocker(expected, "schema_version_unexpected"))
+        if not (expected.name == "frontend_workbench_validation.json" and _is_frontend_workbench_validation_payload(payload)):
+            blockers.append(_blocker(expected, "schema_version_unexpected"))
 
     reported_status = _normalized_status(payload)
     if reported_status is None:
@@ -408,6 +415,15 @@ def _metrics(payload: dict[str, Any], expected: WorkbenchArtifact) -> dict[str, 
         if isinstance(summary, dict):
             for key in ("artifacts_present", "artifacts_passed", "artifacts_failed", "artifacts_missing"):
                 metrics[key] = _safe_int(summary.get(key))
+    if expected.name == "frontend_workbench_validation.json":
+        for key in ("error_count",):
+            metrics[key] = _safe_int(payload.get(key))
+        counts = payload.get("counts")
+        if isinstance(counts, dict):
+            metrics["validator_counts"] = _safe_count_map(counts)
+        fixture_groups = payload.get("fixture_groups")
+        if isinstance(fixture_groups, dict):
+            metrics["fixture_groups"] = _safe_count_map(fixture_groups)
     if expected.name == WORKBENCH_SUMMARY_JSON:
         summary = payload.get("summary")
         if isinstance(summary, dict):
@@ -790,6 +806,16 @@ def _normalized_status(payload: dict[str, Any]) -> str | None:
     if payload.get("pass") is False or payload.get("passed") is False:
         return "fail"
     return None
+
+
+def _is_frontend_workbench_validation_payload(payload: dict[str, Any]) -> bool:
+    return (
+        isinstance(payload.get("status"), str)
+        and isinstance(payload.get("error_count"), int)
+        and isinstance(payload.get("errors"), list)
+        and isinstance(payload.get("counts"), dict)
+        and isinstance(payload.get("privacy"), dict)
+    )
 
 
 def _ready_signal(payload: dict[str, Any]) -> bool | None:

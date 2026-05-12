@@ -49,6 +49,13 @@ REQUIRED_STRINGS = {
     "No Inference Run",
     "public_safe_validation_index.json",
     "scan-qc.public-safe-validation-index.v1",
+    "frontend_workbench_validation.json",
+    "Frontend workbench validation summary",
+    "Frontend Workbench Validation Summary",
+    "Coverage Booleans",
+    "Privacy Booleans",
+    "Validation Error Codes",
+    "Validated HTML Path",
     "scan-qc.processing-review.v1",
     "Processing-review package summary",
     "Processing-Review Package Summary",
@@ -362,6 +369,7 @@ REQUIRED_AGGREGATE_FIELDS = {
     "compatibility diagnostics": "buildArtifactCompatibilityDiagnostics",
     "deep inspection candidate summary": "aggregateDeepInspectionCandidateSummary",
     "deep inspection candidate source": "deepInspectionCandidateSource",
+    "frontend workbench validation summary": "aggregateFrontendValidationSummary",
     "provider capability probe": "aggregateProviderProbe",
     "processing review summary": "aggregateProcessingReview",
     "processing review targets": "buildProcessingReviewTargets",
@@ -529,7 +537,7 @@ def new_summary(workbench: Path) -> dict[str, Any]:
             "executable_preview_lifecycle_checks": 6,
         },
         "fixture_groups": {
-            "aggregate_executable_fixture_groups": 11,
+            "aggregate_executable_fixture_groups": 12,
             "demo_fixture_labels_required": len(REQUIRED_DEMO_FIXTURE_LABELS),
             "preview_lifecycle_synthetic_slots": 2,
         },
@@ -865,9 +873,9 @@ vm.runInContext(workbenchScript + `
     status: "pass",
     ready: true,
     summary: {{
-      known_artifacts: 10,
-      artifacts_present: 10,
-      artifacts_passed: 10,
+      known_artifacts: 11,
+      artifacts_present: 11,
+      artifacts_passed: 11,
       artifacts_failed: 0,
       required_missing_count: 0,
       optional_missing_count: 0,
@@ -878,9 +886,9 @@ vm.runInContext(workbenchScript + `
       privacy_blocker_count: 0
     }},
     aggregate_counts: {{
-      known_artifacts: 10,
-      artifacts_present: 10,
-      artifacts_passed: 10,
+      known_artifacts: 11,
+      artifacts_present: 11,
+      artifacts_passed: 11,
       artifacts_failed: 0,
       required_missing_count: 0,
       optional_missing_count: 0,
@@ -910,6 +918,7 @@ vm.runInContext(workbenchScript + `
       "release_candidate_summary.json": publicSafeReadinessRow("release_candidate_summary.json", "release_candidate_summary", "Release candidate summary", "2026-05-11T00:04:00Z"),
       "final_production_handoff_summary.json": publicSafeReadinessRow("final_production_handoff_summary.json", "final_production_handoff", "Final production handoff summary", "2026-05-11T00:05:00Z", true),
       "deep_inspection_candidate_summary.json": publicSafeReadinessRow("deep_inspection_candidate_summary.json", "deep_inspection_candidate_summary", "Deep-inspection candidate summary", "2026-05-11T00:05:30Z"),
+      "frontend_workbench_validation.json": publicSafeReadinessRow("frontend_workbench_validation.json", "frontend_workbench_validation", "Frontend workbench validation summary", "2026-05-11T00:05:40Z"),
       "review_decision_verification_summary.json": publicSafeReadinessRow("review_decision_verification_summary.json", "review_decision_verification", "Review decision verification summary", "2026-05-11T00:05:45Z"),
       "public_safe_validation_index.json": publicSafeReadinessRow("public_safe_validation_index.json", "public_safe_validation_index", "Public-safe validation index", "2026-05-11T00:06:00Z", true)
     }},
@@ -1860,7 +1869,7 @@ vm.runInContext(workbenchScript + `
   assert(completeChecklistModel.sourceType === "aggregate-handoff", "complete checklist fixture did not load as aggregate handoff");
   assert(completeChecklistModel.artifactReadiness.ready === true, "complete checklist fixture was not ready");
   assert(completeChecklistModel.artifactReadiness.missingCount === 0, "complete checklist fixture reported missing artifacts");
-  assert(completeChecklistModel.artifactReadiness.rows.length === 10, "complete checklist fixture did not cover ten expected artifacts");
+  assert(completeChecklistModel.artifactReadiness.rows.length === 11, "complete checklist fixture did not cover eleven expected artifacts");
   assert(completeChecklistModel.aggregateHandoff.status === "pass", "complete checklist fixture did not preserve aggregate pass status");
   assert(completeChecklistModel.aggregateHandoff.blockingItemCount === 0, "complete checklist fixture did not preserve aggregate blocking count");
   assert(completeChecklistModel.aggregateHandoff.warningCount === 0, "complete checklist fixture did not preserve aggregate warning count");
@@ -1878,6 +1887,85 @@ vm.runInContext(workbenchScript + `
   assert(els.aggregateHandoff.innerHTML.includes("deep_inspection_candidate_summary.json"), "complete checklist did not render deep-inspection candidate artifact");
   assert(els.aggregateHandoff.innerHTML.includes("review_decision_verification_summary.json"), "complete checklist did not render review decision verification artifact");
   assert(!els.aggregateHandoff.innerHTML.includes("blob:aggregate-fixture"), "complete checklist rendered object URL state");
+
+  const frontendValidationPassFixture = {{
+    status: "pass",
+    validated_html_path: "docs/frontend-workbench-prototype.html",
+    error_count: 0,
+    errors: [],
+    counts: {{ required_regions: 9, forbidden_pattern_checks: 8 }},
+    coverage: {{ aggregate_summary: true, executable_fixtures: true, preview_lifecycle: true }},
+    privacy: {{
+      aggregate_only: true,
+      forbidden_pattern_checks_passed: true,
+      preview_lifecycle_public_safe: true,
+      contains_paths: false,
+      contains_filenames: false,
+      contains_hashes: false,
+      contains_ocr_text: false,
+      contains_thumbnails: false,
+      contains_image_content: false,
+      contains_row_level_findings: false,
+      redacts_private_values: true
+    }},
+    fixture_groups: {{ aggregate_executable_fixture_groups: 12, preview_lifecycle_synthetic_slots: 2 }}
+  }};
+  const frontendValidationBlockedFixture = {{
+    schema_version: "scan-qc.frontend-workbench-validation.v1",
+    status: "fail",
+    validated_html_path: "/Users/example/private/frontend-workbench-prototype.html",
+    error_count: 3,
+    errors: [
+      {{ code: "missing_required_region", message: "Missing required region." }},
+      {{ code: "private_path_leak", message: "/Users/example/private/image.tif leaked in preview." }},
+      {{ code: "private_filename_leak", message: "private_scan_alpha.tif failed frontend validation." }}
+    ],
+    counts: {{ required_regions: 9, forbidden_pattern_checks: 8 }},
+    coverage: {{ aggregate_summary: true, executable_fixtures: false, preview_lifecycle: true }},
+    privacy: {{
+      aggregate_only: true,
+      forbidden_pattern_checks_passed: false,
+      preview_lifecycle_public_safe: true,
+      contains_paths: false,
+      contains_filenames: false,
+      contains_hashes: false,
+      contains_ocr_text: false,
+      contains_thumbnails: false,
+      contains_image_content: false,
+      contains_row_level_findings: false,
+      redacts_private_values: true
+    }},
+    fixture_groups: {{ aggregate_executable_fixture_groups: 12, preview_lifecycle_synthetic_slots: 2 }}
+  }};
+  const frontendValidationPassModel = inferArtifact(frontendValidationPassFixture);
+  assert(frontendValidationPassModel.sourceType === "aggregate-handoff", "passing frontend validation fixture did not load as aggregate handoff");
+  assert(frontendValidationPassModel.aggregateHandoff.artifactType === "Frontend workbench validation summary", "passing frontend validation fixture did not classify correctly");
+  assert(frontendValidationPassModel.aggregateHandoff.frontendValidation.errorCount === 0, "passing frontend validation error count was not preserved");
+  assert(frontendValidationPassModel.aggregateHandoff.frontendValidation.validatedHtmlPath === "docs/frontend-workbench-prototype.html", "passing frontend validation repo-relative path was not preserved");
+  state.model = frontendValidationPassModel;
+  renderAggregateHandoff();
+  assert(els.aggregateHandoff.innerHTML.includes("Frontend Workbench Validation Summary"), "passing frontend validation summary did not render");
+  assert(els.aggregateHandoff.innerHTML.includes("Coverage Booleans"), "passing frontend validation coverage booleans did not render");
+  assert(els.aggregateHandoff.innerHTML.includes("Privacy Booleans"), "passing frontend validation privacy booleans did not render");
+  assert(els.aggregateHandoff.innerHTML.includes("required_regions"), "passing frontend validation count summary did not render");
+  assertPublicSafe(els.aggregateHandoff.innerHTML, "passing frontend validation summary rendering");
+
+  const frontendValidationBlockedModel = inferArtifact(frontendValidationBlockedFixture);
+  assert(frontendValidationBlockedModel.sourceType === "aggregate-handoff", "blocked frontend validation fixture did not load as aggregate handoff");
+  assert(frontendValidationBlockedModel.aggregateHandoff.artifactType === "Frontend workbench validation summary", "blocked frontend validation fixture did not classify correctly");
+  assert(frontendValidationBlockedModel.aggregateHandoff.status === "fail", "blocked frontend validation status was not fail");
+  assert(frontendValidationBlockedModel.aggregateHandoff.frontendValidation.errorCount === 3, "blocked frontend validation error count was not preserved");
+  assert(frontendValidationBlockedModel.aggregateHandoff.frontendValidation.validatedHtmlPath.includes("redacted"), "blocked frontend validation absolute path was not redacted");
+  state.model = frontendValidationBlockedModel;
+  renderAggregateHandoff();
+  assert(els.aggregateHandoff.innerHTML.includes("missing_required_region"), "blocked frontend validation safe error code did not render");
+  assert(els.aggregateHandoff.innerHTML.includes("private_path_leak"), "blocked frontend validation second error code did not render");
+  assert(els.aggregateHandoff.innerHTML.includes("private_filename_leak"), "blocked frontend validation bare filename error code did not render");
+  assert(els.aggregateHandoff.innerHTML.includes("redacted private diagnostic"), "blocked frontend validation private error message was not redacted");
+  assert(!els.aggregateHandoff.innerHTML.includes("/Users/example"), "blocked frontend validation rendered absolute path");
+  assert(!els.aggregateHandoff.innerHTML.includes("image.tif"), "blocked frontend validation rendered private filename");
+  assert(!els.aggregateHandoff.innerHTML.includes("private_scan_alpha.tif"), "blocked frontend validation rendered bare private filename");
+  assertPublicSafe(els.aggregateHandoff.innerHTML, "blocked frontend validation summary rendering");
 
   const deepInspectionCandidateModel = inferArtifact(deepInspectionCandidateFixture);
   assert(deepInspectionCandidateModel.sourceType === "aggregate-handoff", "deep-inspection candidate fixture did not load as aggregate handoff");
