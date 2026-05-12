@@ -84,9 +84,30 @@ test.describe("production workbench finish/export browser smoke", () => {
     const queue = {
       schema_version: "scan-qc.production-review-queue.v1",
       items: [
-        { local_id: "PRQ000001", reason_zh: "画面需要确认。", suggested_action: "rescan", severity: "P1", preview_source: "processed" },
-        { local_id: "PRQ000002", reason_zh: "页面顺序需要确认。", suggested_action: "keep_original_trace", severity: "P2", preview_source: "original_fallback" },
-        { local_id: "PRQ000003", reason_zh: "质量结果需要确认。", suggested_action: "skip", severity: "P0", preview_source: "unavailable" },
+        {
+          local_id: "PRQ000001",
+          reason_zh: "画面需要确认。",
+          suggested_action: "rescan",
+          severity: "P1",
+          preview_source: "comparison",
+          preview_sources: { original: true, processed: true },
+        },
+        {
+          local_id: "PRQ000002",
+          reason_zh: "页面顺序需要确认。",
+          suggested_action: "reprocess",
+          severity: "P2",
+          preview_source: "original_fallback",
+          preview_sources: { original: true, processed: false },
+        },
+        {
+          local_id: "PRQ000003",
+          reason_zh: "质量结果需要确认。",
+          suggested_action: "keep_original_trace",
+          severity: "P0",
+          preview_source: "processed",
+          preview_sources: { original: false, processed: true },
+        },
       ],
     };
 
@@ -170,7 +191,9 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.getByRole("heading", { name: "当前图片" })).toBeVisible();
     await expect(page.getByText("已加载复核队列 3 项，待决定 3 项。")).toBeVisible();
     await expect(page.locator("#reviewPositionText")).toHaveText("当前第 1 张 / 共 3 张 / 待确认 3 张。");
-    await expect(page.locator("#previewSourceText")).toHaveText("预览：处理后图片。");
+    await expect(page.locator("#previewSourceText")).toHaveText("预览：正在对比原图和处理后图片。");
+    await expect(page.locator(".comparison-title", { hasText: "原图" })).toBeVisible();
+    await expect(page.locator(".comparison-title", { hasText: "处理后图片" })).toBeVisible();
     await expect(page.locator("#zoomState")).toHaveText("查看：适合窗口");
 
     await page.getByRole("button", { name: "放大" }).click();
@@ -182,19 +205,21 @@ test.describe("production workbench finish/export browser smoke", () => {
     await page.getByRole("button", { name: "适合窗口" }).click();
     await expect(page.locator("#zoomState")).toHaveText("查看：适合窗口");
 
-    await page.getByRole("button", { name: "退回重扫或重处理" }).click();
+    await page.getByRole("button", { name: "需要重扫" }).click();
     await expect(page.locator("#previewSourceText")).toHaveText("预览：处理后图片不可用，正在显示原图。");
+    await expect(page.getByText("处理后图片预览暂不可用。请查看原图，仍可选择一个处理决定。")).toBeVisible();
     await expect(page.locator("#zoomState")).toHaveText("查看：适合窗口");
     await page.getByRole("button", { name: "上一张已确认" }).click();
     await expect(page.locator("#reviewPositionText")).toHaveText("当前第 1 张 / 共 3 张 / 待确认 2 张。");
-    await expect(page.locator("#currentAdvice")).toContainText("当前决定：退回重扫或重处理。");
+    await expect(page.locator("#currentAdvice")).toContainText("当前决定：需要重扫。");
     await page.getByRole("button", { name: "清除当前决定" }).click();
     await expect(page.locator("#decisionSummary")).toHaveText("已决定 0 项，待决定 3 项。");
     await expect(page.getByRole("button", { name: "完成并导出结果" })).toBeDisabled();
-    await page.getByRole("button", { name: "确认通过" }).click();
+    await page.getByRole("button", { name: "通过" }).click();
     await expect(page.locator("#reviewPositionText")).toHaveText("当前第 2 张 / 共 3 张 / 待确认 2 张。");
-    await page.getByRole("button", { name: "确认保留原貌" }).click();
-    await page.getByRole("button", { name: "交管理员处理" }).click();
+    await page.getByRole("button", { name: "重新处理" }).click();
+    await expect(page.getByText("原图预览暂不可用。请查看处理后图片，仍可选择一个处理决定。")).toBeVisible();
+    await page.getByRole("button", { name: "保留原貌" }).click();
     await expect(page.locator("#decisionSummary")).toHaveText("已决定 3 项，待决定 0 项。");
 
     await page.getByRole("button", { name: "完成并导出结果" }).click();

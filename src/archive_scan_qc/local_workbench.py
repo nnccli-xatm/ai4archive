@@ -103,10 +103,13 @@ class WorkbenchController:
             self._thread.start()
         return self.status()
 
-    def preview_path(self, local_id: str) -> tuple[Path, str]:
+    def preview_path(self, local_id: str, requested_source: str | None = None) -> tuple[Path, str]:
         safe_id = local_id.strip()
         if not safe_id:
             raise ValueError("预览请求缺少复核编号。")
+        source_filter = (requested_source or "").strip()
+        if source_filter and source_filter not in {"original", "processed"}:
+            raise ValueError("预览来源不正确。")
         with self._lock:
             input_dir = self.input_dir
             derivatives_dir = self.derivatives_dir
@@ -122,8 +125,11 @@ class WorkbenchController:
             raise ValueError("未找到这条复核记录。")
         relative_path = _safe_relative_path(str(item.get("relative_path") or ""))
         for candidate, source in _preview_candidates(input_dir, derivatives_dir, relative_path):
+            if source_filter and source != source_filter:
+                continue
             if _valid_preview_path(candidate, input_dir, derivatives_dir):
-                return candidate.expanduser().resolve(), source
+                response_source = "original_fallback" if not source_filter and source == "original" else source
+                return candidate.expanduser().resolve(), response_source
         raise ValueError("未找到这条复核记录对应的本机预览图。")
 
     def save_review_decisions(self, summary: dict[str, Any]) -> dict[str, Any]:
@@ -281,7 +287,9 @@ class WorkbenchController:
                 enriched_items.append(item)
                 continue
             enriched_item = dict(item)
-            enriched_item["preview_source"] = _preview_source_for_item(item, input_dir, derivatives_dir)
+            sources = _preview_sources_for_item(item, input_dir, derivatives_dir)
+            enriched_item["preview_sources"] = sources
+            enriched_item["preview_source"] = _preview_source_label(sources)
             enriched_items.append(enriched_item)
         enriched["items"] = enriched_items
         return enriched
@@ -405,7 +413,8 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
             self._send_json(self.workbench_controller.status())
             return
         if parsed.path.startswith("/api/preview/"):
-            self._serve_preview(unquote(parsed.path.removeprefix("/api/preview/")))
+            parts = [unquote(part) for part in parsed.path.removeprefix("/api/preview/").split("/") if part]
+            self._serve_preview(parts[0] if parts else "", parts[1] if len(parts) > 1 else None)
             return
         self._serve_static(parsed.path)
 
@@ -466,9 +475,9 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _serve_preview(self, local_id: str) -> None:
+    def _serve_preview(self, local_id: str, requested_source: str | None = None) -> None:
         try:
-            path, source = self.workbench_controller.preview_path(local_id)
+            path, source = self.workbench_controller.preview_path(local_id, requested_source)
         except ValueError as exc:
             self._send_json({"error_zh": str(exc)}, HTTPStatus.NOT_FOUND)
             return
@@ -795,7 +804,7 @@ def _preview_candidates(input_dir: Path, derivatives_dir: Path, relative_path: P
     return [
         (derivatives_dir / "images" / relative_path, "processed"),
         (derivatives_dir / relative_path, "processed"),
-        (input_dir / relative_path, "original_fallback"),
+        (input_dir / relative_path, "original"),
     ]
 
 
@@ -806,14 +815,25 @@ def _valid_preview_path(candidate: Path, input_dir: Path, derivatives_dir: Path)
     )
 
 
-def _preview_source_for_item(item: dict[str, Any], input_dir: Path, derivatives_dir: Path) -> str:
+def _preview_sources_for_item(item: dict[str, Any], input_dir: Path, derivatives_dir: Path) -> dict[str, bool]:
+    sources = {"original": False, "processed": False}
     try:
         relative_path = _safe_relative_path(str(item.get("relative_path") or ""))
     except ValueError:
-        return "unavailable"
+        return sources
     for candidate, source in _preview_candidates(input_dir, derivatives_dir, relative_path):
         if _valid_preview_path(candidate, input_dir, derivatives_dir):
-            return source
+            sources[source] = True
+    return sources
+
+
+def _preview_source_label(sources: dict[str, bool]) -> str:
+    if sources.get("original") and sources.get("processed"):
+        return "comparison"
+    if sources.get("processed"):
+        return "processed"
+    if sources.get("original"):
+        return "original_fallback"
     return "unavailable"
 
 
