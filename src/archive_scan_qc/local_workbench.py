@@ -33,6 +33,7 @@ DOCS_DIR = ROOT / "docs"
 DEFAULT_METADATA_DIRNAME = "_production_workbench"
 SERVER_SCHEMA = "scan-qc.local-production-workbench.v1"
 REVIEW_DECISION_SUMMARY_JSON = "scan-qc-review-decisions.summary.json"
+REVIEW_DECISION_DRAFT_JSON = "scan-qc-review-decisions.draft.json"
 PREVIEW_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"}
 
 
@@ -143,6 +144,26 @@ class WorkbenchController:
             "decision_summary": verification.get("decision_summary"),
         }
 
+    def save_draft_review_decisions(self, summary: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            metadata_dir = self.metadata_dir
+        if metadata_dir is None:
+            raise ValueError("请先保存文件夹并生成复核队列。")
+        verification = build_review_decision_verification_summary(summary)
+        if verification.get("status") != "pass":
+            raise ValueError("复核进度暂不能保存，请重新选择。")
+
+        metadata_dir.mkdir(parents=True, exist_ok=True)
+        draft_path = metadata_dir / REVIEW_DECISION_DRAFT_JSON
+        draft_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        return {
+            "schema_version": SERVER_SCHEMA,
+            "saved": True,
+            "message_zh": "已自动保存",
+            "draft_decisions": summary,
+            "decision_summary": verification.get("decision_summary"),
+        }
+
     def status(self) -> dict[str, Any]:
         with self._lock:
             running = bool(self._thread and self._thread.is_alive())
@@ -153,6 +174,7 @@ class WorkbenchController:
         summary = _read_json(Path(metadata_dir) / PRODUCTION_RUN_SUMMARY_JSON) if metadata_dir else None
         progress = _read_json(Path(metadata_dir) / PRODUCTION_RUN_PROGRESS_JSON) if metadata_dir else None
         queue = _read_json(Path(metadata_dir) / PRODUCTION_REVIEW_QUEUE_JSON) if metadata_dir else None
+        draft_decisions = _read_json(Path(metadata_dir) / REVIEW_DECISION_DRAFT_JSON) if metadata_dir else None
         return {
             "schema_version": SERVER_SCHEMA,
             "running": running,
@@ -166,6 +188,7 @@ class WorkbenchController:
             "summary": summary,
             "progress": progress,
             "queue": queue,
+            "draft_decisions": draft_decisions,
         }
 
     def _run_once(self) -> None:
@@ -277,6 +300,8 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
                 result = self.workbench_controller.start()
             elif self.path == "/api/finish-decisions":
                 result = self.workbench_controller.save_review_decisions(payload)
+            elif self.path == "/api/save-draft-decisions":
+                result = self.workbench_controller.save_draft_review_decisions(payload)
             else:
                 self._send_json({"error_zh": "未知请求。"}, HTTPStatus.NOT_FOUND)
                 return

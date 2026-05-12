@@ -713,6 +713,7 @@
       attentionFiles: 3,
       outputSummary: "已选择的处理后输出文件夹",
       decisionSaveSummary: "已保存到本机状态文件夹",
+      lastDraftMessage: "",
       operatorMessage: "",
       reviewQueueText: "",
       reviewItems: initialReviewItems.map((item) => ({ ...item })),
@@ -810,9 +811,12 @@
       keep_original_trace: "false_positive"
     };
 
+    const draftDecisionFileName = "scan-qc-review-decisions.draft.json";
+
     const localApi = {
       enabled: (location.protocol === "http:" || location.protocol === "https:") && ["127.0.0.1", "localhost", "::1"].includes(location.hostname),
-      polling: null
+      polling: null,
+      saveTimer: null
     };
 
     function pendingCount() {
@@ -985,7 +989,52 @@
       render();
     }
 
-    function applyRunStatus(summary, progress, queue) {
+    function restoreDraftDecisions(draft) {
+      if (!draft || !Array.isArray(draft.decisions) || state.reviewItems.length === 0) return false;
+      const operatorDecisionMap = {
+        pass: "pass",
+        needs_rework: "needs_rework",
+        admin_handling: "admin_handling",
+        keep_original_trace: "keep_original_trace"
+      };
+      const reverseDecisionMap = {
+        accepted_issue: "pass",
+        false_positive: "pass",
+        fixed_externally: "needs_rework",
+        needs_rescan: "needs_rework",
+        blocked: "admin_handling"
+      };
+      const byId = new Map(state.reviewItems.map((item) => [item.id, item]));
+      let restored = 0;
+      if (Array.isArray(draft.operator_decisions)) {
+        draft.operator_decisions.forEach((decision) => {
+          if (!decision || decision.scope !== "production_review_queue") return;
+          const item = byId.get(decision.local_id);
+          const restoredDecision = operatorDecisionMap[decision.decision];
+          if (!item || !restoredDecision) return;
+          item.decision = restoredDecision;
+          state.decisions[item.id] = restoredDecision;
+          restored += 1;
+        });
+      }
+      draft.decisions.forEach((decision) => {
+        if (!decision || decision.scope !== "production_review_queue") return;
+        const item = byId.get(decision.local_id);
+        const restoredDecision = reverseDecisionMap[decision.decision];
+        if (!item || item.decision || !restoredDecision || decision.decision === "pending") return;
+        item.decision = restoredDecision;
+        state.decisions[item.id] = restoredDecision;
+        restored += 1;
+      });
+      if (restored === 0) return false;
+      state.attentionFiles = pendingCount();
+      state.reviewQueueText = `已恢复上次进度：已决定 ${reviewedCount()} 项，待决定 ${pendingCount()} 项。`;
+      state.lastDraftMessage = "已恢复上次进度";
+      els.loadStatus.textContent = "已恢复上次进度";
+      return true;
+    }
+
+    function applyRunStatus(summary, progress, queue, draftDecisions) {
       const operator = summary.operator_summary || {};
       const rawStatus = summary.status || (progress && progress.state) || "pending";
       const nextStatus = runStateMap[rawStatus] || "failed";
@@ -1008,6 +1057,9 @@
       els.inputStatus.textContent = "已加载本机状态。";
       els.outputStatus.textContent = state.outputSummary;
       if (queue) applyReviewQueue(queue);
+      if (draftDecisions && restoreDraftDecisions(draftDecisions)) {
+        state.progress = pendingCount() === 0 ? Math.max(state.progress, 94) : Math.max(state.progress, 82);
+      }
       render();
     }
 
@@ -1035,7 +1087,7 @@
         if (payload.folders.metadata) state.decisionSaveSummary = payload.folders.metadata;
       }
       if (payload.summary || payload.progress) {
-        applyRunStatus(payload.summary || { status: payload.running ? "running" : "pending", operator_summary: {} }, payload.progress, payload.queue);
+        applyRunStatus(payload.summary || { status: payload.running ? "running" : "pending", operator_summary: {} }, payload.progress, payload.queue, payload.draft_decisions);
       } else if (payload.running) {
         setStatus("processing");
       }
@@ -1192,6 +1244,18 @@
       };
     }
 
+    function draftDecisionArtifact() {
+      const artifact = decisionArtifact();
+      artifact.operator_decisions = state.reviewItems
+        .filter((item) => item.decision)
+        .map((item) => ({
+          scope: "production_review_queue",
+          local_id: item.id,
+          decision: item.decision
+        }));
+      return artifact;
+    }
+
     function exportDecisions() {
       const blob = new Blob([JSON.stringify(decisionArtifact(), null, 2) + "\n"], { type: "application/json" });
       const url = URL.createObjectURL(blob);
@@ -1203,6 +1267,23 @@
       link.remove();
       URL.revokeObjectURL(url);
       els.loadStatus.textContent = "已导出复核决定。";
+    }
+
+    function scheduleDraftSave() {
+      if (!localApi.enabled || state.status !== "needs_review" || state.reviewItems.length === 0) return;
+      window.clearTimeout(localApi.saveTimer);
+      els.loadStatus.textContent = "正在自动保存";
+      localApi.saveTimer = window.setTimeout(saveDraftDecisions, 250);
+    }
+
+    async function saveDraftDecisions() {
+      try {
+        const payload = await apiPost("/api/save-draft-decisions", draftDecisionArtifact());
+        state.lastDraftMessage = payload.message_zh || "已自动保存";
+        els.loadStatus.textContent = state.lastDraftMessage;
+      } catch (error) {
+        els.loadStatus.textContent = error.message || "自动保存失败";
+      }
     }
 
     async function finishBatch() {
@@ -1274,6 +1355,7 @@
       state.attentionFiles = 3;
       state.outputSummary = "已选择的处理后输出文件夹";
       state.decisionSaveSummary = "已保存到本机状态文件夹";
+      state.lastDraftMessage = "";
       state.operatorMessage = "";
       state.reviewQueueText = "";
       state.reviewItems = initialReviewItems.map((item) => ({ ...item }));
@@ -1291,6 +1373,7 @@
       els.loadStatus.textContent = "可加载公开示例或本机生成的状态文件。";
       window.clearTimeout(timer);
       window.clearInterval(localApi.polling);
+      window.clearTimeout(localApi.saveTimer);
       localApi.polling = null;
       render();
     });
@@ -1305,6 +1388,7 @@
       state.attentionFiles = pendingCount();
       state.reviewQueueText = `已决定 ${reviewedCount()} 项，待决定 ${pendingCount()} 项。`;
       render();
+      scheduleDraftSave();
     });
 
     els.fixtureSelect.addEventListener("change", async () => {
