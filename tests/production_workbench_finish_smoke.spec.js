@@ -84,7 +84,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     const queue = {
       schema_version: "scan-qc.production-review-queue.v1",
       items: [
-        { local_id: "PRQ000001", reason_zh: "画面需要确认。", suggested_action: "rescan", severity: "P1", preview_source: "unavailable" },
+        { local_id: "PRQ000001", reason_zh: "画面需要确认。", suggested_action: "rescan", severity: "P1", preview_source: "processed" },
         { local_id: "PRQ000002", reason_zh: "页面顺序需要确认。", suggested_action: "keep_original_trace", severity: "P2", preview_source: "unavailable" },
         { local_id: "PRQ000003", reason_zh: "质量结果需要确认。", suggested_action: "skip", severity: "P0", preview_source: "unavailable" },
       ],
@@ -166,8 +166,21 @@ test.describe("production workbench finish/export browser smoke", () => {
     await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
     await expect(page.getByRole("heading", { name: "当前图片" })).toBeVisible();
     await expect(page.getByText("已加载复核队列 3 项，待决定 3 项。")).toBeVisible();
+    await expect(page.locator("#previewSourceText")).toHaveText("预览来源：处理后图片。");
+    await expect(page.locator("#zoomState")).toHaveText("查看：适合窗口");
+
+    await page.getByRole("button", { name: "放大" }).click();
+    await expect(page.locator("#zoomState")).toHaveText("查看：125%");
+    await page.getByRole("button", { name: "缩小" }).click();
+    await expect(page.locator("#zoomState")).toHaveText("查看：100%");
+    await page.getByRole("button", { name: "还原" }).click();
+    await expect(page.locator("#zoomState")).toHaveText("查看：100%");
+    await page.getByRole("button", { name: "适合窗口" }).click();
+    await expect(page.locator("#zoomState")).toHaveText("查看：适合窗口");
 
     await page.getByRole("button", { name: "退回重扫或重处理" }).click();
+    await expect(page.locator("#previewSourceText")).toHaveText("预览来源：本机暂未找到可预览图片。");
+    await expect(page.locator("#zoomState")).toHaveText("查看：等待图片");
     await page.getByRole("button", { name: "确认保留原貌" }).click();
     await page.getByRole("button", { name: "交管理员处理" }).click();
     await expect(page.locator("#decisionSummary")).toHaveText("已决定 3 项，待决定 0 项。");

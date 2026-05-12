@@ -380,6 +380,8 @@
 
     .preview-zone {
       display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 12px;
       place-items: center;
       padding: 22px;
       background:
@@ -387,6 +389,35 @@
         linear-gradient(-45deg, rgba(19, 40, 32, .05) 25%, transparent 25%),
         #edf2ed;
       background-size: 34px 34px;
+    }
+
+    .preview-controls {
+      width: min(100%, 640px);
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, auto)) minmax(120px, 1fr);
+      gap: 8px;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .preview-controls button {
+      min-height: 38px;
+      padding: 7px 11px;
+      white-space: nowrap;
+    }
+
+    .zoom-state {
+      min-height: 38px;
+      display: grid;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: rgba(255, 255, 255, .9);
+      color: var(--ink-2);
+      padding: 7px 10px;
+      font-weight: 700;
+      text-align: center;
+      white-space: nowrap;
     }
 
     .preview-frame {
@@ -402,6 +433,7 @@
       justify-items: center;
       gap: 22px;
       text-align: center;
+      overflow: auto;
     }
 
     .preview-frame.need {
@@ -429,10 +461,16 @@
     }
 
     .preview-frame img {
-      width: 100%;
-      height: 100%;
+      max-width: 100%;
+      max-height: 100%;
       object-fit: contain;
       display: block;
+      transform-origin: center center;
+    }
+
+    .preview-frame img.zoomed {
+      max-width: none;
+      max-height: none;
     }
 
     .desk-footer {
@@ -579,6 +617,14 @@
         padding: 14px;
       }
 
+      .preview-controls {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .zoom-state {
+        grid-column: 1 / -1;
+      }
+
       .preview-frame {
         padding: 24px;
       }
@@ -679,6 +725,13 @@
         </div>
 
         <div class="preview-zone">
+          <div class="preview-controls" aria-label="图片查看控制">
+            <button type="button" class="secondary" id="fitPreviewButton">适合窗口</button>
+            <button type="button" class="secondary" id="zoomOutButton">缩小</button>
+            <button type="button" class="secondary" id="zoomInButton">放大</button>
+            <button type="button" class="secondary" id="resetPreviewButton">还原</button>
+            <div class="zoom-state" id="zoomState" aria-live="polite">查看：适合窗口</div>
+          </div>
           <div class="preview-frame" id="previewFrame">
             <div class="scan-line"></div>
             <div class="scan-line mid"></div>
@@ -788,7 +841,9 @@
       reviewItems: initialReviewItems.map((item) => ({ ...item })),
       queueLoaded: false,
       queueSource: "内置演示",
-      decisions: {}
+      decisions: {},
+      previewFit: true,
+      previewZoom: 1
     };
 
     const els = {
@@ -814,6 +869,11 @@
       pendingText: document.getElementById("pendingText"),
       sourceText: document.getElementById("sourceText"),
       readyText: document.getElementById("readyText"),
+      fitPreviewButton: document.getElementById("fitPreviewButton"),
+      zoomOutButton: document.getElementById("zoomOutButton"),
+      zoomInButton: document.getElementById("zoomInButton"),
+      resetPreviewButton: document.getElementById("resetPreviewButton"),
+      zoomState: document.getElementById("zoomState"),
       previewFrame: document.getElementById("previewFrame"),
       previewText: document.getElementById("previewText"),
       queueText: document.getElementById("queueText"),
@@ -968,11 +1028,62 @@
       render();
     }
 
+    function previewZoomPercent() {
+      return `${Math.round(state.previewZoom * 100)}%`;
+    }
+
+    function updatePreviewControls(hasImage) {
+      const disabled = !hasImage;
+      els.fitPreviewButton.disabled = disabled;
+      els.zoomOutButton.disabled = disabled || state.previewZoom <= 0.5;
+      els.zoomInButton.disabled = disabled || state.previewZoom >= 3;
+      els.resetPreviewButton.disabled = disabled;
+      if (!hasImage) {
+        els.zoomState.textContent = "查看：等待图片";
+      } else if (state.previewFit) {
+        els.zoomState.textContent = "查看：适合窗口";
+      } else {
+        els.zoomState.textContent = `查看：${previewZoomPercent()}`;
+      }
+    }
+
+    function applyImageView() {
+      const image = els.previewFrame.querySelector("img");
+      if (!image) {
+        updatePreviewControls(false);
+        return;
+      }
+      image.classList.toggle("zoomed", !state.previewFit);
+      image.style.width = state.previewFit ? "100%" : `${Math.round(100 * state.previewZoom)}%`;
+      image.style.height = state.previewFit ? "100%" : "auto";
+      image.style.transform = "none";
+      updatePreviewControls(true);
+    }
+
+    function setPreviewFit() {
+      state.previewFit = true;
+      state.previewZoom = 1;
+      applyImageView();
+    }
+
+    function setPreviewZoom(nextZoom) {
+      state.previewFit = false;
+      state.previewZoom = Math.max(0.5, Math.min(3, Number(nextZoom) || 1));
+      applyImageView();
+    }
+
+    function resetPreviewView() {
+      state.previewFit = false;
+      state.previewZoom = 1;
+      applyImageView();
+    }
+
     function renderPreview(item, pending) {
       els.previewFrame.classList.toggle("need", pending && item.tone === "need");
       els.previewFrame.classList.toggle("stop", pending && item.tone === "stop");
       if (pending && item.previewUrl) {
         els.previewFrame.innerHTML = `<img src="${item.previewUrl}" alt="本机真实预览">`;
+        applyImageView();
       } else {
         els.previewFrame.innerHTML = `
           <div class="scan-line"></div>
@@ -981,6 +1092,7 @@
           <div class="preview-label" id="previewText">${pending ? item.name : state.status === "complete" ? "确认完成" : "公开安全示意图"}</div>
         `;
         els.previewText = document.getElementById("previewText");
+        updatePreviewControls(false);
       }
     }
 
@@ -1191,7 +1303,7 @@
         sourceCategory: item.source_category || "",
         sourceRef: item.source_ref || "",
         previewSource: item.preview_source || "",
-        previewUrl: localApi.enabled && item.local_id ? `/api/preview/${encodeURIComponent(item.local_id)}` : "",
+        previewUrl: localApi.enabled && item.local_id && item.preview_source !== "unavailable" ? `/api/preview/${encodeURIComponent(item.local_id)}` : "",
         decision: null
       };
     }
@@ -1633,6 +1745,8 @@
       state.queueLoaded = false;
       state.queueSource = "内置演示";
       state.decisions = {};
+      state.previewFit = true;
+      state.previewZoom = 1;
       els.inputFolder.value = "";
       els.outputFolder.value = "";
       els.inputPath.value = "";
@@ -1661,6 +1775,11 @@
       render();
       scheduleDraftSave();
     });
+
+    els.fitPreviewButton.addEventListener("click", setPreviewFit);
+    els.zoomOutButton.addEventListener("click", () => setPreviewZoom(state.previewZoom - 0.25));
+    els.zoomInButton.addEventListener("click", () => setPreviewZoom(state.previewZoom + 0.25));
+    els.resetPreviewButton.addEventListener("click", resetPreviewView);
 
     els.fixtureSelect.addEventListener("change", async () => {
       try {
