@@ -37,6 +37,16 @@ function waitForServer(url) {
   });
 }
 
+async function expectOperatorStatusHidesPaths(page, forbiddenPaths) {
+  const operatorStatusText = await page
+    .locator("#outputPanel, #loadStatus, #inputStatus, #outputStatus, #stateName, #stateAction, #stateHint, #currentAdvice")
+    .allTextContents();
+  const combined = operatorStatusText.join("\n");
+  for (const value of ["/tmp", "/private", "/Users", ...forbiddenPaths]) {
+    expect(combined).not.toContain(value);
+  }
+}
+
 test.describe("production workbench finish/export browser smoke", () => {
   let server;
   let baseUrl;
@@ -330,9 +340,14 @@ test.describe("production workbench finish/export browser smoke", () => {
     await page.getByRole("button", { name: "确认完成本批" }).click();
     await expect(page.locator("#completionTitle")).toHaveText("完成并导出结果");
     await expect(page.locator("#completionCounts")).toHaveText("共 3 项，已确认 3 项，待决定 0 项。");
-    await expect(page.locator("#outputPlace")).toHaveText("/tmp/synthetic-output");
-    await expect(page.locator("#decisionSavePlace")).toHaveText("/tmp/synthetic-output/_production_workbench");
-    await expect(page.locator("#completionNotePlace")).toHaveText("/tmp/synthetic-output/_production_workbench");
+    await expect(page.locator("#outputPlace")).toHaveText("已准备 3 张处理后图片");
+    await expect(page.locator("#decisionSavePlace")).toHaveText("已保存到本机状态文件夹");
+    await expect(page.locator("#completionNotePlace")).toHaveText("交接说明已保存");
+    await expectOperatorStatusHidesPaths(page, [
+      "/tmp/synthetic-input",
+      "/tmp/synthetic-output",
+      "/tmp/synthetic-output/_production_workbench",
+    ]);
     await expect(page.locator("#completionChecklist")).toHaveText("处理后图片已保存到输出文件夹复核结果和交接说明已保存到本机状态文件夹可以检查输出文件夹后准备下一批");
     await expect(page.getByText("需要继续加工时，点击准备下一批。")).toBeVisible();
     await expect(page.getByText("重新选择新的扫描原图文件夹和输出文件夹。")).toBeVisible();
@@ -866,8 +881,14 @@ test.describe("production workbench finish/export browser smoke", () => {
     await page.getByRole("button", { name: "确认完成本批" }).click();
     await expect(page.locator("#completionTitle")).toHaveText("完成并导出结果");
     await expect(page.locator("#completionCounts")).toHaveText("共 0 项，已确认 0 项，待决定 0 项。");
-    await expect(page.locator("#outputPlace")).toHaveText("/tmp/no-review-output");
-    await expect(page.locator("#completionNotePlace")).toHaveText("/tmp/no-review-output/_production_workbench");
+    await expect(page.locator("#outputPlace")).toHaveText("已准备 2 张处理后图片");
+    await expect(page.locator("#decisionSavePlace")).toHaveText("已保存到本机状态文件夹");
+    await expect(page.locator("#completionNotePlace")).toHaveText("交接说明已保存");
+    await expectOperatorStatusHidesPaths(page, [
+      "/tmp/no-review-input",
+      "/tmp/no-review-output",
+      "/tmp/no-review-output/_production_workbench",
+    ]);
     await expect(page.locator("#completionSteps").getByText("检查输出文件夹里的处理后图片。")).toBeVisible();
     await expect(page.locator("#completionSteps").getByText("需要继续加工时，点击准备下一批。")).toBeVisible();
 
