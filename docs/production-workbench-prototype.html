@@ -1557,7 +1557,11 @@
         body: JSON.stringify(payload || {})
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error_zh || "本机服务请求失败");
+      if (!response.ok) {
+        const error = new Error(data.error_zh || "本机服务请求失败");
+        error.payload = data;
+        throw error;
+      }
       return data;
     }
 
@@ -1648,6 +1652,13 @@
         localApi.polling = window.setInterval(pollServerStatus, 1200);
       } catch (error) {
         els.loadStatus.textContent = error.message || "本机处理启动失败。";
+        const guidance = error.payload && (error.payload.preflight_guidance || error.payload.recovery_guidance);
+        if (guidance) {
+          state.status = "failed";
+          state.operatorMessage = error.message || guidance.message_zh || "本机处理启动失败。";
+          state.recoveryGuidance = guidance;
+          render();
+        }
       }
     }
 

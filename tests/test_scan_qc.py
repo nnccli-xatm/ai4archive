@@ -6497,6 +6497,173 @@ class ScanQcTest(unittest.TestCase):
             self.assertIsNone(controller.input_dir)
             self.assertFalse((Path.cwd() / DEFAULT_METADATA_DIRNAME).exists())
 
+    def test_local_production_workbench_configure_rejects_unsafe_output_before_creating_it(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_inside_input = input_dir / "derivatives"
+            metadata_inside_input = input_dir / "metadata"
+            input_dir.mkdir()
+            controller = WorkbenchController()
+
+            with self.assertRaisesRegex(ValueError, "处理后输出文件夹不能.*原图文件夹"):
+                controller.configure(input_dir, output_inside_input)
+
+            self.assertFalse(output_inside_input.exists())
+            self.assertIsNone(controller.input_dir)
+
+            safe_output = root / "derivatives"
+            with self.assertRaisesRegex(ValueError, "本机状态文件夹不能放在扫描原图文件夹里面"):
+                controller.configure(input_dir, safe_output, metadata_inside_input)
+
+            self.assertFalse(safe_output.exists())
+            self.assertFalse(metadata_inside_input.exists())
+            self.assertIsNone(controller.input_dir)
+
+    def test_local_production_workbench_preflight_rejects_empty_input_before_start(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            input_dir.mkdir()
+
+            controller = WorkbenchController()
+            controller.configure(input_dir, derivatives_dir)
+
+            with self.assertRaisesRegex(ValueError, "扫描原图文件夹里没有文件"):
+                controller.start()
+
+            status = controller.status()
+            guidance = status["recovery_guidance"]
+            self.assertFalse(status["running"])
+            self.assertIsNone(status["summary"])
+            self.assertEqual(guidance["kind"], "input_folder_empty")
+            self.assertTrue(guidance["aggregate_only"])
+            self.assertIn("放入原图文件夹", "".join(guidance["next_steps_zh"]))
+            self.assertNotIn(str(input_dir), json.dumps(guidance, ensure_ascii=False))
+
+    def test_local_production_workbench_preflight_rejects_unreadable_input_without_private_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            input_dir.mkdir()
+            Image.new("RGB", (48, 36), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+
+            controller = WorkbenchController()
+            controller.configure(input_dir, derivatives_dir)
+
+            original_mode = input_dir.stat().st_mode
+            input_dir.chmod(0)
+            try:
+                with self.assertRaisesRegex(ValueError, "扫描原图文件夹现在不能读取"):
+                    controller.start()
+
+                status = controller.status()
+                guidance = status["recovery_guidance"]
+                self.assertFalse(status["running"])
+                self.assertIsNone(status["summary"])
+                self.assertEqual(guidance["kind"], "input_folder_unreadable")
+                self.assertTrue(guidance["aggregate_only"])
+                self.assertIn("读取权限", "".join(guidance["next_steps_zh"]))
+                self.assertNotIn(str(input_dir), json.dumps(guidance, ensure_ascii=False))
+            finally:
+                input_dir.chmod(original_mode)
+
+    def test_local_production_workbench_preflight_rejects_unusable_output_before_start(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            input_dir.mkdir()
+            Image.new("RGB", (48, 36), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+
+            controller = WorkbenchController()
+            controller.configure(input_dir, derivatives_dir)
+            shutil.rmtree(derivatives_dir)
+
+            with self.assertRaisesRegex(ValueError, "处理后输出文件夹不存在"):
+                controller.start()
+
+            status = controller.status()
+            guidance = status["recovery_guidance"]
+            self.assertFalse(status["running"])
+            self.assertIsNone(status["summary"])
+            self.assertEqual(guidance["kind"], "output_folder_unusable")
+            self.assertIn("可以写入", "".join(guidance["next_steps_zh"]))
+            self.assertNotIn(str(derivatives_dir), json.dumps(guidance, ensure_ascii=False))
+
+    def test_local_production_workbench_preflight_write_probe_does_not_overwrite_existing_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            input_dir.mkdir()
+            derivatives_dir.mkdir()
+            Image.new("RGB", (48, 36), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+            fixed_probe = derivatives_dir / ".scan_qc_preflight_write_test"
+            fixed_probe.write_text("operator file\n", encoding="utf-8")
+
+            controller = WorkbenchController()
+            controller.configure(input_dir, derivatives_dir)
+            with mock.patch("archive_scan_qc.local_workbench.run_production_folder") as run_mock:
+                run_mock.return_value = {
+                    "status": "finished",
+                    "artifacts": {},
+                    "counts": {"total_files": 1, "processed_files": 1, "resumed_files": 0},
+                }
+                controller.start()
+                deadline = time.time() + 10
+                status = controller.status()
+                while status["running"] and time.time() < deadline:
+                    time.sleep(0.05)
+                    status = controller.status()
+                self.assertFalse(status["running"])
+                self.assertIsNone(status["last_error_zh"])
+
+            self.assertEqual(fixed_probe.read_text(encoding="utf-8"), "operator file\n")
+
+    def test_local_production_workbench_start_api_returns_preflight_guidance(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            input_dir.mkdir()
+            server = make_server("127.0.0.1", 0)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                base_url = f"http://127.0.0.1:{server.server_port}"
+                configure_request = urllib.request.Request(
+                    f"{base_url}/api/configure",
+                    data=json.dumps({"input_dir": str(input_dir), "derivatives_dir": str(derivatives_dir)}).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(configure_request, timeout=5):
+                    pass
+
+                start_request = urllib.request.Request(
+                    f"{base_url}/api/start",
+                    data=b"{}",
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with self.assertRaises(urllib.error.HTTPError) as raised:
+                    urllib.request.urlopen(start_request, timeout=5)
+                self.assertEqual(raised.exception.code, 400)
+                payload = json.loads(raised.exception.read().decode("utf-8"))
+                raised.exception.close()
+
+                self.assertEqual(payload["preflight_guidance"]["kind"], "input_folder_empty")
+                self.assertEqual(payload["recovery_guidance"]["schema_version"], "scan-qc.local-folder-preflight.v1")
+                self.assertIn("处理没有启动", payload["error_zh"])
+                self.assertNotIn(str(input_dir), json.dumps(payload, ensure_ascii=False))
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
     def test_local_production_workbench_preview_route_serves_only_local_id_image(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
