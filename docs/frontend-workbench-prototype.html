@@ -2710,8 +2710,21 @@
 
     function aggregatePrivacyOmissions(items) {
       if (!Array.isArray(items)) return "未提供";
-      const labels = items.map(item => text(item, "")).filter(Boolean);
+      const labels = items.map(item => privacyOmissionDisplay(text(item, ""))).filter(Boolean);
       return labels.length ? labels.join(", ") : "未提供";
+    }
+
+    function privacyOmissionDisplay(value) {
+      const labels = {
+        "source location strings": "来源位置字符串",
+        "source file identifiers": "来源文件标识符",
+        "content hashes": "内容哈希",
+        "recognized text": "识别文本",
+        thumbnails: "缩略图",
+        "image content": "图像内容",
+        "row-level findings": "行级发现"
+      };
+      return labels[value.toLowerCase()] || value;
     }
 
     function privacyOmits(items, value) {
@@ -2918,7 +2931,7 @@
         return;
       }
       if (state.model.sourceType === "empty") {
-        els.status.textContent = "No artifact loaded. Overview, workflow, batches, findings, and preview will appear after loading JSON.";
+        els.status.textContent = "尚未加载工件。加载 JSON 后将显示概览、工作流、批次、发现和预览。";
         return;
       }
       els.status.classList.add("ok");
@@ -2977,7 +2990,7 @@
     function renderAggregateHandoff() {
       const aggregate = state.model.aggregateHandoff;
       if (!aggregate) {
-        els.aggregateHandoff.innerHTML = `<div class="empty">Load workbench_public_summary.json, review_summary.json, acceptance_summary.json, aggregate_evidence_bundle_summary.json, final_production_handoff_summary.json, release_candidate_summary.json, deep_inspection_candidate_summary.json, or public_safe_validation_index.json to inspect public-safe aggregate status.</div>`;
+        els.aggregateHandoff.innerHTML = `<div class="empty">加载 workbench_public_summary.json、review_summary.json、acceptance_summary.json、aggregate_evidence_bundle_summary.json、final_production_handoff_summary.json、release_candidate_summary.json、deep_inspection_candidate_summary.json 或 public_safe_validation_index.json 后，可查看公开安全的汇总状态。</div>`;
         return;
       }
       const privacyRows = [
@@ -3045,7 +3058,7 @@
         ["探测隐私状态", aggregate.providerProbe.privacyStatus]
       ];
       els.aggregateHandoff.innerHTML = `
-        <p class="muted">Aggregate-only status from locally reviewed public-safe summary artifacts. This view displays counts, statuses, and codes only, never private filenames, paths, hashes, OCR text, thumbnails, image content, row-level findings, reviewer notes, manifests, or derivative image references.</p>
+        <p class="muted">来自本地复核后的公开安全摘要工件的仅汇总状态。本视图只显示计数、状态和代码，绝不显示私有文件名、路径、哈希、OCR 文本、缩略图、图像内容、行级发现、复核备注、清单或衍生图像引用。</p>
         ${compatibility ? artifactCompatibilityPanel(compatibility) : ""}
         ${readiness ? artifactReadinessPanel(readiness) : ""}
         ${aggregate.processingReview.recognized ? processingReviewPanel(aggregate.processingReview, processingReviewRows) : ""}
@@ -3076,8 +3089,8 @@
           ${aggregateMetric("处理已恢复", aggregate.counts.processingResumedFiles)}
           ${aggregateMetric("处理重复复用", aggregate.counts.processingDuplicateReusedFiles)}
           ${aggregateMetric("处理已有衍生复用", aggregate.counts.processingExistingDerivativeReusedFiles)}
-          ${aggregateMetric("扫描吞吐", aggregate.throughput.scanFilesPerMinute ? `${aggregate.throughput.scanFilesPerMinute} files/min` : "未提供")}
-          ${aggregateMetric("处理吞吐", aggregate.throughput.processingFilesPerMinute ? `${aggregate.throughput.processingFilesPerMinute} files/min` : "未提供")}
+          ${aggregateMetric("扫描吞吐", aggregate.throughput.scanFilesPerMinute ? `${aggregate.throughput.scanFilesPerMinute} 文件/分钟` : "未提供")}
+          ${aggregateMetric("处理吞吐", aggregate.throughput.processingFilesPerMinute ? `${aggregate.throughput.processingFilesPerMinute} 文件/分钟` : "未提供")}
           ${aggregateMetric("扫描工作线程", workerRange(aggregate.workers.scanMin, aggregate.workers.scanMax))}
           ${aggregateMetric("处理工作线程", workerRange(aggregate.workers.processingMin, aggregate.workers.processingMax))}
         </div>
@@ -3096,7 +3109,7 @@
             ${aggregate.blockingCodeCounts.length ? aggregateCountTable(aggregate.blockingCodeCounts, "阻塞代码") : `<div class="empty">未提供按汇总代码统计的阻塞计数。</div>`}
             ${aggregate.warningCodeCounts.length ? aggregateCountTable(aggregate.warningCodeCounts, "警告代码") : `<div class="empty">未提供按汇总代码统计的警告计数。</div>`}
             <h3>提供方能力探测</h3>
-            <p class="muted">Synthetic provider readiness aggregate only; displays configured state and optional package, GPU, and model visibility counts without command strings or local locations.</p>
+            <p class="muted">仅显示合成的提供方就绪汇总；展示配置状态、可选包、GPU 和模型可见性计数，不包含命令字符串或本地位置。</p>
             <div class="table-wrap">
               <table>
                 <tbody>${providerProbeRows.map(([label, value]) => kv(label, value)).join("")}</tbody>
@@ -3127,7 +3140,7 @@
       return `
         <section class="subpanel">
           <h3>前端工作台验证摘要</h3>
-          <p class="muted">Public-safe frontend validator summary. Shows aggregate status, counts, booleans, fixture groups, and sanitized error codes/messages only.</p>
+          <p class="muted">公开安全的前端验证器摘要。仅显示汇总状态、计数、布尔项、夹具分组以及已净化的错误代码/消息。</p>
           <div class="table-wrap">
             <table><tbody>${rows.map(([label, value, html]) => html ? `<tr><th>${escapeHtml(label)}</th><td class="truncate">${value}</td></tr>` : kv(label, value)).join("")}</tbody></table>
           </div>
@@ -3162,7 +3175,7 @@
       return `
         <section class="subpanel">
           <h3>去噪点后端摘要</h3>
-          <p class="muted">Public-safe aggregate backend status. Shows only backend names, availability booleans, counts, and warning codes from aggregate summaries.</p>
+          <p class="muted">公开安全的汇总后端状态。仅显示汇总摘要中的后端名称、可用性布尔项、计数和警告代码。</p>
           <div class="table-wrap">
             <table><tbody>${rows.map(([label, value]) => kv(label, value)).join("")}</tbody></table>
           </div>
@@ -3178,7 +3191,7 @@
       return `
         <section class="subpanel">
           <h3>处理操作耗时热点</h3>
-          <p class="muted">Aggregate-only operation timings sorted by elapsed seconds. Shows only enabled state, file counts, durations, rates, and per-file averages.</p>
+          <p class="muted">按耗时秒数排序的仅汇总操作耗时。仅显示启用状态、文件计数、时长、速率和单文件平均值。</p>
           <div class="table-wrap">
             <table>
               <thead><tr><th>操作</th><th>启用</th><th>文件数</th><th>耗时秒数</th><th>文件/分钟</th><th>平均秒/文件</th></tr></thead>
@@ -3210,7 +3223,7 @@
       return `
         <section class="subpanel">
           <h3>深度检查候选摘要</h3>
-          <p class="muted">Aggregate-only candidate evidence. Counts, statuses, and check codes are shown without filenames, paths, hashes, OCR text, images, row-level findings, provider commands, manifests, source roots, or environment values.</p>
+          <p class="muted">仅汇总的候选证据。显示计数、状态和检查代码，不包含文件名、路径、哈希、OCR 文本、图像、行级发现、提供方命令、清单、来源根目录或环境值。</p>
           <div class="table-wrap">
             <table><tbody>${rows.map(([label, value, html]) => kv(label, value, html)).join("")}</tbody></table>
           </div>
@@ -3247,7 +3260,7 @@
       return `
         <section class="subpanel">
           <h3>复核决定验证摘要</h3>
-          <p class="muted">Aggregate-only decision verification. Counts, statuses, and aggregate codes are shown without source field names, source values, local IDs, paths, filenames, hashes, OCR text, thumbnails, object URLs, reviewer notes, prompts, provider commands, raw model output, or row-level findings.</p>
+          <p class="muted">仅汇总的决定验证。显示计数、状态和汇总代码，不包含来源字段名、来源值、本地 ID、路径、文件名、哈希、OCR 文本、缩略图、对象 URL、复核备注、提示词、提供方命令、原始模型输出或行级发现。</p>
           <div class="table-wrap">
             <table><tbody>${rows.map(([label, value, html]) => html ? `<tr><th>${escapeHtml(label)}</th><td class="truncate">${value}</td></tr>` : kv(label, value)).join("")}</tbody></table>
           </div>
@@ -3267,7 +3280,7 @@
     function validationIndexPanel(rows, reviewDecisionCoverage = []) {
       return `
         <h3>公开安全验证索引</h3>
-        <p class="muted">Validation index view shows aggregate summary counts, artifact presence/category/status, and blocking item codes/counts only. Source values and private evidence are not displayed.</p>
+        <p class="muted">验证索引视图仅显示汇总摘要计数、工件存在性/类别/状态以及阻塞项代码/计数。不显示来源值和私有证据。</p>
         <div class="table-wrap" style="margin-top:12px">
           <table>
             <tbody>${rows.map(([label, value]) => kv(label, value)).join("")}</tbody>
@@ -3276,7 +3289,7 @@
         ${reviewDecisionCoverage.length ? `
           <section class="subpanel">
             <h3>复核决定交接覆盖</h3>
-            <p class="muted">Coverage from the validation index is aggregate-only: artifact presence/status, privacy status, check counts, blocking/warning counts, and blocking/warning code counts.</p>
+            <p class="muted">验证索引中的覆盖信息仅限汇总：工件存在性/状态、隐私状态、检查计数、阻塞/警告计数以及阻塞/警告代码计数。</p>
             ${reviewDecisionCoverage.map(item => `
               <h3>${escapeHtml(item.label)}</h3>
               <div class="table-wrap">
@@ -3307,7 +3320,7 @@
     function processingReviewPanel(processingReview, rows) {
       return `
         <h3>处理复核包摘要</h3>
-        <p class="muted">Local processing-review package summary view uses package-level counts and synthetic review IDs only; it does not parse or display processing manifests, derivative image references, preview filenames, paths, hashes, OCR text, thumbnails, image content, row-level private notes, or per-file records.</p>
+        <p class="muted">本地处理复核包摘要视图只使用包级计数和合成复核 ID；不会解析或显示处理清单、衍生图像引用、预览文件名、路径、哈希、OCR 文本、缩略图、图像内容、行级私有备注或逐文件记录。</p>
         <div class="table-wrap" style="margin-top:12px">
           <table>
             <tbody>${rows.map(([label, value]) => kv(label, value)).join("")}</tbody>
@@ -3325,7 +3338,7 @@
       }];
       return `
         <h3>公开安全工件兼容性诊断</h3>
-        <p class="muted">Compatibility diagnostic uses aggregate/public-safe fields only; no private filenames, paths, hashes, OCR text, thumbnails, image content, manifests, row-level findings, reviewer notes, or derivative image references are parsed or displayed.</p>
+        <p class="muted">兼容性诊断仅使用汇总/公开安全字段；不会解析或显示私有文件名、路径、哈希、OCR 文本、缩略图、图像内容、清单、行级发现、复核备注或衍生图像引用。</p>
         <div class="metric-grid">
           ${aggregateMetric("已识别工件类型", artifactTypeDisplay(compatibility.artifactType))}
           ${aggregateMetric("架构版本", compatibility.schemaVersion)}
@@ -3360,7 +3373,7 @@
           <div class="readiness-verdict ${readiness.ready ? "ready" : "not-ready"}">
             <span class="muted">顶层就绪状态</span>
             <strong>${escapeHtml(readiness.summary)}</strong>
-            <p class="muted">Complete public-safe aggregate artifacts only; excludes local preview filename, preview content, and object URL state.</p>
+            <p class="muted">仅使用完整的公开安全汇总工件；排除本地预览文件名、预览内容和对象 URL 状态。</p>
           </div>
           <div class="metric-grid">
             ${aggregateMetric("预期工件", EXPECTED_PUBLIC_SAFE_ARTIFACTS.length)}
@@ -3556,7 +3569,7 @@
               ${kv("批次", batch.id)}
               ${kv("本地复核 ID", batch.localId)}
               ${kv("复核决定", decisionLabel(getDecision("batch", batch.localId)))}
-              ${kv("状态", batch.status)}
+              ${kv("状态", statusDisplay(batch.status))}
               ${kv("可打开文件", `${batch.openableFiles} / ${batch.totalFiles}`)}
               ${kv("发现数", batch.totalFindings)}
               ${kv("预检错误", batch.preflightErrors)}
@@ -3566,7 +3579,7 @@
               ${kv("处理已有衍生复用", batch.processingExistingDerivativeReused ?? "未提供")}
               ${kv("失败阶段", batch.failureStage || "无")}
               ${kv("失败原因", batch.failureReason || "无")}
-              ${kv("扫描吞吐", perf.files_per_minute ? `${perf.files_per_minute} files/min` : "未提供")}
+              ${kv("扫描吞吐", perf.files_per_minute ? `${perf.files_per_minute} 文件/分钟` : "未提供")}
             </tbody>
           </table>
         </div>`;
@@ -3650,7 +3663,7 @@
             <tbody>
               ${visibleTargets.map(target => `
                 <tr>
-                  <td class="mono">${escapeHtml(target.scope)}</td>
+                  <td>${escapeHtml(scopeDisplay(target.scope))}</td>
                   <td class="mono">${escapeHtml(target.localId)}</td>
                   <td>${severityBadge(target.severity || "none")}</td>
                   <td>${statusBadge(target.status || "local-review")}</td>
@@ -3751,14 +3764,14 @@
       if (hasPreview) {
         const zoomStyle = state.previewDisplay.mode === "zoom" ? ` style="--preview-zoom: ${state.previewDisplay.zoom}"` : "";
         previewEls.preview.className = state.previewDisplay.mode === "zoom" ? "preview has-image preview-zoom" : "preview has-image";
-        previewEls.preview.innerHTML = `<img src="${escapeHtml(previewState.objectUrl)}" alt="Operator-selected local ${slot} preview"${zoomStyle}>`;
+        previewEls.preview.innerHTML = `<img src="${escapeHtml(previewState.objectUrl)}" alt="操作员选择的本地${label}预览"${zoomStyle}>`;
         return;
       }
       previewEls.preview.className = "preview";
       previewEls.preview.innerHTML = `
         <div>
           <strong>${label}预览占位</strong>
-          <p class="muted">此静态原型未加载或转换 ${slot} 图像。请仅使用单独的图像选择器进行受控的本地标签页预览。</p>
+          <p class="muted">此静态原型未加载或转换${label}图像。请仅使用单独的图像选择器进行受控的本地标签页预览。</p>
         </div>`;
     }
 
@@ -3800,12 +3813,58 @@
     function statusBadge(status) {
       const normalized = String(status).toLowerCase();
       const cls = ["pass", "passed", "ready", "present", "存在", "ok"].includes(normalized) ? "pass" : ["fail", "failed", "blocked", "error", "missing", "缺失"].includes(normalized) ? "fail" : ["warning", "warn", "stale"].includes(normalized) ? "warn" : "";
-      return `<span class="badge ${cls}">${escapeHtml(status)}</span>`;
+      return `<span class="badge ${cls}">${escapeHtml(statusDisplay(status))}</span>`;
     }
 
     function severityBadge(severity) {
       const cls = String(severity).toLowerCase();
-      return `<span class="badge ${cls}">${escapeHtml(severity)}</span>`;
+      return `<span class="badge ${cls}">${escapeHtml(severityDisplay(severity))}</span>`;
+    }
+
+    function statusDisplay(status) {
+      const labels = {
+        pass: "通过",
+        passed: "通过",
+        ready: "就绪",
+        present: "存在",
+        ok: "正常",
+        fail: "失败",
+        failed: "失败",
+        blocked: "阻塞",
+        error: "错误",
+        missing: "缺失",
+        warning: "警告",
+        warn: "警告",
+        stale: "过期",
+        processed: "已处理",
+        skipped: "已跳过",
+        pending: "待处理",
+        "local-review": "本地复核",
+        none: "无"
+      };
+      const value = String(status || "未提供");
+      return labels[value.toLowerCase()] || value;
+    }
+
+    function severityDisplay(severity) {
+      const labels = {
+        none: "无",
+        info: "信息",
+        warning: "警告",
+        blocking: "阻塞"
+      };
+      const value = String(severity || "未提供");
+      return labels[value.toLowerCase()] || value;
+    }
+
+    function scopeDisplay(scope) {
+      const labels = {
+        batch: "批次",
+        finding: "发现",
+        processing_review: "处理复核"
+      };
+      const value = String(scope || "未提供");
+      return labels[value] || value;
     }
 
     function decisionKey(scope, localId) {
@@ -3826,7 +3885,7 @@
       const options = REVIEW_DECISIONS.map(([value, label]) => `
         <option value="${escapeHtml(value)}"${value === current ? " selected" : ""}>${escapeHtml(label)}</option>
       `).join("");
-      return `<select class="review-select" data-review-scope="${escapeHtml(scope)}" data-review-id="${escapeHtml(localId)}" aria-label="Review decision for ${escapeHtml(localId)}">${options}</select>`;
+      return `<select class="review-select" data-review-scope="${escapeHtml(scope)}" data-review-id="${escapeHtml(localId)}" aria-label="复核决定 ${escapeHtml(localId)}">${options}</select>`;
     }
 
     function bindDecisionControls(root) {

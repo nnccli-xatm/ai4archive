@@ -84,8 +84,8 @@ REQUIRED_STRINGS = {
     "去噪点后端警告代码",
     "despeckle_numpy_unavailable_fallback",
     "despeckle_numpy_requested_all_fallback",
-    "synthetic review IDs only",
-    "row-level private notes",
+    "合成复核 ID",
+    "行级私有备注",
     "processing_review",
     "Public-safe validation index",
     "公开安全验证索引",
@@ -99,7 +99,7 @@ REQUIRED_STRINGS = {
     "隐私仅汇总状态",
     "JSON.parse",
     "type=\"file\"",
-    "No artifact loaded",
+    "尚未加载工件",
     "无法加载 JSON",
     "原始预览占位",
     "处理后预览占位",
@@ -241,9 +241,9 @@ REQUIRED_STRINGS = {
     "privacyOmits",
     "隐私自检状态",
     "隐私自检违规数",
-    "Aggregate-only status from locally reviewed public-safe summary artifacts.",
+    "来自本地复核后的公开安全摘要工件的仅汇总状态。",
     "公开安全工件兼容性诊断",
-    "Compatibility diagnostic uses aggregate/public-safe fields only",
+    "兼容性诊断仅使用汇总/公开安全字段",
     "已识别工件类型",
     "架构版本",
     "架构/类型检测",
@@ -276,7 +276,7 @@ REQUIRED_STRINGS = {
     "EXPECTED_PUBLIC_SAFE_ARTIFACTS",
     "buildArtifactReadinessChecklist",
     "artifactReadinessPanel",
-    "excludes local preview filename, preview content, and object URL state",
+    "排除本地预览文件名、预览内容和对象 URL 状态",
     "工件存在与状态",
     "隐私状态",
     "敏感性",
@@ -295,7 +295,7 @@ REQUIRED_STRINGS = {
     "contains_thumbnails",
     "contains_image_content",
     "contains_row_level_findings",
-    "private filenames, paths, hashes, OCR text, thumbnails, image content, row-level findings, reviewer notes, manifests, or derivative image references",
+    "私有文件名、路径、哈希、OCR 文本、缩略图、图像内容、行级发现、复核备注、清单或衍生图像引用",
     "公开安全演示夹具库",
     "用于浏览器验证的合成纯汇总夹具。",
     "演示夹具不包含私有文件名、路径、哈希、OCR 文本、缩略图、图像内容、清单、行级发现、复核备注、衍生图像引用和本地预览状态。",
@@ -2107,7 +2107,7 @@ vm.runInContext(workbenchScript + `
   renderAggregateHandoff();
   assert(els.aggregateHandoff.innerHTML.includes("公开交接未就绪"), "missing checklist did not render not-ready summary");
   assert(els.aggregateHandoff.innerHTML.includes("missing"), "missing checklist did not render missing status");
-  assert(els.aggregateHandoff.innerHTML.includes("stale"), "missing checklist did not render stale status");
+  assert(els.aggregateHandoff.innerHTML.includes("过期"), "missing checklist did not render stale status");
 
   const unsupportedSchemaModel = inferArtifact(unsupportedSchemaFixture);
   assert(unsupportedSchemaModel.aggregateHandoff.artifactType === "Public-safe artifact readiness checklist", "unsupported schema fixture did not classify by public-safe artifact type");
@@ -2179,9 +2179,9 @@ vm.runInContext(workbenchScript + `
   assert(els.aggregateHandoff.innerHTML.includes("处理已有衍生复用"), "processing review did not render existing derivative reuse count");
   assert(els.aggregateHandoff.innerHTML.includes("处理状态计数"), "processing review did not render status counts");
   renderReview();
-  assert(els.reviewTargetList.innerHTML.includes("processing_review"), "processing review target list did not render scope");
+  assert(els.reviewTargetList.innerHTML.includes("处理复核"), "processing review target list did not render scope");
   assert(els.reviewTargetList.innerHTML.includes("PR0001"), "processing review target list did not render first synthetic local ID");
-  assert(els.reviewTargetList.innerHTML.includes("failed"), "processing review target list did not render status");
+  assert(els.reviewTargetList.innerHTML.includes("状态"), "processing review target list did not render status column");
   assert(els.reviewTargetList.innerHTML.includes('data-review-scope="processing_review"'), "processing review target list did not render decision control scope");
   assert(els.reviewTargetList.innerHTML.includes('data-review-id="PR0001"'), "processing review target list did not render first decision control ID");
   assertPublicSafe(els.reviewTargetList.innerHTML, "processing review target list");
@@ -2789,7 +2789,7 @@ vm.runInContext(workbenchScript + `
   assert(reviewTargets().length === 6, "processing-review synthetic targets were not exposed");
   assert(els.reviewFilterCount.textContent === "显示 6 / 6 个目标", "initial filtered count did not show visible and total targets");
   assert(els.reviewTargetList.innerHTML.includes("PR0001"), "processing-review target list did not render first target");
-  assert(els.reviewTargetList.innerHTML.includes("failed"), "processing-review target list did not render synthetic target status");
+  assert(els.reviewTargetList.innerHTML.includes("失败"), "processing-review target list did not render localized synthetic target status");
   assert(els.reviewTargetList.innerHTML.includes("P1"), "processing-review target list did not render synthetic target severity");
   setReviewFilter("status", "failed");
   assert(els.reviewStatusFilter.value === "failed", "status filter control did not sync");
