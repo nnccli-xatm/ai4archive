@@ -23,6 +23,7 @@ FIXTURE_STATES = {
     "production-run-needs-review": "needs_review",
     "production-run-finished": "finished",
     "production-run-blocked": "blocked",
+    "production-run-empty": "finished",
 }
 
 REQUIRED_TEXT = {
@@ -79,6 +80,11 @@ REQUIRED_TEXT = {
     "没有剩余处理任务",
     "磁盘空间",
     "可重试",
+    "原图文件夹是空的",
+    "没有可处理的图片",
+    "常见图片格式",
+    "没有需要人工确认",
+    "文件夹位置不对",
 }
 
 FORBIDDEN_VISIBLE_TERMS = {
@@ -410,6 +416,9 @@ def main() -> int:
         "renderRecoveryGuidance",
         "guidanceFromSummary",
         "folder_setup_missing",
+        "folder_path_invalid",
+        "empty_input_folder",
+        "no_supported_images",
         "processing_failed_retryable",
         "processing_failed_admin",
         "no_remaining_work",

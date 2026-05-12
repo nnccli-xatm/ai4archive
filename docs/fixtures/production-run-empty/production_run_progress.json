@@ -1,0 +1,26 @@
+{
+  "schema_version": "scan-qc.production-run-progress.v1",
+  "state": "finished",
+  "state_label_zh": "已完成",
+  "message_zh": "没有发现可处理文件。",
+  "current_step": null,
+  "completed_steps": 3,
+  "total_steps": 3,
+  "steps": [
+    {
+      "id": "scan",
+      "label": "检查扫描图片",
+      "state": "completed"
+    },
+    {
+      "id": "process",
+      "label": "生成处理后图片",
+      "state": "completed"
+    },
+    {
+      "id": "summarize",
+      "label": "整理处理结果",
+      "state": "completed"
+    }
+  ]
+}
