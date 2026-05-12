@@ -757,6 +757,21 @@
       font-size: 18px;
     }
 
+    .decision-actions .recommended-choice {
+      outline: 3px solid rgba(30, 105, 220, 0.28);
+      box-shadow: 0 0 0 4px rgba(30, 105, 220, 0.08);
+    }
+
+    .recommended-action {
+      border: 1px solid #b8cdf6;
+      background: #eef4ff;
+      color: #153b78;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 18px;
+      font-weight: 760;
+    }
+
     .decision-summary {
       border: 1px solid var(--line);
       background: var(--paper);
@@ -1065,6 +1080,7 @@
             </div>
             <div class="reason-block">
               <h3>系统建议</h3>
+              <p class="recommended-action" id="currentRecommendation">建议：等待处理</p>
               <p id="currentAdvice">可以开始处理后再确认。</p>
             </div>
             <p class="muted" id="reviewPositionText">当前第 0 张 / 共 0 张 / 待确认 0 张。</p>
@@ -1144,9 +1160,9 @@
 
   <script>
     const initialReviewItems = [
-      { id: "演示一", name: "图片一", tone: "need", issue: "轻微倾斜，文字边缘可能影响阅读。", advice: "建议重新处理图片；如果仍保持档案原貌，可选择确认保留原貌。", suggestedAction: "reprocess", decision: null },
-      { id: "演示二", name: "图片二", tone: "stop", issue: "疑似漏扫、重扫或页面缺失。", advice: "建议退回重扫，确认后交回扫描工位补扫。", suggestedAction: "rescan", decision: null },
-      { id: "演示三", name: "图片三", tone: "need", issue: "疑似档案原貌痕迹，不一定需要处理。", advice: "如果不影响档案真实性，可选择确认保留原貌。", suggestedAction: "keep_original_trace", decision: null }
+      { id: "演示一", name: "图片一", tone: "need", issue: "轻微倾斜，文字边缘可能影响阅读。", advice: "请看文字边缘是否清楚。", suggestedAction: "reprocess", decision: null },
+      { id: "演示二", name: "图片二", tone: "stop", issue: "疑似漏扫、重扫或页面缺失。", advice: "请交回扫描工位补扫。", suggestedAction: "rescan", decision: null },
+      { id: "演示三", name: "图片三", tone: "need", issue: "疑似档案原貌痕迹，不一定需要处理。", advice: "请确认这是档案原貌。", suggestedAction: "keep_original_trace", decision: null }
     ];
 
     const state = {
@@ -1243,6 +1259,7 @@
       readinessSteps: document.getElementById("readinessSteps"),
       currentIssue: document.getElementById("currentIssue"),
       currentFocusHints: document.getElementById("currentFocusHints"),
+      currentRecommendation: document.getElementById("currentRecommendation"),
       currentAdvice: document.getElementById("currentAdvice"),
       reviewPositionText: document.getElementById("reviewPositionText"),
       previewSourceText: document.getElementById("previewSourceText"),
@@ -1314,11 +1331,25 @@
       pending: ["准备完成", "可以开始处理", "文件夹已准备好，点击开始处理。"]
     };
 
+    const decisionLabels = {
+      pass: "确认通过",
+      rescan: "退回重扫",
+      reprocess: "重新处理图片",
+      keep_original_trace: "确认保留原貌"
+    };
+
     const adviceByAction = {
-      pass: "系统建议确认通过。请确认画面可读、顺序正确后点击确认通过。",
-      rescan: "系统建议退回重扫。请确认原图是否缺页、打不开或质量不足。",
-      reprocess: "系统建议重新处理图片。请确认原图可用，但处理后图片需要重新生成。",
-      keep_original_trace: "系统建议确认保留原貌。请确认这不是扫描产生的新问题。"
+      pass: "请确认画面清楚、顺序正确。",
+      rescan: "请交回扫描工位补扫。",
+      reprocess: "请重新生成处理后图片。",
+      keep_original_trace: "请确认这是档案原貌。"
+    };
+
+    const recommendationLabels = {
+      pass: "建议：确认通过",
+      rescan: "建议：退回重扫",
+      reprocess: "建议：重新处理图片",
+      keep_original_trace: "建议：确认保留原貌"
     };
 
     const suggestedActionMap = {
@@ -1425,13 +1456,12 @@
 
     function currentDecisionLabel(item) {
       if (!item || !item.decision) return "当前决定：未决定。";
-      const labels = {
-        pass: "确认通过",
-        rescan: "退回重扫",
-        reprocess: "重新处理图片",
-        keep_original_trace: "确认保留原貌"
-      };
-      return `当前决定：${labels[item.decision] || "已确认"}。`;
+      return `当前决定：${decisionLabels[item.decision] || "已确认"}。`;
+    }
+
+    function recommendationLabel(item) {
+      if (!item || !item.suggestedAction) return "建议：等待处理";
+      return recommendationLabels[item.suggestedAction] || "建议：请人工确认";
     }
 
     function reviewProgressLabel() {
@@ -1636,6 +1666,7 @@
       els.queueText.textContent = state.reviewQueueText || (reviewMode ? `已决定 ${reviewedCount()} 项，待决定 ${pending} 项` : "等待处理开始。");
       els.currentIssue.textContent = reviewMode && item ? item.issue : (state.operatorMessage || (pending ? "处理开始后在这里显示问题原因。" : "已经没有待确认图片。"));
       els.currentFocusHints.textContent = reviewMode && item ? item.focusHints : (pending ? "处理开始后在这里显示查看重点。" : "已经没有待确认图片。");
+      els.currentRecommendation.textContent = reviewMode && item ? recommendationLabel(item) : "建议：等待处理";
       els.currentAdvice.textContent = reviewMode && item ? `${item.advice} ${currentDecisionLabel(item)}` : state.status === "failed" ? "请联系管理员处理后再继续。" : pending ? "可以开始处理后再确认。" : "可以完成并导出结果。";
       els.reviewPositionText.textContent = reviewMode && state.reviewItems.length
         ? reviewProgressLabel()
@@ -1651,6 +1682,8 @@
       els.decisionActions.querySelectorAll("button").forEach((button) => {
         button.disabled = !(reviewMode && item);
         button.classList.toggle("primary-choice", reviewMode && item && item.suggestedAction === button.dataset.decision);
+        button.classList.toggle("recommended-choice", reviewMode && item && item.suggestedAction === button.dataset.decision);
+        button.setAttribute("aria-pressed", reviewMode && item && item.suggestedAction === button.dataset.decision ? "true" : "false");
       });
       els.decisionSummary.textContent = `已决定 ${reviewedCount()} 项，待决定 ${pending} 项。`;
       renderPreview(item, reviewMode && Boolean(item));
@@ -2480,11 +2513,14 @@
       const item = currentItem();
       if (!item) return;
       item.decision = button.dataset.decision;
+      const recordedLabel = decisionLabels[item.decision] || "已确认";
       stampDecision(item);
       state.decisions[item.id] = item.decision;
       state.progress = pendingCount() === 0 ? 94 : Math.min(92, state.progress + 4);
       state.attentionFiles = pendingCount();
-      state.reviewQueueText = `已决定 ${reviewedCount()} 项，待决定 ${pendingCount()} 项。`;
+      state.reviewQueueText = pendingCount() > 0
+        ? `已记录：${recordedLabel}。已自动显示下一张待确认图片。已决定 ${reviewedCount()} 项，待决定 ${pendingCount()} 项。`
+        : `已记录：${recordedLabel}。所有待确认图片已有决定，可以完成并导出结果。`;
       moveToNextPending();
       render();
       scheduleDraftSave();
