@@ -684,6 +684,7 @@
           <div class="handoff-box hidden" id="outputPanel">
             <h3>批次已完成</h3>
             <p><strong>输出位置：</strong><span id="outputPlace">已选择的处理后输出文件夹</span></p>
+            <p><strong>复核保存：</strong><span id="decisionSavePlace">已保存到本机状态文件夹</span></p>
             <p>请把处理后图片交给验收或移交流程。</p>
           </div>
           <div class="handoff-box hidden" id="failurePanel">
@@ -711,6 +712,7 @@
       totalImages: 0,
       attentionFiles: 3,
       outputSummary: "已选择的处理后输出文件夹",
+      decisionSaveSummary: "已保存到本机状态文件夹",
       operatorMessage: "",
       reviewQueueText: "",
       reviewItems: initialReviewItems.map((item) => ({ ...item })),
@@ -753,7 +755,8 @@
       decisionSummary: document.getElementById("decisionSummary"),
       outputPanel: document.getElementById("outputPanel"),
       failurePanel: document.getElementById("failurePanel"),
-      outputPlace: document.getElementById("outputPlace")
+      outputPlace: document.getElementById("outputPlace"),
+      decisionSavePlace: document.getElementById("decisionSavePlace")
     };
 
     const copy = {
@@ -908,6 +911,7 @@
       els.outputPanel.classList.toggle("hidden", state.status !== "complete");
       els.failurePanel.classList.toggle("hidden", state.status !== "failed");
       els.outputPlace.textContent = state.outputSummary;
+      els.decisionSavePlace.textContent = state.decisionSaveSummary;
       renderDecisionArea();
     }
 
@@ -1026,8 +1030,9 @@
         if (payload.folders.derivatives) {
           els.outputPath.value = payload.folders.derivatives;
           els.outputStatus.textContent = "已保存处理后输出文件夹。";
-          state.outputSummary = "处理后图片将写入已保存的输出文件夹";
+          state.outputSummary = payload.folders.derivatives;
         }
+        if (payload.folders.metadata) state.decisionSaveSummary = payload.folders.metadata;
       }
       if (payload.summary || payload.progress) {
         applyRunStatus(payload.summary || { status: payload.running ? "running" : "pending", operator_summary: {} }, payload.progress, payload.queue);
@@ -1200,6 +1205,33 @@
       els.loadStatus.textContent = "已导出复核决定。";
     }
 
+    async function finishBatch() {
+      if (pendingCount() > 0 || state.reviewItems.length === 0) {
+        els.loadStatus.textContent = "还有图片没有决定，暂不能完成。";
+        render();
+        return;
+      }
+      if (!localApi.enabled) {
+        setStatus("complete");
+        els.loadStatus.textContent = "批次已完成。请确认复核决定已保存。";
+        return;
+      }
+      try {
+        els.loadStatus.textContent = "正在保存复核决定。";
+        const payload = await apiPost("/api/finish-decisions", decisionArtifact());
+        if (payload.folders && payload.folders.derivatives) state.outputSummary = payload.folders.derivatives;
+        if (payload.folders && payload.folders.metadata) state.decisionSaveSummary = payload.folders.metadata;
+        state.status = "complete";
+        state.progress = 100;
+        state.operatorMessage = payload.message_zh || "批次已完成。";
+        els.loadStatus.textContent = payload.message_zh || "批次已完成，复核决定已保存。";
+        render();
+      } catch (error) {
+        els.loadStatus.textContent = error.message || "复核决定保存失败。";
+        render();
+      }
+    }
+
     els.inputFolder.addEventListener("change", () => {
       state.inputChosen = els.inputFolder.files.length > 0;
       els.inputStatus.textContent = folderLabel(els.inputFolder, "尚未选择扫描原图文件夹。");
@@ -1230,7 +1262,7 @@
 
     els.pauseButton.addEventListener("click", () => setStatus("paused"));
     els.resumeButton.addEventListener("click", () => setStatus("processing"));
-    els.completeButton.addEventListener("click", () => setStatus("complete"));
+    els.completeButton.addEventListener("click", finishBatch);
     els.exportButton.addEventListener("click", exportDecisions);
     els.resetButton.addEventListener("click", () => {
       state.inputChosen = false;
@@ -1241,6 +1273,7 @@
       state.totalImages = 0;
       state.attentionFiles = 3;
       state.outputSummary = "已选择的处理后输出文件夹";
+      state.decisionSaveSummary = "已保存到本机状态文件夹";
       state.operatorMessage = "";
       state.reviewQueueText = "";
       state.reviewItems = initialReviewItems.map((item) => ({ ...item }));

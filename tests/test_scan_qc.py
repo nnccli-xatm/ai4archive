@@ -6368,6 +6368,84 @@ class ScanQcTest(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=5)
 
+    def test_local_production_workbench_finish_route_saves_review_decisions(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            metadata_dir = derivatives_dir / DEFAULT_METADATA_DIRNAME
+            input_dir.mkdir()
+            metadata_dir.mkdir(parents=True)
+            Image.new("RGB", (48, 36), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+            server = make_server("127.0.0.1", 0)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                base_url = f"http://127.0.0.1:{server.server_port}"
+                configure_request = urllib.request.Request(
+                    f"{base_url}/api/configure",
+                    data=json.dumps({"input_dir": str(input_dir), "derivatives_dir": str(derivatives_dir)}).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(configure_request, timeout=5) as response:
+                    configured = json.loads(response.read().decode("utf-8"))
+                self.assertTrue(configured["configured"])
+
+                decision_summary = {
+                    "schema": "scan-qc-review-decisions.local.v1",
+                    "source_type": "production_workbench",
+                    "source_target_count": 2,
+                    "generated_in_browser": True,
+                    "privacy": {"summary_only": True},
+                    "aggregate_counts": {
+                        "review_completion": {
+                            "total": 2,
+                            "reviewed": 2,
+                            "pending": 0,
+                            "complete": True,
+                        }
+                    },
+                    "review_counts": {
+                        "pending": 0,
+                        "accepted_issue": 1,
+                        "false_positive": 1,
+                        "fixed_externally": 0,
+                        "needs_rescan": 0,
+                        "blocked": 0,
+                    },
+                    "reviewed_targets": 2,
+                    "decisions": [
+                        {"scope": "production_review_queue", "local_id": "PRQ000001", "decision": "accepted_issue"},
+                        {"scope": "production_review_queue", "local_id": "PRQ000002", "decision": "false_positive"},
+                    ],
+                }
+                finish_request = urllib.request.Request(
+                    f"{base_url}/api/finish-decisions",
+                    data=json.dumps(decision_summary).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(finish_request, timeout=5) as response:
+                    finished = json.loads(response.read().decode("utf-8"))
+
+                self.assertTrue(finished["finished"])
+                self.assertEqual(finished["decision_summary"]["total_decisions"], 2)
+                saved_summary_path = metadata_dir / "scan-qc-review-decisions.summary.json"
+                saved_verification_path = metadata_dir / "review_decision_verification_summary.json"
+                self.assertTrue(saved_summary_path.exists())
+                self.assertTrue(saved_verification_path.exists())
+                saved_verification = json.loads(saved_verification_path.read_text(encoding="utf-8"))
+                self.assertEqual(saved_verification["status"], "pass")
+                self.assertEqual(saved_verification["privacy"]["status"], "pass")
+                saved_raw = saved_summary_path.read_text(encoding="utf-8") + saved_verification_path.read_text(encoding="utf-8")
+                self.assertNotIn("A001_0001.jpg", saved_raw)
+                self.assertNotIn("sha256", saved_raw.lower())
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
     def test_cli_production_workbench_rejects_non_loopback_host(self) -> None:
         stderr = io.StringIO()
         with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:

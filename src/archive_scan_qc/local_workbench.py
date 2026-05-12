@@ -21,6 +21,10 @@ from .production_runner import (
     ProductionRunConfig,
     run_production_folder,
 )
+from .review_decisions import (
+    REVIEW_DECISION_VERIFICATION_JSON,
+    build_review_decision_verification_summary,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -28,6 +32,7 @@ WORKBENCH_HTML = ROOT / "docs" / "production-workbench-prototype.html"
 DOCS_DIR = ROOT / "docs"
 DEFAULT_METADATA_DIRNAME = "_production_workbench"
 SERVER_SCHEMA = "scan-qc.local-production-workbench.v1"
+REVIEW_DECISION_SUMMARY_JSON = "scan-qc-review-decisions.summary.json"
 PREVIEW_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"}
 
 
@@ -104,6 +109,39 @@ class WorkbenchController:
             ):
                 return resolved
         raise ValueError("未找到这条复核记录对应的本机预览图。")
+
+    def save_review_decisions(self, summary: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            derivatives_dir = self.derivatives_dir
+            metadata_dir = self.metadata_dir
+        if derivatives_dir is None or metadata_dir is None:
+            raise ValueError("请先保存文件夹并生成复核队列。")
+        verification = build_review_decision_verification_summary(summary)
+        if verification.get("status") != "pass":
+            raise ValueError("复核决定还不能完成，请检查是否还有待处理图片。")
+
+        metadata_dir.mkdir(parents=True, exist_ok=True)
+        summary_path = metadata_dir / REVIEW_DECISION_SUMMARY_JSON
+        verification_path = metadata_dir / REVIEW_DECISION_VERIFICATION_JSON
+        summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        verification_path.write_text(
+            json.dumps(verification, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        return {
+            "schema_version": SERVER_SCHEMA,
+            "finished": True,
+            "message_zh": "批次已完成，复核决定已保存。",
+            "folders": {
+                "derivatives": str(derivatives_dir),
+                "metadata": str(metadata_dir),
+            },
+            "saved": {
+                "decision_summary": str(summary_path),
+                "verification_summary": str(verification_path),
+            },
+            "decision_summary": verification.get("decision_summary"),
+        }
 
     def status(self) -> dict[str, Any]:
         with self._lock:
@@ -237,6 +275,8 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
                 )
             elif self.path == "/api/start":
                 result = self.workbench_controller.start()
+            elif self.path == "/api/finish-decisions":
+                result = self.workbench_controller.save_review_decisions(payload)
             else:
                 self._send_json({"error_zh": "未知请求。"}, HTTPStatus.NOT_FOUND)
                 return
