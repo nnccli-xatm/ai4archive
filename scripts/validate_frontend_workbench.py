@@ -41,79 +41,79 @@ REQUIRED_STRINGS = {
     "release_candidate_summary.json",
     "deep_inspection_candidate_summary.json",
     "scan-qc.deep-inspection-candidates.v1",
-    "Deep-inspection candidate summary",
-    "Deep-Inspection Candidate Summary",
-    "Candidate Total",
-    "Candidates By Reason",
-    "Candidates By Severity",
-    "No Inference Run",
+    "深度检查候选摘要",
+    "深度检查候选摘要",
+    "候选总数",
+    "按原因统计候选",
+    "按严重级别统计候选",
+    "未运行推理",
     "public_safe_validation_index.json",
     "scan-qc.public-safe-validation-index.v1",
     "frontend_workbench_validation.json",
     "Frontend workbench validation summary",
-    "Frontend Workbench Validation Summary",
-    "Coverage Booleans",
-    "Privacy Booleans",
-    "Validation Error Codes",
-    "Validated HTML Path",
+    "前端工作台验证摘要",
+    "覆盖布尔项",
+    "隐私布尔项",
+    "验证错误代码",
+    "已验证 HTML 路径",
     "scan-qc.processing-review.v1",
     "Processing-review package summary",
-    "Processing-Review Package Summary",
-    "Processed Count",
-    "Failed Count",
-    "Review Target Count",
-    "Local-only status",
-    "Sensitivity/Local-only Status",
-    "Processing Status Counts",
-    "Processing Resumed",
-    "Processing Duplicate Reused",
-    "Processing Existing Derivative Reused",
-    "Processing Operation Timing Hotspots",
-    "Elapsed Seconds",
-    "Files/Min",
-    "Avg Sec/File",
+    "处理复核包摘要",
+    "已处理数",
+    "失败数",
+    "复核目标数",
+    "仅本地状态",
+    "敏感性/仅本地状态",
+    "处理状态计数",
+    "处理已恢复",
+    "处理重复复用",
+    "处理已有衍生复用",
+    "处理操作耗时热点",
+    "耗时秒数",
+    "文件/分钟",
+    "平均秒/文件",
     "aggregateProcessingOperationTimings",
     "processingOperationTimingPanel",
     "despeckle_backend",
     "aggregateDespeckleBackend",
-    "Despeckle Backend Summary",
-    "Requested Backend",
-    "Effective Backend Mode",
-    "Fallback Count",
-    "Requested NumPy Fallback Count",
-    "Despeckle Backend Warning Codes",
+    "去噪点后端摘要",
+    "请求后端",
+    "有效后端模式",
+    "回退数",
+    "请求 NumPy 后回退数",
+    "去噪点后端警告代码",
     "despeckle_numpy_unavailable_fallback",
     "despeckle_numpy_requested_all_fallback",
-    "synthetic review IDs only",
-    "row-level private notes",
+    "合成复核 ID",
+    "行级私有备注",
     "processing_review",
     "Public-safe validation index",
-    "Public-Safe Validation Index",
-    "Artifacts Present",
-    "Artifacts Failed",
-    "Artifacts Missing",
-    "Unknown Inputs",
-    "Validation Checks Passed",
-    "Validation Checks Failed",
-    "Validation Blocking Item Count",
-    "Privacy Aggregate-only Status",
+    "公开安全验证索引",
+    "工件存在数",
+    "工件失败数",
+    "工件缺失数",
+    "未知输入",
+    "验证检查通过数",
+    "验证检查失败数",
+    "验证阻塞项数",
+    "隐私仅汇总状态",
     "JSON.parse",
     "type=\"file\"",
-    "No artifact loaded",
-    "Could not load JSON",
-    "Original preview placeholder",
-    "Processed preview placeholder",
-    "Local image preview scaffold",
-    "Original/Source Image",
-    "Processed/QC Output Image",
-    "preview status:",
-    "Clear Original Preview",
-    "Clear Processed Preview",
-    "Fit to Panel",
-    "Reset Zoom",
-    "Preview zoom level",
-    "Preview display: fit to panel",
-    "preview local state is excluded from review-decision export JSON.",
+    "尚未加载工件",
+    "无法加载 JSON",
+    "原始预览占位",
+    "处理后预览占位",
+    "本地图像预览脚手架",
+    "原始/来源图像",
+    "处理后/质检输出图像",
+    "预览状态：",
+    "清除原始预览",
+    "清除处理后预览",
+    "适应面板",
+    "重置缩放",
+    "预览缩放级别",
+    "预览显示：适应面板",
+    "预览本地状态不包含在复核决定导出 JSON 中。",
     "URL.createObjectURL",
     "URL.revokeObjectURL",
     "beforeunload",
@@ -121,46 +121,46 @@ REQUIRED_STRINGS = {
     "preview object URL",
     "preview display mode",
     "preview zoom level",
-    "Human Review Decisions",
+    "人工复核决定",
     "reviewTargetList",
-    "Total Targets",
-    "Reviewed Targets",
-    "Pending Targets",
-    "Completion Status",
-    "not complete",
-    "Review target filters",
+    "目标总数",
+    "已复核目标",
+    "待处理目标",
+    "完成状态",
+    "未完成",
+    "复核目标筛选",
     "reviewDecisionFilter",
     "reviewScopeFilter",
     "reviewSeverityFilter",
     "reviewStatusFilter",
     "reviewFilterCount",
-    "Showing 0 of 0 targets",
-    "Showing ${visibleTargets.length} of ${targets.length} targets",
-    "No review targets match the current filters.",
-    "Filtered bulk review decision actions",
-    "Bulk visible decision",
-    "Apply to Visible Targets",
-    "No filtered bulk decision applied.",
-    "Bulk actions update only visible targets in this browser tab.",
-    "Visible targets:",
-    "Updated targets:",
+    "显示 0 / 0 个目标",
+    "显示 ${visibleTargets.length} / ${targets.length} 个目标",
+    "没有复核目标匹配当前筛选条件。",
+    "筛选后的批量复核决定操作",
+    "批量设置可见决定",
+    "应用到可见目标",
+    "尚未应用筛选后的批量决定。",
+    "批量操作只更新此浏览器标签页中的可见目标。",
+    "可见目标：",
+    "已更新目标：",
     "applyBulkVisibleReviewDecision",
     "Severity",
     "Status",
-    "Decision State",
-    "Import privacy-safe summary",
+    "决定状态",
+    "导入隐私安全摘要",
     "reviewImportFile",
     "reviewImportStatus",
-    "No review-decision summary imported.",
-    "Imports restore only scope, synthetic/local ID, and decision status",
-    "Imported",
+    "尚未导入复核决定摘要。",
+    "导入只恢复范围、合成/本地 ID 和决定状态",
+    "已导入",
     "skipped",
-    "Last import",
-    "Schema mismatch: expected scan-qc-review-decisions.local.v1.",
-    "Source mismatch: summary source_type does not match the loaded artifact.",
-    "Target count mismatch",
-    "Load a scan, run-plan, or aggregate handoff artifact before importing decisions.",
-    "Validation codes",
+    "最近导入",
+    "架构不匹配：预期 scan-qc-review-decisions.local.v1。",
+    "来源不匹配：摘要 source_type 与已加载工件不一致。",
+    "目标数量不匹配",
+    "导入决定前请先加载扫描、运行计划或汇总交接工件。",
+    "验证代码",
     "duplicate_decision",
     "ignored_private_field",
     "ignored_extra_field",
@@ -172,13 +172,13 @@ REQUIRED_STRINGS = {
     "fixed_externally",
     "needs_rescan",
     "scan-qc-review-decisions.local.v1",
-    "Prepare Privacy-Safe Summary",
+    "生成隐私安全摘要",
     "reviewCompletionGate",
-    "Review completion gate warning",
-    "Completion gate warnings use aggregate counts only",
-    "Export is advisory and remains available.",
-    "Export remains privacy-safe and schema-stable.",
-    "Decision-status counts",
+    "复核完成门禁警告",
+    "完成门禁警告仅使用汇总计数",
+    "导出仅供参考且仍可使用。",
+    "导出保持隐私安全且架构稳定。",
+    "决定状态计数",
     "renderReviewCompletionGate",
     "reviewDecisionCountText",
     "generated_in_browser",
@@ -189,47 +189,47 @@ REQUIRED_STRINGS = {
     "scope",
     "local_id",
     "decision",
-    "Aggregate Artifact Summary",
-    "Public-safe aggregate summaries only after local policy review",
+    "汇总工件摘要",
+    "仅在本地策略复核后查看公开安全的汇总摘要",
     "Review summary",
     "Acceptance summary",
     "review-summary",
     "acceptance-summary",
-    "Aggregate-only Status",
-    "Workflow State",
-    "Artifact Type",
-    "Remaining P0",
-    "Remaining P1",
-    "Review Status Counts",
-    "Severity Status Counts",
-    "No severity/status counts were present.",
-    "Rule Counts",
-    "Rule Status Counts",
-    "Acceptance Passed",
-    "Blocking And Warning Codes",
-    "Blocking codes",
-    "Warning codes",
-    "Blocking Code",
-    "Warning Code",
-    "No blocking counts by aggregate code were present.",
-    "No warning counts by aggregate code were present.",
-    "Warning Count",
-    "Scan Workers",
-    "Processing Workers",
-    "Despeckle Backend Summary",
-    "Backend Mode",
-    "NumPy Available",
-    "Backend Counts",
-    "Provider Capability Probe",
-    "Provider Count",
-    "Configured Provider Count",
-    "Disabled Provider Count",
-    "Providers Configured",
-    "Visible GPU Count",
-    "Visible Model Count",
-    "Optional Package Visible Count",
-    "Optional Package Missing Count",
-    "Probe Privacy Status",
+    "仅汇总状态",
+    "工作流状态",
+    "工件类型",
+    "剩余 P0",
+    "剩余 P1",
+    "复核状态计数",
+    "严重级别状态计数",
+    "未提供严重级别/状态计数。",
+    "规则计数",
+    "规则状态计数",
+    "验收通过",
+    "阻塞与警告代码",
+    "阻塞代码",
+    "警告代码",
+    "阻塞代码",
+    "警告代码",
+    "未提供按汇总代码统计的阻塞计数。",
+    "未提供按汇总代码统计的警告计数。",
+    "警告数",
+    "扫描工作线程",
+    "处理工作线程",
+    "去噪点后端摘要",
+    "后端模式",
+    "NumPy 可用",
+    "后端计数",
+    "提供方能力探测",
+    "提供方数",
+    "已配置提供方数",
+    "已禁用提供方数",
+    "提供方已配置",
+    "可见 GPU 数",
+    "可见模型数",
+    "可见可选包数",
+    "缺失可选包数",
+    "探测隐私状态",
     "aggregateWarningCodes",
     "aggregateCodeCounts",
     "aggregateNestedStatusCounts",
@@ -239,20 +239,20 @@ REQUIRED_STRINGS = {
     "buildProcessingReviewTargets",
     "aggregatePrivacyOmissions",
     "privacyOmits",
-    "Privacy self-check status",
-    "Privacy self-check violations",
-    "Aggregate-only status from locally reviewed public-safe summary artifacts.",
-    "Public-Safe Artifact Compatibility Diagnostics",
-    "Compatibility diagnostic uses aggregate/public-safe fields only",
-    "Recognized Artifact Type",
-    "Schema Version",
-    "Schema/Type Detection",
-    "Generated Timestamp Presence",
-    "Privacy Summary",
-    "Diagnostic Blocking Count",
-    "Diagnostic Warning Count",
-    "Expected aggregate status fields present",
-    "Expected aggregate status fields missing",
+    "隐私自检状态",
+    "隐私自检违规数",
+    "来自本地复核后的公开安全摘要工件的仅汇总状态。",
+    "公开安全工件兼容性诊断",
+    "兼容性诊断仅使用汇总/公开安全字段",
+    "已识别工件类型",
+    "架构版本",
+    "架构/类型检测",
+    "生成时间戳存在性",
+    "隐私摘要",
+    "诊断阻塞数",
+    "诊断警告数",
+    "存在的预期汇总状态字段",
+    "缺失的预期汇总状态字段",
     "unsupported_public_safe_schema_version",
     "generated_timestamp_missing",
     "aggregate_status_fields_missing",
@@ -261,33 +261,33 @@ REQUIRED_STRINGS = {
     "artifact_compatibility_pass",
     "SUPPORTED_PUBLIC_SAFE_SCHEMA_PREFIXES",
     "buildArtifactCompatibilityDiagnostics",
-    "Public-Safe Artifact Readiness Checklist",
-    "Top-level readiness",
-    "Ready for public handoff",
-    "Not ready for public handoff",
-    "Expected Artifacts",
-    "Missing Artifacts",
-    "Privacy Blockers",
-    "Stale Artifacts",
-    "Present/Missing",
-    "Generated Timestamp",
+    "公开安全工件就绪清单",
+    "顶层就绪状态",
+    "公开交接就绪",
+    "公开交接未就绪",
+    "预期工件",
+    "缺失工件",
+    "隐私阻塞项",
+    "过期工件",
+    "存在/缺失",
+    "生成时间戳",
     "artifact_readiness_checklist",
     "public_safe_artifact_readiness",
     "EXPECTED_PUBLIC_SAFE_ARTIFACTS",
     "buildArtifactReadinessChecklist",
     "artifactReadinessPanel",
-    "excludes local preview filename, preview content, and object URL state",
-    "Artifact Presence And Status",
-    "Privacy Status",
-    "Sensitivity",
-    "Omitted private evidence",
-    "Ready for handoff",
-    "Ready for release candidate",
-    "Blocking Items",
-    "Checks Passed",
-    "Checks Failed",
-    "Scan Throughput",
-    "Processing Throughput",
+    "排除本地预览文件名、预览内容和对象 URL 状态",
+    "工件存在与状态",
+    "隐私状态",
+    "敏感性",
+    "已省略私有证据",
+    "交接就绪",
+    "发布候选就绪",
+    "阻塞项",
+    "检查通过数",
+    "检查失败数",
+    "扫描吞吐",
+    "处理吞吐",
     "contains_paths",
     "contains_filenames",
     "contains_hashes",
@@ -295,23 +295,23 @@ REQUIRED_STRINGS = {
     "contains_thumbnails",
     "contains_image_content",
     "contains_row_level_findings",
-    "private filenames, paths, hashes, OCR text, thumbnails, image content, row-level findings, reviewer notes, manifests, or derivative image references",
-    "Public-Safe Demo Fixture Gallery",
-    "Synthetic aggregate-only fixtures for browser validation.",
-    "Demo fixtures exclude private filenames, paths, hashes, OCR text, thumbnails, image content, manifests, row-level findings, reviewer notes, derivative image references, and local preview state.",
+    "私有文件名、路径、哈希、OCR 文本、缩略图、图像内容、行级发现、复核备注、清单或衍生图像引用",
+    "公开安全演示夹具库",
+    "用于浏览器验证的合成纯汇总夹具。",
+    "演示夹具不包含私有文件名、路径、哈希、OCR 文本、缩略图、图像内容、清单、行级发现、复核备注、衍生图像引用和本地预览状态。",
     "demoFixtureSelect",
     "loadDemoFixtureButton",
     "DEMO_FIXTURES",
     "loadDemoFixture",
     "cloneDemoPayload",
-    "Recognized passing review summary",
-    "Passing acceptance summary",
-    "Complete public-safe readiness checklist",
-    "Synthetic processing-review package summary",
-    "Unsupported schema compatibility warning",
-    "Privacy summary failing diagnostic",
-    "Privacy summary missing diagnostic",
-    "Loaded public-safe demo fixture",
+    "已识别的通过复核摘要",
+    "通过的验收摘要",
+    "完整的公开安全就绪清单",
+    "合成处理复核包摘要",
+    "不支持架构的兼容性警告",
+    "隐私摘要失败诊断",
+    "隐私摘要缺失诊断",
+    "已加载公开安全演示夹具",
     "unsupported_input",
 }
 
@@ -382,8 +382,8 @@ REQUIRED_CHECKLIST_FIELDS = {
     "synthetic checklist input": "artifact_readiness_checklist",
     "alternate checklist input": "public_safe_artifact_readiness",
     "readiness model": "buildArtifactReadinessChecklist",
-    "ready summary": "Ready for public handoff",
-    "not-ready summary": "Not ready for public handoff",
+    "ready summary": "公开交接就绪",
+    "not-ready summary": "公开交接未就绪",
     "privacy status": "privacyStatus",
     "generated timestamp": "generatedAt",
     "blocking count": "blockingCount",
@@ -392,15 +392,15 @@ REQUIRED_CHECKLIST_FIELDS = {
 }
 
 REQUIRED_COMPATIBILITY_FIELDS = {
-    "recognized artifact type": "Recognized Artifact Type",
-    "schema version": "Schema Version",
-    "schema/type detection": "Schema/Type Detection",
-    "generated timestamp presence": "Generated Timestamp Presence",
-    "privacy summary": "Privacy Summary",
-    "blocking diagnostic count": "Diagnostic Blocking Count",
-    "warning diagnostic count": "Diagnostic Warning Count",
-    "expected fields present": "Expected aggregate status fields present",
-    "expected fields missing": "Expected aggregate status fields missing",
+    "recognized artifact type": "已识别工件类型",
+    "schema version": "架构版本",
+    "schema/type detection": "架构/类型检测",
+    "generated timestamp presence": "生成时间戳存在性",
+    "privacy summary": "隐私摘要",
+    "blocking diagnostic count": "诊断阻塞数",
+    "warning diagnostic count": "诊断警告数",
+    "expected fields present": "存在的预期汇总状态字段",
+    "expected fields missing": "缺失的预期汇总状态字段",
     "unsupported schema warning": "unsupported_public_safe_schema_version",
     "privacy missing diagnostic": "privacy_summary_missing",
     "privacy failing diagnostic": "privacy_summary_fail",
@@ -420,23 +420,23 @@ FORBIDDEN_AGGREGATE_PAYLOAD_FIELDS = {
 }
 
 REQUIRED_DEMO_FIXTURE_LABELS = {
-    "Recognized passing review summary",
-    "Passing workbench public summary",
-    "Blocked workbench public summary",
-    "Passing review decision verification summary",
-    "Blocked review decision verification summary",
-    "Passing acceptance summary",
-    "Complete public-safe readiness checklist",
-    "Passing final production handoff",
-    "Blocked final production handoff",
-    "Deep-inspection candidate summary",
-    "Disabled provider capability probe",
-    "Passing public-safe validation index",
-    "Blocked public-safe validation index",
-    "Synthetic processing-review package summary",
-    "Unsupported schema compatibility warning",
-    "Privacy summary failing diagnostic",
-    "Privacy summary missing diagnostic",
+    "已识别的通过复核摘要",
+    "通过的工作台公开摘要",
+    "阻塞的工作台公开摘要",
+    "通过的复核决定验证摘要",
+    "阻塞的复核决定验证摘要",
+    "通过的验收摘要",
+    "完整的公开安全就绪清单",
+    "通过的最终生产交接",
+    "阻塞的最终生产交接",
+    "深度检查候选摘要",
+    "已禁用的提供方能力探测",
+    "通过的公开安全验证索引",
+    "阻塞的公开安全验证索引",
+    "合成处理复核包摘要",
+    "不支持架构的兼容性警告",
+    "隐私摘要失败诊断",
+    "隐私摘要缺失诊断",
 }
 
 REQUIRED_PREVIEW_LIFECYCLE_STRINGS = {
@@ -450,8 +450,8 @@ REQUIRED_PREVIEW_LIFECYCLE_STRINGS = {
     "clear revocation": "URL.revokeObjectURL(previewState.objectUrl)",
     "replacement revocation": "if (previewState.objectUrl)",
     "beforeunload revocation": 'window.addEventListener("beforeunload"',
-    "export exclusion": "preview local state is excluded from review-decision export JSON.",
-    "local tab copy": "browser tab only",
+    "export exclusion": "预览本地状态不包含在复核决定导出 JSON 中。",
+    "local tab copy": "浏览器标签页",
     "original slot": "originalPreviewFile",
     "processed slot": "processedPreviewFile",
     "fit control": "fitPreviewButton",
@@ -917,7 +917,7 @@ vm.runInContext(workbenchScript + `
       "aggregate_evidence_bundle_summary.json": publicSafeReadinessRow("aggregate_evidence_bundle_summary.json", "aggregate_evidence_bundle", "Aggregate evidence bundle summary", "2026-05-11T00:03:00Z", true),
       "release_candidate_summary.json": publicSafeReadinessRow("release_candidate_summary.json", "release_candidate_summary", "Release candidate summary", "2026-05-11T00:04:00Z"),
       "final_production_handoff_summary.json": publicSafeReadinessRow("final_production_handoff_summary.json", "final_production_handoff", "Final production handoff summary", "2026-05-11T00:05:00Z", true),
-      "deep_inspection_candidate_summary.json": publicSafeReadinessRow("deep_inspection_candidate_summary.json", "deep_inspection_candidate_summary", "Deep-inspection candidate summary", "2026-05-11T00:05:30Z"),
+      "deep_inspection_candidate_summary.json": publicSafeReadinessRow("deep_inspection_candidate_summary.json", "deep_inspection_candidate_summary", "深度检查候选摘要", "2026-05-11T00:05:30Z"),
       "frontend_workbench_validation.json": publicSafeReadinessRow("frontend_workbench_validation.json", "frontend_workbench_validation", "Frontend workbench validation summary", "2026-05-11T00:05:40Z"),
       "review_decision_verification_summary.json": publicSafeReadinessRow("review_decision_verification_summary.json", "review_decision_verification", "Review decision verification summary", "2026-05-11T00:05:45Z"),
       "public_safe_validation_index.json": publicSafeReadinessRow("public_safe_validation_index.json", "public_safe_validation_index", "Public-safe validation index", "2026-05-11T00:06:00Z", true)
@@ -1727,30 +1727,30 @@ vm.runInContext(workbenchScript + `
   assert(!workbenchPublicPassModel.artifactCompatibility.diagnostics.some(item => item.code === "aggregate_status_fields_missing"), "workbench public pass reported missing aggregate status fields");
   state.model = workbenchPublicPassModel;
   renderAggregateHandoff();
-  assert(els.aggregateHandoff.innerHTML.includes("Workbench public summary"), "workbench public pass did not render artifact type");
-  assert(els.aggregateHandoff.innerHTML.includes("Workflow State"), "workbench public pass did not render workflow state label");
+  assert(els.aggregateHandoff.innerHTML.includes("工作台公开摘要"), "workbench public pass did not render artifact type");
+  assert(els.aggregateHandoff.innerHTML.includes("工作流状态"), "workbench public pass did not render workflow state label");
   assert(els.aggregateHandoff.innerHTML.includes("acceptance_status: pass"), "workbench public pass did not render workflow state value");
   assert(!els.aggregateHandoff.innerHTML.includes("[object Object]"), "workbench public pass rendered workflow object directly");
   assert(els.aggregateHandoff.innerHTML.includes("workbench_public_summary.json"), "workbench public pass did not render known artifact card");
-  assert(els.aggregateHandoff.innerHTML.includes("Processing Resumed"), "workbench public pass did not render resumed processing count");
-  assert(els.aggregateHandoff.innerHTML.includes("Processing Duplicate Reused"), "workbench public pass did not render duplicate reuse count");
-  assert(els.aggregateHandoff.innerHTML.includes("Processing Existing Derivative Reused"), "workbench public pass did not render existing derivative reuse count");
-  assert(els.aggregateHandoff.innerHTML.includes("Processing Operation Timing Hotspots"), "workbench public pass did not render operation timing hotspots");
-  assert(els.aggregateHandoff.innerHTML.indexOf("Deskew") < els.aggregateHandoff.innerHTML.indexOf("Despeckle"), "workbench public pass did not render largest elapsed operation first");
-  assert(els.aggregateHandoff.innerHTML.includes("Elapsed Seconds"), "workbench public pass did not render elapsed seconds column");
-  assert(els.aggregateHandoff.innerHTML.includes("Avg Sec/File"), "workbench public pass did not render per-file average column");
-  assert(els.aggregateHandoff.innerHTML.includes("Despeckle Backend Summary"), "workbench public pass did not render despeckle backend summary");
-  assert(els.aggregateHandoff.innerHTML.includes("Deep-Inspection Candidate Summary"), "workbench public pass did not render promoted deep-inspection readiness");
-  assert(els.aggregateHandoff.innerHTML.includes("Provider Capability Probe"), "workbench public pass did not render promoted provider readiness");
-  assert(els.aggregateHandoff.innerHTML.includes("Optional Package Visible Count"), "workbench public pass did not render promoted optional package count");
-  assert(els.aggregateHandoff.innerHTML.includes("Backend Mode"), "workbench public pass did not render despeckle backend mode label");
+  assert(els.aggregateHandoff.innerHTML.includes("处理已恢复"), "workbench public pass did not render resumed processing count");
+  assert(els.aggregateHandoff.innerHTML.includes("处理重复复用"), "workbench public pass did not render duplicate reuse count");
+  assert(els.aggregateHandoff.innerHTML.includes("处理已有衍生复用"), "workbench public pass did not render existing derivative reuse count");
+  assert(els.aggregateHandoff.innerHTML.includes("处理操作耗时热点"), "workbench public pass did not render operation timing hotspots");
+  assert(els.aggregateHandoff.innerHTML.indexOf("纠偏") < els.aggregateHandoff.innerHTML.indexOf("去噪点"), "workbench public pass did not render largest elapsed operation first");
+  assert(els.aggregateHandoff.innerHTML.includes("耗时秒数"), "workbench public pass did not render elapsed seconds column");
+  assert(els.aggregateHandoff.innerHTML.includes("平均秒/文件"), "workbench public pass did not render per-file average column");
+  assert(els.aggregateHandoff.innerHTML.includes("去噪点后端摘要"), "workbench public pass did not render despeckle backend summary");
+  assert(els.aggregateHandoff.innerHTML.includes("深度检查候选摘要"), "workbench public pass did not render promoted deep-inspection readiness");
+  assert(els.aggregateHandoff.innerHTML.includes("提供方能力探测"), "workbench public pass did not render promoted provider readiness");
+  assert(els.aggregateHandoff.innerHTML.includes("可见可选包数"), "workbench public pass did not render promoted optional package count");
+  assert(els.aggregateHandoff.innerHTML.includes("后端模式"), "workbench public pass did not render despeckle backend mode label");
   assert(els.aggregateHandoff.innerHTML.includes("numpy"), "workbench public pass did not render despeckle backend mode value");
-  assert(els.aggregateHandoff.innerHTML.includes("NumPy Available"), "workbench public pass did not render numpy availability label");
-  assert(els.aggregateHandoff.innerHTML.includes("Backend Counts"), "workbench public pass did not render despeckle backend counts");
-  assert(els.aggregateHandoff.innerHTML.includes("Warning Code"), "workbench public pass did not render warning code counts");
-  assert(els.aggregateHandoff.innerHTML.includes("Remaining P0"), "workbench public pass did not render promoted remaining P0");
-  assert(els.aggregateHandoff.innerHTML.includes("Review Status Counts"), "workbench public pass did not render promoted review status counts");
-  assert(els.aggregateHandoff.innerHTML.includes("Acceptance Passed"), "workbench public pass did not render promoted acceptance signal");
+  assert(els.aggregateHandoff.innerHTML.includes("NumPy 可用"), "workbench public pass did not render numpy availability label");
+  assert(els.aggregateHandoff.innerHTML.includes("后端计数"), "workbench public pass did not render despeckle backend counts");
+  assert(els.aggregateHandoff.innerHTML.includes("警告代码"), "workbench public pass did not render warning code counts");
+  assert(els.aggregateHandoff.innerHTML.includes("剩余 P0"), "workbench public pass did not render promoted remaining P0");
+  assert(els.aggregateHandoff.innerHTML.includes("复核状态计数"), "workbench public pass did not render promoted review status counts");
+  assert(els.aggregateHandoff.innerHTML.includes("验收通过"), "workbench public pass did not render promoted acceptance signal");
   assertPublicSafe(els.aggregateHandoff.innerHTML, "workbench public pass rendering");
 
   const workbenchPublicBlockedModel = inferArtifact(workbenchPublicBlockedFixture);
@@ -1762,18 +1762,18 @@ vm.runInContext(workbenchScript + `
   assert(workbenchPublicBlockedModel.aggregateHandoff.blockingItemCount === 3, "workbench public blocked blocking count was not preserved");
   assert(countFor(workbenchPublicBlockedModel.aggregateHandoff.blockingCodeCounts, "unsupported_input") === 1, "workbench public blocked unsupported input count was not preserved");
   assert(workbenchPublicBlockedModel.aggregateHandoff.validationIndex.unknownInputs === 1, "workbench public blocked unsupported input aggregate count was not preserved");
-  assert(workbenchPublicBlockedModel.aggregateHandoff.despeckleBackend.backendMode === "Not provided", "workbench public blocked missing despeckle backend mode did not stay non-blocking");
+  assert(workbenchPublicBlockedModel.aggregateHandoff.despeckleBackend.backendMode === "未提供", "workbench public blocked missing despeckle backend mode did not stay non-blocking");
   assert(workbenchPublicBlockedModel.aggregateHandoff.despeckleBackend.numpyAvailable === null, "workbench public blocked missing numpy availability did not stay non-blocking");
   assert(workbenchPublicBlockedModel.aggregateHandoff.despeckleBackend.backendCounts.length === 0, "workbench public blocked missing backend counts did not stay non-blocking");
   assert(!workbenchPublicBlockedModel.artifactCompatibility.diagnostics.some(item => item.code === "aggregate_status_fields_missing"), "workbench public blocked reported missing aggregate status fields");
   state.model = workbenchPublicBlockedModel;
   renderAggregateHandoff();
   assert(els.aggregateHandoff.innerHTML.includes("unsupported_input"), "workbench public blocked did not render unsupported input aggregate code");
-  assert(els.aggregateHandoff.innerHTML.includes("Blocking Code"), "workbench public blocked did not render blocking code counts");
+  assert(els.aggregateHandoff.innerHTML.includes("阻塞代码"), "workbench public blocked did not render blocking code counts");
   assert(els.aggregateHandoff.innerHTML.includes("acceptance_status: fail"), "workbench public blocked did not render workflow state");
   assert(!els.aggregateHandoff.innerHTML.includes("[object Object]"), "workbench public blocked rendered workflow object directly");
-  assert(els.aggregateHandoff.innerHTML.includes("Artifacts Missing"), "workbench public blocked did not render missing artifact count");
-  assert(els.aggregateHandoff.innerHTML.includes("Not provided"), "workbench public blocked did not render absent despeckle backend fields as unknown");
+  assert(els.aggregateHandoff.innerHTML.includes("工件缺失数"), "workbench public blocked did not render missing artifact count");
+  assert(els.aggregateHandoff.innerHTML.includes("未提供"), "workbench public blocked did not render absent despeckle backend fields as unknown");
   assert(!els.aggregateHandoff.innerHTML.includes("unsupported_inputs"), "workbench public blocked rendered unsupported input object details");
   assertPublicSafe(els.aggregateHandoff.innerHTML, "workbench public blocked rendering");
 
@@ -1791,9 +1791,9 @@ vm.runInContext(workbenchScript + `
   assert(!reviewDecisionVerificationPassModel.artifactCompatibility.diagnostics.some(item => item.code === "aggregate_status_fields_missing"), "review decision verification pass reported missing aggregate status fields");
   state.model = reviewDecisionVerificationPassModel;
   renderAggregateHandoff();
-  assert(els.aggregateHandoff.innerHTML.includes("Review Decision Verification Summary"), "review decision verification pass did not render summary panel");
-  assert(els.aggregateHandoff.innerHTML.includes("Total Decisions"), "review decision verification pass did not render total decisions");
-  assert(els.aggregateHandoff.innerHTML.includes("Privacy Status"), "review decision verification pass did not render privacy status");
+  assert(els.aggregateHandoff.innerHTML.includes("复核决定验证摘要"), "review decision verification pass did not render summary panel");
+  assert(els.aggregateHandoff.innerHTML.includes("决定总数"), "review decision verification pass did not render total decisions");
+  assert(els.aggregateHandoff.innerHTML.includes("隐私状态"), "review decision verification pass did not render privacy status");
   assert(!els.aggregateHandoff.innerHTML.includes("source_field"), "review decision verification pass rendered source field details");
   assert(!els.aggregateHandoff.innerHTML.includes("source_type"), "review decision verification pass rendered source type details");
   assert(!els.aggregateHandoff.innerHTML.includes("scan-qc-review-decisions.local.v1"), "review decision verification pass rendered source schema details");
@@ -1811,7 +1811,7 @@ vm.runInContext(workbenchScript + `
   state.model = reviewDecisionVerificationBlockedModel;
   renderAggregateHandoff();
   assert(els.aggregateHandoff.innerHTML.includes("review_decision_pending"), "review decision verification blocked did not render blocking code count");
-  assert(els.aggregateHandoff.innerHTML.includes("Warning Counts By Code"), "review decision verification blocked did not render warning code counts");
+  assert(els.aggregateHandoff.innerHTML.includes("按代码统计警告"), "review decision verification blocked did not render warning code counts");
   assert(!els.aggregateHandoff.innerHTML.includes("local_id"), "review decision verification blocked rendered local ID details");
   assert(!els.aggregateHandoff.innerHTML.includes("source_type"), "review decision verification blocked rendered source type details");
   assert(!els.aggregateHandoff.innerHTML.includes("scan-qc-review-decisions.local.v1"), "review decision verification blocked rendered source schema details");
@@ -1839,11 +1839,11 @@ vm.runInContext(workbenchScript + `
   assert(countFor(reviewModel.aggregateHandoff.reviewStatusCounts, "false_positive") === 5, "review fixture status counts were not preserved");
   state.model = reviewModel;
   renderAggregateHandoff();
-  assert(els.aggregateHandoff.innerHTML.includes("Review summary"), "review fixture did not render Review summary");
-  assert(els.aggregateHandoff.innerHTML.includes("Review Status Counts"), "review fixture did not render review status counts");
-  assert(els.aggregateHandoff.innerHTML.includes("Public-Safe Artifact Compatibility Diagnostics"), "review fixture did not render compatibility diagnostics");
+  assert(els.aggregateHandoff.innerHTML.includes("复核摘要"), "review fixture did not render Review summary");
+  assert(els.aggregateHandoff.innerHTML.includes("复核状态计数"), "review fixture did not render review status counts");
+  assert(els.aggregateHandoff.innerHTML.includes("公开安全工件兼容性诊断"), "review fixture did not render compatibility diagnostics");
   assert(els.aggregateHandoff.innerHTML.includes("artifact_compatibility_pass"), "review fixture did not render compatibility pass code");
-  assert(els.aggregateHandoff.innerHTML.includes("Schema/Type Detection"), "review fixture did not render schema/type detection");
+  assert(els.aggregateHandoff.innerHTML.includes("架构/类型检测"), "review fixture did not render schema/type detection");
 
   const acceptanceModel = inferArtifact(acceptanceFixture);
   assert(acceptanceModel.sourceType === "aggregate-handoff", "acceptance fixture did not load as aggregate handoff");
@@ -1859,11 +1859,11 @@ vm.runInContext(workbenchScript + `
   assert(acceptanceModel.aggregateHandoff.privacy.containsFilenames === false, "acceptance fixture reported private filenames");
   state.model = acceptanceModel;
   renderAggregateHandoff();
-  assert(els.aggregateHandoff.innerHTML.includes("Acceptance summary"), "acceptance fixture did not render Acceptance summary");
+  assert(els.aggregateHandoff.innerHTML.includes("验收摘要"), "acceptance fixture did not render Acceptance summary");
   assert(els.aggregateHandoff.innerHTML.includes("aggregate_warning_review_backlog"), "acceptance fixture did not render warning code");
-  assert(els.aggregateHandoff.innerHTML.includes("Aggregate-only Status"), "acceptance fixture did not render aggregate-only status");
-  assert(els.aggregateHandoff.innerHTML.includes("Acceptance Passed"), "acceptance fixture did not render acceptance status");
-  assert(els.aggregateHandoff.innerHTML.includes("Privacy Summary"), "acceptance fixture did not render privacy summary diagnostic");
+  assert(els.aggregateHandoff.innerHTML.includes("仅汇总状态"), "acceptance fixture did not render aggregate-only status");
+  assert(els.aggregateHandoff.innerHTML.includes("验收通过"), "acceptance fixture did not render acceptance status");
+  assert(els.aggregateHandoff.innerHTML.includes("隐私摘要"), "acceptance fixture did not render privacy summary diagnostic");
 
   const completeChecklistModel = inferArtifact(completeChecklistFixture);
   assert(completeChecklistModel.sourceType === "aggregate-handoff", "complete checklist fixture did not load as aggregate handoff");
@@ -1881,8 +1881,8 @@ vm.runInContext(workbenchScript + `
   assert(completeChecklistFixture.artifact_readiness_checklist["workbench_public_summary.json"].blocking_counts_by_code && Object.keys(completeChecklistFixture.artifact_readiness_checklist["workbench_public_summary.json"].blocking_counts_by_code).length === 0, "complete checklist fixture did not include generated row blocking code counts");
   state.model = completeChecklistModel;
   renderAggregateHandoff();
-  assert(els.aggregateHandoff.innerHTML.includes("Public-Safe Artifact Readiness Checklist"), "complete checklist did not render checklist heading");
-  assert(els.aggregateHandoff.innerHTML.includes("Ready for public handoff"), "complete checklist did not render ready summary");
+  assert(els.aggregateHandoff.innerHTML.includes("公开安全工件就绪清单"), "complete checklist did not render checklist heading");
+  assert(els.aggregateHandoff.innerHTML.includes("公开交接就绪"), "complete checklist did not render ready summary");
   assert(els.aggregateHandoff.innerHTML.includes("final_production_handoff_summary.json"), "complete checklist did not render final handoff artifact");
   assert(els.aggregateHandoff.innerHTML.includes("deep_inspection_candidate_summary.json"), "complete checklist did not render deep-inspection candidate artifact");
   assert(els.aggregateHandoff.innerHTML.includes("review_decision_verification_summary.json"), "complete checklist did not render review decision verification artifact");
@@ -1944,9 +1944,9 @@ vm.runInContext(workbenchScript + `
   assert(frontendValidationPassModel.aggregateHandoff.frontendValidation.validatedHtmlPath === "docs/frontend-workbench-prototype.html", "passing frontend validation repo-relative path was not preserved");
   state.model = frontendValidationPassModel;
   renderAggregateHandoff();
-  assert(els.aggregateHandoff.innerHTML.includes("Frontend Workbench Validation Summary"), "passing frontend validation summary did not render");
-  assert(els.aggregateHandoff.innerHTML.includes("Coverage Booleans"), "passing frontend validation coverage booleans did not render");
-  assert(els.aggregateHandoff.innerHTML.includes("Privacy Booleans"), "passing frontend validation privacy booleans did not render");
+  assert(els.aggregateHandoff.innerHTML.includes("前端工作台验证摘要"), "passing frontend validation summary did not render");
+  assert(els.aggregateHandoff.innerHTML.includes("覆盖布尔项"), "passing frontend validation coverage booleans did not render");
+  assert(els.aggregateHandoff.innerHTML.includes("隐私布尔项"), "passing frontend validation privacy booleans did not render");
   assert(els.aggregateHandoff.innerHTML.includes("required_regions"), "passing frontend validation count summary did not render");
   assertPublicSafe(els.aggregateHandoff.innerHTML, "passing frontend validation summary rendering");
 
@@ -1979,11 +1979,11 @@ vm.runInContext(workbenchScript + `
   assert(deepInspectionCandidateModel.aggregateHandoff.deepInspectionCandidate.noInferenceRun === true, "deep-inspection no-inference flag was not preserved");
   state.model = deepInspectionCandidateModel;
   renderAggregateHandoff();
-  assert(els.aggregateHandoff.innerHTML.includes("Deep-Inspection Candidate Summary"), "deep-inspection candidate panel did not render");
-  assert(els.aggregateHandoff.innerHTML.includes("Candidate Total"), "deep-inspection candidate total did not render");
-  assert(els.aggregateHandoff.innerHTML.includes("Candidates By Reason"), "deep-inspection reason counts did not render");
+  assert(els.aggregateHandoff.innerHTML.includes("深度检查候选摘要"), "deep-inspection candidate panel did not render");
+  assert(els.aggregateHandoff.innerHTML.includes("候选总数"), "deep-inspection candidate total did not render");
+  assert(els.aggregateHandoff.innerHTML.includes("按原因统计候选"), "deep-inspection reason counts did not render");
   assert(els.aggregateHandoff.innerHTML.includes("quality_scanline_candidate"), "deep-inspection reason code did not render");
-  assert(els.aggregateHandoff.innerHTML.includes("No Inference Run"), "deep-inspection no-inference flag did not render");
+  assert(els.aggregateHandoff.innerHTML.includes("未运行推理"), "deep-inspection no-inference flag did not render");
   assertPublicSafe(els.aggregateHandoff.innerHTML, "direct deep-inspection candidate rendering");
 
   const aggregateEvidenceBundleCandidateModel = inferArtifact(aggregateEvidenceBundleCandidateFixture);
@@ -1993,7 +1993,7 @@ vm.runInContext(workbenchScript + `
   assert(aggregateEvidenceBundleCandidateModel.aggregateHandoff.deepInspectionCandidate.providerConfigured === true, "nested evidence bundle provider flag was not preserved");
   state.model = aggregateEvidenceBundleCandidateModel;
   renderAggregateHandoff();
-  assert(els.aggregateHandoff.innerHTML.includes("Deep-Inspection Candidate Summary"), "aggregate evidence bundle did not render nested deep-inspection candidate summary");
+  assert(els.aggregateHandoff.innerHTML.includes("深度检查候选摘要"), "aggregate evidence bundle did not render nested deep-inspection candidate summary");
   assert(els.aggregateHandoff.innerHTML.includes("quality_content_edge_cutoff_candidate"), "aggregate evidence bundle did not render nested deep-inspection candidate reason code");
   assertPublicSafe(els.aggregateHandoff.innerHTML, "nested aggregate evidence bundle deep-inspection candidate rendering");
 
@@ -2018,18 +2018,18 @@ vm.runInContext(workbenchScript + `
   assert(countFor(finalHandoffPassModel.aggregateHandoff.reviewDecisionVerification.warningCodeCounts, "ignored_extra_decision_field") === 1, "nested final handoff review decision warning code count was not preserved");
   state.model = finalHandoffPassModel;
   renderAggregateHandoff();
-  assert(els.aggregateHandoff.innerHTML.includes("Final production handoff summary"), "passing final handoff did not render final handoff type");
-  assert(els.aggregateHandoff.innerHTML.includes("Ready for handoff"), "passing final handoff did not render ready flag label");
-  assert(els.aggregateHandoff.innerHTML.includes("Checks Passed"), "passing final handoff did not render checks passed");
-  assert(els.aggregateHandoff.innerHTML.includes("Checks Failed"), "passing final handoff did not render checks failed");
-  assert(els.aggregateHandoff.innerHTML.includes("Processing Existing Derivative Reused"), "passing final handoff did not render existing derivative reuse count");
-  assert(els.aggregateHandoff.innerHTML.includes("Artifact Presence And Status"), "passing final handoff did not render artifact status summary");
-  assert(els.aggregateHandoff.innerHTML.includes("Deep-Inspection Candidate Summary"), "passing final handoff did not render nested deep-inspection candidate summary");
+  assert(els.aggregateHandoff.innerHTML.includes("最终生产交接摘要"), "passing final handoff did not render final handoff type");
+  assert(els.aggregateHandoff.innerHTML.includes("交接就绪"), "passing final handoff did not render ready flag label");
+  assert(els.aggregateHandoff.innerHTML.includes("检查通过数"), "passing final handoff did not render checks passed");
+  assert(els.aggregateHandoff.innerHTML.includes("检查失败数"), "passing final handoff did not render checks failed");
+  assert(els.aggregateHandoff.innerHTML.includes("处理已有衍生复用"), "passing final handoff did not render existing derivative reuse count");
+  assert(els.aggregateHandoff.innerHTML.includes("工件存在与状态"), "passing final handoff did not render artifact status summary");
+  assert(els.aggregateHandoff.innerHTML.includes("深度检查候选摘要"), "passing final handoff did not render nested deep-inspection candidate summary");
   assert(els.aggregateHandoff.innerHTML.includes("processing_review_status_failed"), "passing final handoff did not render nested deep-inspection candidate reason code");
-  assert(els.aggregateHandoff.innerHTML.includes("Review Decision Verification Summary"), "passing final handoff did not render nested review decision verification summary");
-  assert(els.aggregateHandoff.innerHTML.includes("Total Decisions"), "passing final handoff did not render nested review decision total");
+  assert(els.aggregateHandoff.innerHTML.includes("复核决定验证摘要"), "passing final handoff did not render nested review decision verification summary");
+  assert(els.aggregateHandoff.innerHTML.includes("决定总数"), "passing final handoff did not render nested review decision total");
   assert(els.aggregateHandoff.innerHTML.includes("ignored_extra_decision_field"), "passing final handoff did not render nested review decision warning code count");
-  assert(els.aggregateHandoff.innerHTML.includes("Privacy Status"), "passing final handoff did not render privacy status");
+  assert(els.aggregateHandoff.innerHTML.includes("隐私状态"), "passing final handoff did not render privacy status");
   assert(!els.aggregateHandoff.innerHTML.includes("PRIVATE-LOCAL-ID"), "passing final handoff rendered nested review decision local ID");
   assert(!els.aggregateHandoff.innerHTML.includes("source_type"), "passing final handoff rendered nested review decision source type");
   assert(!els.aggregateHandoff.innerHTML.includes("scan-qc-review-decisions.local.v1"), "passing final handoff rendered nested review decision source schema");
@@ -2050,7 +2050,7 @@ vm.runInContext(workbenchScript + `
   assert(els.aggregateHandoff.innerHTML.includes("aggregate_handoff_acceptance_blocker"), "blocked final handoff did not render blocker code");
   assert(els.aggregateHandoff.innerHTML.includes("aggregate_handoff_artifact_blocker"), "blocked final handoff did not render second blocker code");
   assert(els.aggregateHandoff.innerHTML.includes("aggregate_warning_handoff_recheck"), "blocked final handoff did not render warning code");
-  assert(els.aggregateHandoff.innerHTML.includes("Not ready for public handoff"), "blocked final handoff did not render not-ready checklist summary");
+  assert(els.aggregateHandoff.innerHTML.includes("公开交接未就绪"), "blocked final handoff did not render not-ready checklist summary");
 
   const validationIndexPassModel = inferArtifact(validationIndexPassFixture);
   assert(validationIndexPassModel.sourceType === "aggregate-handoff", "passing validation index fixture did not load as aggregate handoff");
@@ -2069,13 +2069,13 @@ vm.runInContext(workbenchScript + `
   assert(validationIndexPassModel.aggregateHandoff.validationIndexReviewDecisionCoverage[2].checksPassed === 5, "passing validation index did not preserve final handoff nested review decision checks");
   state.model = validationIndexPassModel;
   renderAggregateHandoff();
-  assert(els.aggregateHandoff.innerHTML.includes("Public-Safe Validation Index"), "passing validation index did not render index section");
-  assert(els.aggregateHandoff.innerHTML.includes("Review-Decision Handoff Coverage"), "passing validation index did not render review decision handoff coverage");
+  assert(els.aggregateHandoff.innerHTML.includes("公开安全验证索引"), "passing validation index did not render index section");
+  assert(els.aggregateHandoff.innerHTML.includes("复核决定交接覆盖"), "passing validation index did not render review decision handoff coverage");
   assert(els.aggregateHandoff.innerHTML.includes("aggregate_evidence_bundle_summary.json nested review decision verification"), "passing validation index did not render aggregate evidence nested review decision coverage");
   assert(els.aggregateHandoff.innerHTML.includes("final_production_handoff_summary.json nested review decision verification"), "passing validation index did not render final handoff nested review decision coverage");
   assert(els.aggregateHandoff.innerHTML.includes("ignored_extra_decision_field"), "passing validation index did not render direct review decision warning code count");
-  assert(els.aggregateHandoff.innerHTML.includes("Artifacts Present"), "passing validation index did not render artifacts_present");
-  assert(els.aggregateHandoff.innerHTML.includes("Privacy Aggregate-only Status"), "passing validation index did not render aggregate-only privacy status");
+  assert(els.aggregateHandoff.innerHTML.includes("工件存在数"), "passing validation index did not render artifacts_present");
+  assert(els.aggregateHandoff.innerHTML.includes("隐私仅汇总状态"), "passing validation index did not render aggregate-only privacy status");
   assert(els.aggregateHandoff.innerHTML.includes("frontend_workbench_validation.json"), "passing validation index did not render known public-safe filename");
   assert(!els.aggregateHandoff.innerHTML.includes("PRIVATE-LOCAL-ID"), "passing validation index rendered nested review decision local ID");
   assert(!els.aggregateHandoff.innerHTML.includes("source_type"), "passing validation index rendered nested review decision source type");
@@ -2105,9 +2105,9 @@ vm.runInContext(workbenchScript + `
   assert(missingChecklistModel.artifactReadiness.staleCount === 1, "missing checklist fixture did not count stale artifact");
   state.model = missingChecklistModel;
   renderAggregateHandoff();
-  assert(els.aggregateHandoff.innerHTML.includes("Not ready for public handoff"), "missing checklist did not render not-ready summary");
+  assert(els.aggregateHandoff.innerHTML.includes("公开交接未就绪"), "missing checklist did not render not-ready summary");
   assert(els.aggregateHandoff.innerHTML.includes("missing"), "missing checklist did not render missing status");
-  assert(els.aggregateHandoff.innerHTML.includes("stale"), "missing checklist did not render stale status");
+  assert(els.aggregateHandoff.innerHTML.includes("过期"), "missing checklist did not render stale status");
 
   const unsupportedSchemaModel = inferArtifact(unsupportedSchemaFixture);
   assert(unsupportedSchemaModel.aggregateHandoff.artifactType === "Public-safe artifact readiness checklist", "unsupported schema fixture did not classify by public-safe artifact type");
@@ -2116,7 +2116,7 @@ vm.runInContext(workbenchScript + `
   state.model = unsupportedSchemaModel;
   renderAggregateHandoff();
   assert(els.aggregateHandoff.innerHTML.includes("unsupported_public_safe_schema_version"), "unsupported schema fixture did not render unsupported schema warning");
-  assert(els.aggregateHandoff.innerHTML.includes("unsupported or unknown"), "unsupported schema fixture did not render unknown schema wording");
+  assert(els.aggregateHandoff.innerHTML.includes("不支持或未知"), "unsupported schema fixture did not render unknown schema wording");
 
   const failingPrivacyModel = inferArtifact(failingPrivacyFixture);
   assert(failingPrivacyModel.artifactCompatibility.privacySummaryStatus === "fail", "failing privacy fixture did not produce privacy fail status");
@@ -2124,7 +2124,7 @@ vm.runInContext(workbenchScript + `
   state.model = failingPrivacyModel;
   renderAggregateHandoff();
   assert(els.aggregateHandoff.innerHTML.includes("privacy_summary_fail"), "failing privacy fixture did not render privacy failure diagnostic");
-  assert(els.aggregateHandoff.innerHTML.includes("Diagnostic Blocking Count"), "failing privacy fixture did not render diagnostic blocking count");
+  assert(els.aggregateHandoff.innerHTML.includes("诊断阻塞数"), "failing privacy fixture did not render diagnostic blocking count");
 
   const missingPrivacyModel = inferArtifact(missingPrivacyFixture);
   assert(missingPrivacyModel.artifactCompatibility.privacySummaryStatus === "missing", "missing privacy fixture did not produce privacy missing status");
@@ -2146,12 +2146,12 @@ vm.runInContext(workbenchScript + `
   assert(providerProbeModel.aggregateHandoff.providerProbe.privacyStatus === "public-safe", "provider probe privacy status was not preserved");
   state.model = providerProbeModel;
   renderAggregateHandoff();
-  assert(els.aggregateHandoff.innerHTML.includes("Provider Capability Probe"), "provider probe did not render probe section");
-  assert(els.aggregateHandoff.innerHTML.includes("Configured Provider Count"), "provider probe did not render configured count");
-  assert(els.aggregateHandoff.innerHTML.includes("Visible GPU Count"), "provider probe did not render GPU count");
-  assert(els.aggregateHandoff.innerHTML.includes("Visible Model Count"), "provider probe did not render model count");
-  assert(els.aggregateHandoff.innerHTML.includes("Optional Package Missing Count"), "provider probe did not render optional package count");
-  assert(els.aggregateHandoff.innerHTML.includes("Probe Privacy Status"), "provider probe did not render privacy status");
+  assert(els.aggregateHandoff.innerHTML.includes("提供方能力探测"), "provider probe did not render probe section");
+  assert(els.aggregateHandoff.innerHTML.includes("已配置提供方数"), "provider probe did not render configured count");
+  assert(els.aggregateHandoff.innerHTML.includes("可见 GPU 数"), "provider probe did not render GPU count");
+  assert(els.aggregateHandoff.innerHTML.includes("可见模型数"), "provider probe did not render model count");
+  assert(els.aggregateHandoff.innerHTML.includes("缺失可选包数"), "provider probe did not render optional package count");
+  assert(els.aggregateHandoff.innerHTML.includes("探测隐私状态"), "provider probe did not render privacy status");
   assert(els.aggregateHandoff.innerHTML.includes("provider_probe_gpu_not_visible"), "provider probe did not render warning code");
 
   const processingReviewModel = inferArtifact(processingReviewFixture);
@@ -2170,18 +2170,18 @@ vm.runInContext(workbenchScript + `
   assert(processingReviewModel.reviewTargets[0].localId === "PR0001", "processing review target local ID changed");
   state.model = processingReviewModel;
   renderAggregateHandoff();
-  assert(els.aggregateHandoff.innerHTML.includes("Processing-Review Package Summary"), "processing review did not render package summary section");
-  assert(els.aggregateHandoff.innerHTML.includes("Processed Count"), "processing review did not render processed count");
-  assert(els.aggregateHandoff.innerHTML.includes("Failed Count"), "processing review did not render failed count");
-  assert(els.aggregateHandoff.innerHTML.includes("Review Target Count"), "processing review did not render target count");
-  assert(els.aggregateHandoff.innerHTML.includes("Sensitivity/Local-only Status"), "processing review did not render local-only sensitivity");
-  assert(els.aggregateHandoff.innerHTML.includes("Processing Duplicate Reused"), "processing review did not render duplicate reuse count");
-  assert(els.aggregateHandoff.innerHTML.includes("Processing Existing Derivative Reused"), "processing review did not render existing derivative reuse count");
-  assert(els.aggregateHandoff.innerHTML.includes("Processing Status Counts"), "processing review did not render status counts");
+  assert(els.aggregateHandoff.innerHTML.includes("处理复核包摘要"), "processing review did not render package summary section");
+  assert(els.aggregateHandoff.innerHTML.includes("已处理数"), "processing review did not render processed count");
+  assert(els.aggregateHandoff.innerHTML.includes("失败数"), "processing review did not render failed count");
+  assert(els.aggregateHandoff.innerHTML.includes("复核目标数"), "processing review did not render target count");
+  assert(els.aggregateHandoff.innerHTML.includes("敏感性/仅本地状态"), "processing review did not render local-only sensitivity");
+  assert(els.aggregateHandoff.innerHTML.includes("处理重复复用"), "processing review did not render duplicate reuse count");
+  assert(els.aggregateHandoff.innerHTML.includes("处理已有衍生复用"), "processing review did not render existing derivative reuse count");
+  assert(els.aggregateHandoff.innerHTML.includes("处理状态计数"), "processing review did not render status counts");
   renderReview();
-  assert(els.reviewTargetList.innerHTML.includes("processing_review"), "processing review target list did not render scope");
+  assert(els.reviewTargetList.innerHTML.includes("处理复核"), "processing review target list did not render scope");
   assert(els.reviewTargetList.innerHTML.includes("PR0001"), "processing review target list did not render first synthetic local ID");
-  assert(els.reviewTargetList.innerHTML.includes("failed"), "processing review target list did not render status");
+  assert(els.reviewTargetList.innerHTML.includes("状态"), "processing review target list did not render status column");
   assert(els.reviewTargetList.innerHTML.includes('data-review-scope="processing_review"'), "processing review target list did not render decision control scope");
   assert(els.reviewTargetList.innerHTML.includes('data-review-id="PR0001"'), "processing review target list did not render first decision control ID");
   assertPublicSafe(els.reviewTargetList.innerHTML, "processing review target list");
@@ -2196,20 +2196,20 @@ vm.runInContext(workbenchScript + `
   assert(DEMO_FIXTURES.length >= 5, "demo fixture gallery does not cover at least five options");
   const demoLabels = DEMO_FIXTURES.map(item => item.label);
   [
-    "Passing workbench public summary",
-    "Blocked workbench public summary",
-    "Recognized passing review summary",
-    "Passing acceptance summary",
-    "Complete public-safe readiness checklist",
-    "Passing final production handoff",
-    "Blocked final production handoff",
-    "Passing public-safe validation index",
-    "Blocked public-safe validation index",
-    "Disabled provider capability probe",
-    "Synthetic processing-review package summary",
-    "Unsupported schema compatibility warning",
-    "Privacy summary failing diagnostic",
-    "Privacy summary missing diagnostic"
+    "通过的工作台公开摘要",
+    "阻塞的工作台公开摘要",
+    "已识别的通过复核摘要",
+    "通过的验收摘要",
+    "完整的公开安全就绪清单",
+    "通过的最终生产交接",
+    "阻塞的最终生产交接",
+    "通过的公开安全验证索引",
+    "阻塞的公开安全验证索引",
+    "已禁用的提供方能力探测",
+    "合成处理复核包摘要",
+    "不支持架构的兼容性警告",
+    "隐私摘要失败诊断",
+    "隐私摘要缺失诊断"
   ].forEach(label => assert(demoLabels.includes(label), "missing demo fixture label: " + label));
 
   DEMO_FIXTURES.forEach(item => {{
@@ -2234,28 +2234,28 @@ vm.runInContext(workbenchScript + `
     assert(model.sourceType === "aggregate-handoff", "demo fixture " + item.id + " did not load through aggregate inference");
     state.model = model;
     renderAggregateHandoff();
-    assert(els.aggregateHandoff.innerHTML.includes("Public-Safe Artifact Compatibility Diagnostics"), "demo fixture " + item.id + " did not render diagnostics");
-    assert(els.aggregateHandoff.innerHTML.includes("Aggregate-only Status"), "demo fixture " + item.id + " did not render aggregate summary");
+    assert(els.aggregateHandoff.innerHTML.includes("公开安全工件兼容性诊断"), "demo fixture " + item.id + " did not render diagnostics");
+    assert(els.aggregateHandoff.innerHTML.includes("仅汇总状态"), "demo fixture " + item.id + " did not render aggregate summary");
   }});
 
   loadDemoFixture("recognized-review-pass");
-  assert(els.status.textContent.includes("Loaded public-safe demo fixture: Recognized passing review summary."), "demo load button path did not report selected fixture");
-  assert(els.aggregateHandoff.innerHTML.includes("Review summary"), "demo load path did not render review summary");
+  assert(els.status.textContent.includes("已加载公开安全演示夹具：已识别的通过复核摘要。"), "demo load button path did not report selected fixture");
+  assert(els.aggregateHandoff.innerHTML.includes("复核摘要"), "demo load path did not render review summary");
   loadDemoFixture("workbench-public-summary-pass");
-  assert(els.aggregateHandoff.innerHTML.includes("Workbench public summary"), "demo load path did not render passing workbench public summary");
+  assert(els.aggregateHandoff.innerHTML.includes("工作台公开摘要"), "demo load path did not render passing workbench public summary");
   assert(els.aggregateHandoff.innerHTML.includes("acceptance_status: pass"), "demo load path did not render passing workbench workflow state");
   assert(state.model.aggregateHandoff.despeckleBackend.requestedBackend === "numpy", "passing workbench did not preserve requested despeckle backend");
   assert(state.model.aggregateHandoff.despeckleBackend.effectiveBackendMode === "numpy", "passing workbench did not preserve effective despeckle backend");
   assert(state.model.aggregateHandoff.despeckleBackend.numpyAvailable === true, "passing workbench did not preserve NumPy availability");
   assert(state.model.aggregateHandoff.despeckleBackend.backendCounts.some(item => item.name === "numpy" && item.count === 7), "passing workbench did not preserve NumPy backend count");
   assert(state.model.aggregateHandoff.despeckleBackend.fallbackCount === 0, "passing workbench did not preserve zero fallback count");
-  assert(els.aggregateHandoff.innerHTML.includes("Despeckle Backend Summary"), "demo load path did not render despeckle backend section");
-  assert(els.aggregateHandoff.innerHTML.includes("Requested Backend"), "demo load path did not render requested backend label");
-  assert(els.aggregateHandoff.innerHTML.includes("Effective Backend Mode"), "demo load path did not render effective backend label");
-  assert(els.aggregateHandoff.innerHTML.includes("Requested NumPy Fallback Count"), "demo load path did not render requested NumPy fallback label");
+  assert(els.aggregateHandoff.innerHTML.includes("去噪点后端摘要"), "demo load path did not render despeckle backend section");
+  assert(els.aggregateHandoff.innerHTML.includes("请求后端"), "demo load path did not render requested backend label");
+  assert(els.aggregateHandoff.innerHTML.includes("有效后端模式"), "demo load path did not render effective backend label");
+  assert(els.aggregateHandoff.innerHTML.includes("请求 NumPy 后回退数"), "demo load path did not render requested NumPy fallback label");
   loadDemoFixture("workbench-public-summary-blocked");
   assert(els.aggregateHandoff.innerHTML.includes("unsupported_input"), "demo load path did not render blocked workbench unsupported input aggregate code");
-  assert(els.aggregateHandoff.innerHTML.includes("Blocking Code"), "demo load path did not render blocked workbench aggregate code counts");
+  assert(els.aggregateHandoff.innerHTML.includes("阻塞代码"), "demo load path did not render blocked workbench aggregate code counts");
   assert(state.model.aggregateHandoff.despeckleBackend.requestedBackend === "numpy", "blocked workbench did not preserve requested despeckle backend");
   assert(state.model.aggregateHandoff.despeckleBackend.effectiveBackendMode === "fallback", "blocked workbench did not preserve all-fallback effective backend");
   assert(state.model.aggregateHandoff.despeckleBackend.numpyAvailable === false, "blocked workbench did not preserve unavailable NumPy status");
@@ -2264,26 +2264,26 @@ vm.runInContext(workbenchScript + `
   assert(els.aggregateHandoff.innerHTML.includes("despeckle_numpy_unavailable_fallback"), "demo load path did not render unavailable NumPy warning");
   assert(els.aggregateHandoff.innerHTML.includes("despeckle_numpy_requested_all_fallback"), "demo load path did not render all-fallback NumPy warning");
   loadDemoFixture("complete-readiness-checklist");
-  assert(els.aggregateHandoff.innerHTML.includes("Public-Safe Artifact Readiness Checklist"), "demo load path did not render readiness checklist");
+  assert(els.aggregateHandoff.innerHTML.includes("公开安全工件就绪清单"), "demo load path did not render readiness checklist");
   loadDemoFixture("final-handoff-pass");
-  assert(els.aggregateHandoff.innerHTML.includes("Final production handoff summary"), "demo load path did not render passing final handoff");
-  assert(els.aggregateHandoff.innerHTML.includes("Ready for handoff"), "demo load path did not render passing final handoff ready flag");
+  assert(els.aggregateHandoff.innerHTML.includes("最终生产交接摘要"), "demo load path did not render passing final handoff");
+  assert(els.aggregateHandoff.innerHTML.includes("交接就绪"), "demo load path did not render passing final handoff ready flag");
   loadDemoFixture("final-handoff-blocked");
   assert(els.aggregateHandoff.innerHTML.includes("aggregate_handoff_acceptance_blocker"), "demo load path did not render blocked final handoff");
-  assert(els.aggregateHandoff.innerHTML.includes("Not ready for public handoff"), "demo load path did not render blocked final handoff readiness");
+  assert(els.aggregateHandoff.innerHTML.includes("公开交接未就绪"), "demo load path did not render blocked final handoff readiness");
   loadDemoFixture("validation-index-pass");
-  assert(els.aggregateHandoff.innerHTML.includes("Public-safe validation index"), "demo load path did not render passing validation index type");
-  assert(els.aggregateHandoff.innerHTML.includes("Artifacts Present"), "demo load path did not render passing validation index summary");
+  assert(els.aggregateHandoff.innerHTML.includes("公开安全验证索引"), "demo load path did not render passing validation index type");
+  assert(els.aggregateHandoff.innerHTML.includes("工件存在数"), "demo load path did not render passing validation index summary");
   loadDemoFixture("validation-index-blocked");
   assert(els.aggregateHandoff.innerHTML.includes("unknown_public_safe_artifact"), "demo load path did not render blocked validation index blocker");
-  assert(els.aggregateHandoff.innerHTML.includes("Artifacts Missing"), "demo load path did not render blocked validation index missing count");
+  assert(els.aggregateHandoff.innerHTML.includes("工件缺失数"), "demo load path did not render blocked validation index missing count");
   loadDemoFixture("provider-capability-probe-disabled");
-  assert(els.aggregateHandoff.innerHTML.includes("Provider capability probe summary"), "demo load path did not render provider probe type");
-  assert(els.aggregateHandoff.innerHTML.includes("Provider Capability Probe"), "demo load path did not render provider probe section");
+  assert(els.aggregateHandoff.innerHTML.includes("提供方能力探测摘要"), "demo load path did not render provider probe type");
+  assert(els.aggregateHandoff.innerHTML.includes("提供方能力探测"), "demo load path did not render provider probe section");
   assert(els.aggregateHandoff.innerHTML.includes("provider_probe_optional_packages_not_installed"), "demo load path did not render provider probe warning");
   loadDemoFixture("processing-review-package-summary");
-  assert(els.aggregateHandoff.innerHTML.includes("Processing-review package summary"), "demo load path did not render processing review type");
-  assert(els.aggregateHandoff.innerHTML.includes("Processing-Review Package Summary"), "demo load path did not render processing review section");
+  assert(els.aggregateHandoff.innerHTML.includes("处理复核包摘要"), "demo load path did not render processing review type");
+  assert(els.aggregateHandoff.innerHTML.includes("处理复核包摘要"), "demo load path did not render processing review section");
   assert(reviewTargets().length === 6, "demo load path did not expose synthetic processing review targets");
   loadDemoFixture("unsupported-schema-warning");
   assert(els.aggregateHandoff.innerHTML.includes("unsupported_public_safe_schema_version"), "demo load path did not render unsupported schema diagnostic");
@@ -2413,8 +2413,8 @@ vm.createContext(context);
 vm.runInContext(workbenchScript + `
   function assertPreviewStatusSafe(slot, expectedStatus) {{
     const statusHtml = els.previewSlots[slot].privacyCopy.innerHTML;
-    assert(statusHtml.includes(previewSlotLabel(slot) + " preview status: " + expectedStatus), slot + " preview status did not render aggregate selected state");
-    assert(statusHtml.includes(previewSlotLabel(slot) + " preview local state is excluded from review-decision export JSON."), slot + " preview export exclusion copy changed");
+    assert(statusHtml.includes(previewSlotLabel(slot) + "预览状态：" + expectedStatus), slot + " preview status did not render aggregate selected state");
+    assert(statusHtml.includes(previewSlotLabel(slot) + "预览本地状态不包含在复核决定导出 JSON 中。"), slot + " preview export exclusion copy changed");
     assertPublicSafe(statusHtml, slot + " preview status");
     if (state.previews[slot].fileName) {{
       assert(!statusHtml.includes(state.previews[slot].fileName), slot + " preview status rendered local filename");
@@ -2433,8 +2433,8 @@ vm.runInContext(workbenchScript + `
   assert(createdUrls.length === 1, "first original preview did not call createObjectURL once");
   assert(revokedUrls.length === 0, "first original preview unexpectedly revoked a URL");
   assert(els.previewSlots.original.preview.innerHTML.includes("blob:synthetic-preview-private_scan_original_alpha.tif-0"), "original preview image did not render object URL locally");
-  assertPreviewStatusSafe("original", "selected");
-  assertPreviewStatusSafe("processed", "not selected");
+  assertPreviewStatusSafe("original", "已选择");
+  assertPreviewStatusSafe("processed", "未选择");
 
   loadPreviewFile("processed", processedFirstFile);
   assert(state.previews.processed.fileName === processedFirstFile.name, "first processed preview filename was not tracked locally");
@@ -2443,16 +2443,16 @@ vm.runInContext(workbenchScript + `
   assert(createdUrls.length === 2, "first processed preview did not call createObjectURL once");
   assert(revokedUrls.length === 0, "first processed preview unexpectedly revoked a URL");
   assert(els.previewSlots.processed.preview.innerHTML.includes("blob:synthetic-preview-private_scan_processed_alpha.webp-1"), "processed preview image did not render object URL locally");
-  assertPreviewStatusSafe("original", "selected");
-  assertPreviewStatusSafe("processed", "selected");
+  assertPreviewStatusSafe("original", "已选择");
+  assertPreviewStatusSafe("processed", "已选择");
 
   assert(state.previewDisplay.mode === "fit", "preview display should default to fit mode");
-  assert(els.previewZoomStatus.textContent === "Preview display: fit to panel", "fit preview status did not render");
+  assert(els.previewZoomStatus.textContent === "预览显示：适应面板", "fit preview status did not render");
   setPreviewZoom("1.5");
   assert(state.previewDisplay.mode === "zoom", "zoom selection did not switch preview display mode");
   assert(state.previewDisplay.zoom === 1.5, "zoom selection did not store the selected zoom level locally");
   assert(els.previewZoomSelect.value === "1.5", "zoom selector did not reflect selected zoom level");
-  assert(els.previewZoomStatus.textContent === "Preview display: 150% zoom", "zoom preview status did not render selected percentage");
+  assert(els.previewZoomStatus.textContent === "预览显示：150% 缩放", "zoom preview status did not render selected percentage");
   assert(els.previewSlots.original.preview.className.includes("preview-zoom"), "original preview did not receive shared zoom class");
   assert(els.previewSlots.processed.preview.className.includes("preview-zoom"), "processed preview did not receive shared zoom class");
   assert(els.previewSlots.original.preview.innerHTML.includes("--preview-zoom: 1.5"), "original preview did not receive shared zoom style");
@@ -2465,7 +2465,7 @@ vm.runInContext(workbenchScript + `
   resetPreviewZoom();
   assert(state.previewDisplay.mode === "fit", "reset zoom did not return to fit mode");
   assert(state.previewDisplay.zoom === 1, "reset zoom did not restore 100 percent zoom state");
-  assert(els.previewZoomStatus.textContent === "Preview display: fit to panel", "reset zoom did not restore fit status");
+  assert(els.previewZoomStatus.textContent === "预览显示：适应面板", "reset zoom did not restore fit status");
 
   state.model = {{
     sourceType: "scan-report",
@@ -2496,14 +2496,14 @@ vm.runInContext(workbenchScript + `
   assert(state.previews.processed.objectUrl === "blob:synthetic-preview-private_scan_processed_alpha.webp-1", "original replacement should not replace processed preview");
   assert(createdUrls.length === 3, "replacement original preview did not call createObjectURL");
   assert(revokedUrls.includes("blob:synthetic-preview-private_scan_original_alpha.tif-0"), "original replacement did not revoke first original object URL");
-  assertPreviewStatusSafe("original", "selected");
+  assertPreviewStatusSafe("original", "已选择");
 
   loadPreviewFile("processed", processedSecondFile);
   assert(state.previews.processed.fileName === processedSecondFile.name, "replacement processed preview filename was not tracked locally");
   assert(state.previews.processed.objectUrl === "blob:synthetic-preview-private_scan_processed_beta.jpg-3", "replacement processed object URL was not created");
   assert(createdUrls.length === 4, "replacement processed preview did not call createObjectURL");
   assert(revokedUrls.includes("blob:synthetic-preview-private_scan_processed_alpha.webp-1"), "processed replacement did not revoke first processed object URL");
-  assertPreviewStatusSafe("processed", "selected");
+  assertPreviewStatusSafe("processed", "已选择");
 
   clearPreviewState("original");
   assert(state.previews.original.fileName === "", "clear did not reset original preview filename");
@@ -2512,7 +2512,7 @@ vm.runInContext(workbenchScript + `
   assert(els.previewSlots.original.file.value === "", "clear did not reset original preview file input");
   assert(revokedUrls.includes("blob:synthetic-preview-private_scan_original_beta.png-2"), "clear did not revoke replacement original object URL");
   assert(!els.previewSlots.original.preview.innerHTML.includes("blob:synthetic-preview"), "clear left object URL in original preview markup");
-  assertPreviewStatusSafe("original", "not selected");
+  assertPreviewStatusSafe("original", "未选择");
 
   clearPreviewState("processed");
   assert(state.previews.processed.fileName === "", "clear did not reset processed preview filename");
@@ -2520,7 +2520,7 @@ vm.runInContext(workbenchScript + `
   assert(els.previewSlots.processed.file.value === "", "clear did not reset processed preview file input");
   assert(revokedUrls.includes("blob:synthetic-preview-private_scan_processed_beta.jpg-3"), "clear did not revoke replacement processed object URL");
   assert(!els.previewSlots.processed.preview.innerHTML.includes("blob:synthetic-preview"), "clear left object URL in processed preview markup");
-  assertPreviewStatusSafe("processed", "not selected");
+  assertPreviewStatusSafe("processed", "未选择");
 
   loadPreviewFile("original", originalFirstFile);
   loadPreviewFile("processed", processedFirstFile);
@@ -2662,28 +2662,28 @@ vm.runInContext(workbenchScript + `
   render();
 
   assert(reviewTargets().length === 3, "synthetic scan report did not create expected review targets");
-  assert(els.decisionSummary.innerHTML.includes("Total Targets"), "review completion summary did not render total targets");
-  assert(els.decisionSummary.innerHTML.includes("Pending Targets"), "review completion summary did not render pending targets");
-  assert(els.decisionSummary.innerHTML.includes("not complete"), "initial review completion summary did not render not-complete status");
-  assert(els.reviewCompletionGate.textContent.includes("Review completion gate warning: not complete."), "initial review completion gate warning did not render");
-  assert(els.reviewCompletionGate.textContent.includes("Total targets: 3."), "initial completion gate did not render total target count");
-  assert(els.reviewCompletionGate.textContent.includes("Reviewed targets: 0."), "initial completion gate did not render reviewed target count");
-  assert(els.reviewCompletionGate.textContent.includes("Pending targets: 3."), "initial completion gate did not render pending target count");
-  assert(els.reviewCompletionGate.textContent.includes("Pending: 3"), "initial completion gate did not render pending decision count");
-  assert(els.reviewCompletionGate.textContent.includes("Export is advisory and remains available."), "completion gate warning changed export behavior wording");
+  assert(els.decisionSummary.innerHTML.includes("目标总数"), "review completion summary did not render total targets");
+  assert(els.decisionSummary.innerHTML.includes("待处理目标"), "review completion summary did not render pending targets");
+  assert(els.decisionSummary.innerHTML.includes("未完成"), "initial review completion summary did not render not-complete status");
+  assert(els.reviewCompletionGate.textContent.includes("复核完成门禁警告：未完成。"), "initial review completion gate warning did not render");
+  assert(els.reviewCompletionGate.textContent.includes("目标总数：3。"), "initial completion gate did not render total target count");
+  assert(els.reviewCompletionGate.textContent.includes("已复核目标：0。"), "initial completion gate did not render reviewed target count");
+  assert(els.reviewCompletionGate.textContent.includes("待处理目标：3。"), "initial completion gate did not render pending target count");
+  assert(els.reviewCompletionGate.textContent.includes("待处理: 3"), "initial completion gate did not render pending decision count");
+  assert(els.reviewCompletionGate.textContent.includes("导出仅供参考且仍可使用。"), "completion gate warning changed export behavior wording");
   assertPublicSafe(els.reviewCompletionGate.textContent, "initial review completion gate");
   state.decisions.set(decisionKey("batch", "B0001"), "accepted_issue");
   state.decisions.set(decisionKey("finding", "F0001"), "false_positive");
   state.decisions.set(decisionKey("finding", "F0002"), "needs_rescan");
   renderReview();
-  assert(els.decisionSummary.innerHTML.includes("Reviewed Targets"), "review completion summary did not render reviewed targets");
-  assert(els.decisionSummary.innerHTML.includes("complete"), "review completion summary did not update to complete");
-  assert(els.reviewCompletionGate.textContent.includes("Review completion gate: complete."), "review completion gate did not render complete state");
-  assert(els.reviewCompletionGate.textContent.includes("Reviewed targets: 3."), "complete gate did not render reviewed target count");
-  assert(els.reviewCompletionGate.textContent.includes("Pending targets: 0."), "complete gate did not render zero pending target count");
-  assert(els.reviewCompletionGate.textContent.includes("Accepted issue: 1"), "complete gate did not render accepted count");
-  assert(els.reviewCompletionGate.textContent.includes("False positive: 1"), "complete gate did not render false-positive count");
-  assert(els.reviewCompletionGate.textContent.includes("Needs rescan: 1"), "complete gate did not render needs-rescan count");
+  assert(els.decisionSummary.innerHTML.includes("已复核目标"), "review completion summary did not render reviewed targets");
+  assert(els.decisionSummary.innerHTML.includes("已完成"), "review completion summary did not update to complete");
+  assert(els.reviewCompletionGate.textContent.includes("复核完成门禁：已完成。"), "review completion gate did not render complete state");
+  assert(els.reviewCompletionGate.textContent.includes("已复核目标：3。"), "complete gate did not render reviewed target count");
+  assert(els.reviewCompletionGate.textContent.includes("待处理目标：0。"), "complete gate did not render zero pending target count");
+  assert(els.reviewCompletionGate.textContent.includes("确认问题: 1"), "complete gate did not render accepted count");
+  assert(els.reviewCompletionGate.textContent.includes("误报: 1"), "complete gate did not render false-positive count");
+  assert(els.reviewCompletionGate.textContent.includes("需要重扫: 1"), "complete gate did not render needs-rescan count");
   assertPublicSafe(els.reviewCompletionGate.textContent, "complete review completion gate");
   const exported = buildReviewSummary();
   assert(exported.schema === "scan-qc-review-decisions.local.v1", "review export schema changed");
@@ -2710,7 +2710,7 @@ vm.runInContext(workbenchScript + `
   assert(getDecision("finding", "F0001") === "false_positive", "finding decision was not restored");
   assert(getDecision("finding", "F0002") === "needs_rescan", "second finding decision was not restored");
   assert(buildReviewSummary().aggregate_counts.review_completion.complete === true, "imported decisions did not restore completion status");
-  assert(els.reviewImportStatus.textContent.includes("Imported 3 review decisions; skipped 0."), "valid import status did not render aggregate counts");
+  assert(els.reviewImportStatus.textContent.includes("已导入 3 条复核决定；已跳过 0 条。"), "valid import status did not render aggregate counts");
   assertPublicSafe(els.reviewImportStatus.textContent, "valid import status");
 
   const invalidPayload = JSON.parse(JSON.stringify(exported));
@@ -2740,7 +2740,7 @@ vm.runInContext(workbenchScript + `
     "unsupported_decision_status=1",
     "invalid_decision_entry=1"
   ].forEach(code => assert(state.importStatus.validationCodes.includes(code), "missing aggregate validation code " + code));
-  assert(els.reviewImportStatus.textContent.includes("Validation codes:"), "invalid import status did not render validation codes");
+  assert(els.reviewImportStatus.textContent.includes("验证代码："), "invalid import status did not render validation codes");
   assertPublicSafe(els.reviewImportStatus.textContent, "invalid import status");
   assertPublicSafe(state.exportSummary, "post-import export summary");
 
@@ -2759,9 +2759,9 @@ vm.runInContext(workbenchScript + `
   assert(state.model.metrics.processingExistingDerivativeReused === 4, "run-plan existing derivative reuse count was not preserved");
   resetReviewState();
   render();
-  assert(els.metrics.innerHTML.includes("Processing Resumed"), "run-plan metrics did not render processing resumed count");
-  assert(els.metrics.innerHTML.includes("Processing Duplicate Reused"), "run-plan metrics did not render duplicate reuse count");
-  assert(els.metrics.innerHTML.includes("Processing Existing Derivative Reused"), "run-plan metrics did not render existing derivative reuse count");
+  assert(els.metrics.innerHTML.includes("处理已恢复"), "run-plan metrics did not render processing resumed count");
+  assert(els.metrics.innerHTML.includes("处理重复复用"), "run-plan metrics did not render duplicate reuse count");
+  assert(els.metrics.innerHTML.includes("处理已有衍生复用"), "run-plan metrics did not render existing derivative reuse count");
   assert(reviewTargets().length === 2, "run-plan synthetic targets were not exposed");
   state.decisions.set(decisionKey("batch", "B0001"), "fixed_externally");
   renderReview();
@@ -2770,15 +2770,15 @@ vm.runInContext(workbenchScript + `
   assert(runPlanSummary.reviewed === 1, "run-plan reviewed target count did not update");
   assert(runPlanSummary.pending === 1, "run-plan pending target count did not update");
   assert(runPlanSummary.complete === false, "run-plan completion finished too early");
-  assert(els.reviewCompletionGate.textContent.includes("Review completion gate warning: not complete."), "run-plan incomplete gate warning did not render");
-  assert(els.reviewCompletionGate.textContent.includes("Total targets: 2."), "run-plan gate did not render total targets");
-  assert(els.reviewCompletionGate.textContent.includes("Reviewed targets: 1."), "run-plan gate did not render reviewed targets");
-  assert(els.reviewCompletionGate.textContent.includes("Pending targets: 1."), "run-plan gate did not render pending targets");
+  assert(els.reviewCompletionGate.textContent.includes("复核完成门禁警告：未完成。"), "run-plan incomplete gate warning did not render");
+  assert(els.reviewCompletionGate.textContent.includes("目标总数：2。"), "run-plan gate did not render total targets");
+  assert(els.reviewCompletionGate.textContent.includes("已复核目标：1。"), "run-plan gate did not render reviewed targets");
+  assert(els.reviewCompletionGate.textContent.includes("待处理目标：1。"), "run-plan gate did not render pending targets");
   state.decisions.set(decisionKey("batch", "B0002"), "blocked");
   renderReview();
   runPlanSummary = buildReviewSummary().aggregate_counts.review_completion;
   assert(runPlanSummary.complete === true, "run-plan completion did not finish after all targets changed");
-  assert(els.reviewCompletionGate.textContent.includes("Review completion gate: complete."), "run-plan complete gate did not render");
+  assert(els.reviewCompletionGate.textContent.includes("复核完成门禁：已完成。"), "run-plan complete gate did not render");
   assert(buildReviewSummary().review_counts.fixed_externally === 1, "run-plan fixed count was not preserved");
   assert(buildReviewSummary().review_counts.blocked === 1, "run-plan blocked count was not preserved");
 
@@ -2787,13 +2787,13 @@ vm.runInContext(workbenchScript + `
   resetReviewState();
   render();
   assert(reviewTargets().length === 6, "processing-review synthetic targets were not exposed");
-  assert(els.reviewFilterCount.textContent === "Showing 6 of 6 targets", "initial filtered count did not show visible and total targets");
+  assert(els.reviewFilterCount.textContent === "显示 6 / 6 个目标", "initial filtered count did not show visible and total targets");
   assert(els.reviewTargetList.innerHTML.includes("PR0001"), "processing-review target list did not render first target");
-  assert(els.reviewTargetList.innerHTML.includes("failed"), "processing-review target list did not render synthetic target status");
+  assert(els.reviewTargetList.innerHTML.includes("失败"), "processing-review target list did not render localized synthetic target status");
   assert(els.reviewTargetList.innerHTML.includes("P1"), "processing-review target list did not render synthetic target severity");
   setReviewFilter("status", "failed");
   assert(els.reviewStatusFilter.value === "failed", "status filter control did not sync");
-  assert(els.reviewFilterCount.textContent === "Showing 1 of 6 targets", "status filter did not update visible/total count");
+  assert(els.reviewFilterCount.textContent === "显示 1 / 6 个目标", "status filter did not update visible/total count");
   assert(els.reviewTargetList.innerHTML.includes("PR0001"), "status filter hid matching failed target");
   assert(!els.reviewTargetList.innerHTML.includes("PR0002"), "status filter left non-matching target visible");
   assert(buildReviewSummary().aggregate_counts.review_completion.total === 6, "filter changed export completion total");
@@ -2802,7 +2802,7 @@ vm.runInContext(workbenchScript + `
   assert(bulkFailedResult.updated === 1, "bulk status-filter action did not report the updated target count");
   assert(getDecision("processing_review", "PR0001") === "needs_rescan", "bulk action did not update visible failed target");
   assert(getDecision("processing_review", "PR0002") === "pending", "bulk action changed hidden target");
-  assert(els.bulkReviewStatus.textContent.includes("Visible targets: 1. Updated targets: 1."), "bulk action status did not render aggregate counts only");
+  assert(els.bulkReviewStatus.textContent.includes("可见目标：1。已更新目标：1。"), "bulk action status did not render aggregate counts only");
   assertPublicSafe(els.bulkReviewStatus.textContent, "bulk action status");
   assert(buildReviewSummary().aggregate_counts.review_completion.reviewed === 1, "bulk action did not update reviewed completion count");
   assert(buildReviewSummary().aggregate_counts.review_completion.pending === 5, "bulk action did not update pending completion count");
@@ -2811,7 +2811,7 @@ vm.runInContext(workbenchScript + `
   assertPublicSafe(JSON.stringify(buildReviewSummary()), "bulk action review export summary");
   setReviewFilter("status", "all");
   setReviewFilter("severity", "P2");
-  assert(els.reviewFilterCount.textContent === "Showing 3 of 6 targets", "severity filter did not update visible/total count");
+  assert(els.reviewFilterCount.textContent === "显示 3 / 6 个目标", "severity filter did not update visible/total count");
   const bulkP2Result = applyBulkVisibleReviewDecision("blocked");
   assert(bulkP2Result.visible === 3, "bulk severity-filter action did not report visible target count");
   assert(bulkP2Result.updated === 3, "bulk severity-filter action did not report updated target count");
@@ -2819,8 +2819,8 @@ vm.runInContext(workbenchScript + `
   assert(buildReviewSummary().review_counts.blocked === 3, "bulk severity action did not update blocked count");
   assert(buildReviewSummary().aggregate_counts.review_completion.reviewed === 4, "bulk severity action did not update aggregate reviewed count");
   setReviewFilter("scope", "batch");
-  assert(els.reviewFilterCount.textContent === "Showing 0 of 6 targets", "combined filters did not update visible/total count");
-  assert(els.reviewTargetList.innerHTML.includes("No review targets match the current filters."), "empty filtered state did not render");
+  assert(els.reviewFilterCount.textContent === "显示 0 / 6 个目标", "combined filters did not update visible/total count");
+  assert(els.reviewTargetList.innerHTML.includes("没有复核目标匹配当前筛选条件。"), "empty filtered state did not render");
   const emptyBulkResult = applyBulkVisibleReviewDecision("accepted_issue");
   assert(emptyBulkResult.visible === 0, "empty filtered bulk action reported visible targets");
   assert(emptyBulkResult.updated === 0, "empty filtered bulk action reported updated targets");
@@ -2831,7 +2831,7 @@ vm.runInContext(workbenchScript + `
   state.decisions.set(decisionKey("processing_review", "PR0002"), "false_positive");
   renderReview();
   setReviewFilter("decision", "accepted_issue");
-  assert(els.reviewFilterCount.textContent === "Showing 1 of 6 targets", "decision filter did not update visible/total count");
+  assert(els.reviewFilterCount.textContent === "显示 1 / 6 个目标", "decision filter did not update visible/total count");
   assert(els.reviewTargetList.innerHTML.includes("PR0001"), "decision filter hid matching accepted target");
   assert(!els.reviewTargetList.innerHTML.includes("PR0002"), "decision filter left non-matching false-positive target visible");
   const processingSummary = buildReviewSummary().aggregate_counts.review_completion;
@@ -2839,12 +2839,12 @@ vm.runInContext(workbenchScript + `
   assert(processingSummary.reviewed === 2, "processing-review reviewed target count did not update");
   assert(processingSummary.pending === 4, "processing-review pending target count did not update");
   assert(processingSummary.complete === false, "processing-review completion finished too early");
-  assert(els.reviewCompletionGate.textContent.includes("Review completion gate warning: not complete."), "processing-review incomplete gate warning did not render");
-  assert(els.reviewCompletionGate.textContent.includes("Total targets: 6."), "processing-review gate did not render total targets");
-  assert(els.reviewCompletionGate.textContent.includes("Reviewed targets: 2."), "processing-review gate did not render reviewed targets");
-  assert(els.reviewCompletionGate.textContent.includes("Pending targets: 4."), "processing-review gate did not render pending targets");
-  assert(els.reviewCompletionGate.textContent.includes("Accepted issue: 1"), "processing-review gate did not render accepted count");
-  assert(els.reviewCompletionGate.textContent.includes("False positive: 1"), "processing-review gate did not render false-positive count");
+  assert(els.reviewCompletionGate.textContent.includes("复核完成门禁警告：未完成。"), "processing-review incomplete gate warning did not render");
+  assert(els.reviewCompletionGate.textContent.includes("目标总数：6。"), "processing-review gate did not render total targets");
+  assert(els.reviewCompletionGate.textContent.includes("已复核目标：2。"), "processing-review gate did not render reviewed targets");
+  assert(els.reviewCompletionGate.textContent.includes("待处理目标：4。"), "processing-review gate did not render pending targets");
+  assert(els.reviewCompletionGate.textContent.includes("确认问题: 1"), "processing-review gate did not render accepted count");
+  assert(els.reviewCompletionGate.textContent.includes("误报: 1"), "processing-review gate did not render false-positive count");
   assert(buildReviewSummary().source_target_count === 6, "filter changed review export target count");
   assert(buildReviewSummary().decisions.length === 6, "filter removed decisions from privacy-safe export");
   assertPublicSafe(JSON.stringify(buildReviewSummary()), "filtered review export summary");
@@ -2899,7 +2899,7 @@ def validate_workbench(workbench: Path = WORKBENCH) -> dict[str, Any]:
         and (
             "review_summary.json" in error["message"]
             or "acceptance_summary.json" in error["message"]
-            or "Human Review Decisions" in error["message"]
+            or "人工复核决定" in error["message"]
         )
         for error in errors
     )
@@ -3039,8 +3039,8 @@ def validate_workbench(workbench: Path = WORKBENCH) -> dict[str, Any]:
         and not any(
             error["code"] == "missing_demo_fixture_label"
             and (
-                "Passing final production handoff" in error["message"]
-                or "Blocked final production handoff" in error["message"]
+                "通过的最终生产交接" in error["message"]
+                or "阻塞的最终生产交接" in error["message"]
             )
             for error in errors
         )
@@ -3049,7 +3049,7 @@ def validate_workbench(workbench: Path = WORKBENCH) -> dict[str, Any]:
         summary["coverage"]["demo_fixtures"]
         and not any(
             error["code"] == "missing_demo_fixture_label"
-            and "Disabled provider capability probe" in error["message"]
+            and "已禁用的提供方能力探测" in error["message"]
             for error in errors
         )
         and "scan-qc-provider-capability-probe-summary.v1" in demo_block
@@ -3106,37 +3106,37 @@ def validate_workbench(workbench: Path = WORKBENCH) -> dict[str, Any]:
     else:
         render_block = html[render_start:render_end]
         expected_labels = {
-            "Acceptance Passed",
-            "Blocking And Warning Codes",
-            "Blocking Count",
-            "Generated Timestamp",
-            "Missing Artifacts",
-            "Omitted private evidence",
-            "Present/Missing",
-            "Privacy Status",
-            "Public-Safe Artifact Readiness Checklist",
-            "Processing Workers",
-            "Provider Capability Probe",
-            "Provider Count",
-            "Configured Provider Count",
-            "Despeckle Backend Summary",
-            "Despeckle Backend Warning Codes",
-            "Effective Backend Mode",
-            "Fallback Count",
-            "Visible GPU Count",
-            "Visible Model Count",
-            "Optional Package Missing Count",
-            "Probe Privacy Status",
-            "Requested Backend",
-            "Requested NumPy Fallback Count",
-            "Public-Safe Artifact Compatibility Diagnostics",
-            "Recognized Artifact Type",
-            "Review Status Counts",
-            "Rule Counts",
-            "Rule Status Counts",
-            "Scan Workers",
-            "Schema Version",
-            "Schema/Type Detection",
+            "验收通过",
+            "阻塞与警告代码",
+            "阻塞数",
+            "生成时间戳",
+            "缺失工件",
+            "已省略私有证据",
+            "存在/缺失",
+            "隐私状态",
+            "公开安全工件就绪清单",
+            "处理工作线程",
+            "提供方能力探测",
+            "提供方数",
+            "已配置提供方数",
+            "去噪点后端摘要",
+            "去噪点后端警告代码",
+            "有效后端模式",
+            "回退数",
+            "可见 GPU 数",
+            "可见模型数",
+            "缺失可选包数",
+            "探测隐私状态",
+            "请求后端",
+            "请求 NumPy 后回退数",
+            "公开安全工件兼容性诊断",
+            "已识别工件类型",
+            "复核状态计数",
+            "规则计数",
+            "规则状态计数",
+            "扫描工作线程",
+            "架构版本",
+            "架构/类型检测",
         }
         for label in sorted(expected_labels):
             if label not in render_block:
