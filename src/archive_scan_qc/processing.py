@@ -178,17 +178,7 @@ def _process_records(
     workers: int,
     previous_records: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    if not options.resume_processing:
-        return _process_records_reusing_duplicates(files, input_dir, image_root, options, workers)
-    if workers == 1:
-        return [_process_record(item, input_dir, image_root, options, previous_records.get(item["relative_path"])) for item in files]
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        return list(
-            executor.map(
-                lambda item: _process_record(item, input_dir, image_root, options, previous_records.get(item["relative_path"])),
-                files,
-            )
-        )
+    return _process_records_reusing_duplicates(files, input_dir, image_root, options, workers, previous_records)
 
 
 def _process_records_reusing_duplicates(
@@ -197,7 +187,9 @@ def _process_records_reusing_duplicates(
     image_root: Path,
     options: ProcessingOptions,
     workers: int,
+    previous_records: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
+    previous_records = previous_records or {}
     first_by_sha: dict[str, int] = {}
     unique_items: list[dict[str, Any]] = []
     unique_positions: list[int] = []
@@ -217,22 +209,47 @@ def _process_records_reusing_duplicates(
         else:
             duplicate_sources[position] = first_position
 
+    def process_unique(item: dict[str, Any]) -> dict[str, Any]:
+        return _process_record(item, input_dir, image_root, options, previous_records.get(item["relative_path"]))
+
     if workers == 1:
-        unique_records = [_process_record(item, input_dir, image_root, options) for item in unique_items]
+        unique_records = [process_unique(item) for item in unique_items]
     else:
         with ThreadPoolExecutor(max_workers=workers) as executor:
-            unique_records = list(executor.map(lambda item: _process_record(item, input_dir, image_root, options), unique_items))
+            unique_records = list(executor.map(process_unique, unique_items))
 
     records: list[dict[str, Any] | None] = [None] * len(files)
     for position, record in zip(unique_positions, unique_records):
         records[position] = record
     for position, source_position in duplicate_sources.items():
+        item = files[position]
+        previous_record = previous_records.get(item["relative_path"])
+        if previous_record and _previous_record_is_current(previous_record, item, input_dir, image_root, options):
+            records[position] = _resume_record(previous_record, options)
+            continue
         source_record = records[source_position]
-        if source_record is None or source_record.get("status") != "processed":
-            records[position] = _process_record(files[position], input_dir, image_root, options)
+        if source_record is None or source_record.get("status") not in {"processed", "resumed"}:
+            records[position] = _process_record(item, input_dir, image_root, options, previous_record)
         else:
-            records[position] = _reuse_duplicate_record(files[position], input_dir, image_root, options, source_record)
+            duplicate_record = _reuse_duplicate_record(item, input_dir, image_root, options, source_record)
+            if options.resume_processing and previous_record is not None and duplicate_record.get("status") == "processed":
+                duplicate_record["reprocessed"] = True
+            records[position] = duplicate_record
     return [record for record in records if record is not None]
+
+
+def _resume_record(previous_record: dict[str, Any], options: ProcessingOptions) -> dict[str, Any]:
+    resumed = dict(previous_record)
+    resumed["status"] = "resumed"
+    resumed["resumed"] = True
+    resumed["reprocessed"] = False
+    resumed["duplicate_derivative_reused"] = bool(previous_record.get("duplicate_derivative_reused"))
+    resumed["_existing_derivative_reused"] = True
+    resumed["processing_options_fingerprint"] = _processing_options_fingerprint(options)
+    resumed["error"] = None
+    resumed["failure_reason"] = None
+    resumed["operations"] = list(previous_record.get("operations", [])) + ["resume_skip_existing_derivative"]
+    return resumed
 
 
 def _reuse_duplicate_record(
@@ -393,17 +410,7 @@ def _process_record(
         "failure_reason": None,
     }
     if previous_record and _previous_record_is_current(previous_record, item, input_dir, image_root, options):
-        resumed = dict(previous_record)
-        resumed["status"] = "resumed"
-        resumed["resumed"] = True
-        resumed["reprocessed"] = False
-        resumed["duplicate_derivative_reused"] = bool(previous_record.get("duplicate_derivative_reused"))
-        resumed["_existing_derivative_reused"] = True
-        resumed["processing_options_fingerprint"] = _processing_options_fingerprint(options)
-        resumed["error"] = None
-        resumed["failure_reason"] = None
-        resumed["operations"] = list(previous_record.get("operations", [])) + ["resume_skip_existing_derivative"]
-        return resumed
+        return _resume_record(previous_record, options)
 
     if options.resume_processing:
         base["reprocessed"] = previous_record is not None
@@ -646,6 +653,21 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "warning_files": len(warning_records),
             "failed_files": guardrail_failed_files,
             "failure_reasons": _reason_counts(guardrail_failures),
+        },
+        "reuse_decisions": {
+            "resume_skipped_existing_derivatives": {
+                "count": summary["skipped_due_to_resume"],
+                "reason": "prior successful derivative matched source hash, options fingerprint, and output hash",
+            },
+            "duplicate_derivative_reused": {
+                "count": summary["duplicate_reused_files"],
+                "reason": "duplicate source content reused an already processed derivative",
+            },
+            "existing_derivative_write_skipped": {
+                "count": summary["existing_derivative_reused_files"],
+                "reason": "existing derivative output already matched the expected derivative hash",
+            },
+            "scan_measurement_reuse": performance.get("scan_measurement_reuse", _empty_scan_measurement_reuse()),
         },
         "throughput": {
             "processed_files_per_minute": performance["processed_files_per_minute"],
