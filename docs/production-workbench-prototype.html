@@ -1713,6 +1713,7 @@
       if (next === "processing") {
         state.progress = 48;
         state.readyImages = state.readyImages || 0;
+        state.progressLabel = deriveProgressLabel({ status: "running", operator_summary: {}, counts: {} }, { state: "running" });
       }
       if (next === "needs_review") {
         state.progress = 82;
@@ -1964,6 +1965,11 @@
       els.readyText.textContent = `${state.readyImages} 张`;
       els.modeStatus.textContent = `当前处理方式：${state.processingModeLabel}。${state.processingModePurpose}${state.processingModeOutput}`;
       const locked = setupControlsLocked();
+      if (inRunStatus()) {
+        els.loadStatus.textContent = runningGuidanceText();
+        els.inputStatus.textContent = "批次正在运行，完成或失败前不能更改原图文件夹。";
+        els.outputStatus.textContent = "批次正在运行，完成或失败前不能更改输出文件夹。";
+      }
       els.inputFolder.disabled = locked;
       els.outputFolder.disabled = locked;
       els.inputPath.disabled = locked;
@@ -2187,6 +2193,54 @@
       return 0;
     }
 
+    const progressStageLabels = {
+      discover: "正在读取图片",
+      discovery: "正在读取图片",
+      input: "正在读取图片",
+      scan: "正在读取图片",
+      read: "正在读取图片",
+      read_images: "正在读取图片",
+      quality: "正在检查质量",
+      quality_check: "正在检查质量",
+      qc: "正在检查质量",
+      inspect: "正在检查质量",
+      process: "正在生成处理后图片",
+      processing: "正在生成处理后图片",
+      derivatives: "正在生成处理后图片",
+      generate: "正在生成处理后图片",
+      output: "正在生成处理后图片",
+      review: "等待人工确认",
+      needs_review: "等待人工确认",
+      finish: "可以完成",
+      finished: "可以完成",
+      completed: "可以完成"
+    };
+
+    function operatorProgressStage(progressInfo, summary) {
+      const activeStep = Array.isArray(progressInfo && progressInfo.steps)
+        ? progressInfo.steps.find((step) => step.id === progressInfo.current_step) || progressInfo.steps.find((step) => step.state === "running")
+        : null;
+      const raw = String(
+        (activeStep && (activeStep.stage_zh || activeStep.label_zh || activeStep.label || activeStep.id)) ||
+        (progressInfo && (progressInfo.stage_zh || progressInfo.current_stage || progressInfo.current_step || progressInfo.state)) ||
+        (summary && summary.status) ||
+        ""
+      ).toLowerCase();
+      if (raw.includes("读取") || raw.includes("discover") || raw.includes("scan") || raw.includes("read")) return "正在读取图片";
+      if (raw.includes("质量") || raw.includes("quality") || raw.includes("qc") || raw.includes("inspect")) return "正在检查质量";
+      if (raw.includes("生成") || raw.includes("处理后") || raw.includes("process") || raw.includes("derivative") || raw.includes("output")) return "正在生成处理后图片";
+      if (raw.includes("review") || raw.includes("确认")) return "等待人工确认";
+      if (raw.includes("finish") || raw.includes("complete") || raw.includes("完成")) return "可以完成";
+      const mapped = progressStageLabels[raw];
+      if (mapped) return mapped;
+      const rawState = (progressInfo && progressInfo.state) || (summary && summary.status) || "";
+      if (rawState === "needs_review") return "等待人工确认";
+      if (rawState === "finished" || rawState === "completed") return "可以完成";
+      if (rawState === "blocked") return "需要管理员处理";
+      if (rawState === "running") return "正在生成处理后图片";
+      return "正在处理";
+    }
+
     function progressStageLabel(progressInfo) {
       if (!progressInfo || typeof progressInfo !== "object") return "等待开始";
       const activeStep = Array.isArray(progressInfo.steps)
@@ -2210,6 +2264,14 @@
       return "未开始";
     }
 
+    function firstPositiveNumber(values) {
+      for (const value of values) {
+        const number = toNumber(value);
+        if (number > 0) return number;
+      }
+      return 0;
+    }
+
     function deriveProgressLabel(summary, progress) {
       const progressInfo = progress || (summary && summary.progress) || {};
       const counts = (summary && summary.counts) || {};
@@ -2217,11 +2279,22 @@
       const activeStep = Array.isArray(progressInfo.steps)
         ? progressInfo.steps.find((step) => step.id === progressInfo.current_step) || progressInfo.steps.find((step) => step.state === "running")
         : null;
-      const total = toNumber(operator.total_source_images || counts.total_files || (activeStep && activeStep.total_items));
-      const completed = toNumber(operator.derivative_images_ready || counts.processed_files || (activeStep && activeStep.completed_items));
+      const total = firstPositiveNumber([operator.total_source_images, counts.total_files, activeStep && activeStep.total_items, progressInfo.total_items, progressInfo.total_steps]);
+      const completed = firstPositiveNumber([operator.derivative_images_ready, counts.processed_files, activeStep && activeStep.completed_items, progressInfo.completed_items, progressInfo.completed_steps]);
       const failed = toNumber(counts.failed_files);
-      if (total <= 0 && completed <= 0 && failed <= 0) return "";
-      return `阶段：${progressStageLabel(progressInfo)}；总数 ${total} 张，已完成 ${completed} 张，失败 ${failed} 张；状态：${progressStateLabel(summary, progressInfo)}`;
+      const stage = operatorProgressStage(progressInfo, summary);
+      const stateLabel = progressStateLabel(summary, progressInfo);
+      const countText = total > 0
+        ? `已处理 ${Math.min(completed, total)} 张 / 共 ${total} 张`
+        : completed > 0
+          ? `已处理 ${completed} 张；总数还在统计`
+          : "正在统计图片数量";
+      const failureText = failed > 0 ? `；有 ${failed} 张需要管理员处理` : "";
+      return `阶段：${stage}；${countText}${failureText}；状态：${stateLabel}`;
+    }
+
+    function runningGuidanceText() {
+      return "批次正在运行，请等待。本机正在处理图片，处理完成或失败前不能更改文件夹和处理方式，也不要反复点击开始处理。";
     }
 
     function makeReviewItems(count) {
@@ -2378,7 +2451,7 @@
         state.progress = pendingCount() === 0 ? Math.max(state.progress, 94) : Math.max(state.progress, 82);
       }
       if (inRunStatus()) {
-        els.loadStatus.textContent = "正在处理，请不要关闭页面或更改文件夹。";
+        els.loadStatus.textContent = runningGuidanceText();
       }
       render();
     }
@@ -2430,7 +2503,7 @@
       } else if (payload.running) {
         state.launchLocked = false;
         setStatus("processing");
-        els.loadStatus.textContent = "正在处理，请不要关闭页面或更改文件夹。";
+        els.loadStatus.textContent = runningGuidanceText();
       } else if (payload.recovery_guidance) {
         state.recoveryGuidance = payload.recovery_guidance;
         render();
@@ -2494,7 +2567,7 @@
       }
       let payload;
       try {
-        els.loadStatus.textContent = duringLaunch ? "正在处理，请不要关闭页面或更改文件夹。" : "正在保存文件夹。";
+        els.loadStatus.textContent = duringLaunch ? runningGuidanceText() : "正在保存文件夹。";
         payload = await apiPost("/api/configure", {
           input_dir: els.inputPath.value.trim(),
           derivatives_dir: els.outputPath.value.trim(),
@@ -2572,7 +2645,7 @@
       try {
         state.launchLocked = true;
         state.status = "checking";
-        els.loadStatus.textContent = "正在处理，请不要关闭页面或更改文件夹。";
+        els.loadStatus.textContent = runningGuidanceText();
         render();
         const readyAfterSave = await saveFolders({ duringLaunch: true });
         if (!readyAfterSave || !canStartProcessing()) {
@@ -2584,7 +2657,7 @@
         const payload = await apiPost("/api/start", {});
         state.launchLocked = false;
         applyServerStatus(payload);
-        els.loadStatus.textContent = "正在处理，请等待；处理完成后再复核。";
+        els.loadStatus.textContent = runningGuidanceText();
         window.clearInterval(localApi.polling);
         localApi.polling = window.setInterval(pollServerStatus, 1200);
       } catch (error) {
