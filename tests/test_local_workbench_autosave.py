@@ -410,11 +410,11 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertTrue(result["finished"])
             self.assertEqual(
                 result["message_zh"],
-                "完成并导出结果：处理后图片已保存到输出文件夹，复核结果和交接说明已保存到本机状态文件夹。",
+                "本批已完成：处理后图片已保存到输出文件夹，复核结果和交接说明已保存到本机状态文件夹。",
             )
             self.assertEqual(result["decision_summary"]["completion_status"], "complete")
-            self.assertEqual(result["completion_panel"]["title_zh"], "本批次已完成")
-            self.assertEqual(result["completion_panel"]["completion_status_zh"], "已完成")
+            self.assertEqual(result["completion_panel"]["title_zh"], "本批已完成")
+            self.assertEqual(result["completion_panel"]["completion_status_zh"], "本批已完成")
             self.assertEqual(result["completion_panel"]["manual_work_zh"], "没有待人工处理图片")
             self.assertEqual(result["completion_panel"]["admin_handoff_zh"], "不需要")
             self.assertEqual(result["completion_panel"]["total_review_items"], 2)
@@ -432,7 +432,13 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertTrue(result["completion_panel"]["completion_note_path"].endswith(COMPLETION_NOTE_TXT))
             self.assertEqual(
                 result["completion_panel"]["next_steps_zh"],
-                ["查看处理后图片。", "需要继续加工时，点击准备下一批。", "如果仍有异常或不能交接，请交管理员处理。"],
+                [
+                    "打开输出文件夹，检查处理后图片数量和画面状态。",
+                    "本机状态文件夹已保存复核结果和交接说明，正常界面不显示具体路径或文件名。",
+                    "需要继续加工时，点击准备下一批；当前复核队列会清空。",
+                    "为新批次重新选择扫描原图文件夹和输出文件夹，不要混用批次。",
+                    "如果仍有异常或不能交接，请交管理员处理。",
+                ],
             )
             self.assertTrue((metadata_dir / REVIEW_DECISION_SUMMARY_JSON).exists())
             saved_summary = json.loads((metadata_dir / REVIEW_DECISION_SUMMARY_JSON).read_text(encoding="utf-8"))
@@ -446,6 +452,9 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertIn("处理后图片文件夹：", completion_note)
             self.assertIn("复核结果保存位置：", completion_note)
             self.assertIn("复核结果和交接说明已保存到本机状态文件夹", completion_note)
+            self.assertIn("交接前检查：打开输出文件夹", completion_note)
+            self.assertIn("当前复核队列", completion_note)
+            self.assertIn("不要混用批次", completion_note)
             self.assertIn("下一批：", completion_note)
             verification = json.loads((metadata_dir / REVIEW_DECISION_VERIFICATION_JSON).read_text(encoding="utf-8"))
             self.assertEqual(verification["status"], "pass")
