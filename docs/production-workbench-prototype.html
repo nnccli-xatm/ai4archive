@@ -1295,7 +1295,8 @@
       comparisonMode: "processed",
       processingMode: "standard",
       processingModeLabel: "标准优化",
-      progressLabel: ""
+      progressLabel: "",
+      launchLocked: false
     };
 
     const els = {
@@ -1633,7 +1634,7 @@
     }
 
     function setupControlsLocked() {
-      return ["checking", "processing", "needs_review", "ready_to_finish", "complete"].includes(state.status);
+      return state.launchLocked || ["checking", "processing", "needs_review", "ready_to_finish", "complete"].includes(state.status);
     }
 
     function inRunStatus() {
@@ -2201,6 +2202,7 @@
       if (summaryMode || operator.processing_mode) setProcessingMode(summaryMode || operator.processing_mode, summaryModeLabel);
       const rawStatus = summary.status || (progress && progress.state) || "pending";
       let nextStatus = runStateMap[rawStatus] || "failed";
+      state.launchLocked = false;
       state.inputChosen = true;
       state.outputChosen = true;
       state.totalImages = toNumber(operator.total_source_images || (summary.counts && summary.counts.total_files));
@@ -2238,6 +2240,7 @@
     function applyServerStatus(payload) {
       if (!payload) return;
       if (payload.last_error_zh) {
+        state.launchLocked = false;
         state.inputChosen = true;
         state.outputChosen = true;
         state.status = "failed";
@@ -2270,6 +2273,7 @@
         applyRunStatus(payload.summary || { status: payload.running ? "running" : "pending", operator_summary: {} }, payload.progress, payload.queue, payload.draft_decisions);
         if (payload.recovery_guidance && !state.recoveryGuidance) state.recoveryGuidance = payload.recovery_guidance;
       } else if (payload.running) {
+        state.launchLocked = false;
         setStatus("processing");
         els.loadStatus.textContent = "正在处理，请不要关闭页面或更改文件夹。";
       } else if (payload.recovery_guidance) {
@@ -2310,6 +2314,7 @@
     }
 
     async function saveFolders() {
+      const duringLaunch = Boolean(arguments[0] && arguments[0].duringLaunch);
       if (!localApi.enabled) {
         els.loadStatus.textContent = "请从本机入口启动后，在输入框填写本机文件夹位置再保存。";
         updateChosenFromPaths();
@@ -2325,7 +2330,7 @@
       }
       let payload;
       try {
-        els.loadStatus.textContent = "正在保存文件夹。";
+        els.loadStatus.textContent = duringLaunch ? "正在处理，请不要关闭页面或更改文件夹。" : "正在保存文件夹。";
         payload = await apiPost("/api/configure", {
           input_dir: els.inputPath.value.trim(),
           derivatives_dir: els.outputPath.value.trim(),
@@ -2354,8 +2359,10 @@
       state.outputChosen = true;
       state.status = "ready";
       applyServerStatus(payload);
-      els.loadStatus.textContent = "文件夹已保存，可以开始处理。";
-      els.loadStatus.textContent = canStartProcessing() ? "文件夹已保存，可以开始处理。原图不会被覆盖，处理后图片会准备到输出文件夹。" : blockedStartMessage();
+      if (!duringLaunch) {
+        els.loadStatus.textContent = "文件夹已保存，可以开始处理。";
+        els.loadStatus.textContent = canStartProcessing() ? "文件夹已保存，可以开始处理。原图不会被覆盖，处理后图片会准备到输出文件夹。" : blockedStartMessage();
+      }
       render();
       return canStartProcessing();
     }
@@ -2398,27 +2405,33 @@
         return;
       }
       try {
+        state.launchLocked = true;
         state.status = "checking";
-        els.loadStatus.textContent = "正在检查文件夹。";
+        els.loadStatus.textContent = "正在处理，请不要关闭页面或更改文件夹。";
         render();
-        const readyAfterSave = await saveFolders();
+        const readyAfterSave = await saveFolders({ duringLaunch: true });
         if (!readyAfterSave || !canStartProcessing()) {
+          state.launchLocked = false;
           els.loadStatus.textContent = blockedStartMessage();
           render();
           return;
         }
         const payload = await apiPost("/api/start", {});
+        state.launchLocked = false;
         applyServerStatus(payload);
         els.loadStatus.textContent = "正在处理，请等待；处理完成后再复核。";
         window.clearInterval(localApi.polling);
         localApi.polling = window.setInterval(pollServerStatus, 1200);
       } catch (error) {
+        state.launchLocked = false;
         els.loadStatus.textContent = error.message || "本机处理启动失败。";
         const guidance = error.payload && (error.payload.preflight_guidance || error.payload.recovery_guidance);
         if (guidance) {
           state.status = "failed";
           state.operatorMessage = error.message || guidance.message_zh || "本机处理启动失败。";
           state.recoveryGuidance = guidance;
+          render();
+        } else {
           render();
         }
       }
@@ -2680,6 +2693,7 @@
       state.adminHandoffFact = "不需要";
       state.completionSteps = DEFAULT_COMPLETION_STEPS.slice();
       state.finishConfirmationVisible = false;
+      state.launchLocked = false;
       state.lastDraftMessage = "";
       state.operatorMessage = "";
       state.reviewQueueText = "";
