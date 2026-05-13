@@ -1061,6 +1061,7 @@
           <div class="recovery-counts" id="recoveryCounts"></div>
           <ul id="recoverySteps"></ul>
           <button type="button" class="recovery-action hidden" id="retryButton">重试本批次</button>
+          <button type="button" class="recovery-action secondary hidden" id="recoveryNextBatchButton">开始新批次</button>
         </div>
 
         <details class="maintenance-loader">
@@ -1296,7 +1297,8 @@
       processingMode: "standard",
       processingModeLabel: "标准优化",
       progressLabel: "",
-      launchLocked: false
+      launchLocked: false,
+      waitingForNewSetup: false
     };
 
     const els = {
@@ -1344,6 +1346,7 @@
       recoveryCounts: document.getElementById("recoveryCounts"),
       recoverySteps: document.getElementById("recoverySteps"),
       retryButton: document.getElementById("retryButton"),
+      recoveryNextBatchButton: document.getElementById("recoveryNextBatchButton"),
       readinessBox: document.getElementById("readinessBox"),
       readinessTitle: document.getElementById("readinessTitle"),
       readinessMessage: document.getElementById("readinessMessage"),
@@ -1614,6 +1617,7 @@
       if (!state.folderReadiness) return;
       state.folderReadiness = null;
       if (state.status === "ready") state.status = "choose_input";
+      state.waitingForNewSetup = true;
       els.loadStatus.textContent = message || "文件夹已更改，请重新保存文件夹。";
     }
 
@@ -1978,6 +1982,9 @@
       const retryable = guidance.kind === "processing_failed_retryable" && toNumber(guidance.retryable_files) > 0;
       els.retryButton.classList.toggle("hidden", !retryable);
       els.retryButton.disabled = !retryable || state.status === "processing" || state.status === "checking";
+      const canPrepareNewBatch = ["failed", "complete"].includes(state.status);
+      els.recoveryNextBatchButton.classList.toggle("hidden", !canPrepareNewBatch);
+      els.recoveryNextBatchButton.disabled = !canPrepareNewBatch;
     }
 
     function renderFolderReadiness() {
@@ -2239,6 +2246,8 @@
 
     function applyServerStatus(payload) {
       if (!payload) return;
+      if (state.waitingForNewSetup && !payload.configured) return;
+      if (state.waitingForNewSetup && (payload.summary || payload.progress || payload.queue || payload.draft_decisions)) return;
       if (payload.last_error_zh) {
         state.launchLocked = false;
         state.inputChosen = true;
@@ -2357,6 +2366,7 @@
       }
       state.inputChosen = true;
       state.outputChosen = true;
+      state.waitingForNewSetup = false;
       state.status = "ready";
       applyServerStatus(payload);
       if (!duringLaunch) {
@@ -2673,7 +2683,17 @@
     els.confirmFinishButton.addEventListener("click", finishBatch);
     els.returnReviewButton.addEventListener("click", returnToReviewFromFinishConfirmation);
     els.exportButton.addEventListener("click", exportDecisions);
-    function prepareNextBatch() {
+
+    async function resetServerBatchState() {
+      if (!localApi.enabled) return;
+      try {
+        await apiPost("/api/reset-batch", {});
+      } catch (error) {
+        els.loadStatus.textContent = error.message || "当前不能开始新批次。";
+      }
+    }
+
+    async function prepareNextBatch() {
       state.inputChosen = false;
       state.outputChosen = false;
       state.status = "choose_input";
@@ -2694,6 +2714,7 @@
       state.completionSteps = DEFAULT_COMPLETION_STEPS.slice();
       state.finishConfirmationVisible = false;
       state.launchLocked = false;
+      state.waitingForNewSetup = true;
       state.lastDraftMessage = "";
       state.operatorMessage = "";
       state.reviewQueueText = "";
@@ -2722,10 +2743,12 @@
       window.clearTimeout(localApi.saveTimer);
       localApi.polling = null;
       render();
+      await resetServerBatchState();
     }
 
     els.resetButton.addEventListener("click", prepareNextBatch);
     els.nextBatchButton.addEventListener("click", prepareNextBatch);
+    els.recoveryNextBatchButton.addEventListener("click", prepareNextBatch);
 
     els.decisionActions.addEventListener("click", (event) => {
       const button = event.target.closest("button[data-decision]");

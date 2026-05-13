@@ -146,6 +146,19 @@ class WorkbenchController:
             raise ValueError("当前批次不能直接重试。请按提示检查文件夹，必要时交管理员处理。")
         return self._start_run()
 
+    def reset_for_next_batch(self) -> dict[str, Any]:
+        with self._lock:
+            if self._thread and self._thread.is_alive():
+                raise ValueError("当前批次正在处理，不能开始新批次。")
+            self._thread = None
+            self.input_dir = None
+            self.derivatives_dir = None
+            self.metadata_dir = None
+            self.processing_mode = DEFAULT_PROCESSING_MODE
+            self.last_error = None
+            self.last_preflight_guidance = None
+        return self.status()
+
     def _start_run(self) -> dict[str, Any]:
         with self._lock:
             if self._thread and self._thread.is_alive():
@@ -511,6 +524,8 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
                 result = self.workbench_controller.start()
             elif self.path == "/api/retry":
                 result = self.workbench_controller.retry()
+            elif self.path == "/api/reset-batch":
+                result = self.workbench_controller.reset_for_next_batch()
             elif self.path == "/api/finish-decisions":
                 result = self.workbench_controller.save_review_decisions(payload)
             elif self.path == "/api/save-draft-decisions":
@@ -644,6 +659,7 @@ _OPERATOR_SAFE_ERROR_MESSAGES_ZH = {
     "输出文件夹或本机状态文件夹不能创建。请确认磁盘已连接、没有只读，并重新选择文件夹。",
     "当前批次不能直接重试。请按提示检查文件夹，必要时交管理员处理。",
     "当前批次正在处理。",
+    "当前批次正在处理，不能开始新批次。",
     "请先填写并保存两个文件夹位置。",
     "预览请求缺少复核编号。",
     "预览来源不正确。",
