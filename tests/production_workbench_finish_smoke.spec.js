@@ -119,6 +119,132 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.getByText("只用于查看本机已经生成的处理状态，不会开始处理。")).toBeVisible();
   });
 
+  test("shows aggregate Chinese running progress and keeps setup locked until review", async ({ page }) => {
+    let payload = {
+      schema_version: "scan-qc.local-production-workbench.v1",
+      running: true,
+      configured: true,
+      folders: {
+        input: "/tmp/private-running-input",
+        derivatives: "/tmp/private-running-output",
+        metadata: "/tmp/private-running-output/_production_workbench",
+      },
+      summary: {
+        schema_version: "scan-qc.production-run.v1",
+        status: "running",
+        operator_summary: {
+          message_zh: "本机正在处理图片。",
+          total_source_images: 12,
+          derivative_images_ready: 5,
+          files_needing_attention: 0,
+        },
+        counts: {
+          total_files: 12,
+          processed_files: 5,
+          failed_files: 0,
+        },
+      },
+      progress: {
+        schema_version: "scan-qc.production-run-progress.v1",
+        state: "running",
+        current_step: "quality_check",
+        steps: [{ id: "quality_check", state: "running", completed_items: 5, total_items: 12 }],
+      },
+    };
+
+    const queue = {
+      schema_version: "scan-qc.production-review-queue.v1",
+      items: [
+        {
+          local_id: "PRQ-PROGRESS-1",
+          reason_zh: "画面需要确认。",
+          focus_hints_zh: ["确认画面是否完整", "判断是否需要重扫"],
+          suggested_action: "rescan",
+          severity: "P1",
+          preview_source: "unavailable",
+          preview_sources: { original: false, processed: false },
+        },
+      ],
+    };
+
+    await page.route("**/api/status", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(payload),
+      });
+    });
+
+    await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
+    await expect(page.locator("#stateAction")).toHaveText("正在处理");
+    await expect(page.locator("#progressText")).toHaveText("阶段：正在检查质量；已处理 5 张 / 共 12 张；状态：正在处理");
+    await expect(page.locator("#loadStatus")).toHaveText("批次正在运行，请等待。本机正在处理图片，处理完成或失败前不能更改文件夹和处理方式，也不要反复点击开始处理。");
+    await expect(page.locator("#inputStatus")).toHaveText("批次正在运行，完成或失败前不能更改原图文件夹。");
+    await expect(page.locator("#outputStatus")).toHaveText("批次正在运行，完成或失败前不能更改输出文件夹。");
+    await expectLaunchSetupControlsDisabled(page);
+    await expectOperatorStatusHidesPaths(page, [
+      "/tmp/private-running-input",
+      "/tmp/private-running-output",
+      "private-running-input",
+      "private-running-output",
+      "PRQ-PROGRESS-1",
+    ]);
+
+    payload = {
+      ...payload,
+      progress: {
+        schema_version: "scan-qc.production-run-progress.v1",
+        state: "running",
+      },
+      summary: {
+        schema_version: "scan-qc.production-run.v1",
+        status: "running",
+        operator_summary: { message_zh: "本机正在处理图片。", files_needing_attention: 0 },
+        counts: {},
+      },
+    };
+    await page.evaluate(() => pollServerStatus());
+    await expect(page.locator("#progressText")).toHaveText("阶段：正在生成处理后图片；正在统计图片数量；状态：正在处理");
+    await expectLaunchSetupControlsDisabled(page);
+
+    payload = {
+      schema_version: "scan-qc.local-production-workbench.v1",
+      running: false,
+      configured: true,
+      folders: {
+        input: "/tmp/private-running-input",
+        derivatives: "/tmp/private-running-output",
+        metadata: "/tmp/private-running-output/_production_workbench",
+      },
+      summary: {
+        schema_version: "scan-qc.production-run.v1",
+        status: "needs_review",
+        operator_summary: {
+          message_zh: "有图片需要人工确认。",
+          total_source_images: 12,
+          derivative_images_ready: 12,
+          files_needing_attention: 1,
+        },
+        counts: {
+          total_files: 12,
+          processed_files: 12,
+          failed_files: 0,
+        },
+      },
+      progress: {
+        schema_version: "scan-qc.production-run-progress.v1",
+        state: "needs_review",
+      },
+      queue,
+    };
+    await page.evaluate(() => pollServerStatus());
+    await expect(page.locator("#stateAction")).toHaveText("有图片需要人工确认");
+    await expect(page.locator("#progressText")).toHaveText("阶段：等待人工确认；已处理 12 张 / 共 12 张；状态：需要人工确认");
+    await expect(page.locator("#remainingWorkText")).toHaveText("还需确认 1 张");
+    await expect(page.getByRole("button", { name: "确认通过" })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "完成并导出结果" })).toBeEnabled();
+    await expectLaunchSetupControlsDisabled(page);
+  });
+
   test("finishes a synthetic review queue without console errors or warnings", async ({ page }) => {
     const consoleProblems = [];
     let resetRequested = false;
@@ -714,7 +840,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     });
 
     await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
-    await expect(page.locator("#progressText")).toHaveText("阶段：处理被阻断；总数 4 张，已完成 2 张，失败 2 张；状态：需要处理");
+    await expect(page.locator("#progressText")).toHaveText("阶段：需要管理员处理；已处理 2 张 / 共 4 张；有 2 张需要管理员处理；状态：需要处理");
     await expect(page.locator("#recoveryTitle")).toHaveText("处理没有全部完成");
     await expect(page.locator("#recoveryMessage")).toHaveText("本批次有图片没有处理完，可以先检查文件夹后重试本批次。");
     await expect(page.getByText("检查扫描原图文件夹和输出文件夹是否选对。")).toBeVisible();
@@ -774,7 +900,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     });
 
     await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
-    await expect(page.locator("#progressText")).toHaveText("阶段：处理被阻断；总数 2 张，已完成 0 张，失败 2 张；状态：需要处理");
+    await expect(page.locator("#progressText")).toHaveText("阶段：需要管理员处理；已处理 0 张 / 共 2 张；有 2 张需要管理员处理；状态：需要处理");
     await expect(page.locator("#recoveryTitle")).toHaveText("处理没有全部完成");
     await expect(page.locator("#recoveryMessage")).toHaveText("本批次没有处理完，当前不能直接重试。");
     await expect(page.getByRole("button", { name: "重试本批次" })).toBeHidden();
@@ -846,8 +972,8 @@ test.describe("production workbench finish/export browser smoke", () => {
 
     await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
     await expect(page.locator("#stateName")).toHaveText("正在处理");
-    await expect(page.locator("#loadStatus")).toHaveText("正在处理，请不要关闭页面或更改文件夹。");
-    await expect(page.locator("#progressText")).toHaveText("阶段：生成处理后图片；总数 120 张，已完成 48 张，失败 0 张；状态：正在处理");
+    await expect(page.locator("#loadStatus")).toHaveText("批次正在运行，请等待。本机正在处理图片，处理完成或失败前不能更改文件夹和处理方式，也不要反复点击开始处理。");
+    await expect(page.locator("#progressText")).toHaveText("阶段：正在生成处理后图片；已处理 48 张 / 共 120 张；状态：正在处理");
     await expect(page.locator("#sourceText")).toHaveText("120 张");
     await expect(page.locator("#readyText")).toHaveText("48 张");
     await expect(page.locator("#inputPath")).toBeDisabled();
@@ -959,7 +1085,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     });
 
     await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
-    await expect(page.locator("#loadStatus")).toHaveText("正在处理，请不要关闭页面或更改文件夹。");
+    await expect(page.locator("#loadStatus")).toHaveText("批次正在运行，请等待。本机正在处理图片，处理完成或失败前不能更改文件夹和处理方式，也不要反复点击开始处理。");
     await expect(page.locator("#inputPath")).toBeDisabled();
     await expect(page.locator("#outputPath")).toBeDisabled();
     await expectProcessingModeRadiosDisabled(page, true);
@@ -1148,8 +1274,8 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#readinessFacts")).toContainText("方式说明：推荐用于正常批量生产");
     await expectOperatorStatusHidesPaths(page, ["/tmp/ready-input", "/tmp/ready-output", "ready-input", "ready-output"]);
     await page.getByRole("button", { name: "开始处理" }).click();
-    await expect(page.locator("#loadStatus")).toHaveText("正在处理，请等待；处理完成后再复核。");
-    expect(startRequested).toBe(true);
+    await expect(page.locator("#loadStatus")).toHaveText("批次正在运行，请等待。本机正在处理图片，处理完成或失败前不能更改文件夹和处理方式，也不要反复点击开始处理。");
+    await expect.poll(() => startRequested).toBe(true);
   });
 
   test("keeps setup controls locked after configure while start request is delayed", async ({ page }) => {
@@ -1231,7 +1357,7 @@ test.describe("production workbench finish/export browser smoke", () => {
 
     await page.getByRole("button", { name: "开始处理" }).click();
     await expect.poll(() => startRequested).toBe(true);
-    await expect(page.locator("#loadStatus")).toHaveText("正在处理，请不要关闭页面或更改文件夹。");
+    await expect(page.locator("#loadStatus")).toHaveText("批次正在运行，请等待。本机正在处理图片，处理完成或失败前不能更改文件夹和处理方式，也不要反复点击开始处理。");
     await expect(page.locator("#stateName")).toHaveText("准备完成");
     await expect(page.locator("#readinessFacts")).toContainText("可处理图片：4 张");
     await expectLaunchSetupControlsDisabled(page);
@@ -1239,7 +1365,7 @@ test.describe("production workbench finish/export browser smoke", () => {
 
     resolveStart();
     await expect(page.locator("#stateName")).toHaveText("正在处理");
-    await expect(page.locator("#progressText")).toContainText("总数 4 张，已完成 1 张，失败 0 张");
+    await expect(page.locator("#progressText")).toContainText("已处理 1 张 / 共 4 张");
     await expectLaunchSetupControlsDisabled(page);
   });
 
