@@ -39,7 +39,7 @@ function waitForServer(url) {
 
 async function expectOperatorStatusHidesPaths(page, forbiddenPaths) {
   const operatorStatusText = await page
-    .locator("#outputPanel, #loadStatus, #inputStatus, #outputStatus, #readinessBox, #recoveryBox, #stateName, #stateAction, #stateHint, #currentAdvice, #currentDecisionStatus, #previewSourceText, #activePreviewModeText, #previewFrame")
+    .locator("#outputPanel, #loadStatus, #inputStatus, #outputStatus, #readinessBox, #recoveryBox, #stateName, #stateAction, #stateHint, #currentAdvice, #currentRecommendationReason, #currentDecisionStatus, #decisionGuideList, #decisionSaveGuidance, #previewSourceText, #activePreviewModeText, #previewFrame")
     .allTextContents();
   const combined = operatorStatusText.join("\n");
   for (const value of ["/tmp", "/private", "/Users", ...forbiddenPaths]) {
@@ -436,8 +436,15 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#reviewPositionText")).toHaveText("当前第 1 张 / 共 3 张；还需确认 3 张。");
     await expect(page.locator("#currentFocusHints")).toHaveText("看图片能否正常打开；重点判断是否需要重扫");
     await expect(page.locator("#currentRecommendation")).toHaveText("建议：退回重扫");
+    await expect(page.locator("#currentRecommendationReason")).toHaveText("建议退回重扫，是因为这类问题通常需要扫描工位重新获取图片，不能只靠重新处理解决。");
     await expect(page.locator("#currentDecisionStatus")).toHaveText("当前决定：未决定");
     await expect(page.getByRole("button", { name: "退回重扫" })).toHaveClass(/recommended-choice/);
+    await expect(page.locator('[data-guide-decision="rescan"]')).toHaveClass(/recommended-guide/);
+    await expect(page.locator("#decisionGuideList")).toContainText("确认通过：图片可以继续使用；点击后会保存决定并看下一张。");
+    await expect(page.locator("#decisionGuideList")).toContainText("退回重扫：原图不清楚、缺页、歪斜严重或打不开；点击后交回扫描工位补扫。");
+    await expect(page.locator("#decisionGuideList")).toContainText("重新处理图片：原图可用，但处理后图片需要重新生成；点击后保留原图并安排重新处理。");
+    await expect(page.locator("#decisionGuideList")).toContainText("确认保留原貌：痕迹、颜色、折痕或旧化是档案本来样子；点击后不让自动优化覆盖原貌。");
+    await expect(page.locator("#decisionSaveGuidance")).toHaveText("选择任一决定后，会保存当前图片的决定和备注，并自动显示下一张待确认图片；全部确认后可以完成并导出结果。");
     await expect(page.getByRole("button", { name: "确认通过" })).toBeEnabled();
     await expect(page.getByRole("button", { name: "重新处理图片" })).toBeEnabled();
     await expect(page.getByRole("button", { name: "确认保留原貌" })).toBeEnabled();
@@ -513,7 +520,9 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#remainingWorkText")).toHaveText("还需确认 2 张");
     await expect(page.locator("#reviewMovementText")).toHaveText("正在看第 2 张；确认后会自动跳到下一张待确认图片。");
     await expect(page.locator("#currentRecommendation")).toHaveText("建议：重新处理图片");
+    await expect(page.locator("#currentRecommendationReason")).toHaveText("建议重新处理图片，是因为原图仍可使用，通常重新生成处理后图片即可继续。");
     await expect(page.getByRole("button", { name: "重新处理图片" })).toHaveClass(/recommended-choice/);
+    await expect(page.locator('[data-guide-decision="reprocess"]')).toHaveClass(/recommended-guide/);
     await expect(page.locator("#previewSourceText")).toHaveText("图片查看：处理后图片不可用，正在显示原图。");
     await expect(page.locator("#activePreviewModeText")).toHaveText("当前查看：原图。本张没有处理后图片，可查看原图后继续判断。");
     await expect(page.getByText("本张没有处理后图片，可查看原图。看完后在右侧选择处理决定。")).toBeVisible();
@@ -539,6 +548,8 @@ test.describe("production workbench finish/export browser smoke", () => {
     await page.getByRole("button", { name: "重新处理图片" }).click();
     await expect(page.getByText("已记录：重新处理图片。已自动显示下一张待确认图片。已确认 2 张，还需确认 1 张。")).toBeVisible();
     await expect(page.locator("#currentRecommendation")).toHaveText("建议：确认保留原貌");
+    await expect(page.locator("#currentRecommendationReason")).toHaveText("建议保留原貌，是因为当前痕迹更像档案本身状态，自动优化不应覆盖这种原貌。");
+    await expect(page.locator('[data-guide-decision="keep_original_trace"]')).toHaveClass(/recommended-guide/);
     await expect(page.locator("#activePreviewModeText")).toHaveText("当前查看：处理后图片。本张没有原图，可继续判断或交管理员处理。");
     await expect(page.getByText("本张没有原图，可查看处理后图片。看完后在右侧选择处理决定。")).toBeVisible();
     await expect(page.locator('#comparisonControls button[data-comparison-mode="original"]')).toBeDisabled();
