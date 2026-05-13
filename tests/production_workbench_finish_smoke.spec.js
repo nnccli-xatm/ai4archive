@@ -121,6 +121,7 @@ test.describe("production workbench finish/export browser smoke", () => {
 
   test("finishes a synthetic review queue without console errors or warnings", async ({ page }) => {
     const consoleProblems = [];
+    let resetRequested = false;
     page.on("console", (message) => {
       if (["error", "warning"].includes(message.type())) consoleProblems.push(`${message.type()}: ${message.text()}`);
     });
@@ -269,6 +270,31 @@ test.describe("production workbench finish/export browser smoke", () => {
         }),
       });
     });
+    await page.route("**/api/reset-batch", async (route) => {
+      resetRequested = true;
+      expect(route.request().postDataJSON()).toEqual({});
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema_version: "scan-qc.local-production-workbench.v1",
+          running: false,
+          configured: false,
+          folders: { input: null, derivatives: null, metadata: null },
+          folder_readiness: {
+            schema_version: "scan-qc.local-folder-readiness.v1",
+            aggregate_only: true,
+            status: "not_configured",
+            ready_to_start: false,
+            supported_image_count: 0,
+            input_empty: true,
+            output_writable: false,
+            title_zh: "文件夹还没有保存",
+            message_zh: "请先保存扫描原图文件夹和处理后输出文件夹。",
+            next_steps_zh: ["填写两个文件夹位置。", "保存文件夹后查看准备情况。"],
+          },
+        }),
+      });
+    });
 
     await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
     await expect(page.getByRole("heading", { name: "当前图片" })).toBeVisible();
@@ -405,7 +431,19 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#stateName")).toHaveText("填写原图");
     await expect(page.locator("#inputPath")).toHaveValue("");
     await expect(page.locator("#outputPath")).toHaveValue("");
+    await expect(page.locator("#readinessBox")).toBeHidden();
+    await expect(page.locator("#queueText")).toHaveText("等待处理开始。");
+    await expect(page.locator("#decisionSummary")).toHaveText("已决定 0 项，待决定 0 项。");
+    await expect(page.locator("#completionCounts")).toHaveText("共 0 项，已确认 0 项，待决定 0 项。");
+    await expect(page.locator("#previewSourceText")).toHaveText("图片查看：等待本机处理结果。");
+    await expect(page.locator("#finishConfirmPanel")).toBeHidden();
     await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
+    await expect(page.locator("#inputPath")).toBeEnabled();
+    await expect(page.locator("#outputPath")).toBeEnabled();
+    await expect(page.locator("#inputFolder")).toBeEnabled();
+    await expect(page.locator("#outputFolder")).toBeEnabled();
+    await expectProcessingModeRadiosDisabled(page, false);
+    await expect.poll(() => resetRequested).toBe(true);
 
     expect(consoleProblems).toEqual([]);
     expect(fs.existsSync(path.join(ROOT, "docs", "production-workbench-prototype.html"))).toBe(true);
@@ -654,6 +692,7 @@ test.describe("production workbench finish/export browser smoke", () => {
   });
 
   test("does not offer retry for administrator failures", async ({ page }) => {
+    let resetRequested = false;
     await page.route("**/api/status", async (route) => {
       await route.fulfill({
         contentType: "application/json",
@@ -690,14 +729,36 @@ test.describe("production workbench finish/export browser smoke", () => {
         }),
       });
     });
+    await page.route("**/api/reset-batch", async (route) => {
+      resetRequested = true;
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ schema_version: "scan-qc.local-production-workbench.v1", running: false, configured: false }),
+      });
+    });
 
     await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
     await expect(page.locator("#progressText")).toHaveText("阶段：处理被阻断；总数 2 张，已完成 0 张，失败 2 张；状态：需要处理");
     await expect(page.locator("#recoveryTitle")).toHaveText("处理没有全部完成");
     await expect(page.locator("#recoveryMessage")).toHaveText("本批次没有处理完，当前不能直接重试。");
     await expect(page.getByRole("button", { name: "重试本批次" })).toBeHidden();
+    await expect(page.getByRole("button", { name: "开始新批次" })).toBeVisible();
     await expect(page.getByText("请交管理员处理，不要反复点击开始处理。")).toBeVisible();
     await expect(page.getByText("如果文件夹选错了，请返回重新选择文件夹。")).toBeVisible();
+    await page.getByRole("button", { name: "开始新批次" }).click();
+    await expect(page.locator("#stateName")).toHaveText("填写原图");
+    await expect(page.locator("#inputPath")).toHaveValue("");
+    await expect(page.locator("#outputPath")).toHaveValue("");
+    await expect(page.locator("#failurePanel")).toBeHidden();
+    await expect(page.locator("#recoveryTitle")).toHaveText("文件夹还没有准备好");
+    await expect(page.locator("#queueText")).toHaveText("等待处理开始。");
+    await expect(page.locator("#decisionSummary")).toHaveText("已决定 0 项，待决定 0 项。");
+    await expect(page.locator("#completionCounts")).toHaveText("共 0 项，已确认 0 项，待决定 0 项。");
+    await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
+    await expect(page.locator("#inputPath")).toBeEnabled();
+    await expect(page.locator("#outputPath")).toBeEnabled();
+    await expectProcessingModeRadiosDisabled(page, false);
+    await expect.poll(() => resetRequested).toBe(true);
   });
 
   test("shows aggregate in-progress counts and current stage without private paths", async ({ page }) => {
@@ -1189,6 +1250,110 @@ test.describe("production workbench finish/export browser smoke", () => {
     await page.locator("#outputPath").fill("/tmp/edited-ready-output");
     await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
     await expect(page.locator("#loadStatus")).toHaveText("处理后输出文件夹已更改，请重新保存文件夹。");
+  });
+
+  test("after completing a batch, editing the next setup invalidates stale readiness", async ({ page }) => {
+    await page.route("**/api/status", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema_version: "scan-qc.local-production-workbench.v1",
+          running: false,
+          configured: true,
+          folders: {
+            input: "/tmp/completed-edit-input",
+            derivatives: "/tmp/completed-edit-output",
+            metadata: "/tmp/completed-edit-output/_production_workbench",
+          },
+          summary: {
+            schema_version: "scan-qc.production-run.v1",
+            status: "finished",
+            operator_summary: {
+              message_zh: "处理后图片已生成，可以完成并导出结果。",
+              total_source_images: 2,
+              derivative_images_ready: 2,
+              files_needing_attention: 0,
+            },
+            counts: { total_files: 2, openable_files: 2, processed_files: 2, failed_files: 0, retry_list_files: 0 },
+          },
+          progress: { schema_version: "scan-qc.production-run-progress.v1", state: "finished" },
+          queue: { schema_version: "scan-qc.production-review-queue.v1", items: [] },
+        }),
+      });
+    });
+    await page.route("**/api/finish-decisions", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema_version: "scan-qc.local-production-workbench.v1",
+          finished: true,
+          message_zh: "完成并导出结果：处理后图片已保存到输出文件夹，复核结果和交接说明已保存到本机状态文件夹。",
+          completion_panel: {
+            title_zh: "本批次已完成",
+            message_zh: "处理后图片已准备好。本批可以交接。",
+            completion_status_zh: "已完成",
+            manual_work_zh: "没有待人工处理图片",
+            admin_handoff_zh: "不需要",
+            total_review_items: 0,
+            reviewed_items: 0,
+            pending_items: 0,
+            next_steps_zh: ["查看处理后图片。", "需要继续加工时，点击准备下一批。"],
+          },
+        }),
+      });
+    });
+    await page.route("**/api/reset-batch", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ schema_version: "scan-qc.local-production-workbench.v1", running: false, configured: false }),
+      });
+    });
+    await page.route("**/api/configure", async (route) => {
+      const payload = JSON.parse(route.request().postData() || "{}");
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema_version: "scan-qc.local-production-workbench.v1",
+          running: false,
+          configured: true,
+          folders: {
+            input: payload.input_dir,
+            derivatives: payload.derivatives_dir,
+            metadata: `${payload.derivatives_dir}/_production_workbench`,
+          },
+          processing_mode: { id: "standard", label_zh: "标准优化" },
+          folder_readiness: {
+            schema_version: "scan-qc.local-folder-readiness.v1",
+            aggregate_only: true,
+            status: "ready",
+            ready_to_start: true,
+            supported_image_count: 5,
+            input_empty: false,
+            output_writable: true,
+            selected_processing_mode: { id: "standard", label_zh: "标准优化" },
+            title_zh: "文件夹可以开始处理",
+            message_zh: "发现 5 张可处理图片，输出文件夹可以写入。",
+            next_steps_zh: ["确认处理方式无误。", "点击开始处理。"],
+          },
+        }),
+      });
+    });
+
+    await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
+    await page.getByRole("button", { name: "完成并导出结果" }).click();
+    await page.getByRole("button", { name: "确认完成本批" }).click();
+    await expect(page.locator("#completionTitle")).toHaveText("本批次已完成");
+    await page.getByRole("button", { name: "准备下一批" }).click();
+    await page.locator("#inputPath").fill("/tmp/new-completed-input");
+    await page.locator("#outputPath").fill("/tmp/new-completed-output");
+    await page.getByRole("button", { name: "保存文件夹" }).click();
+    await expect(page.getByRole("button", { name: "开始处理" })).toBeEnabled();
+    await expect(page.locator("#readinessTitle")).toHaveText("文件夹可以开始处理");
+
+    await page.locator("#inputPath").fill("/tmp/new-completed-input-edited");
+    await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
+    await expect(page.locator("#readinessBox")).toBeHidden();
+    await expect(page.locator("#loadStatus")).toHaveText("扫描原图文件夹已更改，请重新保存文件夹。");
   });
 
   test("saved-ready then processing mode edit disables Start until folders are saved again", async ({ page }) => {

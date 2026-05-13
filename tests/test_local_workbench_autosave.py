@@ -92,6 +92,29 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertFalse(output_dir.exists())
             self.assertFalse(metadata_dir.exists())
 
+    def test_reset_for_next_batch_clears_configured_status_and_readiness(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            (input_dir / "page.png").write_bytes(b"fake image placeholder")
+            controller = WorkbenchController()
+            configured = controller.configure(input_dir, output_dir, metadata_dir)
+            self.assertTrue(configured["configured"])
+            self.assertTrue(configured["folder_readiness"]["ready_to_start"])
+
+            reset = controller.reset_for_next_batch()
+
+            self.assertFalse(reset["configured"])
+            self.assertIsNone(reset["folders"]["input"])
+            self.assertIsNone(reset["folders"]["derivatives"])
+            self.assertIsNone(reset["folders"]["metadata"])
+            self.assertFalse(reset["folder_readiness"]["ready_to_start"])
+            self.assertEqual(reset["folder_readiness"]["status"], "not_configured")
+            self.assertEqual(reset["processing_mode"]["id"], "standard")
+
     def test_configure_unreadable_source_returns_generic_chinese_guidance_when_supported(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
