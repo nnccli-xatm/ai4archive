@@ -358,13 +358,26 @@
 
     .preview-controls {
       display: grid;
-      grid-template-columns: minmax(300px, 1fr) minmax(300px, auto) minmax(126px, auto);
+      grid-template-columns: minmax(330px, 1fr) minmax(300px, auto) minmax(126px, auto);
       gap: 8px;
       width: min(100%, 980px);
       padding: 10px;
       border-bottom: 1px solid var(--line);
       background: #ffffff;
       align-items: center;
+    }
+
+    .active-preview-mode {
+      grid-column: 1 / -1;
+      min-height: 34px;
+      border: 1px solid #b8d8ca;
+      border-radius: 7px;
+      background: #effaf4;
+      color: #17442f;
+      padding: 6px 10px;
+      font-size: 14px;
+      font-weight: 760;
+      text-align: center;
     }
 
     .view-mode-controls,
@@ -1132,6 +1145,7 @@
               <button type="button" class="secondary" id="resetPreviewButton">还原</button>
             </div>
             <div class="zoom-state" id="zoomState" aria-live="polite">查看：适合窗口</div>
+            <div class="active-preview-mode" id="activePreviewModeText" aria-live="polite">当前查看：处理后图片</div>
           </div>
           <div class="preview-frame" id="previewFrame">
             <div class="scan-line"></div>
@@ -1366,6 +1380,7 @@
       comparisonControls: document.getElementById("comparisonControls"),
       previewFrame: document.getElementById("previewFrame"),
       previewText: document.getElementById("previewText"),
+      activePreviewModeText: document.getElementById("activePreviewModeText"),
       queueText: document.getElementById("queueText"),
       remainingWorkText: document.getElementById("remainingWorkText"),
       reviewMovementText: document.getElementById("reviewMovementText"),
@@ -1775,16 +1790,60 @@
       applyImageView();
     }
 
-    function hasBothPreviews(item) {
-      return Boolean(item && item.originalPreviewUrl && item.processedPreviewUrl);
+    function hasOriginalPreview(item) {
+      return Boolean(item && item.originalPreviewUrl);
     }
 
-    function updateComparisonControls(enabled) {
-      els.comparisonControls.classList.toggle("hidden", !enabled);
+    function hasProcessedPreview(item) {
+      return Boolean(item && item.processedPreviewUrl);
+    }
+
+    function hasBothPreviews(item) {
+      return hasOriginalPreview(item) && hasProcessedPreview(item);
+    }
+
+    function previewModeLabel(mode) {
+      if (mode === "original") return "原图";
+      if (mode === "side_by_side") return "对比查看";
+      return "处理后图片";
+    }
+
+    function availablePreviewMode(item) {
+      if (hasBothPreviews(item)) return state.comparisonMode;
+      if (hasProcessedPreview(item)) return "processed";
+      if (hasOriginalPreview(item)) return "original";
+      return "";
+    }
+
+    function updateComparisonControls(item, pending) {
+      const hasOriginal = pending && hasOriginalPreview(item);
+      const hasProcessed = pending && hasProcessedPreview(item);
+      const canCompare = hasOriginal && hasProcessed;
+      const activeMode = pending ? availablePreviewMode(item) : "";
       els.comparisonControls.querySelectorAll("button[data-comparison-mode]").forEach((button) => {
+        const mode = button.dataset.comparisonMode;
+        const enabled = mode === "original" ? hasOriginal : mode === "processed" ? hasProcessed : canCompare;
         button.disabled = !enabled;
-        button.classList.toggle("active", enabled && button.dataset.comparisonMode === state.comparisonMode);
+        button.classList.toggle("active", enabled && mode === activeMode);
+        button.setAttribute("aria-pressed", enabled && mode === activeMode ? "true" : "false");
+        const unavailable = mode === "original"
+          ? "本张没有原图，可查看处理后图片"
+          : mode === "processed"
+            ? "本张没有处理后图片，可查看原图"
+            : "本张不能对比查看，请查看现有图片";
+        button.title = enabled ? `查看${previewModeLabel(mode)}` : unavailable;
       });
+      els.activePreviewModeText.textContent = pending
+        ? activePreviewStatusText(item, activeMode)
+        : "当前查看：等待本机处理结果";
+    }
+
+    function activePreviewStatusText(item, activeMode) {
+      if (!item || !activeMode) return "当前查看：暂无可查看图片，请检查本机文件夹";
+      if (hasBothPreviews(item)) return `当前查看：${previewModeLabel(activeMode)}。可切换原图、处理后图片或对比查看。`;
+      if (activeMode === "processed") return "当前查看：处理后图片。本张没有原图，可继续判断或交管理员处理。";
+      if (activeMode === "original") return "当前查看：原图。本张没有处理后图片，可查看原图后继续判断。";
+      return "当前查看：暂无可查看图片，请检查本机文件夹";
     }
 
     function previewPlaceholder(label) {
@@ -1807,18 +1866,18 @@
       els.previewFrame.classList.toggle("need", pending && item.tone === "need");
       els.previewFrame.classList.toggle("stop", pending && item.tone === "stop");
       const canCompare = pending && hasBothPreviews(item);
-      updateComparisonControls(canCompare);
+      updateComparisonControls(item, pending);
       els.previewFrame.classList.toggle("comparison-shell", canCompare && state.comparisonMode === "side_by_side");
       if (canCompare) {
         if (state.comparisonMode === "original") {
           els.previewFrame.innerHTML = `
             ${singlePreviewFrame(item.originalPreviewUrl, "原图", false)}
-            <div class="preview-fallback">正在查看原图。可切到对比查看或查看处理后图片。</div>
+            <div class="preview-fallback">正在查看原图，可切换处理后图片或对比查看。</div>
           `;
         } else if (state.comparisonMode === "processed") {
           els.previewFrame.innerHTML = `
             ${singlePreviewFrame(item.processedPreviewUrl, "处理后图片", false)}
-            <div class="preview-fallback">正在查看处理后图片。可切到对比查看或查看原图。</div>
+            <div class="preview-fallback">正在查看处理后图片，可切换原图或对比查看。</div>
           `;
         } else {
           els.previewFrame.innerHTML = `
@@ -1832,7 +1891,7 @@
                 ${singlePreviewFrame(item.processedPreviewUrl, "处理后图片", true)}
               </div>
             </div>
-            <div class="preview-fallback">请对比原图和处理后图片，再选择确认通过、退回重扫、重新处理图片或确认保留原貌。</div>
+            <div class="preview-fallback">正在对比查看。看完后在右侧选择处理决定。</div>
           `;
         }
         applyImageView();
@@ -1840,8 +1899,8 @@
         const showingProcessed = Boolean(item.processedPreviewUrl);
         const label = showingProcessed ? "处理后图片" : "原图";
         const guidance = showingProcessed
-          ? "原图暂不可用。请先查看处理后图片，仍可选择一个处理决定。"
-          : "处理后图片暂不可用。请先查看原图，仍可选择一个处理决定。";
+          ? "本张没有原图，可查看处理后图片。看完后在右侧选择处理决定。"
+          : "本张没有处理后图片，可查看原图。看完后在右侧选择处理决定。";
         els.previewFrame.innerHTML = `
           ${singlePreviewFrame(item.processedPreviewUrl || item.originalPreviewUrl, label, false)}
           <div class="preview-fallback">${guidance}</div>
@@ -1849,7 +1908,7 @@
         applyImageView();
       } else {
         els.previewFrame.innerHTML = previewPlaceholder(pending && item ? item.name : state.status === "complete" ? "确认完成" : "公开安全示意图")
-          + (pending ? '<div class="preview-fallback">本机暂未找到原图或处理后图片。请检查本机文件夹是否还在，必要时交管理员处理。</div>' : "");
+          + (pending ? '<div class="preview-fallback">本张暂时没有可查看图片。请检查本机文件夹是否还在，必要时交管理员处理。</div>' : "");
         els.previewText = document.getElementById("previewText");
         updatePreviewControls(false);
       }
