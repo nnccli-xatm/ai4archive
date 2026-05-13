@@ -857,6 +857,14 @@
       font-weight: 760;
     }
 
+    .recommendation-reason {
+      border-left: 4px solid #2f6fd6;
+      background: #f7faff;
+      padding: 9px 11px;
+      border-radius: 6px;
+      line-height: 1.55;
+    }
+
     .current-decision {
       border: 1px solid #d8c592;
       background: #fff7df;
@@ -865,6 +873,50 @@
       padding: 10px 12px;
       font-size: 16px;
       font-weight: 760;
+    }
+
+    .decision-guide {
+      display: grid;
+      gap: 8px;
+      border: 1px solid var(--line);
+      background: #fbfcfb;
+      border-radius: 8px;
+      padding: 12px;
+    }
+
+    .decision-guide h3 {
+      margin: 0;
+      font-size: 15px;
+    }
+
+    .decision-guide ul {
+      display: grid;
+      gap: 8px;
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    .decision-guide li {
+      display: grid;
+      gap: 3px;
+      border-left: 4px solid transparent;
+      padding: 7px 8px;
+      border-radius: 6px;
+      background: var(--field);
+      color: var(--ink-2);
+      line-height: 1.45;
+    }
+
+    .decision-guide li.recommended-guide {
+      border-left-color: #2f6fd6;
+      background: #eef4ff;
+    }
+
+    .decision-guide p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.5;
     }
 
     .decision-summary {
@@ -1194,6 +1246,7 @@
             <div class="reason-block">
               <h3>系统建议</h3>
               <p class="recommended-action" id="currentRecommendation">建议：等待处理</p>
+              <p class="recommendation-reason" id="currentRecommendationReason">等待处理开始后，这里会说明为什么建议这样选择。</p>
               <p class="current-decision" id="currentDecisionStatus">当前决定：未决定</p>
               <p id="currentAdvice">可以开始处理后再确认。</p>
             </div>
@@ -1220,6 +1273,16 @@
             <button type="button" class="warning" data-decision="rescan" disabled>退回重扫</button>
             <button type="button" class="warning" data-decision="reprocess" disabled>重新处理图片</button>
             <button type="button" class="secondary" data-decision="keep_original_trace" disabled>确认保留原貌</button>
+          </div>
+          <div class="decision-guide" aria-label="决定说明">
+            <h3>怎么选</h3>
+            <ul id="decisionGuideList">
+              <li data-guide-decision="pass"><strong>确认通过：</strong><span>图片可以继续使用；点击后会保存决定并看下一张。</span></li>
+              <li data-guide-decision="rescan"><strong>退回重扫：</strong><span>原图不清楚、缺页、歪斜严重或打不开；点击后交回扫描工位补扫。</span></li>
+              <li data-guide-decision="reprocess"><strong>重新处理图片：</strong><span>原图可用，但处理后图片需要重新生成；点击后保留原图并安排重新处理。</span></li>
+              <li data-guide-decision="keep_original_trace"><strong>确认保留原貌：</strong><span>痕迹、颜色、折痕或旧化是档案本来样子；点击后不让自动优化覆盖原貌。</span></li>
+            </ul>
+            <p id="decisionSaveGuidance">选择任一决定后，会保存当前图片的决定和备注，并自动显示下一张待确认图片；全部确认后可以完成并导出结果。</p>
           </div>
           <div class="decision-summary" id="decisionSummary">已决定 0 项，待决定 0 项。</div>
         </div>
@@ -1404,11 +1467,14 @@
       currentIssue: document.getElementById("currentIssue"),
       currentFocusHints: document.getElementById("currentFocusHints"),
       currentRecommendation: document.getElementById("currentRecommendation"),
+      currentRecommendationReason: document.getElementById("currentRecommendationReason"),
       currentDecisionStatus: document.getElementById("currentDecisionStatus"),
       currentAdvice: document.getElementById("currentAdvice"),
       reviewPositionText: document.getElementById("reviewPositionText"),
       previewSourceText: document.getElementById("previewSourceText"),
       decisionActions: document.getElementById("decisionActions"),
+      decisionGuideList: document.getElementById("decisionGuideList"),
+      decisionSaveGuidance: document.getElementById("decisionSaveGuidance"),
       decisionSummary: document.getElementById("decisionSummary"),
       outputPanel: document.getElementById("outputPanel"),
       failurePanel: document.getElementById("failurePanel"),
@@ -1490,6 +1556,13 @@
       rescan: "请交回扫描工位补扫。",
       reprocess: "请重新生成处理后图片。",
       keep_original_trace: "请确认这是档案原貌。"
+    };
+
+    const recommendationReasons = {
+      pass: "建议通过，是因为当前问题看起来不影响继续生产；仍请先看大图确认画面清楚、内容完整。",
+      rescan: "建议退回重扫，是因为这类问题通常需要扫描工位重新获取图片，不能只靠重新处理解决。",
+      reprocess: "建议重新处理图片，是因为原图仍可使用，通常重新生成处理后图片即可继续。",
+      keep_original_trace: "建议保留原貌，是因为当前痕迹更像档案本身状态，自动优化不应覆盖这种原貌。"
     };
 
     const recommendationLabels = {
@@ -1630,6 +1703,11 @@
     function recommendationLabel(item) {
       if (!item || !item.suggestedAction) return "建议：等待处理";
       return recommendationLabels[item.suggestedAction] || "建议：请人工确认";
+    }
+
+    function recommendationReason(item) {
+      if (!item || !item.suggestedAction) return "等待处理开始后，这里会说明为什么建议这样选择。";
+      return recommendationReasons[item.suggestedAction] || "请按问题原因和大图情况选择合适决定。";
     }
 
     function reviewProgressLabel() {
@@ -1925,6 +2003,7 @@
       els.currentIssue.textContent = reviewMode && item ? item.issue : (state.operatorMessage || (pending ? "处理开始后在这里显示问题原因。" : "已经没有待确认图片。"));
       els.currentFocusHints.textContent = reviewMode && item ? item.focusHints : (pending ? "处理开始后在这里显示查看重点。" : "已经没有待确认图片。");
       els.currentRecommendation.textContent = reviewMode && item ? recommendationLabel(item) : "建议：等待处理";
+      els.currentRecommendationReason.textContent = reviewMode && item ? recommendationReason(item) : "等待处理开始后，这里会说明为什么建议这样选择。";
       els.currentDecisionStatus.textContent = reviewMode && item ? currentDecisionLabel(item) : "当前决定：未决定";
       els.currentAdvice.textContent = reviewMode && item ? currentAdviceText(item) : state.status === "failed" ? "请联系管理员处理后再继续。" : pending ? "可以开始处理后再确认。" : "可以完成并导出结果。";
       els.reviewPositionText.textContent = reviewMode && state.reviewItems.length
@@ -1944,6 +2023,12 @@
         button.classList.toggle("recommended-choice", reviewMode && item && item.suggestedAction === button.dataset.decision);
         button.setAttribute("aria-pressed", reviewMode && item && item.suggestedAction === button.dataset.decision ? "true" : "false");
       });
+      els.decisionGuideList.querySelectorAll("[data-guide-decision]").forEach((guideItem) => {
+        guideItem.classList.toggle("recommended-guide", reviewMode && item && item.suggestedAction === guideItem.dataset.guideDecision);
+      });
+      els.decisionSaveGuidance.textContent = reviewMode && item
+        ? "选择任一决定后，会保存当前图片的决定和备注，并自动显示下一张待确认图片；全部确认后可以完成并导出结果。"
+        : "处理开始后，选择决定会保存当前图片并继续下一张；全部确认后可以完成并导出结果。";
       els.decisionSummary.textContent = `已决定 ${reviewedCount()} 项，待决定 ${pending} 项。`;
       renderPreview(item, reviewMode && Boolean(item));
     }
