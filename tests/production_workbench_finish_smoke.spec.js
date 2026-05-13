@@ -106,11 +106,11 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
     await expect(page.locator("#loadStatus")).toHaveText("请先填写原图文件夹和输出文件夹，点击“保存文件夹”，确认可以开始后再点击“开始处理”。");
     await expect(page.locator(".mode-selector")).toContainText("标准优化");
-    await expect(page.locator(".mode-selector")).toContainText("适合正常批量加工，自动做保守裁边、纠偏、去黑边、去明显小污点，原图不覆盖。");
+    await expect(page.locator(".mode-selector")).toContainText("推荐用于正常批量生产");
     await expect(page.locator(".mode-selector")).toContainText("轻度优化");
-    await expect(page.locator(".mode-selector")).toContainText("只做较少处理，适合担心过度处理的批次。");
+    await expect(page.locator(".mode-selector")).toContainText("用于担心过度处理的批次");
     await expect(page.locator(".mode-selector")).toContainText("只质检不修图");
-    await expect(page.locator(".mode-selector")).toContainText("只检查，不生成修图优化结果。");
+    await expect(page.locator(".mode-selector")).toContainText("只做质量检查，不生成处理后优化图片。");
 
     await expect(page.locator(".maintenance-loader")).not.toHaveAttribute("open", "");
     await expect(page.getByText("选择维护示例")).toBeHidden();
@@ -255,6 +255,12 @@ test.describe("production workbench finish/export browser smoke", () => {
             title_zh: "本批次已完成",
             message_zh: "处理后图片已准备好。本批可以交接。",
             completion_status_zh: "已完成",
+            processing_mode: {
+              id: "standard",
+              label_zh: "标准优化",
+              purpose_zh: "推荐用于正常批量生产，兼顾批量图片质量和处理效率。",
+              output_zh: "会生成处理后优化图片，原图不覆盖。",
+            },
             manual_work_zh: "没有待人工处理图片",
             admin_handoff_zh: "不需要",
             total_review_items: 3,
@@ -584,6 +590,12 @@ test.describe("production workbench finish/export browser smoke", () => {
             title_zh: "本批次已完成",
             message_zh: "处理后图片已准备好。本批可以交接。",
             completion_status_zh: "已完成",
+            processing_mode: {
+              id: "standard",
+              label_zh: "标准优化",
+              purpose_zh: "推荐用于正常批量生产，兼顾批量图片质量和处理效率。",
+              output_zh: "会生成处理后优化图片，原图不覆盖。",
+            },
             manual_work_zh: "没有待人工处理图片",
             admin_handoff_zh: "不需要",
             total_review_items: 0,
@@ -601,6 +613,8 @@ test.describe("production workbench finish/export browser smoke", () => {
     await page.getByRole("button", { name: "完成并导出结果" }).click();
     await expect(page.locator("#finishConfirmPanel")).toBeVisible();
     await expect(page.locator("#finishConfirmMessage")).toHaveText("本批没有需要人工确认的图片。请确认处理后图片已准备好，再完成本批。");
+    await expect(page.locator("#finishConfirmMode")).toContainText("标准优化");
+    await expect(page.locator("#finishConfirmMode")).toContainText("推荐用于正常批量生产");
     await page.getByRole("button", { name: "返回继续检查" }).click();
     await expect(page.locator("#stateName")).toHaveText("待完成");
     await expect(finishRequested).toBe(false);
@@ -1024,9 +1038,11 @@ test.describe("production workbench finish/export browser smoke", () => {
     });
 
     await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
-    await expect(page.locator("#modeStatus")).toHaveText("当前处理方式：标准优化");
+    await expect(page.locator("#modeStatus")).toContainText("当前处理方式：标准优化");
+    await expect(page.locator("#modeStatus")).toContainText("推荐用于正常批量生产");
     await page.getByLabel("只质检不修图").check();
-    await expect(page.locator("#modeStatus")).toHaveText("当前处理方式：只质检不修图");
+    await expect(page.locator("#modeStatus")).toContainText("当前处理方式：只质检不修图");
+    await expect(page.locator("#modeStatus")).toContainText("不会生成处理后优化图片");
     await page.locator("#inputPath").fill("/tmp/mode-input");
     await page.locator("#outputPath").fill("/tmp/mode-output");
     await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
@@ -1036,12 +1052,13 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#readinessFacts")).toContainText("可处理图片：2 张");
     await expect(page.locator("#readinessFacts")).toContainText("输出文件夹：可以写入");
     await expect(page.locator("#readinessFacts")).toContainText("处理方式：只质检不修图");
+    await expect(page.locator("#readinessFacts")).toContainText("输出结果：不会生成处理后优化图片");
     expect(configurePayloads[0]).toMatchObject({
       input_dir: "/tmp/mode-input",
       derivatives_dir: "/tmp/mode-output",
       processing_mode: "qc_only",
     });
-    await expect(page.locator("#modeStatus")).toHaveText("当前处理方式：只质检不修图");
+    await expect(page.locator("#modeStatus")).toContainText("当前处理方式：只质检不修图");
     await expect(page.getByRole("button", { name: "开始处理" })).toBeEnabled();
     await page.getByRole("button", { name: "开始处理" }).click();
     await expect(page.locator("#stateName")).toHaveText("正在处理");
@@ -1105,6 +1122,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#readinessFacts")).toContainText("可处理图片：3 张");
     await expect(page.locator("#readinessFacts")).toContainText("输出文件夹：可以写入");
     await expect(page.locator("#readinessFacts")).toContainText("处理方式：标准优化");
+    await expect(page.locator("#readinessFacts")).toContainText("方式说明：推荐用于正常批量生产");
     await expectOperatorStatusHidesPaths(page, ["/tmp/ready-input", "/tmp/ready-output", "ready-input", "ready-output"]);
     await page.getByRole("button", { name: "开始处理" }).click();
     await expect(page.locator("#loadStatus")).toHaveText("正在处理，请等待；处理完成后再复核。");
@@ -1298,6 +1316,12 @@ test.describe("production workbench finish/export browser smoke", () => {
             title_zh: "本批次已完成",
             message_zh: "处理后图片已准备好。本批可以交接。",
             completion_status_zh: "已完成",
+            processing_mode: {
+              id: "standard",
+              label_zh: "标准优化",
+              purpose_zh: "推荐用于正常批量生产，兼顾批量图片质量和处理效率。",
+              output_zh: "会生成处理后优化图片，原图不覆盖。",
+            },
             manual_work_zh: "没有待人工处理图片",
             admin_handoff_zh: "不需要",
             total_review_items: 0,
@@ -1407,7 +1431,8 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.getByRole("button", { name: "开始处理" })).toBeEnabled();
 
     await page.getByLabel("轻度优化").check();
-    await expect(page.locator("#modeStatus")).toHaveText("当前处理方式：轻度优化");
+    await expect(page.locator("#modeStatus")).toContainText("当前处理方式：轻度优化");
+    await expect(page.locator("#modeStatus")).toContainText("担心过度处理");
     await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
     await expect(page.locator("#loadStatus")).toHaveText("处理方式已更改，请重新保存文件夹。");
     await expect(page.locator("#readinessBox")).toBeHidden();
@@ -1707,10 +1732,12 @@ test.describe("production workbench finish/export browser smoke", () => {
     await page.getByRole("button", { name: "完成并导出结果" }).click();
     await expect(page.locator("#finishConfirmPanel")).toBeVisible();
     await expect(page.locator("#finishConfirmCounts")).toHaveText("共 0 项，已确认 0 项，待决定 0 项。");
+    await expect(page.locator("#finishConfirmMode")).toContainText("标准优化");
     await page.getByRole("button", { name: "确认完成本批" }).click();
     await expect(page.locator("#completionTitle")).toHaveText("本批次已完成");
     await expect(page.locator("#completionCounts")).toHaveText("共 0 项，已确认 0 项，待决定 0 项。");
     await expect(page.locator("#completionStatusFact")).toHaveText("已完成");
+    await expect(page.locator("#completionModeFact")).toHaveText("标准优化");
     await expect(page.locator("#outputPlace")).toHaveText("已准备 2 张处理后图片");
     await expect(page.locator("#manualWorkFact")).toHaveText("没有待人工处理图片");
     await expect(page.locator("#adminHandoffFact")).toHaveText("不需要");

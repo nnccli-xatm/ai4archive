@@ -21,6 +21,8 @@ from .processing_review import REVIEW_JSON as PROCESSING_REVIEW_JSON, write_proc
 from .production_review_queue import PRODUCTION_REVIEW_QUEUE_JSON, write_production_review_queue
 from .production_runner import (
     PROCESSING_MODE_LABELS_ZH,
+    PROCESSING_MODE_OUTPUTS_ZH,
+    PROCESSING_MODE_PURPOSES_ZH,
     PRODUCTION_RUN_PROGRESS_JSON,
     PRODUCTION_RUN_SUMMARY_JSON,
     ProductionRunConfig,
@@ -46,6 +48,8 @@ DEFAULT_PROCESSING_MODE = "standard"
 PROCESSING_MODE_OPTIONS: dict[str, dict[str, Any]] = {
     "standard": {
         "label_zh": PROCESSING_MODE_LABELS_ZH["standard"],
+        "purpose_zh": PROCESSING_MODE_PURPOSES_ZH["standard"],
+        "output_zh": PROCESSING_MODE_OUTPUTS_ZH["standard"],
         "auto_crop": True,
         "deskew": True,
         "trim_dark_border": True,
@@ -53,6 +57,8 @@ PROCESSING_MODE_OPTIONS: dict[str, dict[str, Any]] = {
     },
     "qc_only": {
         "label_zh": PROCESSING_MODE_LABELS_ZH["qc_only"],
+        "purpose_zh": PROCESSING_MODE_PURPOSES_ZH["qc_only"],
+        "output_zh": PROCESSING_MODE_OUTPUTS_ZH["qc_only"],
         "auto_crop": False,
         "deskew": False,
         "trim_dark_border": False,
@@ -60,6 +66,8 @@ PROCESSING_MODE_OPTIONS: dict[str, dict[str, Any]] = {
     },
     "light": {
         "label_zh": PROCESSING_MODE_LABELS_ZH["light"],
+        "purpose_zh": PROCESSING_MODE_PURPOSES_ZH["light"],
+        "output_zh": PROCESSING_MODE_OUTPUTS_ZH["light"],
         "auto_crop": True,
         "deskew": False,
         "trim_dark_border": False,
@@ -209,6 +217,7 @@ class WorkbenchController:
         with self._lock:
             derivatives_dir = self.derivatives_dir
             metadata_dir = self.metadata_dir
+            processing_mode = self.processing_mode
         if derivatives_dir is None or metadata_dir is None:
             raise ValueError("请先保存文件夹并生成复核队列。")
         verification = build_review_decision_verification_summary(summary)
@@ -234,6 +243,7 @@ class WorkbenchController:
                 [
                     "本批次完成交接说明",
                     f"复核人员：{operator_name or '未填写'}",
+                    f"处理方式：{_processing_mode_completion_label(processing_mode)}",
                     f"处理后图片文件夹：{derivatives_dir}",
                     f"复核结果保存位置：{summary_path}",
                     f"复核校验保存位置：{verification_path}",
@@ -270,6 +280,7 @@ class WorkbenchController:
                 "total_review_items": total_decisions,
                 "reviewed_items": reviewed_decisions,
                 "pending_items": pending_decisions,
+                "processing_mode": _processing_mode_payload(processing_mode),
                 "derivatives_dir": str(derivatives_dir),
                 "metadata_dir": str(metadata_dir),
                 "decision_summary_path": str(summary_path),
@@ -1092,11 +1103,23 @@ def _processing_mode_payload(processing_mode: str) -> dict[str, Any]:
     return {
         "id": mode,
         "label_zh": option["label_zh"],
+        "purpose_zh": option["purpose_zh"],
+        "output_zh": option["output_zh"],
         "available_modes": [
-            {"id": mode_id, "label_zh": values["label_zh"]}
+            {
+                "id": mode_id,
+                "label_zh": values["label_zh"],
+                "purpose_zh": values["purpose_zh"],
+                "output_zh": values["output_zh"],
+            }
             for mode_id, values in PROCESSING_MODE_OPTIONS.items()
         ],
     }
+
+
+def _processing_mode_completion_label(processing_mode: str) -> str:
+    mode = _processing_mode_payload(processing_mode)
+    return f"{mode['label_zh']}；{mode['purpose_zh']}；{mode['output_zh']}"
 
 
 def _folder_is_writable(path: Path) -> bool:

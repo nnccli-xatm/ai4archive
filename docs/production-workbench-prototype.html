@@ -1041,25 +1041,25 @@
               <input type="radio" name="processingMode" value="standard" checked>
               <span class="mode-text">
                 <span class="mode-title">标准优化</span>
-                <span class="mode-description">适合正常批量加工，自动做保守裁边、纠偏、去黑边、去明显小污点，原图不覆盖。</span>
+                <span class="mode-description">推荐用于正常批量生产，会自动做保守裁边、纠偏、去黑边、去明显小污点，生成处理后优化图片，原图不覆盖。</span>
               </span>
             </label>
             <label class="mode-option">
               <input type="radio" name="processingMode" value="light">
               <span class="mode-text">
                 <span class="mode-title">轻度优化</span>
-                <span class="mode-description">只做较少处理，适合担心过度处理的批次。</span>
+                <span class="mode-description">用于担心过度处理的批次，只做较轻的保守优化，会生成轻度处理后的优化图片，原图不覆盖。</span>
               </span>
             </label>
             <label class="mode-option">
               <input type="radio" name="processingMode" value="qc_only">
               <span class="mode-text">
                 <span class="mode-title">只质检不修图</span>
-                <span class="mode-description">只检查，不生成修图优化结果。</span>
+                <span class="mode-description">只做质量检查，不生成处理后优化图片。</span>
               </span>
             </label>
           </fieldset>
-          <small class="mode-current" id="modeStatus">当前处理方式：标准优化</small>
+          <small class="mode-current" id="modeStatus">当前处理方式：标准优化。推荐用于正常批量生产，兼顾批量图片质量和处理效率。会生成处理后优化图片，原图不覆盖。</small>
         </div>
 
         <div class="run-controls">
@@ -1216,6 +1216,7 @@
           <div class="handoff-box hidden" id="finishConfirmPanel">
             <h3>确认完成本批</h3>
             <p id="finishConfirmMessage">请确认本批已经检查完，再完成并交接。</p>
+            <p><strong>处理方式：</strong><span id="finishConfirmMode">标准优化。推荐用于正常批量生产，兼顾批量图片质量和处理效率。会生成处理后优化图片，原图不覆盖。</span></p>
             <p><strong>复核情况：</strong><span id="finishConfirmCounts">已确认 0 项，待决定 0 项。</span></p>
             <p><strong>保存位置：</strong><span id="finishConfirmOutput">处理后输出文件夹</span></p>
             <p><strong>接下来：</strong></p>
@@ -1241,6 +1242,10 @@
                 <div class="handoff-fact">
                   <span>处理后图片</span>
                   <strong id="outputPlace">已准备 0 张处理后图片</strong>
+                </div>
+                <div class="handoff-fact">
+                  <span>本批处理方式</span>
+                  <strong id="completionModeFact">标准优化</strong>
                 </div>
                 <div class="handoff-fact">
                   <span>人工处理</span>
@@ -1300,6 +1305,7 @@
       completionTitle: "本批次已完成",
       completionMessage: "处理后图片已准备好。本批可以交接。",
       completionStatusFact: "已完成",
+      completionModeFact: "标准优化",
       manualWorkFact: "没有待人工处理图片",
       adminHandoffFact: "不需要",
       completionSteps: DEFAULT_COMPLETION_STEPS.slice(),
@@ -1320,6 +1326,8 @@
       comparisonMode: "processed",
       processingMode: "standard",
       processingModeLabel: "标准优化",
+      processingModePurpose: "推荐用于正常批量生产，兼顾批量图片质量和处理效率。",
+      processingModeOutput: "会生成处理后优化图片，原图不覆盖。",
       progressLabel: "",
       launchLocked: false,
       waitingForNewSetup: false
@@ -1391,6 +1399,7 @@
       failurePanel: document.getElementById("failurePanel"),
       finishConfirmPanel: document.getElementById("finishConfirmPanel"),
       finishConfirmMessage: document.getElementById("finishConfirmMessage"),
+      finishConfirmMode: document.getElementById("finishConfirmMode"),
       finishConfirmCounts: document.getElementById("finishConfirmCounts"),
       finishConfirmOutput: document.getElementById("finishConfirmOutput"),
       finishConfirmSteps: document.getElementById("finishConfirmSteps"),
@@ -1401,6 +1410,7 @@
       completionMessage: document.getElementById("completionMessage"),
       completionCounts: document.getElementById("completionCounts"),
       completionStatusFact: document.getElementById("completionStatusFact"),
+      completionModeFact: document.getElementById("completionModeFact"),
       manualWorkFact: document.getElementById("manualWorkFact"),
       adminHandoffFact: document.getElementById("adminHandoffFact"),
       completionSteps: document.getElementById("completionSteps"),
@@ -1495,6 +1505,21 @@
       standard: "标准优化",
       qc_only: "只质检不修图",
       light: "轻度优化"
+    };
+
+    const processingModeInfo = {
+      standard: {
+        purpose: "推荐用于正常批量生产，兼顾批量图片质量和处理效率。",
+        output: "会生成处理后优化图片，原图不覆盖。"
+      },
+      qc_only: {
+        purpose: "只做质量检查，适合本批不需要自动修图的情况。",
+        output: "不会生成处理后优化图片。"
+      },
+      light: {
+        purpose: "用于担心过度处理的批次，只做较轻的保守优化。",
+        output: "会生成轻度处理后的优化图片，原图不覆盖。"
+      }
     };
 
     const localApi = {
@@ -1646,14 +1671,18 @@
       return selected ? selected.value : "standard";
     }
 
-    function setProcessingMode(mode, label) {
+    function setProcessingMode(mode, label, purpose, output) {
       const nextMode = processingModeLabels[mode] ? mode : "standard";
+      const fallback = processingModeInfo[nextMode];
       state.processingMode = nextMode;
       state.processingModeLabel = label || processingModeLabels[nextMode];
+      state.processingModePurpose = purpose || fallback.purpose;
+      state.processingModeOutput = output || fallback.output;
+      state.completionModeFact = state.processingModeLabel;
       els.processingModeInputs.forEach((input) => {
         input.checked = input.value === nextMode;
       });
-      els.modeStatus.textContent = `当前处理方式：${state.processingModeLabel}`;
+      els.modeStatus.textContent = `当前处理方式：${state.processingModeLabel}。${state.processingModePurpose}${state.processingModeOutput}`;
     }
 
     function invalidateFolderReadiness(message) {
@@ -1874,7 +1903,7 @@
       els.pendingText.textContent = `${state.attentionFiles} 个`;
       els.sourceText.textContent = `${state.totalImages} 张`;
       els.readyText.textContent = `${state.readyImages} 张`;
-      els.modeStatus.textContent = `当前处理方式：${state.processingModeLabel}`;
+      els.modeStatus.textContent = `当前处理方式：${state.processingModeLabel}。${state.processingModePurpose}${state.processingModeOutput}`;
       const locked = setupControlsLocked();
       els.inputFolder.disabled = locked;
       els.outputFolder.disabled = locked;
@@ -1913,6 +1942,7 @@
       els.finishConfirmMessage.textContent = state.reviewItems.length
         ? "所有需要确认的图片都已有决定。请确认无误后完成本批。"
         : "本批没有需要人工确认的图片。请确认处理后图片已准备好，再完成本批。";
+      els.finishConfirmMode.textContent = `${state.processingModeLabel}。${state.processingModePurpose}${state.processingModeOutput}`;
       els.finishConfirmCounts.textContent = `共 ${state.reviewItems.length} 项，已确认 ${reviewedCount()} 项，待决定 ${pendingCount()} 项。`;
       els.finishConfirmOutput.textContent = finishOutputLabel();
       els.finishConfirmSteps.innerHTML = [
@@ -1929,6 +1959,7 @@
       els.completionCounts.textContent = `共 ${state.reviewItems.length} 项，已确认 ${reviewedCount()} 项，待决定 ${pendingCount()} 项。`;
       els.outputPlace.textContent = state.outputSummary;
       els.completionStatusFact.textContent = state.completionStatusFact;
+      els.completionModeFact.textContent = state.completionModeFact;
       els.manualWorkFact.textContent = state.manualWorkFact;
       els.adminHandoffFact.textContent = state.adminHandoffFact;
       els.completionSteps.innerHTML = state.completionSteps.map((step) => `<li>${escapeHtml(step)}</li>`).join("");
@@ -2044,7 +2075,9 @@
         ["可处理图片", `${toNumber(readiness.supported_image_count)} 张`],
         ["原图文件夹", readiness.input_empty ? "没有发现图片" : "已发现图片"],
         ["输出文件夹", readiness.output_writable ? "可以写入" : "不能写入"],
-        ["处理方式", mode.label_zh || state.processingModeLabel]
+        ["处理方式", mode.label_zh || state.processingModeLabel],
+        ["方式说明", mode.purpose_zh || state.processingModePurpose],
+        ["输出结果", mode.output_zh || state.processingModeOutput]
       ];
       els.readinessFacts.innerHTML = facts.map((item) => `<span>${item[0]}：${escapeHtml(item[1])}</span>`).join("");
       const steps = Array.isArray(readiness.next_steps_zh) ? readiness.next_steps_zh : [];
@@ -2251,7 +2284,9 @@
       const operator = summary.operator_summary || {};
       const summaryMode = summary.options && summary.options.processing_mode;
       const summaryModeLabel = (summary.options && summary.options.processing_mode_label_zh) || operator.processing_mode_label_zh;
-      if (summaryMode || operator.processing_mode) setProcessingMode(summaryMode || operator.processing_mode, summaryModeLabel);
+      const summaryModePurpose = (summary.options && summary.options.processing_mode_purpose_zh) || operator.processing_mode_purpose_zh;
+      const summaryModeOutput = (summary.options && summary.options.processing_mode_output_zh) || operator.processing_mode_output_zh;
+      if (summaryMode || operator.processing_mode) setProcessingMode(summaryMode || operator.processing_mode, summaryModeLabel, summaryModePurpose, summaryModeOutput);
       const rawStatus = summary.status || (progress && progress.state) || "pending";
       let nextStatus = runStateMap[rawStatus] || "failed";
       state.launchLocked = false;
@@ -2321,7 +2356,14 @@
         }
         if (payload.folders.metadata) state.decisionSaveSummary = DECISION_SAVE_LABEL;
       }
-      if (payload.processing_mode) setProcessingMode(payload.processing_mode.id, payload.processing_mode.label_zh);
+      if (payload.processing_mode) {
+        setProcessingMode(
+          payload.processing_mode.id,
+          payload.processing_mode.label_zh,
+          payload.processing_mode.purpose_zh,
+          payload.processing_mode.output_zh
+        );
+      }
       if (payload.folder_readiness) state.folderReadiness = payload.folder_readiness;
       if (payload.summary || payload.progress) {
         applyRunStatus(payload.summary || { status: payload.running ? "running" : "pending", operator_summary: {} }, payload.progress, payload.queue, payload.draft_decisions);
@@ -2347,6 +2389,15 @@
       if (panel.metadata_dir) state.decisionSaveSummary = DECISION_SAVE_LABEL;
       if (panel.metadata_dir || panel.completion_note_path) state.completionNoteSummary = COMPLETION_NOTE_LABEL;
       state.completionStatusFact = panel.completion_status_zh || "已完成";
+      if (panel.processing_mode) {
+        setProcessingMode(
+          panel.processing_mode.id,
+          panel.processing_mode.label_zh,
+          panel.processing_mode.purpose_zh,
+          panel.processing_mode.output_zh
+        );
+      }
+      state.completionModeFact = state.processingModeLabel;
       state.manualWorkFact = panel.manual_work_zh || (pendingCount() > 0 ? `还有 ${pendingCount()} 张需要人工处理` : "没有待人工处理图片");
       state.adminHandoffFact = panel.admin_handoff_zh || "不需要";
       if (Array.isArray(panel.next_steps_zh) && panel.next_steps_zh.length) state.completionSteps = panel.next_steps_zh;
@@ -2754,6 +2805,7 @@
       state.completionTitle = "本批次已完成";
       state.completionMessage = "处理后图片已准备好。本批可以交接。";
       state.completionStatusFact = "已完成";
+      state.completionModeFact = "标准优化";
       state.manualWorkFact = "没有待人工处理图片";
       state.adminHandoffFact = "不需要";
       state.completionSteps = DEFAULT_COMPLETION_STEPS.slice();
