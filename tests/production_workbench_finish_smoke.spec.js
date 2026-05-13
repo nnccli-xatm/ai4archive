@@ -433,7 +433,8 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#outputPath")).toHaveValue("");
     await expect(page.locator("#readinessBox")).toBeHidden();
     await expect(page.locator("#queueText")).toHaveText("等待处理开始。");
-    await expect(page.locator("#decisionSummary")).toHaveText("已决定 0 项，待决定 3 项。");
+    await expect(page.locator("#decisionSummary")).toHaveText("已决定 0 项，待决定 0 项。");
+    await expect(page.locator("#completionCounts")).toHaveText("共 0 项，已确认 0 项，待决定 0 项。");
     await expect(page.locator("#previewSourceText")).toHaveText("图片查看：等待本机处理结果。");
     await expect(page.locator("#finishConfirmPanel")).toBeHidden();
     await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
@@ -750,6 +751,9 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#outputPath")).toHaveValue("");
     await expect(page.locator("#failurePanel")).toBeHidden();
     await expect(page.locator("#recoveryTitle")).toHaveText("文件夹还没有准备好");
+    await expect(page.locator("#queueText")).toHaveText("等待处理开始。");
+    await expect(page.locator("#decisionSummary")).toHaveText("已决定 0 项，待决定 0 项。");
+    await expect(page.locator("#completionCounts")).toHaveText("共 0 项，已确认 0 项，待决定 0 项。");
     await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
     await expect(page.locator("#inputPath")).toBeEnabled();
     await expect(page.locator("#outputPath")).toBeEnabled();
