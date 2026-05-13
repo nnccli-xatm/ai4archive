@@ -60,6 +60,7 @@ from archive_scan_qc.sampling import build_acceptance_sampling_export
 from archive_scan_qc.scanner import ScanConfig, scan_batch
 from archive_scan_qc.validation_index import build_public_safe_validation_index
 from archive_scan_qc.workbench_summary import build_workbench_public_summary
+from archive_scan_qc.analysis_provider import _prepare_command
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -3383,6 +3384,16 @@ class ScanQcTest(unittest.TestCase):
             self.assertIn("Provider Analysis", html)
             self.assertIn("provider.fake.suspected_issue", html)
             self.assertIn("provider,0.875", csv_text)
+
+    def test_prepare_command_rejoins_spaced_provider_path(self) -> None:
+        command = f"{sys.executable} {REPO_ROOT / 'examples' / 'local_analysis_provider.py'} --flag"
+        argv = _prepare_command(command)
+
+        self.assertEqual(argv, [
+            sys.executable,
+            str(REPO_ROOT / 'examples' / 'local_analysis_provider.py'),
+            "--flag",
+        ])
 
     def test_example_analysis_provider_runs_through_cli_and_sanitizes_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
