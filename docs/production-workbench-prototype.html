@@ -771,6 +771,26 @@
       align-content: start;
     }
 
+    .queue-summary {
+      border: 1px solid #b8d8ca;
+      background: #effaf4;
+      color: #17442f;
+      border-radius: 8px;
+      padding: 12px;
+      display: grid;
+      gap: 4px;
+    }
+
+    .queue-summary strong {
+      font-size: 22px;
+      line-height: 1.2;
+    }
+
+    .queue-summary span {
+      color: var(--ink-2);
+      font-size: 14px;
+    }
+
     .reason-block {
       display: grid;
       gap: 6px;
@@ -1145,6 +1165,10 @@
 
         <div class="decision-body">
           <div>
+            <div class="queue-summary" aria-live="polite">
+              <strong id="remainingWorkText">还需确认 0 张</strong>
+              <span id="reviewMovementText">等待处理开始。</span>
+            </div>
             <div class="reason-block">
               <h3>问题原因</h3>
               <p id="currentIssue">还没有需要确认的图片。</p>
@@ -1165,8 +1189,8 @@
           </div>
 
           <div class="review-navigation" aria-label="复核导航">
-            <button type="button" class="secondary" id="previousReviewedButton" disabled>上一张已确认</button>
-            <button type="button" class="secondary" id="nextPendingButton" disabled>下一张待确认</button>
+            <button type="button" class="secondary" id="previousReviewedButton" disabled>上一张已确认图片</button>
+            <button type="button" class="secondary" id="nextPendingButton" disabled>下一张待确认图片</button>
             <button type="button" class="secondary" id="clearDecisionButton" disabled>撤销当前决定</button>
           </div>
           <div class="operator-context">
@@ -1335,6 +1359,8 @@
       previewFrame: document.getElementById("previewFrame"),
       previewText: document.getElementById("previewText"),
       queueText: document.getElementById("queueText"),
+      remainingWorkText: document.getElementById("remainingWorkText"),
+      reviewMovementText: document.getElementById("reviewMovementText"),
       previousReviewedButton: document.getElementById("previousReviewedButton"),
       nextPendingButton: document.getElementById("nextPendingButton"),
       clearDecisionButton: document.getElementById("clearDecisionButton"),
@@ -1567,7 +1593,24 @@
     }
 
     function reviewProgressLabel() {
-      return `当前第 ${currentItemNumber()} 张 / 共 ${state.reviewItems.length} 张 / 待确认 ${pendingCount()} 张。`;
+      return `当前第 ${currentItemNumber()} 张 / 共 ${state.reviewItems.length} 张；还需确认 ${pendingCount()} 张。`;
+    }
+
+    function remainingWorkLabel() {
+      if (state.status === "ready_to_finish") return "还需确认 0 张";
+      if (state.status !== "needs_review" && state.reviewItems.length === 0) return "还需确认 0 张";
+      return `还需确认 ${pendingCount()} 张`;
+    }
+
+    function reviewMovementLabel() {
+      const total = state.reviewItems.length;
+      const pending = pendingCount();
+      const reviewed = reviewedCount();
+      if (state.status === "ready_to_finish") return "本批没有需要人工确认的图片，可以完成并导出结果。";
+      if (state.status !== "needs_review") return total ? `已确认 ${reviewed} 张，还需确认 ${pending} 张。` : "等待处理开始。";
+      if (total === 0) return "没有待人工确认图片，可以完成并导出结果。";
+      if (pending === 0) return "所有待确认图片都已确认，可以点击完成并导出结果。";
+      return `正在看第 ${currentItemNumber()} 张；确认后会自动跳到下一张待确认图片。`;
     }
 
     function previewSourceLabel(item, pending) {
@@ -1788,6 +1831,8 @@
       const pending = pendingCount();
       const reviewMode = state.status === "needs_review";
       els.queueText.textContent = state.reviewQueueText || (reviewMode ? `已决定 ${reviewedCount()} 项，待决定 ${pending} 项` : "等待处理开始。");
+      els.remainingWorkText.textContent = remainingWorkLabel();
+      els.reviewMovementText.textContent = reviewMovementLabel();
       els.currentIssue.textContent = reviewMode && item ? item.issue : (state.operatorMessage || (pending ? "处理开始后在这里显示问题原因。" : "已经没有待确认图片。"));
       els.currentFocusHints.textContent = reviewMode && item ? item.focusHints : (pending ? "处理开始后在这里显示查看重点。" : "已经没有待确认图片。");
       els.currentRecommendation.textContent = reviewMode && item ? recommendationLabel(item) : "建议：等待处理";
@@ -1795,7 +1840,7 @@
       els.currentAdvice.textContent = reviewMode && item ? currentAdviceText(item) : state.status === "failed" ? "请联系管理员处理后再继续。" : pending ? "可以开始处理后再确认。" : "可以完成并导出结果。";
       els.reviewPositionText.textContent = reviewMode && state.reviewItems.length
         ? reviewProgressLabel()
-        : "当前第 0 张 / 共 0 张 / 待确认 0 张。";
+        : "当前第 0 张 / 共 0 张；还需确认 0 张。";
       els.previewSourceText.textContent = previewSourceLabel(item || {}, reviewMode && Boolean(item));
       els.previousReviewedButton.disabled = !(reviewMode && previousReviewedIndex() >= 0);
       els.nextPendingButton.disabled = !(reviewMode && nextPendingIndex() >= 0);
@@ -2144,7 +2189,7 @@
       state.currentIndex = Math.max(0, firstPendingIndex());
       state.attentionFiles = pendingCount();
       state.reviewQueueText = state.reviewItems.length
-        ? `已加载复核队列 ${state.reviewItems.length} 项，待决定 ${pendingCount()} 项。`
+        ? `已加载复核队列 ${state.reviewItems.length} 张，还需确认 ${pendingCount()} 张。`
         : "没有待人工确认图片。";
       render();
     }
@@ -2196,7 +2241,7 @@
       if (restored === 0 && !restoredOperator) return false;
       state.currentIndex = Math.max(0, firstPendingIndex());
       state.attentionFiles = pendingCount();
-      state.reviewQueueText = `已恢复上次进度：已决定 ${reviewedCount()} 项，待决定 ${pendingCount()} 项。`;
+      state.reviewQueueText = `已恢复上次进度：已确认 ${reviewedCount()} 张，还需确认 ${pendingCount()} 张。`;
       state.lastDraftMessage = "已恢复上次进度";
       els.loadStatus.textContent = "已恢复上次进度";
       return true;
@@ -2224,7 +2269,7 @@
       state.operatorMessage = operator.message_zh || operator.message || (progress && progress.message_zh) || text[2];
       state.recoveryGuidance = guidanceFromSummary(summary);
       state.reviewQueueText = state.attentionFiles
-        ? (nextStatus === "failed" ? `需要管理员处理 ${state.attentionFiles} 个。` : `待人工确认 ${state.attentionFiles} 个。`)
+        ? (nextStatus === "failed" ? `需要管理员处理 ${state.attentionFiles} 个。` : `还需确认 ${state.attentionFiles} 张。`)
         : "没有待人工确认图片。";
       state.progress = deriveProgress(summary, progress);
       state.progressLabel = deriveProgressLabel(summary, progress);
@@ -2762,8 +2807,8 @@
       state.progress = pendingCount() === 0 ? 94 : Math.min(92, state.progress + 4);
       state.attentionFiles = pendingCount();
       state.reviewQueueText = pendingCount() > 0
-        ? `已记录：${recordedLabel}。已自动显示下一张待确认图片。已决定 ${reviewedCount()} 项，待决定 ${pendingCount()} 项。`
-        : `已记录：${recordedLabel}。所有待确认图片已有决定，可以完成并导出结果。`;
+        ? `已记录：${recordedLabel}。已自动显示下一张待确认图片。已确认 ${reviewedCount()} 张，还需确认 ${pendingCount()} 张。`
+        : `已记录：${recordedLabel}。所有待确认图片都已确认，可以点击完成并导出结果。`;
       moveToNextPending();
       render();
       scheduleDraftSave();
@@ -2773,7 +2818,7 @@
       const index = previousReviewedIndex();
       if (index < 0) return;
       state.currentIndex = index;
-      state.reviewQueueText = `已返回上一张已确认图片；已决定 ${reviewedCount()} 项，待决定 ${pendingCount()} 项。`;
+      state.reviewQueueText = `已返回上一张已确认图片；已确认 ${reviewedCount()} 张，还需确认 ${pendingCount()} 张。`;
       render();
     });
 
@@ -2781,7 +2826,7 @@
       const index = nextPendingIndex();
       if (index < 0) return;
       state.currentIndex = index;
-      state.reviewQueueText = `已显示下一张待确认图片；已决定 ${reviewedCount()} 项，待决定 ${pendingCount()} 项。`;
+      state.reviewQueueText = `已显示下一张待确认图片；已确认 ${reviewedCount()} 张，还需确认 ${pendingCount()} 张。`;
       render();
     });
 
@@ -2792,7 +2837,7 @@
       item.decidedAt = "";
       delete state.decisions[item.id];
       state.attentionFiles = pendingCount();
-      state.reviewQueueText = `已撤销当前决定；请重新选择。已决定 ${reviewedCount()} 项，待决定 ${pendingCount()} 项。`;
+      state.reviewQueueText = `已撤销当前决定；请重新选择。已确认 ${reviewedCount()} 张，还需确认 ${pendingCount()} 张。`;
       render();
       scheduleDraftSave();
     });
