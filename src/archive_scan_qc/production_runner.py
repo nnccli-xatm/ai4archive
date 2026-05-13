@@ -27,6 +27,16 @@ PROCESSING_MODE_LABELS_ZH = {
     "qc_only": "只质检不修图",
     "light": "轻度优化",
 }
+PROCESSING_MODE_PURPOSES_ZH = {
+    "standard": "推荐用于正常批量生产，兼顾批量图片质量和处理效率。",
+    "qc_only": "只做质量检查，适合本批不需要自动修图的情况。",
+    "light": "用于担心过度处理的批次，只做较轻的保守优化。",
+}
+PROCESSING_MODE_OUTPUTS_ZH = {
+    "standard": "会生成处理后优化图片，原图不覆盖。",
+    "qc_only": "不会生成处理后优化图片。",
+    "light": "会生成轻度处理后的优化图片，原图不覆盖。",
+}
 
 
 @dataclass(frozen=True)
@@ -154,6 +164,8 @@ def build_production_run_summary(
     options = {
         "processing_mode": config.processing_mode,
         "processing_mode_label_zh": PROCESSING_MODE_LABELS_ZH.get(config.processing_mode, config.processing_mode),
+        "processing_mode_purpose_zh": PROCESSING_MODE_PURPOSES_ZH.get(config.processing_mode, ""),
+        "processing_mode_output_zh": PROCESSING_MODE_OUTPUTS_ZH.get(config.processing_mode, ""),
         "auto_crop": config.auto_crop,
         "deskew": config.deskew,
         "trim_dark_border": config.trim_dark_border,
@@ -187,6 +199,8 @@ def build_production_run_summary(
             "message_zh": operator_message,
             "processing_mode": config.processing_mode,
             "processing_mode_label_zh": PROCESSING_MODE_LABELS_ZH.get(config.processing_mode, config.processing_mode),
+            "processing_mode_purpose_zh": PROCESSING_MODE_PURPOSES_ZH.get(config.processing_mode, ""),
+            "processing_mode_output_zh": PROCESSING_MODE_OUTPUTS_ZH.get(config.processing_mode, ""),
             "input_folder": str(config.input_dir.resolve()),
             "derivative_image_folder": str(derivative_image_dir),
             "metadata_folder": str(config.metadata_output_dir.resolve()),
