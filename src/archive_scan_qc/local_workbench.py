@@ -241,7 +241,7 @@ class WorkbenchController:
         completion_note_path.write_text(
             "\n".join(
                 [
-                    "本批次完成交接说明",
+                    "本批已完成交接说明",
                     f"复核人员：{operator_name or '未填写'}",
                     f"处理方式：{_processing_mode_completion_label(processing_mode)}",
                     f"处理后图片文件夹：{derivatives_dir}",
@@ -252,7 +252,8 @@ class WorkbenchController:
                     f"已确认：{reviewed_decisions}",
                     f"待决定：{pending_decisions}",
                     "交接事项：处理后图片已保存到输出文件夹；复核结果和交接说明已保存到本机状态文件夹。",
-                    "下一批：检查输出文件夹后，在工作台点击准备下一批。",
+                    "交接前检查：打开输出文件夹，确认本批处理后图片数量和画面状态符合交接要求。",
+                    "下一批：检查输出文件夹后，在工作台点击准备下一批；系统会清空当前复核队列，请重新选择新一批原图文件夹和输出文件夹，不要混用批次。",
                     "",
                 ]
             ),
@@ -261,7 +262,7 @@ class WorkbenchController:
         return {
             "schema_version": SERVER_SCHEMA,
             "finished": True,
-            "message_zh": "完成并导出结果：处理后图片已保存到输出文件夹，复核结果和交接说明已保存到本机状态文件夹。",
+            "message_zh": "本批已完成：处理后图片已保存到输出文件夹，复核结果和交接说明已保存到本机状态文件夹。",
             "folders": {
                 "derivatives": str(derivatives_dir),
                 "metadata": str(metadata_dir),
@@ -272,9 +273,9 @@ class WorkbenchController:
                 "completion_note": str(completion_note_path),
             },
             "completion_panel": {
-                "title_zh": "本批次已完成",
-                "message_zh": "处理后图片已准备好。本批可以交接。",
-                "completion_status_zh": "已完成",
+                "title_zh": "本批已完成",
+                "message_zh": "处理后图片已准备好。请检查输出文件夹后再交接。",
+                "completion_status_zh": "本批已完成",
                 "manual_work_zh": "没有待人工处理图片",
                 "admin_handoff_zh": "不需要",
                 "total_review_items": total_decisions,
@@ -287,13 +288,15 @@ class WorkbenchController:
                 "verification_summary_path": str(verification_path),
                 "completion_note_path": str(completion_note_path),
                 "checklist_zh": [
-                    "处理后图片已保存到输出文件夹",
+                    "打开输出文件夹，检查处理后图片数量和画面状态",
                     "复核结果和交接说明已保存到本机状态文件夹",
-                    "可以检查输出文件夹后准备下一批",
+                    "准备下一批会清空当前复核队列，请重新选择新一批文件夹",
                 ],
                 "next_steps_zh": [
-                    "查看处理后图片。",
-                    "需要继续加工时，点击准备下一批。",
+                    "打开输出文件夹，检查处理后图片数量和画面状态。",
+                    "本机状态文件夹已保存复核结果和交接说明，正常界面不显示具体路径或文件名。",
+                    "需要继续加工时，点击准备下一批；当前复核队列会清空。",
+                    "为新批次重新选择扫描原图文件夹和输出文件夹，不要混用批次。",
                     "如果仍有异常或不能交接，请交管理员处理。",
                 ],
             },
@@ -1280,9 +1283,10 @@ def _status_recovery_guidance(
                 "title_zh": "没有剩余处理任务",
                 "message_zh": "本批次没有需要人工确认的图片，处理后图片已经准备好。",
                 "next_steps_zh": [
-                    "确认处理后图片已保存到输出文件夹。",
-                    "检查输出文件夹里的处理后图片。",
-                    "需要继续加工时，点击准备下一批。",
+                    "打开输出文件夹，检查处理后图片数量和画面状态。",
+                    "本机状态文件夹已保存复核结果和交接说明，正常界面不显示具体路径或文件名。",
+                    "需要继续加工时，点击准备下一批；当前复核队列会清空。",
+                    "为新批次重新选择扫描原图文件夹和输出文件夹，不要混用批次。",
                 ],
             }
     state = progress.get("state") if isinstance(progress, dict) else None
