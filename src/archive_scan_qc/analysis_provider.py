@@ -7,9 +7,10 @@ file content.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
+import os
 from pathlib import Path
+from dataclasses import dataclass
 import shlex
 import subprocess
 from typing import Any
@@ -67,7 +68,7 @@ def run_analysis_provider(
 
     try:
         completed = subprocess.run(
-            shlex.split(command),
+            _prepare_command(command),
             input=stdin,
             text=True,
             capture_output=True,
@@ -85,6 +86,56 @@ def run_analysis_provider(
         raise AnalysisProviderError(f"Analysis provider exited with code {completed.returncode}{suffix}")
 
     return _parse_provider_output(completed.stdout, {item["relative_path"] for item in files})
+
+
+def _prepare_command(command: str) -> list[str]:
+    argv = shlex.split(command)
+
+    fixed: list[str] = []
+    i = 0
+    while i < len(argv):
+        current = argv[i]
+
+        # Best-effort repair for unquoted filesystem paths that contain spaces.
+        # If a token starts a path but does not exist as-is, try joining
+        # subsequent tokens until a resolvable path appears.
+        if _looks_like_path_token(current):
+            best_candidate: str | None = None
+            best_end = i + 1
+            pieces: list[str] = []
+
+            for j in range(i, len(argv)):
+                pieces.append(argv[j])
+                candidate = " ".join(pieces)
+                if Path(os.path.expanduser(candidate)).exists():
+                    best_candidate = candidate
+                    best_end = j + 1
+
+            if best_candidate is None:
+                fixed.append(current)
+                i += 1
+            else:
+                fixed.append(best_candidate)
+                i = best_end
+            continue
+
+        fixed.append(current)
+        i += 1
+
+    return fixed
+
+
+def _looks_like_path_token(token: str) -> bool:
+    if not token:
+        return False
+    if token.startswith("-"):
+        return False
+    return (
+        os.path.sep in token
+        or token.startswith(".")
+        or token.startswith("~")
+        or token.startswith("/")
+    )
 
 
 def _parse_provider_output(stdout: str, valid_paths: set[str]) -> AnalysisProviderResult:
