@@ -238,7 +238,7 @@ class ProductionWorkbenchRegressionGuardTests(unittest.TestCase):
         for required in [
             "已处理 ${Math.min(completed, total)} 张 / 共 ${total} 张；待处理 ${Math.max(0, total - completed)} 张",
             'els.startButton.textContent = inRunStatus() ? "处理中，请等待" : "开始处理";',
-            'els.startButton.title = inRunStatus() ? "批次正在运行，不能重复开始处理。" : "";',
+            'els.startButton.title = inRunStatus() ? "批次正在运行，不能重复开始处理。" : (canStartProcessing() ? "" : startBlockedMessage);',
             "批次正在运行，请等待。本机正在处理图片，处理完成或失败前不能更改文件夹和处理方式，也不要反复点击开始处理。",
         ]:
             self.assertIn(required, html)
@@ -251,6 +251,40 @@ class ProductionWorkbenchRegressionGuardTests(unittest.TestCase):
             "row-level",
         ]:
             self.assertNotIn(forbidden, html)
+
+    def test_start_preflight_shows_aggregate_count_and_chinese_recovery(self) -> None:
+        html = WORKBENCH_HTML.read_text(encoding="utf-8")
+        server = Path(local_workbench_module.__file__).read_text(encoding="utf-8")
+
+        for required in [
+            "本批预检结果",
+            "function preflightSummaryMessage(readiness)",
+            "已识别到 ${count} 张可处理图片",
+            "本批预检未通过：请先选择扫描原图文件夹和输出文件夹。",
+            "本批预检未通过：已识别到 0 张可处理图片，请确认是否选错原图文件夹。",
+            "本批预检未通过：已识别到 0 张可处理图片，请确认原图格式是否支持。",
+            "但输出文件夹不能写入",
+            "blockedStartMessage()",
+            "return state.status === \"ready\" && Boolean(state.folderReadiness && state.folderReadiness.ready_to_start === true);",
+            'els.loadStatus.textContent = canStartProcessing() ? `${preflightSummaryMessage(state.folderReadiness)} 可以开始处理，原图不会被覆盖。` : blockedStartMessage();',
+        ]:
+            self.assertIn(required, html)
+        for required in [
+            '"schema_version": "scan-qc.local-folder-readiness.v1"',
+            '"aggregate_only": True',
+            '"supported_image_count": 0',
+            '"ready_to_start": False',
+            'f"本批预检结果：已识别到 {supported_image_count} 张可处理图片，输出文件夹可以写入。"',
+        ]:
+            self.assertIn(required, server)
+        for forbidden in [
+            "relative_path",
+            "source_sha256",
+            "output_sha256",
+            "ocr_text",
+            "thumbnail",
+        ]:
+            self.assertNotIn(forbidden, html[html.find("function preflightSummaryMessage"):html.find("function blockedStartMessage")])
 
 
 if __name__ == "__main__":

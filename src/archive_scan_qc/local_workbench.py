@@ -1405,7 +1405,7 @@ def _folder_readiness_summary(
         "status": "ready",
         "ready_to_start": True,
         "title_zh": "文件夹可以开始处理",
-        "message_zh": f"发现 {supported_image_count} 张可处理图片，输出文件夹可以写入。",
+        "message_zh": f"本批预检结果：已识别到 {supported_image_count} 张可处理图片，输出文件夹可以写入。",
         "next_steps_zh": ["确认处理方式无误。", "点击开始处理。"],
     }
 
