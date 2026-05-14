@@ -94,6 +94,9 @@ class WorkbenchController:
         self.input_dir: Path | None = None
         self.derivatives_dir: Path | None = None
         self.metadata_dir: Path | None = None
+        self.input_dir_display: str | None = None
+        self.derivatives_dir_display: str | None = None
+        self.metadata_dir_display: str | None = None
         self.processing_mode = DEFAULT_PROCESSING_MODE
         self.last_error: str | None = None
         self.last_preflight_guidance: dict[str, Any] | None = None
@@ -114,6 +117,13 @@ class WorkbenchController:
         input_path = _safe_resolve_path(input_dir)
         output_path = _safe_resolve_path(derivatives_dir)
         metadata_path = _safe_resolve_path(metadata_dir) if metadata_dir else output_path / DEFAULT_METADATA_DIRNAME
+        input_display = _operator_display_path(input_dir, input_path)
+        output_display = _operator_display_path(derivatives_dir, output_path)
+        metadata_display = (
+            _operator_display_path(metadata_dir, metadata_path)
+            if metadata_dir
+            else _child_display_path(output_display, output_path, metadata_path)
+        )
         unsafe_guidance = _unsafe_folder_choice_guidance(input_path, output_path, metadata_path)
         if unsafe_guidance is not None:
             raise ValueError(str(unsafe_guidance["message_zh"]))
@@ -131,6 +141,9 @@ class WorkbenchController:
             self.input_dir = input_path
             self.derivatives_dir = output_path
             self.metadata_dir = metadata_path
+            self.input_dir_display = input_display
+            self.derivatives_dir_display = output_display
+            self.metadata_dir_display = metadata_display
             self.processing_mode = selected_mode
             self.last_error = None
             self.last_preflight_guidance = None
@@ -163,6 +176,9 @@ class WorkbenchController:
             self.input_dir = None
             self.derivatives_dir = None
             self.metadata_dir = None
+            self.input_dir_display = None
+            self.derivatives_dir_display = None
+            self.metadata_dir_display = None
             self.processing_mode = DEFAULT_PROCESSING_MODE
             self.last_error = None
             self.last_preflight_guidance = None
@@ -218,9 +234,13 @@ class WorkbenchController:
         with self._lock:
             derivatives_dir = self.derivatives_dir
             metadata_dir = self.metadata_dir
+            derivatives_display = self.derivatives_dir_display
+            metadata_display = self.metadata_dir_display
             processing_mode = self.processing_mode
         if derivatives_dir is None or metadata_dir is None:
             raise ValueError("请先保存文件夹并生成复核队列。")
+        derivatives_display = derivatives_display or str(derivatives_dir)
+        metadata_display = metadata_display or str(metadata_dir)
         verification = build_review_decision_verification_summary(summary)
         if verification.get("status") != "pass":
             raise ValueError("复核决定还不能完成，请检查是否还有待处理图片。")
@@ -229,6 +249,9 @@ class WorkbenchController:
         summary_path = metadata_dir / REVIEW_DECISION_SUMMARY_JSON
         verification_path = metadata_dir / REVIEW_DECISION_VERIFICATION_JSON
         completion_note_path = metadata_dir / COMPLETION_NOTE_TXT
+        summary_display = _child_display_path(metadata_display, metadata_dir, summary_path)
+        verification_display = _child_display_path(metadata_display, metadata_dir, verification_path)
+        completion_note_display = _child_display_path(metadata_display, metadata_dir, completion_note_path)
         summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         verification_path.write_text(
             json.dumps(verification, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
@@ -245,10 +268,10 @@ class WorkbenchController:
                     "本批已完成交接说明",
                     f"复核人员：{operator_name or '未填写'}",
                     f"处理方式：{_processing_mode_completion_label(processing_mode)}",
-                    f"处理后图片文件夹：{derivatives_dir}",
-                    f"复核结果保存位置：{summary_path}",
-                    f"复核校验保存位置：{verification_path}",
-                    f"本机状态文件夹：{metadata_dir}",
+                    f"处理后图片文件夹：{derivatives_display}",
+                    f"复核结果保存位置：{summary_display}",
+                    f"复核校验保存位置：{verification_display}",
+                    f"本机状态文件夹：{metadata_display}",
                     f"复核总数：{total_decisions}",
                     f"已确认：{reviewed_decisions}",
                     f"待决定：{pending_decisions}",
@@ -265,13 +288,13 @@ class WorkbenchController:
             "finished": True,
             "message_zh": "本批已完成：处理后图片已保存到输出文件夹，复核结果和交接说明已保存到本机状态文件夹。",
             "folders": {
-                "derivatives": str(derivatives_dir),
-                "metadata": str(metadata_dir),
+                "derivatives": derivatives_display,
+                "metadata": metadata_display,
             },
             "saved": {
-                "decision_summary": str(summary_path),
-                "verification_summary": str(verification_path),
-                "completion_note": str(completion_note_path),
+                "decision_summary": summary_display,
+                "verification_summary": verification_display,
+                "completion_note": completion_note_display,
             },
             "completion_panel": {
                 "title_zh": "本批已完成",
@@ -283,11 +306,11 @@ class WorkbenchController:
                 "reviewed_items": reviewed_decisions,
                 "pending_items": pending_decisions,
                 "processing_mode": _processing_mode_payload(processing_mode),
-                "derivatives_dir": str(derivatives_dir),
-                "metadata_dir": str(metadata_dir),
-                "decision_summary_path": str(summary_path),
-                "verification_summary_path": str(verification_path),
-                "completion_note_path": str(completion_note_path),
+                "derivatives_dir": derivatives_display,
+                "metadata_dir": metadata_display,
+                "decision_summary_path": summary_display,
+                "verification_summary_path": verification_display,
+                "completion_note_path": completion_note_display,
                 "checklist_zh": [
                     "打开输出文件夹，检查处理后图片数量和画面状态",
                     "复核结果和交接说明已保存到本机状态文件夹",
@@ -327,19 +350,22 @@ class WorkbenchController:
     def status(self) -> dict[str, Any]:
         with self._lock:
             running = bool(self._thread and self._thread.is_alive())
-            input_dir = str(self.input_dir) if self.input_dir else None
-            derivatives_dir = str(self.derivatives_dir) if self.derivatives_dir else None
-            metadata_dir = str(self.metadata_dir) if self.metadata_dir else None
+            input_path = self.input_dir
+            derivatives_path = self.derivatives_dir
+            metadata_path = self.metadata_dir
+            input_dir = self.input_dir_display or (str(input_path) if input_path else None)
+            derivatives_dir = self.derivatives_dir_display or (str(derivatives_path) if derivatives_path else None)
+            metadata_dir = self.metadata_dir_display or (str(metadata_path) if metadata_path else None)
             processing_mode = self.processing_mode
             last_error = self.last_error
             last_preflight_guidance = self.last_preflight_guidance
-        raw_summary = _read_json(Path(metadata_dir) / PRODUCTION_RUN_SUMMARY_JSON) if metadata_dir else None
+        raw_summary = _read_json(metadata_path / PRODUCTION_RUN_SUMMARY_JSON) if metadata_path else None
         summary = _sanitize_operator_status_summary(raw_summary)
-        progress = _read_json(Path(metadata_dir) / PRODUCTION_RUN_PROGRESS_JSON) if metadata_dir else None
-        queue = self._queue_with_preview_sources(Path(metadata_dir)) if metadata_dir else None
-        draft_decisions = _read_json(Path(metadata_dir) / REVIEW_DECISION_DRAFT_JSON) if metadata_dir else None
+        progress = _read_json(metadata_path / PRODUCTION_RUN_PROGRESS_JSON) if metadata_path else None
+        queue = self._queue_with_preview_sources(metadata_path) if metadata_path else None
+        draft_decisions = _read_json(metadata_path / REVIEW_DECISION_DRAFT_JSON) if metadata_path else None
         recovery_guidance = _status_recovery_guidance(
-            configured=bool(input_dir and derivatives_dir and metadata_dir),
+            configured=bool(input_path and derivatives_path and metadata_path),
             running=running,
             summary=summary,
             progress=progress,
@@ -349,7 +375,7 @@ class WorkbenchController:
         return {
             "schema_version": SERVER_SCHEMA,
             "running": running,
-            "configured": bool(input_dir and derivatives_dir and metadata_dir),
+            "configured": bool(input_path and derivatives_path and metadata_path),
             "last_error_zh": last_error,
             "preflight_guidance": last_preflight_guidance,
             "recovery_guidance": recovery_guidance,
@@ -360,9 +386,9 @@ class WorkbenchController:
             },
             "processing_mode": _processing_mode_payload(processing_mode),
             "folder_readiness": _folder_readiness_summary(
-                Path(input_dir) if input_dir else None,
-                Path(derivatives_dir) if derivatives_dir else None,
-                Path(metadata_dir) if metadata_dir else None,
+                input_path,
+                derivatives_path,
+                metadata_path,
                 processing_mode,
             ),
             "summary": summary,
@@ -633,20 +659,20 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
-def _required_path(payload: dict[str, Any], key: str, label_zh: str) -> Path:
+def _required_path(payload: dict[str, Any], key: str, label_zh: str) -> str:
     value = payload.get(key)
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"请填写{label_zh}。")
-    return _normalize_operator_path(value)
+    return _strip_pasted_path_quotes(value.strip())
 
 
-def _optional_path(payload: dict[str, Any], key: str, label_zh: str) -> Path | None:
+def _optional_path(payload: dict[str, Any], key: str, label_zh: str) -> str | None:
     value = payload.get(key)
     if value is None:
         return None
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"请填写{label_zh}，或留空使用默认位置。")
-    return _normalize_operator_path(value)
+    return _strip_pasted_path_quotes(value.strip())
 
 
 def _safe_resolve_path(path: Path | str) -> Path:
@@ -669,6 +695,32 @@ def _normalize_operator_path(path: Path | str) -> Path:
     if _looks_like_windows_unc_path(raw):
         raise ValueError("暂不支持 Windows 网络共享路径。请先映射为本机盘符，或在 WSL 中使用 /mnt/<盘符>/... 路径。")
     return Path(raw)
+
+
+def _operator_display_path(path: Path | str, resolved_path: Path) -> str:
+    raw = _strip_pasted_path_quotes(str(path).strip())
+    raw = _decode_file_url_path(raw)
+    raw = _strip_windows_extended_prefix(raw)
+    if _windows_wsl_unc_path_to_linux(raw) is not None:
+        return raw
+    if _windows_drive_path_to_wsl(raw) is not None:
+        return raw
+    return str(resolved_path)
+
+
+def _child_display_path(parent_display: str, parent_path: Path, child_path: Path) -> str:
+    try:
+        relative = child_path.relative_to(parent_path)
+    except ValueError:
+        return str(child_path)
+    if _display_looks_like_windows_path(parent_display):
+        separator = "\\" if "\\" in parent_display else "/"
+        return parent_display.rstrip("\\/") + separator + separator.join(relative.parts)
+    return str(child_path)
+
+
+def _display_looks_like_windows_path(value: str) -> bool:
+    return bool(re.match(r"^[A-Za-z]:[\\/]", value))
 
 
 def _strip_pasted_path_quotes(value: str) -> str:
