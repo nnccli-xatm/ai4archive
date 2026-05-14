@@ -539,6 +539,8 @@ def _review_closure_metrics(payload: dict[str, Any]) -> dict[str, Any]:
             "total_findings": _safe_int(payload.get("total_findings")),
             "remaining_p0": _safe_int(payload.get("remaining_p0")),
             "remaining_p1": _safe_int(payload.get("remaining_p1")),
+            "manually_handled_count": _safe_int(payload.get("manually_handled_count")),
+            "closure_gate_summary": _safe_closure_gate_summary(payload.get("closure_gate_summary")),
             "status_counts": _safe_count_map(payload.get("status_counts")),
             "severity_counts": _safe_count_map(payload.get("severity_counts")),
             "severity_status_counts": _safe_nested_count_map(payload.get("severity_status_counts")),
@@ -561,6 +563,9 @@ def _acceptance_closure_metrics(payload: dict[str, Any]) -> dict[str, Any]:
             "human_review_total_findings": _safe_int(review_metrics.get("total_findings")),
             "human_review_remaining_p0": _safe_int(review_metrics.get("remaining_p0")),
             "human_review_remaining_p1": _safe_int(review_metrics.get("remaining_p1")),
+            "human_review_manually_handled_count": _safe_int(review_metrics.get("manually_handled_count")),
+            "closure_gate_summary": _safe_closure_gate_summary(payload.get("closure_gate_summary")),
+            "human_review_closure_gate_summary": _safe_closure_gate_summary(review_metrics.get("closure_gate_summary")),
             "human_review_status_counts": _safe_count_map(review_metrics.get("status_counts")),
             "privacy_status": _privacy_status_code(payload),
         }
@@ -579,6 +584,22 @@ def _privacy_status_code(payload: dict[str, Any]) -> str | None:
     if isinstance(status, str) and _safe_metric_key(status):
         return status
     return None
+
+
+def _safe_closure_gate_summary(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    result = _clean_optional_metrics(
+        {
+            "open_p0_count": _safe_int(value.get("open_p0_count")),
+            "open_p1_count": _safe_int(value.get("open_p1_count")),
+            "manually_handled_count": _safe_int(value.get("manually_handled_count")),
+            "can_complete_delivery": (
+                value.get("can_complete_delivery") if isinstance(value.get("can_complete_delivery"), bool) else None
+            ),
+        }
+    )
+    return result or None
 
 
 def _processing_reuse_counts(payload: dict[str, Any]) -> dict[str, int]:

@@ -193,6 +193,12 @@ def build_review_decision_verification_summary(summary: dict[str, Any]) -> dict[
             _add(blocking, "review_completion_status_mismatch")
 
     total_decisions = valid_decisions
+    reviewed_decisions = total_decisions - decision_counts["pending"]
+    closure_gate_summary = _review_decision_closure_gate_summary(
+        aggregate_counts=aggregate_counts if isinstance(aggregate_counts, dict) else {},
+        pending_decisions=decision_counts["pending"],
+        reviewed_decisions=reviewed_decisions,
+    )
     status = "pass" if not blocking else "blocked"
     return {
         "schema_version": SCHEMA_VERSION,
@@ -212,6 +218,7 @@ def build_review_decision_verification_summary(summary: dict[str, Any]) -> dict[
             "rework": decision_counts["fixed_externally"] + decision_counts["needs_rescan"] + decision_counts["blocked"],
             "completion_status": "complete" if decision_counts["pending"] == 0 else "incomplete",
             "decision_counts": decision_counts,
+            "closure_gate_summary": closure_gate_summary,
         },
         "blocking_counts_by_code": dict(sorted(blocking.items())),
         "warning_counts_by_code": dict(sorted(warnings.items())),
@@ -226,6 +233,32 @@ def build_review_decision_verification_summary(summary: dict[str, Any]) -> dict[
         "sensitivity": (
             "Aggregate-only verifier output. Decision IDs, paths, filenames, hashes, OCR text, thumbnails, "
             "image references, prompts, provider commands, and raw model output are not emitted."
+        ),
+    }
+
+
+def _review_decision_closure_gate_summary(
+    *,
+    aggregate_counts: dict[str, Any],
+    pending_decisions: int,
+    reviewed_decisions: int,
+) -> dict[str, Any]:
+    open_p0 = _safe_int(aggregate_counts.get("p0_pending"))
+    open_p1 = _safe_int(aggregate_counts.get("p1_pending"))
+    if open_p0 is None:
+        open_p0 = 0 if pending_decisions == 0 else _safe_int(aggregate_counts.get("p0")) or 0
+    if open_p1 is None:
+        open_p1 = 0 if pending_decisions == 0 else _safe_int(aggregate_counts.get("p1")) or 0
+    can_complete = pending_decisions == 0 and open_p0 == 0 and open_p1 == 0
+    return {
+        "open_p0_count": open_p0,
+        "open_p1_count": open_p1,
+        "manually_handled_count": reviewed_decisions,
+        "can_complete_delivery": can_complete,
+        "operator_message_zh": (
+            "P0/P1 问题已经有处理结论，可以完成交接。"
+            if can_complete
+            else "还有需要重扫/重新处理的图片，先处理后再完成导出。"
         ),
     }
 

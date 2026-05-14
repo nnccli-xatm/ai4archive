@@ -134,6 +134,7 @@ def build_review_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     rule_status_counts: dict[str, dict[str, int]] = {}
     remaining_p0 = 0
     remaining_p1 = 0
+    manually_handled_count = 0
 
     for line_number, row in enumerate(rows, start=2):
         rule = _required_text(row, "rule", line_number)
@@ -148,11 +149,14 @@ def build_review_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         status_counts[status] = status_counts.get(status, 0) + 1
         severity_status_counts.setdefault(severity, {item: 0 for item in sorted(REVIEW_STATUSES)})[status] += 1
         rule_status_counts.setdefault(rule, {item: 0 for item in sorted(REVIEW_STATUSES)})[status] += 1
+        if status != "pending":
+            manually_handled_count += 1
         if status not in RESOLVED_REVIEW_STATUSES:
             if severity == "P0":
                 remaining_p0 += 1
             elif severity == "P1":
                 remaining_p1 += 1
+    acceptance_passed = remaining_p0 == 0 and remaining_p1 == 0
 
     return {
         "schema_version": "scan-qc.review-summary.v1",
@@ -166,11 +170,23 @@ def build_review_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "rule_status_counts": {key: value for key, value in sorted(rule_status_counts.items())},
         "remaining_p0": remaining_p0,
         "remaining_p1": remaining_p1,
+        "manually_handled_count": manually_handled_count,
+        "closure_gate_summary": {
+            "open_p0_count": remaining_p0,
+            "open_p1_count": remaining_p1,
+            "manually_handled_count": manually_handled_count,
+            "can_complete_delivery": acceptance_passed,
+            "operator_message_zh": (
+                "P0/P1 问题已经有处理结论，可以进入验收。"
+                if acceptance_passed
+                else "还有需要重扫/重新处理的图片，先处理后再完成导出。"
+            ),
+        },
         "acceptance_threshold": {
             "remaining_p0_max": 0,
             "remaining_p1_max": 0,
         },
-        "acceptance_passed": remaining_p0 == 0 and remaining_p1 == 0,
+        "acceptance_passed": acceptance_passed,
     }
 
 

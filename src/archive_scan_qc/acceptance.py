@@ -166,6 +166,12 @@ def build_acceptance_summary(
             )
 
     passed = not blocking_items
+    closure_gate_summary = _closure_gate_summary(
+        remaining_p0=remaining_p0,
+        remaining_p1=remaining_p1,
+        human_review=human_review,
+        can_complete_delivery=passed,
+    )
     return {
         "schema_version": SCHEMA_VERSION,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -201,6 +207,7 @@ def build_acceptance_summary(
             "p0": remaining_p0,
             "p1": remaining_p1,
         },
+        "closure_gate_summary": closure_gate_summary,
         "failed_batches": failed_batches,
         "processing_failed_files": processing_failed_files,
         "throughput": throughput,
@@ -402,15 +409,52 @@ def _worker_range(values: list[int]) -> dict[str, Any]:
 
 def _human_review_summary(review_summary: dict[str, Any] | None) -> dict[str, Any]:
     if not review_summary:
-        return {"provided": False, "acceptance_passed": None, "total_findings": None, "status_counts": {}}
+        return {
+            "provided": False,
+            "acceptance_passed": None,
+            "total_findings": None,
+            "remaining_p0": None,
+            "remaining_p1": None,
+            "manually_handled_count": None,
+            "status_counts": {},
+            "closure_gate_summary": None,
+        }
     status_counts = review_summary.get("status_counts")
     if not isinstance(status_counts, dict):
         status_counts = {}
+    closure = review_summary.get("closure_gate_summary")
     return {
         "provided": True,
         "acceptance_passed": review_summary.get("acceptance_passed") is True,
         "total_findings": _coerce_int(review_summary.get("total_findings")),
+        "remaining_p0": _coerce_int(review_summary.get("remaining_p0")),
+        "remaining_p1": _coerce_int(review_summary.get("remaining_p1")),
+        "manually_handled_count": _coerce_int(review_summary.get("manually_handled_count")),
         "status_counts": {str(key): _coerce_int(value) or 0 for key, value in sorted(status_counts.items())},
+        "closure_gate_summary": closure if isinstance(closure, dict) else None,
+    }
+
+
+def _closure_gate_summary(
+    *,
+    remaining_p0: int | None,
+    remaining_p1: int | None,
+    human_review: dict[str, Any],
+    can_complete_delivery: bool,
+) -> dict[str, Any]:
+    open_p0 = remaining_p0 if remaining_p0 is not None else 0
+    open_p1 = remaining_p1 if remaining_p1 is not None else 0
+    handled = _coerce_int(human_review.get("manually_handled_count")) if human_review.get("provided") else None
+    return {
+        "open_p0_count": open_p0,
+        "open_p1_count": open_p1,
+        "manually_handled_count": handled,
+        "can_complete_delivery": can_complete_delivery,
+        "operator_message_zh": (
+            "P0/P1 问题已经有处理结论，可以进入验收。"
+            if can_complete_delivery
+            else "还有需要重扫/重新处理的图片，先处理后再完成导出。"
+        ),
     }
 
 

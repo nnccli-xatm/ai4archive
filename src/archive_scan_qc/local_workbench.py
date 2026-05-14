@@ -247,6 +247,14 @@ class WorkbenchController:
         verification = build_review_decision_verification_summary(summary)
         if verification.get("status") != "pass":
             raise ValueError("复核决定还不能完成，请检查是否还有待处理图片。")
+        decision_summary = verification.get("decision_summary") if isinstance(verification.get("decision_summary"), dict) else {}
+        closure_summary = (
+            decision_summary.get("closure_gate_summary")
+            if isinstance(decision_summary.get("closure_gate_summary"), dict)
+            else {}
+        )
+        if decision_summary.get("completion_status") != "complete" or closure_summary.get("can_complete_delivery") is not True:
+            raise ValueError("还有需要重扫/重新处理的图片，先处理后再完成导出。")
 
         metadata_dir.mkdir(parents=True, exist_ok=True)
         summary_path = metadata_dir / REVIEW_DECISION_SUMMARY_JSON
@@ -260,10 +268,11 @@ class WorkbenchController:
             json.dumps(verification, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
-        decision_summary = verification.get("decision_summary") if isinstance(verification.get("decision_summary"), dict) else {}
         total_decisions = int(decision_summary.get("total_decisions") or 0)
         pending_decisions = int(decision_summary.get("pending") or 0)
         reviewed_decisions = max(0, total_decisions - pending_decisions)
+        open_p0_count = int(closure_summary.get("open_p0_count") or 0)
+        open_p1_count = int(closure_summary.get("open_p1_count") or 0)
         operator_name = str(summary.get("operator_name") or "").strip()
         completion_note_path.write_text(
             "\n".join(
@@ -278,6 +287,9 @@ class WorkbenchController:
                     f"复核总数：{total_decisions}",
                     f"已确认：{reviewed_decisions}",
                     f"待决定：{pending_decisions}",
+                    f"未关闭 P0：{open_p0_count}",
+                    f"未关闭 P1：{open_p1_count}",
+                    f"已有人工处理结论：{int(closure_summary.get('manually_handled_count') or reviewed_decisions)}",
                     "交接事项：处理后图片已保存到输出文件夹；复核结果和交接说明已保存到本机状态文件夹。",
                     "交接前检查：打开输出文件夹，确认本批处理后图片数量和画面状态符合交接要求。",
                     "下一批：检查输出文件夹后，在工作台点击准备下一批；系统会清空当前复核队列，请重新选择新一批原图文件夹和输出文件夹，不要混用批次。",
@@ -308,6 +320,7 @@ class WorkbenchController:
                 "total_review_items": total_decisions,
                 "reviewed_items": reviewed_decisions,
                 "pending_items": pending_decisions,
+                "closure_gate_summary": closure_summary,
                 "processing_mode": _processing_mode_payload(processing_mode),
                 "derivatives_dir": derivatives_display,
                 "metadata_dir": metadata_display,
