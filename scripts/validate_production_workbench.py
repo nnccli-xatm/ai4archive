@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import tempfile
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -13,6 +14,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from archive_scan_qc.review_decisions import build_review_decision_verification_summary
+from archive_scan_qc.local_workbench import (
+    COMPLETION_NOTE_TXT,
+    REVIEW_DECISION_SUMMARY_JSON,
+    WorkbenchController,
+)
+from archive_scan_qc.review_decisions import REVIEW_DECISION_VERIFICATION_JSON
 
 WORKBENCH = ROOT / "docs" / "production-workbench-prototype.html"
 CLI = ROOT / "src" / "archive_scan_qc" / "cli.py"
@@ -215,6 +222,19 @@ PRIVATE_FIXTURE_TERMS = {
     ".tiff",
 }
 
+PRIVATE_COMPLETION_EXPORT_TERMS = {
+    "relative_path",
+    "source_path",
+    "thumbnail",
+    "sha256",
+    "hash",
+    "OCR",
+    "ocr_text",
+    "preview_url",
+    "original_path",
+    "processed_path",
+}
+
 CONTRACT_DECISION_MAP = {
     "pass": "false_positive",
     "rescan": "needs_rescan",
@@ -401,6 +421,117 @@ def validate_preview_fit_controls(html: str, errors: list[str]) -> None:
     render_body = js_function_body(html, "renderPreview") or ""
     if render_body.count("applyImageView();") < 2:
         errors.append("preview fit-control contract must reapply image view after single and comparison preview renders")
+
+
+def validate_completion_export_smoke(html: str, errors: list[str]) -> None:
+    """Exercise the local completion export path with synthetic aggregate-only data."""
+
+    for required_token in [
+        'const payload = await apiPost("/api/finish-decisions", decisionArtifact());',
+        "applyCompletionPanel(payload.completion_panel);",
+        'state.status = "complete";',
+        "state.progress = 100;",
+        'state.operatorMessage = payload.message_zh || "完成并导出结果。";',
+        "处理后图片已保存到输出文件夹，复核结果和交接说明已保存到本机状态文件夹",
+        "if (panel.derivatives_dir) state.outputSummary = outputSummaryLabel();",
+        "if (panel.metadata_dir) state.decisionSaveSummary = DECISION_SAVE_LABEL;",
+        "if (panel.metadata_dir || panel.completion_note_path) state.completionNoteSummary = COMPLETION_NOTE_LABEL;",
+    ]:
+        if required_token not in html:
+            errors.append(f"missing completion export smoke token: {required_token}")
+
+    queue = {
+        "items": [
+            {"local_id": "PRQ-SMOKE-001", "severity": "P1"},
+            {"local_id": "PRQ-SMOKE-002", "severity": "P2"},
+        ]
+    }
+    summary = review_decision_contract_fixture(queue)
+    summary["operator_name"] = "复核员"
+    summary["operator_decisions"] = [
+        {
+            "scope": "production_review_queue",
+            "local_id": "PRQ-SMOKE-001",
+            "decision": "rescan",
+            "decided_at": "2026-05-14T03:00:00.000Z",
+            "note_zh": "画面需要补扫。",
+        },
+        {
+            "scope": "production_review_queue",
+            "local_id": "PRQ-SMOKE-002",
+            "decision": "reprocess",
+            "decided_at": "2026-05-14T03:01:00.000Z",
+            "note_zh": "",
+        },
+    ]
+    try:
+        with tempfile.TemporaryDirectory(prefix="production-completion-smoke-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            controller = WorkbenchController()
+            controller.configure(input_dir, output_dir, metadata_dir)
+            result = controller.save_review_decisions(summary)
+
+            expected_message = "本批已完成：处理后图片已保存到输出文件夹，复核结果和交接说明已保存到本机状态文件夹。"
+            if result.get("finished") is not True:
+                errors.append("completion export smoke did not finish")
+            if result.get("message_zh") != expected_message:
+                errors.append("completion export smoke returned unexpected final Chinese message")
+            decision_summary = result.get("decision_summary")
+            if not isinstance(decision_summary, dict) or decision_summary.get("completion_status") != "complete":
+                errors.append("completion export smoke did not return complete decision summary")
+            panel = result.get("completion_panel")
+            if not isinstance(panel, dict):
+                errors.append("completion export smoke did not return completion panel")
+                return
+            expected_panel_values = {
+                "title_zh": "本批已完成",
+                "message_zh": "处理后图片已准备好。请检查输出文件夹后再交接。",
+                "completion_status_zh": "本批已完成",
+                "manual_work_zh": "没有待人工处理图片",
+                "admin_handoff_zh": "不需要",
+            }
+            for key, expected in expected_panel_values.items():
+                if panel.get(key) != expected:
+                    errors.append(f"completion panel has unexpected {key}")
+            for path_name in [REVIEW_DECISION_SUMMARY_JSON, REVIEW_DECISION_VERIFICATION_JSON, COMPLETION_NOTE_TXT]:
+                if not (metadata_dir / path_name).exists():
+                    errors.append(f"completion export smoke missing local artifact: {path_name}")
+
+            saved_summary = json.loads((metadata_dir / REVIEW_DECISION_SUMMARY_JSON).read_text(encoding="utf-8"))
+            saved_summary_text = json.dumps(saved_summary, ensure_ascii=False, sort_keys=True)
+            leaked_summary_terms = sorted(
+                term for term in PRIVATE_COMPLETION_EXPORT_TERMS if term.lower() in saved_summary_text.lower()
+            )
+            if leaked_summary_terms:
+                errors.append(f"completion decision summary includes forbidden private terms: {leaked_summary_terms}")
+            if saved_summary.get("privacy", {}).get("summary_only") is not True:
+                errors.append("completion decision summary is not marked summary-only")
+
+            public_panel_text = json.dumps(
+                {
+                    "title_zh": panel.get("title_zh"),
+                    "message_zh": panel.get("message_zh"),
+                    "completion_status_zh": panel.get("completion_status_zh"),
+                    "manual_work_zh": panel.get("manual_work_zh"),
+                    "admin_handoff_zh": panel.get("admin_handoff_zh"),
+                    "next_steps_zh": panel.get("next_steps_zh"),
+                    "checklist_zh": panel.get("checklist_zh"),
+                    "processing_mode": panel.get("processing_mode"),
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            for private_value in [str(input_dir), str(output_dir), str(metadata_dir), REVIEW_DECISION_SUMMARY_JSON]:
+                if private_value in public_panel_text:
+                    errors.append("completion panel public guidance exposes a local path or artifact filename")
+            if str(output_dir.resolve()) != panel.get("derivatives_dir") or str(metadata_dir.resolve()) != panel.get("metadata_dir"):
+                errors.append("completion panel local artifact pointers are not rooted in the configured local folders")
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        errors.append(f"completion export smoke failed: {exc}")
 
 
 def main() -> int:
@@ -729,6 +860,7 @@ def main() -> int:
         if required_script_token not in html:
             errors.append(f"missing review queue workflow script token: {required_script_token}")
     validate_preview_fit_controls(html, errors)
+    validate_completion_export_smoke(html, errors)
 
     for old_finish_copy in ["导出复核决定", "完成导出", "把处理后图片交给验收或移交流程"]:
         if old_finish_copy in text:
