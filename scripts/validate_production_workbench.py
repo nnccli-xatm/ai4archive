@@ -43,6 +43,8 @@ REQUIRED_TEXT = {
     "请填写原图文件夹",
     "请填写输出文件夹",
     "开始处理",
+    "本批预检结果",
+    "可处理图片数量",
     "批次正在运行，请等待",
     "阶段：",
     "已处理",
@@ -190,11 +192,11 @@ REQUIRED_TEXT = {
     "常见图片格式",
     "没有需要人工确认",
     "文件夹位置不对",
-    "文件夹准备情况",
+    "本批预检未通过",
     "文件夹可以开始处理",
     "可处理图片",
     "输出文件夹可以写入",
-    "确认处理方式无误",
+    "简短中文状态",
 }
 
 FORBIDDEN_VISIBLE_TERMS = {
@@ -688,11 +690,11 @@ def main() -> int:
             'derivatives_dir: els.outputPath.value.trim()',
             'processing_mode: selectedProcessingMode()',
             'state.status = "ready";',
-            'els.loadStatus.textContent = "文件夹已保存，可以开始处理。";',
+            "preflightSummaryMessage(state.folderReadiness)",
         ]:
             if required_token not in save_folders_body:
                 errors.append(f"saved-folder configure flow missing token: {required_token}")
-        success_copy_index = save_folders_body.find('els.loadStatus.textContent = "文件夹已保存，可以开始处理。";')
+        success_copy_index = save_folders_body.find("preflightSummaryMessage(state.folderReadiness)")
         render_after_success_index = save_folders_body.find("render();", success_copy_index)
         if success_copy_index == -1 or render_after_success_index == -1:
             errors.append("saved-folder configure flow does not render after successful save")

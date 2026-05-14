@@ -271,6 +271,8 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertEqual(readiness["supported_image_count"], 1)
             self.assertFalse(readiness["input_empty"])
             self.assertTrue(readiness["output_writable"])
+            self.assertEqual(readiness["title_zh"], "文件夹可以开始处理")
+            self.assertEqual(readiness["message_zh"], "本批预检结果：已识别到 1 张可处理图片，输出文件夹可以写入。")
             self.assertEqual(readiness["selected_processing_mode"]["id"], "light")
             self.assertNotIn("nested", json.dumps(readiness, ensure_ascii=False))
             self.assertNotIn("a.png", json.dumps(readiness, ensure_ascii=False))
