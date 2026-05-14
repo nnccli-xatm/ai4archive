@@ -153,6 +153,7 @@ class ProductionWorkbenchRegressionGuardTests(unittest.TestCase):
             "state.folderReadiness = null;",
             'state.completionTitle = "等待完成本批";',
             'state.completionMessage = "完成并导出结果后，这里会显示本批交接清单。";',
+            'state.completionReuseMessage = "";',
             'state.completionStatusFact = "未完成";',
             "state.completionSteps = INITIAL_COMPLETION_STEPS.slice();",
             "请重新选择新一批扫描原图文件夹和输出文件夹，不要混用批次。",
@@ -193,6 +194,30 @@ class ProductionWorkbenchRegressionGuardTests(unittest.TestCase):
         ]:
             self.assertIn(required, server)
         self.assertIn("state.status === \"complete\" && state.outputChosen && state.openOutputFolderAvailable", html)
+
+    def test_completed_handoff_shows_only_aggregate_reuse_counts_when_available(self) -> None:
+        html = WORKBENCH_HTML.read_text(encoding="utf-8")
+
+        for required in [
+            'id="completionReuseMessage"',
+            "function localReuseMessage(panel)",
+            "panel.local_reuse_summary",
+            "reuse.aggregate_only !== true",
+            '"reused_files", "reprocessed_files", "failed_files"',
+            "本批复用了 ${Math.max(0, toNumber(reuse.reused_files))} 张，重新处理 ${Math.max(0, toNumber(reuse.reprocessed_files))} 张，失败 ${Math.max(0, toNumber(reuse.failed_files))} 张。",
+            "state.completionReuseMessage = localReuseMessage(panel);",
+            'els.completionReuseMessage.classList.toggle("hidden", !state.completionReuseMessage);',
+        ]:
+            self.assertIn(required, html)
+
+        for forbidden in [
+            "reuse.source_path",
+            "reuse.relative_path",
+            "reuse.sha256",
+            "reuse.ocr_text",
+            "reuse.thumbnail",
+        ]:
+            self.assertNotIn(forbidden, html)
 
     def test_running_state_shows_aggregate_remaining_work_and_locks_start_button(self) -> None:
         html = WORKBENCH_HTML.read_text(encoding="utf-8")
