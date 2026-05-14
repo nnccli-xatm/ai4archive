@@ -141,6 +141,30 @@ class ProductionWorkbenchRegressionGuardTests(unittest.TestCase):
         self.assertIn("NEXT_BATCH_STATUS_TEXT", html)
         self.assertIn("请重新选择扫描原图文件夹和输出文件夹", html)
 
+    def test_completed_handoff_has_local_open_output_folder_action_without_path_disclosure(self) -> None:
+        html = WORKBENCH_HTML.read_text(encoding="utf-8")
+        server = Path(local_workbench_module.__file__).read_text(encoding="utf-8")
+
+        for required in [
+            'id="openOutputFolderButton"',
+            ">打开输出文件夹<",
+            'id="openOutputFolderStatus"',
+            "openOutputFolderAvailable",
+            "openOutputFolder()",
+            'apiPost("/api/open-output-folder", {})',
+            "输出文件夹没有打开。请重新选择输出文件夹，或联系管理员处理。",
+        ]:
+            self.assertIn(required, html)
+        for required in [
+            'elif self.path == "/api/open-output-folder":',
+            "open_output_folder",
+            "_open_operator_folder",
+            "_batch_has_completed",
+            "处理后输出文件夹现在不能打开。请重新选择输出文件夹，或联系管理员处理。",
+        ]:
+            self.assertIn(required, server)
+        self.assertIn("state.status === \"complete\" && state.outputChosen && state.openOutputFolderAvailable", html)
+
 
 if __name__ == "__main__":
     unittest.main()

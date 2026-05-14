@@ -339,6 +339,7 @@ class WorkbenchController:
                 "decision_summary_path": summary_display,
                 "verification_summary_path": verification_display,
                 "completion_note_path": completion_note_display,
+                "open_output_folder_available": True,
                 "checklist_zh": [
                     f"打开输出文件夹，检查 {handoff_counts['processed_output_images']} 张处理后图片的数量和画面状态",
                     f"需要重扫 {handoff_counts['needs_rescan_images']} 张，需要重新处理 {handoff_counts['needs_reprocess_images']} 张",
@@ -374,6 +375,23 @@ class WorkbenchController:
             "message_zh": "已自动保存",
             "draft_decisions": summary,
             "decision_summary": verification.get("decision_summary"),
+        }
+
+    def open_output_folder(self) -> dict[str, Any]:
+        with self._lock:
+            derivatives_dir = self.derivatives_dir
+            derivatives_display = self.derivatives_dir_display or (str(derivatives_dir) if derivatives_dir else "")
+            metadata_dir = self.metadata_dir
+        if derivatives_dir is None or not derivatives_dir.exists() or not derivatives_dir.is_dir():
+            raise ValueError("处理后输出文件夹现在不能打开。请重新选择输出文件夹，或联系管理员处理。")
+        if not _batch_has_completed(metadata_dir):
+            raise ValueError("本批还没有完成。完成本批后才能打开输出文件夹。")
+        if not _open_operator_folder(derivatives_dir, derivatives_display):
+            raise ValueError("输出文件夹没有打开。请重新选择输出文件夹，或联系管理员处理。")
+        return {
+            "schema_version": SERVER_SCHEMA,
+            "opened": True,
+            "message_zh": "已打开输出文件夹。请检查处理后图片数量和画面状态。",
         }
 
     def status(self) -> dict[str, Any]:
@@ -602,6 +620,8 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
                 result = self.workbench_controller.save_review_decisions(payload)
             elif self.path == "/api/save-draft-decisions":
                 result = self.workbench_controller.save_draft_review_decisions(payload)
+            elif self.path == "/api/open-output-folder":
+                result = self.workbench_controller.open_output_folder()
             else:
                 self._send_json({"error_zh": "未知请求。"}, HTTPStatus.NOT_FOUND)
                 return
@@ -787,6 +807,58 @@ def _run_folder_picker_command(command: list[str]) -> str | None:
     if completed.returncode in {1, 2}:
         return None
     raise ValueError("系统文件夹选择器没有正常返回路径，请直接填写本机文件夹路径。")
+
+
+def _batch_has_completed(metadata_dir: Path | None) -> bool:
+    if metadata_dir is None:
+        return False
+    if (metadata_dir / COMPLETION_NOTE_TXT).exists():
+        return True
+    summary = _read_json(metadata_dir / PRODUCTION_RUN_SUMMARY_JSON)
+    status = str(summary.get("status") or "").strip().lower() if isinstance(summary, dict) else ""
+    return status in {"completed", "finished"}
+
+
+def _open_operator_folder(path: Path, display_path: str) -> bool:
+    forced_command = os.environ.get("AI4ARCHIVE_OPEN_FOLDER_COMMAND")
+    if forced_command:
+        command = [forced_command, str(path)]
+    elif _running_under_wsl():
+        target = display_path if _display_looks_like_windows_path(display_path) else _wsl_path_to_windows(path)
+        command = ["explorer.exe", target]
+    elif sys.platform == "darwin":
+        command = ["open", str(path)]
+    elif os.name == "nt":
+        try:
+            os.startfile(str(path))  # type: ignore[attr-defined]
+            return True
+        except OSError:
+            return False
+    else:
+        opener = shutil.which("xdg-open")
+        if not opener:
+            return False
+        command = [opener, str(path)]
+    try:
+        subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        return False
+    return True
+
+
+def _wsl_path_to_windows(path: Path) -> str:
+    try:
+        relative = path.resolve().relative_to(WINDOWS_DRIVE_MOUNT_ROOT)
+    except (OSError, ValueError):
+        return str(path)
+    parts = relative.parts
+    if not parts:
+        return str(path)
+    drive = parts[0].upper()
+    if len(drive) != 1 or not drive.isalpha():
+        return str(path)
+    tail = "\\".join(parts[1:])
+    return f"{drive}:\\" + tail if tail else f"{drive}:\\"
 
 
 def _required_path(payload: dict[str, Any], key: str, label_zh: str) -> str:

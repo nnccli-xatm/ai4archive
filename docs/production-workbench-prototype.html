@@ -1366,7 +1366,11 @@
               <li>需要继续加工时，点击准备下一批；当前复核队列会清空。</li>
               <li>为新批次重新选择扫描原图文件夹和输出文件夹，不要混用批次。</li>
             </ul>
-            <button type="button" class="secondary" id="nextBatchButton">准备下一批</button>
+            <div class="decision-actions">
+              <button type="button" class="primary-choice" id="openOutputFolderButton" disabled>打开输出文件夹</button>
+              <button type="button" class="secondary" id="nextBatchButton">准备下一批</button>
+            </div>
+            <p class="muted" id="openOutputFolderStatus" aria-live="polite">完成本批并保存输出文件夹后可以打开检查。</p>
           </div>
           <div class="handoff-box hidden" id="failurePanel">
             <h3>处理失败</h3>
@@ -1450,7 +1454,9 @@
       lastServerOutputPath: "",
       progressLabel: "",
       launchLocked: false,
-      waitingForNewSetup: false
+      waitingForNewSetup: false,
+      openOutputFolderAvailable: false,
+      openOutputFolderStatus: "完成本批并保存输出文件夹后可以打开检查。"
     };
 
     const els = {
@@ -1539,6 +1545,8 @@
       manualWorkFact: document.getElementById("manualWorkFact"),
       adminHandoffFact: document.getElementById("adminHandoffFact"),
       completionSteps: document.getElementById("completionSteps"),
+      openOutputFolderButton: document.getElementById("openOutputFolderButton"),
+      openOutputFolderStatus: document.getElementById("openOutputFolderStatus"),
       nextBatchButton: document.getElementById("nextBatchButton")
     };
 
@@ -2155,6 +2163,9 @@
       els.manualWorkFact.textContent = state.manualWorkFact;
       els.adminHandoffFact.textContent = state.adminHandoffFact;
       els.completionSteps.innerHTML = state.completionSteps.map((step) => `<li>${escapeHtml(step)}</li>`).join("");
+      const canOpenOutputFolder = localApi.enabled && state.status === "complete" && state.outputChosen && state.openOutputFolderAvailable;
+      els.openOutputFolderButton.disabled = !canOpenOutputFolder;
+      els.openOutputFolderStatus.textContent = state.openOutputFolderStatus;
     }
 
     function guidanceFromSummary(summary) {
@@ -2663,6 +2674,10 @@
       }
       if (panel.metadata_dir) state.decisionSaveSummary = DECISION_SAVE_LABEL;
       if (panel.metadata_dir || panel.completion_note_path) state.completionNoteSummary = COMPLETION_NOTE_LABEL;
+      state.openOutputFolderAvailable = panel.open_output_folder_available === true || (state.outputChosen && Boolean(state.lastServerOutputPath));
+      state.openOutputFolderStatus = state.openOutputFolderAvailable
+        ? "可以打开输出文件夹检查处理后图片。"
+        : "完成本批并保存输出文件夹后可以打开检查。";
       state.completionStatusFact = panel.completion_status_zh || "本批已完成";
       if (Number.isFinite(Number(panel.needs_rescan_images))) state.rescanFact = `${Math.max(0, Number(panel.needs_rescan_images))} 张`;
       if (Number.isFinite(Number(panel.needs_reprocess_images))) state.reprocessFact = `${Math.max(0, Number(panel.needs_reprocess_images))} 张`;
@@ -2886,6 +2901,26 @@
       }
     }
 
+    async function openOutputFolder() {
+      if (!localApi.enabled || state.status !== "complete" || !state.openOutputFolderAvailable) {
+        state.openOutputFolderStatus = "完成本批并保存输出文件夹后可以打开检查。";
+        render();
+        return;
+      }
+      try {
+        state.openOutputFolderStatus = "正在打开输出文件夹。";
+        render();
+        const payload = await apiPost("/api/open-output-folder", {});
+        state.openOutputFolderStatus = payload.message_zh || "已打开输出文件夹。请检查处理后图片数量和画面状态。";
+        els.loadStatus.textContent = state.openOutputFolderStatus;
+        render();
+      } catch (error) {
+        state.openOutputFolderStatus = error.message || "输出文件夹没有打开。请重新选择输出文件夹，或联系管理员处理。";
+        els.loadStatus.textContent = state.openOutputFolderStatus;
+        render();
+      }
+    }
+
     async function loadFixture(baseName) {
       if (!baseName) return;
       els.loadStatus.textContent = "正在加载状态示例。";
@@ -3077,6 +3112,7 @@
     els.confirmFinishButton.addEventListener("click", finishBatch);
     els.returnReviewButton.addEventListener("click", returnToReviewFromFinishConfirmation);
     els.exportButton.addEventListener("click", exportDecisions);
+    els.openOutputFolderButton.addEventListener("click", openOutputFolder);
 
     async function resetServerBatchState() {
       if (!localApi.enabled) return;
@@ -3112,6 +3148,8 @@
       state.finishConfirmationVisible = false;
       state.launchLocked = false;
       state.waitingForNewSetup = true;
+      state.openOutputFolderAvailable = false;
+      state.openOutputFolderStatus = "完成本批并保存输出文件夹后可以打开检查。";
       state.lastDraftMessage = "";
       state.operatorMessage = "";
       state.reviewQueueText = "";

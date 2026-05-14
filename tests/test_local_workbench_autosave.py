@@ -630,6 +630,28 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             verification = json.loads((metadata_dir / REVIEW_DECISION_VERIFICATION_JSON).read_text(encoding="utf-8"))
             self.assertEqual(verification["status"], "pass")
 
+    def test_open_output_folder_requires_completed_batch_and_returns_operator_safe_message(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            controller = WorkbenchController()
+            controller.configure(input_dir, output_dir, metadata_dir)
+
+            with self.assertRaisesRegex(ValueError, "本批还没有完成"):
+                controller.open_output_folder()
+
+            controller.save_review_decisions(decision_summary([]))
+            with patch.object(local_workbench_module.subprocess, "Popen") as popen:
+                result = controller.open_output_folder()
+
+            self.assertTrue(result["opened"])
+            self.assertEqual(result["message_zh"], "已打开输出文件夹。请检查处理后图片数量和画面状态。")
+            self.assertNotIn(str(output_dir), json.dumps(result, ensure_ascii=False))
+            popen.assert_called_once()
+
     def test_private_fields_are_rejected_for_drafts(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
