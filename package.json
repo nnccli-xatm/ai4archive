@@ -2,6 +2,7 @@
   "name": "ai4archive-workbench-smoke",
   "private": true,
   "scripts": {
+    "smoke:production-workbench-completion-export": "python3 scripts/smoke_production_workbench_completion_export.py",
     "test:production-workbench-finish-smoke": "playwright test tests/production_workbench_finish_smoke.spec.js"
   },
   "devDependencies": {
