@@ -51,12 +51,20 @@ def build_final_handoff_summary(evidence_dir: Path, *, generated_at: str | None 
     checks_failed = len(blockers)
     blocking_item_count = len(blockers)
     status = "pass" if blocking_item_count == 0 else "fail"
+    handoff_blockers = _handoff_blocker_summary_zh(
+        status=status,
+        release_candidate=release_candidate,
+        review_decision_verification=review_decision_verification,
+    )
 
     return {
         "schema_version": SCHEMA_VERSION,
         "generated_at": generated_at or datetime.now(timezone.utc).isoformat(),
         "status": status,
         "ready_for_handoff": status == "pass",
+        "handoff_status_zh": handoff_blockers["status_zh"],
+        "admin_summary_zh": handoff_blockers["summary_zh"],
+        "handoff_blocker_summary_zh": handoff_blockers,
         "checks_passed": checks_passed,
         "checks_failed": checks_failed,
         "blocking_item_count": blocking_item_count,
@@ -325,6 +333,126 @@ def _review_decision_summary(value: Any) -> dict[str, Any]:
         "rework": _safe_int(value.get("rework")),
         "completion_status": completion_status,
         "decision_counts": _safe_count_map(value.get("decision_counts")),
+        "closure_gate_summary": _closure_gate_status(value.get("closure_gate_summary")),
+    }
+
+
+def _handoff_blocker_summary_zh(
+    *,
+    status: str,
+    release_candidate: _LoadedArtifact,
+    review_decision_verification: _LoadedArtifact,
+) -> dict[str, Any]:
+    release_payload = release_candidate.payload or {}
+    release_digest = release_payload.get("acceptance_blocker_summary_zh")
+    release_blockers = release_digest.get("blockers_zh") if isinstance(release_digest, dict) else None
+    blockers = [item for item in release_blockers if isinstance(item, str)] if isinstance(release_blockers, list) else []
+    closure = _release_closure_gate_status(release_payload)
+    review_closure = _review_decision_closure_gate_status(review_decision_verification.payload)
+    closure = _prefer_closure(closure, review_closure)
+    if not blockers:
+        open_p0 = closure["open_p0_count"]
+        open_p1 = closure["open_p1_count"]
+        handled_count = closure["manually_handled_count"]
+        if open_p0 > 0 or open_p1 > 0:
+            blockers.append(f"P0/P1 未关闭：未关闭 P0 {open_p0} 项，未关闭 P1 {open_p1} 项。")
+        if closure["can_complete_delivery"] is False and handled_count is None:
+            blockers.append("人工处理结论不足：未提供可确认的人工处理闭环汇总。")
+        elif closure["can_complete_delivery"] is False and open_p0 == 0 and open_p1 == 0:
+            blockers.append(f"人工处理结论不足：已有人工处理结论 {handled_count} 项，但闭环状态仍未达到交接条件。")
+    sampling = _release_acceptance_sampling_status(release_payload)
+    if sampling["provided"]:
+        target = sampling["target_sample_count"] or 0
+        generated = sampling["generated_sample_task_count"] or 0
+        reviewed = sampling["reviewed_sample_count"] or 0
+        if sampling["sample_task_target_met"] is False and not any("抽检任务未达到目标比例" in item for item in blockers):
+            blockers.append(f"抽检任务未达到目标比例：目标 {target} 项，已生成 {generated} 项。")
+        if sampling["sampling_target_met"] is False and not any("抽检复核未达到目标比例" in item for item in blockers):
+            blockers.append(f"抽检复核未达到目标比例：目标 {target} 项，已复核 {reviewed} 项。")
+    ready = status == "pass"
+    if not blockers and not ready:
+        blockers.append("交接聚合状态未通过，请查看阻塞代码计数后重新生成交接摘要。")
+    status_zh = "可交接" if ready and not blockers else "不可交接"
+    summary_zh = (
+        "可交接：P0/P1 已关闭，人工处理结论和抽检比例聚合检查均已通过。"
+        if status_zh == "可交接"
+        else "不可交接：" + "；".join(blockers)
+    )
+    return {
+        "status_zh": status_zh,
+        "can_handoff": status_zh == "可交接",
+        "summary_zh": summary_zh,
+        "blockers_zh": blockers,
+        "closure_gate_summary": closure,
+        "acceptance_sampling": sampling,
+        "reused_aggregate_fields": [
+            "closure_gate_summary",
+            "acceptance_sampling",
+            "release_candidate_summary",
+            "review_decision_verification_summary",
+            "blocking_items",
+        ],
+    }
+
+
+def _release_closure_gate_status(payload: dict[str, Any]) -> dict[str, Any]:
+    production = payload.get("production_validation")
+    closure = production.get("closure_gate_summary") if isinstance(production, dict) else None
+    if not isinstance(closure, dict):
+        digest = payload.get("acceptance_blocker_summary_zh")
+        closure = digest.get("closure_gate_summary") if isinstance(digest, dict) else None
+    return _closure_gate_status(closure)
+
+
+def _review_decision_closure_gate_status(payload: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return _closure_gate_status(None)
+    decision = payload.get("decision_summary")
+    closure = decision.get("closure_gate_summary") if isinstance(decision, dict) else None
+    return _closure_gate_status(closure)
+
+
+def _prefer_closure(primary: dict[str, Any], fallback: dict[str, Any]) -> dict[str, Any]:
+    if primary["can_complete_delivery"] is not None or primary["open_p0_count"] or primary["open_p1_count"]:
+        return primary
+    if fallback["can_complete_delivery"] is not None or fallback["open_p0_count"] or fallback["open_p1_count"]:
+        return fallback
+    return primary
+
+
+def _release_acceptance_sampling_status(payload: dict[str, Any]) -> dict[str, Any]:
+    production = payload.get("production_validation")
+    sampling = production.get("acceptance_sampling") if isinstance(production, dict) else None
+    if not isinstance(sampling, dict):
+        digest = payload.get("acceptance_blocker_summary_zh")
+        sampling = digest.get("acceptance_sampling") if isinstance(digest, dict) else None
+    if not isinstance(sampling, dict) or sampling.get("provided") is not True:
+        return {
+            "provided": False,
+            "target_sample_count": None,
+            "generated_sample_task_count": None,
+            "reviewed_sample_count": None,
+            "sample_task_target_met": None,
+            "sampling_target_met": None,
+        }
+    return {
+        "provided": True,
+        "target_sample_count": _safe_optional_int(sampling.get("target_sample_count")),
+        "generated_sample_task_count": _safe_optional_int(sampling.get("generated_sample_task_count")),
+        "reviewed_sample_count": _safe_optional_int(sampling.get("reviewed_sample_count")),
+        "sample_task_target_met": sampling.get("sample_task_target_met") if isinstance(sampling.get("sample_task_target_met"), bool) else None,
+        "sampling_target_met": sampling.get("sampling_target_met") if isinstance(sampling.get("sampling_target_met"), bool) else None,
+    }
+
+
+def _closure_gate_status(value: Any) -> dict[str, Any]:
+    closure = value if isinstance(value, dict) else {}
+    can_complete = closure.get("can_complete_delivery")
+    return {
+        "open_p0_count": _safe_optional_int(closure.get("open_p0_count")) or 0,
+        "open_p1_count": _safe_optional_int(closure.get("open_p1_count")) or 0,
+        "manually_handled_count": _safe_optional_int(closure.get("manually_handled_count")),
+        "can_complete_delivery": can_complete if isinstance(can_complete, bool) else None,
     }
 
 
@@ -337,6 +465,10 @@ def _review_decision_privacy_status(payload: dict[str, Any]) -> str | None:
 
 def _safe_int(value: Any) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
+
+
+def _safe_optional_int(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
 
 
 def _safe_count_map(value: Any) -> dict[str, int]:
