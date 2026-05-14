@@ -767,6 +767,12 @@ def _main_acceptance_summary(argv: list[str]) -> int:
         help="Optional aggregate_baseline_summary.json from scripts/run_aggregate_baseline.py.",
     )
     parser.add_argument(
+        "--acceptance-sampling-review",
+        default=None,
+        type=Path,
+        help="Optional acceptance_sampling_review.json; only its aggregate_sampling_counts field is copied into the gate.",
+    )
+    parser.add_argument(
         "--min-scan-files-per-minute",
         default=None,
         type=_non_negative_float,
@@ -789,6 +795,7 @@ def _main_acceptance_summary(argv: list[str]) -> int:
             processing_audit_summary_path=args.processing_audit_summary,
             benchmark_results_path=args.benchmark_results,
             aggregate_baseline_summary_path=args.aggregate_baseline_summary,
+            acceptance_sampling_review_path=args.acceptance_sampling_review,
             min_scan_files_per_minute=args.min_scan_files_per_minute,
             min_processing_files_per_minute=args.min_processing_files_per_minute,
         )

@@ -27,15 +27,18 @@ def write_acceptance_summary(
     processing_audit_summary_path: Path | None = None,
     benchmark_results_path: Path | None = None,
     aggregate_baseline_summary_path: Path | None = None,
+    acceptance_sampling_review_path: Path | None = None,
     min_scan_files_per_minute: float | None = None,
     min_processing_files_per_minute: float | None = None,
 ) -> tuple[Path, dict[str, Any]]:
+    sampling_payload = _load_optional_json(acceptance_sampling_review_path, "acceptance_sampling_review")
     payload = build_acceptance_summary(
         run_plan_summary=_load_optional_json(run_plan_summary_path, "run_plan_summary"),
         review_summary=_load_optional_json(review_summary_path, "review_summary"),
         processing_audit_summary=_load_optional_json(processing_audit_summary_path, "processing_audit_summary"),
         benchmark_results=_load_optional_json(benchmark_results_path, "benchmark_results"),
         aggregate_baseline_summary=_load_optional_json(aggregate_baseline_summary_path, "aggregate_baseline_summary"),
+        aggregate_sampling_counts=_extract_aggregate_sampling_counts(sampling_payload),
         min_scan_files_per_minute=min_scan_files_per_minute,
         min_processing_files_per_minute=min_processing_files_per_minute,
     )
@@ -51,6 +54,7 @@ def build_acceptance_summary(
     processing_audit_summary: dict[str, Any] | None = None,
     benchmark_results: dict[str, Any] | None = None,
     aggregate_baseline_summary: dict[str, Any] | None = None,
+    aggregate_sampling_counts: dict[str, Any] | None = None,
     min_scan_files_per_minute: float | None = None,
     min_processing_files_per_minute: float | None = None,
 ) -> dict[str, Any]:
@@ -60,6 +64,7 @@ def build_acceptance_summary(
         "processing_audit_summary": processing_audit_summary,
         "benchmark_results": benchmark_results,
         "aggregate_baseline_summary": aggregate_baseline_summary,
+        "acceptance_sampling_counts": aggregate_sampling_counts,
     }
     if not any(payload is not None for payload in supplied.values()):
         raise ValueError("At least one aggregate evidence input is required.")
@@ -99,6 +104,10 @@ def build_acceptance_summary(
     human_review = _human_review_summary(review_summary)
     privacy_self_check = _privacy_self_check_summary(aggregate_baseline_summary)
     cleanup = _cleanup_summary(aggregate_baseline_summary)
+    sampling_gate = _sampling_gate_summary(
+        _extract_aggregate_sampling_counts(aggregate_sampling_counts)
+        or _extract_aggregate_sampling_counts(aggregate_baseline_summary)
+    )
 
     _block_if_positive(blocking_items, "remaining_p0", remaining_p0, "Remaining P0 findings must be zero.")
     _block_if_positive(blocking_items, "remaining_p1", remaining_p1, "Remaining P1 findings must be zero.")
@@ -137,6 +146,31 @@ def build_acceptance_summary(
                     "threshold": {"enabled": True, "retained_public_summary_only": True},
                 }
             )
+    if sampling_gate["provided"]:
+        if not sampling_gate["sample_task_target_met"]:
+            blocking_items.append(
+                {
+                    "code": "sample_task_target_not_met",
+                    "message": "Acceptance sampling task count must meet the configured target ratio.",
+                    "observed": {
+                        "generated_sample_task_count": sampling_gate["generated_sample_task_count"],
+                        "target_sample_count": sampling_gate["target_sample_count"],
+                    },
+                    "threshold": {"generated_sample_task_count_min": sampling_gate["target_sample_count"]},
+                }
+            )
+        if not sampling_gate["sampling_target_met"]:
+            blocking_items.append(
+                {
+                    "code": "sampling_review_target_not_met",
+                    "message": "Reviewed acceptance sampling count must meet the configured target ratio.",
+                    "observed": {
+                        "reviewed_sample_count": sampling_gate["reviewed_sample_count"],
+                        "target_sample_count": sampling_gate["target_sample_count"],
+                    },
+                    "threshold": {"reviewed_sample_count_min": sampling_gate["target_sample_count"]},
+                }
+            )
 
     if min_scan_files_per_minute is not None:
         observed = throughput["scan_files_per_minute"]["best_observed"]
@@ -170,6 +204,7 @@ def build_acceptance_summary(
         remaining_p0=remaining_p0,
         remaining_p1=remaining_p1,
         human_review=human_review,
+        sampling_gate=sampling_gate,
         can_complete_delivery=passed,
     )
     return {
@@ -198,6 +233,14 @@ def build_acceptance_summary(
             "processing_failed_files_max": 0,
             "min_scan_files_per_minute": min_scan_files_per_minute,
             "min_processing_files_per_minute": min_processing_files_per_minute,
+            "acceptance_sampling": {
+                "target_sample_ratio": sampling_gate["target_sample_ratio"],
+                "target_sample_count": sampling_gate["target_sample_count"],
+                "sample_task_target_met": sampling_gate["sample_task_target_met"],
+                "sampling_target_met": sampling_gate["sampling_target_met"],
+            }
+            if sampling_gate["provided"]
+            else None,
             "privacy_self_check": "pass when aggregate_baseline_summary is provided",
             "cleanup_retention": "only aggregate_baseline_summary.json retained when aggregate_baseline_summary is provided",
         },
@@ -213,6 +256,7 @@ def build_acceptance_summary(
         "throughput": throughput,
         "workers": workers,
         "human_review": human_review,
+        "acceptance_sampling": sampling_gate,
         "privacy_self_check": privacy_self_check,
         "cleanup": cleanup,
         "recommended_next_steps": _recommended_next_steps(passed, blocking_items, warnings),
@@ -267,6 +311,67 @@ def _coerce_float(value: Any) -> float | None:
         return round(float(value), 6)
     except (TypeError, ValueError):
         return None
+
+
+def _extract_aggregate_sampling_counts(payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    counts = payload.get("aggregate_sampling_counts")
+    if isinstance(counts, dict):
+        return counts
+    schema = str(payload.get("schema_version") or "")
+    if schema.startswith("scan-qc.acceptance-sampling-counts."):
+        return payload
+    return None
+
+
+def _sampling_gate_summary(counts: dict[str, Any] | None) -> dict[str, Any]:
+    if not counts:
+        return {
+            "provided": False,
+            "schema_version": None,
+            "target_sample_ratio": None,
+            "target_sample_count": None,
+            "generated_sample_task_count": None,
+            "reviewed_sample_count": None,
+            "pending_sample_count": None,
+            "sample_task_target_met": None,
+            "sampling_target_met": None,
+            "admin_message_zh": "未提供抽检比例聚合摘要，本项未纳入验收判断。",
+        }
+    target = _coerce_int(counts.get("target_sample_count")) or 0
+    generated = _coerce_int(counts.get("generated_sample_task_count")) or 0
+    reviewed = _coerce_int(counts.get("reviewed_sample_count")) or 0
+    pending = _coerce_int(counts.get("pending_sample_count"))
+    sample_task_target_met = _bool_or_threshold(counts.get("sample_task_target_met"), generated, target)
+    sampling_target_met = _bool_or_threshold(counts.get("sampling_target_met"), reviewed, target)
+    passed = sample_task_target_met and sampling_target_met
+    return {
+        "provided": True,
+        "schema_version": _safe_text(counts.get("schema_version")),
+        "privacy": {"aggregate_only": True},
+        "design_reference": _safe_text(counts.get("design_reference")),
+        "input_total": _coerce_int(counts.get("input_total")),
+        "target_sample_ratio": _coerce_float(counts.get("target_sample_ratio")),
+        "target_sample_count": target,
+        "generated_sample_task_count": generated,
+        "reviewed_sample_count": reviewed,
+        "pending_sample_count": pending,
+        "sample_task_target_met": sample_task_target_met,
+        "sampling_target_met": sampling_target_met,
+        "status": "pass" if passed else "fail",
+        "admin_message_zh": (
+            f"抽检比例已达标：目标 {target} 项，已生成 {generated} 项，已复核 {reviewed} 项。"
+            if passed
+            else f"抽检比例未达标：目标 {target} 项，已生成 {generated} 项，已复核 {reviewed} 项。"
+        ),
+    }
+
+
+def _bool_or_threshold(value: Any, observed: int, target: int) -> bool:
+    if isinstance(value, bool):
+        return value
+    return observed >= target
 
 
 def _run_plan_failed_batches(run_plan_summary: dict[str, Any] | None) -> int | None:
@@ -440,11 +545,13 @@ def _closure_gate_summary(
     remaining_p0: int | None,
     remaining_p1: int | None,
     human_review: dict[str, Any],
+    sampling_gate: dict[str, Any],
     can_complete_delivery: bool,
 ) -> dict[str, Any]:
     open_p0 = remaining_p0 if remaining_p0 is not None else 0
     open_p1 = remaining_p1 if remaining_p1 is not None else 0
     handled = _coerce_int(human_review.get("manually_handled_count")) if human_review.get("provided") else None
+    sampling_blocked = sampling_gate.get("provided") is True and sampling_gate.get("status") == "fail"
     return {
         "open_p0_count": open_p0,
         "open_p1_count": open_p1,
@@ -453,6 +560,8 @@ def _closure_gate_summary(
         "operator_message_zh": (
             "P0/P1 问题已经有处理结论，可以进入验收。"
             if can_complete_delivery
+            else "抽检还未达到验收比例，请管理员完成抽检复核后再交接。"
+            if sampling_blocked
             else "还有需要重扫/重新处理的图片，先处理后再完成导出。"
         ),
     }
@@ -540,6 +649,8 @@ def _recommended_next_steps(
         steps.append("Regenerate aggregate baseline evidence after removing private fields from the public summary.")
     if "cleanup_retention_not_enabled" in codes or "cleanup_retention_failed" in codes:
         steps.append("Rerun the aggregate baseline with cleanup enabled and verify only aggregate_baseline_summary.json remains.")
+    if "sample_task_target_not_met" in codes or "sampling_review_target_not_met" in codes:
+        steps.append("完成抽检任务生成和抽检复核，使聚合抽检数量达到当前目标比例后重新生成验收摘要。")
     if any(code.endswith("_not_aggregate_only") for code in codes):
         steps.append("Replace non-aggregate evidence with approved aggregate-only summaries.")
     return steps or ["Review blocking items, regenerate aggregate evidence, and rerun acceptance."]

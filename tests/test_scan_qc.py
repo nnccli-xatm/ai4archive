@@ -587,6 +587,51 @@ class ScanQcTest(unittest.TestCase):
         self.assertEqual(summary["decision"]["blocking_item_count"], 3)
         self.assertNotIn("PRIVATE_CASE_001.png", json.dumps(summary))
 
+    def test_release_candidate_summary_carries_sampling_gate_aggregate_only(self) -> None:
+        module = _load_release_candidate_module()
+        acceptance = _release_candidate_acceptance(status="fail")
+        acceptance["blocking_items"] = [
+            {
+                "code": "sampling_review_target_not_met",
+                "message": "Reviewed acceptance sampling count must meet the configured target ratio.",
+                "observed": {"reviewed_sample_count": 3, "target_sample_count": 5},
+                "threshold": {"reviewed_sample_count_min": 5},
+            }
+        ]
+        acceptance["acceptance_sampling"] = {
+            "provided": True,
+            "status": "fail",
+            "target_sample_ratio": 0.05,
+            "target_sample_count": 5,
+            "generated_sample_task_count": 5,
+            "reviewed_sample_count": 3,
+            "pending_sample_count": 2,
+            "sample_task_target_met": True,
+            "sampling_target_met": False,
+            "admin_message_zh": "抽检比例未达标：目标 5 项，已生成 5 项，已复核 3 项。",
+            "private_row": "/private/archive/page_0001.tif",
+        }
+
+        summary = module.build_release_candidate_summary(
+            aggregate_baseline_summary=_release_candidate_baseline(),
+            acceptance_summary=acceptance,
+            release_readiness_summary=_release_candidate_readiness(status="pass"),
+            cleanup_requested=True,
+            generated_at="2026-01-01T00:00:00+00:00",
+        )
+
+        self.assertEqual(summary["status"], "fail")
+        self.assertFalse(summary["ready_for_release_candidate"])
+        sampling = summary["production_validation"]["acceptance_sampling"]
+        self.assertEqual(sampling["target_sample_count"], 5)
+        self.assertEqual(sampling["reviewed_sample_count"], 3)
+        self.assertFalse(sampling["sampling_target_met"])
+        self.assertFalse(summary["production_validation"]["threshold_outcomes"]["sampling_review_target_passed"])
+        raw = json.dumps(summary, ensure_ascii=False)
+        self.assertIn("抽检比例未达标", raw)
+        self.assertNotIn("/private/archive", raw)
+        self.assertNotIn("page_0001.tif", raw)
+
     def test_release_candidate_command_omits_sensitive_values_and_records_cleanup_intent(self) -> None:
         module = _load_release_candidate_module()
         with tempfile.TemporaryDirectory(prefix="private-rc-") as temp_dir:
@@ -2064,6 +2109,70 @@ class ScanQcTest(unittest.TestCase):
         self.assertEqual(payload["failed_batches"], 0)
         self.assertEqual(payload["processing_failed_files"], 0)
         self.assertFalse(payload["blocking_items"])
+
+    def test_acceptance_summary_blocks_when_sampling_target_not_met(self) -> None:
+        payload = build_acceptance_summary(
+            aggregate_baseline_summary={
+                "schema_version": "scan-qc.aggregate-baseline.v1",
+                "privacy": {"aggregate_only": True},
+                "aggregate_counts": {"processing_failed_files": 0},
+            },
+            aggregate_sampling_counts={
+                "schema_version": "scan-qc.acceptance-sampling-counts.v1",
+                "privacy": {"aggregate_only": True},
+                "target_sample_ratio": 0.05,
+                "target_sample_count": 5,
+                "generated_sample_task_count": 2,
+                "sample_task_target_met": False,
+                "reviewed_sample_count": 1,
+                "pending_sample_count": 1,
+                "sampling_target_met": False,
+            },
+        )
+
+        self.assertFalse(payload["pass"])
+        self.assertEqual(payload["status"], "fail")
+        codes = {item["code"] for item in payload["blocking_items"]}
+        self.assertEqual(codes, {"sample_task_target_not_met", "sampling_review_target_not_met"})
+        sampling = payload["acceptance_sampling"]
+        self.assertEqual(sampling["target_sample_count"], 5)
+        self.assertEqual(sampling["generated_sample_task_count"], 2)
+        self.assertEqual(sampling["reviewed_sample_count"], 1)
+        self.assertEqual(sampling["status"], "fail")
+        self.assertIn("抽检比例未达标", sampling["admin_message_zh"])
+        self.assertEqual(
+            payload["closure_gate_summary"]["operator_message_zh"],
+            "抽检还未达到验收比例，请管理员完成抽检复核后再交接。",
+        )
+        raw = json.dumps(payload, ensure_ascii=False)
+        for forbidden in ("page_0001", "/private", "abcdef0123456789", "OCR TEXT"):
+            self.assertNotIn(forbidden, raw)
+
+    def test_acceptance_summary_passes_when_sampling_targets_are_met(self) -> None:
+        payload = build_acceptance_summary(
+            aggregate_baseline_summary={
+                "schema_version": "scan-qc.aggregate-baseline.v1",
+                "privacy": {"aggregate_only": True},
+                "aggregate_counts": {"processing_failed_files": 0},
+            },
+            aggregate_sampling_counts={
+                "schema_version": "scan-qc.acceptance-sampling-counts.v1",
+                "privacy": {"aggregate_only": True},
+                "target_sample_ratio": 0.05,
+                "target_sample_count": 5,
+                "generated_sample_task_count": 5,
+                "sample_task_target_met": True,
+                "reviewed_sample_count": 5,
+                "pending_sample_count": 0,
+                "sampling_target_met": True,
+            },
+        )
+
+        self.assertTrue(payload["pass"])
+        self.assertEqual(payload["status"], "pass")
+        self.assertFalse(payload["blocking_items"])
+        self.assertEqual(payload["acceptance_sampling"]["status"], "pass")
+        self.assertIn("抽检比例已达标", payload["acceptance_sampling"]["admin_message_zh"])
 
     def test_acceptance_summary_passes_with_aggregate_baseline_summary(self) -> None:
         payload = build_acceptance_summary(
@@ -4264,6 +4373,67 @@ class ScanQcTest(unittest.TestCase):
     def test_acceptance_sampling_rejects_ratio_below_five_percent(self) -> None:
         with self.assertRaisesRegex(ValueError, "at least 5.00%"):
             build_acceptance_sampling_export({"files": [_sample_file(1)], "findings": []}, sample_ratio=0.01)
+
+    def test_acceptance_summary_cli_reuses_sampling_counts_without_private_rows(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="private-sampling-") as temp_dir:
+            root = Path(temp_dir)
+            baseline_path = root / "aggregate_baseline_summary.json"
+            sampling_path = root / "acceptance_sampling_review.json"
+            out_path = root / "acceptance_summary.json"
+            _write_json(
+                baseline_path,
+                {
+                    "schema_version": "scan-qc.aggregate-baseline.v1",
+                    "privacy": {"aggregate_only": True},
+                    "aggregate_counts": {"processing_failed_files": 0},
+                },
+            )
+            _write_json(
+                sampling_path,
+                {
+                    "schema_version": "scan-qc.acceptance-sampling.v1",
+                    "sensitivity": "sensitive_local_evidence",
+                    "aggregate_sampling_counts": {
+                        "schema_version": "scan-qc.acceptance-sampling-counts.v1",
+                        "privacy": {"aggregate_only": True},
+                        "target_sample_ratio": 0.05,
+                        "target_sample_count": 1,
+                        "generated_sample_task_count": 1,
+                        "sample_task_target_met": True,
+                        "reviewed_sample_count": 0,
+                        "pending_sample_count": 1,
+                        "sampling_target_met": False,
+                    },
+                    "samples": [
+                        {
+                            "relative_path": "/private/archive/page_0001.tif",
+                            "filename": "page_0001.tif",
+                            "sha256": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+                            "reviewer_notes": "OCR TEXT private note",
+                        }
+                    ],
+                },
+            )
+
+            exit_code = main(
+                [
+                    "acceptance-summary",
+                    "--aggregate-baseline-summary",
+                    str(baseline_path),
+                    "--acceptance-sampling-review",
+                    str(sampling_path),
+                    "--out",
+                    str(out_path),
+                ]
+            )
+            raw = out_path.read_text(encoding="utf-8")
+            payload = json.loads(raw)
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(payload["acceptance_sampling"]["reviewed_sample_count"], 0)
+        self.assertIn("sampling_review_target_not_met", {item["code"] for item in payload["blocking_items"]})
+        for forbidden in ("private-sampling-", "/private/archive", "page_0001.tif", "abcdef0123456789", "OCR TEXT"):
+            self.assertNotIn(forbidden, raw)
 
     def test_benchmark_writes_privacy_safe_json_and_csv(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
