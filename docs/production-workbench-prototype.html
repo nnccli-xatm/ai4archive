@@ -1370,7 +1370,7 @@
               <li>打开输出文件夹，检查处理后图片数量和画面状态。</li>
               <li>本机状态文件夹已保存复核结果和交接说明，正常界面不显示具体路径或文件名。</li>
               <li>需要继续加工时，点击准备下一批；当前复核队列会清空。</li>
-              <li>为新批次重新选择扫描原图文件夹和输出文件夹，不要混用批次。</li>
+              <li>为新批次必须重新选择扫描原图文件夹，不要混用批次；输出文件夹可沿用上次保存的位置。</li>
             </ul>
             <div class="decision-actions">
               <button type="button" class="primary-choice" id="openOutputFolderButton" disabled>打开输出文件夹</button>
@@ -1401,18 +1401,18 @@
       "打开输出文件夹，检查处理后图片数量和画面状态。",
       "本机状态文件夹已保存复核结果和交接说明，正常界面不显示具体路径或文件名。",
       "需要继续加工时，点击准备下一批；当前复核队列会清空。",
-      "为新批次重新选择扫描原图文件夹和输出文件夹，不要混用批次。",
+      "为新批次必须重新选择扫描原图文件夹，不要混用批次；输出文件夹可沿用上次保存的位置。",
       "如果仍有异常或不能交接，请交管理员处理。"
     ];
     const INITIAL_COMPLETION_STEPS = [
       "完成本批后，再检查输出文件夹里的处理后图片数量和画面状态。",
       "完成本批后，复核结果和交接说明会保存到本机状态文件夹。",
-      "进入下一批前，请重新选择扫描原图文件夹和输出文件夹，不要混用批次。"
+      "进入下一批前，必须重新选择扫描原图文件夹，不要混用批次；输出文件夹可沿用上次保存的位置。"
     ];
     const NEXT_BATCH_STATUS_TEXT = [
       "新批次起点",
-      "请重新选择扫描原图文件夹和输出文件夹",
-      "选择新一批扫描原图文件夹和输出文件夹，保存后再开始处理。"
+      "请重新选择扫描原图文件夹",
+      "选择新一批扫描原图文件夹；如输出文件夹提示可沿用，保存后再开始处理。"
     ];
 
     const state = {
@@ -2251,7 +2251,7 @@
             "打开输出文件夹，检查处理后图片数量和画面状态。",
             "本机状态文件夹已保存复核结果和交接说明，正常界面不显示具体路径或文件名。",
             "需要继续加工时，点击准备下一批；当前复核队列会清空。",
-            "为新批次重新选择扫描原图文件夹和输出文件夹，不要混用批次。"
+            "为新批次必须重新选择扫描原图文件夹，不要混用批次；输出文件夹可沿用上次保存的位置。"
           ],
           failed_files: failed,
           retryable_files: retryable,
@@ -3153,8 +3153,11 @@
     }
 
     async function prepareNextBatch() {
+      const reusableOutputPath = state.lastServerOutputPath && els.outputPath.value.trim() === state.lastServerOutputPath
+        ? state.lastServerOutputPath
+        : "";
       state.inputChosen = false;
-      state.outputChosen = false;
+      state.outputChosen = Boolean(reusableOutputPath);
       state.status = "choose_input";
       state.progress = 0;
       state.progressLabel = "";
@@ -3195,15 +3198,19 @@
       state.previewZoom = 1;
       state.comparisonMode = "side_by_side";
       els.inputPath.value = "";
-      els.outputPath.value = "";
+      els.outputPath.value = reusableOutputPath;
       state.inputPathDirty = false;
       state.outputPathDirty = false;
       state.lastServerInputPath = "";
-      state.lastServerOutputPath = "";
+      state.lastServerOutputPath = reusableOutputPath;
       els.fixtureSelect.value = "";
-      els.inputStatus.textContent = "填写本批次扫描原图所在的本机文件夹位置。";
-      els.outputStatus.textContent = "填写处理后图片保存到的本机文件夹位置。";
-      els.loadStatus.textContent = "已准备下一批：当前复核队列已清空。请重新选择新一批扫描原图文件夹和输出文件夹，不要混用批次。";
+      els.inputStatus.textContent = "必须重新选择新一批扫描原图文件夹，不要混用批次。";
+      els.outputStatus.textContent = reusableOutputPath
+        ? "已沿用上次保存的输出文件夹提示；如本批要换位置，请重新选择输出文件夹。"
+        : "没有可安全沿用的输出文件夹提示，请重新选择输出文件夹。";
+      els.loadStatus.textContent = reusableOutputPath
+        ? "已准备下一批：当前复核队列已清空。请重新选择新一批扫描原图文件夹；输出文件夹已保留上次保存的位置提示。"
+        : "已准备下一批：当前复核队列已清空。请重新选择新一批扫描原图文件夹和输出文件夹，不要混用批次。";
       window.clearTimeout(timer);
       window.clearInterval(localApi.polling);
       window.clearTimeout(localApi.saveTimer);

@@ -400,7 +400,7 @@ test.describe("production workbench finish/export browser smoke", () => {
               "打开输出文件夹，检查 3 张处理后图片的数量和画面状态。",
               "需要重扫 0 张；需要重新处理 0 张。",
               "本机状态文件夹已保存复核结果和交接说明，正常界面不显示具体路径或文件名。",
-              "需要继续加工时，点击准备下一批；当前复核队列会清空。为新批次重新选择扫描原图文件夹和输出文件夹，不要混用批次。",
+              "需要继续加工时，点击准备下一批；当前复核队列会清空。为新批次必须重新选择扫描原图文件夹，不要混用批次；输出文件夹可沿用上次保存的位置。",
               "如果仍有异常或不能交接，请交管理员处理。",
             ],
           },
@@ -625,7 +625,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.getByText("打开输出文件夹，检查 3 张处理后图片的数量和画面状态。")).toBeVisible();
     await expect(page.getByText("需要重扫 0 张；需要重新处理 0 张。")).toBeVisible();
     await expect(page.getByText("本机状态文件夹已保存复核结果和交接说明，正常界面不显示具体路径或文件名。")).toBeVisible();
-    await expect(page.getByText("需要继续加工时，点击准备下一批；当前复核队列会清空。为新批次重新选择扫描原图文件夹和输出文件夹，不要混用批次。")).toBeVisible();
+    await expect(page.getByText("需要继续加工时，点击准备下一批；当前复核队列会清空。为新批次必须重新选择扫描原图文件夹，不要混用批次；输出文件夹可沿用上次保存的位置。")).toBeVisible();
     await expect(page.getByText("如果仍有异常或不能交接，请交管理员处理。")).toBeVisible();
     await expect(page.getByRole("button", { name: "打开输出文件夹" })).toBeEnabled();
     await page.getByRole("button", { name: "打开输出文件夹" }).click();
@@ -639,9 +639,11 @@ test.describe("production workbench finish/export browser smoke", () => {
     await page.getByRole("button", { name: "准备下一批" }).click();
     await expect(page.locator("#completionTitle")).toBeHidden();
     await expect(page.locator("#stateName")).toHaveText("新批次起点");
-    await expect(page.locator("#stateAction")).toHaveText("请重新选择扫描原图文件夹和输出文件夹");
+    await expect(page.locator("#stateAction")).toHaveText("请重新选择扫描原图文件夹");
     await expect(page.locator("#inputPath")).toHaveValue("");
-    await expect(page.locator("#outputPath")).toHaveValue("");
+    await expect(page.locator("#outputPath")).toHaveValue("/tmp/synthetic-output");
+    await expect(page.locator("#inputStatus")).toHaveText("必须重新选择新一批扫描原图文件夹，不要混用批次。");
+    await expect(page.locator("#outputStatus")).toHaveText("已沿用上次保存的输出文件夹提示；如本批要换位置，请重新选择输出文件夹。");
     await expect(page.locator("#readinessBox")).toBeHidden();
     await expect(page.locator("#queueText")).toHaveText("等待处理开始。");
     await expect(page.locator("#decisionSummary")).toHaveText("已决定 0 项，待决定 0 项。");
@@ -655,7 +657,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#completionCounts")).toHaveText("共 0 项，已确认 0 项，待决定 0 项。");
     await expect(page.locator("#previewSourceText")).toHaveText("图片查看：等待本机处理结果。");
     await expect(page.locator("#finishConfirmPanel")).toBeHidden();
-    await expect(page.locator("#loadStatus")).toHaveText("已准备下一批：当前复核队列已清空。请重新选择新一批扫描原图文件夹和输出文件夹，不要混用批次。");
+    await expect(page.locator("#loadStatus")).toHaveText("已准备下一批：当前复核队列已清空。请重新选择新一批扫描原图文件夹；输出文件夹已保留上次保存的位置提示。");
     await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
     await expect(page.locator("#inputPath")).toBeEnabled();
     await expect(page.locator("#outputPath")).toBeEnabled();
@@ -974,9 +976,9 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.getByText("如果文件夹选错了，请返回重新选择文件夹。")).toBeVisible();
     await page.getByRole("button", { name: "开始新批次" }).click();
     await expect(page.locator("#stateName")).toHaveText("新批次起点");
-    await expect(page.locator("#stateAction")).toHaveText("请重新选择扫描原图文件夹和输出文件夹");
+    await expect(page.locator("#stateAction")).toHaveText("请重新选择扫描原图文件夹");
     await expect(page.locator("#inputPath")).toHaveValue("");
-    await expect(page.locator("#outputPath")).toHaveValue("");
+    await expect(page.locator("#outputPath")).toHaveValue("/tmp/admin-output");
     await expect(page.locator("#failurePanel")).toBeHidden();
     await expect(page.locator("#recoveryTitle")).toHaveText("文件夹还没有准备好");
     await expect(page.locator("#queueText")).toHaveText("等待处理开始。");
@@ -1546,7 +1548,7 @@ test.describe("production workbench finish/export browser smoke", () => {
             total_review_items: 0,
             reviewed_items: 0,
             pending_items: 0,
-            next_steps_zh: ["打开输出文件夹，检查处理后图片数量和画面状态。", "本机状态文件夹已保存复核结果和交接说明，正常界面不显示具体路径或文件名。", "需要继续加工时，点击准备下一批；当前复核队列会清空。", "为新批次重新选择扫描原图文件夹和输出文件夹，不要混用批次。"],
+            next_steps_zh: ["打开输出文件夹，检查处理后图片数量和画面状态。", "本机状态文件夹已保存复核结果和交接说明，正常界面不显示具体路径或文件名。", "需要继续加工时，点击准备下一批；当前复核队列会清空。", "为新批次必须重新选择扫描原图文件夹，不要混用批次；输出文件夹可沿用上次保存的位置。"],
           },
         }),
       });
@@ -1927,7 +1929,7 @@ test.describe("production workbench finish/export browser smoke", () => {
             reviewed_items: 0,
             pending_items: 0,
             checklist_zh: ["打开输出文件夹，检查处理后图片数量和画面状态", "复核结果和交接说明已保存到本机状态文件夹", "准备下一批会清空当前复核队列，请重新选择新一批文件夹"],
-            next_steps_zh: ["打开输出文件夹，检查处理后图片数量和画面状态。", "本机状态文件夹已保存复核结果和交接说明，正常界面不显示具体路径或文件名。", "需要继续加工时，点击准备下一批；当前复核队列会清空。", "为新批次重新选择扫描原图文件夹和输出文件夹，不要混用批次。", "如果仍有异常或不能交接，请交管理员处理。"],
+            next_steps_zh: ["打开输出文件夹，检查处理后图片数量和画面状态。", "本机状态文件夹已保存复核结果和交接说明，正常界面不显示具体路径或文件名。", "需要继续加工时，点击准备下一批；当前复核队列会清空。", "为新批次必须重新选择扫描原图文件夹，不要混用批次；输出文件夹可沿用上次保存的位置。", "如果仍有异常或不能交接，请交管理员处理。"],
           },
           decision_summary: { completion_status: "complete" },
         }),
@@ -1961,7 +1963,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#completionSteps").getByText("打开输出文件夹，检查处理后图片数量和画面状态。")).toBeVisible();
     await expect(page.locator("#completionSteps").getByText("本机状态文件夹已保存复核结果和交接说明，正常界面不显示具体路径或文件名。")).toBeVisible();
     await expect(page.locator("#completionSteps").getByText("需要继续加工时，点击准备下一批；当前复核队列会清空。")).toBeVisible();
-    await expect(page.locator("#completionSteps").getByText("为新批次重新选择扫描原图文件夹和输出文件夹，不要混用批次。")).toBeVisible();
+    await expect(page.locator("#completionSteps").getByText("为新批次必须重新选择扫描原图文件夹，不要混用批次；输出文件夹可沿用上次保存的位置。")).toBeVisible();
 
     expect(consoleProblems).toEqual([]);
   });
