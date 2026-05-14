@@ -1085,12 +1085,14 @@
           <div class="folder-row">
             <strong>原图文件夹</strong>
             <small id="inputStatus">填写本批次扫描原图所在的本机文件夹位置。</small>
+            <button type="button" class="folder-trigger secondary" id="pickInputButton">从系统选择原图文件夹</button>
             <input class="path-input" id="inputPath" type="text" autocomplete="off" placeholder="填写原图文件夹位置">
           </div>
 
           <div class="folder-row">
             <strong>输出文件夹</strong>
             <small id="outputStatus">填写处理后图片保存到的本机文件夹位置。</small>
+            <button type="button" class="folder-trigger secondary" id="pickOutputButton">从系统选择输出文件夹</button>
             <input class="path-input" id="outputPath" type="text" autocomplete="off" placeholder="填写输出文件夹位置">
           </div>
         </div>
@@ -1414,6 +1416,8 @@
     const els = {
       inputPath: document.getElementById("inputPath"),
       outputPath: document.getElementById("outputPath"),
+      pickInputButton: document.getElementById("pickInputButton"),
+      pickOutputButton: document.getElementById("pickOutputButton"),
       processingModeInputs: Array.from(document.querySelectorAll('input[name="processingMode"]')),
       modeStatus: document.getElementById("modeStatus"),
       fixtureSelect: document.getElementById("fixtureSelect"),
@@ -2051,6 +2055,8 @@
       }
       els.inputPath.disabled = locked;
       els.outputPath.disabled = locked;
+      els.pickInputButton.disabled = locked;
+      els.pickOutputButton.disabled = locked;
       els.processingModeInputs.forEach((input) => {
         input.disabled = locked;
       });
@@ -2691,6 +2697,45 @@
       return canStartProcessing();
     }
 
+    async function pickFolder(kind) {
+      if (!localApi.enabled) {
+        els.loadStatus.textContent = "请从本机入口启动后使用系统选择路径，或直接填写本机文件夹位置。";
+        return;
+      }
+      const isInput = kind === "input";
+      const target = isInput ? els.inputPath : els.outputPath;
+      const status = isInput ? els.inputStatus : els.outputStatus;
+      const button = isInput ? els.pickInputButton : els.pickOutputButton;
+      try {
+        button.disabled = true;
+        els.loadStatus.textContent = isInput ? "正在打开系统原图文件夹选择器。" : "正在打开系统输出文件夹选择器。";
+        const payload = await apiPost("/api/pick-folder", { kind });
+        if (payload.cancelled) {
+          els.loadStatus.textContent = payload.message_zh || "已取消选择文件夹。";
+          render();
+          return;
+        }
+        target.value = payload.path || "";
+        if (isInput) {
+          state.inputPathDirty = true;
+          state.inputChosen = pathChosen(els.inputPath);
+        } else {
+          state.outputPathDirty = true;
+          state.outputChosen = pathChosen(els.outputPath);
+        }
+        invalidateFolderReadiness(isInput ? "扫描原图文件夹已更改，请重新保存文件夹。" : "处理后输出文件夹已更改，请重新保存文件夹。");
+        status.textContent = isInput ? "已从系统选择原图文件夹，请保存文件夹。" : "已从系统选择输出文件夹，请保存文件夹。";
+        if (state.inputChosen && state.outputChosen) setStatus("ready");
+        els.loadStatus.textContent = payload.message_zh || "已选择文件夹，请保存文件夹后再开始处理。";
+        render();
+      } catch (error) {
+        els.loadStatus.textContent = `${error.message || "系统选择路径没有完成。"} 可以直接填写本机文件夹路径。`;
+        render();
+      } finally {
+        button.disabled = setupControlsLocked();
+      }
+    }
+
     async function pollServerStatus() {
       if (!localApi.enabled) return;
       try {
@@ -2965,6 +3010,8 @@
     });
 
     let timer = null;
+    els.pickInputButton.addEventListener("click", () => pickFolder("input"));
+    els.pickOutputButton.addEventListener("click", () => pickFolder("derivatives"));
     els.saveFoldersButton.addEventListener("click", saveFolders);
     els.startButton.addEventListener("click", startLocalRun);
     els.retryButton.addEventListener("click", retryLocalRun);

@@ -37,6 +37,7 @@ from archive_scan_qc.deep_inspection_candidates import build_deep_inspection_can
 from archive_scan_qc.evidence_bundle import build_evidence_bundle_summary
 from archive_scan_qc.final_handoff import build_final_handoff_summary
 from archive_scan_qc.handoff import write_delivery_handoff_manifest
+from archive_scan_qc import local_workbench as local_workbench_module
 from archive_scan_qc.local_workbench import DEFAULT_METADATA_DIRNAME, DEFAULT_PROCESSING_MODE, WorkbenchController, make_server
 from archive_scan_qc.processing import (
     ProcessingOptions,
@@ -6943,6 +6944,31 @@ class ScanQcTest(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 thread.join(timeout=5)
+
+    def test_local_production_workbench_pick_folder_api_returns_native_path_without_upload(self) -> None:
+        server = make_server("127.0.0.1", 0)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            base_url = f"http://127.0.0.1:{server.server_port}"
+            with mock.patch.object(local_workbench_module, "_pick_native_folder", return_value=r"C:\Users\PS\batch input") as picker:
+                request = urllib.request.Request(
+                    f"{base_url}/api/pick-folder",
+                    data=json.dumps({"kind": "input"}).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(request, timeout=5) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+
+            picker.assert_called_once_with("选择本批次扫描原图文件夹")
+            self.assertEqual(payload["path"], r"C:\Users\PS\batch input")
+            self.assertFalse(payload["cancelled"])
+            self.assertIn("已选择文件夹", payload["message_zh"])
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
 
     def test_local_production_workbench_preflight_rejects_empty_input_before_start(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

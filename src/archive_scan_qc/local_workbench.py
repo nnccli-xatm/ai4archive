@@ -10,6 +10,9 @@ import mimetypes
 import os
 from pathlib import Path
 import re
+import shutil
+import subprocess
+import sys
 import threading
 import traceback
 from typing import Any
@@ -561,6 +564,8 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
                     _optional_path(payload, "metadata_dir", "本机状态文件夹"),
                     str(payload.get("processing_mode") or DEFAULT_PROCESSING_MODE),
                 )
+            elif self.path == "/api/pick-folder":
+                result = _pick_operator_folder(payload)
             elif self.path == "/api/start":
                 result = self.workbench_controller.start()
             elif self.path == "/api/retry":
@@ -657,6 +662,96 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     except (OSError, json.JSONDecodeError):
         return None
     return payload if isinstance(payload, dict) else None
+
+
+def _pick_operator_folder(payload: dict[str, Any]) -> dict[str, Any]:
+    kind = str(payload.get("kind") or "").strip()
+    titles = {
+        "input": "选择本批次扫描原图文件夹",
+        "derivatives": "选择处理后输出文件夹",
+    }
+    if kind not in titles:
+        raise ValueError("未知文件夹选择请求。")
+    selected = _pick_native_folder(titles[kind])
+    if selected is None:
+        return {"schema_version": SERVER_SCHEMA, "cancelled": True, "message_zh": "已取消选择文件夹。"}
+    return {
+        "schema_version": SERVER_SCHEMA,
+        "cancelled": False,
+        "path": selected,
+        "message_zh": "已选择文件夹，请保存文件夹后再开始处理。",
+    }
+
+
+def _pick_native_folder(title_zh: str) -> str | None:
+    forced = os.environ.get("AI4ARCHIVE_PICK_FOLDER_RESULT")
+    if forced is not None:
+        return forced or None
+    if _running_under_wsl():
+        return _pick_windows_folder_via_powershell(title_zh)
+    if sys.platform == "darwin":
+        return _pick_macos_folder(title_zh)
+    return _pick_linux_folder(title_zh)
+
+
+def _running_under_wsl() -> bool:
+    if os.environ.get("WSL_DISTRO_NAME"):
+        return True
+    try:
+        return "microsoft" in Path("/proc/version").read_text(encoding="utf-8", errors="ignore").lower()
+    except OSError:
+        return False
+
+
+def _pick_windows_folder_via_powershell(title_zh: str) -> str | None:
+    powershell = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+    if not Path(powershell).exists():
+        powershell = "powershell.exe"
+    script = "\n".join(
+        [
+            "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+            "Add-Type -AssemblyName System.Windows.Forms",
+            "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog",
+            f"$dialog.Description = {json.dumps(title_zh, ensure_ascii=False)}",
+            "$dialog.ShowNewFolderButton = $true",
+            "$result = $dialog.ShowDialog()",
+            "if ($result -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $dialog.SelectedPath; exit 0 }",
+            "exit 2",
+        ]
+    )
+    return _run_folder_picker_command([powershell, "-NoProfile", "-STA", "-Command", script])
+
+
+def _pick_macos_folder(title_zh: str) -> str | None:
+    script = f'POSIX path of (choose folder with prompt {json.dumps(title_zh, ensure_ascii=False)})'
+    return _run_folder_picker_command(["osascript", "-e", script])
+
+
+def _pick_linux_folder(title_zh: str) -> str | None:
+    zenity = shutil.which("zenity")
+    if not zenity:
+        raise ValueError("当前环境没有可用的系统文件夹选择器，请直接填写本机文件夹路径。")
+    return _run_folder_picker_command([zenity, "--file-selection", "--directory", "--title", title_zh])
+
+
+def _run_folder_picker_command(command: list[str]) -> str | None:
+    try:
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=300,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        raise ValueError("系统文件夹选择器没有正常打开，请直接填写本机文件夹路径。") from None
+    output = completed.stdout.strip()
+    if completed.returncode == 0 and output:
+        return output.splitlines()[-1].strip()
+    if completed.returncode in {1, 2}:
+        return None
+    raise ValueError("系统文件夹选择器没有正常返回路径，请直接填写本机文件夹路径。")
 
 
 def _required_path(payload: dict[str, Any], key: str, label_zh: str) -> str:
