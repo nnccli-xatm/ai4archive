@@ -4200,7 +4200,16 @@ class ScanQcTest(unittest.TestCase):
 
         self.assertEqual(payload["selection"]["sample_ratio"], 0.05)
         self.assertEqual(payload["selection"]["sampled_records"], 2)
-        self.assertGreaterEqual(payload["aggregate_sampling_counts"]["effective_sample_ratio"], 0.05)
+        counts = payload["aggregate_sampling_counts"]
+        self.assertEqual(counts["input_total"], 40)
+        self.assertEqual(counts["target_sample_ratio"], 0.05)
+        self.assertEqual(counts["target_sample_count"], 2)
+        self.assertEqual(counts["generated_sample_task_count"], 2)
+        self.assertEqual(counts["reviewed_sample_count"], 0)
+        self.assertEqual(counts["pending_sample_count"], 2)
+        self.assertTrue(counts["sample_task_target_met"])
+        self.assertFalse(counts["sampling_target_met"])
+        self.assertGreaterEqual(counts["effective_sample_ratio"], 0.05)
         self.assertEqual(payload["sensitivity"], "sensitive_local_evidence")
 
     def test_acceptance_sampling_is_deterministic_and_risk_prioritized(self) -> None:
@@ -4242,6 +4251,11 @@ class ScanQcTest(unittest.TestCase):
             csv_text = csv_path.read_text(encoding="utf-8")
             self.assertTrue(payload["privacy"]["sensitive_local_evidence"])
             self.assertFalse(payload["privacy"]["aggregate_only"])
+            self.assertEqual(payload["aggregate_sampling_counts"]["input_total"], 1)
+            self.assertEqual(payload["aggregate_sampling_counts"]["target_sample_count"], 1)
+            self.assertEqual(payload["aggregate_sampling_counts"]["generated_sample_task_count"], 1)
+            self.assertEqual(payload["aggregate_sampling_counts"]["reviewed_sample_count"], 0)
+            self.assertFalse(payload["aggregate_sampling_counts"]["sampling_target_met"])
             self.assertIn("image bytes", payload["privacy"]["omits"])
             self.assertIn(private_path, csv_text)
             self.assertIn(private_hash, csv_text)

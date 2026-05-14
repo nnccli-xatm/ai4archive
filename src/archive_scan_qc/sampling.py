@@ -191,10 +191,23 @@ def _aggregate_counts(candidates: list[dict[str, Any]], rows: list[dict[str, Any
     for row in rows:
         tier = str(row["risk_tier"])
         sampled_by_risk[tier] = sampled_by_risk.get(tier, 0) + 1
+    target_sample_count = min(len(candidates), ceil(len(candidates) * sample_ratio)) if candidates else 0
+    reviewed_sample_count = sum(1 for row in rows if str(row.get("review_status") or "").strip().lower() != "pending")
+    pending_sample_count = max(0, len(rows) - reviewed_sample_count)
     return {
         "schema_version": "scan-qc.acceptance-sampling-counts.v1",
         "privacy": {"aggregate_only": True},
+        "design_reference": "archive-scan-qc-retouch-design.md section 11 manual sampling target",
+        "input_total": len(candidates),
         "total_records": len(candidates),
+        "target_sample_ratio": sample_ratio,
+        "minimum_sample_ratio": MIN_SAMPLE_RATIO,
+        "target_sample_count": target_sample_count,
+        "generated_sample_task_count": len(rows),
+        "sample_task_target_met": len(rows) >= target_sample_count,
+        "reviewed_sample_count": reviewed_sample_count,
+        "pending_sample_count": pending_sample_count,
+        "sampling_target_met": reviewed_sample_count >= target_sample_count,
         "sampled_records": len(rows),
         "sample_ratio": sample_ratio,
         "effective_sample_ratio": round(len(rows) / len(candidates), 6) if candidates else 0.0,
