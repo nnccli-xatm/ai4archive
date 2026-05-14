@@ -44,6 +44,7 @@ from archive_scan_qc.processing import (
     _despeckle_candidate_points,
     _despeckle_candidate_points_fallback,
     _despeckle_candidate_points_numpy,
+    _despeckle_isolated_pixels,
     _deskew_candidate_scores,
     _horizontal_projection_variance,
     process_images,
@@ -6108,6 +6109,23 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(record["despeckle_pixels_changed"], 0)
             self.assertEqual(record["despeckle_reason"], "no isolated dark pixels found")
             self.assertIn("despeckle_noop", record["operations"])
+
+    def test_despeckle_skips_candidate_scan_when_no_dark_pixels_possible(self) -> None:
+        image = Image.new("RGB", (80, 60), (245, 245, 245))
+
+        with mock.patch("archive_scan_qc.processing._despeckle_candidate_points_with_backend") as candidates:
+            processed, changed, backend_mode = _despeckle_isolated_pixels(image, backend="fallback")
+
+        candidates.assert_not_called()
+        self.assertEqual(changed, 0)
+        self.assertEqual(backend_mode, "not_applicable")
+        self.assertEqual(processed.convert("RGB").tobytes(), image.tobytes())
+
+    def test_despeckle_still_validates_backend_on_no_dark_fast_path(self) -> None:
+        image = Image.new("RGB", (80, 60), "white")
+
+        with self.assertRaisesRegex(ValueError, "despeckle backend must be fallback or numpy"):
+            _despeckle_isolated_pixels(image, backend="invalid")
 
     def test_despeckle_fast_path_preserves_border_dark_pixels(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
