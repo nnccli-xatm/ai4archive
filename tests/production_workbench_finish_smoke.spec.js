@@ -176,7 +176,7 @@ test.describe("production workbench finish/export browser smoke", () => {
 
     await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
     await expect(page.locator("#stateAction")).toHaveText("正在处理");
-    await expect(page.locator("#progressText")).toHaveText("阶段：正在检查质量；已处理 5 张 / 共 12 张；状态：正在处理");
+    await expect(page.locator("#progressText")).toHaveText("阶段：正在检查质量；已处理 5 张 / 共 12 张；待处理 7 张；状态：正在处理");
     await expect(page.locator("#loadStatus")).toHaveText("批次正在运行，请等待。本机正在处理图片，处理完成或失败前不能更改文件夹和处理方式，也不要反复点击开始处理。");
     await expect(page.locator("#inputStatus")).toHaveText("批次正在运行，完成或失败前不能更改原图文件夹。");
     await expect(page.locator("#outputStatus")).toHaveText("批次正在运行，完成或失败前不能更改输出文件夹。");
