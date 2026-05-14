@@ -55,7 +55,7 @@ class ProductionRunConfig:
     trim_dark_border: bool = False
     despeckle: bool = False
     despeckle_backend: str = "fallback"
-    resume_processing: bool = False
+    resume_processing: bool = True
     reuse_scan_measurements: bool = False
     workers: int | None = None
     analysis_provider_command: str | None = None
@@ -173,6 +173,13 @@ def build_production_run_summary(
         "despeckle_backend": config.despeckle_backend,
         "resume_processing": config.resume_processing,
     }
+    local_reuse_summary = {
+        "schema_version": "scan-qc.local-processing-reuse-summary.v1",
+        "aggregate_only": True,
+        "reused_files": int(processing_summary.get("existing_derivative_reused_files", 0)),
+        "reprocessed_files": int(processing_summary.get("reprocessed_files", 0)),
+        "failed_files": failed_files,
+    }
     artifacts = {
         "summary": str(config.metadata_output_dir.resolve() / PRODUCTION_RUN_SUMMARY_JSON),
         "progress": str(config.metadata_output_dir.resolve() / PRODUCTION_RUN_PROGRESS_JSON),
@@ -221,7 +228,10 @@ def build_production_run_summary(
             "skipped_files": processing_summary["skipped_files"],
             "failed_files": failed_files,
             "retry_list_files": processing_summary["retry_list_files"],
+            "reused_files": local_reuse_summary["reused_files"],
+            "reprocessed_files": local_reuse_summary["reprocessed_files"],
         },
+        "local_reuse_summary": local_reuse_summary,
         "progress": {
             "state": "completed",
             "total_steps": 3,

@@ -467,6 +467,91 @@ class ScanProcessingReuseTest(unittest.TestCase):
             self.assertTrue(plan["operations"]["reuse_scan_measurements"])
             self.assertTrue(plan["privacy"]["contains_file_list"])
 
+    def test_production_run_rerun_reuses_completed_derivatives_by_default(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-production-reuse-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-input"
+            derivatives_dir = root / "private-derivatives"
+            metadata_dir = root / "private-metadata"
+            input_dir.mkdir()
+            source = input_dir / "private_page_name.png"
+            Image.new("RGB", (80, 60), "white").save(source, dpi=(300, 300))
+            original_sha = processing_module._sha256(source)
+            args = [
+                "production-run",
+                "--input",
+                str(input_dir),
+                "--derivatives-out",
+                str(derivatives_dir),
+                "--metadata-out",
+                str(metadata_dir),
+                "--workers",
+                "1",
+            ]
+
+            self.assertEqual(main(args), 0)
+            first_manifest = json.loads((derivatives_dir / "processing_manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(first_manifest["summary"]["processed_files"], 1)
+            self.assertEqual(first_manifest["summary"]["resumed_files"], 0)
+
+            self.assertEqual(main(args), 0)
+            second_manifest = json.loads((derivatives_dir / "processing_manifest.json").read_text(encoding="utf-8"))
+            production_summary = json.loads((metadata_dir / "production_run_summary.json").read_text(encoding="utf-8"))
+
+            self.assertTrue(second_manifest["resume"]["enabled"])
+            self.assertEqual(second_manifest["summary"]["processed_files"], 0)
+            self.assertEqual(second_manifest["summary"]["resumed_files"], 1)
+            self.assertEqual(second_manifest["summary"]["reprocessed_files"], 0)
+            self.assertEqual(second_manifest["summary"]["failed_files"], 0)
+            self.assertEqual(second_manifest["summary"]["existing_derivative_reused_files"], 1)
+            self.assertEqual(production_summary["local_reuse_summary"]["reused_files"], 1)
+            self.assertEqual(production_summary["local_reuse_summary"]["reprocessed_files"], 0)
+            self.assertEqual(production_summary["local_reuse_summary"]["failed_files"], 0)
+            self.assertEqual(processing_module._sha256(source), original_sha)
+
+            public_reuse_text = json.dumps(production_summary["local_reuse_summary"], ensure_ascii=False, sort_keys=True)
+            self.assertNotIn("private_page_name.png", public_reuse_text)
+            self.assertNotIn(str(input_dir), public_reuse_text)
+            self.assertNotIn(first_manifest["files"][0]["source_sha256"], public_reuse_text)
+            self.assertEqual(
+                set(production_summary["local_reuse_summary"]),
+                {"schema_version", "aggregate_only", "reused_files", "reprocessed_files", "failed_files"},
+            )
+
+    def test_production_run_rerun_reprocesses_when_processing_options_change(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-production-reprocess-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            _dark_border_page().save(input_dir / "page.png", dpi=(300, 300))
+            base_args = [
+                "production-run",
+                "--input",
+                str(input_dir),
+                "--derivatives-out",
+                str(derivatives_dir),
+                "--metadata-out",
+                str(metadata_dir),
+                "--workers",
+                "1",
+            ]
+
+            self.assertEqual(main(base_args), 0)
+            self.assertEqual(main(base_args + ["--trim-dark-border"]), 0)
+            manifest = json.loads((derivatives_dir / "processing_manifest.json").read_text(encoding="utf-8"))
+            production_summary = json.loads((metadata_dir / "production_run_summary.json").read_text(encoding="utf-8"))
+
+            self.assertTrue(manifest["resume"]["enabled"])
+            self.assertEqual(manifest["summary"]["processed_files"], 1)
+            self.assertEqual(manifest["summary"]["resumed_files"], 0)
+            self.assertEqual(manifest["summary"]["reprocessed_files"], 1)
+            self.assertEqual(manifest["summary"]["failed_files"], 0)
+            self.assertEqual(production_summary["local_reuse_summary"]["reused_files"], 0)
+            self.assertEqual(production_summary["local_reuse_summary"]["reprocessed_files"], 1)
+            self.assertEqual(production_summary["local_reuse_summary"]["failed_files"], 0)
+
 
 def _dark_border_page() -> Image.Image:
     image = Image.new("RGB", (100, 80), "white")
