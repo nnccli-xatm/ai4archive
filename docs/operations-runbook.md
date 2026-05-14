@@ -484,6 +484,32 @@ only the aggregate fields from `capability_probe.json`: package labels,
 provider/GPU counts, configured booleans, warnings, and the
 `unchanged_cpu_pillow_baseline` semantics marker.
 
+## 本地生产工作台入口和就绪检查
+
+本地生产入口面向单台扫描处理电脑，不需要打包、安装器、后台服务或局域网监控。
+班次开始前，先在仓库根目录运行推荐的就绪门禁：
+
+```bash
+npm run smoke:production-workbench-suite
+```
+
+门禁通过后，启动中文生产工作台：
+
+```bash
+archive-scan-qc production-workbench
+```
+
+浏览器打开后，扫描操作员按页面顺序完成本地流程：
+
+1. 选择原图文件夹和输出文件夹，确认文件夹保存成功。
+2. 点击“开始处理”，等待进度区显示本批次处理状态。
+3. 在大图预览区检查原图和处理后图片，按提示查看需要确认的图片。
+4. 对每张待确认图片选择处理决定：通过、重扫、重新处理、保留原样或跳过。
+5. 处理和复核完成后，从完成/导出入口保存本批次复核决定和生产结果。
+
+工作台只处理本机选择的文件夹和本机输出目录。不要把私有文件名、本地路径、
+哈希、OCR 文本、缩略图、行级发现或图片内容发布到 Linear、GitHub 或外部报告。
+
 ## Human Review And Acceptance Summary
 
 When automated QC produces findings, create a local review template for manual
