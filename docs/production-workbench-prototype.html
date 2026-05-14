@@ -1394,6 +1394,16 @@
       "为新批次重新选择扫描原图文件夹和输出文件夹，不要混用批次。",
       "如果仍有异常或不能交接，请交管理员处理。"
     ];
+    const INITIAL_COMPLETION_STEPS = [
+      "完成本批后，再检查输出文件夹里的处理后图片数量和画面状态。",
+      "完成本批后，复核结果和交接说明会保存到本机状态文件夹。",
+      "进入下一批前，请重新选择扫描原图文件夹和输出文件夹，不要混用批次。"
+    ];
+    const NEXT_BATCH_STATUS_TEXT = [
+      "新批次起点",
+      "请重新选择扫描原图文件夹和输出文件夹",
+      "选择新一批扫描原图文件夹和输出文件夹，保存后再开始处理。"
+    ];
 
     const state = {
       inputChosen: false,
@@ -1406,15 +1416,15 @@
       outputSummary: OUTPUT_LOCATION_LABEL,
       decisionSaveSummary: DECISION_SAVE_LABEL,
       completionNoteSummary: COMPLETION_NOTE_LABEL,
-      completionTitle: "本批已完成",
-      completionMessage: "处理后图片已准备好。请检查输出文件夹后再交接。",
-      completionStatusFact: "本批已完成",
+      completionTitle: "等待完成本批",
+      completionMessage: "完成并导出结果后，这里会显示本批交接清单。",
+      completionStatusFact: "未完成",
       completionModeFact: "标准优化",
       rescanFact: "0 张",
       reprocessFact: "0 张",
       manualWorkFact: "没有待人工处理图片",
       adminHandoffFact: "不需要",
-      completionSteps: DEFAULT_COMPLETION_STEPS.slice(),
+      completionSteps: INITIAL_COMPLETION_STEPS.slice(),
       finishConfirmationVisible: false,
       lastDraftMessage: "",
       operatorMessage: "",
@@ -2069,7 +2079,9 @@
       else if (!state.outputChosen && state.status !== "failed") state.status = "choose_output";
       else if (state.inputChosen && state.outputChosen && state.status === "choose_output") state.status = "ready";
 
-      const [name, action, hint] = copy[state.status];
+      const [name, action, hint] = state.waitingForNewSetup && state.status === "choose_input"
+        ? NEXT_BATCH_STATUS_TEXT
+        : copy[state.status];
       els.stateName.textContent = name;
       els.stateAction.textContent = action;
       els.stateHint.textContent = hint;
@@ -3083,20 +3095,20 @@
       state.progressLabel = "";
       state.readyImages = 0;
       state.totalImages = 0;
-      state.attentionFiles = 3;
+      state.attentionFiles = 0;
       state.outputSummary = OUTPUT_LOCATION_LABEL;
       setProcessingMode("standard");
       state.decisionSaveSummary = DECISION_SAVE_LABEL;
       state.completionNoteSummary = COMPLETION_NOTE_LABEL;
-      state.completionTitle = "本批已完成";
-      state.completionMessage = "处理后图片已准备好。请检查输出文件夹后再交接。";
-      state.completionStatusFact = "本批已完成";
+      state.completionTitle = "等待完成本批";
+      state.completionMessage = "完成并导出结果后，这里会显示本批交接清单。";
+      state.completionStatusFact = "未完成";
       state.completionModeFact = "标准优化";
       state.rescanFact = "0 张";
       state.reprocessFact = "0 张";
       state.manualWorkFact = "没有待人工处理图片";
       state.adminHandoffFact = "不需要";
-      state.completionSteps = DEFAULT_COMPLETION_STEPS.slice();
+      state.completionSteps = INITIAL_COMPLETION_STEPS.slice();
       state.finishConfirmationVisible = false;
       state.launchLocked = false;
       state.waitingForNewSetup = true;
@@ -3123,7 +3135,7 @@
       els.fixtureSelect.value = "";
       els.inputStatus.textContent = "填写本批次扫描原图所在的本机文件夹位置。";
       els.outputStatus.textContent = "填写处理后图片保存到的本机文件夹位置。";
-      els.loadStatus.textContent = "已准备下一批：当前复核队列已清空。请重新选择新一批原图文件夹和输出文件夹，不要混用批次。";
+      els.loadStatus.textContent = "已准备下一批：当前复核队列已清空。请重新选择新一批扫描原图文件夹和输出文件夹，不要混用批次。";
       window.clearTimeout(timer);
       window.clearInterval(localApi.polling);
       window.clearTimeout(localApi.saveTimer);
