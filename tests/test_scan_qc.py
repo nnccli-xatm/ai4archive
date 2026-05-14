@@ -632,6 +632,53 @@ class ScanQcTest(unittest.TestCase):
         self.assertNotIn("/private/archive", raw)
         self.assertNotIn("page_0001.tif", raw)
 
+    def test_release_candidate_summary_explains_acceptance_blockers_in_chinese(self) -> None:
+        module = _load_release_candidate_module()
+        acceptance = _release_candidate_acceptance(status="fail")
+        acceptance["closure_gate_summary"] = {
+            "open_p0_count": 1,
+            "open_p1_count": 2,
+            "manually_handled_count": 4,
+            "can_complete_delivery": False,
+        }
+        acceptance["acceptance_sampling"] = {
+            "provided": True,
+            "status": "fail",
+            "target_sample_ratio": 0.05,
+            "target_sample_count": 5,
+            "generated_sample_task_count": 3,
+            "reviewed_sample_count": 2,
+            "pending_sample_count": 3,
+            "sample_task_target_met": False,
+            "sampling_target_met": False,
+            "admin_message_zh": "抽检比例未达标：目标 5 项，已生成 3 项，已复核 2 项。",
+        }
+        acceptance["blocking_items"] = [
+            {"code": "remaining_p0"},
+            {"code": "remaining_p1"},
+            {"code": "sample_task_target_not_met"},
+            {"code": "sampling_review_target_not_met"},
+        ]
+
+        summary = module.build_release_candidate_summary(
+            aggregate_baseline_summary=_release_candidate_baseline(),
+            acceptance_summary=acceptance,
+            release_readiness_summary=_release_candidate_readiness(status="pass"),
+            cleanup_requested=True,
+            generated_at="2026-01-01T00:00:00+00:00",
+        )
+
+        self.assertEqual(summary["handoff_status_zh"], "不可交接")
+        digest = summary["acceptance_blocker_summary_zh"]
+        self.assertFalse(digest["can_handoff"])
+        self.assertIn("P0/P1 未关闭", digest["summary_zh"])
+        self.assertIn("抽检任务未达到目标比例", digest["summary_zh"])
+        self.assertIn("抽检复核未达到目标比例", digest["summary_zh"])
+        self.assertEqual(digest["closure_gate_summary"]["open_p0_count"], 1)
+        self.assertEqual(digest["acceptance_sampling"]["reviewed_sample_count"], 2)
+        self.assertIn("closure_gate_summary", digest["reused_aggregate_fields"])
+        self.assertIn("acceptance_sampling", digest["reused_aggregate_fields"])
+
     def test_release_candidate_command_omits_sensitive_values_and_records_cleanup_intent(self) -> None:
         module = _load_release_candidate_module()
         with tempfile.TemporaryDirectory(prefix="private-rc-") as temp_dir:
@@ -1039,6 +1086,57 @@ class ScanQcTest(unittest.TestCase):
         self.assertEqual(review_decisions["warning_counts_by_code"]["ignored_extra_decision_field"], 2)
         for value in forbidden_private_values:
             self.assertNotIn(value, raw)
+
+    def test_final_handoff_summary_promotes_chinese_acceptance_blocker_digest(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            release_payload = _release_candidate_bundle_payload()
+            release_payload["status"] = "fail"
+            release_payload["ready_for_release_candidate"] = False
+            release_payload["handoff_status_zh"] = "不可交接"
+            release_payload["privacy"] = {"aggregate_only": True}
+            release_payload["production_validation"] = {
+                "closure_gate_summary": {
+                    "open_p0_count": 1,
+                    "open_p1_count": 0,
+                    "manually_handled_count": 2,
+                    "can_complete_delivery": False,
+                },
+                "acceptance_sampling": {
+                    "provided": True,
+                    "target_sample_count": 5,
+                    "generated_sample_task_count": 4,
+                    "reviewed_sample_count": 3,
+                    "sample_task_target_met": False,
+                    "sampling_target_met": False,
+                },
+            }
+            release_payload["acceptance_blocker_summary_zh"] = {
+                "status_zh": "不可交接",
+                "can_handoff": False,
+                "summary_zh": "不可交接：P0/P1 未关闭：未关闭 P0 1 项，未关闭 P1 0 项。；抽检复核未达到目标比例：目标 5 项，已复核 3 项。",
+                "blockers_zh": [
+                    "P0/P1 未关闭：未关闭 P0 1 项，未关闭 P1 0 项。",
+                    "抽检复核未达到目标比例：目标 5 项，已复核 3 项。",
+                ],
+                "reused_aggregate_fields": ["closure_gate_summary", "acceptance_sampling", "blocking_items"],
+            }
+            _write_json(root / "aggregate_evidence_bundle_summary.json", _aggregate_evidence_bundle_payload(status="pass"))
+            _write_json(root / "release_candidate_summary.json", release_payload)
+
+            summary = build_final_handoff_summary(root, generated_at="2026-01-01T00:00:00+00:00")
+            raw = json.dumps(summary, ensure_ascii=False)
+
+        self.assertEqual(summary["handoff_status_zh"], "不可交接")
+        digest = summary["handoff_blocker_summary_zh"]
+        self.assertFalse(digest["can_handoff"])
+        self.assertIn("P0/P1 未关闭", digest["summary_zh"])
+        self.assertIn("抽检复核未达到目标比例", digest["summary_zh"])
+        self.assertEqual(digest["closure_gate_summary"]["open_p0_count"], 1)
+        self.assertEqual(digest["acceptance_sampling"]["reviewed_sample_count"], 3)
+        self.assertIn("release_candidate_summary", digest["reused_aggregate_fields"])
+        self.assertNotIn("page_0001", raw)
+        self.assertNotIn("/Users/private/archive", raw)
 
     def test_final_handoff_summary_passes_real_review_decision_verifier_output_source_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

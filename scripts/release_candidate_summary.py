@@ -44,11 +44,15 @@ def build_release_candidate_summary(
     readiness_status = _safe_text(release_readiness_summary.get("status")) or "unknown"
     blocking_item_count = _blocking_count(acceptance_summary) + _readiness_blocking_count(release_readiness_summary)
     status = "pass" if production_status == "pass" and readiness_status == "pass" and blocking_item_count == 0 else "fail"
+    acceptance_blockers = _acceptance_blocker_summary_zh(acceptance_summary, status == "pass")
     return {
         "schema_version": SCHEMA_VERSION,
         "generated_at": generated_at or datetime.now(timezone.utc).isoformat(),
         "status": status,
         "ready_for_release_candidate": status == "pass",
+        "handoff_status_zh": "可交接" if status == "pass" else "不可交接",
+        "admin_summary_zh": acceptance_blockers["summary_zh"],
+        "acceptance_blocker_summary_zh": acceptance_blockers,
         "privacy": {
             "aggregate_only": True,
             "contains_paths": False,
@@ -78,6 +82,7 @@ def build_release_candidate_summary(
             "counts": _production_counts(aggregate_baseline_summary),
             "throughput": _throughput(aggregate_baseline_summary, acceptance_summary),
             "threshold_outcomes": _threshold_outcomes(acceptance_summary),
+            "closure_gate_summary": _closure_gate_status(acceptance_summary.get("closure_gate_summary")),
             "acceptance_sampling": _acceptance_sampling_status(acceptance_summary),
             "privacy": _privacy_status(aggregate_baseline_summary, acceptance_summary),
             "cleanup": _cleanup_status(aggregate_baseline_summary, acceptance_summary, cleanup_requested),
@@ -313,6 +318,57 @@ def _acceptance_sampling_status(acceptance: dict[str, Any]) -> dict[str, Any]:
         "sample_task_target_met": sampling.get("sample_task_target_met") is True,
         "sampling_target_met": sampling.get("sampling_target_met") is True,
         "admin_message_zh": _safe_text(sampling.get("admin_message_zh")),
+    }
+
+
+def _acceptance_blocker_summary_zh(acceptance: dict[str, Any], ready: bool) -> dict[str, Any]:
+    closure = _closure_gate_status(acceptance.get("closure_gate_summary"))
+    sampling = _acceptance_sampling_status(acceptance)
+    blockers: list[str] = []
+    open_p0 = closure["open_p0_count"] or 0
+    open_p1 = closure["open_p1_count"] or 0
+    handled_count = closure["manually_handled_count"]
+    if open_p0 > 0 or open_p1 > 0:
+        blockers.append(f"P0/P1 未关闭：未关闭 P0 {open_p0} 项，未关闭 P1 {open_p1} 项。")
+    if closure["can_complete_delivery"] is False and handled_count is None:
+        blockers.append("人工处理结论不足：未提供可确认的人工处理闭环汇总。")
+    elif closure["can_complete_delivery"] is False and open_p0 == 0 and open_p1 == 0:
+        blockers.append(f"人工处理结论不足：已有人工处理结论 {handled_count} 项，但闭环状态仍未达到交接条件。")
+    if sampling["provided"]:
+        target = sampling["target_sample_count"] or 0
+        generated = sampling["generated_sample_task_count"] or 0
+        reviewed = sampling["reviewed_sample_count"] or 0
+        if sampling["sample_task_target_met"] is False:
+            blockers.append(f"抽检任务未达到目标比例：目标 {target} 项，已生成 {generated} 项。")
+        if sampling["sampling_target_met"] is False:
+            blockers.append(f"抽检复核未达到目标比例：目标 {target} 项，已复核 {reviewed} 项。")
+    if not blockers and not ready:
+        blockers.append("验收聚合状态未通过，请查看阻塞代码计数后重新生成验收摘要。")
+    status_zh = "可交接" if ready and not blockers else "不可交接"
+    summary_zh = (
+        "可交接：P0/P1 已关闭，人工处理结论和抽检比例聚合检查均已通过。"
+        if status_zh == "可交接"
+        else "不可交接：" + "；".join(blockers)
+    )
+    return {
+        "status_zh": status_zh,
+        "can_handoff": status_zh == "可交接",
+        "summary_zh": summary_zh,
+        "blockers_zh": blockers,
+        "closure_gate_summary": closure,
+        "acceptance_sampling": sampling,
+        "reused_aggregate_fields": ["closure_gate_summary", "acceptance_sampling", "blocking_items"],
+    }
+
+
+def _closure_gate_status(value: Any) -> dict[str, Any]:
+    closure = value if isinstance(value, dict) else {}
+    can_complete = closure.get("can_complete_delivery")
+    return {
+        "open_p0_count": _coerce_int(closure.get("open_p0_count")) or 0,
+        "open_p1_count": _coerce_int(closure.get("open_p1_count")) or 0,
+        "manually_handled_count": _coerce_int(closure.get("manually_handled_count")),
+        "can_complete_delivery": can_complete if isinstance(can_complete, bool) else None,
     }
 
 

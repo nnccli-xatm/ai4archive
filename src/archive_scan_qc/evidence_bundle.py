@@ -40,6 +40,8 @@ _PRIVATE_KEYS = (
 )
 _ALLOWED_KEY_EXCEPTIONS = {
     "aggregate_only",
+    "acceptance_blocker_summary_zh",
+    "acceptance_sampling",
     "contains_environment_values",
     "contains_derivative_image_references",
     "contains_file_list",
@@ -66,11 +68,19 @@ _ALLOWED_KEY_EXCEPTIONS = {
     "provider_packages_found",
     "provider_packages_found_count",
     "python_version_family",
+    "generated_sample_task_count",
+    "pending_sample_count",
     "retained_public_summary",
+    "reused_aggregate_fields",
+    "sample_task_target_met",
+    "sampling_target_met",
     "scan_processing_semantics",
     "source_values_omitted",
+    "target_sample_count",
+    "target_sample_ratio",
     "total_files",
     "total_findings",
+    "reviewed_sample_count",
 }
 _ALLOWED_NUMERIC_KEY_SUFFIXES = (
     "files_per_minute",
