@@ -78,6 +78,7 @@ def build_release_candidate_summary(
             "counts": _production_counts(aggregate_baseline_summary),
             "throughput": _throughput(aggregate_baseline_summary, acceptance_summary),
             "threshold_outcomes": _threshold_outcomes(acceptance_summary),
+            "acceptance_sampling": _acceptance_sampling_status(acceptance_summary),
             "privacy": _privacy_status(aggregate_baseline_summary, acceptance_summary),
             "cleanup": _cleanup_status(aggregate_baseline_summary, acceptance_summary, cleanup_requested),
             "runtime_hardware": _runtime_hardware(aggregate_baseline_summary),
@@ -281,6 +282,37 @@ def _threshold_outcomes(acceptance: dict[str, Any]) -> dict[str, Any]:
         "min_processing_files_per_minute": _coerce_float(thresholds.get("min_processing_files_per_minute")),
         "scan_throughput_passed": "scan_throughput_below_threshold" not in blocking_codes,
         "processing_throughput_passed": "processing_throughput_below_threshold" not in blocking_codes,
+        "sample_task_target_passed": "sample_task_target_not_met" not in blocking_codes,
+        "sampling_review_target_passed": "sampling_review_target_not_met" not in blocking_codes,
+    }
+
+
+def _acceptance_sampling_status(acceptance: dict[str, Any]) -> dict[str, Any]:
+    sampling = acceptance.get("acceptance_sampling")
+    if not isinstance(sampling, dict) or sampling.get("provided") is not True:
+        return {
+            "provided": False,
+            "status": "not_provided",
+            "target_sample_ratio": None,
+            "target_sample_count": None,
+            "generated_sample_task_count": None,
+            "reviewed_sample_count": None,
+            "pending_sample_count": None,
+            "sample_task_target_met": None,
+            "sampling_target_met": None,
+            "admin_message_zh": "未提供抽检比例聚合摘要，本项未纳入验收判断。",
+        }
+    return {
+        "provided": True,
+        "status": _safe_text(sampling.get("status")) or "unknown",
+        "target_sample_ratio": _coerce_float(sampling.get("target_sample_ratio")),
+        "target_sample_count": _coerce_int(sampling.get("target_sample_count")),
+        "generated_sample_task_count": _coerce_int(sampling.get("generated_sample_task_count")),
+        "reviewed_sample_count": _coerce_int(sampling.get("reviewed_sample_count")),
+        "pending_sample_count": _coerce_int(sampling.get("pending_sample_count")),
+        "sample_task_target_met": sampling.get("sample_task_target_met") is True,
+        "sampling_target_met": sampling.get("sampling_target_met") is True,
+        "admin_message_zh": _safe_text(sampling.get("admin_message_zh")),
     }
 
 
