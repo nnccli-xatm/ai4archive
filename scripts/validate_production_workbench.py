@@ -161,9 +161,8 @@ REQUIRED_TEXT = {
     "已预先填写演练文件夹",
     "维护入口",
     "选择维护示例",
-    "选择本机状态",
     "这不是正常加工步骤",
-    "浏览器辅助确认",
+    "填写本机真实文件夹位置",
     "请先填写原图文件夹和输出文件夹",
     "需留意文件",
     "原图总数",
@@ -552,8 +551,19 @@ def main() -> int:
         errors.append(f"unexpected visible ASCII words: {unexpected_ascii}")
     if 'lang="zh-CN"' not in html:
         errors.append("missing zh-CN document language")
-    if "webkitdirectory" not in html:
-        errors.append("missing local folder picker controls")
+    for forbidden_upload_token in [
+        'type="file"',
+        "webkitdirectory",
+        "directory multiple",
+        "inputFolder",
+        "outputFolder",
+        "summaryFile",
+        "浏览器辅助确认",
+        "选择本机状态",
+        "上传",
+    ]:
+        if forbidden_upload_token in html:
+            errors.append(f"operator workbench still exposes upload/file-picker flow: {forbidden_upload_token}")
     if "applyRunStatus" not in html:
         errors.append("missing production-run status loader")
     if "operator_summary" not in html:
@@ -572,7 +582,7 @@ def main() -> int:
         '<details class="maintenance-loader">',
         "按下面顺序操作：填原图、填输出、保存文件夹、开始处理。",
         "管理员排查、演练或查看本机状态时使用；这不是正常加工步骤。",
-        "浏览器辅助确认只会提示看到的项目数",
+        "请填写本机真实文件夹位置",
     ]:
         if simplified_flow_token not in html:
             errors.append(f"missing simplified operator-flow token: {simplified_flow_token}")
@@ -812,7 +822,7 @@ def main() -> int:
         "本批次是否完成",
         "人工处理",
         "交管理员处理",
-        "浏览器辅助确认只会提示看到的项目数",
+        "请填写本机真实文件夹位置",
         "静态打开不会启动处理",
         "recovery_guidance",
         "renderRecoveryGuidance",
