@@ -17,6 +17,8 @@ from PIL import Image, ImageDraw
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = REPO_ROOT / "src"
 SUMMARY_JSON = "synthetic_performance_comparison.json"
+REGRESSION_SIGNAL_OPERATIONS = ("deskew", "despeckle")
+DESPECKLE_BACKEND_MODES = ("numpy", "fallback", "not_applicable", "unknown")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -174,6 +176,7 @@ def _variant_summary(variant: dict[str, Any], benchmark: dict[str, Any]) -> dict
         "best_requested_workers": processing["best_requested_workers"] if processing else None,
         "failures": latest_run.get("processing", {}).get("failed_files"),
         "review_needed_counts": latest_run.get("finding_severity_counts", {}),
+        "operation_timing_regression_signal": _operation_timing_regression_signal(benchmark),
         "quality_difference_summary": (
             "Synthetic aggregate comparison only; inspect deltas in failures and review-needed counts before "
             "using private orchestrator evidence."
@@ -181,6 +184,124 @@ def _variant_summary(variant: dict[str, Any], benchmark: dict[str, Any]) -> dict
         "environment": benchmark["environment"],
         "comparison_plan": benchmark["comparison_plan"],
     }
+
+
+def _operation_timing_regression_signal(benchmark: dict[str, Any]) -> dict[str, Any]:
+    runs = benchmark.get("runs")
+    if not isinstance(runs, list):
+        runs = []
+
+    operations = {
+        operation: _aggregate_operation_timing(runs, operation) for operation in REGRESSION_SIGNAL_OPERATIONS
+    }
+    missing_operations = [
+        operation for operation, timing in operations.items() if not timing["signal_available"]
+    ]
+    return {
+        "schema_version": "scan-qc.synthetic-operation-timing-regression-signal.v1",
+        "source": "benchmark_results.runs.processing.operation_timings",
+        "aggregate_only": True,
+        "required_operations": list(REGRESSION_SIGNAL_OPERATIONS),
+        "signal_available": not missing_operations,
+        "missing_operations": missing_operations,
+        "operations": operations,
+        "privacy": {
+            "contains_file_names": False,
+            "contains_paths": False,
+            "contains_hashes": False,
+            "contains_thumbnails": False,
+            "contains_ocr_text": False,
+            "contains_row_level_evidence": False,
+            "contains_image_content": False,
+        },
+    }
+
+
+def _aggregate_operation_timing(runs: list[Any], operation: str) -> dict[str, Any]:
+    elapsed_seconds = 0.0
+    file_count = 0
+    run_count = 0
+    enabled_values: list[bool] = []
+    reused_scan_measurement_files = 0
+    backend_counts = {mode: 0 for mode in DESPECKLE_BACKEND_MODES}
+
+    for run in runs:
+        if not isinstance(run, dict):
+            continue
+        processing = run.get("processing")
+        if not isinstance(processing, dict):
+            continue
+        operation_timings = processing.get("operation_timings")
+        if not isinstance(operation_timings, dict):
+            continue
+        timing = operation_timings.get(operation)
+        if not isinstance(timing, dict):
+            continue
+        run_count += 1
+        if isinstance(timing.get("enabled"), bool):
+            enabled_values.append(timing["enabled"])
+        elapsed = timing.get("elapsed_seconds")
+        if isinstance(elapsed, int | float):
+            elapsed_seconds += float(elapsed)
+        count = timing.get("file_count")
+        if isinstance(count, int):
+            file_count += count
+        reused = timing.get("reused_scan_measurement_files")
+        if isinstance(reused, int):
+            reused_scan_measurement_files += reused
+        if operation == "despeckle":
+            source_counts = timing.get("backend_counts")
+            if isinstance(source_counts, dict):
+                for mode in DESPECKLE_BACKEND_MODES:
+                    value = source_counts.get(mode)
+                    if isinstance(value, int):
+                        backend_counts[mode] += value
+
+    if run_count == 0:
+        return {
+            "signal_available": False,
+            "missing_reason": "missing_from_benchmark_processing_operation_timings",
+            "run_count": 0,
+            "file_count": 0,
+            "elapsed_seconds": 0.0,
+            "files_per_minute": 0.0,
+            "average_seconds_per_file": None,
+            "reused_scan_measurement_files": 0,
+        }
+
+    elapsed_seconds = round(elapsed_seconds, 6)
+    summary = {
+        "signal_available": True,
+        "enabled": any(enabled_values) if enabled_values else True,
+        "run_count": run_count,
+        "file_count": file_count,
+        "elapsed_seconds": elapsed_seconds,
+        "files_per_minute": _files_per_minute(file_count, elapsed_seconds),
+        "average_seconds_per_file": round(elapsed_seconds / file_count, 6) if file_count else None,
+        "reused_scan_measurement_files": reused_scan_measurement_files,
+    }
+    if operation == "despeckle":
+        active_modes = [mode for mode in DESPECKLE_BACKEND_MODES if backend_counts[mode]]
+        if len(active_modes) == 1:
+            backend_mode = active_modes[0]
+        elif active_modes:
+            backend_mode = "mixed"
+        else:
+            backend_mode = "unknown"
+        summary.update(
+            {
+                "backend_mode": backend_mode,
+                "numpy_available": backend_counts["numpy"] > 0,
+                "backend_counts": backend_counts,
+            }
+        )
+    return summary
+
+
+def _files_per_minute(file_count: int, elapsed_seconds: float) -> float:
+    if elapsed_seconds <= 0:
+        return 0.0
+    return round((file_count / elapsed_seconds) * 60, 2)
 
 
 def _production_decision(variants: list[dict[str, Any]]) -> dict[str, Any]:
