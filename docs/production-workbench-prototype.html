@@ -1337,6 +1337,14 @@
                   <strong id="outputPlace">已准备 0 张处理后图片</strong>
                 </div>
                 <div class="handoff-fact">
+                  <span>需要重扫</span>
+                  <strong id="rescanFact">0 张</strong>
+                </div>
+                <div class="handoff-fact">
+                  <span>需要重新处理</span>
+                  <strong id="reprocessFact">0 张</strong>
+                </div>
+                <div class="handoff-fact">
                   <span>本批处理方式</span>
                   <strong id="completionModeFact">标准优化</strong>
                 </div>
@@ -1402,6 +1410,8 @@
       completionMessage: "处理后图片已准备好。请检查输出文件夹后再交接。",
       completionStatusFact: "本批已完成",
       completionModeFact: "标准优化",
+      rescanFact: "0 张",
+      reprocessFact: "0 张",
       manualWorkFact: "没有待人工处理图片",
       adminHandoffFact: "不需要",
       completionSteps: DEFAULT_COMPLETION_STEPS.slice(),
@@ -1514,6 +1524,8 @@
       completionCounts: document.getElementById("completionCounts"),
       completionStatusFact: document.getElementById("completionStatusFact"),
       completionModeFact: document.getElementById("completionModeFact"),
+      rescanFact: document.getElementById("rescanFact"),
+      reprocessFact: document.getElementById("reprocessFact"),
       manualWorkFact: document.getElementById("manualWorkFact"),
       adminHandoffFact: document.getElementById("adminHandoffFact"),
       completionSteps: document.getElementById("completionSteps"),
@@ -2126,6 +2138,8 @@
       els.outputPlace.textContent = state.outputSummary;
       els.completionStatusFact.textContent = state.completionStatusFact;
       els.completionModeFact.textContent = state.completionModeFact;
+      els.rescanFact.textContent = state.rescanFact;
+      els.reprocessFact.textContent = state.reprocessFact;
       els.manualWorkFact.textContent = state.manualWorkFact;
       els.adminHandoffFact.textContent = state.adminHandoffFact;
       els.completionSteps.innerHTML = state.completionSteps.map((step) => `<li>${escapeHtml(step)}</li>`).join("");
@@ -2629,10 +2643,17 @@
       if (Number.isFinite(Number(panel.total_review_items)) && Number.isFinite(Number(panel.reviewed_items)) && Number.isFinite(Number(panel.pending_items))) {
         els.completionCounts.textContent = `共 ${Number(panel.total_review_items)} 项，已确认 ${Number(panel.reviewed_items)} 项，待决定 ${Number(panel.pending_items)} 项。`;
       }
-      if (panel.derivatives_dir) state.outputSummary = outputSummaryLabel();
+      if (Number.isFinite(Number(panel.processed_output_images))) {
+        state.readyImages = Math.max(0, Number(panel.processed_output_images));
+        state.outputSummary = `已准备 ${state.readyImages} 张处理后图片`;
+      } else if (panel.derivatives_dir) {
+        state.outputSummary = outputSummaryLabel();
+      }
       if (panel.metadata_dir) state.decisionSaveSummary = DECISION_SAVE_LABEL;
       if (panel.metadata_dir || panel.completion_note_path) state.completionNoteSummary = COMPLETION_NOTE_LABEL;
       state.completionStatusFact = panel.completion_status_zh || "本批已完成";
+      if (Number.isFinite(Number(panel.needs_rescan_images))) state.rescanFact = `${Math.max(0, Number(panel.needs_rescan_images))} 张`;
+      if (Number.isFinite(Number(panel.needs_reprocess_images))) state.reprocessFact = `${Math.max(0, Number(panel.needs_reprocess_images))} 张`;
       if (panel.processing_mode) {
         setProcessingMode(
           panel.processing_mode.id,
@@ -3071,6 +3092,8 @@
       state.completionMessage = "处理后图片已准备好。请检查输出文件夹后再交接。";
       state.completionStatusFact = "本批已完成";
       state.completionModeFact = "标准优化";
+      state.rescanFact = "0 张";
+      state.reprocessFact = "0 张";
       state.manualWorkFact = "没有待人工处理图片";
       state.adminHandoffFact = "不需要";
       state.completionSteps = DEFAULT_COMPLETION_STEPS.slice();

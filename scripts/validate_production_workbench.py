@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from archive_scan_qc.review_decisions import build_review_decision_verification_summary
 from archive_scan_qc.local_workbench import (
     COMPLETION_NOTE_TXT,
+    PRODUCTION_RUN_SUMMARY_JSON,
     REVIEW_DECISION_SUMMARY_JSON,
     WorkbenchController,
 )
@@ -466,7 +467,10 @@ def validate_completion_export_smoke(html: str, errors: list[str]) -> None:
         "state.progress = 100;",
         'state.operatorMessage = payload.message_zh || "完成并导出结果。";',
         "处理后图片已保存到输出文件夹，复核结果和交接说明已保存到本机状态文件夹",
-        "if (panel.derivatives_dir) state.outputSummary = outputSummaryLabel();",
+        "Number.isFinite(Number(panel.processed_output_images))",
+        "state.outputSummary = `已准备 ${state.readyImages} 张处理后图片`;",
+        "Number.isFinite(Number(panel.needs_rescan_images))",
+        "Number.isFinite(Number(panel.needs_reprocess_images))",
         "if (panel.metadata_dir) state.decisionSaveSummary = DECISION_SAVE_LABEL;",
         "if (panel.metadata_dir || panel.completion_note_path) state.completionNoteSummary = COMPLETION_NOTE_LABEL;",
     ]:
@@ -477,6 +481,7 @@ def validate_completion_export_smoke(html: str, errors: list[str]) -> None:
         "items": [
             {"local_id": "PRQ-SMOKE-001", "severity": "P1"},
             {"local_id": "PRQ-SMOKE-002", "severity": "P2"},
+            {"local_id": "PRQ-SMOKE-003", "severity": "P2"},
         ]
     }
     summary = review_decision_contract_fixture(queue)
@@ -496,6 +501,13 @@ def validate_completion_export_smoke(html: str, errors: list[str]) -> None:
             "decided_at": "2026-05-14T03:01:00.000Z",
             "note_zh": "",
         },
+        {
+            "scope": "production_review_queue",
+            "local_id": "PRQ-SMOKE-003",
+            "decision": "pass",
+            "decided_at": "2026-05-14T03:02:00.000Z",
+            "note_zh": "",
+        },
     ]
     try:
         with tempfile.TemporaryDirectory(prefix="production-completion-smoke-") as temp_dir:
@@ -506,6 +518,16 @@ def validate_completion_export_smoke(html: str, errors: list[str]) -> None:
             input_dir.mkdir()
             controller = WorkbenchController()
             controller.configure(input_dir, output_dir, metadata_dir)
+            (metadata_dir / PRODUCTION_RUN_SUMMARY_JSON).write_text(
+                json.dumps(
+                    {
+                        "operator_summary": {"derivative_images_ready": 7},
+                        "counts": {"processed_files": 7, "resumed_files": 0},
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
             result = controller.save_review_decisions(summary)
 
             expected_message = "本批已完成：处理后图片已保存到输出文件夹，复核结果和交接说明已保存到本机状态文件夹。"
@@ -532,6 +554,12 @@ def validate_completion_export_smoke(html: str, errors: list[str]) -> None:
             for key, expected in expected_panel_values.items():
                 if panel.get(key) != expected:
                     errors.append(f"completion panel has unexpected {key}")
+            if panel.get("processed_output_images") != 7:
+                errors.append("completion panel missing processed output handoff count")
+            if panel.get("needs_rescan_images") != 1:
+                errors.append("completion panel missing rescan handoff count")
+            if panel.get("needs_reprocess_images") != 1:
+                errors.append("completion panel missing reprocess handoff count")
             for path_name in [REVIEW_DECISION_SUMMARY_JSON, REVIEW_DECISION_VERIFICATION_JSON, COMPLETION_NOTE_TXT]:
                 if not (metadata_dir / path_name).exists():
                     errors.append(f"completion export smoke missing local artifact: {path_name}")
@@ -553,6 +581,9 @@ def validate_completion_export_smoke(html: str, errors: list[str]) -> None:
                     "completion_status_zh": panel.get("completion_status_zh"),
                     "manual_work_zh": panel.get("manual_work_zh"),
                     "admin_handoff_zh": panel.get("admin_handoff_zh"),
+                    "processed_output_images": panel.get("processed_output_images"),
+                    "needs_rescan_images": panel.get("needs_rescan_images"),
+                    "needs_reprocess_images": panel.get("needs_reprocess_images"),
                     "next_steps_zh": panel.get("next_steps_zh"),
                     "checklist_zh": panel.get("checklist_zh"),
                     "processing_mode": panel.get("processing_mode"),
