@@ -17,6 +17,7 @@ from archive_scan_qc.local_workbench import (
     WorkbenchController,
     _folder_is_writable,
     _normalize_operator_path,
+    _pick_windows_folder_via_powershell,
     sanitize_operator_error_zh,
 )
 from archive_scan_qc.production_runner import ProductionRunConfig, build_production_run_summary
@@ -145,6 +146,18 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
 
             self.assertIn("Windows 路径请使用完整盘符路径", str(raised.exception))
             self.assertFalse(output_dir.exists())
+
+    def test_windows_folder_picker_uses_topmost_owner_window(self) -> None:
+        with patch.object(local_workbench_module, "_run_folder_picker_command", return_value=r"C:\Users\PS\scan") as runner:
+            selected = _pick_windows_folder_via_powershell("选择原图")
+
+        self.assertEqual(selected, r"C:\Users\PS\scan")
+        command = runner.call_args.args[0]
+        script = command[-1]
+        self.assertIn("$ownerForm.TopMost = $true", script)
+        self.assertIn("$ownerForm.Activate(); $ownerForm.BringToFront()", script)
+        self.assertIn("$dialog.ShowDialog($ownerForm)", script)
+        self.assertIn("-STA", command)
 
     def test_configure_rejects_output_inside_source_before_creating_directories(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
