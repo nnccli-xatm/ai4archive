@@ -557,8 +557,19 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#remainingWorkText")).toHaveText("还需确认 0 张");
     await expect(page.locator("#reviewMovementText")).toHaveText("所有待确认图片都已确认，可以点击完成并导出结果。");
     await expect(page.locator("#decisionSummary")).toHaveText("已决定 3 项，待决定 0 项。");
-    await page.getByRole("button", { name: "放大" }).click();
-    await expect(page.locator("#zoomState")).toHaveText("查看：125%");
+    await expect(page.locator("#currentIssue")).toHaveText("已经没有待确认图片。");
+    await expect(page.locator("#currentFocusHints")).toHaveText("已经没有待确认图片。");
+    await expect(page.locator("#currentAdvice")).toHaveText("可以完成并导出结果。");
+    await expect(page.locator("#previewSourceText")).toHaveText("图片查看：等待本机处理结果。");
+    await expect(page.locator("#activePreviewModeText")).toHaveText("当前查看：等待本机处理结果");
+    await expect(page.locator("#zoomState")).toHaveText("查看：暂无图片");
+    await expect(page.locator("#decisionNote")).toBeDisabled();
+    await expect(page.locator("#decisionNote")).toHaveValue("");
+    await expect(page.getByRole("button", { name: "确认通过" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "退回重扫" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "重新处理图片" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "确认保留原貌" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "放大" })).toBeDisabled();
 
     await page.getByRole("button", { name: "完成并导出结果" }).click();
     await expect(page.locator("#finishConfirmPanel")).toBeVisible();
@@ -569,9 +580,9 @@ test.describe("production workbench finish/export browser smoke", () => {
     await page.getByRole("button", { name: "返回继续检查" }).click();
     await expect(page.locator("#finishConfirmPanel")).toBeHidden();
     await expect(page.locator("#operatorName")).toHaveValue("复核员甲");
-    await expect(page.locator("#decisionNote")).toHaveValue("保留原貌即可。");
+    await expect(page.locator("#decisionNote")).toHaveValue("");
     await expect(page.locator("#decisionSummary")).toHaveText("已决定 3 项，待决定 0 项。");
-    await expect(page.locator("#zoomState")).toHaveText("查看：125%");
+    await expect(page.locator("#zoomState")).toHaveText("查看：暂无图片");
 
     await page.getByRole("button", { name: "完成并导出结果" }).click();
     await page.getByRole("button", { name: "确认完成本批" }).click();

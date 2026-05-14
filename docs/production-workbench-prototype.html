@@ -847,6 +847,11 @@
       font-size: 16px;
     }
 
+    #decisionActions button {
+      min-height: 54px;
+      font-size: 17px;
+    }
+
     .decision-actions .primary-choice {
       min-height: 54px;
       font-size: 18px;
@@ -1775,6 +1780,10 @@
       return `正在看第 ${currentItemNumber()} 张；确认后会自动跳到下一张待确认图片。`;
     }
 
+    function hasActivePendingReview() {
+      return state.status === "needs_review" && pendingCount() > 0;
+    }
+
     function previewSourceLabel(item, pending) {
       if (!pending) return "图片查看：等待本机处理结果。";
       if (hasBothPreviews(item)) {
@@ -2037,40 +2046,42 @@
       const item = currentItem();
       const pending = pendingCount();
       const reviewMode = state.status === "needs_review";
+      const activeReviewMode = hasActivePendingReview();
+      const activeItem = activeReviewMode ? item : null;
       els.queueText.textContent = state.reviewQueueText || (reviewMode ? `已决定 ${reviewedCount()} 项，待决定 ${pending} 项` : "等待处理开始。");
       els.remainingWorkText.textContent = remainingWorkLabel();
       els.reviewMovementText.textContent = reviewMovementLabel();
-      els.currentIssue.textContent = reviewMode && item ? item.issue : (state.operatorMessage || (pending ? "处理开始后在这里显示问题原因。" : "已经没有待确认图片。"));
-      els.currentFocusHints.textContent = reviewMode && item ? item.focusHints : (pending ? "处理开始后在这里显示查看重点。" : "已经没有待确认图片。");
-      els.currentRecommendation.textContent = reviewMode && item ? recommendationLabel(item) : "建议：等待处理";
-      els.currentRecommendationReason.textContent = reviewMode && item ? recommendationReason(item) : "等待处理开始后，这里会说明为什么建议这样选择。";
-      els.currentDecisionStatus.textContent = reviewMode && item ? currentDecisionLabel(item) : "当前决定：未决定";
-      els.currentAdvice.textContent = reviewMode && item ? currentAdviceText(item) : state.status === "failed" ? "请联系管理员处理后再继续。" : pending ? "可以开始处理后再确认。" : "可以完成并导出结果。";
+      els.currentIssue.textContent = activeItem ? activeItem.issue : (state.operatorMessage || (pending ? "处理开始后在这里显示问题原因。" : "已经没有待确认图片。"));
+      els.currentFocusHints.textContent = activeItem ? activeItem.focusHints : (pending ? "处理开始后在这里显示查看重点。" : "已经没有待确认图片。");
+      els.currentRecommendation.textContent = activeItem ? recommendationLabel(activeItem) : "建议：等待处理";
+      els.currentRecommendationReason.textContent = activeItem ? recommendationReason(activeItem) : "等待处理开始后，这里会说明为什么建议这样选择。";
+      els.currentDecisionStatus.textContent = activeItem ? currentDecisionLabel(activeItem) : "当前决定：未决定";
+      els.currentAdvice.textContent = activeItem ? currentAdviceText(activeItem) : state.status === "failed" ? "请联系管理员处理后再继续。" : pending ? "可以开始处理后再确认。" : "可以完成并导出结果。";
       els.reviewPositionText.textContent = reviewMode && state.reviewItems.length
         ? reviewProgressLabel()
         : "当前第 0 张 / 共 0 张；还需确认 0 张。";
-      els.previewSourceText.textContent = previewSourceLabel(item || {}, reviewMode && Boolean(item));
+      els.previewSourceText.textContent = previewSourceLabel(activeItem || {}, Boolean(activeItem));
       els.previousReviewedButton.disabled = !(reviewMode && previousReviewedIndex() >= 0);
       els.nextPendingButton.disabled = !(reviewMode && nextPendingIndex() >= 0);
       els.clearDecisionButton.disabled = !(reviewMode && item && item.decision);
       els.operatorName.disabled = !reviewMode;
       els.operatorName.value = state.operatorName;
-      els.decisionNote.disabled = !(reviewMode && item);
-      if (els.decisionNote.value !== currentNote()) els.decisionNote.value = currentNote();
+      els.decisionNote.disabled = !activeItem;
+      if (els.decisionNote.value !== (activeItem ? currentNote() : "")) els.decisionNote.value = activeItem ? currentNote() : "";
       els.decisionActions.querySelectorAll("button").forEach((button) => {
-        button.disabled = !(reviewMode && item);
-        button.classList.toggle("primary-choice", reviewMode && item && item.suggestedAction === button.dataset.decision);
-        button.classList.toggle("recommended-choice", reviewMode && item && item.suggestedAction === button.dataset.decision);
-        button.setAttribute("aria-pressed", reviewMode && item && item.suggestedAction === button.dataset.decision ? "true" : "false");
+        button.disabled = !activeItem;
+        button.classList.toggle("primary-choice", activeItem && activeItem.suggestedAction === button.dataset.decision);
+        button.classList.toggle("recommended-choice", activeItem && activeItem.suggestedAction === button.dataset.decision);
+        button.setAttribute("aria-pressed", activeItem && activeItem.suggestedAction === button.dataset.decision ? "true" : "false");
       });
       els.decisionGuideList.querySelectorAll("[data-guide-decision]").forEach((guideItem) => {
-        guideItem.classList.toggle("recommended-guide", reviewMode && item && item.suggestedAction === guideItem.dataset.guideDecision);
+        guideItem.classList.toggle("recommended-guide", activeItem && activeItem.suggestedAction === guideItem.dataset.guideDecision);
       });
-      els.decisionSaveGuidance.textContent = reviewMode && item
+      els.decisionSaveGuidance.textContent = activeItem
         ? "选择任一决定后，会保存当前图片的决定和备注，并自动显示下一张待确认图片；全部确认后可以完成并导出结果。"
         : "处理开始后，选择决定会保存当前图片并继续下一张；全部确认后可以完成并导出结果。";
       els.decisionSummary.textContent = `已决定 ${reviewedCount()} 项，待决定 ${pending} 项。`;
-      renderPreview(item, reviewMode && Boolean(item));
+      renderPreview(activeItem, Boolean(activeItem));
     }
 
     function render() {
