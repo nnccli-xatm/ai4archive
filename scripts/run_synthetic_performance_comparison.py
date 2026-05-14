@@ -56,12 +56,28 @@ def run_synthetic_comparison(args: argparse.Namespace) -> dict[str, Any]:
         {
             "id": "pillow_cpu_baseline",
             "label": "Current Python/Pillow CPU baseline",
-            "benchmark_args": ["--auto-crop", "--deskew", "--trim-dark-border", "--despeckle", "--despeckle-backend", "fallback"],
+            "benchmark_args": [
+                "--auto-crop",
+                "--deskew",
+                "--trim-dark-border",
+                "--despeckle",
+                "--despeckle-backend",
+                "fallback",
+                "--reuse-scan-measurements",
+            ],
         },
         {
             "id": "numpy_vectorized_hotspots",
             "label": "NumPy vectorized despeckle hotspot when available",
-            "benchmark_args": ["--auto-crop", "--deskew", "--trim-dark-border", "--despeckle", "--despeckle-backend", "numpy"],
+            "benchmark_args": [
+                "--auto-crop",
+                "--deskew",
+                "--trim-dark-border",
+                "--despeckle",
+                "--despeckle-backend",
+                "numpy",
+                "--reuse-scan-measurements",
+            ],
         },
     ]
     variant_summaries = []

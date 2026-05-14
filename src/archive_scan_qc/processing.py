@@ -1321,9 +1321,16 @@ def _dark_edge_run(image: Image.Image, side: str, max_pixels: int) -> int:
 
 
 def _despeckle_isolated_pixels(image: Image.Image, *, backend: str = "fallback") -> tuple[Image.Image, int, str]:
+    if backend not in {"fallback", "numpy"}:
+        raise ValueError("despeckle backend must be fallback or numpy")
+
     grayscale = image.convert("L")
     width, height = grayscale.size
     if width < 3 or height < 3:
+        return image.copy(), 0, "not_applicable"
+
+    min_value, _max_value = grayscale.getextrema()
+    if min_value > 60:
         return image.copy(), 0, "not_applicable"
 
     dark_mask = grayscale.point(lambda value: 255 if value <= 60 else 0, mode="L")
