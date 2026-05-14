@@ -103,6 +103,44 @@ class ProductionWorkbenchRegressionGuardTests(unittest.TestCase):
         self.assertIn("$dialog.ShowDialog($ownerForm)", script)
         self.assertNotIn("OpenFileDialog", script)
 
+    def test_prepare_next_batch_clears_completed_batch_handoff_state(self) -> None:
+        html = WORKBENCH_HTML.read_text(encoding="utf-8")
+        start = html.find("async function prepareNextBatch()")
+        end = html.find("els.resetButton.addEventListener", start)
+        self.assertNotEqual(start, -1)
+        self.assertNotEqual(end, -1)
+        body = html[start:end]
+
+        for required in [
+            'state.status = "choose_input";',
+            "state.readyImages = 0;",
+            "state.totalImages = 0;",
+            "state.attentionFiles = 0;",
+            "state.reviewItems = [];",
+            "state.queueLoaded = false;",
+            "state.decisions = {};",
+            "state.finishConfirmationVisible = false;",
+            "state.recoveryGuidance = null;",
+            "state.folderReadiness = null;",
+            'state.completionTitle = "等待完成本批";',
+            'state.completionMessage = "完成并导出结果后，这里会显示本批交接清单。";',
+            'state.completionStatusFact = "未完成";',
+            "state.completionSteps = INITIAL_COMPLETION_STEPS.slice();",
+            "请重新选择新一批扫描原图文件夹和输出文件夹，不要混用批次。",
+        ]:
+            self.assertIn(required, body)
+
+        for stale_completed_batch_token in [
+            'state.attentionFiles = 3;',
+            'state.completionTitle = "本批已完成";',
+            'state.completionStatusFact = "本批已完成";',
+            "state.completionSteps = DEFAULT_COMPLETION_STEPS.slice();",
+        ]:
+            self.assertNotIn(stale_completed_batch_token, body)
+
+        self.assertIn("NEXT_BATCH_STATUS_TEXT", html)
+        self.assertIn("请重新选择扫描原图文件夹和输出文件夹", html)
+
 
 if __name__ == "__main__":
     unittest.main()
