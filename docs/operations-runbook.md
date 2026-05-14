@@ -762,8 +762,10 @@ Treat both files as sensitive local evidence. They include row-level local
 evidence fields such as relative paths, hashes, dimensions, DPI, automated rule
 ids, and blank reviewer status fields. They must not include embedded images,
 thumbnails, OCR text, recognized text, or image bytes. The JSON includes an
-`aggregate_sampling_counts` block suitable for copying into acceptance notes or
-future aggregate acceptance integration after local policy review.
+`aggregate_sampling_counts` block suitable for acceptance notes. That aggregate
+block reports the input total, target sampling ratio, target sample count,
+generated sample-task count, reviewed sample-task count, and whether reviewed
+samples meet the current target without publishing row-level evidence.
 
 Sensitive local evidence includes source images, derivative images,
 `scan_qc_report.json`, `scan_qc_report.html`, `scan_qc_files.csv`,

@@ -821,7 +821,11 @@ def _main_acceptance_sampling_export(argv: list[str]) -> int:
     counts = payload["aggregate_sampling_counts"]
     print(f"Acceptance sampling JSON: {json_path}")
     print(f"Acceptance sampling CSV: {csv_path}")
-    print(f"Sampled records: {counts['sampled_records']} of {counts['total_records']}")
+    print(f"Input records: {counts['input_total']}")
+    print(f"Sampling target: {counts['target_sample_count']} records at {counts['target_sample_ratio']:.2%}")
+    print(f"Generated sample tasks: {counts['generated_sample_task_count']}")
+    print(f"Reviewed sample tasks: {counts['reviewed_sample_count']}")
+    print(f"Sampling target met: {counts['sampling_target_met']}")
     print("Sensitivity: sensitive local row-level evidence; contains paths/hashes, no images, thumbnails, OCR text, or image bytes.")
     return 0
 

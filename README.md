@@ -686,9 +686,11 @@ lowered; P0/P1/P2 findings and other problematic records are selected first
 where practical, then remaining records are filled by stable deterministic
 ordering. The artifacts are sensitive local evidence because they include
 row-level paths and hashes for operator inspection. They do not embed images,
-thumbnails, OCR text, or image bytes. The JSON also includes aggregate sampling
-counts that can be copied into acceptance notes or future aggregate acceptance
-integration after local policy review.
+thumbnails, OCR text, or image bytes. The JSON also includes an aggregate-only
+sampling summary with the input total, target ratio, target count, generated
+sample-task count, reviewed sample-task count, and whether reviewed samples meet
+the current target. These fields map to the section 11 design requirement that
+manual sampling tasks are generated for no less than 5% of records by default.
 
 Use aggregate calibration only after automated QC and review:
 
