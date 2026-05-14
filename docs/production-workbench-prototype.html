@@ -1332,6 +1332,7 @@
             <div class="handoff-result" aria-label="本批次交接结果">
               <h3 id="completionTitle">本批已完成</h3>
               <p id="completionMessage">处理后图片已准备好。请检查输出文件夹后再交接。</p>
+              <p class="muted hidden" id="completionReuseMessage"></p>
               <div class="handoff-facts">
                 <div class="handoff-fact">
                   <span>本批次是否完成</span>
@@ -1427,6 +1428,7 @@
       completionNoteSummary: COMPLETION_NOTE_LABEL,
       completionTitle: "等待完成本批",
       completionMessage: "完成并导出结果后，这里会显示本批交接清单。",
+      completionReuseMessage: "",
       completionStatusFact: "未完成",
       completionModeFact: "标准优化",
       rescanFact: "0 张",
@@ -1542,6 +1544,7 @@
       outputPlace: document.getElementById("outputPlace"),
       completionTitle: document.getElementById("completionTitle"),
       completionMessage: document.getElementById("completionMessage"),
+      completionReuseMessage: document.getElementById("completionReuseMessage"),
       completionCounts: document.getElementById("completionCounts"),
       completionStatusFact: document.getElementById("completionStatusFact"),
       completionModeFact: document.getElementById("completionModeFact"),
@@ -2167,6 +2170,8 @@
     function renderCompletionPanel() {
       els.completionTitle.textContent = state.completionTitle;
       els.completionMessage.textContent = state.completionMessage;
+      els.completionReuseMessage.textContent = state.completionReuseMessage;
+      els.completionReuseMessage.classList.toggle("hidden", !state.completionReuseMessage);
       els.completionCounts.textContent = `共 ${state.reviewItems.length} 项，已确认 ${reviewedCount()} 项，待决定 ${pendingCount()} 项。`;
       els.outputPlace.textContent = state.outputSummary;
       els.completionStatusFact.textContent = state.completionStatusFact;
@@ -2319,6 +2324,16 @@
 
     function toNumber(value) {
       return Number.isFinite(Number(value)) ? Number(value) : 0;
+    }
+
+    function localReuseMessage(panel) {
+      const reuse = panel && panel.local_reuse_summary;
+      if (!reuse || reuse.aggregate_only !== true) return "";
+      const hasReusableCounts = ["reused_files", "reprocessed_files", "failed_files"].every((key) =>
+        Object.prototype.hasOwnProperty.call(reuse, key)
+      );
+      if (!hasReusableCounts) return "";
+      return `本批复用了 ${Math.max(0, toNumber(reuse.reused_files))} 张，重新处理 ${Math.max(0, toNumber(reuse.reprocessed_files))} 张，失败 ${Math.max(0, toNumber(reuse.failed_files))} 张。`;
     }
 
     function escapeHtml(value) {
@@ -2676,6 +2691,7 @@
       if (!panel) return;
       state.completionTitle = panel.title_zh || "本批已完成";
       state.completionMessage = panel.message_zh || "处理后图片已准备好。请检查输出文件夹后再交接。";
+      state.completionReuseMessage = localReuseMessage(panel);
       if (Number.isFinite(Number(panel.total_review_items)) && Number.isFinite(Number(panel.reviewed_items)) && Number.isFinite(Number(panel.pending_items))) {
         els.completionCounts.textContent = `共 ${Number(panel.total_review_items)} 项，已确认 ${Number(panel.reviewed_items)} 项，待决定 ${Number(panel.pending_items)} 项。`;
       }
@@ -3151,6 +3167,7 @@
       state.completionNoteSummary = COMPLETION_NOTE_LABEL;
       state.completionTitle = "等待完成本批";
       state.completionMessage = "完成并导出结果后，这里会显示本批交接清单。";
+      state.completionReuseMessage = "";
       state.completionStatusFact = "未完成";
       state.completionModeFact = "标准优化";
       state.rescanFact = "0 张";

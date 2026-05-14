@@ -470,6 +470,10 @@ def validate_completion_export_smoke(html: str, errors: list[str]) -> None:
         "state.progress = 100;",
         'state.operatorMessage = payload.message_zh || "完成并导出结果。";',
         "处理后图片已保存到输出文件夹，复核结果和交接说明已保存到本机状态文件夹",
+        'id="completionReuseMessage"',
+        "function localReuseMessage(panel)",
+        "state.completionReuseMessage = localReuseMessage(panel);",
+        'els.completionReuseMessage.classList.toggle("hidden", !state.completionReuseMessage);',
         "Number.isFinite(Number(panel.processed_output_images))",
         "state.outputSummary = `已准备 ${state.readyImages} 张处理后图片`;",
         "Number.isFinite(Number(panel.needs_rescan_images))",
@@ -526,6 +530,13 @@ def validate_completion_export_smoke(html: str, errors: list[str]) -> None:
                     {
                         "operator_summary": {"derivative_images_ready": 7},
                         "counts": {"processed_files": 7, "resumed_files": 0},
+                        "local_reuse_summary": {
+                            "schema_version": "scan-qc.local-processing-reuse-summary.v1",
+                            "aggregate_only": True,
+                            "reused_files": 2,
+                            "reprocessed_files": 5,
+                            "failed_files": 0,
+                        },
                     },
                     ensure_ascii=False,
                 ),
@@ -563,6 +574,16 @@ def validate_completion_export_smoke(html: str, errors: list[str]) -> None:
                 errors.append("completion panel missing rescan handoff count")
             if panel.get("needs_reprocess_images") != 1:
                 errors.append("completion panel missing reprocess handoff count")
+            expected_reuse = {
+                "schema_version": "scan-qc.local-processing-reuse-summary.v1",
+                "aggregate_only": True,
+                "reused_files": 2,
+                "reprocessed_files": 5,
+                "failed_files": 0,
+                "message_zh": "本批复用了 2 张，重新处理 5 张，失败 0 张。",
+            }
+            if panel.get("local_reuse_summary") != expected_reuse:
+                errors.append("completion panel missing aggregate local reuse handoff counts")
             for path_name in [REVIEW_DECISION_SUMMARY_JSON, REVIEW_DECISION_VERIFICATION_JSON, COMPLETION_NOTE_TXT]:
                 if not (metadata_dir / path_name).exists():
                     errors.append(f"completion export smoke missing local artifact: {path_name}")
@@ -587,6 +608,7 @@ def validate_completion_export_smoke(html: str, errors: list[str]) -> None:
                     "processed_output_images": panel.get("processed_output_images"),
                     "needs_rescan_images": panel.get("needs_rescan_images"),
                     "needs_reprocess_images": panel.get("needs_reprocess_images"),
+                    "local_reuse_summary": panel.get("local_reuse_summary"),
                     "next_steps_zh": panel.get("next_steps_zh"),
                     "checklist_zh": panel.get("checklist_zh"),
                     "processing_mode": panel.get("processing_mode"),

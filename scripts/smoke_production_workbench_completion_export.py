@@ -105,6 +105,13 @@ def run_smoke() -> dict[str, Any]:
                 {
                     "operator_summary": {"derivative_images_ready": 7},
                     "counts": {"processed_files": 7, "resumed_files": 0},
+                    "local_reuse_summary": {
+                        "schema_version": "scan-qc.local-processing-reuse-summary.v1",
+                        "aggregate_only": True,
+                        "reused_files": 2,
+                        "reprocessed_files": 5,
+                        "failed_files": 0,
+                    },
                 },
                 ensure_ascii=False,
             ),
@@ -166,6 +173,18 @@ def run_smoke() -> dict[str, Any]:
         _assert(panel.get("processed_output_images") == 7, "completion panel output count changed")
         _assert(panel.get("needs_rescan_images") == 1, "completion panel rescan count changed")
         _assert(panel.get("needs_reprocess_images") == 1, "completion panel reprocess count changed")
+        _assert(
+            panel.get("local_reuse_summary")
+            == {
+                "schema_version": "scan-qc.local-processing-reuse-summary.v1",
+                "aggregate_only": True,
+                "reused_files": 2,
+                "reprocessed_files": 5,
+                "failed_files": 0,
+                "message_zh": "本批复用了 2 张，重新处理 5 张，失败 0 张。",
+            },
+            "completion panel reuse count summary changed",
+        )
         _assert(str(output_dir.resolve()) == panel.get("derivatives_dir"), "derivative artifact pointer changed")
         _assert(str(metadata_dir.resolve()) == panel.get("metadata_dir"), "metadata artifact pointer changed")
 
@@ -207,6 +226,7 @@ def run_smoke() -> dict[str, Any]:
                 "processed_output_images": panel.get("processed_output_images"),
                 "needs_rescan_images": panel.get("needs_rescan_images"),
                 "needs_reprocess_images": panel.get("needs_reprocess_images"),
+                "local_reuse_summary": panel.get("local_reuse_summary"),
                 "checklist_zh": panel.get("checklist_zh"),
                 "next_steps_zh": panel.get("next_steps_zh"),
                 "processing_mode": panel.get("processing_mode"),
@@ -222,6 +242,9 @@ def run_smoke() -> dict[str, Any]:
             "processed_output_images": panel.get("processed_output_images"),
             "needs_rescan_images": panel.get("needs_rescan_images"),
             "needs_reprocess_images": panel.get("needs_reprocess_images"),
+            "reuse_reused_images": panel.get("local_reuse_summary", {}).get("reused_files"),
+            "reuse_reprocessed_images": panel.get("local_reuse_summary", {}).get("reprocessed_files"),
+            "reuse_failed_images": panel.get("local_reuse_summary", {}).get("failed_files"),
             "local_artifact_count": len(artifacts),
             "summary_only": saved_summary.get("privacy", {}).get("summary_only") is True,
             "verification_status": verification.get("status"),

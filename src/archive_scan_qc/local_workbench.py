@@ -275,6 +275,7 @@ class WorkbenchController:
         open_p1_count = int(closure_summary.get("open_p1_count") or 0)
         run_summary = _read_json(metadata_dir / PRODUCTION_RUN_SUMMARY_JSON)
         handoff_counts = _completion_handoff_counts(run_summary, decision_summary)
+        reuse_handoff_summary = _local_reuse_handoff_summary(run_summary)
         operator_name = str(summary.get("operator_name") or "").strip()
         completion_note_path.write_text(
             "\n".join(
@@ -306,6 +307,44 @@ class WorkbenchController:
             ),
             encoding="utf-8",
         )
+        completion_panel = {
+            "title_zh": "本批已完成",
+            "message_zh": "处理后图片已准备好。请检查输出文件夹后再交接。",
+            "completion_status_zh": "本批已完成",
+            "manual_work_zh": "没有待人工处理图片",
+            "admin_handoff_zh": "不需要",
+            "total_review_items": total_decisions,
+            "reviewed_items": reviewed_decisions,
+            "pending_items": pending_decisions,
+            "closure_gate_summary": closure_summary,
+            "processed_output_images": handoff_counts["processed_output_images"],
+            "needs_rescan_images": handoff_counts["needs_rescan_images"],
+            "needs_reprocess_images": handoff_counts["needs_reprocess_images"],
+            "next_batch_reminder_zh": handoff_counts["next_batch_reminder_zh"],
+            "processing_mode": _processing_mode_payload(processing_mode),
+            "derivatives_dir": derivatives_display,
+            "metadata_dir": metadata_display,
+            "decision_summary_path": summary_display,
+            "verification_summary_path": verification_display,
+            "completion_note_path": completion_note_display,
+            "open_output_folder_available": True,
+            "checklist_zh": [
+                f"打开输出文件夹，检查 {handoff_counts['processed_output_images']} 张处理后图片的数量和画面状态",
+                f"需要重扫 {handoff_counts['needs_rescan_images']} 张，需要重新处理 {handoff_counts['needs_reprocess_images']} 张",
+                "复核结果和交接说明已保存到本机状态文件夹",
+                "准备下一批会清空当前复核队列，请重新选择新一批文件夹",
+            ],
+            "next_steps_zh": [
+                f"打开输出文件夹，检查 {handoff_counts['processed_output_images']} 张处理后图片的数量和画面状态。",
+                f"需要重扫 {handoff_counts['needs_rescan_images']} 张；需要重新处理 {handoff_counts['needs_reprocess_images']} 张。",
+                "本机状态文件夹已保存复核结果和交接说明，正常界面不显示具体路径或文件名。",
+                handoff_counts["next_batch_reminder_zh"],
+                "如果仍有异常或不能交接，请交管理员处理。",
+            ],
+        }
+        if reuse_handoff_summary is not None:
+            completion_panel["local_reuse_summary"] = reuse_handoff_summary
+
         return {
             "schema_version": SERVER_SCHEMA,
             "finished": True,
@@ -319,41 +358,7 @@ class WorkbenchController:
                 "verification_summary": verification_display,
                 "completion_note": completion_note_display,
             },
-            "completion_panel": {
-                "title_zh": "本批已完成",
-                "message_zh": "处理后图片已准备好。请检查输出文件夹后再交接。",
-                "completion_status_zh": "本批已完成",
-                "manual_work_zh": "没有待人工处理图片",
-                "admin_handoff_zh": "不需要",
-                "total_review_items": total_decisions,
-                "reviewed_items": reviewed_decisions,
-                "pending_items": pending_decisions,
-                "closure_gate_summary": closure_summary,
-                "processed_output_images": handoff_counts["processed_output_images"],
-                "needs_rescan_images": handoff_counts["needs_rescan_images"],
-                "needs_reprocess_images": handoff_counts["needs_reprocess_images"],
-                "next_batch_reminder_zh": handoff_counts["next_batch_reminder_zh"],
-                "processing_mode": _processing_mode_payload(processing_mode),
-                "derivatives_dir": derivatives_display,
-                "metadata_dir": metadata_display,
-                "decision_summary_path": summary_display,
-                "verification_summary_path": verification_display,
-                "completion_note_path": completion_note_display,
-                "open_output_folder_available": True,
-                "checklist_zh": [
-                    f"打开输出文件夹，检查 {handoff_counts['processed_output_images']} 张处理后图片的数量和画面状态",
-                    f"需要重扫 {handoff_counts['needs_rescan_images']} 张，需要重新处理 {handoff_counts['needs_reprocess_images']} 张",
-                    "复核结果和交接说明已保存到本机状态文件夹",
-                    "准备下一批会清空当前复核队列，请重新选择新一批文件夹",
-                ],
-                "next_steps_zh": [
-                    f"打开输出文件夹，检查 {handoff_counts['processed_output_images']} 张处理后图片的数量和画面状态。",
-                    f"需要重扫 {handoff_counts['needs_rescan_images']} 张；需要重新处理 {handoff_counts['needs_reprocess_images']} 张。",
-                    "本机状态文件夹已保存复核结果和交接说明，正常界面不显示具体路径或文件名。",
-                    handoff_counts["next_batch_reminder_zh"],
-                    "如果仍有异常或不能交接，请交管理员处理。",
-                ],
-            },
+            "completion_panel": completion_panel,
             "decision_summary": decision_summary,
         }
 
@@ -1473,6 +1478,23 @@ def _completion_handoff_counts(run_summary: dict[str, Any] | None, decision_summ
             "需要继续加工时，点击准备下一批；当前复核队列会清空。"
             "为新批次重新选择扫描原图文件夹和输出文件夹，不要混用批次。"
         ),
+    }
+
+
+def _local_reuse_handoff_summary(run_summary: dict[str, Any] | None) -> dict[str, Any] | None:
+    reuse_summary = run_summary.get("local_reuse_summary") if isinstance(run_summary, dict) else None
+    if not isinstance(reuse_summary, dict) or reuse_summary.get("aggregate_only") is not True:
+        return None
+    reused_files = _safe_nonnegative_int(reuse_summary.get("reused_files"))
+    reprocessed_files = _safe_nonnegative_int(reuse_summary.get("reprocessed_files"))
+    failed_files = _safe_nonnegative_int(reuse_summary.get("failed_files"))
+    return {
+        "schema_version": "scan-qc.local-processing-reuse-summary.v1",
+        "aggregate_only": True,
+        "reused_files": reused_files,
+        "reprocessed_files": reprocessed_files,
+        "failed_files": failed_files,
+        "message_zh": f"本批复用了 {reused_files} 张，重新处理 {reprocessed_files} 张，失败 {failed_files} 张。",
     }
 
 

@@ -492,6 +492,13 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
                     {
                         "operator_summary": {"derivative_images_ready": 7},
                         "counts": {"processed_files": 7, "resumed_files": 0},
+                        "local_reuse_summary": {
+                            "schema_version": "scan-qc.local-processing-reuse-summary.v1",
+                            "aggregate_only": True,
+                            "reused_files": 2,
+                            "reprocessed_files": 5,
+                            "failed_files": 0,
+                        },
                     },
                     ensure_ascii=False,
                 ),
@@ -547,6 +554,17 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertEqual(result["completion_panel"]["processed_output_images"], 7)
             self.assertEqual(result["completion_panel"]["needs_rescan_images"], 1)
             self.assertEqual(result["completion_panel"]["needs_reprocess_images"], 1)
+            self.assertEqual(
+                result["completion_panel"]["local_reuse_summary"],
+                {
+                    "schema_version": "scan-qc.local-processing-reuse-summary.v1",
+                    "aggregate_only": True,
+                    "reused_files": 2,
+                    "reprocessed_files": 5,
+                    "failed_files": 0,
+                    "message_zh": "本批复用了 2 张，重新处理 5 张，失败 0 张。",
+                },
+            )
             self.assertEqual(
                 result["completion_panel"]["closure_gate_summary"],
                 {
@@ -623,6 +641,7 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertEqual(result["completion_panel"]["processing_mode"]["id"], "qc_only")
             self.assertEqual(result["completion_panel"]["processing_mode"]["label_zh"], "只质检不修图")
             self.assertIn("不会生成处理后优化图片", result["completion_panel"]["processing_mode"]["output_zh"])
+            self.assertNotIn("local_reuse_summary", result["completion_panel"])
             self.assertTrue((metadata_dir / REVIEW_DECISION_SUMMARY_JSON).exists())
             completion_note = (metadata_dir / COMPLETION_NOTE_TXT).read_text(encoding="utf-8")
             self.assertIn("复核总数：0", completion_note)
