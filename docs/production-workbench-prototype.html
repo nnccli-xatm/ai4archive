@@ -2885,6 +2885,8 @@
       decisions.forEach((item) => {
         reviewCounts[item.decision] += 1;
       });
+      const pendingP0 = state.reviewItems.filter((item) => item.severity === "P0" && !item.decision).length;
+      const pendingP1 = state.reviewItems.filter((item) => item.severity === "P1" && !item.decision).length;
       return {
         schema: "scan-qc-review-decisions.local.v1",
         source_type: "production_workbench",
@@ -2900,6 +2902,8 @@
           p0: state.reviewItems.filter((item) => item.severity === "P0").length,
           p1: state.reviewItems.filter((item) => item.severity === "P1").length,
           p2: state.reviewItems.filter((item) => item.severity === "P2").length,
+          p0_pending: pendingP0,
+          p1_pending: pendingP1,
           review_completion: {
             total: state.reviewItems.length,
             reviewed: reviewedCount(),

@@ -3185,6 +3185,9 @@ class ScanQcTest(unittest.TestCase):
         )
 
         self.assertTrue(payload["pass"])
+        self.assertEqual(payload["closure_gate_summary"]["open_p0_count"], 0)
+        self.assertEqual(payload["closure_gate_summary"]["open_p1_count"], 0)
+        self.assertTrue(payload["closure_gate_summary"]["can_complete_delivery"])
         self.assertTrue(any("run_plan_summary was not provided" in warning for warning in payload["warnings"]))
         self.assertTrue(any("benchmark_results was not provided" in warning for warning in payload["warnings"]))
 
@@ -3864,6 +3867,17 @@ class ScanQcTest(unittest.TestCase):
         self.assertEqual(summary["status_counts"]["needs_rescan"], 1)
         self.assertEqual(summary["remaining_p0"], 1)
         self.assertEqual(summary["remaining_p1"], 1)
+        self.assertEqual(summary["manually_handled_count"], 4)
+        self.assertEqual(
+            summary["closure_gate_summary"],
+            {
+                "open_p0_count": 1,
+                "open_p1_count": 1,
+                "manually_handled_count": 4,
+                "can_complete_delivery": False,
+                "operator_message_zh": "还有需要重扫/重新处理的图片，先处理后再完成导出。",
+            },
+        )
         self.assertFalse(summary["acceptance_passed"])
 
     def test_review_summary_is_aggregate_only_and_does_not_leak_private_values(self) -> None:
@@ -3886,6 +3900,7 @@ class ScanQcTest(unittest.TestCase):
             summary = json.loads(raw)
             self.assertTrue(summary["acceptance_passed"])
             self.assertEqual(summary["remaining_p0"], 0)
+            self.assertTrue(summary["closure_gate_summary"]["can_complete_delivery"])
 
     def test_review_summary_rejects_invalid_status_with_clear_error(self) -> None:
         with self.assertRaisesRegex(ValueError, "Invalid review status 'done'.*expected one of"):
@@ -3919,6 +3934,16 @@ class ScanQcTest(unittest.TestCase):
         self.assertEqual(summary["decision_summary"]["rejected"], 1)
         self.assertEqual(summary["decision_summary"]["rework"], 1)
         self.assertEqual(summary["decision_summary"]["completion_status"], "complete")
+        self.assertEqual(
+            summary["decision_summary"]["closure_gate_summary"],
+            {
+                "open_p0_count": 0,
+                "open_p1_count": 0,
+                "manually_handled_count": 3,
+                "can_complete_delivery": True,
+                "operator_message_zh": "P0/P1 问题已经有处理结论，可以完成交接。",
+            },
+        )
         self.assertEqual(summary["blocking_counts_by_code"], {})
         self.assertTrue(summary["privacy"]["aggregate_only"])
 
@@ -3937,6 +3962,8 @@ class ScanQcTest(unittest.TestCase):
         self.assertEqual(result["status"], "pass")
         self.assertEqual(result["decision_summary"]["pending"], 1)
         self.assertEqual(result["decision_summary"]["completion_status"], "incomplete")
+        self.assertEqual(result["decision_summary"]["closure_gate_summary"]["open_p0_count"], 1)
+        self.assertFalse(result["decision_summary"]["closure_gate_summary"]["can_complete_delivery"])
 
     def test_review_decisions_verify_blocks_invalid_decision_value(self) -> None:
         fixture = _review_decision_export_fixture(decisions=("accepted_issue", "done", "blocked"))
@@ -8648,6 +8675,8 @@ def _review_decision_export_fixture(
             "p0": 1,
             "p1": 1,
             "p2": 1,
+            "p0_pending": counts["pending"],
+            "p1_pending": 0,
             "review_completion": {
                 "total": len(decision_rows),
                 "reviewed": reviewed,

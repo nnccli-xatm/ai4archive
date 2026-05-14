@@ -61,6 +61,8 @@ def _decision_summary(decisions: list[tuple[str, str]]) -> dict[str, Any]:
             "p0": 0,
             "p1": 1,
             "p2": 1,
+            "p0_pending": 0,
+            "p1_pending": 0,
             "review_completion": {
                 "total": len(rows),
                 "reviewed": reviewed,
@@ -125,6 +127,10 @@ def run_smoke() -> dict[str, Any]:
         _assert(isinstance(panel, dict), "completion/export panel missing")
         _assert(isinstance(decision_summary, dict), "completion/export decision summary missing")
         _assert(decision_summary.get("completion_status") == "complete", "decision summary is not complete")
+        _assert(
+            decision_summary.get("closure_gate_summary", {}).get("can_complete_delivery") is True,
+            "decision closure gate did not allow delivery",
+        )
         _assert(panel.get("title_zh") == "本批已完成", "completion panel title changed")
         _assert(panel.get("completion_status_zh") == "本批已完成", "completion status copy changed")
         _assert(panel.get("manual_work_zh") == "没有待人工处理图片", "manual work copy changed")
@@ -153,6 +159,9 @@ def run_smoke() -> dict[str, Any]:
         _assert("本批已完成交接说明" in completion_note, "completion note missing Chinese handoff title")
         _assert("复核总数：2" in completion_note, "completion note missing aggregate total")
         _assert("待决定：0" in completion_note, "completion note missing aggregate pending count")
+        _assert("未关闭 P0：0" in completion_note, "completion note missing aggregate open P0 count")
+        _assert("未关闭 P1：0" in completion_note, "completion note missing aggregate open P1 count")
+        _assert("已有人工处理结论：2" in completion_note, "completion note missing aggregate handled count")
         _assert_no_private_terms(saved_summary, "saved summary")
         _assert_no_private_terms(
             {

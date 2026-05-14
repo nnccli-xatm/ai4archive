@@ -50,6 +50,8 @@ def decision_summary(decisions: list[tuple[str, str]]) -> dict[str, object]:
             "p0": 0,
             "p1": 0,
             "p2": 0,
+            "p0_pending": 0,
+            "p1_pending": 0,
             "review_completion": {
                 "total": len(rows),
                 "reviewed": sum(1 for _, decision in decisions if decision != "pending"),
@@ -517,6 +519,16 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertEqual(result["completion_panel"]["total_review_items"], 2)
             self.assertEqual(result["completion_panel"]["reviewed_items"], 2)
             self.assertEqual(result["completion_panel"]["pending_items"], 0)
+            self.assertEqual(
+                result["completion_panel"]["closure_gate_summary"],
+                {
+                    "open_p0_count": 0,
+                    "open_p1_count": 0,
+                    "manually_handled_count": 2,
+                    "can_complete_delivery": True,
+                    "operator_message_zh": "P0/P1 问题已经有处理结论，可以完成交接。",
+                },
+            )
             self.assertEqual(result["completion_panel"]["processing_mode"]["id"], "standard")
             self.assertEqual(result["completion_panel"]["processing_mode"]["label_zh"], "标准优化")
             self.assertIn("推荐用于正常批量生产", result["completion_panel"]["processing_mode"]["purpose_zh"])
@@ -553,6 +565,9 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertIn("当前复核队列", completion_note)
             self.assertIn("不要混用批次", completion_note)
             self.assertIn("下一批：", completion_note)
+            self.assertIn("未关闭 P0：0", completion_note)
+            self.assertIn("未关闭 P1：0", completion_note)
+            self.assertIn("已有人工处理结论：2", completion_note)
             verification = json.loads((metadata_dir / REVIEW_DECISION_VERIFICATION_JSON).read_text(encoding="utf-8"))
             self.assertEqual(verification["status"], "pass")
 

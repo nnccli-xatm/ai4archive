@@ -308,6 +308,8 @@ def review_decision_contract_fixture(queue: dict[str, object]) -> dict[str, obje
             "p0": severities["P0"],
             "p1": severities["P1"],
             "p2": severities["P2"],
+            "p0_pending": 0,
+            "p1_pending": 0,
             "review_completion": {
                 "total": len(rows),
                 "reviewed": len(rows),
@@ -514,6 +516,8 @@ def validate_completion_export_smoke(html: str, errors: list[str]) -> None:
             decision_summary = result.get("decision_summary")
             if not isinstance(decision_summary, dict) or decision_summary.get("completion_status") != "complete":
                 errors.append("completion export smoke did not return complete decision summary")
+            elif decision_summary.get("closure_gate_summary", {}).get("can_complete_delivery") is not True:
+                errors.append("completion export smoke did not return deliverable closure gate summary")
             panel = result.get("completion_panel")
             if not isinstance(panel, dict):
                 errors.append("completion export smoke did not return completion panel")
