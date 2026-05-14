@@ -50,6 +50,27 @@ class ProductionWorkbenchRegressionGuardTests(unittest.TestCase):
         ]:
             self.assertNotIn(forbidden, html)
 
+    def test_comparison_preview_layout_keeps_visible_scrollable_image_area(self) -> None:
+        html = WORKBENCH_HTML.read_text(encoding="utf-8")
+
+        for required in [
+            ".preview-controls {\n      position: relative;\n      z-index: 2;",
+            ".preview-zone {\n      display: grid;\n      grid-template-rows: auto 1fr;\n      gap: 12px;\n      align-items: start;\n      justify-items: center;\n      min-height: 620px;",
+            "      overflow: auto;\n      background:",
+            ".preview-frame {\n      position: relative;\n      z-index: 1;\n      width: min(100%, 520px);\n      min-height: 420px;",
+            ".preview-frame.compact {\n      width: 100%;\n      min-height: 340px;",
+            ".preview-frame.comparison-shell {\n      width: min(100%, 980px);\n      min-height: 520px;",
+            "      .preview-zone {\n        padding: 14px;\n        min-height: 520px;",
+            "      .preview-frame.compact {\n        min-height: 300px;",
+            "      .preview-frame.comparison-shell {\n        min-height: 480px;",
+            'els.previewFrame.classList.toggle("comparison-shell", canCompare && state.comparisonMode === "side_by_side");',
+            '<div class="preview-comparison" aria-label="原图和处理后图片对比">',
+            '<div class="comparison-title">原图</div>',
+            '<div class="comparison-title">处理后图片</div>',
+            "正在对比查看。看完后在右侧选择处理决定。",
+        ]:
+            self.assertIn(required, html)
+
     def test_windows_path_display_and_internal_wsl_path_stay_separate(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

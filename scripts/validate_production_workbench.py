@@ -424,6 +424,36 @@ def validate_preview_fit_controls(html: str, errors: list[str]) -> None:
         errors.append("preview fit-control contract must reapply image view after single and comparison preview renders")
 
 
+def validate_preview_visibility_layout(html: str, errors: list[str]) -> None:
+    """Guard against comparison preview clipping or overlap regressions."""
+
+    for required_css_token in [
+        ".preview-controls {\n      position: relative;\n      z-index: 2;",
+        ".preview-zone {\n      display: grid;\n      grid-template-rows: auto 1fr;\n      gap: 12px;\n      align-items: start;\n      justify-items: center;\n      min-height: 620px;",
+        "      overflow: auto;\n      background:",
+        ".preview-frame {\n      position: relative;\n      z-index: 1;\n      width: min(100%, 520px);\n      min-height: 420px;",
+        ".preview-frame.compact {\n      width: 100%;\n      min-height: 340px;",
+        ".preview-frame.comparison-shell {\n      width: min(100%, 980px);\n      min-height: 520px;",
+        "      .preview-zone {\n        padding: 14px;\n        min-height: 520px;",
+        "      .preview-frame {\n        min-height: 360px;",
+        "      .preview-frame.compact {\n        min-height: 300px;",
+        "      .preview-frame.comparison-shell {\n        min-height: 480px;",
+    ]:
+        if required_css_token not in html:
+            errors.append(f"preview visibility layout contract missing CSS token: {required_css_token}")
+
+    render_body = js_function_body(html, "renderPreview") or ""
+    for required_render_token in [
+        'els.previewFrame.classList.toggle("comparison-shell", canCompare && state.comparisonMode === "side_by_side");',
+        '<div class="preview-comparison" aria-label="原图和处理后图片对比">',
+        '<div class="comparison-title">原图</div>',
+        '<div class="comparison-title">处理后图片</div>',
+        '<div class="preview-fallback">正在对比查看。看完后在右侧选择处理决定。</div>',
+    ]:
+        if required_render_token not in render_body:
+            errors.append(f"preview visibility layout contract missing render token: {required_render_token}")
+
+
 def validate_completion_export_smoke(html: str, errors: list[str]) -> None:
     """Exercise the local completion export path with synthetic aggregate-only data."""
 
@@ -879,6 +909,7 @@ def main() -> int:
         if required_script_token not in html:
             errors.append(f"missing review queue workflow script token: {required_script_token}")
     validate_preview_fit_controls(html, errors)
+    validate_preview_visibility_layout(html, errors)
     validate_completion_export_smoke(html, errors)
 
     for old_finish_copy in ["导出复核决定", "完成导出", "把处理后图片交给验收或移交流程"]:
