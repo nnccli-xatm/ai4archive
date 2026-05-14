@@ -83,10 +83,31 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
                 )
 
             self.assertTrue(configured["configured"])
-            self.assertEqual(configured["folders"]["input"], str(input_dir.resolve()))
-            self.assertEqual(configured["folders"]["derivatives"], str(output_dir.resolve()))
-            self.assertEqual(configured["folders"]["metadata"], str(metadata_dir.resolve()))
+            self.assertEqual(configured["folders"]["input"], r"C:\Users\PS\scan batch")
+            self.assertEqual(configured["folders"]["derivatives"], "C:/Users/PS/processed batch")
+            self.assertEqual(configured["folders"]["metadata"], r"C:\Users\PS\workbench state")
+            self.assertEqual(controller.input_dir, input_dir.resolve())
+            self.assertEqual(controller.derivatives_dir, output_dir.resolve())
+            self.assertEqual(controller.metadata_dir, metadata_dir.resolve())
             self.assertTrue(configured["folder_readiness"]["ready_to_start"])
+
+    def test_default_metadata_display_stays_in_windows_path_style(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            mount_root = root / "mnt"
+            input_dir = mount_root / "d" / "batch" / "input"
+            output_dir = mount_root / "d" / "batch" / "output"
+            input_dir.mkdir(parents=True)
+            (input_dir / "page.png").write_bytes(b"fake image placeholder")
+            controller = WorkbenchController()
+
+            with patch.object(local_workbench_module, "WINDOWS_DRIVE_MOUNT_ROOT", mount_root):
+                configured = controller.configure(r"D:\batch\input", r"D:\batch\output")
+
+            self.assertEqual(configured["folders"]["input"], r"D:\batch\input")
+            self.assertEqual(configured["folders"]["derivatives"], r"D:\batch\output")
+            self.assertEqual(configured["folders"]["metadata"], r"D:\batch\output\_production_workbench")
+            self.assertEqual(controller.metadata_dir, (output_dir / "_production_workbench").resolve())
 
     def test_normalize_accepts_windows_file_url_and_wsl_unc_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

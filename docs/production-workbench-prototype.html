@@ -1408,6 +1408,10 @@
       processingModeLabel: "标准优化",
       processingModePurpose: "推荐用于正常批量生产，兼顾批量图片质量和处理效率。",
       processingModeOutput: "会生成处理后优化图片，原图不覆盖。",
+      inputPathDirty: false,
+      outputPathDirty: false,
+      lastServerInputPath: "",
+      lastServerOutputPath: "",
       progressLabel: "",
       launchLocked: false,
       waitingForNewSetup: false
@@ -1755,6 +1759,13 @@
 
     function pathChosen(input) {
       return input.value.trim().length > 0;
+    }
+
+    function shouldApplyServerPath(input, serverPath, lastServerPath, dirty, force) {
+      if (force) return true;
+      if (!dirty) return true;
+      const current = input.value.trim();
+      return current.length === 0 || current === lastServerPath || current === serverPath;
     }
 
     function updateChosenFromPaths() {
@@ -2546,8 +2557,9 @@
       render();
     }
 
-    function applyServerStatus(payload) {
+    function applyServerStatus(payload, options = {}) {
       if (!payload) return;
+      const forcePaths = Boolean(options.forcePaths);
       if (state.waitingForNewSetup && !payload.configured) return;
       if (state.waitingForNewSetup && (payload.summary || payload.progress || payload.queue || payload.draft_decisions)) return;
       if (payload.last_error_zh) {
@@ -2568,11 +2580,19 @@
       }
       if (payload.folders) {
         if (payload.folders.input) {
-          els.inputPath.value = payload.folders.input;
+          if (shouldApplyServerPath(els.inputPath, payload.folders.input, state.lastServerInputPath, state.inputPathDirty, forcePaths)) {
+            els.inputPath.value = payload.folders.input;
+            state.inputPathDirty = false;
+          }
+          state.lastServerInputPath = payload.folders.input;
           els.inputStatus.textContent = "已保存扫描原图文件夹。";
         }
         if (payload.folders.derivatives) {
-          els.outputPath.value = payload.folders.derivatives;
+          if (shouldApplyServerPath(els.outputPath, payload.folders.derivatives, state.lastServerOutputPath, state.outputPathDirty, forcePaths)) {
+            els.outputPath.value = payload.folders.derivatives;
+            state.outputPathDirty = false;
+          }
+          state.lastServerOutputPath = payload.folders.derivatives;
           els.outputStatus.textContent = "已保存处理后输出文件夹。";
           state.outputSummary = outputSummaryLabel();
         }
@@ -2686,7 +2706,7 @@
       state.outputChosen = true;
       state.waitingForNewSetup = false;
       state.status = "ready";
-      applyServerStatus(payload);
+      applyServerStatus(payload, { forcePaths: true });
       if (!duringLaunch) {
         els.loadStatus.textContent = "文件夹已保存，可以开始处理。";
         els.loadStatus.textContent = canStartProcessing() ? "文件夹已保存，可以开始处理。原图不会被覆盖，处理后图片会准备到输出文件夹。" : blockedStartMessage();
@@ -2973,12 +2993,14 @@
     });
 
     els.inputPath.addEventListener("input", () => {
+      state.inputPathDirty = true;
       invalidateFolderReadiness("扫描原图文件夹已更改，请重新保存文件夹。");
       state.inputChosen = pathChosen(els.inputPath) || (els.inputFolder.files && els.inputFolder.files.length > 0);
       render();
     });
 
     els.outputPath.addEventListener("input", () => {
+      state.outputPathDirty = true;
       invalidateFolderReadiness("处理后输出文件夹已更改，请重新保存文件夹。");
       state.outputChosen = pathChosen(els.outputPath) || (els.outputFolder.files && els.outputFolder.files.length > 0);
       render();
@@ -3052,6 +3074,10 @@
       els.outputFolder.value = "";
       els.inputPath.value = "";
       els.outputPath.value = "";
+      state.inputPathDirty = false;
+      state.outputPathDirty = false;
+      state.lastServerInputPath = "";
+      state.lastServerOutputPath = "";
       els.summaryFile.value = "";
       els.fixtureSelect.value = "";
       els.inputStatus.textContent = "填写本批次扫描原图所在的本机文件夹位置。";
