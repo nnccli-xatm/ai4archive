@@ -4200,7 +4200,16 @@ class ScanQcTest(unittest.TestCase):
 
         self.assertEqual(payload["selection"]["sample_ratio"], 0.05)
         self.assertEqual(payload["selection"]["sampled_records"], 2)
-        self.assertGreaterEqual(payload["aggregate_sampling_counts"]["effective_sample_ratio"], 0.05)
+        counts = payload["aggregate_sampling_counts"]
+        self.assertEqual(counts["input_total"], 40)
+        self.assertEqual(counts["target_sample_ratio"], 0.05)
+        self.assertEqual(counts["target_sample_count"], 2)
+        self.assertEqual(counts["generated_sample_task_count"], 2)
+        self.assertEqual(counts["reviewed_sample_count"], 0)
+        self.assertEqual(counts["pending_sample_count"], 2)
+        self.assertTrue(counts["sample_task_target_met"])
+        self.assertFalse(counts["sampling_target_met"])
+        self.assertGreaterEqual(counts["effective_sample_ratio"], 0.05)
         self.assertEqual(payload["sensitivity"], "sensitive_local_evidence")
 
     def test_acceptance_sampling_is_deterministic_and_risk_prioritized(self) -> None:
@@ -4242,6 +4251,11 @@ class ScanQcTest(unittest.TestCase):
             csv_text = csv_path.read_text(encoding="utf-8")
             self.assertTrue(payload["privacy"]["sensitive_local_evidence"])
             self.assertFalse(payload["privacy"]["aggregate_only"])
+            self.assertEqual(payload["aggregate_sampling_counts"]["input_total"], 1)
+            self.assertEqual(payload["aggregate_sampling_counts"]["target_sample_count"], 1)
+            self.assertEqual(payload["aggregate_sampling_counts"]["generated_sample_task_count"], 1)
+            self.assertEqual(payload["aggregate_sampling_counts"]["reviewed_sample_count"], 0)
+            self.assertFalse(payload["aggregate_sampling_counts"]["sampling_target_met"])
             self.assertIn("image bytes", payload["privacy"]["omits"])
             self.assertIn(private_path, csv_text)
             self.assertIn(private_hash, csv_text)
@@ -4357,6 +4371,116 @@ class ScanQcTest(unittest.TestCase):
 
         self.assertEqual(decision["worth_implementing_next"], "numpy_vectorized_hotspots")
         self.assertIn("private aggregate validation", decision["reason"])
+
+    def test_synthetic_performance_summary_promotes_operation_timing_regression_signal(self) -> None:
+        module = _load_synthetic_performance_module()
+        benchmark = {
+            "schema_version": "scan-qc.benchmark.v1",
+            "environment": {"python_version": "3.12", "platform": "test"},
+            "comparison_plan": {"schema_version": "scan-qc.performance-comparison-plan.v1"},
+            "recommendations": {
+                "processing": {"files_per_minute": 120.0, "best_requested_workers": 1},
+            },
+            "runs": [
+                {
+                    "finding_severity_counts": {"P0": 0, "P1": 0, "P2": 0},
+                    "processing": {
+                        "failed_files": 0,
+                        "operation_timings": {
+                            "deskew": {
+                                "enabled": True,
+                                "file_count": 8,
+                                "elapsed_seconds": 0.4,
+                                "reused_scan_measurement_files": 8,
+                            },
+                            "despeckle": {
+                                "enabled": True,
+                                "file_count": 8,
+                                "elapsed_seconds": 1.2,
+                                "backend_counts": {
+                                    "numpy": 8,
+                                    "fallback": 0,
+                                    "not_applicable": 0,
+                                    "unknown": 0,
+                                },
+                            },
+                        },
+                        "source_path": "/Users/private/archive/private_page_0001.png",
+                        "source_sha256": "a" * 64,
+                    },
+                },
+                {
+                    "finding_severity_counts": {"P0": 0, "P1": 0, "P2": 0},
+                    "processing": {
+                        "failed_files": 0,
+                        "operation_timings": {
+                            "deskew": {
+                                "enabled": True,
+                                "file_count": 8,
+                                "elapsed_seconds": 0.2,
+                                "reused_scan_measurement_files": 8,
+                            },
+                            "despeckle": {
+                                "enabled": True,
+                                "file_count": 8,
+                                "elapsed_seconds": 0.8,
+                                "backend_counts": {
+                                    "numpy": 0,
+                                    "fallback": 8,
+                                    "not_applicable": 0,
+                                    "unknown": 0,
+                                },
+                            },
+                        },
+                    },
+                },
+            ],
+        }
+
+        summary = module._variant_summary({"id": "candidate", "label": "Candidate"}, benchmark)
+        raw = json.dumps(summary, ensure_ascii=False, sort_keys=True)
+
+        signal = summary["operation_timing_regression_signal"]
+        self.assertTrue(signal["aggregate_only"])
+        self.assertTrue(signal["signal_available"])
+        self.assertEqual(signal["missing_operations"], [])
+        self.assertEqual(signal["operations"]["deskew"]["run_count"], 2)
+        self.assertEqual(signal["operations"]["deskew"]["file_count"], 16)
+        self.assertEqual(signal["operations"]["deskew"]["elapsed_seconds"], 0.6)
+        self.assertEqual(signal["operations"]["deskew"]["average_seconds_per_file"], 0.0375)
+        self.assertEqual(signal["operations"]["deskew"]["reused_scan_measurement_files"], 16)
+        despeckle = signal["operations"]["despeckle"]
+        self.assertEqual(despeckle["elapsed_seconds"], 2.0)
+        self.assertEqual(despeckle["backend_mode"], "mixed")
+        self.assertTrue(despeckle["numpy_available"])
+        self.assertEqual(despeckle["backend_counts"]["numpy"], 8)
+        self.assertEqual(despeckle["backend_counts"]["fallback"], 8)
+        self.assertNotIn("/Users/private/archive", raw)
+        self.assertNotIn("private_page_0001.png", raw)
+        self.assertNotIn("a" * 64, raw)
+
+    def test_synthetic_performance_summary_reports_missing_operation_timing_signal(self) -> None:
+        module = _load_synthetic_performance_module()
+        summary = module._variant_summary(
+            {"id": "scan_only", "label": "Scan only"},
+            {
+                "schema_version": "scan-qc.benchmark.v1",
+                "environment": {},
+                "comparison_plan": {},
+                "recommendations": {"processing": None},
+                "runs": [{"finding_severity_counts": {}, "processing": {"failed_files": 0}}],
+            },
+        )
+
+        signal = summary["operation_timing_regression_signal"]
+        self.assertFalse(signal["signal_available"])
+        self.assertEqual(signal["missing_operations"], ["deskew", "despeckle"])
+        self.assertFalse(signal["operations"]["deskew"]["signal_available"])
+        self.assertEqual(
+            signal["operations"]["deskew"]["missing_reason"],
+            "missing_from_benchmark_processing_operation_timings",
+        )
+        self.assertFalse(signal["operations"]["despeckle"]["signal_available"])
 
     def test_benchmark_workers_list_order_is_stable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
