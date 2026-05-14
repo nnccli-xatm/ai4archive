@@ -380,7 +380,19 @@ def _main_production_run(argv: list[str]) -> int:
         default="fallback",
         help="去黑点处理后端，默认使用保守模式，numpy 需显式开启。",
     )
-    parser.add_argument("--resume-processing", action="store_true", help="尽量跳过已经成功生成的处理后图片。")
+    parser.add_argument(
+        "--resume-processing",
+        dest="resume_processing",
+        action="store_true",
+        default=True,
+        help="尽量跳过已经成功生成的处理后图片（生产运行默认开启）。",
+    )
+    parser.add_argument(
+        "--no-resume-processing",
+        dest="resume_processing",
+        action="store_false",
+        help="诊断时强制重新生成处理后图片。",
+    )
     parser.add_argument(
         "--reuse-scan-measurements",
         action="store_true",
