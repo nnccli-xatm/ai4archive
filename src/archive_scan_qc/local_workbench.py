@@ -264,6 +264,8 @@ class WorkbenchController:
         total_decisions = int(decision_summary.get("total_decisions") or 0)
         pending_decisions = int(decision_summary.get("pending") or 0)
         reviewed_decisions = max(0, total_decisions - pending_decisions)
+        run_summary = _read_json(metadata_dir / PRODUCTION_RUN_SUMMARY_JSON)
+        handoff_counts = _completion_handoff_counts(run_summary, decision_summary)
         operator_name = str(summary.get("operator_name") or "").strip()
         completion_note_path.write_text(
             "\n".join(
@@ -275,12 +277,18 @@ class WorkbenchController:
                     f"复核结果保存位置：{summary_display}",
                     f"复核校验保存位置：{verification_display}",
                     f"本机状态文件夹：{metadata_display}",
+                    f"已输出处理后图片：{handoff_counts['processed_output_images']} 张",
+                    f"需要重扫：{handoff_counts['needs_rescan_images']} 张",
+                    f"需要重新处理：{handoff_counts['needs_reprocess_images']} 张",
                     f"复核总数：{total_decisions}",
                     f"已确认：{reviewed_decisions}",
                     f"待决定：{pending_decisions}",
-                    "交接事项：处理后图片已保存到输出文件夹；复核结果和交接说明已保存到本机状态文件夹。",
+                    (
+                        "交接事项：处理后图片已保存到输出文件夹；需要重扫和重新处理的数量已写入本交接说明；"
+                        "复核结果和交接说明已保存到本机状态文件夹。"
+                    ),
                     "交接前检查：打开输出文件夹，确认本批处理后图片数量和画面状态符合交接要求。",
-                    "下一批：检查输出文件夹后，在工作台点击准备下一批；系统会清空当前复核队列，请重新选择新一批原图文件夹和输出文件夹，不要混用批次。",
+                    f"下一批：{handoff_counts['next_batch_reminder_zh']}",
                     "",
                 ]
             ),
@@ -308,6 +316,10 @@ class WorkbenchController:
                 "total_review_items": total_decisions,
                 "reviewed_items": reviewed_decisions,
                 "pending_items": pending_decisions,
+                "processed_output_images": handoff_counts["processed_output_images"],
+                "needs_rescan_images": handoff_counts["needs_rescan_images"],
+                "needs_reprocess_images": handoff_counts["needs_reprocess_images"],
+                "next_batch_reminder_zh": handoff_counts["next_batch_reminder_zh"],
                 "processing_mode": _processing_mode_payload(processing_mode),
                 "derivatives_dir": derivatives_display,
                 "metadata_dir": metadata_display,
@@ -315,15 +327,16 @@ class WorkbenchController:
                 "verification_summary_path": verification_display,
                 "completion_note_path": completion_note_display,
                 "checklist_zh": [
-                    "打开输出文件夹，检查处理后图片数量和画面状态",
+                    f"打开输出文件夹，检查 {handoff_counts['processed_output_images']} 张处理后图片的数量和画面状态",
+                    f"需要重扫 {handoff_counts['needs_rescan_images']} 张，需要重新处理 {handoff_counts['needs_reprocess_images']} 张",
                     "复核结果和交接说明已保存到本机状态文件夹",
                     "准备下一批会清空当前复核队列，请重新选择新一批文件夹",
                 ],
                 "next_steps_zh": [
-                    "打开输出文件夹，检查处理后图片数量和画面状态。",
+                    f"打开输出文件夹，检查 {handoff_counts['processed_output_images']} 张处理后图片的数量和画面状态。",
+                    f"需要重扫 {handoff_counts['needs_rescan_images']} 张；需要重新处理 {handoff_counts['needs_reprocess_images']} 张。",
                     "本机状态文件夹已保存复核结果和交接说明，正常界面不显示具体路径或文件名。",
-                    "需要继续加工时，点击准备下一批；当前复核队列会清空。",
-                    "为新批次重新选择扫描原图文件夹和输出文件夹，不要混用批次。",
+                    handoff_counts["next_batch_reminder_zh"],
                     "如果仍有异常或不能交接，请交管理员处理。",
                 ],
             },
@@ -1348,6 +1361,48 @@ def _processing_mode_payload(processing_mode: str) -> dict[str, Any]:
 def _processing_mode_completion_label(processing_mode: str) -> str:
     mode = _processing_mode_payload(processing_mode)
     return f"{mode['label_zh']}；{mode['purpose_zh']}；{mode['output_zh']}"
+
+
+def _completion_handoff_counts(run_summary: dict[str, Any] | None, decision_summary: dict[str, Any]) -> dict[str, Any]:
+    operator = run_summary.get("operator_summary") if isinstance(run_summary, dict) else {}
+    counts = run_summary.get("counts") if isinstance(run_summary, dict) else {}
+    decision_counts = decision_summary.get("decision_counts") if isinstance(decision_summary, dict) else {}
+    if not isinstance(operator, dict):
+        operator = {}
+    if not isinstance(counts, dict):
+        counts = {}
+    if not isinstance(decision_counts, dict):
+        decision_counts = {}
+    processed_output_images = _first_nonnegative_int(
+        operator.get("derivative_images_ready"),
+        counts.get("processed_files"),
+    )
+    needs_rescan_images = _safe_nonnegative_int(decision_counts.get("needs_rescan"))
+    needs_reprocess_images = _safe_nonnegative_int(decision_counts.get("fixed_externally"))
+    return {
+        "processed_output_images": processed_output_images,
+        "needs_rescan_images": needs_rescan_images,
+        "needs_reprocess_images": needs_reprocess_images,
+        "next_batch_reminder_zh": (
+            "需要继续加工时，点击准备下一批；当前复核队列会清空。"
+            "为新批次重新选择扫描原图文件夹和输出文件夹，不要混用批次。"
+        ),
+    }
+
+
+def _first_nonnegative_int(*values: Any) -> int:
+    for value in values:
+        number = _safe_nonnegative_int(value)
+        if number > 0:
+            return number
+    return 0
+
+
+def _safe_nonnegative_int(value: Any) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _folder_is_writable(path: Path) -> bool:

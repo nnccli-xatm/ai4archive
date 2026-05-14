@@ -383,12 +383,16 @@ test.describe("production workbench finish/export browser smoke", () => {
             total_review_items: 3,
             reviewed_items: 3,
             pending_items: 0,
-            checklist_zh: ["打开输出文件夹，检查处理后图片数量和画面状态", "复核结果和交接说明已保存到本机状态文件夹", "准备下一批会清空当前复核队列，请重新选择新一批文件夹"],
+            processed_output_images: 3,
+            needs_rescan_images: 1,
+            needs_reprocess_images: 1,
+            next_batch_reminder_zh: "需要继续加工时，点击准备下一批；当前复核队列会清空。为新批次重新选择扫描原图文件夹和输出文件夹，不要混用批次。",
+            checklist_zh: ["打开输出文件夹，检查 3 张处理后图片的数量和画面状态", "需要重扫 1 张，需要重新处理 1 张", "复核结果和交接说明已保存到本机状态文件夹", "准备下一批会清空当前复核队列，请重新选择新一批文件夹"],
             next_steps_zh: [
-              "打开输出文件夹，检查处理后图片数量和画面状态。",
+              "打开输出文件夹，检查 3 张处理后图片的数量和画面状态。",
+              "需要重扫 1 张；需要重新处理 1 张。",
               "本机状态文件夹已保存复核结果和交接说明，正常界面不显示具体路径或文件名。",
-              "需要继续加工时，点击准备下一批；当前复核队列会清空。",
-              "为新批次重新选择扫描原图文件夹和输出文件夹，不要混用批次。",
+              "需要继续加工时，点击准备下一批；当前复核队列会清空。为新批次重新选择扫描原图文件夹和输出文件夹，不要混用批次。",
               "如果仍有异常或不能交接，请交管理员处理。",
             ],
           },
@@ -577,6 +581,8 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#completionCounts")).toHaveText("共 3 项，已确认 3 项，待决定 0 项。");
     await expect(page.locator("#completionStatusFact")).toHaveText("本批已完成");
     await expect(page.locator("#outputPlace")).toHaveText("已准备 3 张处理后图片");
+    await expect(page.locator("#rescanFact")).toHaveText("1 张");
+    await expect(page.locator("#reprocessFact")).toHaveText("1 张");
     await expect(page.locator("#manualWorkFact")).toHaveText("没有待人工处理图片");
     await expect(page.locator("#adminHandoffFact")).toHaveText("不需要");
     await expectOperatorStatusHidesPaths(page, [
@@ -584,10 +590,10 @@ test.describe("production workbench finish/export browser smoke", () => {
       "/tmp/synthetic-output",
       "/tmp/synthetic-output/_production_workbench",
     ]);
-    await expect(page.getByText("打开输出文件夹，检查处理后图片数量和画面状态。")).toBeVisible();
+    await expect(page.getByText("打开输出文件夹，检查 3 张处理后图片的数量和画面状态。")).toBeVisible();
+    await expect(page.getByText("需要重扫 1 张；需要重新处理 1 张。")).toBeVisible();
     await expect(page.getByText("本机状态文件夹已保存复核结果和交接说明，正常界面不显示具体路径或文件名。")).toBeVisible();
-    await expect(page.getByText("需要继续加工时，点击准备下一批；当前复核队列会清空。")).toBeVisible();
-    await expect(page.getByText("为新批次重新选择扫描原图文件夹和输出文件夹，不要混用批次。")).toBeVisible();
+    await expect(page.getByText("需要继续加工时，点击准备下一批；当前复核队列会清空。为新批次重新选择扫描原图文件夹和输出文件夹，不要混用批次。")).toBeVisible();
     await expect(page.getByText("如果仍有异常或不能交接，请交管理员处理。")).toBeVisible();
     await page.getByRole("button", { name: "准备下一批" }).click();
     await expect(page.locator("#completionTitle")).toBeHidden();
@@ -753,8 +759,11 @@ test.describe("production workbench finish/export browser smoke", () => {
             total_review_items: 0,
             reviewed_items: 0,
             pending_items: 0,
-            checklist_zh: ["打开输出文件夹，检查处理后图片数量和画面状态", "复核结果和交接说明已保存到本机状态文件夹", "准备下一批会清空当前复核队列，请重新选择新一批文件夹"],
-            next_steps_zh: ["打开输出文件夹，检查处理后图片数量和画面状态。"],
+            processed_output_images: 4,
+            needs_rescan_images: 0,
+            needs_reprocess_images: 0,
+            checklist_zh: ["打开输出文件夹，检查 4 张处理后图片的数量和画面状态", "需要重扫 0 张，需要重新处理 0 张", "复核结果和交接说明已保存到本机状态文件夹", "准备下一批会清空当前复核队列，请重新选择新一批文件夹"],
+            next_steps_zh: ["打开输出文件夹，检查 4 张处理后图片的数量和画面状态。", "需要重扫 0 张；需要重新处理 0 张。"],
           },
         }),
       });
@@ -1486,7 +1495,10 @@ test.describe("production workbench finish/export browser smoke", () => {
             total_review_items: 0,
             reviewed_items: 0,
             pending_items: 0,
-            next_steps_zh: ["打开输出文件夹，检查处理后图片数量和画面状态。", "本机状态文件夹已保存复核结果和交接说明，正常界面不显示具体路径或文件名。", "需要继续加工时，点击准备下一批；当前复核队列会清空。", "为新批次重新选择扫描原图文件夹和输出文件夹，不要混用批次。"],
+            processed_output_images: 2,
+            needs_rescan_images: 0,
+            needs_reprocess_images: 0,
+            next_steps_zh: ["打开输出文件夹，检查 2 张处理后图片的数量和画面状态。", "需要重扫 0 张；需要重新处理 0 张。", "本机状态文件夹已保存复核结果和交接说明，正常界面不显示具体路径或文件名。", "需要继续加工时，点击准备下一批；当前复核队列会清空。为新批次重新选择扫描原图文件夹和输出文件夹，不要混用批次。"],
           },
         }),
       });
@@ -1866,8 +1878,11 @@ test.describe("production workbench finish/export browser smoke", () => {
             total_review_items: 0,
             reviewed_items: 0,
             pending_items: 0,
-            checklist_zh: ["打开输出文件夹，检查处理后图片数量和画面状态", "复核结果和交接说明已保存到本机状态文件夹", "准备下一批会清空当前复核队列，请重新选择新一批文件夹"],
-            next_steps_zh: ["打开输出文件夹，检查处理后图片数量和画面状态。", "本机状态文件夹已保存复核结果和交接说明，正常界面不显示具体路径或文件名。", "需要继续加工时，点击准备下一批；当前复核队列会清空。", "为新批次重新选择扫描原图文件夹和输出文件夹，不要混用批次。", "如果仍有异常或不能交接，请交管理员处理。"],
+            processed_output_images: 2,
+            needs_rescan_images: 0,
+            needs_reprocess_images: 0,
+            checklist_zh: ["打开输出文件夹，检查 2 张处理后图片的数量和画面状态", "需要重扫 0 张，需要重新处理 0 张", "复核结果和交接说明已保存到本机状态文件夹", "准备下一批会清空当前复核队列，请重新选择新一批文件夹"],
+            next_steps_zh: ["打开输出文件夹，检查 2 张处理后图片的数量和画面状态。", "需要重扫 0 张；需要重新处理 0 张。", "本机状态文件夹已保存复核结果和交接说明，正常界面不显示具体路径或文件名。", "需要继续加工时，点击准备下一批；当前复核队列会清空。为新批次重新选择扫描原图文件夹和输出文件夹，不要混用批次。", "如果仍有异常或不能交接，请交管理员处理。"],
           },
           decision_summary: { completion_status: "complete" },
         }),
@@ -1891,6 +1906,8 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#completionStatusFact")).toHaveText("本批已完成");
     await expect(page.locator("#completionModeFact")).toHaveText("标准优化");
     await expect(page.locator("#outputPlace")).toHaveText("已准备 2 张处理后图片");
+    await expect(page.locator("#rescanFact")).toHaveText("0 张");
+    await expect(page.locator("#reprocessFact")).toHaveText("0 张");
     await expect(page.locator("#manualWorkFact")).toHaveText("没有待人工处理图片");
     await expect(page.locator("#adminHandoffFact")).toHaveText("不需要");
     await expectOperatorStatusHidesPaths(page, [
@@ -1898,10 +1915,10 @@ test.describe("production workbench finish/export browser smoke", () => {
       "/tmp/no-review-output",
       "/tmp/no-review-output/_production_workbench",
     ]);
-    await expect(page.locator("#completionSteps").getByText("打开输出文件夹，检查处理后图片数量和画面状态。")).toBeVisible();
+    await expect(page.locator("#completionSteps").getByText("打开输出文件夹，检查 2 张处理后图片的数量和画面状态。")).toBeVisible();
+    await expect(page.locator("#completionSteps").getByText("需要重扫 0 张；需要重新处理 0 张。")).toBeVisible();
     await expect(page.locator("#completionSteps").getByText("本机状态文件夹已保存复核结果和交接说明，正常界面不显示具体路径或文件名。")).toBeVisible();
-    await expect(page.locator("#completionSteps").getByText("需要继续加工时，点击准备下一批；当前复核队列会清空。")).toBeVisible();
-    await expect(page.locator("#completionSteps").getByText("为新批次重新选择扫描原图文件夹和输出文件夹，不要混用批次。")).toBeVisible();
+    await expect(page.locator("#completionSteps").getByText("需要继续加工时，点击准备下一批；当前复核队列会清空。为新批次重新选择扫描原图文件夹和输出文件夹，不要混用批次。")).toBeVisible();
 
     expect(consoleProblems).toEqual([]);
   });

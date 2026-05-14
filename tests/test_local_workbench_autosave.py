@@ -20,7 +20,7 @@ from archive_scan_qc.local_workbench import (
     _pick_windows_folder_via_powershell,
     sanitize_operator_error_zh,
 )
-from archive_scan_qc.production_runner import ProductionRunConfig, build_production_run_summary
+from archive_scan_qc.production_runner import PRODUCTION_RUN_SUMMARY_JSON, ProductionRunConfig, build_production_run_summary
 from archive_scan_qc.production_review_queue import PRODUCTION_REVIEW_QUEUE_JSON
 from archive_scan_qc.review_decisions import REVIEW_DECISION_VERIFICATION_JSON
 
@@ -483,8 +483,27 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             input_dir.mkdir()
             controller = WorkbenchController()
             controller.configure(input_dir, output_dir, metadata_dir)
+            (metadata_dir / PRODUCTION_RUN_SUMMARY_JSON).write_text(
+                json.dumps(
+                    {
+                        "schema_version": "scan-qc.production-run.v1",
+                        "status": "finished",
+                        "operator_summary": {"derivative_images_ready": 5},
+                        "counts": {"processed_files": 5},
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
 
-            summary = decision_summary([("PRQ000001", "needs_rescan"), ("PRQ000002", "false_positive")])
+            summary = decision_summary(
+                [
+                    ("PRQ000001", "needs_rescan"),
+                    ("PRQ000002", "fixed_externally"),
+                    ("PRQ000003", "false_positive"),
+                ]
+            )
             summary["operator_name"] = "复核员乙"
             summary["operator_decisions"] = [
                 {
@@ -514,9 +533,12 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertEqual(result["completion_panel"]["completion_status_zh"], "本批已完成")
             self.assertEqual(result["completion_panel"]["manual_work_zh"], "没有待人工处理图片")
             self.assertEqual(result["completion_panel"]["admin_handoff_zh"], "不需要")
-            self.assertEqual(result["completion_panel"]["total_review_items"], 2)
-            self.assertEqual(result["completion_panel"]["reviewed_items"], 2)
+            self.assertEqual(result["completion_panel"]["total_review_items"], 3)
+            self.assertEqual(result["completion_panel"]["reviewed_items"], 3)
             self.assertEqual(result["completion_panel"]["pending_items"], 0)
+            self.assertEqual(result["completion_panel"]["processed_output_images"], 5)
+            self.assertEqual(result["completion_panel"]["needs_rescan_images"], 1)
+            self.assertEqual(result["completion_panel"]["needs_reprocess_images"], 1)
             self.assertEqual(result["completion_panel"]["processing_mode"]["id"], "standard")
             self.assertEqual(result["completion_panel"]["processing_mode"]["label_zh"], "标准优化")
             self.assertIn("推荐用于正常批量生产", result["completion_panel"]["processing_mode"]["purpose_zh"])
@@ -530,10 +552,10 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertEqual(
                 result["completion_panel"]["next_steps_zh"],
                 [
-                    "打开输出文件夹，检查处理后图片数量和画面状态。",
+                    "打开输出文件夹，检查 5 张处理后图片的数量和画面状态。",
+                    "需要重扫 1 张；需要重新处理 1 张。",
                     "本机状态文件夹已保存复核结果和交接说明，正常界面不显示具体路径或文件名。",
-                    "需要继续加工时，点击准备下一批；当前复核队列会清空。",
-                    "为新批次重新选择扫描原图文件夹和输出文件夹，不要混用批次。",
+                    "需要继续加工时，点击准备下一批；当前复核队列会清空。为新批次重新选择扫描原图文件夹和输出文件夹，不要混用批次。",
                     "如果仍有异常或不能交接，请交管理员处理。",
                 ],
             )
@@ -546,6 +568,9 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertIn("复核人员：复核员乙", completion_note)
             self.assertIn("处理方式：标准优化", completion_note)
             self.assertIn("推荐用于正常批量生产", completion_note)
+            self.assertIn("已输出处理后图片：5 张", completion_note)
+            self.assertIn("需要重扫：1 张", completion_note)
+            self.assertIn("需要重新处理：1 张", completion_note)
             self.assertIn("处理后图片文件夹：", completion_note)
             self.assertIn("复核结果保存位置：", completion_note)
             self.assertIn("复核结果和交接说明已保存到本机状态文件夹", completion_note)

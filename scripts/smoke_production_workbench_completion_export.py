@@ -17,6 +17,7 @@ from archive_scan_qc.local_workbench import (  # noqa: E402
     REVIEW_DECISION_SUMMARY_JSON,
     WorkbenchController,
 )
+from archive_scan_qc.production_runner import PRODUCTION_RUN_SUMMARY_JSON  # noqa: E402
 from archive_scan_qc.review_decisions import REVIEW_DECISION_VERIFICATION_JSON  # noqa: E402
 
 
@@ -96,8 +97,27 @@ def run_smoke() -> dict[str, Any]:
 
         controller = WorkbenchController()
         controller.configure(input_dir, output_dir, metadata_dir)
+        (metadata_dir / PRODUCTION_RUN_SUMMARY_JSON).write_text(
+            json.dumps(
+                {
+                    "schema_version": "scan-qc.production-run.v1",
+                    "status": "finished",
+                    "operator_summary": {"derivative_images_ready": 4},
+                    "counts": {"processed_files": 4},
+                },
+                ensure_ascii=False,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
 
-        summary = _decision_summary([("PRQ-SMOKE-001", "needs_rescan"), ("PRQ-SMOKE-002", "false_positive")])
+        summary = _decision_summary(
+            [
+                ("PRQ-SMOKE-001", "needs_rescan"),
+                ("PRQ-SMOKE-002", "fixed_externally"),
+                ("PRQ-SMOKE-003", "false_positive"),
+            ]
+        )
         summary["operator_name"] = "复核员"
         summary["operator_decisions"] = [
             {
@@ -129,9 +149,12 @@ def run_smoke() -> dict[str, Any]:
         _assert(panel.get("completion_status_zh") == "本批已完成", "completion status copy changed")
         _assert(panel.get("manual_work_zh") == "没有待人工处理图片", "manual work copy changed")
         _assert(panel.get("admin_handoff_zh") == "不需要", "admin handoff copy changed")
-        _assert(panel.get("total_review_items") == 2, "completion panel total count changed")
-        _assert(panel.get("reviewed_items") == 2, "completion panel reviewed count changed")
+        _assert(panel.get("total_review_items") == 3, "completion panel total count changed")
+        _assert(panel.get("reviewed_items") == 3, "completion panel reviewed count changed")
         _assert(panel.get("pending_items") == 0, "completion panel pending count changed")
+        _assert(panel.get("processed_output_images") == 4, "completion panel output count changed")
+        _assert(panel.get("needs_rescan_images") == 1, "completion panel rescan count changed")
+        _assert(panel.get("needs_reprocess_images") == 1, "completion panel reprocess count changed")
         _assert(str(output_dir.resolve()) == panel.get("derivatives_dir"), "derivative artifact pointer changed")
         _assert(str(metadata_dir.resolve()) == panel.get("metadata_dir"), "metadata artifact pointer changed")
 
@@ -151,7 +174,10 @@ def run_smoke() -> dict[str, Any]:
         _assert(saved_summary.get("source_type") == "production_workbench", "saved summary source type changed")
         _assert(verification.get("status") == "pass", "saved verification did not pass")
         _assert("本批已完成交接说明" in completion_note, "completion note missing Chinese handoff title")
-        _assert("复核总数：2" in completion_note, "completion note missing aggregate total")
+        _assert("已输出处理后图片：4 张" in completion_note, "completion note missing processed output count")
+        _assert("需要重扫：1 张" in completion_note, "completion note missing rescan count")
+        _assert("需要重新处理：1 张" in completion_note, "completion note missing reprocess count")
+        _assert("复核总数：3" in completion_note, "completion note missing aggregate total")
         _assert("待决定：0" in completion_note, "completion note missing aggregate pending count")
         _assert_no_private_terms(saved_summary, "saved summary")
         _assert_no_private_terms(
@@ -164,6 +190,10 @@ def run_smoke() -> dict[str, Any]:
                 "total_review_items": panel.get("total_review_items"),
                 "reviewed_items": panel.get("reviewed_items"),
                 "pending_items": panel.get("pending_items"),
+                "processed_output_images": panel.get("processed_output_images"),
+                "needs_rescan_images": panel.get("needs_rescan_images"),
+                "needs_reprocess_images": panel.get("needs_reprocess_images"),
+                "next_batch_reminder_zh": panel.get("next_batch_reminder_zh"),
                 "checklist_zh": panel.get("checklist_zh"),
                 "next_steps_zh": panel.get("next_steps_zh"),
                 "processing_mode": panel.get("processing_mode"),
@@ -176,6 +206,9 @@ def run_smoke() -> dict[str, Any]:
             "review_items": panel.get("total_review_items"),
             "reviewed_items": panel.get("reviewed_items"),
             "pending_items": panel.get("pending_items"),
+            "processed_output_images": panel.get("processed_output_images"),
+            "needs_rescan_images": panel.get("needs_rescan_images"),
+            "needs_reprocess_images": panel.get("needs_reprocess_images"),
             "local_artifact_count": len(artifacts),
             "summary_only": saved_summary.get("privacy", {}).get("summary_only") is True,
             "verification_status": verification.get("status"),
@@ -191,6 +224,7 @@ def main() -> int:
     print("Production workbench completion/export smoke passed")
     print(
         "review_items={review_items} reviewed={reviewed_items} pending={pending_items} "
+        "output_images={processed_output_images} rescan={needs_rescan_images} reprocess={needs_reprocess_images} "
         "local_artifacts={local_artifact_count} summary_only={summary_only} verification={verification_status}".format(
             **result
         )
