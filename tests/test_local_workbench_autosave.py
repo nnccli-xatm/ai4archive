@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from archive_scan_qc import local_workbench as local_workbench_module
 from archive_scan_qc.local_workbench import (
     COMPLETION_NOTE_TXT,
     MAINTENANCE_ERROR_LOG_JSONL,
@@ -15,6 +16,7 @@ from archive_scan_qc.local_workbench import (
     WorkbenchPreflightError,
     WorkbenchController,
     _folder_is_writable,
+    _normalize_operator_path,
     sanitize_operator_error_zh,
 )
 from archive_scan_qc.production_runner import ProductionRunConfig, build_production_run_summary
@@ -62,6 +64,67 @@ def decision_summary(decisions: list[tuple[str, str]]) -> dict[str, object]:
 
 
 class LocalWorkbenchAutosaveTests(unittest.TestCase):
+    def test_configure_accepts_windows_drive_paths_from_windows_browser_on_wsl(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            mount_root = root / "mnt"
+            input_dir = mount_root / "c" / "Users" / "PS" / "scan batch"
+            output_dir = mount_root / "c" / "Users" / "PS" / "processed batch"
+            metadata_dir = mount_root / "c" / "Users" / "PS" / "workbench state"
+            input_dir.mkdir(parents=True)
+            (input_dir / "page.png").write_bytes(b"fake image placeholder")
+            controller = WorkbenchController()
+
+            with patch.object(local_workbench_module, "WINDOWS_DRIVE_MOUNT_ROOT", mount_root):
+                configured = controller.configure(
+                    r"C:\Users\PS\scan batch",
+                    "C:/Users/PS/processed batch",
+                    r"C:\Users\PS\workbench state",
+                )
+
+            self.assertTrue(configured["configured"])
+            self.assertEqual(configured["folders"]["input"], str(input_dir.resolve()))
+            self.assertEqual(configured["folders"]["derivatives"], str(output_dir.resolve()))
+            self.assertEqual(configured["folders"]["metadata"], str(metadata_dir.resolve()))
+            self.assertTrue(configured["folder_readiness"]["ready_to_start"])
+
+    def test_normalize_accepts_windows_file_url_and_wsl_unc_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            mount_root = Path(temp_dir) / "mnt"
+            with patch.object(local_workbench_module, "WINDOWS_DRIVE_MOUNT_ROOT", mount_root):
+                self.assertEqual(
+                    _normalize_operator_path("file:///C:/Users/PS/scan%20batch"),
+                    mount_root / "c" / "Users" / "PS" / "scan batch",
+                )
+            self.assertEqual(
+                _normalize_operator_path(r"\\wsl.localhost\Ubuntu-22.04\home\ps\scan batch"),
+                Path("/home/ps/scan batch"),
+            )
+
+    def test_configure_rejects_windows_network_share_with_operator_guidance(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output_dir = root / "output"
+            controller = WorkbenchController()
+
+            with self.assertRaises(ValueError) as raised:
+                controller.configure(r"\\archive-server\share\scan batch", output_dir)
+
+            self.assertIn("暂不支持 Windows 网络共享路径", str(raised.exception))
+            self.assertFalse(output_dir.exists())
+
+    def test_configure_rejects_drive_relative_windows_path_with_plain_guidance(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output_dir = root / "output"
+            controller = WorkbenchController()
+
+            with self.assertRaises(ValueError) as raised:
+                controller.configure(r"C:scan batch", output_dir)
+
+            self.assertIn("Windows 路径请使用完整盘符路径", str(raised.exception))
+            self.assertFalse(output_dir.exists())
+
     def test_configure_rejects_output_inside_source_before_creating_directories(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
