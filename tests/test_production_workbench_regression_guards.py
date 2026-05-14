@@ -165,6 +165,26 @@ class ProductionWorkbenchRegressionGuardTests(unittest.TestCase):
             self.assertIn(required, server)
         self.assertIn("state.status === \"complete\" && state.outputChosen && state.openOutputFolderAvailable", html)
 
+    def test_running_state_shows_aggregate_remaining_work_and_locks_start_button(self) -> None:
+        html = WORKBENCH_HTML.read_text(encoding="utf-8")
+
+        for required in [
+            "已处理 ${Math.min(completed, total)} 张 / 共 ${total} 张；待处理 ${Math.max(0, total - completed)} 张",
+            'els.startButton.textContent = inRunStatus() ? "处理中，请等待" : "开始处理";',
+            'els.startButton.title = inRunStatus() ? "批次正在运行，不能重复开始处理。" : "";',
+            "批次正在运行，请等待。本机正在处理图片，处理完成或失败前不能更改文件夹和处理方式，也不要反复点击开始处理。",
+        ]:
+            self.assertIn(required, html)
+
+        for forbidden in [
+            "current_file",
+            "currentPath",
+            "sha256",
+            "OCR",
+            "row-level",
+        ]:
+            self.assertNotIn(forbidden, html)
+
 
 if __name__ == "__main__":
     unittest.main()
