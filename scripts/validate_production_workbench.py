@@ -671,6 +671,45 @@ def main() -> int:
         render_after_success_index = save_folders_body.find("render();", success_copy_index)
         if success_copy_index == -1 or render_after_success_index == -1:
             errors.append("saved-folder configure flow does not render after successful save")
+    prepare_next_batch_start = html.find("async function prepareNextBatch()")
+    prepare_next_batch_end = html.find("els.resetButton.addEventListener", prepare_next_batch_start)
+    if prepare_next_batch_start == -1 or prepare_next_batch_end == -1:
+        errors.append("missing prepare-next-batch reset flow")
+    else:
+        prepare_next_batch_body = html[prepare_next_batch_start:prepare_next_batch_end]
+        for required_token in [
+            'state.status = "choose_input";',
+            "state.readyImages = 0;",
+            "state.totalImages = 0;",
+            "state.attentionFiles = 0;",
+            "state.reviewItems = [];",
+            "state.queueLoaded = false;",
+            "state.decisions = {};",
+            "state.finishConfirmationVisible = false;",
+            "state.recoveryGuidance = null;",
+            "state.folderReadiness = null;",
+            'state.completionTitle = "等待完成本批";',
+            'state.completionMessage = "完成并导出结果后，这里会显示本批交接清单。";',
+            'state.completionStatusFact = "未完成";',
+            "state.completionSteps = INITIAL_COMPLETION_STEPS.slice();",
+            "请重新选择新一批扫描原图文件夹和输出文件夹，不要混用批次。",
+        ]:
+            if required_token not in prepare_next_batch_body:
+                errors.append(f"prepare-next-batch reset missing token: {required_token}")
+        for forbidden_token in [
+            'state.attentionFiles = 3;',
+            'state.completionTitle = "本批已完成";',
+            'state.completionStatusFact = "本批已完成";',
+            "state.completionSteps = DEFAULT_COMPLETION_STEPS.slice();",
+        ]:
+            if forbidden_token in prepare_next_batch_body:
+                errors.append(f"prepare-next-batch reset keeps stale completed batch token: {forbidden_token}")
+    for required_reset_prompt_token in [
+        "NEXT_BATCH_STATUS_TEXT",
+        "请重新选择扫描原图文件夹和输出文件夹",
+    ]:
+        if required_reset_prompt_token not in html:
+            errors.append(f"missing next-batch operator prompt token: {required_reset_prompt_token}")
     cli = CLI.read_text(encoding="utf-8")
     local_workbench = LOCAL_WORKBENCH.read_text(encoding="utf-8")
     for required_entrypoint_token in [
