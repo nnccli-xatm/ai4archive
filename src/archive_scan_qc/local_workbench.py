@@ -45,6 +45,7 @@ REVIEW_DECISION_DRAFT_JSON = "scan-qc-review-decisions.draft.json"
 COMPLETION_NOTE_TXT = "本批次完成交接说明.txt"
 PREVIEW_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"}
 DEFAULT_PROCESSING_MODE = "standard"
+WINDOWS_DRIVE_MOUNT_ROOT = Path(os.environ.get("AI4ARCHIVE_WINDOWS_DRIVE_MOUNT_ROOT", "/mnt"))
 PROCESSING_MODE_OPTIONS: dict[str, dict[str, Any]] = {
     "standard": {
         "label_zh": PROCESSING_MODE_LABELS_ZH["standard"],
@@ -99,9 +100,9 @@ class WorkbenchController:
 
     def configure(
         self,
-        input_dir: Path,
-        derivatives_dir: Path,
-        metadata_dir: Path | None = None,
+        input_dir: Path | str,
+        derivatives_dir: Path | str,
+        metadata_dir: Path | str | None = None,
         processing_mode: str | None = None,
     ) -> dict[str, Any]:
         if str(input_dir).strip() in {"", "."}:
@@ -452,9 +453,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--host", default="127.0.0.1", help="只建议使用 127.0.0.1。")
     parser.add_argument("--port", default=8765, type=int, help="本机端口。")
     parser.add_argument("--no-open", action="store_true", help="只启动服务，不自动打开浏览器。")
-    parser.add_argument("--input-dir", default=None, type=Path, help="预先填写扫描原图文件夹。")
-    parser.add_argument("--derivatives-dir", default=None, type=Path, help="预先填写处理后输出文件夹。")
-    parser.add_argument("--metadata-dir", default=None, type=Path, help="预先填写本机状态文件夹；默认使用输出文件夹下的状态文件夹。")
+    parser.add_argument("--input-dir", default=None, help="预先填写扫描原图文件夹。")
+    parser.add_argument("--derivatives-dir", default=None, help="预先填写处理后输出文件夹。")
+    parser.add_argument("--metadata-dir", default=None, help="预先填写本机状态文件夹；默认使用输出文件夹下的状态文件夹。")
     args = parser.parse_args(argv)
     if args.host not in {"127.0.0.1", "localhost", "::1"}:
         parser.error("production-workbench is local-only; use 127.0.0.1, localhost, or ::1.")
@@ -491,9 +492,9 @@ def make_server(
     host: str = "127.0.0.1",
     port: int = 8765,
     *,
-    input_dir: Path | None = None,
-    derivatives_dir: Path | None = None,
-    metadata_dir: Path | None = None,
+    input_dir: Path | str | None = None,
+    derivatives_dir: Path | str | None = None,
+    metadata_dir: Path | str | None = None,
 ) -> ThreadingHTTPServer:
     controller = WorkbenchController()
     if input_dir is not None or derivatives_dir is not None or metadata_dir is not None:
@@ -636,7 +637,7 @@ def _required_path(payload: dict[str, Any], key: str, label_zh: str) -> Path:
     value = payload.get(key)
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"请填写{label_zh}。")
-    return Path(value.strip())
+    return _normalize_operator_path(value)
 
 
 def _optional_path(payload: dict[str, Any], key: str, label_zh: str) -> Path | None:
@@ -645,14 +646,82 @@ def _optional_path(payload: dict[str, Any], key: str, label_zh: str) -> Path | N
         return None
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"请填写{label_zh}，或留空使用默认位置。")
-    return Path(value.strip())
+    return _normalize_operator_path(value)
 
 
-def _safe_resolve_path(path: Path) -> Path:
+def _safe_resolve_path(path: Path | str) -> Path:
     try:
-        return path.expanduser().resolve()
+        return _normalize_operator_path(path).expanduser().resolve()
     except OSError:
         raise ValueError("文件夹位置无法读取。请重新选择本机可以打开的文件夹。") from None
+
+
+def _normalize_operator_path(path: Path | str) -> Path:
+    raw = _strip_pasted_path_quotes(str(path).strip())
+    raw = _decode_file_url_path(raw)
+    raw = _strip_windows_extended_prefix(raw)
+    wsl_unc_path = _windows_wsl_unc_path_to_linux(raw)
+    if wsl_unc_path is not None:
+        return wsl_unc_path
+    drive_path = _windows_drive_path_to_wsl(raw)
+    if drive_path is not None:
+        return drive_path
+    if _looks_like_windows_unc_path(raw):
+        raise ValueError("暂不支持 Windows 网络共享路径。请先映射为本机盘符，或在 WSL 中使用 /mnt/<盘符>/... 路径。")
+    return Path(raw)
+
+
+def _strip_pasted_path_quotes(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1].strip()
+    return value
+
+
+def _decode_file_url_path(value: str) -> str:
+    parsed = urlparse(value)
+    if parsed.scheme.lower() != "file":
+        return value
+    if parsed.netloc and parsed.netloc.lower() != "localhost":
+        return f"//{parsed.netloc}{unquote(parsed.path)}"
+    path = unquote(parsed.path)
+    if re.match(r"^/[A-Za-z]:", path):
+        return path[1:]
+    return path
+
+
+def _strip_windows_extended_prefix(value: str) -> str:
+    if value.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + value.removeprefix("\\\\?\\UNC\\")
+    if value.startswith("//?/UNC/"):
+        return "//" + value.removeprefix("//?/UNC/")
+    if value.startswith("\\\\?\\") or value.startswith("//?/"):
+        return value[4:]
+    return value
+
+
+def _windows_wsl_unc_path_to_linux(value: str) -> Path | None:
+    if not re.match(r"^(?:\\\\|//)wsl(?:\$|\.localhost)[\\/]", value, re.IGNORECASE):
+        return None
+    parts = [part for part in re.split(r"[\\/]+", value.lstrip("\\/")) if part]
+    if len(parts) < 3:
+        raise ValueError("WSL 文件夹路径不完整。请重新选择本机可以打开的文件夹。")
+    return Path("/") / Path(*parts[2:])
+
+
+def _windows_drive_path_to_wsl(value: str) -> Path | None:
+    match = re.match(r"^([A-Za-z]):(?:[\\/](.*))?$", value)
+    if match is None:
+        if re.match(r"^[A-Za-z]:", value):
+            raise ValueError("Windows 路径请使用完整盘符路径，例如 C:\\... 或 C:/...。")
+        return None
+    drive = match.group(1).lower()
+    tail = match.group(2) or ""
+    parts = [part for part in re.split(r"[\\/]+", tail) if part]
+    return WINDOWS_DRIVE_MOUNT_ROOT / drive / Path(*parts)
+
+
+def _looks_like_windows_unc_path(value: str) -> bool:
+    return bool(re.match(r"^(?:\\\\|//)[^\\/]+[\\/]+[^\\/]+", value))
 
 
 _PRIVATE_OR_TECHNICAL_ERROR_PATTERNS = [
