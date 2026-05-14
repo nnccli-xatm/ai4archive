@@ -131,7 +131,29 @@ class ScanProcessingReuseTest(unittest.TestCase):
             self.assertTrue(record["scan_measurements_reused"])
             timing = manifest["summary"]["performance"]["operation_timings"]["deskew"]
             self.assertEqual(timing["reused_scan_measurement_files"], 1)
+            self.assertEqual(timing["safe_skip_files"], 1)
+            self.assertEqual(timing["projection_detection_files"], 0)
+            self.assertEqual(timing["fallback_detection_files"], 0)
             self.assertEqual(manifest["summary"]["performance"]["scan_measurement_reuse"]["operations_skipped"]["deskew"], 1)
+            self.assertEqual(manifest["summary"]["performance"]["scan_measurement_reuse"]["deskew_safe_skip_files"], 1)
+            self.assertEqual(
+                manifest["summary"]["performance"]["scan_measurement_reuse"]["deskew_projection_detection_files"],
+                0,
+            )
+            self.assertEqual(
+                manifest["summary"]["performance"]["scan_measurement_reuse"]["deskew_fallback_detection_files"],
+                0,
+            )
+            audit = json.loads((root / "processed" / "processing_audit_summary.json").read_text(encoding="utf-8"))
+            audit_text = json.dumps(audit, ensure_ascii=False, sort_keys=True)
+            self.assertEqual(audit["counts"]["deskew_safe_skip_files"], 1)
+            self.assertEqual(audit["counts"]["deskew_projection_detection_files"], 0)
+            self.assertEqual(audit["counts"]["deskew_fallback_detection_files"], 0)
+            self.assertEqual(audit["timing"]["operation_timings"]["deskew"]["safe_skip_files"], 1)
+            self.assertEqual(audit["timing"]["scan_measurement_reuse"]["deskew_safe_skip_files"], 1)
+            self.assertNotIn("blank.png", audit_text)
+            self.assertNotIn(str(input_dir), audit_text)
+            self.assertNotIn(manifest["files"][0]["source_sha256"], audit_text)
 
     def test_safe_deskew_skip_falls_back_when_scan_measurement_is_uncertain(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-safe-deskew-fallback-") as temp_dir:
@@ -156,6 +178,47 @@ class ScanProcessingReuseTest(unittest.TestCase):
             record = manifest["files"][0]
             self.assertNotIn("deskew_safe_skip_scan_measurement", record["operations"])
             self.assertIn("skew_detect_projection", record["operations"])
+            timing = manifest["summary"]["performance"]["operation_timings"]["deskew"]
+            self.assertEqual(timing["safe_skip_files"], 0)
+            self.assertEqual(timing["projection_detection_files"], 1)
+            self.assertEqual(timing["fallback_detection_files"], 0)
+
+    def test_reuse_deskew_fallback_reports_projection_detection_aggregate(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-deskew-fallback-audit-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            input_dir.mkdir()
+            _text_page().save(input_dir / "private_page_name.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("project", "batch", input_dir, root / "scan", workers=1))
+            report["files"][0]["quality_skew_reason"] = None
+
+            with mock.patch("archive_scan_qc.processing._detect_skew", wraps=processing_module._detect_skew) as skew:
+                manifest = process_images(
+                    report,
+                    input_dir,
+                    root / "processed",
+                    ProcessingOptions(deskew=True, reuse_scan_measurements=True, workers=1),
+                )
+
+            self.assertGreaterEqual(skew.call_count, 1)
+            timing = manifest["summary"]["performance"]["operation_timings"]["deskew"]
+            self.assertEqual(timing["safe_skip_files"], 0)
+            self.assertEqual(timing["projection_detection_files"], 1)
+            self.assertEqual(timing["fallback_detection_files"], 1)
+            reuse = manifest["summary"]["performance"]["scan_measurement_reuse"]
+            self.assertEqual(reuse["deskew_safe_skip_files"], 0)
+            self.assertEqual(reuse["deskew_projection_detection_files"], 1)
+            self.assertEqual(reuse["deskew_fallback_detection_files"], 1)
+            audit = json.loads((root / "processed" / "processing_audit_summary.json").read_text(encoding="utf-8"))
+            audit_text = json.dumps(audit, ensure_ascii=False, sort_keys=True)
+            self.assertEqual(audit["counts"]["deskew_safe_skip_files"], 0)
+            self.assertEqual(audit["counts"]["deskew_projection_detection_files"], 1)
+            self.assertEqual(audit["counts"]["deskew_fallback_detection_files"], 1)
+            self.assertEqual(audit["timing"]["operation_timings"]["deskew"]["fallback_detection_files"], 1)
+            self.assertEqual(audit["timing"]["scan_measurement_reuse"]["deskew_fallback_detection_files"], 1)
+            self.assertNotIn("private_page_name.png", audit_text)
+            self.assertNotIn(str(input_dir), audit_text)
 
     def test_safe_deskew_skip_does_not_bypass_skew_risk_candidate(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-safe-deskew-risk-") as temp_dir:

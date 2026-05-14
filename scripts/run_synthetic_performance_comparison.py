@@ -223,6 +223,9 @@ def _aggregate_operation_timing(runs: list[Any], operation: str) -> dict[str, An
     run_count = 0
     enabled_values: list[bool] = []
     reused_scan_measurement_files = 0
+    deskew_safe_skip_files = 0
+    deskew_projection_detection_files = 0
+    deskew_fallback_detection_files = 0
     backend_counts = {mode: 0 for mode in DESPECKLE_BACKEND_MODES}
 
     for run in runs:
@@ -249,6 +252,16 @@ def _aggregate_operation_timing(runs: list[Any], operation: str) -> dict[str, An
         reused = timing.get("reused_scan_measurement_files")
         if isinstance(reused, int):
             reused_scan_measurement_files += reused
+        if operation == "deskew":
+            safe_skip = timing.get("safe_skip_files")
+            if isinstance(safe_skip, int):
+                deskew_safe_skip_files += safe_skip
+            projection = timing.get("projection_detection_files")
+            if isinstance(projection, int):
+                deskew_projection_detection_files += projection
+            fallback = timing.get("fallback_detection_files")
+            if isinstance(fallback, int):
+                deskew_fallback_detection_files += fallback
         if operation == "despeckle":
             source_counts = timing.get("backend_counts")
             if isinstance(source_counts, dict):
@@ -258,7 +271,7 @@ def _aggregate_operation_timing(runs: list[Any], operation: str) -> dict[str, An
                         backend_counts[mode] += value
 
     if run_count == 0:
-        return {
+        missing = {
             "signal_available": False,
             "missing_reason": "missing_from_benchmark_processing_operation_timings",
             "run_count": 0,
@@ -268,6 +281,15 @@ def _aggregate_operation_timing(runs: list[Any], operation: str) -> dict[str, An
             "average_seconds_per_file": None,
             "reused_scan_measurement_files": 0,
         }
+        if operation == "deskew":
+            missing.update(
+                {
+                    "safe_skip_files": 0,
+                    "projection_detection_files": 0,
+                    "fallback_detection_files": 0,
+                }
+            )
+        return missing
 
     elapsed_seconds = round(elapsed_seconds, 6)
     summary = {
@@ -280,6 +302,14 @@ def _aggregate_operation_timing(runs: list[Any], operation: str) -> dict[str, An
         "average_seconds_per_file": round(elapsed_seconds / file_count, 6) if file_count else None,
         "reused_scan_measurement_files": reused_scan_measurement_files,
     }
+    if operation == "deskew":
+        summary.update(
+            {
+                "safe_skip_files": deskew_safe_skip_files,
+                "projection_detection_files": deskew_projection_detection_files,
+                "fallback_detection_files": deskew_fallback_detection_files,
+            }
+        )
     if operation == "despeckle":
         active_modes = [mode for mode in DESPECKLE_BACKEND_MODES if backend_counts[mode]]
         if len(active_modes) == 1:

@@ -100,6 +100,14 @@ _ALLOWED_NUMERIC_KEYS = {
     "processing_resumed_files",
     "processing_duplicate_reused_files",
     "processing_existing_derivative_reused_files",
+    "processing_scan_measurement_reused_files",
+    "reused_scan_measurement_files",
+    "safe_skip_files",
+    "projection_detection_files",
+    "fallback_detection_files",
+    "deskew_safe_skip_files",
+    "deskew_projection_detection_files",
+    "deskew_fallback_detection_files",
 }
 _COUNT_SUMMARY_KEYS = {
     "average",

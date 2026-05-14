@@ -1700,6 +1700,10 @@ class ScanQcTest(unittest.TestCase):
                                 "elapsed_seconds": 3.5,
                                 "files_per_minute": 120.0,
                                 "average_seconds_per_file": 0.5,
+                                "reused_scan_measurement_files": 5,
+                                "safe_skip_files": 3,
+                                "projection_detection_files": 4,
+                                "fallback_detection_files": 1,
                             },
                             "trim_dark_border": {
                                 "enabled": False,
@@ -1738,6 +1742,10 @@ class ScanQcTest(unittest.TestCase):
         self.assertEqual(timings["auto_crop"]["file_count"], 7)
         self.assertEqual(timings["auto_crop"]["elapsed_seconds"], 0.5)
         self.assertEqual(timings["deskew"]["elapsed_seconds"], 3.5)
+        self.assertEqual(timings["deskew"]["reused_scan_measurement_files"], 5)
+        self.assertEqual(timings["deskew"]["safe_skip_files"], 3)
+        self.assertEqual(timings["deskew"]["projection_detection_files"], 4)
+        self.assertEqual(timings["deskew"]["fallback_detection_files"], 1)
         self.assertEqual(timings["trim_dark_border"]["enabled"], False)
         despeckle = timings["despeckle"]
         self.assertEqual(despeckle["enabled"], True)
@@ -4660,6 +4668,9 @@ class ScanQcTest(unittest.TestCase):
                                 "file_count": 8,
                                 "elapsed_seconds": 0.4,
                                 "reused_scan_measurement_files": 8,
+                                "safe_skip_files": 6,
+                                "projection_detection_files": 2,
+                                "fallback_detection_files": 1,
                             },
                             "despeckle": {
                                 "enabled": True,
@@ -4687,6 +4698,9 @@ class ScanQcTest(unittest.TestCase):
                                 "file_count": 8,
                                 "elapsed_seconds": 0.2,
                                 "reused_scan_measurement_files": 8,
+                                "safe_skip_files": 4,
+                                "projection_detection_files": 4,
+                                "fallback_detection_files": 2,
                             },
                             "despeckle": {
                                 "enabled": True,
@@ -4717,6 +4731,9 @@ class ScanQcTest(unittest.TestCase):
         self.assertEqual(signal["operations"]["deskew"]["elapsed_seconds"], 0.6)
         self.assertEqual(signal["operations"]["deskew"]["average_seconds_per_file"], 0.0375)
         self.assertEqual(signal["operations"]["deskew"]["reused_scan_measurement_files"], 16)
+        self.assertEqual(signal["operations"]["deskew"]["safe_skip_files"], 10)
+        self.assertEqual(signal["operations"]["deskew"]["projection_detection_files"], 6)
+        self.assertEqual(signal["operations"]["deskew"]["fallback_detection_files"], 3)
         despeckle = signal["operations"]["despeckle"]
         self.assertEqual(despeckle["elapsed_seconds"], 2.0)
         self.assertEqual(despeckle["backend_mode"], "mixed")

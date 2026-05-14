@@ -365,6 +365,10 @@ def _files_per_minute(file_count: int, elapsed_seconds: float) -> float:
     return round((file_count / elapsed_seconds) * 60, 2)
 
 
+def _int_count(value: Any) -> int:
+    return int(value) if isinstance(value, int) else 0
+
+
 def _process_record(
     item: dict[str, Any],
     input_dir: Path,
@@ -593,6 +597,9 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
     ]
     guardrail_failed_files = sum(1 for audit in audit_records if audit.get("guardrail_failures"))
     operation_timings = performance.get("operation_timings", {})
+    deskew_timing = operation_timings.get("deskew") if isinstance(operation_timings, dict) else {}
+    if not isinstance(deskew_timing, dict):
+        deskew_timing = {}
     return {
         "schema_version": "scan-qc.processing.audit.v1",
         "generated_at": manifest["generated_at"],
@@ -630,6 +637,9 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "retry_list_files": summary["retry_list_files"],
             "processing_warning_files": len(warning_records),
             "guardrail_failed_files": guardrail_failed_files,
+            "deskew_safe_skip_files": _int_count(deskew_timing.get("safe_skip_files")),
+            "deskew_projection_detection_files": _int_count(deskew_timing.get("projection_detection_files")),
+            "deskew_fallback_detection_files": _int_count(deskew_timing.get("fallback_detection_files")),
         },
         "thresholds": _audit_thresholds(options),
         "metrics": {
@@ -709,6 +719,8 @@ def _aggregate_operation_timings(records: list[dict[str, Any]], options: Process
             "average_seconds_per_file": round(elapsed_seconds / len(values), 6) if values else None,
             "reused_scan_measurement_files": _operation_reuse_count(records, operation),
         }
+        if operation == "deskew":
+            timings[operation].update(_aggregate_deskew_detection_counts(records))
         if operation == "despeckle":
             timings[operation].update(_aggregate_despeckle_backend(records, is_enabled))
     return timings
@@ -722,6 +734,24 @@ def _operation_reuse_count(records: list[dict[str, Any]], operation: str) -> int
         and isinstance(record["operation_timings"].get(operation), dict)
         and record["operation_timings"][operation].get("reused_scan_measurement") is True
     )
+
+
+def _operation_flag_count(records: list[dict[str, Any]], operation: str, flag: str) -> int:
+    return sum(
+        1
+        for record in records
+        if isinstance(record.get("operation_timings"), dict)
+        and isinstance(record["operation_timings"].get(operation), dict)
+        and record["operation_timings"][operation].get(flag) is True
+    )
+
+
+def _aggregate_deskew_detection_counts(records: list[dict[str, Any]]) -> dict[str, int]:
+    return {
+        "safe_skip_files": _operation_flag_count(records, "deskew", "safe_skip"),
+        "projection_detection_files": _operation_flag_count(records, "deskew", "projection_detection"),
+        "fallback_detection_files": _operation_flag_count(records, "deskew", "fallback_detection"),
+    }
 
 
 def _aggregate_scan_measurement_reuse(records: list[dict[str, Any]]) -> dict[str, Any]:
@@ -742,6 +772,9 @@ def _aggregate_scan_measurement_reuse(records: list[dict[str, Any]]) -> dict[str
         "files_with_any_reuse": sum(1 for record in records if record.get("scan_measurements_reused")),
         "operations_skipped": {operation: count for operation, count in reused.items() if count},
         "fallback_operations": {operation: count for operation, count in fallback.items() if count},
+        "deskew_safe_skip_files": _operation_flag_count(records, "deskew", "safe_skip"),
+        "deskew_projection_detection_files": _operation_flag_count(records, "deskew", "projection_detection"),
+        "deskew_fallback_detection_files": _operation_flag_count(records, "deskew", "fallback_detection"),
     }
 
 
@@ -751,6 +784,9 @@ def _empty_scan_measurement_reuse() -> dict[str, Any]:
         "files_with_any_reuse": 0,
         "operations_skipped": {},
         "fallback_operations": {},
+        "deskew_safe_skip_files": 0,
+        "deskew_projection_detection_files": 0,
+        "deskew_fallback_detection_files": 0,
     }
 
 
@@ -862,13 +898,16 @@ def _process_image(
             if safe_skip_skew is not None:
                 operations.append("deskew_safe_skip_scan_measurement")
                 operation_timings.setdefault("deskew", {})["safe_skip_reason"] = "scan measurement proves no correction"
+                operation_timings.setdefault("deskew", {})["safe_skip"] = True
         else:
             skew = _detect_skew(processed)
             operations.append("skew_detect_projection")
+            operation_timings.setdefault("deskew", {})["projection_detection"] = True
             if options.reuse_scan_measurements and options.deskew:
                 operation_timings.setdefault("deskew", {})["fallback_reason"] = reusable.get(
                     "fallback_reason", "scan measurements unavailable"
                 )
+                operation_timings.setdefault("deskew", {})["fallback_detection"] = True
         deskewed = False
         deskew_reason = skew.reason
         if not options.deskew:
