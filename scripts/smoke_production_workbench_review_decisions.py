@@ -175,9 +175,13 @@ def _assert_workbench_decision_contract() -> list[str]:
         )
         status_copies.append(f"已记录：{label_zh}")
     for token in [
+        "function hasActivePendingReview()",
         "`已记录：${recordedLabel}。已自动显示下一张待确认图片。已确认 ${reviewedCount()} 张，还需确认 ${pendingCount()} 张。`",
         "`已记录：${recordedLabel}。所有待确认图片都已确认，可以点击完成并导出结果。`",
         "`已决定 ${reviewedCount()} 项，待决定 ${pending} 项`",
+        "renderPreview(activeItem, Boolean(activeItem));",
+        "button.disabled = !activeItem;",
+        "#decisionActions button",
     ]:
         _assert(token in html, f"missing Chinese review status template: {token}")
     return status_copies

@@ -71,6 +71,35 @@ class ProductionWorkbenchRegressionGuardTests(unittest.TestCase):
         ]:
             self.assertIn(required, html)
 
+    def test_review_decision_flow_auto_advances_to_clear_empty_state(self) -> None:
+        html = WORKBENCH_HTML.read_text(encoding="utf-8")
+
+        for required in [
+            "function hasActivePendingReview()",
+            'return state.status === "needs_review" && pendingCount() > 0;',
+            "const activeReviewMode = hasActivePendingReview();",
+            "const activeItem = activeReviewMode ? item : null;",
+            'els.currentIssue.textContent = activeItem ? activeItem.issue : (state.operatorMessage || (pending ? "处理开始后在这里显示问题原因。" : "已经没有待确认图片。"));',
+            'els.previewSourceText.textContent = previewSourceLabel(activeItem || {}, Boolean(activeItem));',
+            "button.disabled = !activeItem;",
+            "renderPreview(activeItem, Boolean(activeItem));",
+            "所有待确认图片都已确认，可以点击完成并导出结果。",
+            "可以完成并导出结果。",
+            "已自动显示下一张待确认图片",
+        ]:
+            self.assertIn(required, html)
+
+    def test_review_decision_buttons_keep_stable_dimensions(self) -> None:
+        html = WORKBENCH_HTML.read_text(encoding="utf-8")
+
+        for required in [
+            "#decisionActions button {\n      min-height: 54px;\n      font-size: 17px;\n    }",
+            ".decision-actions .primary-choice {\n      min-height: 54px;",
+            "button.classList.toggle(\"primary-choice\", activeItem && activeItem.suggestedAction === button.dataset.decision);",
+            "button.classList.toggle(\"recommended-choice\", activeItem && activeItem.suggestedAction === button.dataset.decision);",
+        ]:
+            self.assertIn(required, html)
+
     def test_windows_path_display_and_internal_wsl_path_stay_separate(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
