@@ -142,34 +142,38 @@ Use `run` only for plans whose validation commands fully automate the work
 between issues. Use `--dry-run` to confirm plan parsing and state transitions
 without changing Linear or running validation commands.
 
-### Local production workbench
+### 本地生产工作台
 
-For a single-machine operator loop, start the Chinese production workbench on
-loopback:
+本地单机生产操作从中文生产工作台开始。正式处理前，先在当前仓库运行一次
+就绪烟测：
+
+```bash
+npm run smoke:production-workbench-suite
+```
+
+烟测通过后，在本机环回地址启动工作台：
 
 ```bash
 archive-scan-qc production-workbench
 ```
 
-The command serves `docs/production-workbench-prototype.html` at a local browser
-URL, opens it by default, and accepts source/output folder paths from the page.
-Starting a batch runs the existing local `production-run` flow, writes metadata
-under the output folder's `_production_workbench` directory, polls progress, and
-emits a local review queue plus verifier-compatible review-decision export.
+命令会打开 `docs/production-workbench-prototype.html` 对应的本地浏览器页面。
+扫描操作员在页面里选择原图文件夹和输出文件夹，保存文件夹后点击“开始处理”。
+工作台会在本机运行现有 `production-run` 流程，在输出文件夹下写入
+`_production_workbench` 元数据，轮询处理进度，并生成本地复核队列和可验证的
+复核决定导出。处理完成后，按页面提示查看大图预览，对待确认图片选择通过、
+重扫、重新处理、保留原样或跳过，最后使用完成/导出入口保存本批次结果。
 
-To rehearse the same local flow without private images, generate a synthetic
-batch, workbench-ready outputs, and an already configured local workbench with
-one command:
+如需在不接触私有图片的情况下演练同一条本地流程，可以一条命令生成合成批次、
+工作台可读输出，并打开已经配置好的本地工作台：
 
 ```bash
 archive-scan-qc production-rehearsal --launch-workbench
 ```
 
-The command creates a temporary rehearsal folder, writes synthetic source
-images, runs local scan QC and derivative processing, builds the local review
-queue, starts the loopback-only workbench, and opens a browser with the sample
-batch already loaded. Omit `--launch-workbench` if you only want to generate
-the rehearsal folders and keep using manual folder entry.
+该命令会创建临时演练文件夹，写入合成原图，运行本地扫描质检和优化图片处理，
+生成本地复核队列，启动仅限本机访问的工作台，并在浏览器中加载演练批次。
+如果只想生成演练文件夹并继续手动填写文件夹，省略 `--launch-workbench`。
 
 The optional manifest CSV must include a `relative_path` column whose values
 are expected image paths relative to `--input`. Manifests may also include one
