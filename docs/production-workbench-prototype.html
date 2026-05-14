@@ -357,6 +357,8 @@
     }
 
     .preview-controls {
+      position: relative;
+      z-index: 2;
       display: grid;
       grid-template-columns: minmax(330px, 1fr) minmax(300px, auto) minmax(126px, auto);
       gap: 8px;
@@ -609,8 +611,11 @@
       display: grid;
       grid-template-rows: auto 1fr;
       gap: 12px;
-      place-items: center;
+      align-items: start;
+      justify-items: center;
+      min-height: 620px;
       padding: 22px;
+      overflow: auto;
       background:
         linear-gradient(45deg, rgba(19, 40, 32, .05) 25%, transparent 25%),
         linear-gradient(-45deg, rgba(19, 40, 32, .05) 25%, transparent 25%),
@@ -633,7 +638,10 @@
     }
 
     .preview-frame {
+      position: relative;
+      z-index: 1;
       width: min(100%, 520px);
+      min-height: 420px;
       aspect-ratio: 3 / 4;
       background: #fdfefd;
       border: 10px solid #cbd7d0;
@@ -711,6 +719,7 @@
 
     .preview-frame.compact {
       width: 100%;
+      min-height: 340px;
       padding: 22px;
       border-width: 8px;
       box-shadow: 0 14px 34px rgba(25, 42, 35, .18);
@@ -718,6 +727,7 @@
 
     .preview-frame.comparison-shell {
       width: min(100%, 980px);
+      min-height: 520px;
       aspect-ratio: auto;
       align-content: start;
       padding: 22px;
@@ -1017,6 +1027,7 @@
 
       .preview-zone {
         padding: 14px;
+        min-height: 520px;
       }
 
       .preview-controls {
@@ -1037,11 +1048,20 @@
       }
 
       .preview-frame {
+        min-height: 360px;
         padding: 24px;
       }
 
       .preview-comparison {
         grid-template-columns: 1fr;
+      }
+
+      .preview-frame.compact {
+        min-height: 300px;
+      }
+
+      .preview-frame.comparison-shell {
+        min-height: 480px;
       }
 
       .desk-stat {
