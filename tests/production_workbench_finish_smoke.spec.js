@@ -248,6 +248,7 @@ test.describe("production workbench finish/export browser smoke", () => {
   test("finishes a synthetic review queue without console errors or warnings", async ({ page }) => {
     const consoleProblems = [];
     let resetRequested = false;
+    let openOutputRequested = false;
     page.on("console", (message) => {
       if (["error", "warning"].includes(message.type())) consoleProblems.push(`${message.type()}: ${message.text()}`);
     });
@@ -386,6 +387,7 @@ test.describe("production workbench finish/export browser smoke", () => {
             processed_output_images: 3,
             needs_rescan_images: 0,
             needs_reprocess_images: 0,
+            open_output_folder_available: true,
             checklist_zh: ["打开输出文件夹，检查 3 张处理后图片的数量和画面状态", "需要重扫 0 张，需要重新处理 0 张", "复核结果和交接说明已保存到本机状态文件夹", "准备下一批会清空当前复核队列，请重新选择新一批文件夹"],
             next_steps_zh: [
               "打开输出文件夹，检查 3 张处理后图片的数量和画面状态。",
@@ -396,6 +398,18 @@ test.describe("production workbench finish/export browser smoke", () => {
             ],
           },
           decision_summary: { completion_status: "complete" },
+        }),
+      });
+    });
+    await page.route("**/api/open-output-folder", async (route) => {
+      openOutputRequested = true;
+      expect(route.request().postDataJSON()).toEqual({});
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema_version: "scan-qc.local-production-workbench.v1",
+          opened: true,
+          message_zh: "已打开输出文件夹。请检查处理后图片数量和画面状态。",
         }),
       });
     });
@@ -605,6 +619,15 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.getByText("本机状态文件夹已保存复核结果和交接说明，正常界面不显示具体路径或文件名。")).toBeVisible();
     await expect(page.getByText("需要继续加工时，点击准备下一批；当前复核队列会清空。为新批次重新选择扫描原图文件夹和输出文件夹，不要混用批次。")).toBeVisible();
     await expect(page.getByText("如果仍有异常或不能交接，请交管理员处理。")).toBeVisible();
+    await expect(page.getByRole("button", { name: "打开输出文件夹" })).toBeEnabled();
+    await page.getByRole("button", { name: "打开输出文件夹" }).click();
+    await expect(page.locator("#openOutputFolderStatus")).toHaveText("已打开输出文件夹。请检查处理后图片数量和画面状态。");
+    await expect.poll(() => openOutputRequested).toBe(true);
+    await expectOperatorStatusHidesPaths(page, [
+      "/tmp/synthetic-input",
+      "/tmp/synthetic-output",
+      "/tmp/synthetic-output/_production_workbench",
+    ]);
     await page.getByRole("button", { name: "准备下一批" }).click();
     await expect(page.locator("#completionTitle")).toBeHidden();
     await expect(page.locator("#stateName")).toHaveText("新批次起点");
@@ -616,6 +639,8 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#decisionSummary")).toHaveText("已决定 0 项，待决定 0 项。");
     await expect(page.locator("#completionTitle")).toHaveText("等待完成本批");
     await expect(page.locator("#completionStatusFact")).toHaveText("未完成");
+    await expect(page.getByRole("button", { name: "打开输出文件夹" })).toBeDisabled();
+    await expect(page.locator("#openOutputFolderStatus")).toHaveText("完成本批并保存输出文件夹后可以打开检查。");
     await expect(page.locator("#outputPlace")).toHaveText("已选择的处理后输出文件夹");
     await expect(page.locator("#pendingText")).toHaveText("0 个");
     await expect(page.locator("#completionCounts")).toHaveText("共 0 项，已确认 0 项，待决定 0 项。");
