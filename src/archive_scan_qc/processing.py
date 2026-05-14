@@ -850,10 +850,18 @@ def _process_image(
     pre_deskew_size = list(processed.size)
     post_deskew_size = list(processed.size)
     with _operation_timer(operation_timings, "deskew", enabled=options.deskew):
-        skew = reusable.get("skew")
+        safe_skip_skew = None if options.reuse_scan_measurements else _safe_deskew_skip_from_scan_record(
+            scan_record,
+            processed,
+            options,
+        )
+        skew = reusable.get("skew") if safe_skip_skew is None else safe_skip_skew
         if isinstance(skew, SkewDetection):
             operations.append("skew_detect_reused_scan_measurement")
             operation_timings.setdefault("deskew", {})["reused_scan_measurement"] = True
+            if safe_skip_skew is not None:
+                operations.append("deskew_safe_skip_scan_measurement")
+                operation_timings.setdefault("deskew", {})["safe_skip_reason"] = "scan measurement proves no correction"
         else:
             skew = _detect_skew(processed)
             operations.append("skew_detect_projection")
@@ -1066,6 +1074,33 @@ def _scan_record_skew(scan_record: dict[str, Any]) -> SkewDetection | None:
     if not isinstance(confidence, int | float) or not isinstance(reason, str):
         return None
     return SkewDetection(float(angle) if angle is not None else None, float(confidence), reason)
+
+
+def _safe_deskew_skip_from_scan_record(
+    scan_record: dict[str, Any] | None,
+    image: Image.Image,
+    options: ProcessingOptions,
+) -> SkewDetection | None:
+    if not options.deskew:
+        return None
+    reusable = _scan_measurements_for_processing(scan_record, image)
+    skew = reusable.get("skew")
+    if not isinstance(skew, SkewDetection):
+        return None
+    if skew.angle_degrees is None:
+        return skew if skew.reason in _SAFE_DESKEW_NO_CANDIDATE_REASONS else None
+    if skew.confidence >= options.deskew_min_confidence and abs(skew.angle_degrees) < 0.2:
+        return skew
+    return None
+
+
+_SAFE_DESKEW_NO_CANDIDATE_REASONS = {
+    "image too small",
+    "low contrast",
+    "blank page",
+    "insufficient foreground",
+    "foreground too dense",
+}
 
 
 def _scan_record_dark_border(scan_record: dict[str, Any], size: tuple[int, int]) -> DarkBorderDetection | None:

@@ -95,6 +95,93 @@ class ScanProcessingReuseTest(unittest.TestCase):
             self.assertEqual(reuse["fallback_operations"]["deskew"], 1)
             self.assertEqual(reuse["fallback_operations"]["trim_dark_border"], 1)
 
+    def test_safe_deskew_skip_uses_scan_no_candidate_measurement_without_full_reuse(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-safe-deskew-skip-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            input_dir.mkdir()
+            Image.new("RGB", (120, 90), "white").save(input_dir / "blank.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("project", "batch", input_dir, root / "scan", workers=1))
+            fallback_report = json.loads(json.dumps(report))
+            fallback_report["files"][0]["quality_skew_angle_degrees"] = None
+            fallback_report["files"][0]["quality_skew_confidence"] = None
+            fallback_report["files"][0]["quality_skew_reason"] = None
+            fallback_manifest = process_images(
+                fallback_report,
+                input_dir,
+                root / "fallback",
+                ProcessingOptions(deskew=True, workers=1),
+            )
+            with mock.patch("archive_scan_qc.processing._detect_skew", side_effect=AssertionError("unsafe fallback")):
+                manifest = process_images(
+                    report,
+                    input_dir,
+                    root / "processed",
+                    ProcessingOptions(deskew=True, workers=1),
+                )
+
+            record = manifest["files"][0]
+            self.assertEqual(record["status"], "processed")
+            self.assertFalse(record["deskewed"])
+            self.assertIn(record["deskew_reason"], {"blank page", "low contrast"})
+            self.assertEqual(record["output_sha256"], fallback_manifest["files"][0]["output_sha256"])
+            self.assertEqual(record["processing_audit"], fallback_manifest["files"][0]["processing_audit"])
+            self.assertIn("deskew_safe_skip_scan_measurement", record["operations"])
+            self.assertTrue(record["scan_measurements_reused"])
+            timing = manifest["summary"]["performance"]["operation_timings"]["deskew"]
+            self.assertEqual(timing["reused_scan_measurement_files"], 1)
+            self.assertEqual(manifest["summary"]["performance"]["scan_measurement_reuse"]["operations_skipped"]["deskew"], 1)
+
+    def test_safe_deskew_skip_falls_back_when_scan_measurement_is_uncertain(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-safe-deskew-fallback-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            input_dir.mkdir()
+            _text_page().save(input_dir / "page.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("project", "batch", input_dir, root / "scan", workers=1))
+            report["files"][0]["quality_skew_confidence"] = 0.01
+            report["files"][0]["quality_skew_reason"] = "low confidence"
+
+            with mock.patch("archive_scan_qc.processing._detect_skew", wraps=processing_module._detect_skew) as skew:
+                manifest = process_images(
+                    report,
+                    input_dir,
+                    root / "processed",
+                    ProcessingOptions(deskew=True, workers=1),
+                )
+
+            self.assertGreaterEqual(skew.call_count, 1)
+            record = manifest["files"][0]
+            self.assertNotIn("deskew_safe_skip_scan_measurement", record["operations"])
+            self.assertIn("skew_detect_projection", record["operations"])
+
+    def test_safe_deskew_skip_does_not_bypass_skew_risk_candidate(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-safe-deskew-risk-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            input_dir.mkdir()
+            _text_page().rotate(-3.0, resample=Image.Resampling.BICUBIC, expand=True, fillcolor="white").save(
+                input_dir / "skew.png",
+                dpi=(300, 300),
+            )
+
+            report = scan_batch(ScanConfig("project", "batch", input_dir, root / "scan", workers=1))
+            with mock.patch("archive_scan_qc.processing._detect_skew", wraps=processing_module._detect_skew) as skew:
+                manifest = process_images(
+                    report,
+                    input_dir,
+                    root / "processed",
+                    ProcessingOptions(deskew=True, workers=1),
+                )
+
+            self.assertGreaterEqual(skew.call_count, 1)
+            record = manifest["files"][0]
+            self.assertTrue(record["deskewed"])
+            self.assertIn("skew_detect_projection", record["operations"])
+            self.assertNotIn("deskew_safe_skip_scan_measurement", record["operations"])
+
     def test_benchmark_reports_aggregate_scan_measurement_reuse(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-reuse-benchmark-") as temp_dir:
             root = Path(temp_dir)
@@ -323,6 +410,14 @@ def _dark_border_page() -> Image.Image:
     draw = ImageDraw.Draw(image)
     draw.rectangle((0, 0, 99, 79), outline="black", width=5)
     draw.rectangle((25, 30, 75, 45), fill="black")
+    return image
+
+
+def _text_page() -> Image.Image:
+    image = Image.new("RGB", (180, 140), "white")
+    draw = ImageDraw.Draw(image)
+    for y in range(30, 105, 14):
+        draw.line((35, y, 145, y), fill=(20, 20, 20), width=2)
     return image
 
 
