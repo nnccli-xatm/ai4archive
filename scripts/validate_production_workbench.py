@@ -717,11 +717,23 @@ def main() -> int:
             'state.completionMessage = "完成并导出结果后，这里会显示本批交接清单。";',
             'state.completionStatusFact = "未完成";',
             "state.completionSteps = INITIAL_COMPLETION_STEPS.slice();",
-            "请重新选择新一批扫描原图文件夹和输出文件夹，不要混用批次。",
+            "const reusableOutputPath = state.lastServerOutputPath && els.outputPath.value.trim() === state.lastServerOutputPath",
+            "state.outputChosen = Boolean(reusableOutputPath);",
+            "els.inputPath.value = \"\";",
+            "els.outputPath.value = reusableOutputPath;",
+            "state.lastServerInputPath = \"\";",
+            "state.lastServerOutputPath = reusableOutputPath;",
+            "必须重新选择新一批扫描原图文件夹，不要混用批次。",
+            "已沿用上次保存的输出文件夹提示；如本批要换位置，请重新选择输出文件夹。",
+            "没有可安全沿用的输出文件夹提示，请重新选择输出文件夹。",
+            "请重新选择新一批扫描原图文件夹；输出文件夹已保留上次保存的位置提示。",
         ]:
             if required_token not in prepare_next_batch_body:
                 errors.append(f"prepare-next-batch reset missing token: {required_token}")
         for forbidden_token in [
+            "state.outputChosen = false;",
+            "els.outputPath.value = \"\";",
+            "state.lastServerOutputPath = \"\";",
             'state.attentionFiles = 3;',
             'state.completionTitle = "本批已完成";',
             'state.completionStatusFact = "本批已完成";',
@@ -731,7 +743,8 @@ def main() -> int:
                 errors.append(f"prepare-next-batch reset keeps stale completed batch token: {forbidden_token}")
     for required_reset_prompt_token in [
         "NEXT_BATCH_STATUS_TEXT",
-        "请重新选择扫描原图文件夹和输出文件夹",
+        "请重新选择扫描原图文件夹",
+        "输出文件夹可沿用上次保存的位置",
     ]:
         if required_reset_prompt_token not in html:
             errors.append(f"missing next-batch operator prompt token: {required_reset_prompt_token}")

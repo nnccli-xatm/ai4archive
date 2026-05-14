@@ -156,11 +156,23 @@ class ProductionWorkbenchRegressionGuardTests(unittest.TestCase):
             'state.completionReuseMessage = "";',
             'state.completionStatusFact = "未完成";',
             "state.completionSteps = INITIAL_COMPLETION_STEPS.slice();",
-            "请重新选择新一批扫描原图文件夹和输出文件夹，不要混用批次。",
+            "const reusableOutputPath = state.lastServerOutputPath && els.outputPath.value.trim() === state.lastServerOutputPath",
+            "state.outputChosen = Boolean(reusableOutputPath);",
+            "els.inputPath.value = \"\";",
+            "els.outputPath.value = reusableOutputPath;",
+            "state.lastServerInputPath = \"\";",
+            "state.lastServerOutputPath = reusableOutputPath;",
+            "必须重新选择新一批扫描原图文件夹，不要混用批次。",
+            "已沿用上次保存的输出文件夹提示；如本批要换位置，请重新选择输出文件夹。",
+            "没有可安全沿用的输出文件夹提示，请重新选择输出文件夹。",
+            "请重新选择新一批扫描原图文件夹；输出文件夹已保留上次保存的位置提示。",
         ]:
             self.assertIn(required, body)
 
         for stale_completed_batch_token in [
+            "state.outputChosen = false;",
+            "els.outputPath.value = \"\";",
+            "state.lastServerOutputPath = \"\";",
             'state.attentionFiles = 3;',
             'state.completionTitle = "本批已完成";',
             'state.completionStatusFact = "本批已完成";',
@@ -169,7 +181,8 @@ class ProductionWorkbenchRegressionGuardTests(unittest.TestCase):
             self.assertNotIn(stale_completed_batch_token, body)
 
         self.assertIn("NEXT_BATCH_STATUS_TEXT", html)
-        self.assertIn("请重新选择扫描原图文件夹和输出文件夹", html)
+        self.assertIn("请重新选择扫描原图文件夹", html)
+        self.assertIn("输出文件夹可沿用上次保存的位置", html)
 
     def test_completed_handoff_has_local_open_output_folder_action_without_path_disclosure(self) -> None:
         html = WORKBENCH_HTML.read_text(encoding="utf-8")

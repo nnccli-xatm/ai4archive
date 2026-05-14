@@ -1476,7 +1476,7 @@ def _completion_handoff_counts(run_summary: dict[str, Any] | None, decision_summ
         "needs_reprocess_images": needs_reprocess_images,
         "next_batch_reminder_zh": (
             "需要继续加工时，点击准备下一批；当前复核队列会清空。"
-            "为新批次重新选择扫描原图文件夹和输出文件夹，不要混用批次。"
+            "为新批次必须重新选择扫描原图文件夹，不要混用批次；输出文件夹可沿用上次保存的位置。"
         ),
     }
 
@@ -1666,7 +1666,7 @@ def _status_recovery_guidance(
                     "打开输出文件夹，检查处理后图片数量和画面状态。",
                     "本机状态文件夹已保存复核结果和交接说明，正常界面不显示具体路径或文件名。",
                     "需要继续加工时，点击准备下一批；当前复核队列会清空。",
-                    "为新批次重新选择扫描原图文件夹和输出文件夹，不要混用批次。",
+                    "为新批次必须重新选择扫描原图文件夹，不要混用批次；输出文件夹可沿用上次保存的位置。",
                 ],
             }
     state = progress.get("state") if isinstance(progress, dict) else None
