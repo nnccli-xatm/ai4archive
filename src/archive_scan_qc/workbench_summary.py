@@ -29,6 +29,12 @@ _PROCESSING_OPERATION_FIELDS = (
     "files_per_minute",
     "average_seconds_per_file",
 )
+_DESKEW_AUDIT_FIELDS = (
+    "reused_scan_measurement_files",
+    "safe_skip_files",
+    "projection_detection_files",
+    "fallback_detection_files",
+)
 _DESPECKLE_BACKEND_FIELDS = ("backend_mode", "numpy_available", "backend_counts")
 
 
@@ -666,9 +672,18 @@ def _sanitize_processing_operation_timing(operation: str, value: Any) -> dict[st
         parsed = _safe_float(value.get(key))
         if parsed is not None:
             result[key] = parsed
+    if operation == "deskew":
+        for key in _DESKEW_AUDIT_FIELDS:
+            parsed = _safe_int(value.get(key))
+            if parsed is not None:
+                result[key] = parsed
     if operation == "despeckle":
         result.update(_sanitize_despeckle_backend_timing(value))
-    allowed_fields = _PROCESSING_OPERATION_FIELDS + (_DESPECKLE_BACKEND_FIELDS if operation == "despeckle" else ())
+    allowed_fields = (
+        _PROCESSING_OPERATION_FIELDS
+        + (_DESKEW_AUDIT_FIELDS if operation == "deskew" else ())
+        + (_DESPECKLE_BACKEND_FIELDS if operation == "despeckle" else ())
+    )
     return {key: result[key] for key in allowed_fields if key in result}
 
 

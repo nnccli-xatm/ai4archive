@@ -557,6 +557,35 @@ def _benchmark_operation_timings(benchmark_summary: dict[str, Any] | None) -> di
             "files_per_minute": _files_per_minute(file_count, elapsed_seconds),
             "average_seconds_per_file": round(elapsed_seconds / file_count, 6) if file_count else None,
         }
+        if operation == "deskew":
+            totals[operation].update(_benchmark_deskew_audit_timings(benchmark_summary))
+    return totals
+
+
+def _benchmark_deskew_audit_timings(benchmark_summary: dict[str, Any]) -> dict[str, int]:
+    fields = (
+        "reused_scan_measurement_files",
+        "safe_skip_files",
+        "projection_detection_files",
+        "fallback_detection_files",
+    )
+    totals = {field: 0 for field in fields}
+    for run in benchmark_summary.get("runs", []):
+        if not isinstance(run, dict):
+            continue
+        processing = run.get("processing")
+        if not isinstance(processing, dict):
+            continue
+        operation_timings = processing.get("operation_timings")
+        if not isinstance(operation_timings, dict):
+            continue
+        timing = operation_timings.get("deskew")
+        if not isinstance(timing, dict):
+            continue
+        for field in fields:
+            value = timing.get(field)
+            if isinstance(value, int):
+                totals[field] += value
     return totals
 
 

@@ -386,8 +386,32 @@ def _aggregate_processing_operation_timings(batches: list[dict[str, Any]]) -> di
             "files_per_minute": _files_per_minute(file_count, elapsed_seconds),
             "average_seconds_per_file": round(elapsed_seconds / file_count, 6) if file_count else None,
         }
+        if operation == "deskew":
+            totals[operation].update(_aggregate_deskew_audit_timings(batches))
         if operation == "despeckle":
             totals[operation].update(_aggregate_despeckle_backend_timings(batches, enabled))
+    return totals
+
+
+def _aggregate_deskew_audit_timings(batches: list[dict[str, Any]]) -> dict[str, int]:
+    fields = (
+        "reused_scan_measurement_files",
+        "safe_skip_files",
+        "projection_detection_files",
+        "fallback_detection_files",
+    )
+    totals = {field: 0 for field in fields}
+    for batch in batches:
+        batch_timings = batch.get("processing_operation_timings")
+        if not isinstance(batch_timings, dict):
+            continue
+        timing = batch_timings.get("deskew")
+        if not isinstance(timing, dict):
+            continue
+        for field in fields:
+            value = timing.get(field)
+            if isinstance(value, int):
+                totals[field] += value
     return totals
 
 
