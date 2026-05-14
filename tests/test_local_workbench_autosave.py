@@ -315,6 +315,190 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertEqual(guidance["supported_image_count"], 0)
             self.assertIn("常见图片格式", " ".join(guidance["next_steps_zh"]))
 
+    def test_start_reuses_fresh_ready_preflight_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            (input_dir / "page.png").write_bytes(b"image")
+            controller = WorkbenchController()
+
+            with patch.object(local_workbench_module, "_scan_input_folder_preflight", wraps=local_workbench_module._scan_input_folder_preflight) as scan_mock:
+                controller.configure(input_dir, output_dir, metadata_dir, processing_mode="light")
+                with patch("archive_scan_qc.local_workbench.run_production_folder") as run_mock:
+                    run_mock.return_value = {
+                        "schema_version": "scan-qc.production-run.v1",
+                        "status": "finished",
+                        "artifacts": {},
+                        "counts": {"total_files": 1, "processed_files": 1, "resumed_files": 0, "failed_files": 0, "retry_list_files": 0},
+                    }
+                    controller.start()
+                    if controller._thread:
+                        controller._thread.join(timeout=5)
+
+            self.assertEqual(scan_mock.call_count, 1)
+            status = controller.status()
+            self.assertEqual(status["preflight_reuse_summary"]["status"], "reused")
+            self.assertEqual(status["preflight_reuse_summary"]["supported_image_count"], 1)
+            run_mock.assert_called_once()
+            config = run_mock.call_args.args[0]
+            self.assertEqual(config.processing_mode, "light")
+
+    def test_start_rescans_when_preflight_input_snapshot_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            (input_dir / "page.png").write_bytes(b"image")
+            controller = WorkbenchController()
+
+            with patch.object(local_workbench_module, "_scan_input_folder_preflight", wraps=local_workbench_module._scan_input_folder_preflight) as scan_mock:
+                controller.configure(input_dir, output_dir, metadata_dir)
+                (input_dir / "added.png").write_bytes(b"image")
+                with patch("archive_scan_qc.local_workbench.run_production_folder") as run_mock:
+                    run_mock.return_value = {
+                        "schema_version": "scan-qc.production-run.v1",
+                        "status": "finished",
+                        "artifacts": {},
+                        "counts": {"total_files": 2, "processed_files": 2, "resumed_files": 0, "failed_files": 0, "retry_list_files": 0},
+                    }
+                    controller.start()
+                    if controller._thread:
+                        controller._thread.join(timeout=5)
+
+            self.assertGreaterEqual(scan_mock.call_count, 2)
+            status = controller.status()
+            self.assertEqual(status["preflight_reuse_summary"]["status"], "rescanned")
+            self.assertEqual(status["preflight_reuse_summary"]["reason"], "input_folder_changed")
+            self.assertEqual(status["preflight_reuse_summary"]["supported_image_count"], 2)
+            run_mock.assert_called_once()
+
+    def test_start_rescans_when_processing_mode_changes_after_preflight(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            (input_dir / "page.png").write_bytes(b"image")
+            controller = WorkbenchController()
+            controller.configure(input_dir, output_dir, metadata_dir, processing_mode="light")
+            with controller._lock:
+                controller.processing_mode = "standard"
+
+            with patch.object(local_workbench_module, "_scan_input_folder_preflight", wraps=local_workbench_module._scan_input_folder_preflight) as scan_mock:
+                with patch("archive_scan_qc.local_workbench.run_production_folder") as run_mock:
+                    run_mock.return_value = {
+                        "schema_version": "scan-qc.production-run.v1",
+                        "status": "finished",
+                        "artifacts": {},
+                        "counts": {"total_files": 1, "processed_files": 1, "resumed_files": 0, "failed_files": 0, "retry_list_files": 0},
+                    }
+                    controller.start()
+                    if controller._thread:
+                        controller._thread.join(timeout=5)
+
+            self.assertGreaterEqual(scan_mock.call_count, 1)
+            status = controller.status()
+            self.assertEqual(status["preflight_reuse_summary"]["status"], "rescanned")
+            self.assertEqual(status["preflight_reuse_summary"]["reason"], "preflight_identity_changed")
+            run_mock.assert_called_once()
+            self.assertEqual(run_mock.call_args.args[0].processing_mode, "standard")
+
+    def test_start_rescans_when_output_folder_changes_after_preflight(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = root / "metadata"
+            changed_output_dir = root / "changed-output"
+            changed_metadata_dir = root / "changed-metadata"
+            changed_output_dir.mkdir()
+            changed_metadata_dir.mkdir()
+            input_dir.mkdir()
+            (input_dir / "page.png").write_bytes(b"image")
+            controller = WorkbenchController()
+            controller.configure(input_dir, output_dir, metadata_dir)
+            with controller._lock:
+                controller.derivatives_dir = changed_output_dir
+                controller.metadata_dir = changed_metadata_dir
+
+            with patch.object(local_workbench_module, "_scan_input_folder_preflight", wraps=local_workbench_module._scan_input_folder_preflight) as scan_mock:
+                with patch("archive_scan_qc.local_workbench.run_production_folder") as run_mock:
+                    run_mock.return_value = {
+                        "schema_version": "scan-qc.production-run.v1",
+                        "status": "finished",
+                        "artifacts": {},
+                        "counts": {"total_files": 1, "processed_files": 1, "resumed_files": 0, "failed_files": 0, "retry_list_files": 0},
+                    }
+                    controller.start()
+                    if controller._thread:
+                        controller._thread.join(timeout=5)
+
+            self.assertGreaterEqual(scan_mock.call_count, 1)
+            status = controller.status()
+            self.assertEqual(status["preflight_reuse_summary"]["status"], "rescanned")
+            self.assertEqual(status["preflight_reuse_summary"]["reason"], "preflight_identity_changed")
+            run_mock.assert_called_once()
+            config = run_mock.call_args.args[0]
+            self.assertEqual(config.derivative_output_dir.resolve(), changed_output_dir.resolve())
+            self.assertEqual(config.metadata_output_dir.resolve(), changed_metadata_dir.resolve())
+
+    def test_start_rescans_when_preflight_snapshot_expires(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            (input_dir / "page.png").write_bytes(b"image")
+            controller = WorkbenchController()
+            controller.configure(input_dir, output_dir, metadata_dir)
+            with controller._lock:
+                controller._last_preflight_snapshot["created_monotonic"] -= local_workbench_module.PREFLIGHT_SNAPSHOT_MAX_AGE_SECONDS + 1
+
+            with patch.object(local_workbench_module, "_scan_input_folder_preflight", wraps=local_workbench_module._scan_input_folder_preflight) as scan_mock:
+                with patch("archive_scan_qc.local_workbench.run_production_folder") as run_mock:
+                    run_mock.return_value = {
+                        "schema_version": "scan-qc.production-run.v1",
+                        "status": "finished",
+                        "artifacts": {},
+                        "counts": {"total_files": 1, "processed_files": 1, "resumed_files": 0, "failed_files": 0, "retry_list_files": 0},
+                    }
+                    controller.start()
+                    if controller._thread:
+                        controller._thread.join(timeout=5)
+
+            self.assertGreaterEqual(scan_mock.call_count, 1)
+            status = controller.status()
+            self.assertEqual(status["preflight_reuse_summary"]["status"], "rescanned")
+            self.assertEqual(status["preflight_reuse_summary"]["reason"], "expired_preflight_snapshot")
+            run_mock.assert_called_once()
+
+    def test_start_does_not_reuse_unsupported_preflight_to_start(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            (input_dir / "notes.txt").write_text("not an image", encoding="utf-8")
+            controller = WorkbenchController()
+            controller.configure(input_dir, output_dir, metadata_dir)
+
+            with patch("archive_scan_qc.local_workbench.run_production_folder") as run_mock:
+                with self.assertRaises(WorkbenchPreflightError) as raised:
+                    controller.start()
+
+            self.assertEqual(raised.exception.guidance["kind"], "no_supported_images")
+            self.assertEqual(raised.exception.guidance["supported_image_count"], 0)
+            self.assertEqual(controller.status()["preflight_reuse_summary"]["status"], "rescanned")
+            run_mock.assert_not_called()
+
     def test_empty_batch_summary_gives_operator_next_steps(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

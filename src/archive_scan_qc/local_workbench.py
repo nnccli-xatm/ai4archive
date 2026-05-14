@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import traceback
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -42,6 +43,8 @@ WORKBENCH_HTML = ROOT / "docs" / "production-workbench-prototype.html"
 DOCS_DIR = ROOT / "docs"
 DEFAULT_METADATA_DIRNAME = "_production_workbench"
 SERVER_SCHEMA = "scan-qc.local-production-workbench.v1"
+PREFLIGHT_SNAPSHOT_SCHEMA = "scan-qc.local-preflight-snapshot.v1"
+PREFLIGHT_SNAPSHOT_MAX_AGE_SECONDS = 10 * 60
 MAINTENANCE_ERROR_LOG_JSONL = "local_workbench_maintenance_errors.jsonl"
 REVIEW_DECISION_SUMMARY_JSON = "scan-qc-review-decisions.summary.json"
 REVIEW_DECISION_DRAFT_JSON = "scan-qc-review-decisions.draft.json"
@@ -103,6 +106,9 @@ class WorkbenchController:
         self.processing_mode = DEFAULT_PROCESSING_MODE
         self.last_error: str | None = None
         self.last_preflight_guidance: dict[str, Any] | None = None
+        self.last_preflight_reuse_summary: dict[str, Any] | None = None
+        self._last_folder_readiness: dict[str, Any] | None = None
+        self._last_preflight_snapshot: dict[str, Any] | None = None
 
     def configure(
         self,
@@ -140,6 +146,12 @@ class WorkbenchController:
             metadata_path.mkdir(parents=True, exist_ok=True)
         except OSError:
             raise ValueError("输出文件夹或本机状态文件夹不能创建。请确认磁盘已连接、没有只读，并重新选择文件夹。") from None
+        folder_readiness, preflight_snapshot = _folder_readiness_summary_with_snapshot(
+            input_path,
+            output_path,
+            metadata_path,
+            selected_mode,
+        )
         with self._lock:
             self.input_dir = input_path
             self.derivatives_dir = output_path
@@ -150,6 +162,9 @@ class WorkbenchController:
             self.processing_mode = selected_mode
             self.last_error = None
             self.last_preflight_guidance = None
+            self.last_preflight_reuse_summary = None
+            self._last_folder_readiness = folder_readiness
+            self._last_preflight_snapshot = preflight_snapshot
         return self.status()
 
     def start(self) -> dict[str, Any]:
@@ -185,6 +200,9 @@ class WorkbenchController:
             self.processing_mode = DEFAULT_PROCESSING_MODE
             self.last_error = None
             self.last_preflight_guidance = None
+            self.last_preflight_reuse_summary = None
+            self._last_folder_readiness = None
+            self._last_preflight_snapshot = None
         return self.status()
 
     def _start_run(self) -> dict[str, Any]:
@@ -193,13 +211,53 @@ class WorkbenchController:
                 raise ValueError("当前批次正在处理。")
             if self.input_dir is None or self.derivatives_dir is None or self.metadata_dir is None:
                 raise ValueError("请先填写并保存两个文件夹位置。")
-            guidance = _preflight_folder_guidance(self.input_dir, self.derivatives_dir, self.metadata_dir)
+            reuse_summary = _preflight_reuse_summary("unavailable", "missing_preflight_snapshot", 0)
+            guidance = None
+            cached_ready = (
+                isinstance(self._last_folder_readiness, dict)
+                and self._last_folder_readiness.get("ready_to_start") is True
+            )
+            cache_matches, cache_reason = _preflight_snapshot_matches(
+                self._last_preflight_snapshot,
+                self.input_dir,
+                self.derivatives_dir,
+                self.metadata_dir,
+                self.processing_mode,
+            )
+            if cached_ready and cache_matches:
+                reuse_summary = _preflight_reuse_summary(
+                    "reused",
+                    "preflight_snapshot_matched",
+                    _safe_nonnegative_int(self._last_folder_readiness.get("supported_image_count")),
+                )
+            else:
+                guidance = _preflight_folder_guidance(self.input_dir, self.derivatives_dir, self.metadata_dir)
+                fallback_supported_count = 0
+                if guidance is None:
+                    updated_readiness, updated_snapshot = _folder_readiness_summary_with_snapshot(
+                        self.input_dir,
+                        self.derivatives_dir,
+                        self.metadata_dir,
+                        self.processing_mode,
+                    )
+                    self._last_folder_readiness = updated_readiness
+                    self._last_preflight_snapshot = updated_snapshot
+                    fallback_supported_count = _safe_nonnegative_int(updated_readiness.get("supported_image_count"))
+                else:
+                    fallback_supported_count = _safe_nonnegative_int(guidance.get("supported_image_count"))
+                reuse_summary = _preflight_reuse_summary(
+                    "rescanned",
+                    cache_reason,
+                    fallback_supported_count,
+                )
             if guidance is not None:
                 self.last_error = None
                 self.last_preflight_guidance = guidance
+                self.last_preflight_reuse_summary = reuse_summary
                 raise WorkbenchPreflightError(guidance)
             self.last_error = None
             self.last_preflight_guidance = None
+            self.last_preflight_reuse_summary = reuse_summary
             self._thread = threading.Thread(target=self._run_once, name="production-workbench-run", daemon=True)
             self._thread.start()
         return self.status()
@@ -411,6 +469,8 @@ class WorkbenchController:
             processing_mode = self.processing_mode
             last_error = self.last_error
             last_preflight_guidance = self.last_preflight_guidance
+            last_preflight_reuse_summary = self.last_preflight_reuse_summary
+        folder_readiness = self._folder_readiness_for_status(input_path, derivatives_path, metadata_path, processing_mode)
         raw_summary = _read_json(metadata_path / PRODUCTION_RUN_SUMMARY_JSON) if metadata_path else None
         summary = _sanitize_operator_status_summary(raw_summary)
         progress = _read_json(metadata_path / PRODUCTION_RUN_PROGRESS_JSON) if metadata_path else None
@@ -430,6 +490,7 @@ class WorkbenchController:
             "configured": bool(input_path and derivatives_path and metadata_path),
             "last_error_zh": last_error,
             "preflight_guidance": last_preflight_guidance,
+            "preflight_reuse_summary": last_preflight_reuse_summary,
             "recovery_guidance": recovery_guidance,
             "folders": {
                 "input": input_dir,
@@ -437,17 +498,43 @@ class WorkbenchController:
                 "metadata": metadata_dir,
             },
             "processing_mode": _processing_mode_payload(processing_mode),
-            "folder_readiness": _folder_readiness_summary(
-                input_path,
-                derivatives_path,
-                metadata_path,
-                processing_mode,
-            ),
+            "folder_readiness": folder_readiness,
             "summary": summary,
             "progress": progress,
             "queue": queue,
             "draft_decisions": draft_decisions,
         }
+
+    def _folder_readiness_for_status(
+        self,
+        input_path: Path | None,
+        derivatives_path: Path | None,
+        metadata_path: Path | None,
+        processing_mode: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            cached_readiness = self._last_folder_readiness
+            cached_snapshot = self._last_preflight_snapshot
+        cache_matches, _reason = _preflight_snapshot_matches(
+            cached_snapshot,
+            input_path,
+            derivatives_path,
+            metadata_path,
+            processing_mode,
+        )
+        if cache_matches and isinstance(cached_readiness, dict):
+            return dict(cached_readiness)
+        readiness, snapshot = _folder_readiness_summary_with_snapshot(
+            input_path,
+            derivatives_path,
+            metadata_path,
+            processing_mode,
+        )
+        with self._lock:
+            if self.input_dir == input_path and self.derivatives_dir == derivatives_path and self.metadata_dir == metadata_path:
+                self._last_folder_readiness = readiness
+                self._last_preflight_snapshot = snapshot
+        return readiness
 
     def _queue_with_preview_sources(self, metadata_dir: Path) -> dict[str, Any] | None:
         queue = _read_json(metadata_dir / PRODUCTION_REVIEW_QUEUE_JSON)
@@ -1310,6 +1397,21 @@ def _folder_readiness_summary(
     metadata_dir: Path | None,
     processing_mode: str,
 ) -> dict[str, Any]:
+    summary, _snapshot = _folder_readiness_summary_with_snapshot(
+        input_dir,
+        derivatives_dir,
+        metadata_dir,
+        processing_mode,
+    )
+    return summary
+
+
+def _folder_readiness_summary_with_snapshot(
+    input_dir: Path | None,
+    derivatives_dir: Path | None,
+    metadata_dir: Path | None,
+    processing_mode: str,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
     selected_mode = _normalize_processing_mode(processing_mode)
     mode_payload = _processing_mode_payload(selected_mode)
     base: dict[str, Any] = {
@@ -1328,7 +1430,7 @@ def _folder_readiness_summary(
             "title_zh": "文件夹还没有保存",
             "message_zh": "请先保存扫描原图文件夹和处理后输出文件夹。",
             "next_steps_zh": ["填写两个文件夹位置。", "保存文件夹后查看准备情况。"],
-        }
+        }, None
     try:
         input_path = _safe_resolve_path(input_dir)
         output_path = _safe_resolve_path(derivatives_dir)
@@ -1340,7 +1442,7 @@ def _folder_readiness_summary(
             "title_zh": "文件夹位置不能读取",
             "message_zh": "有文件夹位置当前不能读取。",
             "next_steps_zh": ["重新选择本机可以打开的文件夹。", "保存文件夹后再查看准备情况。"],
-        }
+        }, None
     unsafe_guidance = _unsafe_folder_choice_guidance(input_path, output_path, metadata_path)
     if unsafe_guidance is not None:
         return {
@@ -1349,19 +1451,31 @@ def _folder_readiness_summary(
             "title_zh": unsafe_guidance["title_zh"],
             "message_zh": unsafe_guidance["message_zh"],
             "next_steps_zh": unsafe_guidance["next_steps_zh"],
-        }
+        }, None
     input_exists = _path_is_existing_dir(input_path)
     input_readable = input_exists and os.access(input_path, os.R_OK | os.X_OK)
     input_empty = True
     supported_image_count = 0
+    snapshot: dict[str, Any] | None = None
     if input_readable:
         try:
-            input_empty = not any(input_path.iterdir())
+            scan_snapshot = _scan_input_folder_preflight(input_path)
+            input_empty = bool(scan_snapshot["input_empty"])
+            supported_image_count = _safe_nonnegative_int(scan_snapshot["supported_image_count"])
+            snapshot = _preflight_snapshot_payload(
+                input_path,
+                output_path,
+                metadata_path,
+                selected_mode,
+                input_empty=input_empty,
+                supported_image_count=supported_image_count,
+                input_snapshot=scan_snapshot,
+            )
         except OSError:
             input_readable = False
-        if input_readable and not input_empty:
-            supported_image_count = _supported_image_count(input_path)
     output_writable = _folder_is_writable(output_path) and _folder_is_writable(metadata_path)
+    if snapshot is not None:
+        snapshot["output_writable"] = output_writable
     summary = {
         **base,
         "input_empty": input_empty,
@@ -1375,7 +1489,7 @@ def _folder_readiness_summary(
             "title_zh": "原图文件夹不能使用",
             "message_zh": "扫描原图文件夹不存在，或当前电脑不能读取。",
             "next_steps_zh": ["重新选择本批次的扫描原图文件夹。", "保存文件夹后再查看准备情况。"],
-        }
+        }, None
     if input_empty:
         return {
             **summary,
@@ -1383,7 +1497,7 @@ def _folder_readiness_summary(
             "title_zh": "原图文件夹是空的",
             "message_zh": "这个扫描原图文件夹里没有发现可处理文件。",
             "next_steps_zh": ["确认是否选到了本批次真正的扫描原图文件夹。", "放好图片后，重新保存文件夹。"],
-        }
+        }, snapshot
     if supported_image_count == 0:
         return {
             **summary,
@@ -1391,7 +1505,7 @@ def _folder_readiness_summary(
             "title_zh": "没有可处理的图片",
             "message_zh": "文件夹里没有找到当前支持处理的图片。",
             "next_steps_zh": ["确认原图是常见图片格式。", "如果格式不对，请重新导出为支持的图片格式后再处理。"],
-        }
+        }, snapshot
     if not output_writable:
         return {
             **summary,
@@ -1399,14 +1513,162 @@ def _folder_readiness_summary(
             "title_zh": "输出文件夹不能写入",
             "message_zh": "处理后输出文件夹或本机状态文件夹不能写入。",
             "next_steps_zh": ["确认输出磁盘没有只读、已解锁，并且空间足够。", "换一个可以写入的输出文件夹后重新保存。"],
-        }
-    return {
+        }, snapshot
+    ready_summary = {
         **summary,
         "status": "ready",
         "ready_to_start": True,
         "title_zh": "文件夹可以开始处理",
         "message_zh": f"本批预检结果：已识别到 {supported_image_count} 张可处理图片，输出文件夹可以写入。",
         "next_steps_zh": ["确认处理方式无误。", "点击开始处理。"],
+    }
+    if snapshot is not None:
+        snapshot["ready_to_start"] = True
+    return ready_summary, snapshot
+
+
+def _scan_input_folder_preflight(input_path: Path) -> dict[str, Any]:
+    directory_snapshots = [_path_stat_snapshot(input_path, ".")]
+    supported_file_snapshots: list[dict[str, Any]] = []
+    saw_entry = False
+    for candidate in input_path.rglob("*"):
+        saw_entry = True
+        if candidate.is_dir():
+            directory_snapshots.append(_path_stat_snapshot(candidate, _snapshot_relative_path(input_path, candidate)))
+        elif candidate.is_file() and candidate.suffix.lower() in PREVIEW_IMAGE_SUFFIXES:
+            supported_file_snapshots.append(_path_stat_snapshot(candidate, _snapshot_relative_path(input_path, candidate)))
+    return {
+        "input_empty": not saw_entry,
+        "supported_image_count": len(supported_file_snapshots),
+        "directory_snapshots": directory_snapshots,
+        "supported_file_snapshots": supported_file_snapshots,
+    }
+
+
+def _preflight_snapshot_payload(
+    input_path: Path,
+    output_path: Path,
+    metadata_path: Path,
+    processing_mode: str,
+    *,
+    input_empty: bool,
+    supported_image_count: int,
+    input_snapshot: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "schema_version": PREFLIGHT_SNAPSHOT_SCHEMA,
+        "created_monotonic": time.monotonic(),
+        "input_dir": str(input_path),
+        "derivatives_dir": str(output_path),
+        "metadata_dir": str(metadata_path),
+        "processing_mode": _normalize_processing_mode(processing_mode),
+        "input_empty": bool(input_empty),
+        "supported_image_count": max(0, supported_image_count),
+        "ready_to_start": False,
+        "output_writable": False,
+        "directory_snapshots": list(input_snapshot.get("directory_snapshots") or []),
+        "supported_file_snapshots": list(input_snapshot.get("supported_file_snapshots") or []),
+    }
+
+
+def _preflight_snapshot_matches(
+    snapshot: dict[str, Any] | None,
+    input_dir: Path | None,
+    derivatives_dir: Path | None,
+    metadata_dir: Path | None,
+    processing_mode: str,
+) -> tuple[bool, str]:
+    if not isinstance(snapshot, dict) or snapshot.get("schema_version") != PREFLIGHT_SNAPSHOT_SCHEMA:
+        return False, "missing_preflight_snapshot"
+    if input_dir is None or derivatives_dir is None or metadata_dir is None:
+        return False, "not_configured"
+    created_monotonic = snapshot.get("created_monotonic")
+    if not isinstance(created_monotonic, (int, float)):
+        return False, "incomplete_preflight_snapshot"
+    if time.monotonic() - float(created_monotonic) > PREFLIGHT_SNAPSHOT_MAX_AGE_SECONDS:
+        return False, "expired_preflight_snapshot"
+    try:
+        input_path = _safe_resolve_path(input_dir)
+        output_path = _safe_resolve_path(derivatives_dir)
+        metadata_path = _safe_resolve_path(metadata_dir)
+    except ValueError:
+        return False, "folder_path_unreadable"
+    if (
+        snapshot.get("input_dir") != str(input_path)
+        or snapshot.get("derivatives_dir") != str(output_path)
+        or snapshot.get("metadata_dir") != str(metadata_path)
+        or snapshot.get("processing_mode") != _normalize_processing_mode(processing_mode)
+    ):
+        return False, "preflight_identity_changed"
+    if _unsafe_folder_choice_guidance(input_path, output_path, metadata_path) is not None:
+        return False, "unsafe_folder_choice"
+    if not _path_is_existing_dir(input_path) or not os.access(input_path, os.R_OK | os.X_OK):
+        return False, "input_folder_unreadable"
+    if not _path_is_existing_dir(output_path):
+        return False, "output_folder_unusable"
+    if not _folder_is_writable(output_path) or not _folder_is_writable(metadata_path):
+        return False, "output_folder_unwritable"
+    directory_snapshots = snapshot.get("directory_snapshots")
+    supported_file_snapshots = snapshot.get("supported_file_snapshots")
+    if not isinstance(directory_snapshots, list) or not isinstance(supported_file_snapshots, list):
+        return False, "incomplete_preflight_snapshot"
+    if not _snapshot_records_match(input_path, directory_snapshots, expect_directory=True):
+        return False, "input_folder_changed"
+    if not _snapshot_records_match(input_path, supported_file_snapshots, expect_directory=False):
+        return False, "input_folder_changed"
+    if _safe_nonnegative_int(snapshot.get("supported_image_count")) != len(supported_file_snapshots):
+        return False, "incomplete_preflight_snapshot"
+    return True, "preflight_snapshot_matched"
+
+
+def _snapshot_records_match(input_path: Path, records: list[Any], *, expect_directory: bool) -> bool:
+    for record in records:
+        if not isinstance(record, dict):
+            return False
+        rel = record.get("relative_path")
+        if not isinstance(rel, str) or not rel:
+            return False
+        candidate = input_path if rel == "." else input_path / _safe_relative_path(rel)
+        try:
+            stat_result = candidate.stat()
+        except OSError:
+            return False
+        if expect_directory:
+            if not candidate.is_dir():
+                return False
+        elif not candidate.is_file() or candidate.suffix.lower() not in PREVIEW_IMAGE_SUFFIXES:
+            return False
+        if (
+            record.get("mtime_ns") != getattr(stat_result, "st_mtime_ns", None)
+            or record.get("ctime_ns") != getattr(stat_result, "st_ctime_ns", None)
+            or record.get("size") != stat_result.st_size
+        ):
+            return False
+    return True
+
+
+def _path_stat_snapshot(path: Path, relative_path: str) -> dict[str, Any]:
+    stat_result = path.stat()
+    return {
+        "relative_path": relative_path,
+        "mtime_ns": getattr(stat_result, "st_mtime_ns", None),
+        "ctime_ns": getattr(stat_result, "st_ctime_ns", None),
+        "size": stat_result.st_size,
+    }
+
+
+def _snapshot_relative_path(root: Path, path: Path) -> str:
+    relative = path.relative_to(root).as_posix()
+    return relative or "."
+
+
+def _preflight_reuse_summary(status: str, reason: str, supported_image_count: int) -> dict[str, Any]:
+    return {
+        "schema_version": "scan-qc.local-preflight-reuse-summary.v1",
+        "aggregate_only": True,
+        "status": status,
+        "reason": reason,
+        "supported_image_count": max(0, supported_image_count),
     }
 
 
