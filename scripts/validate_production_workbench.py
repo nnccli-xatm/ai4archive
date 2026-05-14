@@ -301,6 +301,108 @@ def review_decision_contract_fixture(queue: dict[str, object]) -> dict[str, obje
     }
 
 
+def js_function_body(html: str, name: str) -> str | None:
+    marker = f"function {name}("
+    start = html.find(marker)
+    if start == -1:
+        return None
+    body_start = html.find("{", start)
+    if body_start == -1:
+        return None
+    depth = 0
+    for index in range(body_start, len(html)):
+        char = html[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return html[body_start + 1 : index]
+    return None
+
+
+def require_js_tokens(errors: list[str], label: str, body: str | None, tokens: list[str]) -> None:
+    if body is None:
+        errors.append(f"missing preview fit-control contract function: {label}")
+        return
+    for token in tokens:
+        if token not in body:
+            errors.append(f"preview fit-control contract missing token in {label}: {token}")
+
+
+def validate_preview_fit_controls(html: str, errors: list[str]) -> None:
+    """Keep static coverage focused on aggregate preview control behavior."""
+
+    require_js_tokens(
+        errors,
+        "updatePreviewControls",
+        js_function_body(html, "updatePreviewControls"),
+        [
+            "const disabled = !hasImage;",
+            "els.fitPreviewButton.disabled = disabled;",
+            "els.zoomOutButton.disabled = disabled || state.previewZoom <= 0.5;",
+            "els.zoomInButton.disabled = disabled || state.previewZoom >= 3;",
+            'els.zoomState.textContent = "查看：暂无图片";',
+            'els.zoomState.textContent = "查看：适合窗口";',
+            "els.zoomState.textContent = `查看：${previewZoomPercent()}`;",
+        ],
+    )
+    require_js_tokens(
+        errors,
+        "applyImageView",
+        js_function_body(html, "applyImageView"),
+        [
+            'const images = Array.from(els.previewFrame.querySelectorAll("img"));',
+            "updatePreviewControls(false);",
+            'image.classList.toggle("zoomed", !state.previewFit);',
+            'image.style.width = state.previewFit ? "100%" : `${Math.round(100 * state.previewZoom)}%`;',
+            'image.style.height = state.previewFit ? "100%" : "auto";',
+            "updatePreviewControls(true);",
+        ],
+    )
+    require_js_tokens(
+        errors,
+        "setPreviewFit",
+        js_function_body(html, "setPreviewFit"),
+        [
+            "state.previewFit = true;",
+            "state.previewZoom = 1;",
+            "applyImageView();",
+        ],
+    )
+    require_js_tokens(
+        errors,
+        "setPreviewZoom",
+        js_function_body(html, "setPreviewZoom"),
+        [
+            "state.previewFit = false;",
+            "state.previewZoom = Math.max(0.5, Math.min(3, Number(nextZoom) || 1));",
+            "applyImageView();",
+        ],
+    )
+    require_js_tokens(
+        errors,
+        "renderPreview",
+        js_function_body(html, "renderPreview"),
+        [
+            'els.previewFrame.classList.toggle("comparison-shell", canCompare && state.comparisonMode === "side_by_side");',
+            "applyImageView();",
+            "updatePreviewControls(false);",
+        ],
+    )
+    for handler_token in [
+        'els.fitPreviewButton.addEventListener("click", setPreviewFit);',
+        'els.zoomOutButton.addEventListener("click", () => setPreviewZoom(state.previewZoom - 0.25));',
+        'els.zoomInButton.addEventListener("click", () => setPreviewZoom(state.previewZoom + 0.25));',
+        'els.resetPreviewButton.addEventListener("click", resetPreviewView);',
+    ]:
+        if handler_token not in html:
+            errors.append(f"preview fit-control contract missing event handler: {handler_token}")
+    render_body = js_function_body(html, "renderPreview") or ""
+    if render_body.count("applyImageView();") < 2:
+        errors.append("preview fit-control contract must reapply image view after single and comparison preview renders")
+
+
 def main() -> int:
     html = WORKBENCH.read_text(encoding="utf-8")
     text = visible_text(html)
@@ -626,6 +728,7 @@ def main() -> int:
     ]:
         if required_script_token not in html:
             errors.append(f"missing review queue workflow script token: {required_script_token}")
+    validate_preview_fit_controls(html, errors)
 
     for old_finish_copy in ["导出复核决定", "完成导出", "把处理后图片交给验收或移交流程"]:
         if old_finish_copy in text:
