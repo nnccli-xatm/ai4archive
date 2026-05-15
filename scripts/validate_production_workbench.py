@@ -682,11 +682,16 @@ def main() -> int:
         errors.append("missing operator summary mapping")
     for stage_timing_token in [
         'id="stageTimingText"',
+        'id="stageTimingAdviceText"',
         "function deriveStageTimingLabel(summary, progress)",
+        "function deriveStageTimingAdvice(summary, progress)",
         "source.stage_timings",
+        "timings.aggregate_only !== true",
         "elapsed_seconds",
+        "主要耗时在生成处理后图片，请继续等待；如长时间没有变化再交管理员处理。",
         '["completed", "finished", "running"].includes(stage.status)',
         'els.stageTimingText.classList.toggle("hidden", !state.stageTimingLabel);',
+        'els.stageTimingAdviceText.classList.toggle("hidden", !state.stageTimingAdvice);',
         "^[\\u4e00-\\u9fff\\s]{2,18}$",
     ]:
         if stage_timing_token not in html:

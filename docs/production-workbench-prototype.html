@@ -1257,6 +1257,7 @@
           <div class="progress-track">
             <span id="progressText">进度：未开始</span>
             <span class="stage-timing-text hidden" id="stageTimingText"></span>
+            <span class="stage-timing-text hidden" id="stageTimingAdviceText"></span>
             <div class="progress-bar" aria-label="处理进度">
               <div class="progress-fill" id="progressFill"></div>
             </div>
@@ -1520,6 +1521,7 @@
       lastServerOutputPath: "",
       progressLabel: "",
       stageTimingLabel: "",
+      stageTimingAdvice: "",
       launchLocked: false,
       waitingForNewSetup: false,
       openOutputFolderAvailable: false,
@@ -1548,6 +1550,7 @@
       progressFill: document.getElementById("progressFill"),
       progressText: document.getElementById("progressText"),
       stageTimingText: document.getElementById("stageTimingText"),
+      stageTimingAdviceText: document.getElementById("stageTimingAdviceText"),
       pendingText: document.getElementById("pendingText"),
       sourceText: document.getElementById("sourceText"),
       readyText: document.getElementById("readyText"),
@@ -2192,6 +2195,8 @@
       els.progressText.textContent = state.progressLabel || (state.progress ? `进度：${state.progress}%` : "进度：未开始");
       els.stageTimingText.textContent = state.stageTimingLabel;
       els.stageTimingText.classList.toggle("hidden", !state.stageTimingLabel);
+      els.stageTimingAdviceText.textContent = state.stageTimingAdvice;
+      els.stageTimingAdviceText.classList.toggle("hidden", !state.stageTimingAdvice);
       els.pendingText.textContent = `${state.attentionFiles} 个`;
       els.sourceText.textContent = `${state.totalImages} 张`;
       els.readyText.textContent = `${state.readyImages} 张`;
@@ -2605,13 +2610,23 @@
       finish: "整理处理结果"
     };
 
-    function safeStageTimingLabel(stage) {
+    const slowStageAdviceByLabel = {
+      检查扫描图片: "主要耗时在检查扫描图片，请先继续等待；如一直没有变化，再检查原图批次。",
+      生成处理后图片: "主要耗时在生成处理后图片，请继续等待；如长时间没有变化再交管理员处理。",
+      整理处理结果: "主要耗时在整理处理结果，请继续等待；如长时间没有变化再交管理员处理。"
+    };
+
+    function safeStageTimingLabelInfo(stage) {
       const rawLabel = typeof stage.label_zh === "string" ? stage.label_zh.trim() : "";
       const rawId = typeof stage.id === "string" ? stage.id.trim().toLowerCase() : "";
       const mapped = aggregateStageLabelById[rawId] || "";
-      if (!rawLabel) return mapped;
+      if (!rawLabel) return { label: mapped, safeForAdvice: Boolean(mapped) };
       const unsafe = !/^[\u4e00-\u9fff\s]{2,18}$/.test(rawLabel) || /([A-Za-z]:\\|\/Users\/|\/tmp\/|\/private\/|\\\\|\.jpe?g\b|\.png\b|\.tiff?\b)/i.test(rawLabel);
-      return unsafe ? mapped : rawLabel;
+      return unsafe ? { label: mapped, safeForAdvice: false } : { label: rawLabel, safeForAdvice: true };
+    }
+
+    function safeStageTimingLabel(stage) {
+      return safeStageTimingLabelInfo(stage).label;
     }
 
     function formatStageSeconds(value) {
@@ -2623,12 +2638,14 @@
     function stageTimingItems(source, includeAllStages) {
       const timings = source && source.stage_timings;
       if (!timings || !Array.isArray(timings.stages)) return [];
+      if (timings.aggregate_only !== true) return [];
       return timings.stages
         .map((stage) => {
-          const label = safeStageTimingLabel(stage || {});
+          const labelInfo = safeStageTimingLabelInfo(stage || {});
           const elapsed = formatStageSeconds(stage && stage.elapsed_seconds);
+          const elapsedSeconds = Number(stage && stage.elapsed_seconds);
           const status = String((stage && stage.status) || "").toLowerCase();
-          return { label, elapsed, status };
+          return { label: labelInfo.label, elapsed, elapsedSeconds, safeForAdvice: labelInfo.safeForAdvice, status };
         })
         .filter((stage) => {
           if (!stage.label || !stage.elapsed) return false;
@@ -2643,6 +2660,18 @@
       const items = progressItems.length ? progressItems : summaryItems;
       if (!items.length) return "";
       return items.map((stage) => `${stage.label} ${stage.elapsed}`).join("；");
+    }
+
+    function deriveStageTimingAdvice(summary, progress) {
+      const rawStatus = String((summary && summary.status) || (progress && progress.state) || "").toLowerCase();
+      if (["blocked", "failed", "error"].includes(rawStatus)) return "";
+      const progressItems = stageTimingItems(progress, false);
+      const summaryItems = progressItems.length ? [] : stageTimingItems(summary, false);
+      const items = (progressItems.length ? progressItems : summaryItems)
+        .filter((stage) => stage.safeForAdvice && slowStageAdviceByLabel[stage.label] && ["completed", "finished", "running"].includes(stage.status));
+      if (!items.length) return "";
+      const slowest = items.reduce((best, stage) => stage.elapsedSeconds > best.elapsedSeconds ? stage : best, items[0]);
+      return slowStageAdviceByLabel[slowest.label] || "";
     }
 
     function runningGuidanceText() {
@@ -2793,6 +2822,7 @@
       state.progress = deriveProgress(summary, progress);
       state.progressLabel = deriveProgressLabel(summary, progress);
       state.stageTimingLabel = deriveStageTimingLabel(summary, progress);
+      state.stageTimingAdvice = deriveStageTimingAdvice(summary, progress);
       state.reviewItems = nextStatus === "needs_review" ? makeReviewItems(state.attentionFiles) : [];
       state.decisions = {};
       state.operatorName = "";
@@ -2820,6 +2850,7 @@
         state.outputChosen = true;
         state.status = "failed";
         state.operatorMessage = payload.last_error_zh;
+        state.stageTimingAdvice = "";
         state.recoveryGuidance = payload.recovery_guidance || {
           kind: "processing_failed_admin",
           title_zh: "本机处理启动失败",
@@ -2867,6 +2898,7 @@
       } else if (payload.running) {
         state.launchLocked = false;
         setStatus("processing");
+        state.stageTimingAdvice = "";
         els.loadStatus.textContent = runningGuidanceText();
       } else if (payload.recovery_guidance) {
         state.recoveryGuidance = payload.recovery_guidance;
@@ -3393,6 +3425,7 @@
       state.progress = 0;
       state.progressLabel = "";
       state.stageTimingLabel = "";
+      state.stageTimingAdvice = "";
       state.readyImages = 0;
       state.totalImages = 0;
       state.attentionFiles = 0;
