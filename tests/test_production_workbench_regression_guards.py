@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -49,6 +50,59 @@ class ProductionWorkbenchRegressionGuardTests(unittest.TestCase):
             "上传",
         ]:
             self.assertNotIn(forbidden, html)
+
+    def test_aggregate_processing_wait_copy_uses_operator_safe_chinese(self) -> None:
+        html = WORKBENCH_HTML.read_text(encoding="utf-8")
+
+        for required in [
+            'id="aggregateProcessingText"',
+            "function deriveAggregateProcessingLabel(summary, progress)",
+            "function aggregateProcessingAvailable(aggregate)",
+            "aggregate.aggregate_only === true",
+            "aggregate.unavailable_reason",
+            "聚合处理速度：",
+            "张/分钟",
+            "预计还需等待",
+            "少于 1 分钟",
+            "暂不能估算剩余时间，继续等待处理进度更新。",
+            'els.aggregateProcessingText.classList.toggle("hidden", !state.aggregateProcessingLabel);',
+        ]:
+            self.assertIn(required, html)
+
+        for forbidden_visible in [
+            "missing_total_images",
+            "missing_processed_images",
+            "no_total_images",
+            "no_processed_images",
+            "no_elapsed_seconds",
+            "null",
+            "undefined",
+        ]:
+            self.assertNotIn(f"`{forbidden_visible}`", html)
+
+    def test_aggregate_processing_fixtures_cover_running_and_finished_states(self) -> None:
+        running_progress = json.loads(
+            (ROOT / "docs" / "fixtures" / "production-run-running" / "production_run_progress.json").read_text(encoding="utf-8")
+        )
+        finished_summary = json.loads(
+            (ROOT / "docs" / "fixtures" / "production-run-finished" / "production_run_summary.json").read_text(encoding="utf-8")
+        )
+
+        running = running_progress["aggregate_processing"]
+        self.assertTrue(running["aggregate_only"])
+        self.assertEqual(running["total_images"], 120)
+        self.assertEqual(running["processed_images"], 48)
+        self.assertEqual(running["remaining_images"], 72)
+        self.assertEqual(running["images_per_minute"], 4.8)
+        self.assertEqual(running["estimated_remaining_seconds"], 900.0)
+        self.assertIsNone(running["unavailable_reason"])
+
+        finished = finished_summary["aggregate_processing"]
+        self.assertTrue(finished["aggregate_only"])
+        self.assertEqual(finished["remaining_images"], 0)
+        self.assertEqual(finished["images_per_minute"], 6.0)
+        self.assertEqual(finished["estimated_remaining_seconds"], 0.0)
+        self.assertIsNone(finished["unavailable_reason"])
 
     def test_comparison_preview_layout_keeps_visible_scrollable_image_area(self) -> None:
         html = WORKBENCH_HTML.read_text(encoding="utf-8")
