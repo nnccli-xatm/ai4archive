@@ -7144,6 +7144,119 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(record["despeckle_reason"], "isolated dark pixels replaced")
             self.assertIn("despeckle_isolated_pixels", record["operations"])
 
+    def test_despeckle_preserves_synthetic_text_marks_and_cleans_sparse_noise(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "A001_0001.png"
+            image = Image.new("RGB", (120, 90), "white")
+            draw = ImageDraw.Draw(image)
+            draw.line((14, 35, 45, 35), fill=(0, 0, 0), width=2)
+            draw.line((18, 30, 18, 42), fill=(0, 0, 0), width=2)
+            image.putpixel((50, 36), (0, 0, 0))
+            draw.line((92, 8, 110, 8), fill=(0, 0, 0), width=2)
+            image.putpixel((114, 8), (0, 0, 0))
+            draw.rectangle((31, 55, 72, 75), outline=(0, 0, 0), width=2)
+            draw.line((5, 12, 5, 82), fill=(0, 0, 0), width=2)
+            draw.line((11, 21, 18, 25), fill=(0, 0, 0), width=2)
+            draw.line((78, 58, 90, 64), fill=(0, 0, 0), width=2)
+            for point in [(82, 15), (65, 28)]:
+                image.putpixel(point, (0, 0, 0))
+            image.save(source)
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+
+            with Image.open(process_dir / "images" / "A001_0001.png") as processed:
+                grayscale = processed.convert("L")
+                for protected_point in [(30, 35), (50, 36), (114, 8), (31, 55), (5, 40), (13, 22), (84, 61)]:
+                    self.assertLessEqual(grayscale.getpixel(protected_point), 5)
+                for removed_noise in [(82, 15), (65, 28)]:
+                    self.assertGreaterEqual(grayscale.getpixel(removed_noise), 240)
+            record = manifest["files"][0]
+            self.assertTrue(record["despeckled"])
+            self.assertEqual(record["despeckle_pixels_changed"], 2)
+            self.assertEqual(record["despeckle_reason"], "isolated dark pixels replaced")
+            self.assertEqual(record["processing_audit"]["despeckle_pixel_ratio"], round(2 / (120 * 90), 6))
+
+    def test_despeckle_preserves_edge_near_dark_marks_with_auditable_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "A001_0001.png"
+            image = Image.new("RGB", (80, 60), "white")
+            for point in [(4, 4), (76, 55)]:
+                image.putpixel(point, (0, 0, 0))
+            image.save(source)
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+
+            with Image.open(process_dir / "images" / "A001_0001.png") as processed:
+                grayscale = processed.convert("L")
+                for point in [(4, 4), (76, 55)]:
+                    self.assertLessEqual(grayscale.getpixel(point), 5)
+            record = manifest["files"][0]
+            self.assertFalse(record["despeckled"])
+            self.assertEqual(record["despeckle_pixels_changed"], 0)
+            self.assertEqual(record["despeckle_reason"], "protected edge dark marks preserved")
+            self.assertIn("despeckle_noop", record["operations"])
+
+    def test_despeckle_skips_excessive_pixel_changes_with_manual_review_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "A001_0001.png"
+            image = Image.new("RGB", (100, 100), "white")
+            for y in range(8, 94, 7):
+                for x in range(8, 94, 7):
+                    image.putpixel((x, y), (0, 0, 0))
+            image.save(source)
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            with mock.patch("archive_scan_qc.processing._despeckle_has_nearby_content_context", return_value=False):
+                manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+
+            with Image.open(process_dir / "images" / "A001_0001.png") as processed:
+                self.assertEqual(_dark_pixel_count(processed), _dark_pixel_count(image))
+            record = manifest["files"][0]
+            self.assertFalse(record["despeckled"])
+            self.assertEqual(record["despeckle_pixels_changed"], 0)
+            self.assertEqual(record["despeckle_reason"], "despeckle skipped: pixel change ratio exceeds safety threshold")
+
+    def test_despeckle_skips_high_density_candidates_with_manual_review_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "A001_0001.png"
+            image = Image.new("RGB", (100, 100), "white")
+            for y in range(7, 95, 5):
+                for x in range(7, 95, 5):
+                    image.putpixel((x, y), (0, 0, 0))
+            image.save(source)
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+
+            with Image.open(process_dir / "images" / "A001_0001.png") as processed:
+                self.assertEqual(_dark_pixel_count(processed), _dark_pixel_count(image))
+            record = manifest["files"][0]
+            self.assertFalse(record["despeckled"])
+            self.assertEqual(record["despeckle_pixels_changed"], 0)
+            self.assertEqual(record["despeckle_reason"], "despeckle skipped: candidate density exceeds safety threshold")
+
     def test_despeckle_candidate_points_prefilter_isolated_speckles_only(self) -> None:
         mask = Image.new("L", (80, 60), 0)
         draw = ImageDraw.Draw(mask)
@@ -7156,6 +7269,13 @@ class ScanQcTest(unittest.TestCase):
             sorted(_despeckle_candidate_points(mask)),
             [(5, 5), (20, 8), (40, 50), (74, 12)],
         )
+
+    def test_despeckle_candidate_points_protect_near_edge_candidates(self) -> None:
+        mask = Image.new("L", (80, 60), 0)
+        for point in [(4, 4), (5, 5), (74, 54), (75, 55)]:
+            mask.putpixel(point, 255)
+
+        self.assertEqual(sorted(_despeckle_candidate_points(mask)), [(5, 5), (74, 54)])
 
     @unittest.skipUnless(importlib.util.find_spec("numpy"), "NumPy optional fast path unavailable")
     def test_despeckle_candidate_points_numpy_matches_fallback_synthetic_masks(self) -> None:
@@ -7281,7 +7401,7 @@ class ScanQcTest(unittest.TestCase):
             record = manifest["files"][0]
             self.assertFalse(record["despeckled"])
             self.assertEqual(record["despeckle_pixels_changed"], 0)
-            self.assertEqual(record["despeckle_reason"], "no isolated dark pixels found")
+            self.assertEqual(record["despeckle_reason"], "protected edge dark marks preserved")
 
     def test_despeckle_preserves_clustered_dark_marks(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

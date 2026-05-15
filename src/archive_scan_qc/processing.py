@@ -1108,17 +1108,15 @@ def _process_image(
     despeckle_backend_mode = "disabled"
     with _operation_timer(operation_timings, "despeckle", enabled=options.despeckle):
         if options.despeckle:
-            processed, despeckle_pixels_changed, despeckle_backend_mode = _despeckle_isolated_pixels(
+            processed, despeckle_pixels_changed, despeckle_backend_mode, despeckle_reason = _despeckle_isolated_pixels_with_reason(
                 processed,
                 backend=options.despeckle_backend,
             )
             if despeckle_pixels_changed:
                 operations.append("despeckle_isolated_pixels")
                 despeckled = True
-                despeckle_reason = "isolated dark pixels replaced"
             else:
                 operations.append("despeckle_noop")
-                despeckle_reason = "no isolated dark pixels found"
         else:
             operations.append("despeckle_disabled")
     if options.despeckle and "despeckle" in operation_timings:
@@ -1588,30 +1586,53 @@ def _dark_edge_run(image: Image.Image, side: str, max_pixels: int) -> int:
     return run
 
 
+_DESPECKLE_DARK_THRESHOLD = 60
+_DESPECKLE_NEAR_DARK_THRESHOLD = 90
+_DESPECKLE_MIN_BACKGROUND_MEDIAN = 120
+_DESPECKLE_MAX_CANDIDATE_RATIO = 0.02
+_DESPECKLE_MAX_CHANGED_RATIO = 0.01
+_DESPECKLE_CONTENT_CONTEXT_RADIUS = 8
+_DESPECKLE_CONTENT_CONTEXT_MIN_DARK_PIXELS = 6
+
+
 def _despeckle_isolated_pixels(image: Image.Image, *, backend: str = "fallback") -> tuple[Image.Image, int, str]:
+    processed, changed, backend_mode, _reason = _despeckle_isolated_pixels_with_reason(image, backend=backend)
+    return processed, changed, backend_mode
+
+
+def _despeckle_isolated_pixels_with_reason(image: Image.Image, *, backend: str = "fallback") -> tuple[Image.Image, int, str, str]:
     if backend not in {"fallback", "numpy"}:
         raise ValueError("despeckle backend must be fallback or numpy")
 
     grayscale = image.convert("L")
     width, height = grayscale.size
     if width < 3 or height < 3:
-        return image.copy(), 0, "not_applicable"
+        return image.copy(), 0, "not_applicable", "despeckle not applicable to very small image"
 
     min_value, _max_value = grayscale.getextrema()
-    if min_value > 60:
-        return image.copy(), 0, "not_applicable"
+    if min_value > _DESPECKLE_DARK_THRESHOLD:
+        return image.copy(), 0, "not_applicable", "no isolated dark pixels found"
 
-    dark_mask = grayscale.point(lambda value: 255 if value <= 60 else 0, mode="L")
+    dark_mask = grayscale.point(lambda value: 255 if value <= _DESPECKLE_DARK_THRESHOLD else 0, mode="L")
     candidates, backend_mode = _despeckle_candidate_points_with_backend(dark_mask, backend=backend)
     if not candidates:
-        return image.copy(), 0, backend_mode
+        reason = (
+            "protected edge dark marks preserved"
+            if _despeckle_mask_touches_protected_edge(dark_mask)
+            else "no isolated dark pixels found"
+        )
+        return image.copy(), 0, backend_mode, reason
+
+    source_area = max(1, width * height)
+    if len(candidates) / source_area > _DESPECKLE_MAX_CANDIDATE_RATIO:
+        return image.copy(), 0, backend_mode, "despeckle skipped: candidate density exceeds safety threshold"
 
     gray_pixels = grayscale.load()
     source: Image.Image | None = None
     output: Image.Image | None = None
     source_pixels: Any = None
     output_pixels: Any = None
-    changed = 0
+    replacements: list[tuple[int, int, tuple[int, int, int]]] = []
     for x, y in candidates:
         dark_neighbors = 0
         neighbor_values: list[int] = []
@@ -1621,7 +1642,7 @@ def _despeckle_isolated_pixels(image: Image.Image, *, backend: str = "fallback")
                     continue
                 value = gray_pixels[nx, ny]
                 neighbor_values.append(value)
-                if value <= 90:
+                if value <= _DESPECKLE_NEAR_DARK_THRESHOLD:
                     dark_neighbors += 1
         if dark_neighbors > 1:
             continue
@@ -1631,20 +1652,20 @@ def _despeckle_isolated_pixels(image: Image.Image, *, backend: str = "fallback")
             for nx in range(max(0, x - 2), min(width, x + 3)):
                 if nx == x and ny == y:
                     continue
-                if gray_pixels[nx, ny] <= 90:
+                if gray_pixels[nx, ny] <= _DESPECKLE_NEAR_DARK_THRESHOLD:
                     wider_dark += 1
         if wider_dark > 2:
             continue
-
-        median_gray = sorted(neighbor_values)[len(neighbor_values) // 2]
-        if median_gray < 120:
+        if _despeckle_has_nearby_content_context(gray_pixels, width, height, x, y):
             continue
 
-        if output is None:
+        median_gray = sorted(neighbor_values)[len(neighbor_values) // 2]
+        if median_gray < _DESPECKLE_MIN_BACKGROUND_MEDIAN:
+            continue
+
+        if source is None:
             source = image if image.mode == "RGB" else image.convert("RGB")
-            output = source.copy()
             source_pixels = source.load()
-            output_pixels = output.load()
         neighbor_rgb = [
             source_pixels[nx, ny]
             for ny in range(y - 1, y + 2)
@@ -1652,16 +1673,55 @@ def _despeckle_isolated_pixels(image: Image.Image, *, backend: str = "fallback")
             if nx != x or ny != y
         ]
         replacement = tuple(sorted(channel)[len(channel) // 2] for channel in zip(*neighbor_rgb))
-        output_pixels[x, y] = replacement
-        changed += 1
+        replacements.append((x, y, replacement))
 
-    if output is None:
-        return image.copy(), 0, backend_mode
+    changed = len(replacements)
+    if not changed:
+        return image.copy(), 0, backend_mode, "no isolated dark pixels found"
+    if changed / source_area > _DESPECKLE_MAX_CHANGED_RATIO:
+        return image.copy(), 0, backend_mode, "despeckle skipped: pixel change ratio exceeds safety threshold"
+
+    source = image if image.mode == "RGB" else image.convert("RGB")
+    output = source.copy()
+    output_pixels = output.load()
+    for x, y, replacement in replacements:
+        output_pixels[x, y] = replacement
+
     if image.mode == "L":
-        return output.convert("L"), changed, backend_mode
+        return output.convert("L"), changed, backend_mode, "isolated dark pixels replaced"
     if image.mode == "RGB":
-        return output, changed, backend_mode
-    return output.convert(image.mode), changed, backend_mode
+        return output, changed, backend_mode, "isolated dark pixels replaced"
+    return output.convert(image.mode), changed, backend_mode, "isolated dark pixels replaced"
+
+
+def _despeckle_protected_edge_margin(width: int, height: int) -> int:
+    return min(5, max(1, min(width, height) // 12))
+
+
+def _despeckle_mask_touches_protected_edge(dark_mask: Image.Image) -> bool:
+    bbox = dark_mask.getbbox()
+    if not bbox:
+        return False
+    width, height = dark_mask.size
+    margin = _despeckle_protected_edge_margin(width, height)
+    left, top, right, bottom = bbox
+    return left < margin or top < margin or right > width - margin or bottom > height - margin
+
+
+def _despeckle_has_nearby_content_context(gray_pixels: Any, width: int, height: int, x: int, y: int) -> bool:
+    dark_pixels = 0
+    radius = _DESPECKLE_CONTENT_CONTEXT_RADIUS
+    for ny in range(max(0, y - radius), min(height, y + radius + 1)):
+        for nx in range(max(0, x - radius), min(width, x + radius + 1)):
+            if nx == x and ny == y:
+                continue
+            if abs(nx - x) <= 2 and abs(ny - y) <= 2:
+                continue
+            if gray_pixels[nx, ny] <= _DESPECKLE_NEAR_DARK_THRESHOLD:
+                dark_pixels += 1
+                if dark_pixels >= _DESPECKLE_CONTENT_CONTEXT_MIN_DARK_PIXELS:
+                    return True
+    return False
 
 
 def _despeckle_candidate_points(dark_mask: Image.Image, *, backend: str = "fallback") -> list[tuple[int, int]]:
@@ -1723,6 +1783,15 @@ def _despeckle_candidate_points_numpy(dark_mask: Image.Image) -> list[tuple[int,
         candidate_mask[:, crop_width - 1] = False
     if bottom == height:
         candidate_mask[crop_height - 1, :] = False
+    margin = _despeckle_protected_edge_margin(width, height)
+    if left < margin:
+        candidate_mask[:, : margin - left] = False
+    if top < margin:
+        candidate_mask[: margin - top, :] = False
+    if right > width - margin:
+        candidate_mask[:, width - margin - left :] = False
+    if bottom > height - margin:
+        candidate_mask[height - margin - top :, :] = False
 
     local_y_values, local_x_values = np.nonzero(candidate_mask)
     return [
@@ -1744,6 +1813,7 @@ def _despeckle_candidate_points_fallback(dark_mask: Image.Image) -> list[tuple[i
     if left >= width - 1 or top >= height - 1 or right <= 1 or bottom <= 1:
         return []
 
+    margin = _despeckle_protected_edge_margin(width, height)
     crop_width = right - left
     crop_values = dark_mask.crop(candidate_bbox).tobytes()
     candidates: list[tuple[int, int]] = []
@@ -1755,6 +1825,8 @@ def _despeckle_candidate_points_fallback(dark_mask: Image.Image) -> list[tuple[i
         x = left + local_x
         y = top + local_y
         if x == 0 or y == 0 or x == width - 1 or y == height - 1:
+            continue
+        if x < margin or y < margin or x >= width - margin or y >= height - margin:
             continue
 
         dark_neighbors = 0
