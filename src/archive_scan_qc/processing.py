@@ -957,6 +957,19 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
         for record in processed_records
         if isinstance(record.get("despeckle_reason"), str)
     ]
+    background_stains_reasons = [
+        record.get("background_stains_reason")
+        for record in processed_records
+        if isinstance(record.get("background_stains_reason"), str)
+    ]
+    background_stains_skipped_reasons = [
+        reason
+        for record in processed_records
+        for reason in [record.get("background_stains_reason")]
+        if record.get("background_stains_lightened") is False
+        and isinstance(reason, str)
+        and reason != "background stain lightening disabled"
+    ]
     return {
         "schema_version": "scan-qc.processing.audit.v1",
         "generated_at": manifest["generated_at"],
@@ -1049,6 +1062,12 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             ),
             "background_stains_lightened_files": sum(
                 1 for audit in audit_records if audit.get("background_stains_lightened") is True
+            ),
+            "background_stains_skipped_files": sum(
+                1
+                for record in processed_records
+                if record.get("background_stains_lightened") is False
+                and record.get("background_stains_reason") not in {None, "background stain lightening disabled"}
             ),
             "scanlines_lightened_files": sum(1 for audit in audit_records if audit.get("scanlines_lightened") is True),
             "faded_text_enhanced_files": sum(
@@ -1178,6 +1197,30 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                 ),
                 "backend_mode": _aggregate_despeckle_backend(processed_records, options.despeckle)["backend_mode"],
                 "reason_distribution": _reason_counts(reason for reason in despeckle_reasons if isinstance(reason, str)),
+            },
+            "background_stains": {
+                "applied_files": sum(
+                    1 for audit in audit_records if audit.get("background_stains_lightened") is True
+                ),
+                "skipped_files": sum(
+                    1
+                    for record in processed_records
+                    if record.get("background_stains_lightened") is False
+                    and record.get("background_stains_reason") not in {None, "background stain lightening disabled"}
+                ),
+                "changed_pixel_ratio": _aggregate_metric(audit_records, "background_stains_changed_pixel_ratio"),
+                "candidate_pixel_ratio": _aggregate_metric(audit_records, "background_stains_candidate_pixel_ratio"),
+                "reason_distribution": _reason_counts(
+                    reason for reason in background_stains_reasons if isinstance(reason, str)
+                ),
+                "skip_reason_distribution": _reason_counts(background_stains_skipped_reasons),
+                "protection_triggered_files": sum(1 for reason in background_stains_skipped_reasons if "risk" in reason),
+                "conservative_scope_skip_files": sum(
+                    1 for reason in background_stains_skipped_reasons if "conservative scope" in reason
+                ),
+                "low_confidence_skip_files": sum(
+                    1 for reason in background_stains_skipped_reasons if "low-confidence" in reason
+                ),
             },
         },
         "reuse_decisions": {
@@ -2001,11 +2044,11 @@ def _edge_shadow_noop(image: Image.Image, reason: str) -> EdgeShadowLighteningRe
 def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundStainLighteningResult:
     if image.width < 80 or image.height < 80:
         return _background_stains_noop(image, "background stain lightening skipped: image too small")
-    color_risk = _tone_color_risk_reason(image)
+    color_risk = _background_stain_color_risk_reason(image)
     if color_risk:
         return _background_stains_noop(
             image,
-            "background stain lightening skipped: color content, stamp, or annotation risk",
+            f"background stain lightening skipped: {color_risk}",
         )
 
     grayscale = image.convert("L")
@@ -2018,7 +2061,7 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
     p99 = _histogram_percentile(histogram, total, 0.99)
     if p95 < 210 or p50 < 195:
         return _background_stains_noop(image, "background stain lightening skipped: page is too dark")
-    if p99 - p05 < 24:
+    if p99 - p05 < 14:
         return _background_stains_noop(image, "background stain lightening skipped: low-confidence tonal evidence")
 
     foreground_threshold = min(150, max(80, p50 - 46))
@@ -2037,20 +2080,33 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
     background = max(p90, p95 - 2)
     min_stain = max(160, min(p50 + 4, background - 30))
     max_stain = max(min_stain, background - 8)
-    candidate = grayscale.point(
+    pixel_candidate = grayscale.point(
         lambda value: 255 if min_stain <= value <= max_stain and 8 <= background - value <= 34 else 0,
         mode="L",
     )
+    blur_radius = max(3, min(9, int(round(min(image.width, image.height) * 0.035))))
+    low_frequency = grayscale.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+    light_tonal_candidate = grayscale.point(
+        lambda value: 255 if 165 <= value <= background - 4 and 4 <= background - value <= 35 else 0,
+        mode="L",
+    )
+    low_frequency_candidate = low_frequency.point(
+        lambda value: 255 if 170 <= value <= background - 5 and 5 <= background - value <= 28 else 0,
+        mode="L",
+    )
+    low_frequency_candidate = ImageChops.multiply(low_frequency_candidate, light_tonal_candidate)
+    candidate = ImageChops.lighter(pixel_candidate, low_frequency_candidate)
     candidate = _clear_mask_edges(candidate, max(3, int(round(min(image.width, image.height) * 0.025))))
     raw_candidate_ratio = _mask_ratio(candidate)
-    if raw_candidate_ratio > 0.035:
+    if raw_candidate_ratio > 0.09:
         return _background_stains_noop(
             image,
             "background stain lightening skipped: broad uneven lighting is outside conservative scope",
             raw_candidate_ratio,
         )
     protected = foreground.filter(ImageFilter.MaxFilter(13))
-    if _mask_ratio(ImageChops.multiply(candidate, protected)) > 0.00005:
+    protected_overlap_ratio = _mask_ratio(ImageChops.multiply(candidate, protected))
+    if protected_overlap_ratio > 0.001 or protected_overlap_ratio / max(raw_candidate_ratio, 0.000001) > 0.02:
         return _background_stains_noop(
             image,
             "background stain lightening skipped: stain candidate near text, stamp, annotation, or original mark risk",
@@ -2059,7 +2115,7 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
     candidate_ratio = _mask_ratio(candidate)
     if candidate_ratio < 0.00008:
         return _background_stains_noop(image, "background stain lightening skipped: no confident light background stains")
-    if candidate_ratio > 0.035:
+    if candidate_ratio > 0.09:
         return _background_stains_noop(
             image,
             "background stain lightening skipped: broad uneven lighting is outside conservative scope",
@@ -2078,7 +2134,17 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
         height = max(ys) - min(ys) + 1
         if area < 6:
             continue
-        if area / total > 0.012 or width > image.width * 0.18 or height > image.height * 0.18:
+        area_ratio = area / total
+        low_frequency_shape = (
+            area_ratio <= 0.08
+            and width <= image.width * 0.62
+            and height <= image.height * 0.62
+            and width >= image.width * 0.24
+            and height >= image.height * 0.22
+            and area_ratio >= 0.004
+        )
+        small_speckle_shape = area_ratio <= 0.012 and width <= image.width * 0.18 and height <= image.height * 0.18
+        if not (small_speckle_shape or low_frequency_shape):
             return _background_stains_noop(
                 image,
                 "background stain lightening skipped: large stain or historical damage risk",
@@ -2089,7 +2155,7 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
     changed_ratio = len(selected) / max(1, total)
     if changed_ratio < 0.00008:
         return _background_stains_noop(image, "background stain lightening skipped: no confident light background stains")
-    if changed_ratio > 0.025:
+    if changed_ratio > 0.08:
         return _background_stains_noop(
             image,
             "background stain lightening skipped: changed area exceeds conservative background scope",
@@ -2137,13 +2203,51 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
     return BackgroundStainLighteningResult(
         result_image,
         True,
-        "background stain lightening applied: small neutral low-contrast stains on light background",
+        "background stain lightening applied: conservative low-contrast stains on light background",
         before_mean,
         after_mean,
         round(after_mean - before_mean, 6),
         round(changed_ratio, 6),
         round(candidate_ratio, 6),
     )
+
+
+def _background_stain_color_risk_reason(image: Image.Image) -> str | None:
+    if image.mode == "L":
+        return None
+    sample = image.convert("RGB")
+    sample.thumbnail((600, 600), Image.Resampling.BILINEAR)
+    total = max(1, sample.width * sample.height)
+    colored = 0
+    red = 0
+    weak_warm_background = 0
+    pixel_data = sample.get_flattened_data() if hasattr(sample, "get_flattened_data") else sample.getdata()
+    for red_value, green_value, blue_value in pixel_data:
+        high = max(red_value, green_value, blue_value)
+        low = min(red_value, green_value, blue_value)
+        spread = high - low
+        brightness = (red_value + green_value + blue_value) / 3
+        if red_value >= 110 and red_value - green_value >= 35 and red_value - blue_value >= 35:
+            red += 1
+        if spread > 18 and 30 < brightness < 250:
+            colored += 1
+        if (
+            170 <= brightness <= 246
+            and 10 <= spread <= 36
+            and red_value >= green_value >= blue_value
+            and red_value - blue_value <= 38
+        ):
+            weak_warm_background += 1
+    red_ratio = red / total
+    if red_ratio >= 0.0004:
+        return "color content, stamp, or annotation risk"
+    colored_ratio = colored / total
+    weak_warm_ratio = weak_warm_background / total
+    if 0.0008 <= colored_ratio < 0.01:
+        return "color content, stamp, or annotation risk"
+    if colored_ratio >= 0.003 and (weak_warm_ratio / max(colored_ratio, 0.000001) < 0.85 or colored_ratio > 0.16):
+        return "color content, stamp, or annotation risk"
+    return None
 
 
 def _background_stains_noop(

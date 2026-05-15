@@ -5979,6 +5979,159 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn("private_safe_stacked_repairs", audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
 
+    def test_lighten_background_stains_improves_gray_and_yellow_low_frequency_stains_safely(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "private_gray_low_frequency_stain.png": _synthetic_background_stain_page((224, 224, 224)),
+                "private_yellow_low_frequency_stain.png": _synthetic_background_stain_page((230, 226, 205)),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                path = input_dir / name
+                image.save(path, dpi=(300, 300))
+                source_bytes[name] = path.read_bytes()
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(lighten_background_stains=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for record in manifest["files"]:
+                source_name = record["source_relative_path"]
+                self.assertEqual((input_dir / source_name).read_bytes(), source_bytes[source_name])
+                self.assertTrue(record["background_stains_lightened"], source_name)
+                self.assertIn("lighten_background_stains_conservative", record["operations"])
+                audit = record["processing_audit"]
+                self.assertGreater(audit["background_stains_delta"], 6.0)
+                self.assertGreater(audit["background_stains_changed_pixel_ratio"], 0.0)
+                self.assertLessEqual(audit["background_stains_changed_pixel_ratio"], 0.08)
+                self.assertLessEqual(audit["cumulative_change_candidate_pixel_ratio"], 0.08)
+                self.assertEqual(audit["cumulative_change_guard_action"], "passed")
+                self.assertEqual(audit["guardrail_failures"], [])
+
+                original = pages[source_name].convert("RGB")
+                processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+                stain_before = ImageStat.Stat(original.crop((140, 60, 205, 112)).convert("L")).mean[0]
+                stain_after = ImageStat.Stat(processed.crop((140, 60, 205, 112)).convert("L")).mean[0]
+                self.assertGreater(stain_after - stain_before, 4.0)
+                for protected_box in ((24, 40, 96, 128), (112, 26, 126, 38), (104, 136, 198, 154)):
+                    diff = ImageChops.difference(original.crop(protected_box), processed.crop(protected_box))
+                    self.assertIsNone(diff.getbbox(), f"{source_name} changed protected content {protected_box}")
+
+            self.assertTrue(audit_summary["operations"]["lighten_background_stains"])
+            self.assertEqual(audit_summary["counts"]["background_stains_lightened_files"], 2)
+            self.assertEqual(audit_summary["counts"]["background_stains_skipped_files"], 0)
+            self.assertEqual(audit_summary["guardrails"]["background_stains"]["applied_files"], 2)
+            self.assertEqual(audit_summary["guardrails"]["background_stains"]["skipped_files"], 0)
+            self.assertIn("background_stains_changed_pixel_ratio", audit_summary["metrics"])
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_gray_low_frequency_stain", audit_summary_text)
+            self.assertNotIn("private_yellow_low_frequency_stain", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
+    def test_lighten_background_stains_skips_uncertain_content_edges_and_default_off(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            default_process_dir = root / "processed-default"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "private_default_compatible_stain.png": _synthetic_background_stain_page((224, 224, 224)),
+                "private_red_annotation.png": _synthetic_background_stain_page((224, 224, 224), red_annotation=True),
+                "private_photo_texture.png": _synthetic_photo_like_page(),
+                "private_dense_dark_texture.png": _synthetic_dense_background_texture_page(),
+                "private_low_confidence.png": Image.new("RGB", (240, 180), (236, 236, 236)),
+                "private_edge_mark.png": _synthetic_background_stain_page((224, 224, 224), edge_mark=True),
+            }
+            for name, image in pages.items():
+                image.save(input_dir / name, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            default_manifest = process_images(report, input_dir, default_process_dir, ProcessingOptions(workers=1))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(lighten_background_stains=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            default_records = {record["source_relative_path"]: record for record in default_manifest["files"]}
+            for source_name, record in default_records.items():
+                self.assertFalse(record["background_stains_lightened"])
+                self.assertIn("lighten_background_stains_disabled", record["operations"])
+                self.assertEqual(
+                    _sha256_for_test(input_dir / source_name),
+                    _sha256_for_test(default_process_dir / record["output_relative_path"]),
+                )
+
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            self.assertTrue(records["private_default_compatible_stain.png"]["background_stains_lightened"])
+            for source_name in (
+                "private_red_annotation.png",
+                "private_photo_texture.png",
+                "private_dense_dark_texture.png",
+                "private_low_confidence.png",
+                "private_edge_mark.png",
+            ):
+                self.assertFalse(records[source_name]["background_stains_lightened"], source_name)
+                self.assertIn("lighten_background_stains_noop", records[source_name]["operations"])
+                self.assertEqual(records[source_name]["processing_audit"]["background_stains_changed_pixel_ratio"], 0.0)
+
+            self.assertIn("color content, stamp, or annotation risk", records["private_red_annotation.png"]["background_stains_reason"])
+            self.assertIn("binding, edge mark, or margin content risk", records["private_edge_mark.png"]["background_stains_reason"])
+            self.assertIn(
+                records["private_photo_texture.png"]["background_stains_reason"],
+                {
+                    "background stain lightening skipped: page is too dark",
+                    "background stain lightening skipped: foreground too dense",
+                    "background stain lightening skipped: broad uneven lighting is outside conservative scope",
+                    "background stain lightening skipped: large stain or historical damage risk",
+                },
+            )
+            self.assertIn(
+                records["private_dense_dark_texture.png"]["background_stains_reason"],
+                {
+                    "background stain lightening skipped: foreground too dense",
+                    "background stain lightening skipped: broad uneven lighting is outside conservative scope",
+                    "background stain lightening skipped: large stain or historical damage risk",
+                    "background stain lightening skipped: page is too dark",
+                    "background stain lightening skipped: binding, edge mark, or margin content risk",
+                },
+            )
+            self.assertIn(
+                records["private_low_confidence.png"]["background_stains_reason"],
+                {
+                    "background stain lightening skipped: low-confidence tonal evidence",
+                    "background stain lightening skipped: foreground evidence too sparse",
+                },
+            )
+            edge_processed = Image.open(process_dir / records["private_edge_mark.png"]["output_relative_path"]).convert("RGB")
+            self.assertIsNone(
+                ImageChops.difference(pages["private_edge_mark.png"].crop((0, 72, 18, 104)), edge_processed.crop((0, 72, 18, 104))).getbbox()
+            )
+            self.assertEqual(audit_summary["counts"]["background_stains_lightened_files"], 1)
+            self.assertEqual(audit_summary["counts"]["background_stains_skipped_files"], 5)
+            self.assertGreaterEqual(audit_summary["guardrails"]["background_stains"]["protection_triggered_files"], 2)
+            self.assertGreaterEqual(len(audit_summary["guardrails"]["background_stains"]["skip_reason_distribution"]), 3)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_default_compatible_stain", audit_summary_text)
+            self.assertNotIn("private_red_annotation", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
     def test_cumulative_change_guard_reverts_high_risk_stacked_change_without_failing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -8119,6 +8272,7 @@ class ScanQcTest(unittest.TestCase):
                     deskew=True,
                     trim_dark_border=True,
                     despeckle=True,
+                    lighten_background_stains=True,
                     normalize_tones=True,
                     workers=1,
                 ),
@@ -8134,10 +8288,12 @@ class ScanQcTest(unittest.TestCase):
             self.assertTrue(audit_summary["operations"]["deskew"])
             self.assertTrue(audit_summary["operations"]["trim_dark_border"])
             self.assertTrue(audit_summary["operations"]["despeckle"])
+            self.assertTrue(audit_summary["operations"]["lighten_background_stains"])
             self.assertTrue(audit_summary["operations"]["normalize_tones"])
             self.assertEqual(audit_summary["counts"]["processed_files"], 1)
             self.assertEqual(audit_summary["counts"]["failed_files"], 0)
             self.assertIn("despeckle_pixel_ratio", audit_summary["metrics"])
+            self.assertIn("background_stains", audit_summary["guardrails"])
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertNotIn("private_combined_despeckle", audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
@@ -10197,6 +10353,41 @@ def _synthetic_texture_stain_page() -> Image.Image:
             shade = 190 + ((x + y) % 28)
             draw.point((x, y), fill=(shade, shade, shade))
             draw.point((x + 1, y), fill=(shade, shade, shade))
+    return image
+
+
+def _synthetic_background_stain_page(
+    stain_color: tuple[int, int, int],
+    *,
+    red_annotation: bool = False,
+    edge_mark: bool = False,
+) -> Image.Image:
+    image = Image.new("RGB", (240, 180), (240, 240, 240))
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((140, 60, 205, 112), fill=stain_color)
+    for y in range(42, 132, 20):
+        draw.rectangle((28, y, 90, y + 4), fill=(35, 35, 35))
+    draw.text((112, 24), "12", fill=(30, 30, 30))
+    for y in (138, 150):
+        draw.line((104, y, 198, y), fill=(40, 40, 40), width=1)
+    for x in (128, 162):
+        draw.line((x, 136, x, 154), fill=(40, 40, 40), width=1)
+    draw.line((26, 142, 92, 154), fill=(55, 55, 55), width=2)
+    if red_annotation:
+        draw.ellipse((154, 30, 206, 82), outline=(180, 40, 35), width=3)
+        draw.line((166, 56, 194, 56), fill=(180, 40, 35), width=2)
+    if edge_mark:
+        draw.rectangle((0, 74, 14, 102), fill=(58, 58, 58))
+    return image
+
+
+def _synthetic_dense_background_texture_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), (232, 232, 232))
+    draw = ImageDraw.Draw(image)
+    for x in range(12, 228, 6):
+        for y in range(10, 170, 6):
+            shade = 92 + ((x * 5 + y * 7) % 80)
+            draw.rectangle((x, y, x + 2, y + 2), fill=(shade, shade, shade))
     return image
 
 
