@@ -7370,6 +7370,9 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(record["despeckle_reason"], "despeckle disabled")
             self.assertIn("dark_border_trim_disabled", record["operations"])
             self.assertIn("despeckle_disabled", record["operations"])
+            audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(audit_summary["counts"]["dark_border_trimmed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["dark_border_skipped_files"], 0)
 
     def test_trim_dark_border_trims_edge_border_without_touching_source(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -7400,12 +7403,44 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(record["dark_border_reason"], "dark edge border trimmed")
             self.assertIn("dark_border_trim_conservative", record["operations"])
 
-    def test_trim_dark_border_keeps_content_adjacent_to_each_edge(self) -> None:
+    def test_trim_dark_border_trims_gray_continuous_scan_edge_and_audits_aggregate_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            image = Image.new("RGB", (100, 80), (242, 242, 238))
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((0, 0, 99, 79), outline=(55, 55, 55), width=4)
+            draw.rectangle((25, 24, 75, 28), fill=(20, 20, 20))
+            image.save(input_dir / "A001_gray_edge.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(trim_dark_border=True))
+            audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
+
+            record = manifest["files"][0]
+            self.assertTrue(record["dark_border_trimmed"])
+            self.assertEqual(record["dark_border_bbox"], [4, 4, 96, 76])
+            self.assertEqual(record["output_size"], [92, 72])
+            self.assertAlmostEqual(record["processing_audit"]["max_trim_margin_ratio"], 0.05)
+            self.assertEqual(record["dark_border_reason"], "dark edge border trimmed")
+            self.assertEqual(audit_summary["counts"]["dark_border_trimmed_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["dark_border_trim"]["trimmed_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["dark_border_trim"]["reason_distribution"]["dark edge border trimmed"],
+                1,
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("A001_gray_edge", json.dumps(audit_summary, ensure_ascii=False))
+
+    def test_trim_dark_border_noops_for_content_adjacent_to_each_edge(self) -> None:
         cases = {
-            "left": ((5, 34, 13, 39), (0, 29, 8, 34)),
-            "right": ((87, 34, 94, 39), (82, 29, 89, 34)),
-            "top": ((44, 5, 55, 12), (39, 0, 50, 7)),
-            "bottom": ((44, 67, 55, 74), (39, 62, 50, 69)),
+            "left": (5, 34, 13, 39),
+            "right": (87, 34, 94, 39),
+            "top": (44, 5, 55, 12),
+            "bottom": (44, 67, 55, 74),
         }
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -7413,7 +7448,7 @@ class ScanQcTest(unittest.TestCase):
             output_dir = root / "reports"
             process_dir = root / "processed"
             input_dir.mkdir()
-            for side, (source_mark, _output_mark) in cases.items():
+            for side, source_mark in cases.items():
                 image = Image.new("RGB", (100, 80), "white")
                 draw = ImageDraw.Draw(image)
                 draw.rectangle((0, 0, 99, 79), outline="black", width=5)
@@ -7429,15 +7464,22 @@ class ScanQcTest(unittest.TestCase):
             )
 
             records = {record["source_relative_path"]: record for record in manifest["files"]}
-            for side, (_source_mark, output_mark) in cases.items():
+            audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
+            for side in cases:
                 name = f"A001_{side}.png"
                 record = records[name]
-                self.assertTrue(record["dark_border_trimmed"], side)
-                self.assertEqual(record["dark_border_bbox"], [5, 5, 95, 75])
-                with Image.open(process_dir / "images" / name) as processed:
-                    mark = processed.crop(output_mark).convert("L")
-                    min_value, _max_value = mark.getextrema()
-                self.assertLessEqual(min_value, 40, side)
+                self.assertFalse(record["dark_border_trimmed"], side)
+                self.assertIsNone(record["dark_border_bbox"], side)
+                self.assertEqual(record["output_size"], [100, 80], side)
+                self.assertEqual(record["dark_border_reason"], "protected edge content near dark border")
+                self.assertIn("dark_border_trim_noop", record["operations"])
+            self.assertEqual(audit_summary["counts"]["dark_border_skipped_files"], 4)
+            self.assertEqual(
+                audit_summary["guardrails"]["dark_border_trim"]["reason_distribution"][
+                    "protected edge content near dark border"
+                ],
+                4,
+            )
 
     def test_trim_dark_border_noops_for_single_sided_and_unbalanced_edges(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -7483,6 +7525,88 @@ class ScanQcTest(unittest.TestCase):
 
         self.assertIsNone(detection.bbox)
         self.assertEqual(detection.reason, "incomplete dark edge border evidence")
+
+    def test_trim_dark_border_noops_for_discontinuous_blocks_and_broad_shadow(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            discontinuous = Image.new("RGB", (100, 80), "white")
+            draw = ImageDraw.Draw(discontinuous)
+            for box in [(0, 0, 4, 18), (0, 30, 4, 48), (0, 60, 4, 79), (95, 0, 99, 18), (95, 60, 99, 79)]:
+                draw.rectangle(box, fill=(0, 0, 0))
+            discontinuous.save(input_dir / "A001_discontinuous.png")
+
+            broad_shadow = Image.new("RGB", (100, 80), (242, 242, 238))
+            draw = ImageDraw.Draw(broad_shadow)
+            draw.rectangle((0, 0, 19, 79), fill=(35, 35, 35))
+            draw.rectangle((80, 0, 99, 79), fill=(35, 35, 35))
+            draw.rectangle((0, 0, 99, 15), fill=(35, 35, 35))
+            draw.rectangle((0, 64, 99, 79), fill=(35, 35, 35))
+            broad_shadow.save(input_dir / "A001_broad_shadow.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(trim_dark_border=True))
+
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            self.assertEqual(
+                records["A001_discontinuous.png"]["dark_border_reason"],
+                "incomplete dark edge border evidence",
+            )
+            self.assertEqual(
+                records["A001_broad_shadow.png"]["dark_border_reason"],
+                "candidate trim exceeds conservative retain ratio",
+            )
+            for record in records.values():
+                self.assertFalse(record["dark_border_trimmed"])
+                self.assertIsNone(record["dark_border_bbox"])
+                self.assertIn("dark_border_trim_noop", record["operations"])
+
+    def test_trim_dark_border_combines_with_crop_deskew_and_cumulative_guard(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            image = Image.new("RGB", (120, 90), (245, 245, 240))
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((0, 0, 119, 89), outline=(8, 8, 8), width=4)
+            draw.rectangle((32, 30, 88, 34), fill=(20, 20, 20))
+            draw.rectangle((35, 44, 82, 47), fill=(30, 30, 30))
+            image.save(input_dir / "private_combined_trim.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(auto_crop=True, deskew=True, trim_dark_border=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+
+            self.assertEqual(manifest["summary"]["processed_files"], 1)
+            self.assertEqual(manifest["summary"]["failed_files"], 0)
+            self.assertEqual(record["status"], "processed")
+            self.assertTrue(record["dark_border_trimmed"])
+            self.assertEqual(record["processing_audit"]["cumulative_change_guard_action"], "passed")
+            self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
+            self.assertTrue(audit_summary["operations"]["auto_crop"])
+            self.assertTrue(audit_summary["operations"]["deskew"])
+            self.assertTrue(audit_summary["operations"]["trim_dark_border"])
+            self.assertEqual(audit_summary["counts"]["processed_files"], 1)
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["cumulative_change_guard_checked_files"], 1)
+            self.assertEqual(audit_summary["counts"]["cumulative_change_guard_reverted_files"], 0)
+            self.assertEqual(audit_summary["counts"]["dark_border_trimmed_files"], 1)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_combined_trim", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
 
     def test_trim_dark_border_noops_for_blank_and_edge_content(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
