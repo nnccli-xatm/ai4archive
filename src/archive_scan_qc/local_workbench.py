@@ -135,7 +135,7 @@ class WorkbenchController:
         )
         unsafe_guidance = _unsafe_folder_choice_guidance(input_path, output_path, metadata_path)
         if unsafe_guidance is not None:
-            raise ValueError(str(unsafe_guidance["message_zh"]))
+            raise WorkbenchPreflightError(unsafe_guidance)
         if not _path_is_existing_dir(input_path):
             raise ValueError("扫描原图文件夹不存在。")
         if not _folder_can_be_listed(input_path):
@@ -1797,6 +1797,17 @@ def _unsafe_folder_choice_guidance(input_path: Path, output_path: Path, metadata
                 "重新保存文件夹后再开始处理。",
             ],
         )
+    if _is_relative_to(input_path, output_path):
+        return _folder_preflight_guidance(
+            "unsafe_source_inside_output",
+            "原图和输出文件夹不能混在一起",
+            "扫描原图文件夹不能放在处理后输出文件夹里面。",
+            [
+                "为本批扫描原图和处理后图片选择两个互相独立的文件夹。",
+                "不要把扫描原图文件夹放进输出文件夹。",
+                "重新保存文件夹后再开始处理。",
+            ],
+        )
     if _is_relative_to(metadata_path, input_path):
         return _folder_preflight_guidance(
             "unsafe_metadata_folder",
@@ -1828,6 +1839,9 @@ def _folder_preflight_guidance(
         "title_zh": title_zh,
         "message_zh": message_zh,
         "next_steps_zh": next_steps_zh,
+        "ready_to_start": False,
+        "can_start_processing": False,
+        "blocking_reasons_zh": [message_zh],
         "failed_files": 0,
         "retryable_files": 0,
         "derivative_images_ready": 0,
@@ -1873,6 +1887,8 @@ def _folder_readiness_summary_with_snapshot(
         "input_empty": True,
         "output_writable": False,
         "ready_to_start": False,
+        "can_start_processing": False,
+        "blocking_reasons_zh": [],
     }
     if input_dir is None or derivatives_dir is None or metadata_dir is None:
         return {
@@ -1901,6 +1917,7 @@ def _folder_readiness_summary_with_snapshot(
             "status": "blocked",
             "title_zh": unsafe_guidance["title_zh"],
             "message_zh": unsafe_guidance["message_zh"],
+            "blocking_reasons_zh": list(unsafe_guidance.get("blocking_reasons_zh") or [unsafe_guidance["message_zh"]]),
             "next_steps_zh": unsafe_guidance["next_steps_zh"],
         }, None
     input_exists = _path_is_existing_dir(input_path)
@@ -1958,17 +1975,21 @@ def _folder_readiness_summary_with_snapshot(
             "next_steps_zh": ["确认原图是常见图片格式。", "如果格式不对，请重新导出为支持的图片格式后再处理。"],
         }, snapshot
     if not output_writable:
+        message_zh = "处理后输出文件夹或本机状态文件夹不能写入。"
         return {
             **summary,
             "status": "blocked",
             "title_zh": "输出文件夹不能写入",
-            "message_zh": "处理后输出文件夹或本机状态文件夹不能写入。",
+            "message_zh": message_zh,
+            "blocking_reasons_zh": [message_zh],
             "next_steps_zh": ["确认输出磁盘没有只读、已解锁，并且空间足够。", "换一个可以写入的输出文件夹后重新保存。"],
         }, snapshot
     ready_summary = {
         **summary,
         "status": "ready",
         "ready_to_start": True,
+        "can_start_processing": True,
+        "blocking_reasons_zh": [],
         "title_zh": "文件夹可以开始处理",
         "message_zh": f"本批预检结果：已识别到 {supported_image_count} 张可处理图片，输出文件夹可以写入。",
         "next_steps_zh": ["确认处理方式无误。", "点击开始处理。"],
