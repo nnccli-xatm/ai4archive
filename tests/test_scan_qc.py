@@ -6016,17 +6016,33 @@ class ScanQcTest(unittest.TestCase):
                 },
                 admin_report_dir=metadata_dir / "admin_reports",
                 generated_at="2026-01-01T00:00:00+00:00",
+                stage_timings={"scan": 0.1, "process": 0.2, "summarize": 0.3},
             )
 
             guidance_text = json.dumps(summary["recovery_guidance"], ensure_ascii=False, sort_keys=True)
+            stage_timings_text = json.dumps(summary["stage_timings"], ensure_ascii=False, sort_keys=True)
             self.assertIn("本批有 2 张处理失败", guidance_text)
             self.assertIn("已成功输出 1 张", guidance_text)
+            self.assertTrue(summary["stage_timings"]["aggregate_only"])
+            self.assertEqual(
+                [(stage["id"], stage["label_zh"], stage["status"]) for stage in summary["stage_timings"]["stages"]],
+                [
+                    ("scan", "检查扫描图片", "completed"),
+                    ("process", "生成处理后图片", "completed"),
+                    ("summarize", "整理处理结果", "completed"),
+                ],
+            )
             for private_value in private_values:
                 self.assertNotIn(private_value, guidance_text)
+                self.assertNotIn(private_value, stage_timings_text)
             self.assertNotIn(".tif", guidance_text)
+            self.assertNotIn(".tif", stage_timings_text)
             self.assertNotIn("sha256", guidance_text.lower())
+            self.assertNotIn("sha256", stage_timings_text.lower())
             self.assertNotIn("traceback", guidance_text.lower())
+            self.assertNotIn("traceback", stage_timings_text.lower())
             self.assertNotIn("ocr", guidance_text.lower())
+            self.assertNotIn("ocr", stage_timings_text.lower())
 
     def test_recovery_advice_generation_preserves_sources_and_successful_outputs(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-recovery-preserve-") as temp_dir:
@@ -6948,6 +6964,21 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(progress["state_label_zh"], "已完成")
             self.assertEqual(progress["steps"][0]["label"], "检查扫描图片")
             self.assertEqual(progress["completed_steps"], 3)
+            expected_stages = [
+                ("scan", "检查扫描图片", "completed"),
+                ("process", "生成处理后图片", "completed"),
+                ("summarize", "整理处理结果", "completed"),
+            ]
+            for timing_payload in (summary["stage_timings"], progress["stage_timings"]):
+                self.assertEqual(timing_payload["schema_version"], "scan-qc.production-stage-timings.v1")
+                self.assertTrue(timing_payload["aggregate_only"])
+                self.assertEqual(
+                    [(stage["id"], stage["label_zh"], stage["status"]) for stage in timing_payload["stages"]],
+                    expected_stages,
+                )
+                for stage in timing_payload["stages"]:
+                    self.assertIsInstance(stage["elapsed_seconds"], float)
+                    self.assertGreaterEqual(stage["elapsed_seconds"], 0.0)
 
     def test_cli_production_run_is_operator_friendly(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

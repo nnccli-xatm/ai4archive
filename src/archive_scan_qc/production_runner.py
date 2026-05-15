@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import time
 from typing import Any
 
 from .processing import ProcessingOptions, process_images
@@ -22,6 +23,7 @@ STEP_LABELS = {
     "process": "生成处理后图片",
     "summarize": "整理处理结果",
 }
+STAGE_TIMING_SCHEMA_VERSION = "scan-qc.production-stage-timings.v1"
 PROCESSING_MODE_LABELS_ZH = {
     "standard": "标准优化",
     "qc_only": "只质检不修图",
@@ -75,9 +77,11 @@ def run_production_folder(config: ProductionRunConfig) -> dict[str, Any]:
         _step("process", STEP_LABELS["process"], "pending"),
         _step("summarize", STEP_LABELS["summarize"], "pending"),
     ]
+    stage_timings: dict[str, float] = {}
     _write_progress(metadata_dir, "running", steps, current_step="scan")
     steps[0] = _step("scan", STEP_LABELS["scan"], "running")
 
+    scan_started_at = time.perf_counter()
     report = scan_batch(
         ScanConfig(
             project_id=config.project_id,
@@ -92,11 +96,13 @@ def run_production_folder(config: ProductionRunConfig) -> dict[str, Any]:
             analysis_provider_command=config.analysis_provider_command,
         )
     )
+    stage_timings["scan"] = time.perf_counter() - scan_started_at
     report_paths = write_reports(report, admin_report_dir)
     steps[0] = _step("scan", STEP_LABELS["scan"], "completed", completed_items=report["summary"]["total_files"])
     steps[1] = _step("process", STEP_LABELS["process"], "running", total_items=report["summary"]["total_files"])
-    _write_progress(metadata_dir, "running", steps, current_step="process")
+    _write_progress(metadata_dir, "running", steps, current_step="process", stage_timings=stage_timings)
 
+    process_started_at = time.perf_counter()
     processing_manifest = process_images(
         report,
         config.input_dir,
@@ -112,6 +118,7 @@ def run_production_folder(config: ProductionRunConfig) -> dict[str, Any]:
             workers=config.workers,
         ),
     )
+    stage_timings["process"] = time.perf_counter() - process_started_at
     processed_done = (
         processing_manifest["summary"]["processed_files"]
         + processing_manifest["summary"]["resumed_files"]
@@ -126,18 +133,29 @@ def run_production_folder(config: ProductionRunConfig) -> dict[str, Any]:
         completed_items=processed_done,
     )
     steps[2] = _step("summarize", STEP_LABELS["summarize"], "running")
-    _write_progress(metadata_dir, "running", steps, current_step="summarize")
+    _write_progress(metadata_dir, "running", steps, current_step="summarize", stage_timings=stage_timings)
 
+    summarize_started_at = time.perf_counter()
     summary = build_production_run_summary(
         config=config,
         report=report,
         processing_manifest=processing_manifest,
         admin_report_dir=admin_report_dir,
         report_paths=report_paths,
+        stage_timings=stage_timings,
     )
+    stage_timings["summarize"] = time.perf_counter() - summarize_started_at
+    summary["stage_timings"] = _stage_timings_payload(stage_timings)
     summary_path = write_production_run_summary(summary, metadata_dir)
     steps[2] = _step("summarize", STEP_LABELS["summarize"], "completed")
-    _write_progress(metadata_dir, summary["status"], steps, current_step=None, summary_path=summary_path)
+    _write_progress(
+        metadata_dir,
+        summary["status"],
+        steps,
+        current_step=None,
+        summary_path=summary_path,
+        stage_timings=stage_timings,
+    )
     return summary
 
 
@@ -149,6 +167,7 @@ def build_production_run_summary(
     admin_report_dir: Path,
     report_paths: dict[str, Path] | None = None,
     generated_at: str | None = None,
+    stage_timings: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     scan_summary = report["summary"]
     processing_summary = processing_manifest["summary"]
@@ -245,6 +264,7 @@ def build_production_run_summary(
             "scan": scan_summary["performance"],
             "processing": processing_summary["performance"],
         },
+        "stage_timings": _stage_timings_payload(stage_timings),
         "options": options,
         "artifacts": artifacts,
         "admin_artifacts_available": True,
@@ -269,6 +289,7 @@ def _write_progress(
     *,
     current_step: str | None,
     summary_path: Path | None = None,
+    stage_timings: dict[str, float] | None = None,
 ) -> Path:
     completed_steps = sum(1 for step in steps if step["state"] == "completed")
     payload = {
@@ -281,12 +302,39 @@ def _write_progress(
         "completed_steps": completed_steps,
         "total_steps": len(steps),
         "steps": steps,
+        "stage_timings": _stage_timings_payload(stage_timings, steps=steps),
     }
     if summary_path is not None:
         payload["summary"] = str(summary_path)
     path = metadata_dir / PRODUCTION_RUN_PROGRESS_JSON
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return path
+
+
+def _stage_timings_payload(
+    elapsed_by_stage: dict[str, float] | None,
+    *,
+    steps: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    elapsed_by_stage = elapsed_by_stage or {}
+    status_by_stage = {step["id"]: step["state"] for step in steps or []}
+    stages = []
+    for stage_id in STEP_LABELS:
+        elapsed_seconds = elapsed_by_stage.get(stage_id, 0.0)
+        status = status_by_stage.get(stage_id, "completed" if stage_id in elapsed_by_stage else "pending")
+        stages.append(
+            {
+                "id": stage_id,
+                "label_zh": STEP_LABELS[stage_id],
+                "elapsed_seconds": max(0.0, round(float(elapsed_seconds), 6)),
+                "status": status,
+            }
+        )
+    return {
+        "schema_version": STAGE_TIMING_SCHEMA_VERSION,
+        "aggregate_only": True,
+        "stages": stages,
+    }
 
 
 def _step(
