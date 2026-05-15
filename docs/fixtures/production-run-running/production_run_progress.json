@@ -6,6 +6,17 @@
   "current_step": "process",
   "completed_steps": 1,
   "total_steps": 3,
+  "aggregate_processing": {
+    "schema_version": "scan-qc.aggregate-processing-rate.v1",
+    "aggregate_only": true,
+    "total_images": 120,
+    "processed_images": 48,
+    "remaining_images": 72,
+    "elapsed_seconds": 600.0,
+    "images_per_minute": 4.8,
+    "estimated_remaining_seconds": 900.0,
+    "unavailable_reason": null
+  },
   "steps": [
     {
       "id": "scan",

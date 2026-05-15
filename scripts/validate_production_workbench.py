@@ -50,6 +50,10 @@ REQUIRED_TEXT = {
     "检查扫描图片",
     "已处理",
     "待处理",
+    "聚合处理速度",
+    "张/分钟",
+    "预计还需等待",
+    "暂不能估算剩余时间，继续等待处理进度更新",
     "生成处理后图片",
     "整理处理结果",
     "正在统计图片数量",
@@ -682,7 +686,18 @@ def main() -> int:
         errors.append("missing operator summary mapping")
     for stage_timing_token in [
         'id="stageTimingText"',
+        'id="aggregateProcessingText"',
         'id="stageTimingAdviceText"',
+        "function deriveAggregateProcessingLabel(summary, progress)",
+        "function aggregateProcessingAvailable(aggregate)",
+        "function formatRemainingWait(secondsValue)",
+        "aggregate.aggregate_only === true",
+        "aggregate.unavailable_reason",
+        "聚合处理速度：",
+        "预计还需等待",
+        "少于 1 分钟",
+        "暂不能估算剩余时间，继续等待处理进度更新。",
+        'els.aggregateProcessingText.classList.toggle("hidden", !state.aggregateProcessingLabel);',
         "function deriveStageTimingLabel(summary, progress)",
         "function deriveStageTimingAdvice(summary, progress)",
         "source.stage_timings",
@@ -853,6 +868,35 @@ def main() -> int:
             errors.append(f"unexpected progress schema for {fixture_name}")
         if summary.get("status") != expected_status:
             errors.append(f"unexpected summary status for {fixture_name}: {summary.get('status')}")
+        aggregate = progress.get("aggregate_processing") or summary.get("aggregate_processing")
+        if fixture_name in {"production-run-running", "production-run-finished"}:
+            if not isinstance(aggregate, dict):
+                errors.append(f"missing aggregate processing fixture payload: {fixture_name}")
+            else:
+                for key in [
+                    "schema_version",
+                    "aggregate_only",
+                    "total_images",
+                    "processed_images",
+                    "remaining_images",
+                    "images_per_minute",
+                    "estimated_remaining_seconds",
+                    "unavailable_reason",
+                ]:
+                    if key not in aggregate:
+                        errors.append(f"missing aggregate processing field for {fixture_name}: {key}")
+                if aggregate.get("schema_version") != "scan-qc.aggregate-processing-rate.v1":
+                    errors.append(f"unexpected aggregate processing schema for {fixture_name}")
+                if aggregate.get("aggregate_only") is not True:
+                    errors.append(f"aggregate processing is not aggregate-only for {fixture_name}")
+                if fixture_name == "production-run-running":
+                    if aggregate.get("remaining_images", 0) <= 0 or aggregate.get("images_per_minute", 0) <= 0:
+                        errors.append("running aggregate processing fixture does not prove remaining speed estimate")
+                    if aggregate.get("estimated_remaining_seconds", 0) <= 0:
+                        errors.append("running aggregate processing fixture does not prove positive wait estimate")
+                if fixture_name == "production-run-finished":
+                    if aggregate.get("remaining_images") != 0 or aggregate.get("estimated_remaining_seconds") != 0.0:
+                        errors.append("finished aggregate processing fixture should have no remaining wait")
         operator = summary.get("operator_summary")
         if not isinstance(operator, dict):
             errors.append(f"missing operator summary for {fixture_name}")

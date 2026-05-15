@@ -146,11 +146,33 @@ test.describe("production workbench finish/export browser smoke", () => {
           processed_files: 5,
           failed_files: 0,
         },
+        aggregate_processing: {
+          schema_version: "scan-qc.aggregate-processing-rate.v1",
+          aggregate_only: true,
+          total_images: 12,
+          processed_images: 5,
+          remaining_images: 7,
+          elapsed_seconds: 150,
+          images_per_minute: 2,
+          estimated_remaining_seconds: 210,
+          unavailable_reason: null,
+        },
       },
       progress: {
         schema_version: "scan-qc.production-run-progress.v1",
         state: "running",
         current_step: "quality_check",
+        aggregate_processing: {
+          schema_version: "scan-qc.aggregate-processing-rate.v1",
+          aggregate_only: true,
+          total_images: 12,
+          processed_images: 5,
+          remaining_images: 7,
+          elapsed_seconds: 150,
+          images_per_minute: 2,
+          estimated_remaining_seconds: 210,
+          unavailable_reason: null,
+        },
         steps: [{ id: "quality_check", state: "running", completed_items: 5, total_items: 12 }],
         stage_timings: {
           aggregate_only: true,
@@ -187,7 +209,8 @@ test.describe("production workbench finish/export browser smoke", () => {
 
     await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
     await expect(page.locator("#stateAction")).toHaveText("正在处理");
-    await expect(page.locator("#progressText")).toHaveText("阶段：正在检查质量；已处理 5 张 / 共 12 张；待处理 7 张；状态：正在处理");
+    await expect(page.locator("#progressText")).toHaveText("阶段：正在检查质量；已处理 5 张 / 共 12 张；剩余 7 张；状态：正在处理");
+    await expect(page.locator("#aggregateProcessingText")).toHaveText("聚合处理速度：2.0 张/分钟；剩余 7 张；预计还需等待 约 4 分钟");
     await expect(page.locator("#stageTimingText")).toHaveText("检查扫描图片 1.2 秒；生成处理后图片 8.5 秒");
     await expect(page.locator("#stageTimingAdviceText")).toHaveText("主要耗时在生成处理后图片，请继续等待；如长时间没有变化再交管理员处理。");
     await expect(page.locator("#loadStatus")).toHaveText("批次正在运行，请等待。本机正在处理图片，处理完成或失败前不能更改文件夹和处理方式，也不要反复点击开始处理。");
@@ -220,6 +243,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     };
     await page.evaluate(() => pollServerStatus());
     await expect(page.locator("#progressText")).toHaveText("阶段：正在生成处理后图片；正在统计图片数量；状态：正在处理");
+    await expect(page.locator("#aggregateProcessingText")).toHaveText("暂不能估算剩余时间，继续等待处理进度更新。");
     await expect(page.locator("#stageTimingText")).toHaveClass(/hidden/);
     await expect(page.locator("#stageTimingAdviceText")).toHaveClass(/hidden/);
     await expectLaunchSetupControlsDisabled(page);

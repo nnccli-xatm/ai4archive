@@ -15,9 +15,31 @@
     "processed_files": 48,
     "failed_files": 0
   },
+  "aggregate_processing": {
+    "schema_version": "scan-qc.aggregate-processing-rate.v1",
+    "aggregate_only": true,
+    "total_images": 120,
+    "processed_images": 48,
+    "remaining_images": 72,
+    "elapsed_seconds": 600.0,
+    "images_per_minute": 4.8,
+    "estimated_remaining_seconds": 900.0,
+    "unavailable_reason": null
+  },
   "progress": {
     "state": "running",
     "total_items": 120,
-    "completed_items": 48
+    "completed_items": 48,
+    "aggregate_processing": {
+      "schema_version": "scan-qc.aggregate-processing-rate.v1",
+      "aggregate_only": true,
+      "total_images": 120,
+      "processed_images": 48,
+      "remaining_images": 72,
+      "elapsed_seconds": 600.0,
+      "images_per_minute": 4.8,
+      "estimated_remaining_seconds": 900.0,
+      "unavailable_reason": null
+    }
   }
 }
