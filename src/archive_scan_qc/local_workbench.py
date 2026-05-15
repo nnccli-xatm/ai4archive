@@ -81,6 +81,16 @@ PROCESSING_MODE_OPTIONS: dict[str, dict[str, Any]] = {
         "despeckle": False,
     },
 }
+SAFE_STAGE_TIMING_LABELS_ZH = {
+    "scan": "检查扫描图片",
+    "process": "生成处理后图片",
+    "summarize": "整理处理结果",
+}
+SAFE_STAGE_TIMING_STATUS_LABELS_ZH = {
+    "running": "进行中",
+    "pending": "未开始",
+    "failed": "未完成",
+}
 
 
 class WorkbenchPreflightError(ValueError):
@@ -362,33 +372,39 @@ class WorkbenchController:
             if isinstance(reuse_handoff_summary, dict)
             else "本批复用了 0 张，重新处理 0 张，失败 0 张，剩余 0 张。"
         )
+        stage_timings_note = _completion_stage_timings_note(run_summary)
+        completion_note_lines = [
+            "本批已完成交接说明",
+            "本批次是否完成：已完成，可交接",
+            f"复核人员：{operator_name or '未填写'}",
+            f"处理方式：{_processing_mode_completion_label(processing_mode)}",
+            f"扫描原图总数：{handoff_counts['total_source_images']} 张",
+            f"处理后图片数量：{handoff_counts['processed_output_images']} 张",
+            f"需要重扫：{handoff_counts['needs_rescan_images']} 张",
+            f"需要重新处理：{handoff_counts['needs_reprocess_images']} 张",
+            f"待决定：{pending_decisions}",
+            reuse_note,
+            f"复核总数：{total_decisions}",
+            f"已确认：{reviewed_decisions}",
+            f"未关闭 P0：{open_p0_count}",
+            f"未关闭 P1：{open_p1_count}",
+            f"已有人工处理结论：{int(closure_summary.get('manually_handled_count') or reviewed_decisions)}",
+        ]
+        if stage_timings_note:
+            completion_note_lines.append(stage_timings_note)
+        completion_note_lines.extend(
+            [
+                (
+                    "交接事项：处理后图片已保存到输出文件夹；需要重扫和重新处理的数量已写入本交接说明；"
+                    "复核结果和交接说明已保存到本机状态文件夹。"
+                ),
+                "交接前检查：打开输出文件夹，确认本批处理后图片数量和画面状态符合交接要求。",
+                f"下一批：{handoff_counts['next_batch_reminder_zh']}",
+                "",
+            ]
+        )
         completion_note_path.write_text(
-            "\n".join(
-                [
-                    "本批已完成交接说明",
-                    "本批次是否完成：已完成，可交接",
-                    f"复核人员：{operator_name or '未填写'}",
-                    f"处理方式：{_processing_mode_completion_label(processing_mode)}",
-                    f"扫描原图总数：{handoff_counts['total_source_images']} 张",
-                    f"处理后图片数量：{handoff_counts['processed_output_images']} 张",
-                    f"需要重扫：{handoff_counts['needs_rescan_images']} 张",
-                    f"需要重新处理：{handoff_counts['needs_reprocess_images']} 张",
-                    f"待决定：{pending_decisions}",
-                    reuse_note,
-                    f"复核总数：{total_decisions}",
-                    f"已确认：{reviewed_decisions}",
-                    f"未关闭 P0：{open_p0_count}",
-                    f"未关闭 P1：{open_p1_count}",
-                    f"已有人工处理结论：{int(closure_summary.get('manually_handled_count') or reviewed_decisions)}",
-                    (
-                        "交接事项：处理后图片已保存到输出文件夹；需要重扫和重新处理的数量已写入本交接说明；"
-                        "复核结果和交接说明已保存到本机状态文件夹。"
-                    ),
-                    "交接前检查：打开输出文件夹，确认本批处理后图片数量和画面状态符合交接要求。",
-                    f"下一批：{handoff_counts['next_batch_reminder_zh']}",
-                    "",
-                ]
-            ),
+            "\n".join(completion_note_lines),
             encoding="utf-8",
         )
         completion_panel = {
@@ -2371,6 +2387,39 @@ def _local_reuse_handoff_summary(run_summary: dict[str, Any] | None) -> dict[str
             f"失败 {failed_files} 张，剩余 {remaining_files} 张。"
         ),
     }
+
+
+def _completion_stage_timings_note(run_summary: dict[str, Any] | None) -> str | None:
+    stage_timings = run_summary.get("stage_timings") if isinstance(run_summary, dict) else None
+    if not isinstance(stage_timings, dict) or stage_timings.get("aggregate_only") is not True:
+        return None
+    stages = stage_timings.get("stages")
+    if not isinstance(stages, list):
+        return None
+    fragments: list[str] = []
+    for stage in stages:
+        if not isinstance(stage, dict):
+            continue
+        stage_id = str(stage.get("id") or "").strip()
+        label_zh = SAFE_STAGE_TIMING_LABELS_ZH.get(stage_id)
+        if label_zh is None:
+            continue
+        try:
+            elapsed_seconds = max(0.0, float(stage.get("elapsed_seconds")))
+        except (TypeError, ValueError):
+            continue
+        status = str(stage.get("status") or "").strip().lower()
+        if status == "pending" and elapsed_seconds <= 0:
+            continue
+        status_suffix = (
+            ""
+            if status in {"completed", "finished"}
+            else f"（{SAFE_STAGE_TIMING_STATUS_LABELS_ZH.get(status, '未完成')}）"
+        )
+        fragments.append(f"{label_zh} {elapsed_seconds:.1f} 秒{status_suffix}")
+    if not fragments:
+        return None
+    return f"聚合阶段耗时：{'、'.join(fragments)}。"
 
 
 def _safe_nonnegative_int(value: Any) -> int:
