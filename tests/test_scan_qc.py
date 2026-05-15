@@ -5664,7 +5664,7 @@ class ScanQcTest(unittest.TestCase):
             process_dir = root / "processed"
             input_dir.mkdir()
             source = input_dir / "private_faded_text.png"
-            _synthetic_faded_text_page().save(source, dpi=(300, 300))
+            _synthetic_faded_text_page(ink=210).save(source, dpi=(300, 300))
             source_bytes = source.read_bytes()
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
@@ -5688,7 +5688,12 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(audit["guardrail_failures"], [])
             self.assertTrue(audit_summary["operations"]["enhance_faded_text"])
             self.assertEqual(audit_summary["counts"]["faded_text_enhanced_files"], 1)
+            self.assertEqual(audit_summary["counts"]["faded_text_skipped_files"], 0)
             self.assertIn("faded_text_changed_pixel_ratio", audit_summary["metrics"])
+            self.assertEqual(audit_summary["guardrails"]["faded_text"]["applied_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["faded_text"]["skipped_files"], 0)
+            self.assertGreater(audit_summary["guardrails"]["faded_text"]["changed_pixel_ratio"]["max"], 0)
+            self.assertIn(record["faded_text_reason"], audit_summary["guardrails"]["faded_text"]["reason_distribution"])
             self.assertEqual(plan["summary"]["faded_text_enhancement_candidates"], 1)
             self.assertTrue(plan["files"][0]["faded_text_enhancement_candidate"])
 
@@ -5706,6 +5711,9 @@ class ScanQcTest(unittest.TestCase):
                 "A003_dark_page.png": _synthetic_faded_text_page(background=150, ink=112),
                 "A004_photo_like.png": _synthetic_photo_like_page(),
                 "A005_texture_stain.png": _synthetic_texture_stain_page(),
+                "A006_edge_archival_line.png": _synthetic_faded_text_edge_risk_page(),
+                "A007_table_page_number_handwriting.png": _synthetic_faded_text_table_page(),
+                "A008_too_faint_low_confidence.png": _synthetic_faded_text_page(ink=232),
             }
             for name, image in pages.items():
                 image.save(input_dir / name, dpi=(300, 300))
@@ -5728,8 +5736,28 @@ class ScanQcTest(unittest.TestCase):
                 self.assertFalse(record["faded_text_enhanced"], record["source_relative_path"])
                 self.assertIn("enhance_faded_text_noop", record["operations"])
                 self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
+                self.assertEqual(record["processing_audit"]["faded_text_changed_pixel_ratio"], 0.0)
             self.assertTrue(audit_summary["operations"]["enhance_faded_text"])
             self.assertEqual(audit_summary["counts"]["faded_text_enhanced_files"], 0)
+            self.assertEqual(audit_summary["counts"]["faded_text_skipped_files"], len(pages))
+            faded_guard = audit_summary["guardrails"]["faded_text"]
+            self.assertEqual(faded_guard["applied_files"], 0)
+            self.assertEqual(faded_guard["skipped_files"], len(pages))
+            self.assertGreaterEqual(faded_guard["protection_triggered_files"], 4)
+            self.assertGreaterEqual(faded_guard["low_confidence_skip_files"], 1)
+            self.assertIn(
+                "faded text enhancement skipped: edge mark or binding risk",
+                faded_guard["skip_reason_distribution"],
+            )
+            self.assertIn(
+                "faded text enhancement skipped: broad stain, texture, illustration, or table-region risk",
+                faded_guard["skip_reason_distribution"],
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            self.assertNotIn("A006_edge_archival_line", audit_summary_text)
+            self.assertNotIn("A007_table_page_number_handwriting", audit_summary_text)
 
     def test_enhance_faded_text_dense_noop_skips_component_scan_and_keeps_metrics(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -5771,6 +5799,49 @@ class ScanQcTest(unittest.TestCase):
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertFalse(audit_summary["privacy"]["contains_paths"])
             self.assertNotIn("private_dense_texture", audit_summary_text)
+
+    def test_full_retouch_chain_with_faded_text_keeps_public_audit_aggregate_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            _synthetic_faded_text_page(ink=210).save(input_dir / "private_combo_faded_text.png", dpi=(300, 300))
+            _synthetic_faded_text_edge_risk_page().save(input_dir / "private_combo_edge_line.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(
+                    auto_crop=True,
+                    deskew=True,
+                    trim_dark_border=True,
+                    despeckle=True,
+                    lighten_background_stains=True,
+                    lighten_scanlines=True,
+                    enhance_faded_text=True,
+                    normalize_tones=True,
+                    sharpen_text_edges=True,
+                    workers=1,
+                ),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            self.assertEqual(manifest["summary"]["processed_files"], 2)
+            self.assertEqual(manifest["summary"]["failed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["operations"]["enhance_faded_text"])
+            self.assertIn("faded_text", audit_summary["guardrails"])
+            self.assertIn("skip_reason_distribution", audit_summary["guardrails"]["faded_text"])
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            self.assertNotIn("private_combo_faded_text", audit_summary_text)
+            self.assertNotIn("private_combo_edge_line", audit_summary_text)
 
     def test_sharpen_text_edges_lightly_improves_blurred_text_and_records_aggregate_audit(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -10542,6 +10613,28 @@ def _synthetic_texture_stain_page() -> Image.Image:
             shade = 190 + ((x + y) % 28)
             draw.point((x, y), fill=(shade, shade, shade))
             draw.point((x + 1, y), fill=(shade, shade, shade))
+    return image
+
+
+def _synthetic_faded_text_edge_risk_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), (242, 242, 242))
+    draw = ImageDraw.Draw(image)
+    draw.line((0, 38, 55, 38), fill=(198, 198, 198), width=3)
+    draw.line((238, 0, 238, 179), fill=(196, 196, 196), width=2)
+    for y in range(64, 132, 18):
+        draw.rectangle((60, y, 130, y + 3), fill=(210, 210, 210))
+    return image
+
+
+def _synthetic_faded_text_table_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), (242, 242, 242))
+    draw = ImageDraw.Draw(image)
+    for y in (42, 72, 102, 132):
+        draw.line((26, y, 214, y), fill=(190, 190, 190), width=2)
+    for x in (26, 88, 150, 214):
+        draw.line((x, 42, x, 132), fill=(190, 190, 190), width=2)
+    draw.text((180, 18), "12", fill=(60, 60, 60))
+    draw.line((48, 150, 116, 158), fill=(120, 120, 120), width=2)
     return image
 
 
