@@ -6014,6 +6014,18 @@ class ScanQcTest(unittest.TestCase):
             self.assertIn("可读取", guidance_text)
             self.assertIn("可写入", guidance_text)
             self.assertIn("常见图片格式", guidance_text)
+            reuse_summary = summary["local_reuse_summary"]
+            self.assertTrue(reuse_summary["aggregate_only"])
+            self.assertEqual(reuse_summary["total_files"], 5)
+            self.assertEqual(reuse_summary["reused_files"], 0)
+            self.assertEqual(reuse_summary["reprocessed_files"], 0)
+            self.assertEqual(reuse_summary["failed_files"], 2)
+            self.assertEqual(reuse_summary["remaining_files"], 2)
+            self.assertIn("本批共 5 张", reuse_summary["message_zh"])
+            self.assertIn("复用 0 张", reuse_summary["message_zh"])
+            self.assertIn("重新处理 0 张", reuse_summary["message_zh"])
+            self.assertIn("仍失败 2 张", reuse_summary["message_zh"])
+            self.assertIn("剩余待处理 2 张", reuse_summary["message_zh"])
 
     def test_processing_failure_recovery_advice_is_public_aggregate_only(self) -> None:
         private_values = [
@@ -6066,9 +6078,11 @@ class ScanQcTest(unittest.TestCase):
             )
 
             guidance_text = json.dumps(summary["recovery_guidance"], ensure_ascii=False, sort_keys=True)
+            reuse_text = json.dumps(summary["local_reuse_summary"], ensure_ascii=False, sort_keys=True)
             stage_timings_text = json.dumps(summary["stage_timings"], ensure_ascii=False, sort_keys=True)
             self.assertIn("本批有 2 张处理失败", guidance_text)
             self.assertIn("已成功输出 1 张", guidance_text)
+            self.assertIn("本批共 3 张", reuse_text)
             self.assertTrue(summary["stage_timings"]["aggregate_only"])
             self.assertEqual(
                 [(stage["id"], stage["label_zh"], stage["status"]) for stage in summary["stage_timings"]["stages"]],
@@ -6080,14 +6094,19 @@ class ScanQcTest(unittest.TestCase):
             )
             for private_value in private_values:
                 self.assertNotIn(private_value, guidance_text)
+                self.assertNotIn(private_value, reuse_text)
                 self.assertNotIn(private_value, stage_timings_text)
             self.assertNotIn(".tif", guidance_text)
+            self.assertNotIn(".tif", reuse_text)
             self.assertNotIn(".tif", stage_timings_text)
             self.assertNotIn("sha256", guidance_text.lower())
+            self.assertNotIn("sha256", reuse_text.lower())
             self.assertNotIn("sha256", stage_timings_text.lower())
             self.assertNotIn("traceback", guidance_text.lower())
+            self.assertNotIn("traceback", reuse_text.lower())
             self.assertNotIn("traceback", stage_timings_text.lower())
             self.assertNotIn("ocr", guidance_text.lower())
+            self.assertNotIn("ocr", reuse_text.lower())
             self.assertNotIn("ocr", stage_timings_text.lower())
 
     def test_running_progress_includes_aggregate_processing_rate_and_wait_estimate(self) -> None:
@@ -7489,6 +7508,59 @@ class ScanQcTest(unittest.TestCase):
             self.assertIn("磁盘空间", "".join(guidance["next_steps_zh"]))
             self.assertNotIn(str(input_dir), json.dumps(guidance, ensure_ascii=False))
             self.assertNotIn(".jpg", json.dumps(guidance, ensure_ascii=False))
+
+    def test_local_production_workbench_status_is_conservative_when_retry_scope_is_unknown(self) -> None:
+        private_values = [
+            "/Users/private/archive/input",
+            "Secret_Case_0001.tif",
+            "f" * 64,
+            "OCR: 张三身份证 110101199001010011",
+            "data:image/png;base64",
+            "Traceback File worker.py line 42",
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            metadata_dir = derivatives_dir / DEFAULT_METADATA_DIRNAME
+            input_dir.mkdir()
+            metadata_dir.mkdir(parents=True)
+            Image.new("RGB", (48, 36), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
+            (metadata_dir / "production_run_summary.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "scan-qc.production-run.v1",
+                        "status": "blocked",
+                        "operator_summary": {"message_zh": " ".join(private_values)},
+                        "counts": {
+                            "total_files": 3,
+                            "processed_files": 1,
+                            "failed_files": "unknown",
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            controller = WorkbenchController()
+            controller.configure(input_dir, derivatives_dir)
+            status = controller.status()
+
+            guidance = status["recovery_guidance"]
+            guidance_text = json.dumps(guidance, ensure_ascii=False, sort_keys=True)
+            self.assertEqual(guidance["kind"], "processing_retry_scope_unknown")
+            self.assertFalse(guidance["retry_scope_safe"])
+            self.assertIn("不能安全判断本批应重试哪些图片", guidance["message_zh"])
+            self.assertIn("不会误报完成", guidance["message_zh"])
+            self.assertIn("不会编造重试数量", guidance["message_zh"])
+            self.assertEqual(guidance["known_counts"], {"total_files": 3, "processed_files": 1})
+            self.assertNotIn("no_remaining_work", guidance_text)
+            for private_value in private_values:
+                self.assertNotIn(private_value, guidance_text)
+            self.assertNotIn(".tif", guidance_text)
+            self.assertNotIn("sha256", guidance_text.lower())
+            self.assertNotIn("ocr", guidance_text.lower())
+            self.assertNotIn("traceback", guidance_text.lower())
 
     def test_local_production_workbench_status_sanitizes_private_error_text_from_summary(self) -> None:
         private_values = [

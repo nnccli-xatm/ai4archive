@@ -193,13 +193,22 @@ def build_production_run_summary(
         "despeckle_backend": config.despeckle_backend,
         "resume_processing": config.resume_processing,
     }
+    reused_files = int(processing_summary.get("existing_derivative_reused_files", 0))
+    reprocessed_files = int(processing_summary.get("reprocessed_files", 0))
+    remaining_files = int(processing_summary.get("retry_list_files", failed_files))
     local_reuse_summary = {
         "schema_version": "scan-qc.local-processing-reuse-summary.v1",
         "aggregate_only": True,
-        "reused_files": int(processing_summary.get("existing_derivative_reused_files", 0)),
-        "reprocessed_files": int(processing_summary.get("reprocessed_files", 0)),
+        "total_files": int(processing_summary.get("total_files", total_files)),
+        "reused_files": reused_files,
+        "reprocessed_files": reprocessed_files,
         "failed_files": failed_files,
-        "remaining_files": int(processing_summary.get("retry_list_files", failed_files)),
+        "remaining_files": remaining_files,
+        "message_zh": (
+            f"本批共 {int(processing_summary.get('total_files', total_files))} 张；"
+            f"复用 {reused_files} 张，重新处理 {reprocessed_files} 张，"
+            f"仍失败 {failed_files} 张，剩余待处理 {remaining_files} 张。"
+        ),
     }
     completed_processing_items = (
         int(processing_summary.get("processed_files", 0))
@@ -263,6 +272,7 @@ def build_production_run_summary(
             "reused_files": local_reuse_summary["reused_files"],
             "reprocessed_files": local_reuse_summary["reprocessed_files"],
             "remaining_files": local_reuse_summary["remaining_files"],
+            "retry_total_files": local_reuse_summary["total_files"],
         },
         "local_reuse_summary": local_reuse_summary,
         "aggregate_processing": aggregate_processing,

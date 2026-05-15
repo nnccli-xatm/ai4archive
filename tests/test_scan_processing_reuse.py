@@ -508,6 +508,12 @@ class ScanProcessingReuseTest(unittest.TestCase):
             self.assertEqual(production_summary["local_reuse_summary"]["reprocessed_files"], 0)
             self.assertEqual(production_summary["local_reuse_summary"]["failed_files"], 0)
             self.assertEqual(production_summary["local_reuse_summary"]["remaining_files"], 0)
+            self.assertEqual(production_summary["local_reuse_summary"]["total_files"], 1)
+            self.assertIn("本批共 1 张", production_summary["local_reuse_summary"]["message_zh"])
+            self.assertIn("复用 1 张", production_summary["local_reuse_summary"]["message_zh"])
+            self.assertIn("重新处理 0 张", production_summary["local_reuse_summary"]["message_zh"])
+            self.assertIn("仍失败 0 张", production_summary["local_reuse_summary"]["message_zh"])
+            self.assertIn("剩余待处理 0 张", production_summary["local_reuse_summary"]["message_zh"])
             self.assertEqual(processing_module._sha256(source), original_sha)
             self.assertTrue(production_summary["stage_timings"]["aggregate_only"])
             self.assertEqual(
@@ -528,7 +534,16 @@ class ScanProcessingReuseTest(unittest.TestCase):
             self.assertNotIn(first_manifest["files"][0]["source_sha256"], public_reuse_text)
             self.assertEqual(
                 set(production_summary["local_reuse_summary"]),
-                {"schema_version", "aggregate_only", "reused_files", "reprocessed_files", "failed_files", "remaining_files"},
+                {
+                    "schema_version",
+                    "aggregate_only",
+                    "total_files",
+                    "reused_files",
+                    "reprocessed_files",
+                    "failed_files",
+                    "remaining_files",
+                    "message_zh",
+                },
             )
 
     def test_production_run_restart_only_fills_missing_outputs(self) -> None:
@@ -579,6 +594,10 @@ class ScanProcessingReuseTest(unittest.TestCase):
             self.assertEqual(production_summary["local_reuse_summary"]["reprocessed_files"], 1)
             self.assertEqual(production_summary["local_reuse_summary"]["failed_files"], 0)
             self.assertEqual(production_summary["local_reuse_summary"]["remaining_files"], 0)
+            self.assertEqual(production_summary["local_reuse_summary"]["total_files"], 2)
+            self.assertIn("本批共 2 张", production_summary["local_reuse_summary"]["message_zh"])
+            self.assertIn("复用 1 张", production_summary["local_reuse_summary"]["message_zh"])
+            self.assertIn("重新处理 1 张", production_summary["local_reuse_summary"]["message_zh"])
             for timing_payload in (production_summary["stage_timings"], progress["stage_timings"]):
                 self.assertTrue(timing_payload["aggregate_only"])
                 self.assertEqual(
@@ -679,6 +698,8 @@ class ScanProcessingReuseTest(unittest.TestCase):
             self.assertEqual(production_summary["local_reuse_summary"]["reprocessed_files"], 1)
             self.assertEqual(production_summary["local_reuse_summary"]["failed_files"], 0)
             self.assertEqual(production_summary["local_reuse_summary"]["remaining_files"], 0)
+            self.assertEqual(production_summary["local_reuse_summary"]["total_files"], 1)
+            self.assertIn("重新处理 1 张", production_summary["local_reuse_summary"]["message_zh"])
 
 
 def _dark_border_page() -> Image.Image:
