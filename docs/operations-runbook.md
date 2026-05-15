@@ -188,23 +188,31 @@ Run `archive-scan-qc processing-plan` after the scan report and before enabling
 `processing_plan.json` plus `processing_plan.csv` under its `--out` directory.
 The plan records per-file proposed EXIF transpose, deskew, dark-border trim,
 auto-crop, despeckle, optional tone normalization, optional conservative
-edge-shadow lightening, skipped, and unopenable decisions so operators can
-review the intended processing before derivative files are created. Treat the plan as
-sensitive local evidence because it contains row-level paths and hashes. It does
-not embed images, thumbnails, or image bytes.
+edge-shadow lightening, optional conservative background stain lightening,
+skipped, and unopenable decisions so operators can review the intended
+processing before derivative files are created. Treat the plan as sensitive
+local evidence because it contains row-level paths and hashes. It does not embed
+images, thumbnails, or image bytes.
 
 `--lighten-edge-shadow` is default-off and only targets narrow neutral shadows
 at the page edge. It no-ops when dark marks, text-like pixels, annotations,
 binding holes, color content, deep/dark pages, broad uneven lighting, or low
 confidence would risk changing正文,边注,印章,批注, or archival appearance.
 
+`--lighten-background-stains` is default-off and only targets small neutral,
+low-contrast light stains on otherwise light paper background. It no-ops for
+near-text candidates, red stamps, colored marks, annotations, binding or edge
+marks, large or history-like stains, normal pages, dark pages, obvious color
+pages, broad uneven lighting, sparse/low-confidence foreground evidence, or any
+case that could alter正文、印章、批注、装订痕迹 or archival appearance.
+
 For project-scale production runs, create a local run plan instead of launching
 each batch manually. CSV example:
 
 ```csv
-batch_id,input_dir,report_dir,process_out,manifest_csv,rules_profile,workers,auto_crop,deskew,trim_dark_border,despeckle,lighten_edge_shadow,resume_processing
-batch-001,/approved-work/input-batches/batch-001,batch-001,/approved-work/processed-derivatives/batch-001,/approved-work/manifests/batch-001.csv,/approved-work/rules/project-rules.json,2,true,true,true,true,false,false
-batch-002,/approved-work/input-batches/batch-002,batch-002,/approved-work/processed-derivatives/batch-002,/approved-work/manifests/batch-002.csv,/approved-work/rules/project-rules.json,2,true,true,true,true,false,true
+batch_id,input_dir,report_dir,process_out,manifest_csv,rules_profile,workers,auto_crop,deskew,trim_dark_border,despeckle,lighten_edge_shadow,lighten_background_stains,resume_processing
+batch-001,/approved-work/input-batches/batch-001,batch-001,/approved-work/processed-derivatives/batch-001,/approved-work/manifests/batch-001.csv,/approved-work/rules/project-rules.json,2,true,true,true,true,false,false,false
+batch-002,/approved-work/input-batches/batch-002,batch-002,/approved-work/processed-derivatives/batch-002,/approved-work/manifests/batch-002.csv,/approved-work/rules/project-rules.json,2,true,true,true,true,false,false,true
 ```
 
 Run it with:
@@ -264,7 +272,8 @@ intended for operator review before running `--process-out`.
 flags, worker metadata, timing, throughput, failure totals, resume counts,
 guardrail totals, and max/average/distribution metrics for size change, pixel
 change, brightness/contrast delta, crop ratio, dark-border trim margin, deskew
-angle, despeckle pixel ratio, and opt-in tone-normalization deltas. When
+angle, despeckle pixel ratio, opt-in tone-normalization deltas, opt-in
+edge-shadow deltas, and opt-in background-stain deltas/change ratios. When
 `--despeckle` is enabled, the aggregate
 timing block also reports count-only backend mode fields for the optional NumPy
 candidate filter or the Python/Pillow fallback; fallback is expected and
@@ -276,16 +285,17 @@ exposure, obvious color content, red stamps, light color annotations, faint
 marks, dense foreground, or too little tonal separation. Review
 `tone_normalized_files`, tone delta metrics, and row-level local reasons before
 accepting derivatives for archival packages.
-When `--deskew --trim-dark-border --auto-crop --despeckle --normalize-tones`
-are combined, size change, crop ratio, trim margin, deskew angle, despeckle
-pixel ratio, and bounded tone deltas remain the local guardrails for explained
-edits. Pixel-change ratio is still reported for aggregate review, but its
-guardrail is only applied to same-size changes without a recorded geometric or
-tone-normalization reason so conservative, auditable edits are not rejected
-solely because the derivative must be resized or tonally remapped for
+When `--deskew --trim-dark-border --auto-crop --despeckle --normalize-tones
+--lighten-edge-shadow --lighten-background-stains` are combined, size change,
+crop ratio, trim margin, deskew angle, despeckle pixel ratio, bounded tone
+deltas, and aggregate same-size pixel-change ratios remain the local guardrails
+for explained edits. Pixel-change ratio is still reported for aggregate review,
+and remains directly applied to same-size background stain and edge-shadow
+changes. For geometric or tone-normalization changes it is deferred to the
+size/crop/trim/deskew/tone guardrails so conservative, auditable edits are not
+rejected solely because the derivative must be resized or tonally remapped for
 comparison. The audit summary records aggregate counts for files where the
-pixel guardrail applied directly and files where it was deferred to the
-geometric or tone guardrails.
+pixel guardrail applied directly and files where it was deferred.
 Private integration and aggregate baseline summaries also promote the
 despeckle backend capability as public-safe aggregate fields:
 `requested_backend`, `effective_backend_mode`, `numpy_available`,
@@ -941,6 +951,11 @@ Start with these controls:
   manifest reason for review.
 - `--trim-dark-border`: dark edge trim before crop.
 - `--despeckle`: isolated dark speckle cleanup.
+- `--lighten-edge-shadow`: default-off narrow neutral page-edge shadow
+  lightening with content, color, binding, and broad-lighting no-op guards.
+- `--lighten-background-stains`: default-off small neutral light background
+  stain lightening with text, stamp, annotation, binding, color, historical
+  damage, broad-lighting, and low-confidence no-op guards.
 - `--rules-profile`: project-specific DPI, filename, and quality thresholds.
 - `archive-scan-qc benchmark`: aggregate-only local throughput comparison.
 

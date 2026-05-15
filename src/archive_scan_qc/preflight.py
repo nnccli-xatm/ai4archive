@@ -21,6 +21,7 @@ PROCESSING_FLAGS = (
     "despeckle",
     "normalize_tones",
     "lighten_edge_shadow",
+    "lighten_background_stains",
     "resume_processing",
 )
 
@@ -43,6 +44,7 @@ class PreflightConfig:
     despeckle: bool = False
     normalize_tones: bool = False
     lighten_edge_shadow: bool = False
+    lighten_background_stains: bool = False
     resume_processing: bool = False
 
 

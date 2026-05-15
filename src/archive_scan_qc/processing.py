@@ -16,7 +16,7 @@ import shutil
 import time
 from typing import Any
 
-from PIL import Image, ImageChops, ImageOps, ImageStat, UnidentifiedImageError
+from PIL import Image, ImageChops, ImageFilter, ImageOps, ImageStat, UnidentifiedImageError
 
 from .concurrency import resolve_worker_count, worker_metadata
 
@@ -37,6 +37,7 @@ class ProcessingOptions:
     despeckle: bool = False
     normalize_tones: bool = False
     lighten_edge_shadow: bool = False
+    lighten_background_stains: bool = False
     despeckle_backend: str = "fallback"
     resume_processing: bool = False
     reuse_scan_measurements: bool = False
@@ -92,6 +93,18 @@ class EdgeShadowLighteningResult:
     edge_mean_after: float | None
     edge_delta: float
     changed_pixel_ratio: float
+
+
+@dataclass(frozen=True)
+class BackgroundStainLighteningResult:
+    image: Image.Image
+    applied: bool
+    reason: str
+    stain_mean_before: float | None
+    stain_mean_after: float | None
+    stain_delta: float
+    changed_pixel_ratio: float
+    candidate_pixel_ratio: float
 
 
 def detect_skew(image: Image.Image) -> SkewDetection:
@@ -173,6 +186,11 @@ def process_images(
             "despeckle_isolated_pixels" if options.despeckle else "despeckle_disabled",
             "normalize_tones_conservative" if options.normalize_tones else "normalize_tones_disabled",
             "lighten_edge_shadow_conservative" if options.lighten_edge_shadow else "lighten_edge_shadow_disabled",
+            (
+                "lighten_background_stains_conservative"
+                if options.lighten_background_stains
+                else "lighten_background_stains_disabled"
+            ),
             "reuse_scan_measurements" if options.reuse_scan_measurements else "reuse_scan_measurements_disabled",
             "preserve_source_relative_path",
         ],
@@ -560,6 +578,13 @@ def _process_record(
         "edge_shadow_mean_after": None,
         "edge_shadow_delta": 0.0,
         "edge_shadow_changed_pixel_ratio": 0.0,
+        "background_stains_lightened": False,
+        "background_stains_reason": None,
+        "background_stains_mean_before": None,
+        "background_stains_mean_after": None,
+        "background_stains_delta": 0.0,
+        "background_stains_changed_pixel_ratio": 0.0,
+        "background_stains_candidate_pixel_ratio": 0.0,
         "processing_audit": None,
         "processing_warnings": [],
         "operation_timings": {},
@@ -632,6 +657,13 @@ def _process_record(
                 "edge_shadow_mean_after": process_info["edge_shadow_mean_after"],
                 "edge_shadow_delta": process_info["edge_shadow_delta"],
                 "edge_shadow_changed_pixel_ratio": process_info["edge_shadow_changed_pixel_ratio"],
+                "background_stains_lightened": process_info["background_stains_lightened"],
+                "background_stains_reason": process_info["background_stains_reason"],
+                "background_stains_mean_before": process_info["background_stains_mean_before"],
+                "background_stains_mean_after": process_info["background_stains_mean_after"],
+                "background_stains_delta": process_info["background_stains_delta"],
+                "background_stains_changed_pixel_ratio": process_info["background_stains_changed_pixel_ratio"],
+                "background_stains_candidate_pixel_ratio": process_info["background_stains_candidate_pixel_ratio"],
                 "processing_audit": process_info["processing_audit"],
                 "processing_warnings": process_info["processing_warnings"],
                 "operation_timings": process_info["operation_timings"],
@@ -679,6 +711,13 @@ def _process_record(
                     "edge_shadow_mean_after": process_info["edge_shadow_mean_after"],
                     "edge_shadow_delta": process_info["edge_shadow_delta"],
                     "edge_shadow_changed_pixel_ratio": process_info["edge_shadow_changed_pixel_ratio"],
+                    "background_stains_lightened": process_info["background_stains_lightened"],
+                    "background_stains_reason": process_info["background_stains_reason"],
+                    "background_stains_mean_before": process_info["background_stains_mean_before"],
+                    "background_stains_mean_after": process_info["background_stains_mean_after"],
+                    "background_stains_delta": process_info["background_stains_delta"],
+                    "background_stains_changed_pixel_ratio": process_info["background_stains_changed_pixel_ratio"],
+                    "background_stains_candidate_pixel_ratio": process_info["background_stains_candidate_pixel_ratio"],
                     "processing_audit": process_info["processing_audit"],
                     "processing_warnings": process_info["processing_warnings"],
                     "operation_timings": process_info["operation_timings"],
@@ -745,6 +784,7 @@ def _processing_options_fingerprint(options: ProcessingOptions) -> str:
         "despeckle": options.despeckle,
         "normalize_tones": options.normalize_tones,
         "lighten_edge_shadow": options.lighten_edge_shadow,
+        "lighten_background_stains": options.lighten_background_stains,
         "despeckle_backend": options.despeckle_backend,
         "reuse_scan_measurements": options.reuse_scan_measurements,
         "deskew_max_degrees": options.deskew_max_degrees,
@@ -801,6 +841,7 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "despeckle": options.despeckle,
             "normalize_tones": options.normalize_tones,
             "lighten_edge_shadow": options.lighten_edge_shadow,
+            "lighten_background_stains": options.lighten_background_stains,
             "resume_processing": options.resume_processing,
             "reuse_scan_measurements": options.reuse_scan_measurements,
         },
@@ -843,6 +884,9 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "edge_shadow_lightened_files": sum(
                 1 for audit in audit_records if audit.get("edge_shadow_lightened") is True
             ),
+            "background_stains_lightened_files": sum(
+                1 for audit in audit_records if audit.get("background_stains_lightened") is True
+            ),
         },
         "thresholds": _audit_thresholds(options),
         "metrics": {
@@ -859,6 +903,13 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "edge_shadow_delta": _aggregate_metric(audit_records, "edge_shadow_delta"),
             "edge_shadow_changed_pixel_ratio": _aggregate_metric(
                 audit_records, "edge_shadow_changed_pixel_ratio"
+            ),
+            "background_stains_delta": _aggregate_metric(audit_records, "background_stains_delta"),
+            "background_stains_changed_pixel_ratio": _aggregate_metric(
+                audit_records, "background_stains_changed_pixel_ratio"
+            ),
+            "background_stains_candidate_pixel_ratio": _aggregate_metric(
+                audit_records, "background_stains_candidate_pixel_ratio"
             ),
         },
         "distributions": {
@@ -911,6 +962,7 @@ def _aggregate_operation_timings(records: list[dict[str, Any]], options: Process
         "despeckle": options.despeckle,
         "normalize_tones": options.normalize_tones,
         "lighten_edge_shadow": options.lighten_edge_shadow,
+        "lighten_background_stains": options.lighten_background_stains,
     }
     timings: dict[str, dict[str, Any]] = {}
     for operation, is_enabled in enabled.items():
@@ -1232,6 +1284,21 @@ def _process_image(
         else:
             operations.append("lighten_edge_shadow_disabled")
 
+    background_stains = BackgroundStainLighteningResult(
+        processed, False, "background stain lightening disabled", None, None, 0.0, 0.0, 0.0
+    )
+    with _operation_timer(operation_timings, "lighten_background_stains", enabled=options.lighten_background_stains):
+        if options.lighten_background_stains:
+            background_stains = _lighten_background_stains_conservative(processed)
+            processed = background_stains.image
+            operations.append(
+                "lighten_background_stains_conservative"
+                if background_stains.applied
+                else "lighten_background_stains_noop"
+            )
+        else:
+            operations.append("lighten_background_stains_disabled")
+
     processing_audit = _processing_audit(
         audit_source,
         processed,
@@ -1248,6 +1315,10 @@ def _process_image(
         edge_shadow.applied,
         edge_shadow.edge_delta,
         edge_shadow.changed_pixel_ratio,
+        background_stains.applied,
+        background_stains.stain_delta,
+        background_stains.changed_pixel_ratio,
+        background_stains.candidate_pixel_ratio,
     )
     processing_warnings = list(processing_audit["guardrail_failures"])
     crop_info = {
@@ -1282,6 +1353,13 @@ def _process_image(
         "edge_shadow_mean_after": edge_shadow.edge_mean_after,
         "edge_shadow_delta": edge_shadow.edge_delta,
         "edge_shadow_changed_pixel_ratio": edge_shadow.changed_pixel_ratio,
+        "background_stains_lightened": background_stains.applied,
+        "background_stains_reason": background_stains.reason,
+        "background_stains_mean_before": background_stains.stain_mean_before,
+        "background_stains_mean_after": background_stains.stain_mean_after,
+        "background_stains_delta": background_stains.stain_delta,
+        "background_stains_changed_pixel_ratio": background_stains.changed_pixel_ratio,
+        "background_stains_candidate_pixel_ratio": background_stains.candidate_pixel_ratio,
         "processing_audit": processing_audit,
         "processing_warnings": processing_warnings,
         "operation_timings": operation_timings,
@@ -1556,6 +1634,228 @@ def _edge_shadow_noop(image: Image.Image, reason: str) -> EdgeShadowLighteningRe
     return EdgeShadowLighteningResult(image, False, reason, (), None, None, 0.0, 0.0)
 
 
+def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundStainLighteningResult:
+    if image.width < 80 or image.height < 80:
+        return _background_stains_noop(image, "background stain lightening skipped: image too small")
+    color_risk = _tone_color_risk_reason(image)
+    if color_risk:
+        return _background_stains_noop(
+            image,
+            "background stain lightening skipped: color content, stamp, or annotation risk",
+        )
+
+    grayscale = image.convert("L")
+    histogram = grayscale.histogram()
+    total = image.width * image.height
+    p05 = _histogram_percentile(histogram, total, 0.05)
+    p50 = _histogram_percentile(histogram, total, 0.50)
+    p90 = _histogram_percentile(histogram, total, 0.90)
+    p95 = _histogram_percentile(histogram, total, 0.95)
+    p99 = _histogram_percentile(histogram, total, 0.99)
+    if p95 < 210 or p50 < 195:
+        return _background_stains_noop(image, "background stain lightening skipped: page is too dark")
+    if p99 - p05 < 24:
+        return _background_stains_noop(image, "background stain lightening skipped: low-confidence tonal evidence")
+
+    foreground_threshold = min(150, max(80, p50 - 46))
+    foreground = grayscale.point(lambda value: 255 if value <= foreground_threshold else 0, mode="L")
+    foreground_ratio = _mask_ratio(foreground)
+    if foreground_ratio < 0.002:
+        return _background_stains_noop(image, "background stain lightening skipped: foreground evidence too sparse")
+    if foreground_ratio > 0.24:
+        return _background_stains_noop(image, "background stain lightening skipped: foreground too dense")
+    if _protected_edge_dark_ratio(foreground) > 0.0025:
+        return _background_stains_noop(
+            image,
+            "background stain lightening skipped: binding, edge mark, or margin content risk",
+        )
+
+    background = max(p90, p95 - 2)
+    min_stain = max(160, min(p50 + 4, background - 30))
+    max_stain = max(min_stain, background - 8)
+    candidate = grayscale.point(
+        lambda value: 255 if min_stain <= value <= max_stain and 8 <= background - value <= 34 else 0,
+        mode="L",
+    )
+    candidate = _clear_mask_edges(candidate, max(3, int(round(min(image.width, image.height) * 0.025))))
+    raw_candidate_ratio = _mask_ratio(candidate)
+    if raw_candidate_ratio > 0.035:
+        return _background_stains_noop(
+            image,
+            "background stain lightening skipped: broad uneven lighting is outside conservative scope",
+            raw_candidate_ratio,
+        )
+    protected = foreground.filter(ImageFilter.MaxFilter(13))
+    if _mask_ratio(ImageChops.multiply(candidate, protected)) > 0.00005:
+        return _background_stains_noop(
+            image,
+            "background stain lightening skipped: stain candidate near text, stamp, annotation, or original mark risk",
+        )
+    candidate = ImageChops.multiply(candidate, ImageChops.invert(protected))
+    candidate_ratio = _mask_ratio(candidate)
+    if candidate_ratio < 0.00008:
+        return _background_stains_noop(image, "background stain lightening skipped: no confident light background stains")
+    if candidate_ratio > 0.035:
+        return _background_stains_noop(
+            image,
+            "background stain lightening skipped: broad uneven lighting is outside conservative scope",
+            candidate_ratio,
+        )
+
+    components = _mask_components(candidate)
+    if not components:
+        return _background_stains_noop(image, "background stain lightening skipped: no confident light background stains")
+    selected: set[tuple[int, int]] = set()
+    for component in components:
+        area = len(component)
+        xs = [point[0] for point in component]
+        ys = [point[1] for point in component]
+        width = max(xs) - min(xs) + 1
+        height = max(ys) - min(ys) + 1
+        if area < 6:
+            continue
+        if area / total > 0.012 or width > image.width * 0.18 or height > image.height * 0.18:
+            return _background_stains_noop(
+                image,
+                "background stain lightening skipped: large stain or historical damage risk",
+                candidate_ratio,
+            )
+        selected.update(component)
+
+    changed_ratio = len(selected) / max(1, total)
+    if changed_ratio < 0.00008:
+        return _background_stains_noop(image, "background stain lightening skipped: no confident light background stains")
+    if changed_ratio > 0.025:
+        return _background_stains_noop(
+            image,
+            "background stain lightening skipped: changed area exceeds conservative background scope",
+            candidate_ratio,
+        )
+
+    before_values: list[int] = []
+    after_values: list[int] = []
+    if image.mode == "L":
+        output = grayscale.copy()
+        pixels = output.load()
+        for x, y in selected:
+            value = pixels[x, y]
+            new_value = min(255, int(round(value + min(22, max(4, (background - value) * 0.78)))))
+            pixels[x, y] = new_value
+            before_values.append(value)
+            after_values.append(new_value)
+        result_image = output
+    else:
+        source = image.convert("RGB")
+        output = source.copy()
+        output_pixels = output.load()
+        gray_pixels = grayscale.load()
+        for x, y in selected:
+            gray_value = gray_pixels[x, y]
+            delta = min(22, max(4, int(round((background - gray_value) * 0.78))))
+            red_value, green_value, blue_value = output_pixels[x, y]
+            output_pixels[x, y] = (
+                min(255, red_value + delta),
+                min(255, green_value + delta),
+                min(255, blue_value + delta),
+            )
+            before_values.append(gray_value)
+            after_values.append(min(255, gray_value + delta))
+        result_image = output
+
+    before_mean = round(sum(before_values) / len(before_values), 6)
+    after_mean = round(sum(after_values) / len(after_values), 6)
+    if after_mean - before_mean < 4:
+        return _background_stains_noop(
+            image,
+            "background stain lightening skipped: improvement below conservative threshold",
+            candidate_ratio,
+        )
+    return BackgroundStainLighteningResult(
+        result_image,
+        True,
+        "background stain lightening applied: small neutral low-contrast stains on light background",
+        before_mean,
+        after_mean,
+        round(after_mean - before_mean, 6),
+        round(changed_ratio, 6),
+        round(candidate_ratio, 6),
+    )
+
+
+def _background_stains_noop(
+    image: Image.Image,
+    reason: str,
+    candidate_pixel_ratio: float = 0.0,
+) -> BackgroundStainLighteningResult:
+    return BackgroundStainLighteningResult(
+        image,
+        False,
+        reason,
+        None,
+        None,
+        0.0,
+        0.0,
+        round(candidate_pixel_ratio, 6),
+    )
+
+
+def _mask_ratio(mask: Image.Image) -> float:
+    histogram = mask.histogram()
+    return sum(histogram[1:]) / max(1, mask.width * mask.height)
+
+
+def _protected_edge_dark_ratio(mask: Image.Image) -> float:
+    margin = max(5, int(round(min(mask.width, mask.height) * 0.06)))
+    boxes = (
+        (0, 0, margin, mask.height),
+        (mask.width - margin, 0, mask.width, mask.height),
+        (0, 0, mask.width, margin),
+        (0, mask.height - margin, mask.width, mask.height),
+    )
+    edge_pixels = sum((box[2] - box[0]) * (box[3] - box[1]) for box in boxes)
+    dark_pixels = sum(sum(mask.crop(box).histogram()[1:]) for box in boxes)
+    return dark_pixels / max(1, edge_pixels)
+
+
+def _clear_mask_edges(mask: Image.Image, margin: int) -> Image.Image:
+    if margin <= 0:
+        return mask
+    output = mask.copy()
+    pixels = output.load()
+    for y in range(output.height):
+        for x in range(output.width):
+            if x < margin or y < margin or x >= output.width - margin or y >= output.height - margin:
+                pixels[x, y] = 0
+    return output
+
+
+def _mask_components(mask: Image.Image) -> list[list[tuple[int, int]]]:
+    width, height = mask.size
+    pixels = mask.load()
+    visited: set[tuple[int, int]] = set()
+    components: list[list[tuple[int, int]]] = []
+    for y in range(height):
+        for x in range(width):
+            if not pixels[x, y] or (x, y) in visited:
+                continue
+            stack = [(x, y)]
+            visited.add((x, y))
+            component: list[tuple[int, int]] = []
+            while stack:
+                point = stack.pop()
+                component.append(point)
+                px, py = point
+                for nx in range(max(0, px - 1), min(width, px + 2)):
+                    for ny in range(max(0, py - 1), min(height, py + 2)):
+                        neighbor = (nx, ny)
+                        if neighbor in visited or not pixels[nx, ny]:
+                            continue
+                        visited.add(neighbor)
+                        stack.append(neighbor)
+            components.append(component)
+    return components
+
+
 def _dark_pixel_ratio(image: Image.Image, threshold: int) -> float:
     histogram = image.histogram()
     return sum(histogram[:threshold]) / max(1, image.width * image.height)
@@ -1610,6 +1910,10 @@ def _processing_audit(
     edge_shadow_lightened: bool = False,
     edge_shadow_delta: float = 0.0,
     edge_shadow_changed_pixel_ratio: float = 0.0,
+    background_stains_lightened: bool = False,
+    background_stains_delta: float = 0.0,
+    background_stains_changed_pixel_ratio: float = 0.0,
+    background_stains_candidate_pixel_ratio: float = 0.0,
 ) -> dict[str, Any]:
     source_width, source_height = source.size
     output_width, output_height = processed.size
@@ -1664,6 +1968,10 @@ def _processing_audit(
         "edge_shadow_lightened": edge_shadow_lightened,
         "edge_shadow_delta": round(edge_shadow_delta, 6),
         "edge_shadow_changed_pixel_ratio": round(edge_shadow_changed_pixel_ratio, 6),
+        "background_stains_lightened": background_stains_lightened,
+        "background_stains_delta": round(background_stains_delta, 6),
+        "background_stains_changed_pixel_ratio": round(background_stains_changed_pixel_ratio, 6),
+        "background_stains_candidate_pixel_ratio": round(background_stains_candidate_pixel_ratio, 6),
         "crop_ratio": round(max(0.0, crop_ratio), 6),
         "trim_margins": trim_margins,
         "max_trim_margin_ratio": round(max_trim_margin_ratio, 6),
