@@ -75,6 +75,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--deskew", action="store_true", help="Enable conservative deskew during processing.")
     parser.add_argument("--trim-dark-border", action="store_true", help="Enable conservative dark-border trim.")
     parser.add_argument("--despeckle", action="store_true", help="Enable conservative despeckle.")
+    parser.add_argument("--normalize-tones", action="store_true", help="Enable conservative gray/dark page tone normalization.")
     parser.add_argument(
         "--despeckle-backend",
         choices=("fallback", "numpy"),
@@ -157,6 +158,7 @@ def run_private_integration(args: argparse.Namespace) -> PrivateIntegrationResul
                 deskew=args.deskew,
                 trim_dark_border=args.trim_dark_border,
                 despeckle=args.despeckle,
+                normalize_tones=getattr(args, "normalize_tones", False),
                 despeckle_backend=despeckle_backend,
                 resume_processing=args.resume_processing,
                 reuse_scan_measurements=args.reuse_scan_measurements,
@@ -524,7 +526,7 @@ def _has_operation_timing(value: Any) -> bool:
 def _benchmark_operation_timings(benchmark_summary: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
     if not benchmark_summary:
         return {}
-    operation_names = ["auto_crop", "deskew", "trim_dark_border", "despeckle"]
+    operation_names = ["auto_crop", "deskew", "trim_dark_border", "despeckle", "normalize_tones"]
     totals: dict[str, dict[str, Any]] = {}
     for operation in operation_names:
         elapsed_seconds = 0.0
@@ -654,6 +656,7 @@ def _benchmark_args(args: argparse.Namespace, input_dir: Path, output_root: Path
         deskew=args.deskew,
         trim_dark_border=args.trim_dark_border,
         despeckle=args.despeckle,
+        normalize_tones=getattr(args, "normalize_tones", False),
         despeckle_backend=despeckle_backend,
         min_dpi=args.min_dpi,
         name_pattern=args.name_pattern,

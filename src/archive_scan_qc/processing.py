@@ -35,6 +35,7 @@ class ProcessingOptions:
     deskew: bool = False
     trim_dark_border: bool = False
     despeckle: bool = False
+    normalize_tones: bool = False
     despeckle_backend: str = "fallback"
     resume_processing: bool = False
     reuse_scan_measurements: bool = False
@@ -67,6 +68,17 @@ class DarkBorderDetection:
 class CropDetection:
     bbox: tuple[int, int, int, int] | None
     reason: str
+
+
+@dataclass(frozen=True)
+class ToneNormalizationResult:
+    image: Image.Image
+    applied: bool
+    reason: str
+    background_before: float | None
+    background_after: float | None
+    contrast_before: float | None
+    contrast_after: float | None
 
 
 def detect_skew(image: Image.Image) -> SkewDetection:
@@ -146,8 +158,8 @@ def process_images(
             "dark_border_trim_conservative" if options.trim_dark_border else "dark_border_trim_disabled",
             "auto_crop_conservative" if options.auto_crop else "auto_crop_disabled",
             "despeckle_isolated_pixels" if options.despeckle else "despeckle_disabled",
+            "normalize_tones_conservative" if options.normalize_tones else "normalize_tones_disabled",
             "reuse_scan_measurements" if options.reuse_scan_measurements else "reuse_scan_measurements_disabled",
-            "autocontrast_cutoff_0_5",
             "preserve_source_relative_path",
         ],
         "resume": {
@@ -521,6 +533,12 @@ def _process_record(
         "despeckle_pixels_changed": 0,
         "despeckle_reason": None,
         "despeckle_backend_mode": None,
+        "tone_normalized": False,
+        "tone_reason": None,
+        "tone_background_before": None,
+        "tone_background_after": None,
+        "tone_contrast_before": None,
+        "tone_contrast_after": None,
         "processing_audit": None,
         "processing_warnings": [],
         "operation_timings": {},
@@ -580,6 +598,12 @@ def _process_record(
                 "despeckle_pixels_changed": process_info["despeckle_pixels_changed"],
                 "despeckle_reason": process_info["despeckle_reason"],
                 "despeckle_backend_mode": process_info["despeckle_backend_mode"],
+                "tone_normalized": process_info["tone_normalized"],
+                "tone_reason": process_info["tone_reason"],
+                "tone_background_before": process_info["tone_background_before"],
+                "tone_background_after": process_info["tone_background_after"],
+                "tone_contrast_before": process_info["tone_contrast_before"],
+                "tone_contrast_after": process_info["tone_contrast_after"],
                 "processing_audit": process_info["processing_audit"],
                 "processing_warnings": process_info["processing_warnings"],
                 "operation_timings": process_info["operation_timings"],
@@ -614,6 +638,12 @@ def _process_record(
                     "despeckle_pixels_changed": process_info["despeckle_pixels_changed"],
                     "despeckle_reason": process_info["despeckle_reason"],
                     "despeckle_backend_mode": process_info["despeckle_backend_mode"],
+                    "tone_normalized": process_info["tone_normalized"],
+                    "tone_reason": process_info["tone_reason"],
+                    "tone_background_before": process_info["tone_background_before"],
+                    "tone_background_after": process_info["tone_background_after"],
+                    "tone_contrast_before": process_info["tone_contrast_before"],
+                    "tone_contrast_after": process_info["tone_contrast_after"],
                     "processing_audit": process_info["processing_audit"],
                     "processing_warnings": process_info["processing_warnings"],
                     "operation_timings": process_info["operation_timings"],
@@ -678,6 +708,7 @@ def _processing_options_fingerprint(options: ProcessingOptions) -> str:
         "deskew": options.deskew,
         "trim_dark_border": options.trim_dark_border,
         "despeckle": options.despeckle,
+        "normalize_tones": options.normalize_tones,
         "despeckle_backend": options.despeckle_backend,
         "reuse_scan_measurements": options.reuse_scan_measurements,
         "deskew_max_degrees": options.deskew_max_degrees,
@@ -732,6 +763,7 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "deskew": options.deskew,
             "trim_dark_border": options.trim_dark_border,
             "despeckle": options.despeckle,
+            "normalize_tones": options.normalize_tones,
             "resume_processing": options.resume_processing,
             "reuse_scan_measurements": options.reuse_scan_measurements,
         },
@@ -770,6 +802,7 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "deskew_safe_skip_files": _int_count(deskew_timing.get("safe_skip_files")),
             "deskew_projection_detection_files": _int_count(deskew_timing.get("projection_detection_files")),
             "deskew_fallback_detection_files": _int_count(deskew_timing.get("fallback_detection_files")),
+            "tone_normalized_files": sum(1 for audit in audit_records if audit.get("tone_normalized") is True),
         },
         "thresholds": _audit_thresholds(options),
         "metrics": {
@@ -781,6 +814,8 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "max_trim_margin_ratio": _aggregate_metric(audit_records, "max_trim_margin_ratio"),
             "deskew_abs_angle_degrees": _aggregate_metric(audit_records, "deskew_abs_angle_degrees"),
             "despeckle_pixel_ratio": _aggregate_metric(audit_records, "despeckle_pixel_ratio"),
+            "tone_background_delta": _aggregate_metric(audit_records, "tone_background_delta"),
+            "tone_contrast_delta": _aggregate_metric(audit_records, "tone_contrast_delta"),
         },
         "distributions": {
             "pixel_change_ratio": _ratio_distribution(audit_records, "pixel_change_ratio"),
@@ -830,6 +865,7 @@ def _aggregate_operation_timings(records: list[dict[str, Any]], options: Process
         "deskew": options.deskew,
         "trim_dark_border": options.trim_dark_border,
         "despeckle": options.despeckle,
+        "normalize_tones": options.normalize_tones,
     }
     timings: dict[str, dict[str, Any]] = {}
     for operation, is_enabled in enabled.items():
@@ -1129,9 +1165,29 @@ def _process_image(
         operation_timings["despeckle"]["backend_mode"] = despeckle_backend_mode
         operation_timings["despeckle"]["numpy_available"] = despeckle_backend_mode == "numpy"
 
-    processed = ImageOps.autocontrast(processed, cutoff=0.5)
-    operations.append("autocontrast_cutoff_0_5")
-    processing_audit = _processing_audit(audit_source, processed, options, crop_bbox, dark_border.bbox, skew.angle_degrees, despeckle_pixels_changed)
+    tone = ToneNormalizationResult(processed, False, "tone normalization disabled", None, None, None, None)
+    with _operation_timer(operation_timings, "normalize_tones", enabled=options.normalize_tones):
+        if options.normalize_tones:
+            tone = _normalize_tones_conservative(processed)
+            processed = tone.image
+            operations.append("normalize_tones_conservative" if tone.applied else "normalize_tones_noop")
+        else:
+            operations.append("normalize_tones_disabled")
+
+    processing_audit = _processing_audit(
+        audit_source,
+        processed,
+        options,
+        crop_bbox,
+        dark_border.bbox,
+        skew.angle_degrees,
+        despeckle_pixels_changed,
+        tone.applied,
+        tone.background_before,
+        tone.background_after,
+        tone.contrast_before,
+        tone.contrast_after,
+    )
     processing_warnings = list(processing_audit["guardrail_failures"])
     crop_info = {
         "original_size": original_size,
@@ -1152,6 +1208,12 @@ def _process_image(
         "despeckle_pixels_changed": despeckle_pixels_changed,
         "despeckle_reason": despeckle_reason,
         "despeckle_backend_mode": despeckle_backend_mode,
+        "tone_normalized": tone.applied,
+        "tone_reason": tone.reason,
+        "tone_background_before": tone.background_before,
+        "tone_background_after": tone.background_after,
+        "tone_contrast_before": tone.contrast_before,
+        "tone_contrast_after": tone.contrast_after,
         "processing_audit": processing_audit,
         "processing_warnings": processing_warnings,
         "operation_timings": operation_timings,
@@ -1178,6 +1240,180 @@ class _operation_timer:
             timing["elapsed_seconds"] = max(0.0, round(time.perf_counter() - self.started_at, 6))
 
 
+def _normalize_tones_conservative(image: Image.Image) -> ToneNormalizationResult:
+    if image.width < 30 or image.height < 30:
+        return ToneNormalizationResult(image, False, "image too small for tone normalization", None, None, None, None)
+    color_risk = _tone_color_risk_reason(image)
+    if color_risk:
+        return ToneNormalizationResult(image, False, color_risk, None, None, None, None)
+
+    grayscale = image.convert("L")
+    histogram = grayscale.histogram()
+    total = image.width * image.height
+    p01 = _histogram_percentile(histogram, total, 0.01)
+    p05 = _histogram_percentile(histogram, total, 0.05)
+    p50 = _histogram_percentile(histogram, total, 0.50)
+    p95 = _histogram_percentile(histogram, total, 0.95)
+    p99 = _histogram_percentile(histogram, total, 0.99)
+    contrast_before = float(p95 - p05)
+    background_before = float(p95)
+    if p99 - p01 < 35:
+        return ToneNormalizationResult(
+            image,
+            False,
+            "tone normalization skipped: tonal separation too small",
+            background_before,
+            background_before,
+            contrast_before,
+            contrast_before,
+        )
+    if p95 >= 235 and contrast_before >= 65:
+        return ToneNormalizationResult(
+            image,
+            False,
+            "tone normalization skipped: exposure and contrast already normal",
+            background_before,
+            background_before,
+            contrast_before,
+            contrast_before,
+        )
+    if p95 < 145:
+        return ToneNormalizationResult(
+            image,
+            False,
+            "tone normalization skipped: page is too dark for conservative automatic correction",
+            background_before,
+            background_before,
+            contrast_before,
+            contrast_before,
+        )
+    if not (45 <= contrast_before <= 135 and 145 <= p95 <= 225):
+        return ToneNormalizationResult(
+            image,
+            False,
+            "tone normalization skipped: outside conservative gray text range",
+            background_before,
+            background_before,
+            contrast_before,
+            contrast_before,
+        )
+
+    foreground_threshold = max(0, min(p50 - 10, p95 - 35))
+    foreground_pixels = sum(histogram[: foreground_threshold + 1])
+    foreground_ratio = foreground_pixels / max(1, total)
+    if foreground_ratio < 0.006:
+        return ToneNormalizationResult(
+            image,
+            False,
+            "tone normalization skipped: foreground evidence too sparse",
+            background_before,
+            background_before,
+            contrast_before,
+            contrast_before,
+        )
+    if foreground_ratio > 0.35:
+        return ToneNormalizationResult(
+            image,
+            False,
+            "tone normalization skipped: foreground too dense",
+            background_before,
+            background_before,
+            contrast_before,
+            contrast_before,
+        )
+
+    source_low = max(0, p05 - 6)
+    source_high = min(255, p95 + 4)
+    if source_high - source_low < 45:
+        return ToneNormalizationResult(
+            image,
+            False,
+            "tone normalization skipped: stretch range too narrow",
+            background_before,
+            background_before,
+            contrast_before,
+            contrast_before,
+        )
+    target_low = 62
+    target_high = 230
+    scale = (target_high - target_low) / (source_high - source_low)
+
+    def map_value(value: int) -> int:
+        return max(0, min(255, int(round((value - source_low) * scale + target_low))))
+
+    normalized_l = grayscale.point(map_value, mode="L")
+    normalized_histogram = normalized_l.histogram()
+    background_after = float(_histogram_percentile(normalized_histogram, total, 0.95))
+    contrast_after = float(
+        _histogram_percentile(normalized_histogram, total, 0.95)
+        - _histogram_percentile(normalized_histogram, total, 0.05)
+    )
+    if background_after - background_before < 12 or contrast_after - contrast_before < 12:
+        return ToneNormalizationResult(
+            image,
+            False,
+            "tone normalization skipped: improvement below conservative threshold",
+            background_before,
+            background_after,
+            contrast_before,
+            contrast_after,
+        )
+    if background_after - background_before > 75 or contrast_after - contrast_before > 75:
+        return ToneNormalizationResult(
+            image,
+            False,
+            "tone normalization skipped: brightness or contrast delta exceeds conservative threshold",
+            background_before,
+            background_after,
+            contrast_before,
+            contrast_after,
+        )
+
+    normalized = normalized_l if image.mode == "L" else Image.merge("RGB", (normalized_l, normalized_l, normalized_l))
+    return ToneNormalizationResult(
+        normalized,
+        True,
+        "tone normalization applied: neutral gray low-contrast text page",
+        background_before,
+        background_after,
+        contrast_before,
+        contrast_after,
+    )
+
+
+def _tone_color_risk_reason(image: Image.Image) -> str | None:
+    if image.mode == "L":
+        return None
+    sample = image.convert("RGB")
+    sample.thumbnail((600, 600), Image.Resampling.BILINEAR)
+    total = max(1, sample.width * sample.height)
+    colored = 0
+    red = 0
+    light_colored = 0
+    pixel_data = sample.get_flattened_data() if hasattr(sample, "get_flattened_data") else sample.getdata()
+    for red_value, green_value, blue_value in pixel_data:
+        high = max(red_value, green_value, blue_value)
+        low = min(red_value, green_value, blue_value)
+        spread = high - low
+        brightness = (red_value + green_value + blue_value) / 3
+        if spread > 18 and 30 < brightness < 250:
+            colored += 1
+        if red_value >= 110 and red_value - green_value >= 35 and red_value - blue_value >= 35:
+            red += 1
+        if spread > 12 and 125 <= brightness <= 245:
+            light_colored += 1
+    red_ratio = red / total
+    if red_ratio >= 0.0004:
+        return "tone normalization skipped: red stamp or red annotation risk"
+    colored_ratio = colored / total
+    light_colored_ratio = light_colored / total
+    if light_colored_ratio >= 0.0008 and colored_ratio < 0.02:
+        return "tone normalization skipped: light color annotation or faint mark risk"
+    if colored_ratio >= 0.003:
+        return "tone normalization skipped: obvious color content"
+    return None
+
+
 def _processing_audit(
     source: Image.Image,
     processed: Image.Image,
@@ -1186,6 +1422,11 @@ def _processing_audit(
     dark_border_bbox: tuple[int, int, int, int] | None,
     skew_angle_degrees: float | None,
     despeckle_pixels_changed: int,
+    tone_normalized: bool = False,
+    tone_background_before: float | None = None,
+    tone_background_after: float | None = None,
+    tone_contrast_before: float | None = None,
+    tone_contrast_after: float | None = None,
 ) -> dict[str, Any]:
     source_width, source_height = source.size
     output_width, output_height = processed.size
@@ -1209,17 +1450,34 @@ def _processing_audit(
         or max_trim_margin_ratio > 0
         or deskew_abs_angle >= 0.2
     )
+    tone_background_delta = (
+        abs(tone_background_after - tone_background_before)
+        if isinstance(tone_background_before, int | float) and isinstance(tone_background_after, int | float)
+        else 0.0
+    )
+    tone_contrast_delta = (
+        abs(tone_contrast_after - tone_contrast_before)
+        if isinstance(tone_contrast_before, int | float) and isinstance(tone_contrast_after, int | float)
+        else 0.0
+    )
     metrics = {
         "size_change_ratio": round(size_change_ratio, 6),
         "pixel_change_ratio": round(pixel_change_ratio, 6),
-        "pixel_change_guardrail_applied": not geometric_change_recorded,
+        "pixel_change_guardrail_applied": not geometric_change_recorded and not tone_normalized,
         "pixel_change_guardrail_scope": (
             "same_size_pixel_change"
-            if not geometric_change_recorded
-            else "geometric_change_recorded_by_size_crop_trim_or_deskew"
+            if not geometric_change_recorded and not tone_normalized
+            else (
+                "tone_normalization_recorded_by_brightness_and_contrast"
+                if tone_normalized and not geometric_change_recorded
+                else "geometric_change_recorded_by_size_crop_trim_or_deskew"
+            )
         ),
         "brightness_delta": round(brightness_delta, 6),
         "contrast_delta": round(contrast_delta, 6),
+        "tone_normalized": tone_normalized,
+        "tone_background_delta": round(tone_background_delta, 6),
+        "tone_contrast_delta": round(tone_contrast_delta, 6),
         "crop_ratio": round(max(0.0, crop_ratio), 6),
         "trim_margins": trim_margins,
         "max_trim_margin_ratio": round(max_trim_margin_ratio, 6),

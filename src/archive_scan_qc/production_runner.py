@@ -57,6 +57,7 @@ class ProductionRunConfig:
     deskew: bool = False
     trim_dark_border: bool = False
     despeckle: bool = False
+    normalize_tones: bool = False
     despeckle_backend: str = "fallback"
     resume_processing: bool = True
     reuse_scan_measurements: bool = False
@@ -113,6 +114,7 @@ def run_production_folder(config: ProductionRunConfig) -> dict[str, Any]:
             deskew=config.deskew,
             trim_dark_border=config.trim_dark_border,
             despeckle=config.despeckle,
+            normalize_tones=config.normalize_tones,
             despeckle_backend=config.despeckle_backend,
             resume_processing=config.resume_processing,
             reuse_scan_measurements=config.reuse_scan_measurements,
@@ -190,6 +192,7 @@ def build_production_run_summary(
         "deskew": config.deskew,
         "trim_dark_border": config.trim_dark_border,
         "despeckle": config.despeckle,
+        "normalize_tones": config.normalize_tones,
         "despeckle_backend": config.despeckle_backend,
         "resume_processing": config.resume_processing,
     }

@@ -187,8 +187,9 @@ Run `archive-scan-qc processing-plan` after the scan report and before enabling
 `--process-out`. It opens images for in-memory analysis only and writes
 `processing_plan.json` plus `processing_plan.csv` under its `--out` directory.
 The plan records per-file proposed EXIF transpose, deskew, dark-border trim,
-auto-crop, despeckle, skipped, and unopenable decisions so operators can review
-the intended processing before derivative files are created. Treat the plan as
+auto-crop, despeckle, optional tone normalization, skipped, and unopenable
+decisions so operators can review the intended processing before derivative
+files are created. Treat the plan as
 sensitive local evidence because it contains row-level paths and hashes. It does
 not embed images, thumbnails, or image bytes.
 
@@ -258,19 +259,28 @@ intended for operator review before running `--process-out`.
 flags, worker metadata, timing, throughput, failure totals, resume counts,
 guardrail totals, and max/average/distribution metrics for size change, pixel
 change, brightness/contrast delta, crop ratio, dark-border trim margin, deskew
-angle, and despeckle pixel ratio. When `--despeckle` is enabled, the aggregate
+angle, despeckle pixel ratio, and opt-in tone-normalization deltas. When
+`--despeckle` is enabled, the aggregate
 timing block also reports count-only backend mode fields for the optional NumPy
 candidate filter or the Python/Pillow fallback; fallback is expected and
 non-blocking when NumPy is unavailable. It does not include file lists, paths,
 hashes, thumbnails, or image content.
-When `--deskew --trim-dark-border --auto-crop --despeckle` are combined, size
-change, crop ratio, trim margin, deskew angle, and despeckle pixel ratio remain
-the local guardrails for geometric edits. Pixel-change ratio is still reported
-for aggregate review, but its guardrail is only applied to same-size changes so
-conservative, auditable geometric edits are not rejected solely because the
-derivative must be resized for comparison. The audit summary records aggregate
-counts for files where the pixel guardrail applied directly and files where it
-was deferred to the geometric guardrails.
+`--normalize-tones` is default-off and should only be enabled for batches with
+neutral gray or dark low-contrast text pages. It no-ops when it detects normal
+exposure, obvious color content, red stamps, light color annotations, faint
+marks, dense foreground, or too little tonal separation. Review
+`tone_normalized_files`, tone delta metrics, and row-level local reasons before
+accepting derivatives for archival packages.
+When `--deskew --trim-dark-border --auto-crop --despeckle --normalize-tones`
+are combined, size change, crop ratio, trim margin, deskew angle, despeckle
+pixel ratio, and bounded tone deltas remain the local guardrails for explained
+edits. Pixel-change ratio is still reported for aggregate review, but its
+guardrail is only applied to same-size changes without a recorded geometric or
+tone-normalization reason so conservative, auditable edits are not rejected
+solely because the derivative must be resized or tonally remapped for
+comparison. The audit summary records aggregate counts for files where the
+pixel guardrail applied directly and files where it was deferred to the
+geometric or tone guardrails.
 Private integration and aggregate baseline summaries also promote the
 despeckle backend capability as public-safe aggregate fields:
 `requested_backend`, `effective_backend_mode`, `numpy_available`,

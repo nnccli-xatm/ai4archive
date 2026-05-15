@@ -55,6 +55,7 @@ def build_processing_plan(
         "dark_border_trim_candidates": sum(1 for record in records if record.get("dark_border_trim_candidate")),
         "auto_crop_candidates": sum(1 for record in records if record.get("auto_crop_candidate")),
         "despeckle_candidates": sum(1 for record in records if record.get("despeckle_candidate")),
+        "tone_normalization_candidates": sum(1 for record in records if record.get("tone_normalization_candidate")),
     }
     return {
         "schema_version": "scan-qc.processing-plan.v1",
@@ -66,6 +67,7 @@ def build_processing_plan(
             "deskew": options.deskew,
             "trim_dark_border": options.trim_dark_border,
             "despeckle": options.despeckle,
+            "normalize_tones": options.normalize_tones,
             "resume_processing": False,
             "reuse_scan_measurements": options.reuse_scan_measurements,
         },
@@ -119,6 +121,8 @@ def _plan_record(item: dict[str, Any], input_dir: Path, options: ProcessingOptio
         "despeckle_candidate": False,
         "despeckle_pixels_changed": 0,
         "despeckle_reason": None,
+        "tone_normalization_candidate": False,
+        "tone_reason": None,
         "processing_audit": None,
         "processing_warnings": [],
         "failure_reason": None,
@@ -160,6 +164,8 @@ def _plan_record(item: dict[str, Any], input_dir: Path, options: ProcessingOptio
             "despeckle_candidate": process_info["despeckled"],
             "despeckle_pixels_changed": process_info["despeckle_pixels_changed"],
             "despeckle_reason": process_info["despeckle_reason"],
+            "tone_normalization_candidate": process_info["tone_normalized"],
+            "tone_reason": process_info["tone_reason"],
             "processing_audit": process_info["processing_audit"],
             "processing_warnings": process_info["processing_warnings"],
         }
@@ -186,6 +192,8 @@ def _write_plan_csv(plan: dict[str, Any], path: Path) -> None:
         "crop_bbox",
         "despeckle_candidate",
         "despeckle_pixels_changed",
+        "tone_normalization_candidate",
+        "tone_reason",
         "processing_warnings",
         "failure_reason",
     ]
