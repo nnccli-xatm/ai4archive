@@ -947,6 +947,11 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
         for record in processed_records
         if isinstance(record.get("dark_border_reason"), str)
     ]
+    deskew_reasons = [
+        record.get("deskew_reason")
+        for record in processed_records
+        if isinstance(record.get("deskew_reason"), str)
+    ]
     return {
         "schema_version": "scan-qc.processing.audit.v1",
         "generated_at": manifest["generated_at"],
@@ -1010,6 +1015,13 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "deskew_safe_skip_files": _int_count(deskew_timing.get("safe_skip_files")),
             "deskew_projection_detection_files": _int_count(deskew_timing.get("projection_detection_files")),
             "deskew_fallback_detection_files": _int_count(deskew_timing.get("fallback_detection_files")),
+            "deskewed_files": sum(1 for record in processed_records if record.get("deskewed") is True),
+            "deskew_skipped_files": sum(
+                1
+                for record in processed_records
+                if record.get("deskewed") is False
+                and record.get("deskew_reason") not in {None, "deskew disabled"}
+            ),
             "dark_border_trimmed_files": sum(
                 1 for record in processed_records if record.get("dark_border_trimmed") is True
             ),
@@ -1130,6 +1142,16 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                     and record.get("dark_border_reason") not in {None, "dark border trim disabled"}
                 ),
                 "reason_distribution": _reason_counts(reason for reason in dark_border_reasons if isinstance(reason, str)),
+            },
+            "deskew": {
+                "corrected_files": sum(1 for record in processed_records if record.get("deskewed") is True),
+                "skipped_files": sum(
+                    1
+                    for record in processed_records
+                    if record.get("deskewed") is False
+                    and record.get("deskew_reason") not in {None, "deskew disabled"}
+                ),
+                "reason_distribution": _reason_counts(reason for reason in deskew_reasons if isinstance(reason, str)),
             },
         },
         "reuse_decisions": {
@@ -3195,16 +3217,28 @@ def _detect_skew(image: Image.Image) -> SkewDetection:
     if width < 30 or height < 30:
         return SkewDetection(None, 0.0, "image too small")
 
-    grayscale = ImageOps.autocontrast(image.convert("L"), cutoff=1)
+    raw_grayscale = image.convert("L")
+    grayscale = ImageOps.autocontrast(raw_grayscale, cutoff=1)
     histogram = grayscale.histogram()
     total_pixels = width * height
     low = _histogram_percentile(histogram, total_pixels, 0.05)
     high = _histogram_percentile(histogram, total_pixels, 0.95)
     if high - low < 35:
-        return SkewDetection(None, 0.0, "low contrast")
-
-    threshold = max(0, min(255, low + int((high - low) * 0.35)))
-    ink = grayscale.point(lambda value: 255 if value <= threshold else 0, mode="L")
+        raw_histogram = raw_grayscale.histogram()
+        raw_low = _histogram_percentile(raw_histogram, total_pixels, 0.005)
+        raw_high = _histogram_percentile(raw_histogram, total_pixels, 0.995)
+        if raw_high - raw_low < 35:
+            return SkewDetection(None, 0.0, "low contrast")
+        sparse_threshold = max(0, raw_high - 35)
+        sparse_foreground = sum(raw_histogram[: sparse_threshold + 1]) / total_pixels
+        if sparse_foreground < 0.002:
+            return SkewDetection(None, 0.0, "low contrast")
+        threshold = sparse_threshold
+        threshold_source = raw_grayscale
+    else:
+        threshold = max(0, min(255, low + int((high - low) * 0.35)))
+        threshold_source = grayscale
+    ink = threshold_source.point(lambda value: 255 if value <= threshold else 0, mode="L")
     bbox = ink.getbbox()
     if not bbox:
         return SkewDetection(None, 0.0, "blank page")
@@ -3214,6 +3248,8 @@ def _detect_skew(image: Image.Image) -> SkewDetection:
         return SkewDetection(None, 0.0, "insufficient foreground")
     if ink_ratio > 0.65:
         return SkewDetection(None, 0.0, "foreground too dense")
+    if not _has_deskew_line_evidence(ink, bbox):
+        return SkewDetection(None, 0.0, "low confidence")
 
     sample = ink.crop(bbox)
     sample.thumbnail((700, 700), Image.Resampling.BILINEAR)
@@ -3272,6 +3308,31 @@ def _nonzero_ratio(image: Image.Image, bbox: tuple[int, int, int, int]) -> float
     return foreground / area if area else 0.0
 
 
+def _has_deskew_line_evidence(image: Image.Image, bbox: tuple[int, int, int, int]) -> bool:
+    sample = image.crop(bbox)
+    width, height = sample.size
+    if width <= 0 or height <= 0:
+        return False
+    horizontal_min_run = max(8, int(round(width * 0.08)))
+    vertical_min_run = max(8, int(round(height * 0.08)))
+    pixels = sample.load()
+
+    for y in range(height):
+        run = 0
+        for x in range(width):
+            run = run + 1 if pixels[x, y] else 0
+            if run >= horizontal_min_run:
+                return True
+
+    for x in range(width):
+        run = 0
+        for y in range(height):
+            run = run + 1 if pixels[x, y] else 0
+            if run >= vertical_min_run:
+                return True
+    return False
+
+
 def _frange(start: float, stop: float, step: float) -> list[float]:
     count = int(round((stop - start) / step))
     return [start + index * step for index in range(count + 1)]
@@ -3290,7 +3351,7 @@ def _deskew_candidate_scores(sample: Image.Image) -> dict[float, float]:
                 expand=True,
                 fillcolor=background,
             )
-            scores[normalized_angle] = _horizontal_projection_variance(rotated)
+            scores[normalized_angle] = _deskew_projection_score(rotated)
         return scores[normalized_angle]
 
     zero_score = score(0.0)
@@ -3312,12 +3373,24 @@ def _deskew_candidate_scores(sample: Image.Image) -> dict[float, float]:
     return scores
 
 
+def _deskew_projection_score(image: Image.Image) -> float:
+    return _horizontal_projection_variance(image) + _vertical_projection_variance(image)
+
+
 def _horizontal_projection_variance(image: Image.Image) -> float:
     width, height = image.size
     projection = image.resize((1, height), Image.Resampling.BOX)
     row_counts = [value * width / 255 for value in projection.tobytes()]
     mean = sum(row_counts) / len(row_counts)
     return sum((count - mean) ** 2 for count in row_counts) / len(row_counts)
+
+
+def _vertical_projection_variance(image: Image.Image) -> float:
+    width, height = image.size
+    projection = image.resize((width, 1), Image.Resampling.BOX)
+    column_counts = [value * height / 255 for value in projection.tobytes()]
+    mean = sum(column_counts) / len(column_counts)
+    return sum((count - mean) ** 2 for count in column_counts) / len(column_counts)
 
 
 def _rotate_for_deskew(image: Image.Image, correction_angle: float) -> Image.Image:
