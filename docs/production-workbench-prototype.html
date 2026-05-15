@@ -2690,6 +2690,8 @@
       if (payload.folder_readiness) state.folderReadiness = payload.folder_readiness;
       if (payload.summary || payload.progress) {
         applyRunStatus(payload.summary || { status: payload.running ? "running" : "pending", operator_summary: {} }, payload.progress, payload.queue, payload.draft_decisions);
+        if (payload.restored_batch) state.recoveryGuidance = payload.restored_batch;
+        if (payload.completion_panel) applyCompletionPanel(payload.completion_panel);
         if (payload.recovery_guidance && !state.recoveryGuidance) state.recoveryGuidance = payload.recovery_guidance;
       } else if (payload.running) {
         state.launchLocked = false;
@@ -2697,6 +2699,8 @@
         els.loadStatus.textContent = runningGuidanceText();
       } else if (payload.recovery_guidance) {
         state.recoveryGuidance = payload.recovery_guidance;
+        if (payload.restored_batch) state.recoveryGuidance = payload.restored_batch;
+        if (payload.completion_panel) applyCompletionPanel(payload.completion_panel);
         render();
       }
     }

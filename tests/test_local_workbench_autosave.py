@@ -67,6 +67,16 @@ def decision_summary(decisions: list[tuple[str, str]]) -> dict[str, object]:
     }
 
 
+def assert_public_restore_payload_is_private(
+    test_case: unittest.TestCase,
+    payload: dict[str, object],
+    forbidden_terms: list[str],
+) -> None:
+    public_json = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    for forbidden in forbidden_terms:
+        test_case.assertNotIn(forbidden, public_json)
+
+
 class LocalWorkbenchAutosaveTests(unittest.TestCase):
     def test_configure_accepts_windows_drive_paths_from_windows_browser_on_wsl(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -498,6 +508,205 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertEqual(raised.exception.guidance["supported_image_count"], 0)
             self.assertEqual(controller.status()["preflight_reuse_summary"]["status"], "rescanned")
             run_mock.assert_not_called()
+
+    def test_recreated_controller_restores_completed_batch_aggregate_state(self) -> None:
+        private_hash = "f" * 64
+        private_ocr = "PRIVATE_OCR_TEXT_SHOULD_NOT_LEAK"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            metadata_dir.mkdir()
+            private_file = input_dir / "private_page_alpha.png"
+            private_file.write_bytes(b"fake image placeholder")
+            (metadata_dir / PRODUCTION_RUN_SUMMARY_JSON).write_text(
+                json.dumps(
+                    {
+                        "schema_version": "scan-qc.production-run.v1",
+                        "status": "finished",
+                        "counts": {
+                            "total_files": 3,
+                            "openable_files": 3,
+                            "processed_files": 2,
+                            "resumed_files": 1,
+                            "failed_files": 0,
+                            "retry_list_files": 0,
+                            "reused_files": 1,
+                            "reprocessed_files": 2,
+                        },
+                        "operator_summary": {
+                            "message_zh": "处理后图片已经准备好。",
+                            "total_source_images": 3,
+                            "derivative_images_ready": 3,
+                            "files_needing_attention": 0,
+                            "input_folder": str(input_dir),
+                            "metadata_folder": str(metadata_dir),
+                        },
+                        "local_reuse_summary": {
+                            "schema_version": "scan-qc.local-processing-reuse-summary.v1",
+                            "aggregate_only": True,
+                            "reused_files": 1,
+                            "reprocessed_files": 2,
+                            "failed_files": 0,
+                        },
+                        "debug_should_not_surface": {
+                            "file": private_file.name,
+                            "path": str(private_file),
+                            "sha256": private_hash,
+                            "ocr": private_ocr,
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            (metadata_dir / "production_run_progress.json").write_text(
+                json.dumps({"schema_version": "scan-qc.production-run-progress.v1", "state": "finished"}),
+                encoding="utf-8",
+            )
+            (metadata_dir / REVIEW_DECISION_SUMMARY_JSON).write_text(
+                json.dumps(decision_summary([("PRQ000001", "false_positive")]), ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            controller = WorkbenchController()
+            controller.configure(input_dir, output_dir, metadata_dir)
+            restored = WorkbenchController()
+            status = restored.configure(input_dir, output_dir, metadata_dir)
+
+            self.assertFalse(status["running"])
+            self.assertEqual(status["restored_batch"]["kind"], "completed")
+            self.assertEqual(status["restored_batch"]["derivative_images_ready"], 3)
+            self.assertTrue(status["restored_batch"]["can_open_output_folder"])
+            self.assertFalse(status["restored_batch"]["auto_started"])
+            self.assertEqual(status["completion_panel"]["title_zh"], "已恢复本批完成状态")
+            self.assertEqual(status["completion_panel"]["processed_output_images"], 3)
+            self.assertEqual(status["completion_panel"]["local_reuse_summary"]["reused_files"], 1)
+            assert_public_restore_payload_is_private(
+                self,
+                {
+                    "restored_batch": status["restored_batch"],
+                    "completion_panel": status["completion_panel"],
+                    "recovery_guidance": status["recovery_guidance"],
+                },
+                [str(root), str(private_file), private_file.name, private_hash, private_ocr, ".png", "sha256", "OCR"],
+            )
+
+    def test_recreated_controller_restores_review_queue_aggregate_state(self) -> None:
+        private_hash = "e" * 64
+        private_ocr = "PRIVATE_REVIEW_OCR_SHOULD_NOT_LEAK"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            metadata_dir.mkdir()
+            private_name = "private_review_page.tif"
+            (input_dir / private_name).write_bytes(b"fake image placeholder")
+            (metadata_dir / PRODUCTION_RUN_SUMMARY_JSON).write_text(
+                json.dumps(
+                    {
+                        "schema_version": "scan-qc.production-run.v1",
+                        "status": "needs_review",
+                        "counts": {
+                            "total_files": 2,
+                            "openable_files": 2,
+                            "processed_files": 2,
+                            "resumed_files": 0,
+                            "failed_files": 0,
+                            "retry_list_files": 0,
+                        },
+                        "operator_summary": {
+                            "message_zh": "还有图片需要人工确认。",
+                            "total_source_images": 2,
+                            "derivative_images_ready": 2,
+                            "files_needing_attention": 2,
+                        },
+                        "private_debug": {"relative_path": private_name, "hash": private_hash, "ocr": private_ocr},
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            (metadata_dir / "production_run_progress.json").write_text(
+                json.dumps({"schema_version": "scan-qc.production-run-progress.v1", "state": "needs_review"}),
+                encoding="utf-8",
+            )
+            (metadata_dir / PRODUCTION_REVIEW_QUEUE_JSON).write_text(
+                json.dumps(
+                    {
+                        "schema_version": "scan-qc.production-review-queue.v1",
+                        "summary": {"total_items": 2, "ready_for_operator_review": True},
+                        "items": [
+                            {"local_id": "PRQ000001", "relative_path": private_name, "reason_zh": "需要确认。"},
+                            {"local_id": "PRQ000002", "relative_path": "another_private_page.tif", "reason_zh": "需要确认。"},
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            (metadata_dir / REVIEW_DECISION_DRAFT_JSON).write_text(
+                json.dumps(decision_summary([("PRQ000001", "false_positive"), ("PRQ000002", "pending")]), ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            restored = WorkbenchController()
+            status = restored.configure(input_dir, output_dir, metadata_dir)
+
+            self.assertFalse(status["running"])
+            self.assertEqual(status["restored_batch"]["kind"], "needs_review")
+            self.assertEqual(status["restored_batch"]["total_review_items"], 2)
+            self.assertEqual(status["restored_batch"]["reviewed_items"], 1)
+            self.assertEqual(status["restored_batch"]["pending_items"], 1)
+            self.assertIsNone(status["completion_panel"])
+            assert_public_restore_payload_is_private(
+                self,
+                {"restored_batch": status["restored_batch"], "recovery_guidance": status["recovery_guidance"]},
+                [str(root), private_name, "another_private_page.tif", private_hash, private_ocr, ".tif", "relative_path", "hash", "OCR"],
+            )
+
+    def test_recreated_controller_treats_running_progress_as_interrupted_not_complete(self) -> None:
+        private_file = "private_interrupted_page.jpg"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            metadata_dir.mkdir()
+            (input_dir / private_file).write_bytes(b"fake image placeholder")
+            (metadata_dir / "production_run_progress.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "scan-qc.production-run-progress.v1",
+                        "state": "running",
+                        "message_zh": "正在生成处理后图片。",
+                        "summary": str(metadata_dir / "private_summary_path.json"),
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            restored = WorkbenchController()
+            status = restored.configure(input_dir, output_dir, metadata_dir)
+
+            self.assertFalse(status["running"])
+            self.assertEqual(status["restored_batch"]["kind"], "interrupted_or_blocked")
+            self.assertFalse(status["restored_batch"]["auto_started"])
+            self.assertFalse(status["restored_batch"]["can_open_output_folder"])
+            self.assertNotEqual(status["recovery_guidance"]["kind"], "processing_running")
+            self.assertEqual(status["recovery_guidance"]["kind"], "processing_interrupted")
+            self.assertIsNone(status["completion_panel"])
+            assert_public_restore_payload_is_private(
+                self,
+                {"restored_batch": status["restored_batch"], "recovery_guidance": status["recovery_guidance"]},
+                [str(root), private_file, ".jpg", "private_summary_path"],
+            )
 
     def test_empty_batch_summary_gives_operator_next_steps(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

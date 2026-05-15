@@ -476,6 +476,19 @@ class WorkbenchController:
         progress = _read_json(metadata_path / PRODUCTION_RUN_PROGRESS_JSON) if metadata_path else None
         queue = self._queue_with_preview_sources(metadata_path) if metadata_path else None
         draft_decisions = _read_json(metadata_path / REVIEW_DECISION_DRAFT_JSON) if metadata_path else None
+        final_decisions = _read_json(metadata_path / REVIEW_DECISION_SUMMARY_JSON) if metadata_path else None
+        final_verification = _read_json(metadata_path / REVIEW_DECISION_VERIFICATION_JSON) if metadata_path else None
+        restored_batch = _restored_batch_status(
+            configured=bool(input_path and derivatives_path and metadata_path),
+            running=running,
+            summary=summary,
+            progress=progress,
+            queue=queue,
+            draft_decisions=draft_decisions,
+            final_decisions=final_decisions,
+            final_verification=final_verification,
+        )
+        completion_panel = _restored_completion_panel(restored_batch, summary, processing_mode)
         recovery_guidance = _status_recovery_guidance(
             configured=bool(input_path and derivatives_path and metadata_path),
             running=running,
@@ -499,6 +512,8 @@ class WorkbenchController:
             },
             "processing_mode": _processing_mode_payload(processing_mode),
             "folder_readiness": folder_readiness,
+            "restored_batch": restored_batch,
+            "completion_panel": completion_panel,
             "summary": summary,
             "progress": progress,
             "queue": queue,
@@ -1209,6 +1224,204 @@ def _maintenance_error_category(safe_message_zh: str) -> str:
     if safe_message_zh.startswith("图片无法打开"):
         return "image_unopenable"
     return "startup_or_processing_failed"
+
+
+def _restored_batch_status(
+    *,
+    configured: bool,
+    running: bool,
+    summary: dict[str, Any] | None,
+    progress: dict[str, Any] | None,
+    queue: dict[str, Any] | None,
+    draft_decisions: dict[str, Any] | None,
+    final_decisions: dict[str, Any] | None,
+    final_verification: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not configured:
+        return None
+    counts = summary.get("counts") if isinstance(summary, dict) and isinstance(summary.get("counts"), dict) else {}
+    queue_summary = queue.get("summary") if isinstance(queue, dict) and isinstance(queue.get("summary"), dict) else {}
+    decision_summary = (
+        final_verification.get("decision_summary")
+        if isinstance(final_verification, dict) and isinstance(final_verification.get("decision_summary"), dict)
+        else {}
+    )
+    draft_counts = _review_completion_counts(draft_decisions)
+    final_counts = _review_completion_counts(final_decisions)
+    review_total = max(
+        _safe_nonnegative_int(queue_summary.get("total_items")),
+        _safe_nonnegative_int(decision_summary.get("total_decisions")),
+        final_counts["total"],
+        draft_counts["total"],
+    )
+    reviewed_items = max(final_counts["reviewed"], draft_counts["reviewed"])
+    pending_items = max(0, review_total - reviewed_items)
+    total_files = _safe_nonnegative_int(counts.get("total_files"))
+    derivative_images_ready = _safe_nonnegative_int(counts.get("processed_files")) + _safe_nonnegative_int(
+        counts.get("resumed_files")
+    )
+    failed_files = _safe_nonnegative_int(counts.get("failed_files"))
+    retryable_files = _safe_nonnegative_int(counts.get("retry_list_files"))
+    openable_files = _safe_nonnegative_int(counts.get("openable_files"))
+    status = str(summary.get("status") or "").strip().lower() if isinstance(summary, dict) else ""
+    progress_state = str(progress.get("state") or "").strip().lower() if isinstance(progress, dict) else ""
+    local_batch_state = str(summary.get("local_batch_state") or "").strip().lower() if isinstance(summary, dict) else ""
+    summary_finished_without_operator_work = (
+        status in {"finished", "completed"}
+        and total_files > 0
+        and openable_files > 0
+        and local_batch_state not in {"empty_input_folder", "no_supported_images", "processing_blocked"}
+    )
+    has_final_completion = (
+        final_counts["complete"]
+        or str(decision_summary.get("completion_status") or "").strip().lower() == "complete"
+        or summary_finished_without_operator_work
+    )
+    base = {
+        "schema_version": "scan-qc.local-restored-batch.v1",
+        "aggregate_only": True,
+        "restored": True,
+        "total_files": total_files,
+        "derivative_images_ready": derivative_images_ready,
+        "failed_files": failed_files,
+        "retryable_files": retryable_files,
+        "total_review_items": review_total,
+        "reviewed_items": min(reviewed_items, review_total) if review_total else reviewed_items,
+        "pending_items": pending_items,
+        "can_open_output_folder": False,
+        "can_prepare_next_batch": False,
+        "can_retry": False,
+        "auto_started": False,
+    }
+    if has_final_completion and failed_files == 0:
+        return {
+            **base,
+            "kind": "completed",
+            "title_zh": "已恢复本批完成状态",
+            "message_zh": "本机状态文件显示本批已完成，可以继续完成交接、打开输出文件夹或准备下一批。",
+            "can_open_output_folder": True,
+            "can_prepare_next_batch": True,
+            "next_steps_zh": [
+                "打开输出文件夹，检查处理后图片数量和画面状态。",
+                "确认交接说明和复核结果已经保存。",
+                "需要继续加工时，点击准备下一批；当前复核队列会清空。",
+            ],
+        }
+    if status == "needs_review" or review_total > 0:
+        return {
+            **base,
+            "kind": "needs_review",
+            "title_zh": "已恢复本批待确认状态",
+            "message_zh": "本机状态文件显示本批还有图片需要看图确认，已恢复待确认数量和已保存决定。",
+            "next_steps_zh": [
+                "继续逐张查看待确认图片，并保存决定。",
+                "全部确认后再完成本批交接。",
+                "如果文件夹位置不对，请重新保存文件夹或准备下一批。",
+            ],
+        }
+    if failed_files or status == "blocked":
+        return {
+            **base,
+            "kind": "interrupted_or_blocked",
+            "title_zh": "已恢复本批中断状态",
+            "message_zh": "本机状态文件显示上次处理没有完整完成，请检查文件夹后再决定是否重试本批。",
+            "can_retry": retryable_files > 0,
+            "can_prepare_next_batch": True,
+            "next_steps_zh": [
+                "检查扫描原图文件夹和输出文件夹是否选对。",
+                "确认输出磁盘空间足够，原图图片可以正常打开。",
+                "可以重新开始、重新保存文件夹或准备下一批。",
+            ],
+        }
+    if progress_state == "running" and not running:
+        return {
+            **base,
+            "kind": "interrupted_or_blocked",
+            "title_zh": "已恢复上次中断状态",
+            "message_zh": "本机状态文件显示上次处理可能中断，没有自动继续处理，也不会误报完成。",
+            "can_prepare_next_batch": True,
+            "next_steps_zh": [
+                "确认扫描原图文件夹和输出文件夹仍然正确。",
+                "需要继续本批时可以重新开始处理。",
+                "如果这不是当前批次，请准备下一批后重新选择文件夹。",
+            ],
+        }
+    if isinstance(summary, dict) or isinstance(progress, dict):
+        return {
+            **base,
+            "kind": "incomplete_or_unknown",
+            "title_zh": "已恢复本批未完成状态",
+            "message_zh": "本机状态文件不完整，当前不会自动开始处理，也不会把本批显示为已完成。",
+            "can_prepare_next_batch": True,
+            "next_steps_zh": [
+                "可以重新开始处理当前批次。",
+                "也可以重新保存文件夹，确认本机状态文件夹是否选对。",
+                "如果要处理新批次，请准备下一批后重新选择文件夹。",
+            ],
+        }
+    return None
+
+
+def _review_completion_counts(decisions: dict[str, Any] | None) -> dict[str, Any]:
+    completion = (
+        decisions.get("aggregate_counts", {}).get("review_completion")
+        if isinstance(decisions, dict) and isinstance(decisions.get("aggregate_counts"), dict)
+        else None
+    )
+    if isinstance(completion, dict):
+        total = _safe_nonnegative_int(completion.get("total"))
+        reviewed = _safe_nonnegative_int(completion.get("reviewed"))
+        pending = _safe_nonnegative_int(completion.get("pending"))
+        return {"total": total, "reviewed": reviewed, "pending": pending, "complete": completion.get("complete") is True}
+    rows = decisions.get("decisions") if isinstance(decisions, dict) else None
+    if not isinstance(rows, list):
+        return {"total": 0, "reviewed": 0, "pending": 0, "complete": False}
+    total = len([row for row in rows if isinstance(row, dict)])
+    pending = len(
+        [
+            row
+            for row in rows
+            if isinstance(row, dict) and str(row.get("decision") or "").strip().lower() in {"", "pending"}
+        ]
+    )
+    return {"total": total, "reviewed": max(0, total - pending), "pending": pending, "complete": total > 0 and pending == 0}
+
+
+def _restored_completion_panel(
+    restored_batch: dict[str, Any] | None,
+    summary: dict[str, Any] | None,
+    processing_mode: str,
+) -> dict[str, Any] | None:
+    if not isinstance(restored_batch, dict) or restored_batch.get("kind") != "completed":
+        return None
+    counts = summary.get("counts") if isinstance(summary, dict) and isinstance(summary.get("counts"), dict) else {}
+    reuse_handoff_summary = _local_reuse_handoff_summary(summary)
+    panel = {
+        "schema_version": "scan-qc.local-restored-completion-panel.v1",
+        "aggregate_only": True,
+        "title_zh": "已恢复本批完成状态",
+        "message_zh": "处理后图片已准备好。请检查输出文件夹后再交接。",
+        "completion_status_zh": "本批已完成",
+        "manual_work_zh": "没有待人工处理图片" if restored_batch.get("pending_items") == 0 else "仍有待人工处理图片",
+        "admin_handoff_zh": "不需要" if _safe_nonnegative_int(counts.get("failed_files")) == 0 else "需要管理员确认",
+        "total_review_items": _safe_nonnegative_int(restored_batch.get("total_review_items")),
+        "reviewed_items": _safe_nonnegative_int(restored_batch.get("reviewed_items")),
+        "pending_items": _safe_nonnegative_int(restored_batch.get("pending_items")),
+        "processed_output_images": _safe_nonnegative_int(restored_batch.get("derivative_images_ready")),
+        "needs_rescan_images": 0,
+        "needs_reprocess_images": 0,
+        "processing_mode": _processing_mode_payload(processing_mode),
+        "open_output_folder_available": True,
+        "next_steps_zh": [
+            f"打开输出文件夹，检查 {_safe_nonnegative_int(restored_batch.get('derivative_images_ready'))} 张处理后图片的数量和画面状态。",
+            "本机状态文件夹已保存本批处理状态，正常界面不显示具体路径或文件名。",
+            "需要继续加工时，点击准备下一批；当前复核队列会清空。",
+            "如果仍有异常或不能交接，请交管理员处理。",
+        ],
+    }
+    if reuse_handoff_summary is not None:
+        panel["local_reuse_summary"] = reuse_handoff_summary
+    return panel
 
 
 def _path_is_existing_dir(path: Path) -> bool:
@@ -1932,6 +2145,18 @@ def _status_recovery_guidance(
                 ],
             }
     state = progress.get("state") if isinstance(progress, dict) else None
+    if state == "running" and not running:
+        return {
+            **base,
+            "kind": "processing_interrupted",
+            "title_zh": "上次处理可能中断",
+            "message_zh": "本机状态文件显示上次处理没有正常结束，当前不会自动继续处理，也不会误报完成。",
+            "next_steps_zh": [
+                "确认扫描原图文件夹和输出文件夹仍然正确。",
+                "需要继续本批时可以重新开始处理。",
+                "如果这不是当前批次，请准备下一批后重新选择文件夹。",
+            ],
+        }
     return {
         **base,
         "kind": "processing_running" if running or state == "running" else "ready_to_start",
