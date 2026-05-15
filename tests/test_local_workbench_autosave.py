@@ -7,6 +7,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from PIL import Image
+
 from archive_scan_qc import local_workbench as local_workbench_module
 from archive_scan_qc.local_workbench import (
     COMPLETION_NOTE_TXT,
@@ -20,7 +22,7 @@ from archive_scan_qc.local_workbench import (
     _pick_windows_folder_via_powershell,
     sanitize_operator_error_zh,
 )
-from archive_scan_qc.production_runner import ProductionRunConfig, build_production_run_summary
+from archive_scan_qc.production_runner import ProductionRunConfig, build_production_run_summary, run_production_folder
 from archive_scan_qc.production_runner import PRODUCTION_RUN_PROGRESS_JSON, PRODUCTION_RUN_SUMMARY_JSON
 from archive_scan_qc.production_review_queue import PRODUCTION_REVIEW_QUEUE_JSON
 from archive_scan_qc.review_decisions import REVIEW_DECISION_VERIFICATION_JSON
@@ -78,6 +80,193 @@ def assert_public_restore_payload_is_private(
 
 
 class LocalWorkbenchAutosaveTests(unittest.TestCase):
+    def test_configure_preflight_reports_reusable_and_needs_processing_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-input"
+            output_dir = root / "private-output"
+            metadata_dir = root / "private-metadata"
+            input_dir.mkdir()
+            Image.new("RGB", (80, 60), "white").save(input_dir / "private_reusable_page.png", dpi=(300, 300))
+            Image.new("RGB", (80, 60), (230, 230, 230)).save(input_dir / "private_missing_page.png", dpi=(300, 300))
+            run_production_folder(
+                ProductionRunConfig(
+                    input_dir=input_dir,
+                    derivative_output_dir=output_dir,
+                    metadata_output_dir=metadata_dir,
+                    auto_crop=True,
+                    deskew=True,
+                    trim_dark_border=True,
+                    despeckle=True,
+                    resume_processing=True,
+                    reuse_scan_measurements=True,
+                    workers=1,
+                )
+            )
+            manifest = json.loads((output_dir / "processing_manifest.json").read_text(encoding="utf-8"))
+            missing_record = next(record for record in manifest["files"] if record["source_relative_path"] == "private_missing_page.png")
+            (output_dir / missing_record["output_relative_path"]).unlink()
+
+            status = WorkbenchController().configure(input_dir, output_dir, metadata_dir, processing_mode="standard")
+
+            precheck = status["folder_readiness"]["preflight_processing_summary"]
+            self.assertTrue(precheck["aggregate_only"])
+            self.assertTrue(precheck["retry_scope_safe"])
+            self.assertEqual(precheck["total_files"], 2)
+            self.assertEqual(precheck["reusable_files"], 1)
+            self.assertEqual(precheck["needs_processing_files"], 1)
+            self.assertEqual(precheck["unknown_scope_files"], 0)
+            self.assertIn("可复用处理后输出", precheck["message_zh"])
+            self.assertIn("补处理", precheck["message_zh"])
+            risk = status["folder_readiness"]["existing_output_risk"]
+            self.assertEqual(risk["kind"], "reusable_current_batch")
+            self.assertIn("已有 1 张可复用处理后输出", risk["message_zh"])
+
+    def test_configure_preflight_counts_changed_options_and_failures_as_needs_processing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-input"
+            output_dir = root / "private-output"
+            metadata_dir = root / "private-metadata"
+            input_dir.mkdir()
+            Image.new("RGB", (80, 60), "white").save(input_dir / "private_changed_options.png", dpi=(300, 300))
+            Image.new("RGB", (80, 60), (230, 230, 230)).save(input_dir / "private_failed_record.png", dpi=(300, 300))
+            run_production_folder(
+                ProductionRunConfig(
+                    input_dir=input_dir,
+                    derivative_output_dir=output_dir,
+                    metadata_output_dir=metadata_dir,
+                    auto_crop=True,
+                    deskew=False,
+                    trim_dark_border=False,
+                    despeckle=False,
+                    processing_mode="light",
+                    resume_processing=True,
+                    reuse_scan_measurements=True,
+                    workers=1,
+                )
+            )
+            manifest_path = output_dir / "processing_manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            for record in manifest["files"]:
+                if record["source_relative_path"] == "private_failed_record.png":
+                    record["status"] = "failed"
+                    record["failure_reason"] = "PRIVATE_STACK_SHOULD_NOT_LEAK"
+                    record["error"] = "/Users/private/input/private_failed_record.png"
+            manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
+            status = WorkbenchController().configure(input_dir, output_dir, metadata_dir, processing_mode="standard")
+
+            precheck = status["folder_readiness"]["preflight_processing_summary"]
+            self.assertTrue(precheck["retry_scope_safe"])
+            self.assertEqual(precheck["total_files"], 2)
+            self.assertEqual(precheck["reusable_files"], 0)
+            self.assertEqual(precheck["needs_processing_files"], 2)
+            public_text = json.dumps(precheck, ensure_ascii=False, sort_keys=True)
+            self.assertNotIn("PRIVATE_STACK_SHOULD_NOT_LEAK", public_text)
+            self.assertNotIn("private_failed_record.png", public_text)
+
+    def test_configure_preflight_is_conservative_for_missing_old_or_incomplete_state(self) -> None:
+        cases = {
+            "missing": None,
+            "old": {"schema_version": "scan-qc.processing.v0", "files": []},
+            "incomplete": {"schema_version": "scan-qc.processing.v1", "files": [{"status": "processed"}]},
+        }
+        for name, manifest in cases.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                input_dir = root / "private-input"
+                output_dir = root / "private-output"
+                metadata_dir = root / "private-metadata"
+                input_dir.mkdir()
+                (output_dir / "images").mkdir(parents=True)
+                metadata_dir.mkdir()
+                Image.new("RGB", (80, 60), "white").save(input_dir / "private_state_page.png", dpi=(300, 300))
+                Image.new("RGB", (80, 60), "white").save(output_dir / "images" / "private_state_page.png", dpi=(300, 300))
+                if manifest is not None:
+                    (output_dir / "processing_manifest.json").write_text(
+                        json.dumps(manifest, ensure_ascii=False),
+                        encoding="utf-8",
+                    )
+
+                status = WorkbenchController().configure(input_dir, output_dir, metadata_dir)
+
+                precheck = status["folder_readiness"]["preflight_processing_summary"]
+                self.assertFalse(precheck["retry_scope_safe"])
+                self.assertEqual(precheck["state"], "unknown")
+                self.assertEqual(precheck["total_files"], 1)
+                self.assertIsNone(precheck["reusable_files"])
+                self.assertIsNone(precheck["needs_processing_files"])
+                self.assertEqual(precheck["unknown_scope_files"], 1)
+                self.assertIn("不会误报完成", precheck["message_zh"])
+                self.assertIn("不会编造复用数量", precheck["message_zh"])
+
+    def test_configure_preflight_summary_omits_private_details(self) -> None:
+        private_hash = "a" * 64
+        private_ocr = "PRIVATE_OCR_SHOULD_NOT_LEAK"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-input"
+            output_dir = root / "private-output"
+            metadata_dir = root / "private-metadata"
+            input_dir.mkdir()
+            Image.new("RGB", (80, 60), "white").save(input_dir / "private_sensitive_page.png", dpi=(300, 300))
+            run_production_folder(
+                ProductionRunConfig(
+                    input_dir=input_dir,
+                    derivative_output_dir=output_dir,
+                    metadata_output_dir=metadata_dir,
+                    auto_crop=True,
+                    deskew=True,
+                    trim_dark_border=True,
+                    despeckle=True,
+                    resume_processing=True,
+                    reuse_scan_measurements=True,
+                    workers=1,
+                )
+            )
+            manifest_path = output_dir / "processing_manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["files"][0]["private_debug"] = {
+                "path": str(input_dir),
+                "filename": "private_sensitive_page.png",
+                "hash": private_hash,
+                "ocr": private_ocr,
+                "thumbnail": "data:image/png;base64,PRIVATE_THUMBNAIL",
+                "evidence": ["PRIVATE_EVIDENCE_LINE"],
+                "traceback": "Traceback File worker.py line 42",
+            }
+            manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
+            status = WorkbenchController().configure(input_dir, output_dir, metadata_dir)
+
+            public_payload = {
+                "preflight_processing_summary": status["folder_readiness"]["preflight_processing_summary"],
+                "existing_output_risk": status["folder_readiness"]["existing_output_risk"],
+            }
+            assert_public_restore_payload_is_private(
+                self,
+                public_payload,
+                [
+                    str(root),
+                    str(input_dir),
+                    str(output_dir),
+                    str(metadata_dir),
+                    "private_sensitive_page.png",
+                    private_hash,
+                    private_ocr,
+                    "PRIVATE_THUMBNAIL",
+                    "PRIVATE_EVIDENCE_LINE",
+                    "Traceback",
+                    ".png",
+                    "hash",
+                    "ocr",
+                    "thumbnail",
+                    "evidence",
+                    "data:image",
+                ],
+            )
+
     def test_configure_accepts_windows_drive_paths_from_windows_browser_on_wsl(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

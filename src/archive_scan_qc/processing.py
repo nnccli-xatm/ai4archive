@@ -170,6 +170,102 @@ def process_images(
     return manifest
 
 
+def aggregate_processing_reuse_precheck(
+    input_dir: Path,
+    process_dir: Path,
+    relative_paths: list[str],
+    options: ProcessingOptions | None = None,
+) -> dict[str, Any]:
+    """Summarize existing derivative reuse before starting a processing run."""
+    options = options or ProcessingOptions()
+    input_dir = input_dir.resolve()
+    process_dir = process_dir.resolve()
+    image_root = process_dir / "images"
+    safe_relative_paths = [path for path in relative_paths if isinstance(path, str) and path.strip()]
+    total_files = len(safe_relative_paths)
+    base = {
+        "schema_version": "scan-qc.local-processing-precheck.v1",
+        "aggregate_only": True,
+        "total_files": total_files,
+    }
+    manifest_path = process_dir / "processing_manifest.json"
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return _processing_precheck_unknown(base, "missing_state_file", total_files)
+    except (OSError, json.JSONDecodeError):
+        return _processing_precheck_unknown(base, "unreadable_state_file", total_files)
+    if payload.get("schema_version") != "scan-qc.processing.v1" or not isinstance(payload.get("files"), list):
+        return _processing_precheck_unknown(base, "unsupported_state_file", total_files)
+
+    previous_records: dict[str, dict[str, Any]] = {}
+    for record in payload["files"]:
+        if not isinstance(record, dict):
+            return _processing_precheck_unknown(base, "incomplete_state_file", total_files)
+        source_relative_path = record.get("source_relative_path")
+        if not isinstance(source_relative_path, str) or not source_relative_path:
+            return _processing_precheck_unknown(base, "incomplete_state_file", total_files)
+        previous_records[source_relative_path] = record
+
+    reusable_files = 0
+    needs_processing_files = 0
+    for relative_path in safe_relative_paths:
+        source_path = input_dir / relative_path
+        try:
+            source_sha256 = _sha256(source_path)
+        except OSError:
+            return _processing_precheck_unknown(base, "input_file_unreadable", total_files)
+        item = {
+            "relative_path": relative_path,
+            "sha256": source_sha256,
+            "openable": True,
+        }
+        previous_record = previous_records.get(relative_path)
+        if previous_record and _previous_record_is_current(previous_record, item, input_dir, image_root, options):
+            reusable_files += 1
+        else:
+            needs_processing_files += 1
+
+    message_zh = (
+        f"本批预检结果：共识别 {total_files} 张图片，"
+        f"已有 {reusable_files} 张可复用处理后输出，"
+        f"{needs_processing_files} 张需要新处理或补处理。"
+    )
+    next_steps_zh = [
+        "确认当前选择的是同一批扫描原图和输出文件夹。",
+        "开始处理后，系统会复用可安全确认的已有输出，并补齐需要处理的图片。",
+        "预检只用于开始前判断，不代表本批已经完成交接。",
+    ]
+    return {
+        **base,
+        "reusable_files": reusable_files,
+        "needs_processing_files": needs_processing_files,
+        "unknown_scope_files": 0,
+        "retry_scope_safe": True,
+        "state": "ready",
+        "message_zh": message_zh,
+        "next_steps_zh": next_steps_zh,
+    }
+
+
+def _processing_precheck_unknown(base: dict[str, Any], reason: str, total_files: int) -> dict[str, Any]:
+    return {
+        **base,
+        "reusable_files": None,
+        "needs_processing_files": None,
+        "unknown_scope_files": total_files,
+        "retry_scope_safe": False,
+        "state": "unknown",
+        "unknown_reason": reason,
+        "message_zh": "本批已有状态文件缺失或不完整，开始前不能安全判断哪些图片可复用；当前不会误报完成，也不会编造复用数量。",
+        "next_steps_zh": [
+            "确认扫描原图和输出文件夹选对。",
+            "可以开始处理，系统会按保守方式重新核对已有输出。",
+            "如果不确定是否同一批，请更换空输出文件夹或交管理员确认。",
+        ],
+    }
+
+
 def _process_records(
     files: list[dict[str, Any]],
     input_dir: Path,

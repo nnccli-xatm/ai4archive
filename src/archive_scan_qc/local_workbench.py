@@ -21,6 +21,7 @@ from urllib.parse import unquote, urlparse
 import uuid
 import webbrowser
 
+from .processing import ProcessingOptions, aggregate_processing_reuse_precheck
 from .processing_review import REVIEW_JSON as PROCESSING_REVIEW_JSON, write_processing_review_package
 from .production_review_queue import PRODUCTION_REVIEW_QUEUE_JSON, write_production_review_queue
 from .production_runner import (
@@ -2020,7 +2021,13 @@ def _folder_readiness_summary_with_snapshot(
             "blocking_reasons_zh": [message_zh],
             "next_steps_zh": ["确认输出磁盘没有只读、已解锁，并且空间足够。", "换一个可以写入的输出文件夹后重新保存。"],
         }, snapshot
-    existing_output_risk = _existing_output_artifact_risk(output_path, metadata_path)
+    processing_precheck = _aggregate_processing_precheck_from_snapshot(
+        input_path,
+        output_path,
+        selected_mode,
+        snapshot,
+    )
+    existing_output_risk = _existing_output_artifact_risk(output_path, metadata_path, processing_precheck)
     ready_title = "文件夹可以开始处理"
     ready_message = (
         f"本批预检结果：已识别到 {supported_image_count} 张可处理图片，输出文件夹可以写入；"
@@ -2045,19 +2052,65 @@ def _folder_readiness_summary_with_snapshot(
         "message_zh": ready_message,
         "next_steps_zh": ready_steps,
         "existing_output_risk": existing_output_risk,
+        "preflight_processing_summary": processing_precheck,
     }
     if snapshot is not None:
         snapshot["ready_to_start"] = True
     return ready_summary, snapshot
 
 
-def _existing_output_artifact_risk(derivatives_dir: Path, metadata_dir: Path) -> dict[str, Any]:
+def _aggregate_processing_precheck_from_snapshot(
+    input_path: Path,
+    derivatives_dir: Path,
+    processing_mode: str,
+    snapshot: dict[str, Any] | None,
+) -> dict[str, Any]:
+    records = snapshot.get("supported_file_snapshots") if isinstance(snapshot, dict) else None
+    relative_paths = [
+        str(record.get("relative_path"))
+        for record in records or []
+        if isinstance(record, dict) and isinstance(record.get("relative_path"), str) and record.get("relative_path") != "."
+    ]
+    options = PROCESSING_MODE_OPTIONS[_normalize_processing_mode(processing_mode)]
+    return aggregate_processing_reuse_precheck(
+        input_path,
+        derivatives_dir,
+        relative_paths,
+        ProcessingOptions(
+            auto_crop=bool(options["auto_crop"]),
+            deskew=bool(options["deskew"]),
+            trim_dark_border=bool(options["trim_dark_border"]),
+            despeckle=bool(options["despeckle"]),
+            despeckle_backend="fallback",
+            resume_processing=True,
+            reuse_scan_measurements=True,
+        ),
+    )
+
+
+def _existing_output_artifact_risk(
+    derivatives_dir: Path,
+    metadata_dir: Path,
+    processing_precheck: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     processed_outputs_detected = _processed_output_images_detected(derivatives_dir)
     metadata_summary = _read_json(metadata_dir / PRODUCTION_RUN_SUMMARY_JSON)
     progress = _read_json(metadata_dir / PRODUCTION_RUN_PROGRESS_JSON)
     workbench_metadata_detected = _workbench_metadata_detected(metadata_dir)
     completed_handoff_detected = _completed_handoff_artifacts_detected(metadata_dir)
     reusable_current_batch_detected = _reusable_current_batch_detected(metadata_summary, progress)
+    precheck_reusable = (
+        _safe_nonnegative_int(processing_precheck.get("reusable_files"))
+        if isinstance(processing_precheck, dict) and processing_precheck.get("retry_scope_safe") is True
+        else 0
+    )
+    precheck_needs_processing = (
+        _safe_nonnegative_int(processing_precheck.get("needs_processing_files"))
+        if isinstance(processing_precheck, dict) and processing_precheck.get("retry_scope_safe") is True
+        else 0
+    )
+    if precheck_reusable > 0:
+        reusable_current_batch_detected = True
     base = {
         "schema_version": "scan-qc.local-existing-output-risk.v1",
         "aggregate_only": True,
@@ -2081,13 +2134,19 @@ def _existing_output_artifact_risk(derivatives_dir: Path, metadata_dir: Path) ->
             ],
         }
     if reusable_current_batch_detected:
+        message_zh = "发现本批已有可复用处理结果；可以继续本批，重新开始会只补齐缺失输出，已经成功输出的图片不会删除。"
+        if precheck_reusable > 0:
+            message_zh = (
+                f"本批预检结果：已有 {precheck_reusable} 张可复用处理后输出，"
+                f"{precheck_needs_processing} 张需要新处理或补处理；开始处理会只补齐需要处理的图片。"
+            )
         return {
             **base,
             "kind": "reusable_current_batch",
             "severity": "medium",
             "existing_artifacts_detected": True,
             "title_zh": "输出文件夹已有本批可复用结果",
-            "message_zh": "发现本批已有可复用处理结果；可以继续本批，重新开始会只补齐缺失输出，已经成功输出的图片不会删除。",
+            "message_zh": message_zh,
             "next_steps_zh": [
                 "确认当前选择的是同一批扫描原图和输出文件夹。",
                 "需要继续本批时，可以开始处理，系统会复用已有结果并补齐缺失输出。",
