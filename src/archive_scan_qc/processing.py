@@ -941,6 +941,12 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
     sharpen_text_edges_timing = operation_timings.get("sharpen_text_edges") if isinstance(operation_timings, dict) else {}
     if not isinstance(sharpen_text_edges_timing, dict):
         sharpen_text_edges_timing = {}
+    processed_records = [record for record in manifest["files"] if record.get("status") in {"processed", "resumed"}]
+    dark_border_reasons = [
+        record.get("dark_border_reason")
+        for record in processed_records
+        if isinstance(record.get("dark_border_reason"), str)
+    ]
     return {
         "schema_version": "scan-qc.processing.audit.v1",
         "generated_at": manifest["generated_at"],
@@ -1004,6 +1010,15 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "deskew_safe_skip_files": _int_count(deskew_timing.get("safe_skip_files")),
             "deskew_projection_detection_files": _int_count(deskew_timing.get("projection_detection_files")),
             "deskew_fallback_detection_files": _int_count(deskew_timing.get("fallback_detection_files")),
+            "dark_border_trimmed_files": sum(
+                1 for record in processed_records if record.get("dark_border_trimmed") is True
+            ),
+            "dark_border_skipped_files": sum(
+                1
+                for record in processed_records
+                if record.get("dark_border_trimmed") is False
+                and record.get("dark_border_reason") not in {None, "dark border trim disabled"}
+            ),
             "tone_normalized_files": sum(1 for audit in audit_records if audit.get("tone_normalized") is True),
             "edge_shadow_lightened_files": sum(
                 1 for audit in audit_records if audit.get("edge_shadow_lightened") is True
@@ -1105,6 +1120,16 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                     for reason in audit.get("cumulative_change_guard_reasons", [])
                     if isinstance(reason, str)
                 ),
+            },
+            "dark_border_trim": {
+                "trimmed_files": sum(1 for record in processed_records if record.get("dark_border_trimmed") is True),
+                "skipped_files": sum(
+                    1
+                    for record in processed_records
+                    if record.get("dark_border_trimmed") is False
+                    and record.get("dark_border_reason") not in {None, "dark border trim disabled"}
+                ),
+                "reason_distribution": _reason_counts(reason for reason in dark_border_reasons if isinstance(reason, str)),
             },
         },
         "reuse_decisions": {
@@ -3362,6 +3387,9 @@ def _detect_dark_border_bbox(image: Image.Image) -> DarkBorderDetection:
         return DarkBorderDetection(None, "image too small")
 
     grayscale = image.convert("L")
+    if _light_page_background_mean(grayscale) < 135:
+        return DarkBorderDetection(None, "no light page background for dark border trim")
+
     max_x = max(2, int(width * 0.08))
     max_y = max(2, int(height * 0.08))
     min_retain_width = int(width * 0.88)
@@ -3386,6 +3414,8 @@ def _detect_dark_border_bbox(image: Image.Image) -> DarkBorderDetection:
         return DarkBorderDetection(None, "candidate trim exceeds conservative retain ratio")
     if retained_width <= 0 or retained_height <= 0:
         return DarkBorderDetection(None, "invalid trim candidate")
+    if _has_protected_dark_content_near_trim_boundary(grayscale, bbox):
+        return DarkBorderDetection(None, "protected edge content near dark border")
 
     return DarkBorderDetection(bbox, "dark edge border trimmed")
 
@@ -3403,13 +3433,50 @@ def _dark_edge_run(image: Image.Image, side: str, max_pixels: int) -> int:
             values = [pixels[x, offset] for x in range(width)]
         else:
             values = [pixels[x, height - 1 - offset] for x in range(width)]
-        dark_ratio = sum(1 for value in values if value <= 45) / len(values)
+        dark_ratio = sum(1 for value in values if value <= 70) / len(values)
         mean = sum(values) / len(values)
-        if dark_ratio >= 0.72 and mean <= 80:
+        if dark_ratio >= 0.70 and mean <= 105:
             run = offset + 1
         else:
             break
     return run
+
+
+def _light_page_background_mean(image: Image.Image) -> float:
+    width, height = image.size
+    margin_x = max(1, int(width * 0.20))
+    margin_y = max(1, int(height * 0.20))
+    if margin_x * 2 >= width or margin_y * 2 >= height:
+        return ImageStat.Stat(image).mean[0]
+    return ImageStat.Stat(image.crop((margin_x, margin_y, width - margin_x, height - margin_y))).mean[0]
+
+
+def _has_protected_dark_content_near_trim_boundary(
+    image: Image.Image,
+    bbox: tuple[int, int, int, int],
+) -> bool:
+    width, height = image.size
+    left, top, right, bottom = bbox
+    protect_depth = max(3, min(10, int(min(width, height) * 0.04)))
+    corner_pad_x = max(2, int(width * 0.04))
+    corner_pad_y = max(2, int(height * 0.04))
+    bands = [
+        (left, top + corner_pad_y, min(right, left + protect_depth), bottom - corner_pad_y),
+        (max(left, right - protect_depth), top + corner_pad_y, right, bottom - corner_pad_y),
+        (left + corner_pad_x, top, right - corner_pad_x, min(bottom, top + protect_depth)),
+        (left + corner_pad_x, max(top, bottom - protect_depth), right - corner_pad_x, bottom),
+    ]
+    for band in bands:
+        x0, y0, x1, y1 = band
+        if x1 <= x0 or y1 <= y0:
+            continue
+        crop = image.crop(band)
+        values = crop.tobytes()
+        dark_pixels = sum(1 for value in values if value <= 90)
+        area = max(1, len(values))
+        if dark_pixels >= 8 and dark_pixels / area >= 0.01:
+            return True
+    return False
 
 
 _DESPECKLE_DARK_THRESHOLD = 60
