@@ -315,7 +315,7 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (metadata_dir / PRODUCTION_RUN_PROGRESS_JSON).write_text(
-                json.dumps({"status": "running", "current_file": private_file.name}, ensure_ascii=False),
+                json.dumps({"status": "finished"}, ensure_ascii=False),
                 encoding="utf-8",
             )
             result = controller.save_review_decisions(decision_summary([("PRQ000001", "false_positive")]))
@@ -370,6 +370,170 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
                     "evidence",
                     "data:image",
                 ],
+            )
+
+    def test_finish_blocks_running_batch_with_aggregate_chinese_guidance(self) -> None:
+        private_hash = "d" * 64
+        private_ocr = "PRIVATE_RUNNING_OCR_SHOULD_NOT_LEAK"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            private_file = input_dir / "private_running_page.png"
+            private_file.write_bytes(b"fake image placeholder")
+            controller = WorkbenchController()
+            controller.configure(input_dir, output_dir, metadata_dir)
+
+            (metadata_dir / PRODUCTION_RUN_SUMMARY_JSON).write_text(
+                json.dumps(
+                    {
+                        "status": "processing",
+                        "counts": {
+                            "total_files": 1,
+                            "openable_files": 1,
+                            "processed_files": 1,
+                            "resumed_files": 0,
+                            "skipped_files": 0,
+                            "failed_files": 0,
+                            "retry_list_files": 0,
+                        },
+                        "operator_summary": {
+                            "total_source_images": 1,
+                            "derivative_images_ready": 1,
+                            "files_needing_attention": 0,
+                        },
+                        "private_debug": {"file": private_file.name, "sha256": private_hash, "ocr": private_ocr},
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            (metadata_dir / PRODUCTION_RUN_PROGRESS_JSON).write_text(
+                json.dumps({"status": "running", "current_file": private_file.name}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            (metadata_dir / PRODUCTION_REVIEW_QUEUE_JSON).write_text(
+                json.dumps({"summary": {"total_items": 1}, "items": [{"local_id": "PRQ000001"}]}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "当前不能显示为可以交接") as raised:
+                controller.save_review_decisions(decision_summary([("PRQ000001", "false_positive")]))
+
+            public_text = str(raised.exception)
+            self.assertIn("请检查输出文件夹", public_text)
+            self.assertFalse((metadata_dir / REVIEW_DECISION_SUMMARY_JSON).exists())
+            self.assertFalse((metadata_dir / COMPLETION_NOTE_TXT).exists())
+            assert_public_restore_payload_is_private(
+                self,
+                {"error_zh": public_text},
+                [str(root), str(private_file), private_file.name, private_hash, private_ocr, ".png", "sha256", "OCR"],
+            )
+
+    def test_finish_blocks_pending_confirmations_without_overwriting_draft(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            (input_dir / "page.png").write_bytes(b"fake image placeholder")
+            controller = WorkbenchController()
+            controller.configure(input_dir, output_dir, metadata_dir)
+
+            (metadata_dir / PRODUCTION_RUN_SUMMARY_JSON).write_text(
+                json.dumps(
+                    {
+                        "status": "finished",
+                        "counts": {
+                            "total_files": 1,
+                            "openable_files": 1,
+                            "processed_files": 1,
+                            "resumed_files": 0,
+                            "skipped_files": 0,
+                            "failed_files": 0,
+                            "retry_list_files": 0,
+                        },
+                        "operator_summary": {
+                            "total_source_images": 1,
+                            "derivative_images_ready": 1,
+                            "files_needing_attention": 1,
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            draft = decision_summary([("PRQ000001", "pending")])
+            controller.save_draft_review_decisions(draft)
+            draft_before = (metadata_dir / REVIEW_DECISION_DRAFT_JSON).read_text(encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "仍有 1 项待人工确认"):
+                controller.save_review_decisions(draft)
+
+            self.assertEqual((metadata_dir / REVIEW_DECISION_DRAFT_JSON).read_text(encoding="utf-8"), draft_before)
+            self.assertFalse((metadata_dir / REVIEW_DECISION_SUMMARY_JSON).exists())
+            self.assertFalse((metadata_dir / COMPLETION_NOTE_TXT).exists())
+
+    def test_finish_blocks_insufficient_output_count_with_operator_next_step(self) -> None:
+        private_hash = "e" * 64
+        private_ocr = "PRIVATE_SHORT_OUTPUT_OCR_SHOULD_NOT_LEAK"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            private_file = input_dir / "private_short_output.jpg"
+            private_file.write_bytes(b"fake image placeholder")
+            controller = WorkbenchController()
+            controller.configure(input_dir, output_dir, metadata_dir)
+
+            (metadata_dir / PRODUCTION_RUN_SUMMARY_JSON).write_text(
+                json.dumps(
+                    {
+                        "status": "finished",
+                        "counts": {
+                            "total_files": 3,
+                            "openable_files": 3,
+                            "processed_files": 1,
+                            "resumed_files": 0,
+                            "skipped_files": 0,
+                            "failed_files": 0,
+                            "retry_list_files": 0,
+                        },
+                        "operator_summary": {
+                            "total_source_images": 3,
+                            "derivative_images_ready": 1,
+                            "files_needing_attention": 0,
+                        },
+                        "private_debug": {"path": str(private_file), "hash": private_hash, "ocr": private_ocr},
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            (metadata_dir / PRODUCTION_RUN_PROGRESS_JSON).write_text(
+                json.dumps({"state": "finished"}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            (metadata_dir / PRODUCTION_REVIEW_QUEUE_JSON).write_text(
+                json.dumps({"summary": {"total_items": 1}, "items": [{"local_id": "PRQ000001"}]}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "当前不能显示为可以交接") as raised:
+                controller.save_review_decisions(decision_summary([("PRQ000001", "false_positive")]))
+
+            public_text = str(raised.exception)
+            self.assertIn("重新开始处理本批", public_text)
+            self.assertFalse((metadata_dir / REVIEW_DECISION_SUMMARY_JSON).exists())
+            assert_public_restore_payload_is_private(
+                self,
+                {"error_zh": public_text},
+                [str(root), str(private_file), private_file.name, private_hash, private_ocr, ".jpg", "sha256", "OCR"],
             )
 
     def test_configure_unreadable_source_returns_generic_chinese_guidance_when_supported(self) -> None:
