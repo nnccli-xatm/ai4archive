@@ -6531,7 +6531,7 @@ class ScanQcTest(unittest.TestCase):
                 "private_overexposed.png": "overexposed",
                 "private_high_noise.png": "noise",
                 "private_color_risk.png": "light color annotation",
-                "private_low_confidence.png": "low-confidence",
+                "private_low_confidence.png": "low-confidence tonal separation",
             }
             for source_name, reason_fragment in skipped_expectations.items():
                 record = records[source_name]
@@ -6817,12 +6817,14 @@ class ScanQcTest(unittest.TestCase):
                 self.assertIn("lighten_scanlines_conservative", record["operations"])
                 self.assertGreater(
                     _box_luma(processed, line_box),
-                    _box_luma(pages[source_name], line_box) + 4.0,
+                    _box_luma(pages[source_name], line_box) + 3.0,
                     source_name,
                 )
                 self.assertLess(_changed_ratio_for_test(pages[source_name], processed, protected_box), 0.002, source_name)
                 self.assertGreater(record["scanlines_changed_pixel_ratio"], 0.0007, source_name)
                 self.assertLess(record["scanlines_changed_pixel_ratio"], 0.035, source_name)
+                self.assertGreater(record["scanlines_delta"], 3.0, source_name)
+                self.assertGreater(record["scanlines_candidate_pixel_ratio"], 0.0007, source_name)
                 self.assertEqual(record["processing_audit"]["guardrail_failures"], [], source_name)
 
             self.assertEqual(audit_summary["counts"]["scanlines_lightened_files"], 2)
@@ -6854,6 +6856,12 @@ class ScanQcTest(unittest.TestCase):
                 "private_page_number.png": _synthetic_repair_scanline_page("horizontal", page_number=True),
                 "private_red_stamp.png": _synthetic_repair_scanline_page("horizontal", red_stamp=True),
                 "private_handwriting.png": _synthetic_repair_scanline_page("horizontal", handwriting=True),
+                "private_underlined_text.png": _synthetic_repair_scanline_page(
+                    "horizontal", scanline=False, underline=True
+                ),
+                "private_header_footer.png": _synthetic_repair_scanline_page(
+                    "horizontal", scanline=False, header_footer=True
+                ),
                 "private_photo_texture.png": _synthetic_photo_like_page(),
                 "private_dense_table.png": _synthetic_dense_table_scanline_page(),
                 "private_low_confidence.png": _synthetic_scanline_low_confidence_page(),
@@ -6884,14 +6892,16 @@ class ScanQcTest(unittest.TestCase):
             records = {record["source_relative_path"]: record for record in manifest["files"]}
             self.assertTrue(records["private_default_compatible_scanline.png"]["scanlines_lightened"])
             skipped_expectations = {
-                "private_table_line.png": "no confident",
-                "private_page_number.png": "risk",
-                "private_red_stamp.png": "risk",
-                "private_handwriting.png": "no confident",
+                "private_table_line.png": "SCANLINE_LOW_CONFIDENCE",
+                "private_page_number.png": "SCANLINE_EDGE_CONTENT_RISK",
+                "private_red_stamp.png": "SCANLINE_COLOR_CONTENT_RISK",
+                "private_handwriting.png": "SCANLINE_LOW_CONFIDENCE",
+                "private_underlined_text.png": "SCANLINE_LOW_CONFIDENCE",
+                "private_header_footer.png": "SCANLINE_LOW_CONFIDENCE",
                 "private_photo_texture.png": "texture risk",
                 "private_dense_table.png": "foreground too dense",
                 "private_low_confidence.png": "low-confidence",
-                "private_edge_archive_line.png": "risk",
+                "private_edge_archive_line.png": "SCANLINE_EDGE_CONTENT_RISK",
             }
             for source_name, reason_fragment in skipped_expectations.items():
                 record = records[source_name]
@@ -6899,6 +6909,8 @@ class ScanQcTest(unittest.TestCase):
                 self.assertFalse(record["scanlines_lightened"], source_name)
                 self.assertIn("lighten_scanlines_noop", record["operations"], source_name)
                 self.assertIn(reason_fragment, record["scanlines_reason"], source_name)
+                if reason_fragment.startswith("SCANLINE_"):
+                    self.assertRegex(record["scanlines_reason"], r"[\u4e00-\u9fff]+", source_name)
                 self.assertEqual(record["processing_audit"]["scanlines_changed_pixel_ratio"], 0.0, source_name)
                 self.assertLess(
                     _changed_ratio_for_test(pages[source_name], processed, (0, 0, processed.width, processed.height)),
@@ -12106,17 +12118,20 @@ def _synthetic_repair_scanline_page(
     page_number: bool = False,
     red_stamp: bool = False,
     handwriting: bool = False,
+    underline: bool = False,
+    header_footer: bool = False,
     edge_archive_line: bool = False,
+    scanline: bool = True,
 ) -> Image.Image:
     image = Image.new("RGB", (260, 180), (240, 240, 236))
     draw = ImageDraw.Draw(image)
     for y in (42, 64, 86):
         draw.rectangle((42, y, 158, y + 5), fill=(36, 36, 36))
-    if orientation == "horizontal":
-        draw.rectangle((16, 132, 244, 133), fill=(222, 222, 218))
-    elif orientation == "vertical":
-        draw.rectangle((212, 18, 213, 164), fill=(222, 222, 218))
-    else:
+    if orientation == "horizontal" and scanline:
+        draw.rectangle((16, 132, 244, 133), fill=(236, 236, 232))
+    elif orientation == "vertical" and scanline:
+        draw.rectangle((212, 18, 213, 164), fill=(236, 236, 232))
+    elif orientation not in {"horizontal", "vertical"}:
         raise ValueError(orientation)
     if table_line:
         draw.line((24, 126, 236, 126), fill=(45, 45, 45), width=2)
@@ -12127,6 +12142,11 @@ def _synthetic_repair_scanline_page(
     if handwriting:
         draw.line((32, 128, 80, 150), fill=(55, 55, 55), width=2)
         draw.line((80, 150, 126, 126), fill=(55, 55, 55), width=2)
+    if underline:
+        draw.line((42, 93, 158, 93), fill=(42, 42, 42), width=2)
+    if header_footer:
+        draw.rectangle((26, 18, 232, 20), fill=(44, 44, 44))
+        draw.rectangle((108, 160, 152, 168), fill=(36, 36, 36))
     if edge_archive_line:
         draw.rectangle((4, 112, 18, 154), fill=(60, 60, 60))
     return image

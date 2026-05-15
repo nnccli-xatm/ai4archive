@@ -2908,7 +2908,10 @@ def _lighten_scanlines_conservative(image: Image.Image) -> ScanlineLighteningRes
         return _scanlines_noop(image, "scanline lightening skipped: image too small")
     color_risk = _tone_color_risk_reason(image)
     if color_risk:
-        return _scanlines_noop(image, "scanline lightening skipped: color content, stamp, or annotation risk")
+        return _scanlines_noop(
+            image,
+            "scanline lightening skipped: SCANLINE_COLOR_CONTENT_RISK risk 彩色内容/印章/批注风险",
+        )
 
     grayscale = image.convert("L")
     histogram = grayscale.histogram()
@@ -2938,7 +2941,7 @@ def _lighten_scanlines_conservative(image: Image.Image) -> ScanlineLighteningRes
     if _protected_edge_dark_ratio(foreground) > 0.0025:
         return _scanlines_noop(
             image,
-            "scanline lightening skipped: binding, edge mark, or margin content risk",
+            "scanline lightening skipped: SCANLINE_EDGE_CONTENT_RISK risk 装订边、边缘原痕或边距内容风险",
         )
 
     protected = foreground.filter(ImageFilter.MaxFilter(13))
@@ -3049,7 +3052,7 @@ def _scanline_axis_lightening_plan(
             values.append(value)
             if value <= 125:
                 dark += 1
-            if 5 <= background - value <= 24 and value >= 170:
+            if 4 <= background - value <= 24 and value >= 170:
                 selected.append((x, y))
         available_ratio = len(values) / max(1, cross_length)
         protected_ratio = protected_count / max(1, cross_length)
@@ -3073,9 +3076,17 @@ def _scanline_axis_lightening_plan(
 
     candidate_total_ratio = len(all_candidates) / max(1, width * height)
     if max_dark_ratio > 0.025:
-        return _empty_scanline_lightening_plan(orientation, "text, table line, stamp, annotation, or original mark risk", candidate_total_ratio)
+        return _empty_scanline_lightening_plan(
+            orientation,
+            "SCANLINE_CONTENT_RISK risk 正文、表格线、印章、批注或档案原痕风险",
+            candidate_total_ratio,
+        )
     if candidate_total_ratio > 0.09:
-        return _empty_scanline_lightening_plan(orientation, "broad uneven lighting is outside conservative scope", candidate_total_ratio)
+        return _empty_scanline_lightening_plan(
+            orientation,
+            "SCANLINE_SCOPE_RISK risk 大范围不均匀明暗超出保守处理范围",
+            candidate_total_ratio,
+        )
 
     candidate_lines: list[int] = []
     selected: set[tuple[int, int]] = set()
@@ -3099,19 +3110,29 @@ def _scanline_axis_lightening_plan(
             continue
         local_mean = sum(neighbor_means) / len(neighbor_means)
         local_delta = local_mean - stat["mean"]
-        if not (4.5 <= local_delta <= 22.0):
+        if not (3.0 <= local_delta <= 22.0):
+            continue
+        if local_delta < 4.5 and (
+            stat["candidate_ratio"] < 0.68
+            or stat["candidate_available_ratio"] < 0.80
+            or stat["dark_ratio"] > 0.002
+        ):
             continue
         candidate_lines.append(index)
         selected.update(stat["selected"])
         score += min(1.0, stat["candidate_available_ratio"] / 0.8) * min(1.0, local_delta / 12.0)
 
     if not candidate_lines:
-        return _empty_scanline_lightening_plan(orientation, "no confident low-contrast scanlines", candidate_total_ratio)
+        return _empty_scanline_lightening_plan(
+            orientation,
+            "SCANLINE_LOW_CONFIDENCE low-confidence 低置信轻微扫描线证据不足",
+            candidate_total_ratio,
+        )
     groups = _contiguous_groups(candidate_lines)
     if len(groups) > 6 or any(len(group) > 4 for group in groups):
         return _empty_scanline_lightening_plan(
             orientation,
-            "broad uneven lighting or archival stripe risk",
+            "SCANLINE_SCOPE_RISK risk 大范围不均匀明暗或档案原有条痕风险",
             candidate_total_ratio,
         )
     return {
