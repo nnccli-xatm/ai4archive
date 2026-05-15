@@ -270,22 +270,30 @@ class ProductionWorkbenchRegressionGuardTests(unittest.TestCase):
 
         for required in [
             'id="stageTimingText"',
+            'id="stageTimingAdviceText"',
             "stageTimingLabel",
+            "stageTimingAdvice",
             "function deriveStageTimingLabel(summary, progress)",
+            "function deriveStageTimingAdvice(summary, progress)",
             "source.stage_timings",
+            "timings.aggregate_only !== true",
             "检查扫描图片",
             "生成处理后图片",
             "整理处理结果",
+            "主要耗时在生成处理后图片，请继续等待；如长时间没有变化再交管理员处理。",
             "formatStageSeconds",
             "seconds.toFixed(1)",
             '["completed", "finished", "running"].includes(stage.status)',
             "^[\\u4e00-\\u9fff\\s]{2,18}$",
             'els.stageTimingText.classList.toggle("hidden", !state.stageTimingLabel);',
+            'els.stageTimingAdviceText.classList.toggle("hidden", !state.stageTimingAdvice);',
         ]:
             self.assertIn(required, html)
 
         start = html.find("function safeStageTimingLabel(stage)")
         end = html.find("function runningGuidanceText()", start)
+        if start == -1:
+            start = html.find("function safeStageTimingLabelInfo(stage)")
         self.assertNotEqual(start, -1)
         self.assertNotEqual(end, -1)
         body = html[start:end]
@@ -298,6 +306,19 @@ class ProductionWorkbenchRegressionGuardTests(unittest.TestCase):
             "<img",
         ]:
             self.assertNotIn(forbidden, body.lower())
+
+        advice_start = html.find("function deriveStageTimingAdvice(summary, progress)")
+        advice_end = html.find("function runningGuidanceText()", advice_start)
+        self.assertNotEqual(advice_start, -1)
+        self.assertNotEqual(advice_end, -1)
+        advice_body = html[advice_start:advice_end]
+        for required in [
+            '["blocked", "failed", "error"].includes(rawStatus)',
+            "stage.safeForAdvice",
+            "slowStageAdviceByLabel[stage.label]",
+            "stage.elapsedSeconds > best.elapsedSeconds",
+        ]:
+            self.assertIn(required, advice_body)
 
     def test_start_preflight_shows_aggregate_count_and_chinese_recovery(self) -> None:
         html = WORKBENCH_HTML.read_text(encoding="utf-8")
