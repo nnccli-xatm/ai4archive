@@ -431,10 +431,148 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertTrue(readiness["output_writable"])
             self.assertEqual(readiness["blocking_reasons_zh"], [])
             self.assertEqual(readiness["title_zh"], "文件夹可以开始处理")
-            self.assertEqual(readiness["message_zh"], "本批预检结果：已识别到 1 张可处理图片，输出文件夹可以写入。")
+            self.assertEqual(readiness["message_zh"], "本批预检结果：已识别到 1 张可处理图片，输出文件夹可以写入；未发现已有工作台结果，可以开始。")
+            self.assertEqual(readiness["existing_output_risk"]["kind"], "none")
+            self.assertFalse(readiness["existing_output_risk"]["existing_artifacts_detected"])
             self.assertEqual(readiness["selected_processing_mode"]["id"], "light")
             self.assertNotIn("nested", json.dumps(readiness, ensure_ascii=False))
             self.assertNotIn("a.png", json.dumps(readiness, ensure_ascii=False))
+
+    def test_configure_readiness_warns_about_existing_workbench_results_without_private_details(self) -> None:
+        private_hash = "a" * 64
+        private_ocr = "PRIVATE_OCR_TEXT_SHOULD_NOT_LEAK"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "operator-output"
+            metadata_dir = output_dir / "_production_workbench"
+            input_dir.mkdir()
+            (input_dir / "incoming_private_page.png").write_bytes(b"image")
+            processed_dir = output_dir / "images" / "nested"
+            processed_dir.mkdir(parents=True)
+            processed_file = processed_dir / "old_private_result.png"
+            processed_file.write_bytes(b"processed image bytes")
+            metadata_dir.mkdir(parents=True)
+            summary_file = metadata_dir / PRODUCTION_RUN_SUMMARY_JSON
+            summary_file.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "scan-qc.production-run.v1",
+                        "status": "finished",
+                        "debug_should_not_surface": {
+                            "path": str(processed_file),
+                            "file": processed_file.name,
+                            "sha256": private_hash,
+                            "ocr_text": private_ocr,
+                            "thumbnail": "data:image/png;base64,AAAA",
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            readiness = WorkbenchController().configure(input_dir, output_dir)["folder_readiness"]
+
+            self.assertTrue(readiness["ready_to_start"])
+            self.assertEqual(readiness["status"], "ready")
+            risk = readiness["existing_output_risk"]
+            self.assertTrue(risk["aggregate_only"])
+            self.assertEqual(risk["kind"], "existing_workbench_results")
+            self.assertTrue(risk["processed_outputs_detected"])
+            self.assertTrue(risk["workbench_metadata_detected"])
+            self.assertIn("已有本工具结果", readiness["message_zh"])
+            self.assertIn("空的输出文件夹", " ".join(readiness["next_steps_zh"]))
+            public_json = json.dumps(readiness, ensure_ascii=False, sort_keys=True)
+            for forbidden in [
+                str(root),
+                str(output_dir),
+                str(processed_file),
+                "incoming_private_page.png",
+                "old_private_result.png",
+                private_hash,
+                private_ocr,
+                "sha256",
+                "ocr_text",
+                "thumbnail",
+                "data:image",
+            ]:
+                self.assertNotIn(forbidden, public_json)
+
+    def test_configure_readiness_warns_about_completed_handoff_material_and_keeps_files_unchanged(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = output_dir / "_production_workbench"
+            input_dir.mkdir()
+            (input_dir / "page.png").write_bytes(b"image")
+            (output_dir / "images").mkdir(parents=True)
+            processed_file = output_dir / "images" / "completed.png"
+            processed_file.write_bytes(b"processed before preflight")
+            metadata_dir.mkdir(parents=True)
+            completion_note = metadata_dir / COMPLETION_NOTE_TXT
+            completion_note.write_text("上一批中文交接说明\n", encoding="utf-8")
+            summary_file = metadata_dir / PRODUCTION_RUN_SUMMARY_JSON
+            summary_file.write_text('{"schema_version":"scan-qc.production-run.v1","status":"finished"}\n', encoding="utf-8")
+            before = {
+                processed_file: processed_file.read_bytes(),
+                completion_note: completion_note.read_text(encoding="utf-8"),
+                summary_file: summary_file.read_text(encoding="utf-8"),
+            }
+
+            readiness = WorkbenchController().configure(input_dir, output_dir)["folder_readiness"]
+
+            self.assertEqual(readiness["existing_output_risk"]["kind"], "completed_handoff")
+            self.assertTrue(readiness["existing_output_risk"]["completed_handoff_detected"])
+            self.assertIn("完成交接材料", readiness["title_zh"])
+            self.assertIn("先完成或归档上一批", readiness["message_zh"])
+            self.assertIn("更换一个空的输出文件夹", " ".join(readiness["next_steps_zh"]))
+            self.assertEqual(processed_file.read_bytes(), before[processed_file])
+            self.assertEqual(completion_note.read_text(encoding="utf-8"), before[completion_note])
+            self.assertEqual(summary_file.read_text(encoding="utf-8"), before[summary_file])
+            self.assertTrue(processed_file.exists())
+            self.assertTrue(completion_note.exists())
+            self.assertTrue(summary_file.exists())
+
+    def test_configure_readiness_guides_reusable_current_batch_results(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = output_dir / "_production_workbench"
+            input_dir.mkdir()
+            (input_dir / "page.png").write_bytes(b"image")
+            (output_dir / "images").mkdir(parents=True)
+            (output_dir / "images" / "page.png").write_bytes(b"processed")
+            metadata_dir.mkdir(parents=True)
+            (metadata_dir / PRODUCTION_RUN_SUMMARY_JSON).write_text(
+                json.dumps(
+                    {
+                        "schema_version": "scan-qc.production-run.v1",
+                        "status": "blocked",
+                        "counts": {
+                            "total_files": 2,
+                            "processed_files": 1,
+                            "resumed_files": 0,
+                            "failed_files": 1,
+                            "retry_list_files": 1,
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            readiness = WorkbenchController().configure(input_dir, output_dir)["folder_readiness"]
+
+            self.assertTrue(readiness["ready_to_start"])
+            self.assertTrue(readiness["can_start_processing"])
+            self.assertEqual(readiness["existing_output_risk"]["kind"], "reusable_current_batch")
+            self.assertTrue(readiness["existing_output_risk"]["reusable_current_batch_detected"])
+            self.assertIn("本批已有可复用处理结果", readiness["message_zh"])
+            self.assertIn("只补齐缺失输出", readiness["message_zh"])
+            self.assertIn("复用已有结果", " ".join(readiness["next_steps_zh"]))
 
     def test_configure_readiness_blocks_unwritable_output_with_next_steps(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

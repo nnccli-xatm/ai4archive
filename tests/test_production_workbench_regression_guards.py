@@ -287,7 +287,13 @@ class ProductionWorkbenchRegressionGuardTests(unittest.TestCase):
             '"aggregate_only": True',
             '"supported_image_count": 0',
             '"ready_to_start": False',
-            'f"本批预检结果：已识别到 {supported_image_count} 张可处理图片，输出文件夹可以写入。"',
+            '"existing_output_risk": existing_output_risk',
+            '"schema_version": "scan-qc.local-existing-output-risk.v1"',
+            "未发现已有工作台结果，可以开始",
+            "已有本工具结果",
+            "本批已有可复用处理结果",
+            "只补齐缺失输出",
+            "完成交接材料",
         ]:
             self.assertIn(required, server)
         for forbidden in [

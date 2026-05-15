@@ -1984,19 +1984,149 @@ def _folder_readiness_summary_with_snapshot(
             "blocking_reasons_zh": [message_zh],
             "next_steps_zh": ["确认输出磁盘没有只读、已解锁，并且空间足够。", "换一个可以写入的输出文件夹后重新保存。"],
         }, snapshot
+    existing_output_risk = _existing_output_artifact_risk(output_path, metadata_path)
+    ready_title = "文件夹可以开始处理"
+    ready_message = (
+        f"本批预检结果：已识别到 {supported_image_count} 张可处理图片，输出文件夹可以写入；"
+        "未发现已有工作台结果，可以开始。"
+    )
+    ready_steps = ["确认处理方式无误。", "点击开始处理。"]
+    if existing_output_risk.get("kind") == "reusable_current_batch":
+        ready_title = existing_output_risk["title_zh"]
+        ready_message = existing_output_risk["message_zh"]
+        ready_steps = list(existing_output_risk["next_steps_zh"])
+    elif existing_output_risk.get("kind") != "none":
+        ready_title = existing_output_risk["title_zh"]
+        ready_message = existing_output_risk["message_zh"]
+        ready_steps = list(existing_output_risk["next_steps_zh"])
     ready_summary = {
         **summary,
         "status": "ready",
         "ready_to_start": True,
         "can_start_processing": True,
         "blocking_reasons_zh": [],
-        "title_zh": "文件夹可以开始处理",
-        "message_zh": f"本批预检结果：已识别到 {supported_image_count} 张可处理图片，输出文件夹可以写入。",
-        "next_steps_zh": ["确认处理方式无误。", "点击开始处理。"],
+        "title_zh": ready_title,
+        "message_zh": ready_message,
+        "next_steps_zh": ready_steps,
+        "existing_output_risk": existing_output_risk,
     }
     if snapshot is not None:
         snapshot["ready_to_start"] = True
     return ready_summary, snapshot
+
+
+def _existing_output_artifact_risk(derivatives_dir: Path, metadata_dir: Path) -> dict[str, Any]:
+    processed_outputs_detected = _processed_output_images_detected(derivatives_dir)
+    metadata_summary = _read_json(metadata_dir / PRODUCTION_RUN_SUMMARY_JSON)
+    progress = _read_json(metadata_dir / PRODUCTION_RUN_PROGRESS_JSON)
+    workbench_metadata_detected = _workbench_metadata_detected(metadata_dir)
+    completed_handoff_detected = _completed_handoff_artifacts_detected(metadata_dir)
+    reusable_current_batch_detected = _reusable_current_batch_detected(metadata_summary, progress)
+    base = {
+        "schema_version": "scan-qc.local-existing-output-risk.v1",
+        "aggregate_only": True,
+        "processed_outputs_detected": processed_outputs_detected,
+        "workbench_metadata_detected": workbench_metadata_detected,
+        "completed_handoff_detected": completed_handoff_detected,
+        "reusable_current_batch_detected": reusable_current_batch_detected,
+    }
+    if completed_handoff_detected:
+        return {
+            **base,
+            "kind": "completed_handoff",
+            "severity": "high",
+            "existing_artifacts_detected": True,
+            "title_zh": "输出文件夹已有完成交接材料",
+            "message_zh": "发现输出文件夹里已有本工具完成交接材料；建议先完成或归档上一批，或选择空输出文件夹，避免新旧批次混在一起。",
+            "next_steps_zh": [
+                "如果这是上一批，请先完成交接或归档后再处理新批次。",
+                "如果要处理新批次，请更换一个空的输出文件夹。",
+                "如果确认继续同一批，请先核对本机状态和输出数量。",
+            ],
+        }
+    if reusable_current_batch_detected:
+        return {
+            **base,
+            "kind": "reusable_current_batch",
+            "severity": "medium",
+            "existing_artifacts_detected": True,
+            "title_zh": "输出文件夹已有本批可复用结果",
+            "message_zh": "发现本批已有可复用处理结果；可以继续本批，重新开始会只补齐缺失输出，已经成功输出的图片不会删除。",
+            "next_steps_zh": [
+                "确认当前选择的是同一批扫描原图和输出文件夹。",
+                "需要继续本批时，可以开始处理，系统会复用已有结果并补齐缺失输出。",
+                "如果这是新批次，请更换一个空输出文件夹。",
+            ],
+        }
+    if workbench_metadata_detected or processed_outputs_detected:
+        return {
+            **base,
+            "kind": "existing_workbench_results",
+            "severity": "medium",
+            "existing_artifacts_detected": True,
+            "title_zh": "输出文件夹已有工作台结果",
+            "message_zh": "发现输出文件夹里已有本工具结果；请先确认是继续本批、换一个空输出文件夹，还是先处理上一批交接。",
+            "next_steps_zh": [
+                "如果这是同一批，请确认后继续，系统会尽量复用已有处理结果。",
+                "如果这是新批次，请选择空的输出文件夹。",
+                "如果上一批还没交接，请先完成交接或归档。",
+            ],
+        }
+    return {
+        **base,
+        "kind": "none",
+        "severity": "none",
+        "existing_artifacts_detected": False,
+        "title_zh": "未发现已有结果",
+        "message_zh": "未发现已有工作台结果，可以开始。",
+        "next_steps_zh": ["确认处理方式无误。", "点击开始处理。"],
+    }
+
+
+def _processed_output_images_detected(derivatives_dir: Path) -> bool:
+    image_root = derivatives_dir / "images"
+    if not _path_is_existing_dir(image_root):
+        return False
+    try:
+        return any(candidate.is_file() and candidate.suffix.lower() in PREVIEW_IMAGE_SUFFIXES for candidate in image_root.rglob("*"))
+    except OSError:
+        return False
+
+
+def _workbench_metadata_detected(metadata_dir: Path) -> bool:
+    known_names = {
+        PRODUCTION_RUN_SUMMARY_JSON,
+        PRODUCTION_RUN_PROGRESS_JSON,
+        PRODUCTION_REVIEW_QUEUE_JSON,
+        REVIEW_DECISION_DRAFT_JSON,
+        REVIEW_DECISION_SUMMARY_JSON,
+        REVIEW_DECISION_VERIFICATION_JSON,
+        PROCESSING_REVIEW_JSON,
+        COMPLETION_NOTE_TXT,
+        MAINTENANCE_ERROR_LOG_JSONL,
+    }
+    try:
+        return any((metadata_dir / name).exists() for name in known_names)
+    except OSError:
+        return False
+
+
+def _completed_handoff_artifacts_detected(metadata_dir: Path) -> bool:
+    try:
+        return (metadata_dir / COMPLETION_NOTE_TXT).exists() or (metadata_dir / REVIEW_DECISION_VERIFICATION_JSON).exists()
+    except OSError:
+        return False
+
+
+def _reusable_current_batch_detected(summary: dict[str, Any] | None, progress: dict[str, Any] | None) -> bool:
+    if not isinstance(summary, dict):
+        return False
+    counts = summary.get("counts") if isinstance(summary.get("counts"), dict) else {}
+    processed_or_resumed = _safe_nonnegative_int(counts.get("processed_files")) + _safe_nonnegative_int(counts.get("resumed_files"))
+    retryable_or_failed = _safe_nonnegative_int(counts.get("retry_list_files")) + _safe_nonnegative_int(counts.get("failed_files"))
+    status = str(summary.get("status") or "").strip().lower()
+    progress_state = str(progress.get("state") or "").strip().lower() if isinstance(progress, dict) else ""
+    return processed_or_resumed > 0 and (retryable_or_failed > 0 or status in {"blocked", "needs_review"} or progress_state == "running")
 
 
 def _scan_input_folder_preflight(input_path: Path) -> dict[str, Any]:

@@ -2333,7 +2333,7 @@
       if (!readiness) return "请先保存扫描原图文件夹和处理后输出文件夹。";
       const count = toNumber(readiness.supported_image_count);
       if (readiness.ready_to_start === true) {
-        return `本批预检结果：已识别到 ${count} 张可处理图片，输出文件夹可以写入。`;
+        return readiness.message_zh || `本批预检结果：已识别到 ${count} 张可处理图片，输出文件夹可以写入。`;
       }
       if (readiness.status === "not_configured") return "本批预检未通过：请先选择扫描原图文件夹和输出文件夹。";
       if (readiness.status === "empty") return "本批预检未通过：已识别到 0 张可处理图片，请确认是否选错原图文件夹。";
