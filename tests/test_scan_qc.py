@@ -23,6 +23,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter
 
 from archive_scan_qc import __version__
+from archive_scan_qc import processing as processing_module
 from archive_scan_qc.acceptance import build_acceptance_summary
 from archive_scan_qc.artifact_readiness import build_artifact_readiness_checklist
 from archive_scan_qc.benchmark import _comparison_plan, _recommendations
@@ -5728,6 +5729,47 @@ class ScanQcTest(unittest.TestCase):
             self.assertTrue(audit_summary["operations"]["enhance_faded_text"])
             self.assertEqual(audit_summary["counts"]["faded_text_enhanced_files"], 0)
 
+    def test_enhance_faded_text_dense_noop_skips_component_scan_and_keeps_metrics(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            _synthetic_dense_faded_text_noop_page().save(input_dir / "private_dense_texture.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            with mock.patch.object(
+                processing_module,
+                "_mask_components",
+                side_effect=AssertionError("dense no-op should not scan components"),
+            ):
+                manifest = process_images(
+                    report,
+                    input_dir,
+                    process_dir,
+                    ProcessingOptions(enhance_faded_text=True, workers=1),
+                )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            record = manifest["files"][0]
+            timing = manifest["summary"]["performance"]["operation_timings"]["enhance_faded_text"]
+            self.assertEqual(record["status"], "processed")
+            self.assertFalse(record["faded_text_enhanced"])
+            self.assertIn("enhance_faded_text_noop", record["operations"])
+            self.assertEqual(record["faded_text_reason"], "faded text enhancement skipped: foreground too dense")
+            self.assertGreater(record["faded_text_candidate_pixel_ratio"], 0.20)
+            self.assertEqual(record["processing_audit"]["faded_text_changed_pixel_ratio"], 0.0)
+            self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
+            self.assertTrue(timing["enabled"])
+            self.assertEqual(timing["file_count"], 1)
+            self.assertIn("elapsed_seconds", timing)
+            self.assertIn("faded_text_candidate_pixel_ratio", audit_summary["metrics"])
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertNotIn("private_dense_texture", audit_summary_text)
+
     def test_process_images_writes_audit_summary_and_retry_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -9556,6 +9598,18 @@ def _synthetic_texture_stain_page() -> Image.Image:
             shade = 190 + ((x + y) % 28)
             draw.point((x, y), fill=(shade, shade, shade))
             draw.point((x + 1, y), fill=(shade, shade, shade))
+    return image
+
+
+def _synthetic_dense_faded_text_noop_page() -> Image.Image:
+    image = Image.new("RGB", (720, 540), (238, 238, 238))
+    draw = ImageDraw.Draw(image)
+    for y in range(72, 468, 12):
+        shade = 176 + ((y * 5) % 24)
+        draw.rectangle((72, y, 648, y + 5), fill=(shade, shade, shade))
+    for x in range(84, 636, 18):
+        shade = 184 + ((x * 3) % 20)
+        draw.line((x, 84, min(648, x + 84), 456), fill=(shade, shade, shade), width=3)
     return image
 
 

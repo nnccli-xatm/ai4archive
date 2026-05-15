@@ -2220,6 +2220,19 @@ def _enhance_faded_text_conservative(image: Image.Image) -> FadedTextEnhancement
     threshold = min(205, p50 - 18, p95 - 22)
     if threshold < 125:
         return _faded_text_noop(image, "faded text enhancement skipped: outside conservative faded ink range")
+    sampled_candidate_ratio = _faded_text_sample_candidate_ratio(grayscale, threshold, p95)
+    if sampled_candidate_ratio < 0.0015:
+        return _faded_text_noop(
+            image,
+            "faded text enhancement skipped: foreground evidence too sparse",
+            sampled_candidate_ratio,
+        )
+    if sampled_candidate_ratio > 0.20:
+        return _faded_text_noop(
+            image,
+            "faded text enhancement skipped: foreground too dense",
+            sampled_candidate_ratio,
+        )
     candidate = grayscale.point(
         lambda value: 255 if 95 <= value <= threshold and 18 <= p95 - value <= 70 else 0,
         mode="L",
@@ -2337,6 +2350,17 @@ def _faded_text_noop(
     candidate_pixel_ratio: float = 0.0,
 ) -> FadedTextEnhancementResult:
     return FadedTextEnhancementResult(image, False, reason, 0.0, 0.0, round(candidate_pixel_ratio, 6))
+
+
+def _faded_text_sample_candidate_ratio(grayscale: Image.Image, threshold: float, p95: int) -> float:
+    sample = grayscale.copy()
+    sample.thumbnail((96, 96), Image.Resampling.BILINEAR)
+    candidate = sample.point(
+        lambda value: 255 if 95 <= value <= threshold and 18 <= p95 - value <= 70 else 0,
+        mode="L",
+    )
+    candidate = _clear_mask_edges(candidate, max(2, int(round(min(sample.width, sample.height) * 0.025))))
+    return round(_mask_ratio(candidate), 6)
 
 
 def _mask_ratio(mask: Image.Image) -> float:
