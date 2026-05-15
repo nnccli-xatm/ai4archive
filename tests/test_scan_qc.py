@@ -6145,6 +6145,105 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn("private_yellow_low_frequency_stain", audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
 
+    def test_lighten_background_stains_improves_sparse_multi_spots_with_protection_guards(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            page = _synthetic_background_multi_stain_page()
+            source_name = "private_sparse_multi_spot_stains.png"
+            page.save(input_dir / source_name, dpi=(300, 300))
+            source_bytes = (input_dir / source_name).read_bytes()
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(lighten_background_stains=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+            processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+
+            self.assertEqual((input_dir / source_name).read_bytes(), source_bytes)
+            self.assertTrue(record["background_stains_lightened"])
+            self.assertIn("lighten_background_stains_conservative", record["operations"])
+            audit = record["processing_audit"]
+            self.assertGreater(audit["background_stains_delta"], 4.0)
+            self.assertGreater(audit["background_stains_changed_pixel_ratio"], 0.0)
+            self.assertLessEqual(audit["background_stains_changed_pixel_ratio"], 0.03)
+            self.assertLessEqual(audit["background_stains_candidate_pixel_ratio"], 0.03)
+            self.assertEqual(audit["guardrail_failures"], [])
+
+            original = page.convert("RGB")
+            for stain_box in ((130, 42, 148, 58), (176, 72, 198, 90), (144, 110, 162, 126)):
+                before = ImageStat.Stat(original.crop(stain_box).convert("L")).mean[0]
+                after = ImageStat.Stat(processed.crop(stain_box).convert("L")).mean[0]
+                self.assertGreater(after - before, 3.0, stain_box)
+            for protected_box in ((24, 40, 96, 128), (112, 26, 126, 38), (104, 136, 198, 154)):
+                diff = ImageChops.difference(original.crop(protected_box), processed.crop(protected_box))
+                self.assertIsNone(diff.getbbox(), f"changed protected content {protected_box}")
+
+            self.assertEqual(audit_summary["counts"]["background_stains_lightened_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["background_stains"]["applied_files"], 1)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_sparse_multi_spot_stains", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
+    def test_lighten_background_stains_skips_component_guard_risks_with_public_reasons(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "private_too_many_spots.png": _synthetic_background_multi_stain_page(variant="too_many"),
+                "private_large_component.png": _synthetic_background_multi_stain_page(variant="large"),
+                "private_foreground_near_spot.png": _synthetic_background_multi_stain_page(variant="near_foreground"),
+                "private_edge_spot.png": _synthetic_background_multi_stain_page(variant="edge"),
+            }
+            for name, image in pages.items():
+                image.save(input_dir / name, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(lighten_background_stains=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            expected_reasons = {
+                "private_too_many_spots.png": "too many stain candidates outside conservative scope",
+                "private_large_component.png": "large stain or historical damage risk",
+                "private_foreground_near_spot.png": "stain candidate near text, stamp, annotation, or original mark risk",
+                "private_edge_spot.png": "binding, edge mark, or margin content risk",
+            }
+            for source_name, reason in expected_reasons.items():
+                record = records[source_name]
+                self.assertFalse(record["background_stains_lightened"], source_name)
+                self.assertIn("lighten_background_stains_noop", record["operations"])
+                self.assertIn(reason, record["background_stains_reason"])
+                self.assertEqual(record["processing_audit"]["background_stains_changed_pixel_ratio"], 0.0)
+                processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+                self.assertIsNone(ImageChops.difference(pages[source_name].convert("RGB"), processed).getbbox())
+
+            self.assertEqual(audit_summary["counts"]["background_stains_lightened_files"], 0)
+            self.assertEqual(audit_summary["counts"]["background_stains_skipped_files"], 4)
+            self.assertGreaterEqual(len(audit_summary["guardrails"]["background_stains"]["skip_reason_distribution"]), 4)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            for private_name in ("private_too_many_spots", "private_large_component", "private_foreground_near_spot", "private_edge_spot"):
+                self.assertNotIn(private_name, audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
     def test_lighten_background_stains_skips_uncertain_content_edges_and_default_off(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -11590,6 +11689,45 @@ def _synthetic_background_stain_page(
         draw.line((166, 56, 194, 56), fill=(180, 40, 35), width=2)
     if edge_mark:
         draw.rectangle((0, 74, 14, 102), fill=(58, 58, 58))
+    return image
+
+
+def _synthetic_background_multi_stain_page(*, variant: str = "safe") -> Image.Image:
+    image = Image.new("RGB", (240, 180), (240, 240, 240))
+    draw = ImageDraw.Draw(image)
+    for y in range(42, 132, 20):
+        draw.rectangle((28, y, 90, y + 4), fill=(35, 35, 35))
+    draw.text((112, 24), "12", fill=(30, 30, 30))
+    for y in (138, 150):
+        draw.line((104, y, 198, y), fill=(40, 40, 40), width=1)
+    for x in (128, 162):
+        draw.line((x, 136, x, 154), fill=(40, 40, 40), width=1)
+
+    if variant == "safe":
+        spots = (
+            ((130, 42, 148, 58), (224, 224, 224)),
+            ((176, 72, 198, 90), (230, 226, 205)),
+            ((144, 110, 162, 126), (226, 226, 226)),
+        )
+    elif variant == "too_many":
+        spots = tuple(
+            ((118 + (index % 4) * 24, 42 + (index // 4) * 36, 132 + (index % 4) * 24, 54 + (index // 4) * 36), (224, 224, 224))
+            for index in range(7)
+        )
+    elif variant == "large":
+        spots = (((118, 48, 206, 70), (224, 224, 224)),)
+    elif variant == "near_foreground":
+        spots = (((90, 78, 112, 96), (224, 224, 224)),)
+    elif variant == "edge":
+        spots = (
+            ((2, 76, 13, 92), (224, 224, 224)),
+            ((176, 72, 198, 90), (224, 224, 224)),
+        )
+    else:
+        raise ValueError(f"unknown multi-stain variant: {variant}")
+
+    for box, color in spots:
+        draw.ellipse(box, fill=color)
     return image
 
 
