@@ -12,7 +12,7 @@ from pathlib import Path
 import platform
 import shutil
 import sys
-from typing import Any
+from typing import Any, Iterable
 
 from PIL import Image
 
@@ -44,6 +44,18 @@ PROCESSING_OPERATION_TIMING_REQUIRED_FIELDS = (
     "files_per_minute",
     "average_seconds_per_file",
 )
+PROCESSING_OPERATION_TIMING_DIAGNOSTIC_SECONDS_PER_FILE = {
+    "deskew": 0.15,
+    "trim_dark_border": 0.15,
+    "auto_crop": 0.2,
+    "despeckle": 0.25,
+    "normalize_tones": 0.25,
+    "lighten_edge_shadow": 0.25,
+    "lighten_background_stains": 0.35,
+    "lighten_scanlines": 0.35,
+    "enhance_faded_text": 0.35,
+    "sharpen_text_edges": 0.35,
+}
 
 
 def positive_int(value: str, label: str) -> int:
@@ -576,6 +588,7 @@ def _processing_quality_regression(processing_manifest: dict[str, Any] | None) -
     )
     operation_timings = _processing_operation_timings(processing_manifest)
     timing_integrity = _operation_timing_integrity(operation_timings)
+    timing_budget = _operation_timing_budget(operation_timings, _operation_timing_budget_config(summary))
     thresholds = _processing_quality_thresholds()
     algorithm_metrics = _repair_algorithm_metrics(audit_records, operation_timings)
     threshold_violations = _quality_threshold_violations(algorithm_metrics, thresholds)
@@ -586,9 +599,11 @@ def _processing_quality_regression(processing_manifest: dict[str, Any] | None) -
         and guardrail_failed_files == 0
         and not threshold_violations
         and timing_integrity["status"] == "pass"
+        and timing_budget["status"] != "failed"
         else "failed"
     )
 
+    local_content_guard = _local_content_change_guard_summary(audit_records)
     return {
         "schema_version": "scan-qc.processing.quality-regression.v1",
         "aggregate_only": True,
@@ -610,13 +625,16 @@ def _processing_quality_regression(processing_manifest: dict[str, Any] | None) -
             "local_content_change_guard_checked_files": sum(
                 1 for audit in audit_records if audit.get("local_content_change_guard_checked") is True
             ),
+            "local_content_change_guard_skipped_files": local_content_guard["skipped_files"],
             "local_content_change_guard_reverted_files": sum(
                 1 for audit in audit_records if audit.get("local_content_change_guard_reverted") is True
             ),
         },
+        "local_content_change_guard": local_content_guard,
         "thresholds": thresholds,
         "algorithm_metrics": algorithm_metrics,
         "operation_timing_integrity": timing_integrity,
+        "operation_timing_budget": timing_budget,
         "slow_operations": _slow_operation_summary(operation_timings),
         "threshold_violations": threshold_violations,
         "privacy": {
@@ -649,11 +667,14 @@ def _empty_quality_regression_summary(reason: str) -> dict[str, Any]:
             "cumulative_change_guard_checked_files": 0,
             "cumulative_change_guard_reverted_files": 0,
             "local_content_change_guard_checked_files": 0,
+            "local_content_change_guard_skipped_files": 0,
             "local_content_change_guard_reverted_files": 0,
         },
+        "local_content_change_guard": _local_content_change_guard_summary([]),
         "thresholds": _processing_quality_thresholds(),
         "algorithm_metrics": _repair_algorithm_metrics([], {}),
         "operation_timing_integrity": _empty_operation_timing_integrity(reason),
+        "operation_timing_budget": _empty_operation_timing_budget(reason),
         "slow_operations": [],
         "threshold_violations": [],
         "privacy": {
@@ -700,6 +721,88 @@ def _empty_operation_timing_integrity(reason: str) -> dict[str, Any]:
     }
 
 
+def _operation_timing_budget_config(summary: dict[str, Any]) -> dict[str, Any]:
+    performance = summary.get("performance")
+    if not isinstance(performance, dict):
+        return {
+            "mode": "diagnostic",
+            "source": "diagnostic_defaults",
+            "budgets_seconds_per_file": dict(PROCESSING_OPERATION_TIMING_DIAGNOSTIC_SECONDS_PER_FILE),
+        }
+    config = performance.get("operation_timing_budget")
+    if not isinstance(config, dict):
+        return {
+            "mode": "diagnostic",
+            "source": "diagnostic_defaults",
+            "budgets_seconds_per_file": dict(PROCESSING_OPERATION_TIMING_DIAGNOSTIC_SECONDS_PER_FILE),
+        }
+    mode = "blocking" if config.get("mode") == "blocking" or config.get("blocking") is True else "diagnostic"
+    budgets = dict(PROCESSING_OPERATION_TIMING_DIAGNOSTIC_SECONDS_PER_FILE)
+    configured_budgets = config.get("budgets_seconds_per_file")
+    if isinstance(configured_budgets, dict):
+        for operation, value in configured_budgets.items():
+            if operation in PROCESSING_OPERATION_TIMING_NAMES:
+                budget = _coerce_float(value)
+                if budget is not None and budget > 0:
+                    budgets[operation] = budget
+    return {
+        "mode": mode,
+        "source": "calibrated" if mode == "blocking" else "diagnostic_defaults",
+        "budgets_seconds_per_file": budgets,
+    }
+
+
+def _operation_timing_budget(operation_timings: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+    budgets = config["budgets_seconds_per_file"]
+    over_budget: list[dict[str, Any]] = []
+    for operation in PROCESSING_OPERATION_TIMING_NAMES:
+        timing = operation_timings.get(operation)
+        if not isinstance(timing, dict) or not timing.get("enabled", False):
+            continue
+        budget = budgets[operation]
+        average_seconds_per_file = _coerce_float(timing.get("average_seconds_per_file"))
+        file_count = _coerce_int(timing.get("file_count"))
+        elapsed_seconds = _coerce_float(timing.get("elapsed_seconds"))
+        if average_seconds_per_file is None and isinstance(elapsed_seconds, int | float) and file_count > 0:
+            average_seconds_per_file = round(elapsed_seconds / file_count, 6)
+        if isinstance(average_seconds_per_file, int | float) and average_seconds_per_file > budget:
+            over_budget.append(
+                {
+                    "operation": operation,
+                    "average_seconds_per_file": round(float(average_seconds_per_file), 6),
+                    "budget_seconds_per_file": budget,
+                    "file_count": file_count,
+                }
+            )
+    blocking = config["mode"] == "blocking"
+    failed = blocking and bool(over_budget)
+    return {
+        "aggregate_only": True,
+        "status": "failed" if failed else "pass",
+        "mode": config["mode"],
+        "budget_source": config["source"],
+        "blocker_code": "processing_operation_timing_budget_exceeded" if failed else None,
+        "diagnostic_code": (
+            "processing_operation_timing_budget_diagnostic" if over_budget and not failed else None
+        ),
+        "budgets_seconds_per_file": dict(budgets),
+        "over_budget_operations": over_budget,
+    }
+
+
+def _empty_operation_timing_budget(reason: str) -> dict[str, Any]:
+    return {
+        "aggregate_only": True,
+        "status": "not_applicable",
+        "mode": "not_applicable",
+        "budget_source": reason,
+        "blocker_code": reason,
+        "diagnostic_code": None,
+        "budgets_seconds_per_file": dict(PROCESSING_OPERATION_TIMING_DIAGNOSTIC_SECONDS_PER_FILE),
+        "over_budget_operations": [],
+    }
+
+
 def _slow_operation_summary(operation_timings: dict[str, Any], *, limit: int = 5) -> list[dict[str, Any]]:
     summaries: list[dict[str, Any]] = []
     for operation in PROCESSING_OPERATION_TIMING_NAMES:
@@ -730,6 +833,29 @@ def _slow_operation_summary(operation_timings: dict[str, Any], *, limit: int = 5
         reverse=True,
     )
     return summaries[:limit]
+
+
+def _local_content_change_guard_summary(audit_records: list[dict[str, Any]]) -> dict[str, Any]:
+    checked_files = sum(1 for audit in audit_records if audit.get("local_content_change_guard_checked") is True)
+    reverted_files = sum(1 for audit in audit_records if audit.get("local_content_change_guard_reverted") is True)
+    warning_files = sum(
+        1
+        for audit in audit_records
+        if audit.get("local_content_change_guard_action") in {"reverted_to_source", "warn_review"}
+    )
+    return {
+        "aggregate_only": True,
+        "checked_files": checked_files,
+        "skipped_files": max(0, len(audit_records) - checked_files),
+        "reverted_files": reverted_files,
+        "warning_files": warning_files,
+        "reason_distribution": _reason_counts(
+            reason
+            for audit in audit_records
+            for reason in audit.get("local_content_change_guard_reasons", [])
+            if isinstance(reason, str)
+        ),
+    }
 
 
 def _processing_quality_thresholds() -> dict[str, float]:
@@ -933,6 +1059,13 @@ def _enhancement_changed_files(audit_records: list[dict[str, Any]]) -> int:
         "text_edges_sharpened",
     )
     return sum(1 for audit in audit_records if any(audit.get(flag) is True for flag in enhancement_flags))
+
+
+def _reason_counts(reasons: Iterable[str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for reason in reasons:
+        counts[reason] = counts.get(reason, 0) + 1
+    return dict(sorted(counts.items()))
 
 
 def _coerce_int(value: Any) -> int:

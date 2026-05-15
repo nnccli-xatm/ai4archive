@@ -51,6 +51,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             _assert_algorithm_thresholds(self, full_quality)
             _assert_required_metrics_present(self, full_quality)
             _assert_operation_timing_signal(self, full_quality)
+            _assert_local_content_guard_signal(self, full_quality)
 
             self.assertGreater(base_run["processing"]["processed_files_per_minute"], 0)
             self.assertGreater(full_run["processing"]["processed_files_per_minute"], 0)
@@ -122,6 +123,164 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             "a" * 64,
         ):
             self.assertNotIn(forbidden, raw)
+
+    def test_quality_regression_aggregates_local_guard_reasons_without_private_rows(self) -> None:
+        quality = _processing_quality_regression(
+            {
+                "summary": {
+                    "total_files": 3,
+                    "processed_files": 3,
+                    "failed_files": 0,
+                    "skipped_files": 0,
+                    "performance": {"operation_timings": _operation_timings_fixture()},
+                },
+                "files": [
+                    {
+                        "source_relative_path": "private_safe_stain_cleanup.png",
+                        "source_sha256": "b" * 64,
+                        "processing_audit": {
+                            "background_stains_lightened": True,
+                            "local_content_change_guard_checked": False,
+                            "local_content_change_guard_reverted": False,
+                            "local_content_change_guard_action": "passed",
+                            "local_content_change_guard_reasons": [],
+                        },
+                    },
+                    {
+                        "source_relative_path": "private_risky_text_damage.png",
+                        "source_sha256": "c" * 64,
+                        "processing_audit": {
+                            "scanlines_lightened": True,
+                            "local_content_change_guard_checked": True,
+                            "local_content_change_guard_reverted": True,
+                            "local_content_change_guard_action": "reverted_to_source",
+                            "local_content_change_guard_reasons": [
+                                "edge_content_changed_ratio",
+                                "local_content_changed_ratio",
+                            ],
+                        },
+                    },
+                    {
+                        "source_relative_path": "private_risky_text_sharpen.png",
+                        "source_sha256": "d" * 64,
+                        "processing_audit": {
+                            "text_edges_sharpened": True,
+                            "local_content_change_guard_checked": True,
+                            "local_content_change_guard_reverted": False,
+                            "local_content_change_guard_action": "passed",
+                            "local_content_change_guard_reasons": [],
+                        },
+                    },
+                ],
+            }
+        )
+        raw = json.dumps(quality, ensure_ascii=False, sort_keys=True)
+
+        self.assertEqual(quality["status"], "pass")
+        self.assertEqual(quality["counts"]["local_content_change_guard_checked_files"], 2)
+        self.assertEqual(quality["counts"]["local_content_change_guard_skipped_files"], 1)
+        self.assertEqual(quality["counts"]["local_content_change_guard_reverted_files"], 1)
+        local_guard = quality["local_content_change_guard"]
+        self.assertTrue(local_guard["aggregate_only"])
+        self.assertEqual(local_guard["checked_files"], 2)
+        self.assertEqual(local_guard["skipped_files"], 1)
+        self.assertEqual(local_guard["reverted_files"], 1)
+        self.assertEqual(local_guard["reason_distribution"]["local_content_changed_ratio"], 1)
+        self.assertEqual(local_guard["reason_distribution"]["edge_content_changed_ratio"], 1)
+        self.assertEqual(quality["operation_timing_budget"]["status"], "pass")
+        for forbidden in (
+            "private_safe_stain_cleanup.png",
+            "private_risky_text_damage.png",
+            "private_risky_text_sharpen.png",
+            "source_relative_path",
+            "source_sha256",
+            "b" * 64,
+            "c" * 64,
+            "d" * 64,
+        ):
+            self.assertNotIn(forbidden, raw)
+
+    def test_quality_regression_reports_timing_budget_blocker_without_private_rows(self) -> None:
+        operation_timings = _operation_timings_fixture()
+        operation_timings["lighten_scanlines"] = {
+            "enabled": True,
+            "file_count": 2,
+            "elapsed_seconds": 1.2,
+            "files_per_minute": 100.0,
+            "average_seconds_per_file": 0.6,
+        }
+        quality = _processing_quality_regression(
+            {
+                "summary": {
+                    "total_files": 2,
+                    "processed_files": 2,
+                    "failed_files": 0,
+                    "skipped_files": 0,
+                    "performance": {
+                        "operation_timings": operation_timings,
+                        "operation_timing_budget": {
+                            "mode": "blocking",
+                            "budgets_seconds_per_file": {"lighten_scanlines": 0.35},
+                        },
+                    },
+                },
+                "files": [
+                    {
+                        "source_relative_path": "private_slow_scanline_page.png",
+                        "source_sha256": "e" * 64,
+                        "processing_audit": {"local_content_change_guard_checked": True},
+                    }
+                ],
+            }
+        )
+        raw = json.dumps(quality, ensure_ascii=False, sort_keys=True)
+
+        self.assertEqual(quality["status"], "failed")
+        timing_budget = quality["operation_timing_budget"]
+        self.assertTrue(timing_budget["aggregate_only"])
+        self.assertEqual(timing_budget["status"], "failed")
+        self.assertEqual(timing_budget["mode"], "blocking")
+        self.assertEqual(timing_budget["budget_source"], "calibrated")
+        self.assertEqual(timing_budget["blocker_code"], "processing_operation_timing_budget_exceeded")
+        self.assertIsNone(timing_budget["diagnostic_code"])
+        self.assertEqual(timing_budget["over_budget_operations"][0]["operation"], "lighten_scanlines")
+        self.assertEqual(timing_budget["over_budget_operations"][0]["average_seconds_per_file"], 0.6)
+        self.assertEqual(timing_budget["over_budget_operations"][0]["file_count"], 2)
+        self.assertIn("lighten_scanlines", timing_budget["budgets_seconds_per_file"])
+        for forbidden in (
+            "private_slow_scanline_page.png",
+            "source_relative_path",
+            "source_sha256",
+            "e" * 64,
+        ):
+            self.assertNotIn(forbidden, raw)
+
+    def test_quality_regression_reports_default_timing_budget_as_diagnostic(self) -> None:
+        quality = _processing_quality_regression(
+            {
+                "summary": {
+                    "total_files": 20,
+                    "processed_files": 20,
+                    "failed_files": 0,
+                    "skipped_files": 0,
+                    "performance": {"operation_timings": _fixed_sample_operation_timings()},
+                },
+                "files": [{"processing_audit": {}} for _ in range(20)],
+            }
+        )
+
+        self.assertEqual(quality["status"], "pass")
+        timing_budget = quality["operation_timing_budget"]
+        self.assertTrue(timing_budget["aggregate_only"])
+        self.assertEqual(timing_budget["status"], "pass")
+        self.assertEqual(timing_budget["mode"], "diagnostic")
+        self.assertEqual(timing_budget["budget_source"], "diagnostic_defaults")
+        self.assertIsNone(timing_budget["blocker_code"])
+        self.assertEqual(timing_budget["diagnostic_code"], "processing_operation_timing_budget_diagnostic")
+        self.assertEqual(
+            [operation["operation"] for operation in timing_budget["over_budget_operations"]],
+            ["auto_crop", "deskew", "despeckle", "lighten_background_stains"],
+        )
 
 
 BASE_FLAGS = ("--deskew", "--trim-dark-border", "--auto-crop", "--despeckle")
@@ -229,6 +388,12 @@ def _assert_operation_timing_signal(testcase: unittest.TestCase, quality: dict[s
     testcase.assertIsNone(integrity["missing_code"])
     testcase.assertEqual(integrity["missing_operations"], [])
     testcase.assertEqual(integrity["incomplete_operations"], [])
+    timing_budget = quality["operation_timing_budget"]
+    testcase.assertTrue(timing_budget["aggregate_only"])
+    testcase.assertEqual(timing_budget["status"], "pass")
+    testcase.assertIsNone(timing_budget["blocker_code"])
+    testcase.assertEqual(timing_budget["over_budget_operations"], [])
+    testcase.assertIn("lighten_scanlines", timing_budget["budgets_seconds_per_file"])
     slow_operations = quality["slow_operations"]
     testcase.assertGreaterEqual(len(slow_operations), 3)
     previous_average = None
@@ -241,6 +406,18 @@ def _assert_operation_timing_signal(testcase: unittest.TestCase, quality: dict[s
         if previous_average is not None:
             testcase.assertGreaterEqual(previous_average, summary["average_seconds_per_file"])
         previous_average = summary["average_seconds_per_file"]
+
+
+def _assert_local_content_guard_signal(testcase: unittest.TestCase, quality: dict[str, object]) -> None:
+    counts = quality["counts"]
+    local_guard = quality["local_content_change_guard"]
+    testcase.assertTrue(local_guard["aggregate_only"])
+    testcase.assertEqual(counts["local_content_change_guard_checked_files"], 2)
+    testcase.assertEqual(counts["local_content_change_guard_skipped_files"], 4)
+    testcase.assertEqual(local_guard["checked_files"], 2)
+    testcase.assertEqual(local_guard["skipped_files"], 4)
+    testcase.assertEqual(local_guard["reverted_files"], 0)
+    testcase.assertEqual(local_guard["reason_distribution"], {})
 
 
 def _assert_algorithm_thresholds(testcase: unittest.TestCase, quality: dict[str, object]) -> None:
@@ -269,6 +446,44 @@ def _assert_algorithm_thresholds(testcase: unittest.TestCase, quality: dict[str,
         observed = algorithm_metrics[operation]["metrics"][metric_name]["max"]
         if observed is not None:
             testcase.assertLessEqual(observed, thresholds[threshold_name], f"{operation}.{metric_name}")
+
+
+def _operation_timings_fixture() -> dict[str, dict[str, object]]:
+    return {
+        operation: {
+            "enabled": True,
+            "file_count": 3,
+            "elapsed_seconds": 0.03,
+            "files_per_minute": 6000.0,
+            "average_seconds_per_file": 0.01,
+        }
+        for operation in REQUIRED_OPERATIONS
+    }
+
+
+def _fixed_sample_operation_timings() -> dict[str, dict[str, object]]:
+    average_seconds_by_operation = {
+        "auto_crop": 0.21,
+        "deskew": 0.16,
+        "trim_dark_border": 0.01,
+        "despeckle": 0.26,
+        "normalize_tones": 0.01,
+        "lighten_edge_shadow": 0.01,
+        "lighten_background_stains": 0.36,
+        "lighten_scanlines": 0.01,
+        "enhance_faded_text": 0.01,
+        "sharpen_text_edges": 0.01,
+    }
+    return {
+        operation: {
+            "enabled": True,
+            "file_count": 20,
+            "elapsed_seconds": round(average_seconds * 20, 6),
+            "files_per_minute": round(60 / average_seconds, 6),
+            "average_seconds_per_file": average_seconds,
+        }
+        for operation, average_seconds in average_seconds_by_operation.items()
+    }
 
 
 def _synthetic_pages(input_dir: Path) -> None:
