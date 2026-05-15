@@ -1303,6 +1303,33 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
                             "failed_files": 0,
                             "remaining_files": 0,
                         },
+                        "stage_timings": {
+                            "schema_version": "scan-qc.production-stage-timings.v1",
+                            "aggregate_only": True,
+                            "stages": [
+                                {
+                                    "id": "scan",
+                                    "label_zh": "PRIVATE_LABEL_SHOULD_NOT_LEAK",
+                                    "elapsed_seconds": 1.2,
+                                    "status": "completed",
+                                    "private_path": str(private_file),
+                                },
+                                {
+                                    "id": "process",
+                                    "label_zh": "生成处理后图片",
+                                    "elapsed_seconds": 8.5,
+                                    "status": "running",
+                                    "ocr_text": private_ocr,
+                                },
+                                {
+                                    "id": "summarize",
+                                    "label_zh": "整理处理结果",
+                                    "elapsed_seconds": 0.4,
+                                    "status": "completed",
+                                    "sha256": private_hash,
+                                },
+                            ],
+                        },
                         "private_debug": {
                             "path": str(private_file),
                             "file_name": private_file.name,
@@ -1431,6 +1458,11 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertIn("未关闭 P0：0", completion_note)
             self.assertIn("未关闭 P1：0", completion_note)
             self.assertIn("已有人工处理结论：3", completion_note)
+            self.assertIn(
+                "聚合阶段耗时：检查扫描图片 1.2 秒、生成处理后图片 8.5 秒（进行中）、整理处理结果 0.4 秒。",
+                completion_note,
+            )
+            self.assertNotIn("PRIVATE_LABEL_SHOULD_NOT_LEAK", completion_note)
             verification = json.loads((metadata_dir / REVIEW_DECISION_VERIFICATION_JSON).read_text(encoding="utf-8"))
             self.assertEqual(verification["status"], "pass")
             public_result_text = json.dumps(result, ensure_ascii=False, sort_keys=True)
@@ -1446,6 +1478,7 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
                     private_file.name,
                     private_hash,
                     private_ocr,
+                    "PRIVATE_LABEL_SHOULD_NOT_LEAK",
                     REVIEW_DECISION_SUMMARY_JSON,
                     REVIEW_DECISION_VERIFICATION_JSON,
                     COMPLETION_NOTE_TXT,
@@ -1457,6 +1490,86 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertNotIn("derivatives_dir", public_result_text)
             self.assertNotIn("metadata_dir", public_result_text)
             self.assertNotIn("completion_note_path", public_result_text)
+
+    def test_final_completion_keeps_handoff_stable_without_safe_stage_timings(self) -> None:
+        cases = {
+            "missing": None,
+            "empty": {"schema_version": "scan-qc.production-stage-timings.v1", "aggregate_only": True, "stages": []},
+            "non_aggregate": {
+                "schema_version": "scan-qc.production-stage-timings.v1",
+                "aggregate_only": False,
+                "stages": [{"id": "scan", "label_zh": "检查扫描图片", "elapsed_seconds": 1.2, "status": "completed"}],
+            },
+            "unsafe_stage": {
+                "schema_version": "scan-qc.production-stage-timings.v1",
+                "aggregate_only": True,
+                "stages": [
+                    {
+                        "id": "private_stage",
+                        "label_zh": "私有文件 Secret_Case_0001.tif",
+                        "elapsed_seconds": 2.4,
+                        "status": "completed",
+                        "thumbnail": "data:image/png;base64,PRIVATE",
+                    },
+                    {"id": "scan", "label_zh": "检查扫描图片", "elapsed_seconds": 0, "status": "pending"},
+                ],
+            },
+        }
+        for case_name, stage_timings in cases.items():
+            with self.subTest(case_name=case_name):
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    root = Path(temp_dir)
+                    input_dir = root / "input"
+                    output_dir = root / "output"
+                    metadata_dir = root / "metadata"
+                    input_dir.mkdir()
+                    controller = WorkbenchController()
+                    controller.configure(input_dir, output_dir, metadata_dir)
+
+                    run_summary = {
+                        "schema_version": "scan-qc.production-run.v1",
+                        "status": "finished",
+                        "counts": {
+                            "total_files": 0,
+                            "openable_files": 0,
+                            "processed_files": 0,
+                            "resumed_files": 0,
+                            "skipped_files": 0,
+                            "failed_files": 0,
+                            "retry_list_files": 0,
+                        },
+                        "operator_summary": {
+                            "total_source_images": 0,
+                            "derivative_images_ready": 0,
+                            "files_needing_attention": 0,
+                        },
+                    }
+                    if stage_timings is not None:
+                        run_summary["stage_timings"] = stage_timings
+                    (metadata_dir / PRODUCTION_RUN_SUMMARY_JSON).write_text(
+                        json.dumps(run_summary, ensure_ascii=False),
+                        encoding="utf-8",
+                    )
+                    (metadata_dir / PRODUCTION_RUN_PROGRESS_JSON).write_text(
+                        json.dumps({"schema_version": "scan-qc.production-run-progress.v1", "state": "finished"}),
+                        encoding="utf-8",
+                    )
+                    (metadata_dir / PRODUCTION_REVIEW_QUEUE_JSON).write_text(
+                        json.dumps({"summary": {"total_items": 0}}, ensure_ascii=False),
+                        encoding="utf-8",
+                    )
+
+                    result = controller.save_review_decisions(decision_summary([]))
+
+                    completion_note = (metadata_dir / COMPLETION_NOTE_TXT).read_text(encoding="utf-8")
+                    self.assertTrue(result["finished"])
+                    self.assertIn("本批次是否完成：已完成，可交接", completion_note)
+                    self.assertNotIn("聚合阶段耗时", completion_note)
+                    self.assertNotIn("Secret_Case_0001.tif", completion_note)
+                    self.assertNotIn(
+                        "thumbnail",
+                        json.dumps({"result": result, "completion_note": completion_note}, ensure_ascii=False),
+                    )
 
     def test_final_completion_allows_no_review_items(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
