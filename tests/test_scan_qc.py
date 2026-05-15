@@ -7996,6 +7996,101 @@ class ScanQcTest(unittest.TestCase):
             )
             self.assertGreater(audit_summary["guardrails"]["auto_crop"]["crop_ratio"]["max"], 0.0)
 
+    def test_auto_crop_trims_post_deskew_canvas_without_content_loss(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            image = Image.new("RGB", (240, 180), (248, 248, 248))
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((24, 20, 215, 159), fill=(238, 238, 238))
+            for y in range(48, 128, 18):
+                draw.rectangle((58, y, 182, y + 4), fill=(25, 25, 25))
+            image.rotate(
+                -2.5,
+                resample=Image.Resampling.BICUBIC,
+                expand=True,
+                fillcolor=(252, 252, 252),
+            ).save(input_dir / "private_post_deskew_canvas.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(auto_crop=True, deskew=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            record = manifest["files"][0]
+            self.assertEqual(record["status"], "processed")
+            self.assertTrue(record["deskewed"])
+            self.assertTrue(record["cropped"])
+            self.assertEqual(record["crop_reason"], "post-deskew safe canvas crop applied")
+            self.assertEqual(record["output_size"], [240, 180])
+            self.assertLess(record["processing_audit"]["crop_ratio"], 0.12)
+            with Image.open(process_dir / "images" / "private_post_deskew_canvas.png") as processed:
+                self.assertLess(_box_luma(processed, (58, 48, 182, 132)), 225)
+                self.assertGreater(_box_luma(processed, (0, 0, 16, 16)), 240)
+            self.assertEqual(audit_summary["counts"]["auto_crop_applied_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["auto_crop"]["post_deskew_safe_crop_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["auto_crop"]["reason_distribution"],
+                {"post-deskew safe canvas crop applied": 1},
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_post_deskew_canvas", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
+    def test_auto_crop_skips_post_deskew_canvas_when_edge_content_is_protected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            image = Image.new("RGB", (240, 180), (248, 248, 248))
+            draw = ImageDraw.Draw(image)
+            for y in range(48, 128, 18):
+                draw.rectangle((58, y, 182, y + 4), fill=(25, 25, 25))
+            draw.rectangle((104, 164, 126, 172), fill=(20, 20, 20))
+            image.rotate(
+                -2.5,
+                resample=Image.Resampling.BICUBIC,
+                expand=True,
+                fillcolor=(252, 252, 252),
+            ).save(input_dir / "private_post_deskew_page_number.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(auto_crop=True, deskew=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            record = manifest["files"][0]
+            self.assertEqual(record["status"], "processed")
+            self.assertTrue(record["deskewed"])
+            self.assertFalse(record["cropped"])
+            self.assertEqual(record["crop_reason"], "post-deskew crop skipped: edge content protection")
+            self.assertEqual(record["output_size"], record["post_deskew_size"])
+            self.assertEqual(audit_summary["counts"]["auto_crop_skipped_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["auto_crop"]["edge_content_protection_skip_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["auto_crop"]["protection_triggered_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["auto_crop"]["skip_reason_distribution"],
+                {"post-deskew crop skipped: edge content protection": 1},
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_post_deskew_page_number", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
     def test_auto_crop_keeps_edge_content_near_any_side(self) -> None:
         cases = {
             "body_left": lambda draw: draw.rectangle((1, 35, 25, 40), fill=(20, 20, 20)),
