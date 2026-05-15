@@ -78,6 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--normalize-tones", action="store_true", help="Enable conservative gray/dark page tone normalization.")
     parser.add_argument("--lighten-edge-shadow", action="store_true", help="Enable conservative narrow edge-shadow lightening.")
     parser.add_argument("--lighten-background-stains", action="store_true", help="Enable conservative light background stain lightening.")
+    parser.add_argument("--lighten-scanlines", action="store_true", help="Enable conservative low-contrast scanline lightening.")
     parser.add_argument(
         "--despeckle-backend",
         choices=("fallback", "numpy"),
@@ -163,6 +164,7 @@ def run_private_integration(args: argparse.Namespace) -> PrivateIntegrationResul
                 normalize_tones=getattr(args, "normalize_tones", False),
                 lighten_edge_shadow=getattr(args, "lighten_edge_shadow", False),
                 lighten_background_stains=getattr(args, "lighten_background_stains", False),
+                lighten_scanlines=getattr(args, "lighten_scanlines", False),
                 despeckle_backend=despeckle_backend,
                 resume_processing=args.resume_processing,
                 reuse_scan_measurements=args.reuse_scan_measurements,
@@ -269,6 +271,7 @@ def _public_summary(
             "reuse_scan_measurements": bool(getattr(args, "reuse_scan_measurements", False)),
             "lighten_edge_shadow": bool(getattr(args, "lighten_edge_shadow", False)),
             "lighten_background_stains": bool(getattr(args, "lighten_background_stains", False)),
+            "lighten_scanlines": bool(getattr(args, "lighten_scanlines", False)),
         },
         "despeckle_backend": despeckle_backend,
         "warning_item_count": len(warning_items),
@@ -540,6 +543,7 @@ def _benchmark_operation_timings(benchmark_summary: dict[str, Any] | None) -> di
         "normalize_tones",
         "lighten_edge_shadow",
         "lighten_background_stains",
+        "lighten_scanlines",
     ]
     totals: dict[str, dict[str, Any]] = {}
     for operation in operation_names:
@@ -673,6 +677,7 @@ def _benchmark_args(args: argparse.Namespace, input_dir: Path, output_root: Path
         normalize_tones=getattr(args, "normalize_tones", False),
         lighten_edge_shadow=getattr(args, "lighten_edge_shadow", False),
         lighten_background_stains=getattr(args, "lighten_background_stains", False),
+        lighten_scanlines=getattr(args, "lighten_scanlines", False),
         despeckle_backend=despeckle_backend,
         min_dpi=args.min_dpi,
         name_pattern=args.name_pattern,

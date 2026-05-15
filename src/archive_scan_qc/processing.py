@@ -38,6 +38,7 @@ class ProcessingOptions:
     normalize_tones: bool = False
     lighten_edge_shadow: bool = False
     lighten_background_stains: bool = False
+    lighten_scanlines: bool = False
     despeckle_backend: str = "fallback"
     resume_processing: bool = False
     reuse_scan_measurements: bool = False
@@ -103,6 +104,20 @@ class BackgroundStainLighteningResult:
     stain_mean_before: float | None
     stain_mean_after: float | None
     stain_delta: float
+    changed_pixel_ratio: float
+    candidate_pixel_ratio: float
+
+
+@dataclass(frozen=True)
+class ScanlineLighteningResult:
+    image: Image.Image
+    applied: bool
+    reason: str
+    orientation: str | None
+    line_count: int
+    line_mean_before: float | None
+    line_mean_after: float | None
+    line_delta: float
     changed_pixel_ratio: float
     candidate_pixel_ratio: float
 
@@ -191,6 +206,7 @@ def process_images(
                 if options.lighten_background_stains
                 else "lighten_background_stains_disabled"
             ),
+            "lighten_scanlines_conservative" if options.lighten_scanlines else "lighten_scanlines_disabled",
             "reuse_scan_measurements" if options.reuse_scan_measurements else "reuse_scan_measurements_disabled",
             "preserve_source_relative_path",
         ],
@@ -585,6 +601,15 @@ def _process_record(
         "background_stains_delta": 0.0,
         "background_stains_changed_pixel_ratio": 0.0,
         "background_stains_candidate_pixel_ratio": 0.0,
+        "scanlines_lightened": False,
+        "scanlines_reason": None,
+        "scanlines_orientation": None,
+        "scanlines_count": 0,
+        "scanlines_mean_before": None,
+        "scanlines_mean_after": None,
+        "scanlines_delta": 0.0,
+        "scanlines_changed_pixel_ratio": 0.0,
+        "scanlines_candidate_pixel_ratio": 0.0,
         "processing_audit": None,
         "processing_warnings": [],
         "operation_timings": {},
@@ -664,6 +689,15 @@ def _process_record(
                 "background_stains_delta": process_info["background_stains_delta"],
                 "background_stains_changed_pixel_ratio": process_info["background_stains_changed_pixel_ratio"],
                 "background_stains_candidate_pixel_ratio": process_info["background_stains_candidate_pixel_ratio"],
+                "scanlines_lightened": process_info["scanlines_lightened"],
+                "scanlines_reason": process_info["scanlines_reason"],
+                "scanlines_orientation": process_info["scanlines_orientation"],
+                "scanlines_count": process_info["scanlines_count"],
+                "scanlines_mean_before": process_info["scanlines_mean_before"],
+                "scanlines_mean_after": process_info["scanlines_mean_after"],
+                "scanlines_delta": process_info["scanlines_delta"],
+                "scanlines_changed_pixel_ratio": process_info["scanlines_changed_pixel_ratio"],
+                "scanlines_candidate_pixel_ratio": process_info["scanlines_candidate_pixel_ratio"],
                 "processing_audit": process_info["processing_audit"],
                 "processing_warnings": process_info["processing_warnings"],
                 "operation_timings": process_info["operation_timings"],
@@ -718,6 +752,15 @@ def _process_record(
                     "background_stains_delta": process_info["background_stains_delta"],
                     "background_stains_changed_pixel_ratio": process_info["background_stains_changed_pixel_ratio"],
                     "background_stains_candidate_pixel_ratio": process_info["background_stains_candidate_pixel_ratio"],
+                    "scanlines_lightened": process_info["scanlines_lightened"],
+                    "scanlines_reason": process_info["scanlines_reason"],
+                    "scanlines_orientation": process_info["scanlines_orientation"],
+                    "scanlines_count": process_info["scanlines_count"],
+                    "scanlines_mean_before": process_info["scanlines_mean_before"],
+                    "scanlines_mean_after": process_info["scanlines_mean_after"],
+                    "scanlines_delta": process_info["scanlines_delta"],
+                    "scanlines_changed_pixel_ratio": process_info["scanlines_changed_pixel_ratio"],
+                    "scanlines_candidate_pixel_ratio": process_info["scanlines_candidate_pixel_ratio"],
                     "processing_audit": process_info["processing_audit"],
                     "processing_warnings": process_info["processing_warnings"],
                     "operation_timings": process_info["operation_timings"],
@@ -785,6 +828,7 @@ def _processing_options_fingerprint(options: ProcessingOptions) -> str:
         "normalize_tones": options.normalize_tones,
         "lighten_edge_shadow": options.lighten_edge_shadow,
         "lighten_background_stains": options.lighten_background_stains,
+        "lighten_scanlines": options.lighten_scanlines,
         "despeckle_backend": options.despeckle_backend,
         "reuse_scan_measurements": options.reuse_scan_measurements,
         "deskew_max_degrees": options.deskew_max_degrees,
@@ -842,6 +886,7 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "normalize_tones": options.normalize_tones,
             "lighten_edge_shadow": options.lighten_edge_shadow,
             "lighten_background_stains": options.lighten_background_stains,
+            "lighten_scanlines": options.lighten_scanlines,
             "resume_processing": options.resume_processing,
             "reuse_scan_measurements": options.reuse_scan_measurements,
         },
@@ -887,6 +932,7 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "background_stains_lightened_files": sum(
                 1 for audit in audit_records if audit.get("background_stains_lightened") is True
             ),
+            "scanlines_lightened_files": sum(1 for audit in audit_records if audit.get("scanlines_lightened") is True),
         },
         "thresholds": _audit_thresholds(options),
         "metrics": {
@@ -911,6 +957,9 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "background_stains_candidate_pixel_ratio": _aggregate_metric(
                 audit_records, "background_stains_candidate_pixel_ratio"
             ),
+            "scanlines_delta": _aggregate_metric(audit_records, "scanlines_delta"),
+            "scanlines_changed_pixel_ratio": _aggregate_metric(audit_records, "scanlines_changed_pixel_ratio"),
+            "scanlines_candidate_pixel_ratio": _aggregate_metric(audit_records, "scanlines_candidate_pixel_ratio"),
         },
         "distributions": {
             "pixel_change_ratio": _ratio_distribution(audit_records, "pixel_change_ratio"),
@@ -963,6 +1012,7 @@ def _aggregate_operation_timings(records: list[dict[str, Any]], options: Process
         "normalize_tones": options.normalize_tones,
         "lighten_edge_shadow": options.lighten_edge_shadow,
         "lighten_background_stains": options.lighten_background_stains,
+        "lighten_scanlines": options.lighten_scanlines,
     }
     timings: dict[str, dict[str, Any]] = {}
     for operation, is_enabled in enabled.items():
@@ -1299,6 +1349,17 @@ def _process_image(
         else:
             operations.append("lighten_background_stains_disabled")
 
+    scanlines = ScanlineLighteningResult(
+        processed, False, "scanline lightening disabled", None, 0, None, None, 0.0, 0.0, 0.0
+    )
+    with _operation_timer(operation_timings, "lighten_scanlines", enabled=options.lighten_scanlines):
+        if options.lighten_scanlines:
+            scanlines = _lighten_scanlines_conservative(processed)
+            processed = scanlines.image
+            operations.append("lighten_scanlines_conservative" if scanlines.applied else "lighten_scanlines_noop")
+        else:
+            operations.append("lighten_scanlines_disabled")
+
     processing_audit = _processing_audit(
         audit_source,
         processed,
@@ -1319,6 +1380,10 @@ def _process_image(
         background_stains.stain_delta,
         background_stains.changed_pixel_ratio,
         background_stains.candidate_pixel_ratio,
+        scanlines.applied,
+        scanlines.line_delta,
+        scanlines.changed_pixel_ratio,
+        scanlines.candidate_pixel_ratio,
     )
     processing_warnings = list(processing_audit["guardrail_failures"])
     crop_info = {
@@ -1360,6 +1425,15 @@ def _process_image(
         "background_stains_delta": background_stains.stain_delta,
         "background_stains_changed_pixel_ratio": background_stains.changed_pixel_ratio,
         "background_stains_candidate_pixel_ratio": background_stains.candidate_pixel_ratio,
+        "scanlines_lightened": scanlines.applied,
+        "scanlines_reason": scanlines.reason,
+        "scanlines_orientation": scanlines.orientation,
+        "scanlines_count": scanlines.line_count,
+        "scanlines_mean_before": scanlines.line_mean_before,
+        "scanlines_mean_after": scanlines.line_mean_after,
+        "scanlines_delta": scanlines.line_delta,
+        "scanlines_changed_pixel_ratio": scanlines.changed_pixel_ratio,
+        "scanlines_candidate_pixel_ratio": scanlines.candidate_pixel_ratio,
         "processing_audit": processing_audit,
         "processing_warnings": processing_warnings,
         "operation_timings": operation_timings,
@@ -1799,6 +1873,262 @@ def _background_stains_noop(
     )
 
 
+def _lighten_scanlines_conservative(image: Image.Image) -> ScanlineLighteningResult:
+    if image.width < 80 or image.height < 80:
+        return _scanlines_noop(image, "scanline lightening skipped: image too small")
+    color_risk = _tone_color_risk_reason(image)
+    if color_risk:
+        return _scanlines_noop(image, "scanline lightening skipped: color content, stamp, or annotation risk")
+
+    grayscale = image.convert("L")
+    histogram = grayscale.histogram()
+    total = image.width * image.height
+    p01 = _histogram_percentile(histogram, total, 0.01)
+    p50 = _histogram_percentile(histogram, total, 0.50)
+    p90 = _histogram_percentile(histogram, total, 0.90)
+    p95 = _histogram_percentile(histogram, total, 0.95)
+    p99 = _histogram_percentile(histogram, total, 0.99)
+    if p95 < 210 or p50 < 190:
+        return _scanlines_noop(image, "scanline lightening skipped: page is too dark")
+    if p99 - p01 < 24:
+        return _scanlines_noop(image, "scanline lightening skipped: low-confidence tonal evidence")
+
+    foreground_threshold = min(155, max(78, p50 - 44))
+    foreground = grayscale.point(lambda value: 255 if value <= foreground_threshold else 0, mode="L")
+    foreground_ratio = _mask_ratio(foreground)
+    if foreground_ratio < 0.0015:
+        return _scanlines_noop(image, "scanline lightening skipped: foreground evidence too sparse")
+    if foreground_ratio > 0.24:
+        return _scanlines_noop(image, "scanline lightening skipped: foreground too dense")
+    if _protected_edge_dark_ratio(foreground) > 0.0025:
+        return _scanlines_noop(
+            image,
+            "scanline lightening skipped: binding, edge mark, or margin content risk",
+        )
+
+    protected = foreground.filter(ImageFilter.MaxFilter(13))
+    horizontal = _scanline_axis_lightening_plan(grayscale, protected, horizontal=True, background=p90)
+    vertical = _scanline_axis_lightening_plan(grayscale, protected, horizontal=False, background=p90)
+    plan = horizontal if horizontal["score"] >= vertical["score"] else vertical
+    if plan["reason"]:
+        return _scanlines_noop(image, f"scanline lightening skipped: {plan['reason']}", plan["candidate_ratio"])
+
+    selected = plan["selected"]
+    selected_count = len(selected)
+    changed_ratio = selected_count / max(1, total)
+    candidate_ratio = round(plan["candidate_ratio"], 6)
+    if changed_ratio < 0.0007:
+        return _scanlines_noop(image, "scanline lightening skipped: no confident low-contrast scanlines", candidate_ratio)
+    if changed_ratio > 0.035:
+        return _scanlines_noop(
+            image,
+            "scanline lightening skipped: broad uneven lighting is outside conservative scope",
+            candidate_ratio,
+        )
+
+    before_values: list[int] = []
+    after_values: list[int] = []
+    if image.mode == "L":
+        output = grayscale.copy()
+        pixels = output.load()
+        for x, y in selected:
+            value = pixels[x, y]
+            delta = min(18, max(4, int(round((p95 - value) * 0.72))))
+            new_value = min(255, value + delta)
+            pixels[x, y] = new_value
+            before_values.append(value)
+            after_values.append(new_value)
+        result_image = output
+    else:
+        source = image.convert("RGB")
+        output = source.copy()
+        output_pixels = output.load()
+        gray_pixels = grayscale.load()
+        for x, y in selected:
+            gray_value = gray_pixels[x, y]
+            delta = min(18, max(4, int(round((p95 - gray_value) * 0.72))))
+            red_value, green_value, blue_value = output_pixels[x, y]
+            output_pixels[x, y] = (
+                min(255, red_value + delta),
+                min(255, green_value + delta),
+                min(255, blue_value + delta),
+            )
+            before_values.append(gray_value)
+            after_values.append(min(255, gray_value + delta))
+        result_image = output
+
+    before_mean = round(sum(before_values) / len(before_values), 6)
+    after_mean = round(sum(after_values) / len(after_values), 6)
+    if after_mean - before_mean < 4:
+        return _scanlines_noop(
+            image,
+            "scanline lightening skipped: improvement below conservative threshold",
+            candidate_ratio,
+        )
+    return ScanlineLighteningResult(
+        result_image,
+        True,
+        "scanline lightening applied: low-contrast neutral background scanlines",
+        plan["orientation"],
+        len(plan["lines"]),
+        before_mean,
+        after_mean,
+        round(after_mean - before_mean, 6),
+        round(changed_ratio, 6),
+        candidate_ratio,
+    )
+
+
+def _scanline_axis_lightening_plan(
+    grayscale: Image.Image,
+    protected: Image.Image,
+    *,
+    horizontal: bool,
+    background: int,
+) -> dict[str, Any]:
+    width, height = grayscale.size
+    axis_length = height if horizontal else width
+    cross_length = width if horizontal else height
+    orientation = "horizontal" if horizontal else "vertical"
+    margin = max(4, int(round(axis_length * 0.035)))
+    if axis_length <= margin * 2 or cross_length < 40:
+        return _empty_scanline_lightening_plan(orientation, "image too small")
+
+    pixels = grayscale.load()
+    protected_pixels = protected.load()
+    line_stats: list[dict[str, Any]] = []
+    all_candidates: set[tuple[int, int]] = set()
+    max_dark_ratio = 0.0
+    for index in range(axis_length):
+        values: list[int] = []
+        selected: list[tuple[int, int]] = []
+        dark = 0
+        protected_count = 0
+        colored_axis = range(width) if horizontal else range(height)
+        for cross in colored_axis:
+            x, y = (cross, index) if horizontal else (index, cross)
+            value = pixels[x, y]
+            if protected_pixels[x, y]:
+                protected_count += 1
+                continue
+            values.append(value)
+            if value <= 125:
+                dark += 1
+            if 5 <= background - value <= 24 and value >= 170:
+                selected.append((x, y))
+        available_ratio = len(values) / max(1, cross_length)
+        protected_ratio = protected_count / max(1, cross_length)
+        candidate_ratio = len(selected) / max(1, cross_length)
+        dark_ratio = dark / max(1, len(values)) if values else 1.0
+        max_dark_ratio = max(max_dark_ratio, dark_ratio)
+        mean = sum(values) / len(values) if values else 0.0
+        line_stats.append(
+            {
+                "mean": mean,
+                "available_ratio": available_ratio,
+                "protected_ratio": protected_ratio,
+                "candidate_ratio": candidate_ratio,
+                "dark_ratio": dark_ratio,
+                "selected": selected,
+            }
+        )
+        all_candidates.update(selected)
+
+    candidate_total_ratio = len(all_candidates) / max(1, width * height)
+    if max_dark_ratio > 0.025:
+        return _empty_scanline_lightening_plan(orientation, "text, table line, stamp, annotation, or original mark risk", candidate_total_ratio)
+    if candidate_total_ratio > 0.09:
+        return _empty_scanline_lightening_plan(orientation, "broad uneven lighting is outside conservative scope", candidate_total_ratio)
+
+    candidate_lines: list[int] = []
+    selected: set[tuple[int, int]] = set()
+    score = 0.0
+    for index in range(margin, axis_length - margin):
+        stat = line_stats[index]
+        if stat["protected_ratio"] > 0.012:
+            continue
+        if stat["available_ratio"] < 0.72 or stat["candidate_ratio"] < 0.55:
+            continue
+        neighbor_means = [
+            line_stats[neighbor]["mean"]
+            for offset in range(-8, 9)
+            if abs(offset) >= 3
+            for neighbor in [index + offset]
+            if 0 <= neighbor < axis_length and line_stats[neighbor]["available_ratio"] >= 0.72
+        ]
+        if not neighbor_means:
+            continue
+        local_mean = sum(neighbor_means) / len(neighbor_means)
+        local_delta = local_mean - stat["mean"]
+        if not (4.5 <= local_delta <= 22.0):
+            continue
+        candidate_lines.append(index)
+        selected.update(stat["selected"])
+        score += min(1.0, stat["candidate_ratio"] / 0.8) * min(1.0, local_delta / 12.0)
+
+    if not candidate_lines:
+        return _empty_scanline_lightening_plan(orientation, "no confident low-contrast scanlines", candidate_total_ratio)
+    groups = _contiguous_groups(candidate_lines)
+    if len(groups) > 6 or any(len(group) > 4 for group in groups):
+        return _empty_scanline_lightening_plan(
+            orientation,
+            "broad uneven lighting or archival stripe risk",
+            candidate_total_ratio,
+        )
+    return {
+        "orientation": orientation,
+        "score": score,
+        "lines": candidate_lines,
+        "selected": selected,
+        "candidate_ratio": candidate_total_ratio,
+        "reason": None,
+    }
+
+
+def _empty_scanline_lightening_plan(
+    orientation: str,
+    reason: str,
+    candidate_ratio: float = 0.0,
+) -> dict[str, Any]:
+    return {
+        "orientation": orientation,
+        "score": 0.0,
+        "lines": [],
+        "selected": set(),
+        "candidate_ratio": round(candidate_ratio, 6),
+        "reason": reason,
+    }
+
+
+def _contiguous_groups(values: list[int]) -> list[list[int]]:
+    groups: list[list[int]] = []
+    for value in sorted(values):
+        if not groups or value != groups[-1][-1] + 1:
+            groups.append([value])
+        else:
+            groups[-1].append(value)
+    return groups
+
+
+def _scanlines_noop(
+    image: Image.Image,
+    reason: str,
+    candidate_pixel_ratio: float = 0.0,
+) -> ScanlineLighteningResult:
+    return ScanlineLighteningResult(
+        image,
+        False,
+        reason,
+        None,
+        0,
+        None,
+        None,
+        0.0,
+        0.0,
+        round(candidate_pixel_ratio, 6),
+    )
+
+
 def _mask_ratio(mask: Image.Image) -> float:
     histogram = mask.histogram()
     return sum(histogram[1:]) / max(1, mask.width * mask.height)
@@ -1914,6 +2244,10 @@ def _processing_audit(
     background_stains_delta: float = 0.0,
     background_stains_changed_pixel_ratio: float = 0.0,
     background_stains_candidate_pixel_ratio: float = 0.0,
+    scanlines_lightened: bool = False,
+    scanlines_delta: float = 0.0,
+    scanlines_changed_pixel_ratio: float = 0.0,
+    scanlines_candidate_pixel_ratio: float = 0.0,
 ) -> dict[str, Any]:
     source_width, source_height = source.size
     output_width, output_height = processed.size
@@ -1972,6 +2306,10 @@ def _processing_audit(
         "background_stains_delta": round(background_stains_delta, 6),
         "background_stains_changed_pixel_ratio": round(background_stains_changed_pixel_ratio, 6),
         "background_stains_candidate_pixel_ratio": round(background_stains_candidate_pixel_ratio, 6),
+        "scanlines_lightened": scanlines_lightened,
+        "scanlines_delta": round(scanlines_delta, 6),
+        "scanlines_changed_pixel_ratio": round(scanlines_changed_pixel_ratio, 6),
+        "scanlines_candidate_pixel_ratio": round(scanlines_candidate_pixel_ratio, 6),
         "crop_ratio": round(max(0.0, crop_ratio), 6),
         "trim_margins": trim_margins,
         "max_trim_margin_ratio": round(max_trim_margin_ratio, 6),
