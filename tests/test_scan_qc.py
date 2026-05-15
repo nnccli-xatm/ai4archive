@@ -2392,6 +2392,97 @@ class ScanQcTest(unittest.TestCase):
             },
         )
 
+    def test_acceptance_summary_diagnoses_main_scan_baseline_drift_without_hiding_absolute_gate(self) -> None:
+        payload = build_acceptance_summary(
+            aggregate_baseline_summary=_aggregate_validation_summary(scan_rate=96.0, processing_rate=124.0),
+            main_aggregate_baseline_summary=_aggregate_validation_summary(scan_rate=100.0, processing_rate=126.0),
+            min_scan_files_per_minute=120.0,
+            min_processing_files_per_minute=90.0,
+        )
+
+        self.assertFalse(payload["pass"])
+        self.assertEqual(payload["status"], "fail")
+        codes = {item["code"] for item in payload["blocking_items"]}
+        self.assertEqual(codes, {"scan_throughput_below_threshold"})
+        comparison = payload["main_comparison"]
+        self.assertTrue(comparison["provided"])
+        self.assertEqual(comparison["diagnostic_code"], "baseline_scan_throughput_drift_not_pr_specific")
+        self.assertIn("baseline_scan_throughput_drift_not_pr_specific", comparison["warning_codes"])
+        self.assertEqual(comparison["throughput"]["scan_files_per_minute"]["delta_files_per_minute"], -4.0)
+        self.assertFalse(comparison["throughput"]["scan_files_per_minute"]["pr_threshold_met"])
+        self.assertFalse(comparison["throughput"]["scan_files_per_minute"]["main_threshold_met"])
+        self.assertTrue(
+            any("latest main aggregate evidence" in warning and "PR-specific regression" in warning for warning in payload["warnings"])
+        )
+
+    def test_acceptance_summary_fails_when_pr_throughput_regresses_versus_main(self) -> None:
+        payload = build_acceptance_summary(
+            aggregate_baseline_summary=_aggregate_validation_summary(scan_rate=80.0, processing_rate=76.0),
+            main_aggregate_baseline_summary=_aggregate_validation_summary(scan_rate=115.0, processing_rate=100.0),
+            min_scan_files_per_minute=120.0,
+            min_processing_files_per_minute=90.0,
+        )
+
+        self.assertFalse(payload["pass"])
+        codes = {item["code"] for item in payload["blocking_items"]}
+        self.assertIn("scan_throughput_below_threshold", codes)
+        self.assertIn("processing_throughput_below_threshold", codes)
+        self.assertIn("scan_throughput_regressed_vs_main", codes)
+        self.assertIn("processing_throughput_regressed_vs_main", codes)
+        comparison = payload["main_comparison"]
+        self.assertEqual(comparison["diagnostic_code"], "scan_throughput_regressed_vs_main")
+        self.assertEqual(comparison["throughput"]["scan_files_per_minute"]["delta_files_per_minute"], -35.0)
+        self.assertEqual(comparison["throughput"]["processing_files_per_minute"]["delta_files_per_minute"], -24.0)
+
+    def test_acceptance_summary_main_comparison_does_not_mask_failure_privacy_or_cleanup_blocks(self) -> None:
+        payload = build_acceptance_summary(
+            aggregate_baseline_summary=_aggregate_validation_summary(
+                scan_rate=96.0,
+                processing_rate=124.0,
+                processing_failed_files=2,
+                cleanup_preserved_artifacts=["processed-images"],
+                privacy_passed=False,
+            ),
+            main_aggregate_baseline_summary=_aggregate_validation_summary(scan_rate=100.0, processing_rate=126.0),
+            min_scan_files_per_minute=120.0,
+            min_processing_files_per_minute=90.0,
+        )
+
+        self.assertFalse(payload["pass"])
+        codes = {item["code"] for item in payload["blocking_items"]}
+        self.assertIn("processing_failed_files", codes)
+        self.assertIn("privacy_self_check_failed", codes)
+        self.assertIn("cleanup_retention_failed", codes)
+        self.assertIn("scan_throughput_below_threshold", codes)
+        self.assertEqual(payload["main_comparison"]["diagnostic_code"], "baseline_scan_throughput_drift_not_pr_specific")
+
+    def test_acceptance_summary_main_comparison_remains_public_safe(self) -> None:
+        pr_summary = _aggregate_validation_summary(scan_rate=96.0, processing_rate=124.0)
+        pr_summary["private_path"] = "/private/source/page_0001.tif"
+        pr_summary["sha256"] = "abcdef0123456789abcdef0123456789"
+        pr_summary["ocr_text"] = "SECRET OCR TEXT"
+        main_summary = _aggregate_validation_summary(scan_rate=100.0, processing_rate=126.0)
+        main_summary["files"] = [{"relative_path": "private_page_0001.png", "thumbnail": "data:image/png;base64,secret"}]
+
+        payload = build_acceptance_summary(
+            aggregate_baseline_summary=pr_summary,
+            main_aggregate_baseline_summary=main_summary,
+            min_scan_files_per_minute=120.0,
+            min_processing_files_per_minute=90.0,
+        )
+
+        raw = json.dumps(payload, ensure_ascii=False)
+        for forbidden in [
+            "/private/source/page_0001.tif",
+            "private_page_0001.png",
+            "abcdef0123456789",
+            "SECRET OCR TEXT",
+            "relative_path",
+            "data:image/png",
+        ]:
+            self.assertNotIn(forbidden, raw)
+        self.assertTrue(payload["main_comparison"]["privacy"]["aggregate_only"])
+
     def test_acceptance_summary_allows_missing_optional_aggregate_baseline_fields(self) -> None:
         payload = build_acceptance_summary(
             aggregate_baseline_summary={
@@ -11296,6 +11387,41 @@ def _private_run_plan_summary(
             },
         },
         "batches": [{"workers": 1}],
+    }
+
+
+def _aggregate_validation_summary(
+    *,
+    scan_rate: float,
+    processing_rate: float,
+    processing_failed_files: int = 0,
+    cleanup_preserved_artifacts: list[str] | None = None,
+    privacy_passed: bool = True,
+) -> dict[str, object]:
+    return {
+        "schema_version": "scan-qc.aggregate-baseline.v1",
+        "privacy": {"aggregate_only": True},
+        "aggregate_counts": {
+            "total_files": 149,
+            "openable_files": 149,
+            "processing_processed_files": 149 - processing_failed_files,
+            "processing_failed_files": processing_failed_files,
+        },
+        "stage_timings": {
+            "scan": {"files_per_minute": scan_rate},
+            "processing": {"processed_files_per_minute": processing_rate},
+        },
+        "cleanup": {
+            "enabled": True,
+            "removed_artifacts": ["scan-reports"],
+            "preserved_artifacts": cleanup_preserved_artifacts or [],
+            "retained_public_summary": "aggregate_baseline_summary.json",
+        },
+        "privacy_self_check": {
+            "passed": privacy_passed,
+            "status": "pass" if privacy_passed else "failed",
+            "violation_count": 0 if privacy_passed else 1,
+        },
     }
 
 

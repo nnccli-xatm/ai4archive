@@ -833,6 +833,12 @@ def _main_acceptance_summary(argv: list[str]) -> int:
         help="Optional aggregate_baseline_summary.json from scripts/run_aggregate_baseline.py.",
     )
     parser.add_argument(
+        "--main-aggregate-baseline-summary",
+        default=None,
+        type=Path,
+        help="Optional latest-main aggregate_baseline_summary.json for PR-specific throughput regression diagnostics.",
+    )
+    parser.add_argument(
         "--acceptance-sampling-review",
         default=None,
         type=Path,
@@ -861,6 +867,7 @@ def _main_acceptance_summary(argv: list[str]) -> int:
             processing_audit_summary_path=args.processing_audit_summary,
             benchmark_results_path=args.benchmark_results,
             aggregate_baseline_summary_path=args.aggregate_baseline_summary,
+            main_aggregate_baseline_summary_path=args.main_aggregate_baseline_summary,
             acceptance_sampling_review_path=args.acceptance_sampling_review,
             min_scan_files_per_minute=args.min_scan_files_per_minute,
             min_processing_files_per_minute=args.min_processing_files_per_minute,

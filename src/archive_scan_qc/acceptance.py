@@ -10,6 +10,8 @@ from typing import Any
 
 ACCEPTANCE_JSON = "acceptance_summary.json"
 SCHEMA_VERSION = "scan-qc.acceptance-summary.v1"
+DEFAULT_MAIN_COMPARISON_REGRESSION_RATIO = 0.15
+DEFAULT_MAIN_COMPARISON_REGRESSION_MIN_DELTA = 10.0
 EVIDENCE_TYPES = (
     "run_plan_summary",
     "review_summary",
@@ -27,9 +29,12 @@ def write_acceptance_summary(
     processing_audit_summary_path: Path | None = None,
     benchmark_results_path: Path | None = None,
     aggregate_baseline_summary_path: Path | None = None,
+    main_aggregate_baseline_summary_path: Path | None = None,
     acceptance_sampling_review_path: Path | None = None,
     min_scan_files_per_minute: float | None = None,
     min_processing_files_per_minute: float | None = None,
+    main_comparison_regression_ratio: float = DEFAULT_MAIN_COMPARISON_REGRESSION_RATIO,
+    main_comparison_regression_min_delta: float = DEFAULT_MAIN_COMPARISON_REGRESSION_MIN_DELTA,
 ) -> tuple[Path, dict[str, Any]]:
     sampling_payload = _load_optional_json(acceptance_sampling_review_path, "acceptance_sampling_review")
     payload = build_acceptance_summary(
@@ -38,9 +43,14 @@ def write_acceptance_summary(
         processing_audit_summary=_load_optional_json(processing_audit_summary_path, "processing_audit_summary"),
         benchmark_results=_load_optional_json(benchmark_results_path, "benchmark_results"),
         aggregate_baseline_summary=_load_optional_json(aggregate_baseline_summary_path, "aggregate_baseline_summary"),
+        main_aggregate_baseline_summary=_load_optional_json(
+            main_aggregate_baseline_summary_path, "main_aggregate_baseline_summary"
+        ),
         aggregate_sampling_counts=_extract_aggregate_sampling_counts(sampling_payload),
         min_scan_files_per_minute=min_scan_files_per_minute,
         min_processing_files_per_minute=min_processing_files_per_minute,
+        main_comparison_regression_ratio=main_comparison_regression_ratio,
+        main_comparison_regression_min_delta=main_comparison_regression_min_delta,
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -54,9 +64,12 @@ def build_acceptance_summary(
     processing_audit_summary: dict[str, Any] | None = None,
     benchmark_results: dict[str, Any] | None = None,
     aggregate_baseline_summary: dict[str, Any] | None = None,
+    main_aggregate_baseline_summary: dict[str, Any] | None = None,
     aggregate_sampling_counts: dict[str, Any] | None = None,
     min_scan_files_per_minute: float | None = None,
     min_processing_files_per_minute: float | None = None,
+    main_comparison_regression_ratio: float = DEFAULT_MAIN_COMPARISON_REGRESSION_RATIO,
+    main_comparison_regression_min_delta: float = DEFAULT_MAIN_COMPARISON_REGRESSION_MIN_DELTA,
 ) -> dict[str, Any]:
     supplied = {
         "run_plan_summary": run_plan_summary,
@@ -89,6 +102,21 @@ def build_acceptance_summary(
                     "message": f"{evidence_type} does not declare aggregate-only privacy.",
                 }
             )
+    main_comparison_evidence = {
+        "provided": main_aggregate_baseline_summary is not None,
+        "schema_version": _safe_text(main_aggregate_baseline_summary.get("schema_version"))
+        if main_aggregate_baseline_summary
+        else None,
+        "aggregate_only": _aggregate_only(main_aggregate_baseline_summary) if main_aggregate_baseline_summary else None,
+    }
+    evidence["main_aggregate_baseline_summary"] = main_comparison_evidence
+    if main_aggregate_baseline_summary is not None and not main_comparison_evidence["aggregate_only"]:
+        blocking_items.append(
+            {
+                "code": "main_aggregate_baseline_summary_not_aggregate_only",
+                "message": "main_aggregate_baseline_summary does not declare aggregate-only privacy.",
+            }
+        )
 
     remaining_p0 = _int_from(review_summary, "remaining_p0")
     remaining_p1 = _int_from(review_summary, "remaining_p1")
@@ -107,6 +135,14 @@ def build_acceptance_summary(
     sampling_gate = _sampling_gate_summary(
         _extract_aggregate_sampling_counts(aggregate_sampling_counts)
         or _extract_aggregate_sampling_counts(aggregate_baseline_summary)
+    )
+    main_comparison = _main_comparison_summary(
+        aggregate_baseline_summary=aggregate_baseline_summary,
+        main_aggregate_baseline_summary=main_aggregate_baseline_summary,
+        min_scan_files_per_minute=min_scan_files_per_minute,
+        min_processing_files_per_minute=min_processing_files_per_minute,
+        regression_ratio=main_comparison_regression_ratio,
+        regression_min_delta=main_comparison_regression_min_delta,
     )
 
     _block_if_positive(blocking_items, "remaining_p0", remaining_p0, "Remaining P0 findings must be zero.")
@@ -198,6 +234,36 @@ def build_acceptance_summary(
                     "threshold": min_processing_files_per_minute,
                 }
             )
+    for code in main_comparison["blocking_codes"]:
+        metric = "scan_files_per_minute" if code == "scan_throughput_regressed_vs_main" else "processing_files_per_minute"
+        comparison = main_comparison["throughput"][metric]
+        blocking_items.append(
+            {
+                "code": code,
+                "message": "PR aggregate throughput regressed materially versus latest main aggregate baseline.",
+                "observed": {
+                    "pr_files_per_minute": comparison["pr_observed"],
+                    "main_files_per_minute": comparison["main_observed"],
+                    "delta_files_per_minute": comparison["delta_files_per_minute"],
+                    "delta_percent": comparison["delta_percent"],
+                },
+                "threshold": {
+                    "max_regression_ratio": main_comparison_regression_ratio,
+                    "min_regression_delta_files_per_minute": main_comparison_regression_min_delta,
+                },
+            }
+        )
+    for code in main_comparison["warning_codes"]:
+        if code == "baseline_scan_throughput_drift_not_pr_specific":
+            warnings.append(
+                "Scan throughput is below the absolute threshold on both PR and latest main aggregate evidence; "
+                "relative comparison did not identify a PR-specific regression."
+            )
+        elif code == "baseline_processing_throughput_drift_not_pr_specific":
+            warnings.append(
+                "Processing throughput is below the absolute threshold on both PR and latest main aggregate evidence; "
+                "relative comparison did not identify a PR-specific regression."
+            )
 
     passed = not blocking_items
     closure_gate_summary = _closure_gate_summary(
@@ -233,6 +299,10 @@ def build_acceptance_summary(
             "processing_failed_files_max": 0,
             "min_scan_files_per_minute": min_scan_files_per_minute,
             "min_processing_files_per_minute": min_processing_files_per_minute,
+            "main_comparison": {
+                "regression_ratio": main_comparison_regression_ratio,
+                "regression_min_delta_files_per_minute": main_comparison_regression_min_delta,
+            },
             "acceptance_sampling": {
                 "target_sample_ratio": sampling_gate["target_sample_ratio"],
                 "target_sample_count": sampling_gate["target_sample_count"],
@@ -254,6 +324,7 @@ def build_acceptance_summary(
         "failed_batches": failed_batches,
         "processing_failed_files": processing_failed_files,
         "throughput": throughput,
+        "main_comparison": main_comparison,
         "workers": workers,
         "human_review": human_review,
         "acceptance_sampling": sampling_gate,
@@ -464,6 +535,158 @@ def _metric_summary(values: list[float]) -> dict[str, Any]:
         "best_observed": round(max(values), 6),
         "lowest_observed": round(min(values), 6),
     }
+
+
+def _main_comparison_summary(
+    *,
+    aggregate_baseline_summary: dict[str, Any] | None,
+    main_aggregate_baseline_summary: dict[str, Any] | None,
+    min_scan_files_per_minute: float | None,
+    min_processing_files_per_minute: float | None,
+    regression_ratio: float,
+    regression_min_delta: float,
+) -> dict[str, Any]:
+    if not main_aggregate_baseline_summary:
+        return {
+            "provided": False,
+            "privacy": {"aggregate_only": True},
+            "diagnostic_code": "main_comparison_not_provided",
+            "diagnostic_codes": [],
+            "blocking_codes": [],
+            "warning_codes": [],
+            "aggregate_counts": {"pr": {}, "main": {}},
+            "throughput": {
+                "scan_files_per_minute": _comparison_metric(None, None, min_scan_files_per_minute, False),
+                "processing_files_per_minute": _comparison_metric(None, None, min_processing_files_per_minute, False),
+            },
+        }
+    pr_rates = _aggregate_baseline_rates(aggregate_baseline_summary)
+    main_rates = _aggregate_baseline_rates(main_aggregate_baseline_summary)
+    scan = _comparison_metric(
+        pr_rates["scan_files_per_minute"],
+        main_rates["scan_files_per_minute"],
+        min_scan_files_per_minute,
+        _material_regression(
+            pr_rates["scan_files_per_minute"],
+            main_rates["scan_files_per_minute"],
+            regression_ratio,
+            regression_min_delta,
+        ),
+    )
+    processing = _comparison_metric(
+        pr_rates["processing_files_per_minute"],
+        main_rates["processing_files_per_minute"],
+        min_processing_files_per_minute,
+        _material_regression(
+            pr_rates["processing_files_per_minute"],
+            main_rates["processing_files_per_minute"],
+            regression_ratio,
+            regression_min_delta,
+        ),
+    )
+    blocking_codes: list[str] = []
+    warning_codes: list[str] = []
+    if scan["material_regression"]:
+        blocking_codes.append("scan_throughput_regressed_vs_main")
+    elif scan["pr_threshold_met"] is False and scan["main_threshold_met"] is False:
+        warning_codes.append("baseline_scan_throughput_drift_not_pr_specific")
+    if processing["material_regression"]:
+        blocking_codes.append("processing_throughput_regressed_vs_main")
+    elif processing["pr_threshold_met"] is False and processing["main_threshold_met"] is False:
+        warning_codes.append("baseline_processing_throughput_drift_not_pr_specific")
+    diagnostic_codes = blocking_codes + warning_codes
+    return {
+        "provided": True,
+        "privacy": {"aggregate_only": True},
+        "diagnostic_code": diagnostic_codes[0] if diagnostic_codes else "main_comparison_no_pr_specific_regression",
+        "diagnostic_codes": diagnostic_codes,
+        "blocking_codes": blocking_codes,
+        "warning_codes": warning_codes,
+        "aggregate_counts": {
+            "pr": _aggregate_baseline_counts(aggregate_baseline_summary),
+            "main": _aggregate_baseline_counts(main_aggregate_baseline_summary),
+        },
+        "throughput": {
+            "scan_files_per_minute": scan,
+            "processing_files_per_minute": processing,
+        },
+    }
+
+
+def _aggregate_baseline_rates(payload: dict[str, Any] | None) -> dict[str, float | None]:
+    timings = payload.get("stage_timings") if payload else None
+    if not isinstance(timings, dict):
+        return {"scan_files_per_minute": None, "processing_files_per_minute": None}
+    scan = timings.get("scan")
+    processing = timings.get("processing")
+    return {
+        "scan_files_per_minute": _coerce_float(scan.get("files_per_minute")) if isinstance(scan, dict) else None,
+        "processing_files_per_minute": _coerce_float(processing.get("processed_files_per_minute"))
+        if isinstance(processing, dict)
+        else None,
+    }
+
+
+def _aggregate_baseline_counts(payload: dict[str, Any] | None) -> dict[str, int | None]:
+    counts = payload.get("aggregate_counts") if payload else None
+    if not isinstance(counts, dict):
+        return {}
+    return {
+        "total_files": _coerce_int(counts.get("total_files")),
+        "openable_files": _coerce_int(counts.get("openable_files")),
+        "processing_processed_files": _coerce_int(counts.get("processing_processed_files")),
+        "processing_failed_files": _coerce_int(counts.get("processing_failed_files")),
+    }
+
+
+def _comparison_metric(
+    pr_observed: float | None,
+    main_observed: float | None,
+    threshold: float | None,
+    material_regression: bool,
+) -> dict[str, Any]:
+    delta = _rate_delta(pr_observed, main_observed)
+    percent = _rate_delta_percent(pr_observed, main_observed)
+    return {
+        "pr_observed": pr_observed,
+        "main_observed": main_observed,
+        "delta_files_per_minute": delta,
+        "delta_percent": percent,
+        "threshold": threshold,
+        "pr_threshold_met": _threshold_met(pr_observed, threshold),
+        "main_threshold_met": _threshold_met(main_observed, threshold),
+        "material_regression": material_regression,
+    }
+
+
+def _material_regression(
+    pr_observed: float | None,
+    main_observed: float | None,
+    regression_ratio: float,
+    regression_min_delta: float,
+) -> bool:
+    if pr_observed is None or main_observed is None or main_observed <= 0:
+        return False
+    delta = main_observed - pr_observed
+    return delta >= regression_min_delta and (delta / main_observed) >= regression_ratio
+
+
+def _rate_delta(pr_observed: float | None, main_observed: float | None) -> float | None:
+    if pr_observed is None or main_observed is None:
+        return None
+    return round(pr_observed - main_observed, 6)
+
+
+def _rate_delta_percent(pr_observed: float | None, main_observed: float | None) -> float | None:
+    if pr_observed is None or main_observed in (None, 0):
+        return None
+    return round(((pr_observed - main_observed) / main_observed) * 100.0, 3)
+
+
+def _threshold_met(observed: float | None, threshold: float | None) -> bool | None:
+    if observed is None or threshold is None:
+        return None
+    return observed >= threshold
 
 
 def _worker_summary(

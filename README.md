@@ -412,12 +412,63 @@ PYTHONPATH=src python3 scripts/run_production_validation.py \
   --min-processing-files-per-minute 90
 ```
 
+PR validation can also compare the PR aggregate result with a latest-main
+aggregate-only summary from the same sample and operator command:
+
+```bash
+PYTHONPATH=src python3 scripts/run_production_validation.py \
+  --input /placeholder/private-149-image-sample \
+  --out /placeholder/private-validation-output/pr-full-149 \
+  --workers 4 \
+  --benchmark-workers-list 1,2,4,8 \
+  --process-images \
+  --auto-crop \
+  --deskew \
+  --trim-dark-border \
+  --despeckle \
+  --min-scan-files-per-minute 120 \
+  --min-processing-files-per-minute 90 \
+  --main-aggregate-baseline-summary /placeholder/private-validation-output/main-full-149/aggregate_baseline_summary.json
+```
+
+For a synthetic aggregate-only comparison without private images, first create
+two `aggregate_baseline_summary.json` fixtures that contain only
+`schema_version`, `privacy.aggregate_only`, `aggregate_counts`, `stage_timings`,
+`cleanup`, and `privacy_self_check`, then run:
+
+```bash
+PYTHONPATH=src python3 -m archive_scan_qc acceptance-summary \
+  --aggregate-baseline-summary /placeholder/synthetic/pr/aggregate_baseline_summary.json \
+  --main-aggregate-baseline-summary /placeholder/synthetic/main/aggregate_baseline_summary.json \
+  --min-scan-files-per-minute 120 \
+  --min-processing-files-per-minute 90 \
+  --out /placeholder/synthetic/acceptance_summary.json
+```
+
 The command exits non-zero when the aggregate baseline privacy self-check fails,
 cleanup does not retain only the aggregate baseline summary before acceptance,
 processing failures are present, or the configured throughput thresholds are not
 met. Stdout names only aggregate output files, aggregate counts/rates, and
 aggregate runtime/resource fields; do not paste private input or output paths
 into public reports.
+
+When `--main-aggregate-baseline-summary` is provided,
+`acceptance_summary.json` includes a `main_comparison` object with aggregate
+counts, PR/main scan and processing throughput, file-per-minute deltas,
+percentage deltas, threshold-met booleans, and diagnostic codes. If both PR and
+latest main are below the absolute scan threshold but the PR is not materially
+slower than main, the existing absolute threshold gate still fails and the
+summary adds `baseline_scan_throughput_drift_not_pr_specific` as a warning
+diagnostic. If PR scan or processing throughput is materially lower than main,
+the summary adds blocking diagnostics such as
+`scan_throughput_regressed_vs_main` or
+`processing_throughput_regressed_vs_main`.
+
+Main-thread merge judgment for image-quality algorithm PRs must still require
+CI, local tests, remote aggregate processing, privacy self-check, and cleanup to
+pass. A PR may only cite the main comparison as non-PR-specific drift when the
+only blocker is the shared scan threshold drift diagnostic; record that in the
+PR comment and track baseline calibration separately.
 
 Current `puersai-hpc` production baseline after PR #61 uses the full fixed
 private sample of 149 files. The latest aggregate-only result is:
