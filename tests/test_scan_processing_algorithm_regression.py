@@ -69,6 +69,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     "private_edge_page.png",
                     "private_stain_page.png",
                     "private_scanline_page.png",
+                    "private_faded_text_page.png",
                     str(input_dir),
                     "source_relative_path",
                     "source_sha256",
@@ -84,6 +85,7 @@ CONSERVATIVE_REPAIR_FLAGS = (
     "--lighten-edge-shadow",
     "--lighten-background-stains",
     "--lighten-scanlines",
+    "--enhance-faded-text",
 )
 REQUIRED_OPERATIONS = (
     "deskew",
@@ -94,12 +96,14 @@ REQUIRED_OPERATIONS = (
     "lighten_edge_shadow",
     "lighten_background_stains",
     "lighten_scanlines",
+    "enhance_faded_text",
 )
 CONSERVATIVE_REPAIR_OPERATIONS = (
     "normalize_tones",
     "lighten_edge_shadow",
     "lighten_background_stains",
     "lighten_scanlines",
+    "enhance_faded_text",
 )
 
 
@@ -125,6 +129,7 @@ def _benchmark_combo(root: Path, input_dir: Path, label: str, *flags: str) -> di
             lighten_edge_shadow="--lighten-edge-shadow" in flag_set,
             lighten_background_stains="--lighten-background-stains" in flag_set,
             lighten_scanlines="--lighten-scanlines" in flag_set,
+            enhance_faded_text="--enhance-faded-text" in flag_set,
             reuse_scan_measurements=False,
             despeckle_backend="fallback",
             min_dpi=None,
@@ -158,12 +163,13 @@ def _assert_required_metrics_present(
         "lighten_edge_shadow": ("delta", "changed_pixel_ratio"),
         "lighten_background_stains": ("delta", "changed_pixel_ratio", "candidate_pixel_ratio"),
         "lighten_scanlines": ("delta", "changed_pixel_ratio", "candidate_pixel_ratio"),
+        "enhance_faded_text": ("delta", "changed_pixel_ratio", "candidate_pixel_ratio"),
     }
     for operation, metric_names in expected.items():
         metrics = algorithm_metrics[operation]["metrics"]
         for metric_name in metric_names:
             testcase.assertIn(metric_name, metrics, operation)
-            testcase.assertEqual(metrics[metric_name]["count"], 4, f"{operation}.{metric_name}")
+            testcase.assertEqual(metrics[metric_name]["count"], 5, f"{operation}.{metric_name}")
 
 
 def _assert_algorithm_thresholds(testcase: unittest.TestCase, quality: dict[str, object]) -> None:
@@ -182,6 +188,8 @@ def _assert_algorithm_thresholds(testcase: unittest.TestCase, quality: dict[str,
         ("lighten_background_stains", "candidate_pixel_ratio"): "max_background_stains_candidate_pixel_ratio",
         ("lighten_scanlines", "changed_pixel_ratio"): "max_scanlines_changed_pixel_ratio",
         ("lighten_scanlines", "candidate_pixel_ratio"): "max_scanlines_candidate_pixel_ratio",
+        ("enhance_faded_text", "changed_pixel_ratio"): "max_faded_text_changed_pixel_ratio",
+        ("enhance_faded_text", "candidate_pixel_ratio"): "max_faded_text_candidate_pixel_ratio",
     }
     for (operation, metric_name), threshold_name in checks.items():
         observed = algorithm_metrics[operation]["metrics"][metric_name]["max"]
@@ -194,6 +202,7 @@ def _synthetic_pages(input_dir: Path) -> None:
     _edge_shadow_page().save(input_dir / "private_edge_page.png", dpi=(300, 300))
     _stain_page().save(input_dir / "private_stain_page.png", dpi=(300, 300))
     _scanline_page().save(input_dir / "private_scanline_page.png", dpi=(300, 300))
+    _faded_text_page().save(input_dir / "private_faded_text_page.png", dpi=(300, 300))
 
 
 def _text_page() -> Image.Image:
@@ -233,4 +242,13 @@ def _scanline_page() -> Image.Image:
         draw.line((6, y, 121, y), fill=(218, 218, 218), width=1)
     for y in range(34, 58, 12):
         draw.line((42, y, 86, y), fill=(50, 50, 50), width=2)
+    return image
+
+
+def _faded_text_page() -> Image.Image:
+    image = Image.new("RGB", (128, 96), (242, 242, 242))
+    draw = ImageDraw.Draw(image)
+    for y in range(22, 74, 13):
+        draw.line((24, y, 104, y), fill=(188, 188, 188), width=2)
+        draw.line((28, y + 6, 92, y + 6), fill=(192, 192, 192), width=2)
     return image

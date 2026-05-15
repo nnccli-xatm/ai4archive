@@ -43,6 +43,7 @@ class PlanBatch:
     lighten_edge_shadow: bool
     lighten_background_stains: bool
     lighten_scanlines: bool
+    enhance_faded_text: bool
     despeckle_backend: str
     resume_processing: bool
     reuse_scan_measurements: bool = False
@@ -191,6 +192,7 @@ def _run_batch(project_id: str, batch: PlanBatch, index: int) -> dict[str, Any]:
                 lighten_edge_shadow=batch.lighten_edge_shadow,
                 lighten_background_stains=batch.lighten_background_stains,
                 lighten_scanlines=batch.lighten_scanlines,
+                enhance_faded_text=batch.enhance_faded_text,
                 resume_processing=batch.resume_processing,
             )
         )
@@ -259,6 +261,7 @@ def _run_batch(project_id: str, batch: PlanBatch, index: int) -> dict[str, Any]:
                     lighten_edge_shadow=batch.lighten_edge_shadow,
                     lighten_background_stains=batch.lighten_background_stains,
                     lighten_scanlines=batch.lighten_scanlines,
+                    enhance_faded_text=batch.enhance_faded_text,
                     despeckle_backend=batch.despeckle_backend,
                     resume_processing=batch.resume_processing,
                     reuse_scan_measurements=batch.reuse_scan_measurements,
@@ -381,6 +384,7 @@ def _aggregate_processing_operation_timings(batches: list[dict[str, Any]]) -> di
         "lighten_edge_shadow",
         "lighten_background_stains",
         "lighten_scanlines",
+        "enhance_faded_text",
     ]
     totals: dict[str, dict[str, Any]] = {}
     for operation in operation_names:
@@ -567,6 +571,7 @@ def _batch_from_row(row: dict[str, Any], index: int, plan_dir: Path, output_root
             index,
         ),
         lighten_scanlines=_bool(normalized.get("lighten_scanlines"), "lighten_scanlines", index),
+        enhance_faded_text=_bool(normalized.get("enhance_faded_text"), "enhance_faded_text", index),
         despeckle_backend=_despeckle_backend(normalized.get("despeckle_backend"), index),
         resume_processing=_bool(normalized.get("resume_processing"), "resume_processing", index),
         reuse_scan_measurements=_bool(normalized.get("reuse_scan_measurements"), "reuse_scan_measurements", index),
