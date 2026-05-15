@@ -5850,6 +5850,51 @@ class ScanQcTest(unittest.TestCase):
             self.assertTrue(audit_summary["operations"]["sharpen_text_edges"])
             self.assertEqual(audit_summary["counts"]["text_edges_sharpened_files"], 0)
 
+    def test_sharpen_text_edges_low_candidate_page_uses_fast_noop_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            _synthetic_sparse_text_edge_preflight_skip_page().save(input_dir / "A001_sparse_marks.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            mask_call_sizes: list[tuple[int, int]] = []
+            original_candidate_mask = processing_module._text_edge_candidate_mask
+
+            def wrapped_candidate_mask(grayscale: Image.Image, p95: int) -> Image.Image:
+                mask_call_sizes.append(grayscale.size)
+                return original_candidate_mask(grayscale, p95)
+
+            with mock.patch.object(processing_module, "_text_edge_candidate_mask", side_effect=wrapped_candidate_mask):
+                manifest = process_images(
+                    report,
+                    input_dir,
+                    process_dir,
+                    ProcessingOptions(sharpen_text_edges=True, workers=1),
+                )
+
+            audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
+            record = manifest["files"][0]
+            audit = record["processing_audit"]
+            timing = audit_summary["timing"]["operation_timings"]["sharpen_text_edges"]
+
+            self.assertFalse(record["text_edges_sharpened"])
+            self.assertIn("sharpen_text_edges_noop", record["operations"])
+            self.assertIn("cheap candidate preflight", record["text_edges_reason"])
+            self.assertGreater(audit["text_edges_candidate_pixel_ratio"], 0.0)
+            self.assertEqual(audit["text_edges_changed_pixel_ratio"], 0.0)
+            self.assertEqual(audit["guardrail_failures"], [])
+            self.assertTrue(mask_call_sizes)
+            self.assertTrue(all(width <= 96 and height <= 96 for width, height in mask_call_sizes))
+            self.assertTrue(timing["enabled"])
+            self.assertEqual(timing["file_count"], 1)
+            self.assertEqual(timing["candidate_preflight_skipped_files"], 1)
+            self.assertEqual(audit_summary["counts"]["text_edges_sharpened_files"], 0)
+            self.assertEqual(audit_summary["counts"]["text_edges_candidate_preflight_skipped_files"], 1)
+            self.assertIn("text_edges_candidate_pixel_ratio", audit_summary["metrics"])
+
     def test_sharpen_text_edges_default_off_preserves_derivative_bytes(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -9711,6 +9756,14 @@ def _synthetic_texture_stain_page() -> Image.Image:
             shade = 190 + ((x + y) % 28)
             draw.point((x, y), fill=(shade, shade, shade))
             draw.point((x + 1, y), fill=(shade, shade, shade))
+    return image
+
+
+def _synthetic_sparse_text_edge_preflight_skip_page() -> Image.Image:
+    image = Image.new("RGB", (1200, 900), (244, 244, 244))
+    draw = ImageDraw.Draw(image)
+    for x, y in ((100, 100), (350, 100), (600, 100)):
+        draw.rectangle((x, y, x + 160, y + 80), fill=(60, 60, 60))
     return image
 
 

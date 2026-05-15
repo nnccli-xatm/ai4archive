@@ -142,6 +142,7 @@ class TextEdgeSharpeningResult:
     edge_delta: float
     changed_pixel_ratio: float
     candidate_pixel_ratio: float
+    preflight_skipped: bool = False
 
 
 def detect_skew(image: Image.Image) -> SkewDetection:
@@ -931,6 +932,9 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
     deskew_timing = operation_timings.get("deskew") if isinstance(operation_timings, dict) else {}
     if not isinstance(deskew_timing, dict):
         deskew_timing = {}
+    sharpen_text_edges_timing = operation_timings.get("sharpen_text_edges") if isinstance(operation_timings, dict) else {}
+    if not isinstance(sharpen_text_edges_timing, dict):
+        sharpen_text_edges_timing = {}
     return {
         "schema_version": "scan-qc.processing.audit.v1",
         "generated_at": manifest["generated_at"],
@@ -996,6 +1000,9 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             ),
             "text_edges_sharpened_files": sum(
                 1 for audit in audit_records if audit.get("text_edges_sharpened") is True
+            ),
+            "text_edges_candidate_preflight_skipped_files": _int_count(
+                sharpen_text_edges_timing.get("candidate_preflight_skipped_files")
             ),
         },
         "thresholds": _audit_thresholds(options),
@@ -1116,6 +1123,12 @@ def _aggregate_operation_timings(records: list[dict[str, Any]], options: Process
             timings[operation].update(_aggregate_deskew_detection_counts(records))
         if operation == "despeckle":
             timings[operation].update(_aggregate_despeckle_backend(records, is_enabled))
+        if operation == "sharpen_text_edges":
+            timings[operation]["candidate_preflight_skipped_files"] = _operation_flag_count(
+                records,
+                operation,
+                "candidate_preflight_skip",
+            )
     return timings
 
 
@@ -1463,6 +1476,8 @@ def _process_image(
     with _operation_timer(operation_timings, "sharpen_text_edges", enabled=options.sharpen_text_edges):
         if options.sharpen_text_edges:
             text_edges = _sharpen_text_edges_conservative(processed)
+            if text_edges.preflight_skipped:
+                operation_timings.setdefault("sharpen_text_edges", {})["candidate_preflight_skip"] = True
             processed = text_edges.image
             operations.append(
                 "sharpen_text_edges_conservative" if text_edges.applied else "sharpen_text_edges_noop"
@@ -2449,6 +2464,15 @@ def _sharpen_text_edges_conservative(image: Image.Image) -> TextEdgeSharpeningRe
     if p05 < 35 and _dark_pixel_ratio(grayscale, 64) > 0.09:
         return _text_edges_noop(image, "text edge sharpening skipped: dense dark foreground or illustration risk")
 
+    sample_candidate_ratio = _text_edge_sample_candidate_ratio(grayscale)
+    if sample_candidate_ratio < 0.02:
+        return _text_edges_noop(
+            image,
+            "text edge sharpening skipped: cheap candidate preflight found too little blurred text edge evidence",
+            sample_candidate_ratio,
+            preflight_skipped=True,
+        )
+
     candidate = _text_edge_candidate_mask(grayscale, p95)
     candidate = _clear_mask_edges(candidate, max(3, int(round(min(image.width, image.height) * 0.025))))
     candidate_ratio = _mask_ratio(candidate)
@@ -2579,6 +2603,19 @@ def _sharpen_text_edges_conservative(image: Image.Image) -> TextEdgeSharpeningRe
     )
 
 
+def _text_edge_sample_candidate_ratio(grayscale: Image.Image) -> float:
+    sample = grayscale.copy()
+    sample.thumbnail((96, 96), Image.Resampling.BILINEAR)
+    if sample.width < 30 or sample.height < 30:
+        return 0.0
+    histogram = sample.histogram()
+    total = sample.width * sample.height
+    p95 = _histogram_percentile(histogram, total, 0.95)
+    candidate = _text_edge_candidate_mask(sample, p95)
+    candidate = _clear_mask_edges(candidate, max(2, int(round(min(sample.width, sample.height) * 0.025))))
+    return round(_mask_ratio(candidate), 6)
+
+
 def _text_edge_candidate_mask(grayscale: Image.Image, p95: int) -> Image.Image:
     width, height = grayscale.size
     edges = grayscale.filter(ImageFilter.FIND_EDGES)
@@ -2609,8 +2646,10 @@ def _text_edges_noop(
     image: Image.Image,
     reason: str,
     candidate_pixel_ratio: float = 0.0,
+    *,
+    preflight_skipped: bool = False,
 ) -> TextEdgeSharpeningResult:
-    return TextEdgeSharpeningResult(image, False, reason, 0.0, 0.0, round(candidate_pixel_ratio, 6))
+    return TextEdgeSharpeningResult(image, False, reason, 0.0, 0.0, round(candidate_pixel_ratio, 6), preflight_skipped)
 
 
 def _mask_ratio(mask: Image.Image) -> float:
