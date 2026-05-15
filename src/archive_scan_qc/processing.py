@@ -1472,9 +1472,14 @@ def _detect_dark_border_bbox(image: Image.Image) -> DarkBorderDetection:
     right = _dark_edge_run(grayscale, "right", max_x)
     top = _dark_edge_run(grayscale, "top", max_y)
     bottom = _dark_edge_run(grayscale, "bottom", max_y)
+    runs = (left, right, top, bottom)
 
-    if max(left, right, top, bottom) < 2:
+    if max(runs) < 2:
         return DarkBorderDetection(None, "no confident dark edge border")
+    if min(runs) < 2:
+        return DarkBorderDetection(None, "incomplete dark edge border evidence")
+    if max(runs) > max(min(runs) * 3, min(runs) + max(2, int(min(width, height) * 0.04))):
+        return DarkBorderDetection(None, "unbalanced dark edge border evidence")
 
     bbox = (left, top, width - right, height - bottom)
     retained_width = bbox[2] - bbox[0]

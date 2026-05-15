@@ -47,6 +47,7 @@ from archive_scan_qc.processing import (
     _despeckle_isolated_pixels,
     _deskew_candidate_scores,
     _horizontal_projection_variance,
+    detect_dark_border_bbox,
     process_images,
 )
 from archive_scan_qc.processing_plan import build_processing_plan
@@ -6841,6 +6842,90 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(processed_size, (90, 70))
             self.assertEqual(record["dark_border_reason"], "dark edge border trimmed")
             self.assertIn("dark_border_trim_conservative", record["operations"])
+
+    def test_trim_dark_border_keeps_content_adjacent_to_each_edge(self) -> None:
+        cases = {
+            "left": ((5, 34, 13, 39), (0, 29, 8, 34)),
+            "right": ((87, 34, 94, 39), (82, 29, 89, 34)),
+            "top": ((44, 5, 55, 12), (39, 0, 50, 7)),
+            "bottom": ((44, 67, 55, 74), (39, 62, 50, 69)),
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            for side, (source_mark, _output_mark) in cases.items():
+                image = Image.new("RGB", (100, 80), "white")
+                draw = ImageDraw.Draw(image)
+                draw.rectangle((0, 0, 99, 79), outline="black", width=5)
+                draw.rectangle(source_mark, fill=(15, 15, 15))
+                image.save(input_dir / f"A001_{side}.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(trim_dark_border=True, audit_max_contrast_delta=100.0),
+            )
+
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            for side, (_source_mark, output_mark) in cases.items():
+                name = f"A001_{side}.png"
+                record = records[name]
+                self.assertTrue(record["dark_border_trimmed"], side)
+                self.assertEqual(record["dark_border_bbox"], [5, 5, 95, 75])
+                with Image.open(process_dir / "images" / name) as processed:
+                    mark = processed.crop(output_mark).convert("L")
+                    min_value, _max_value = mark.getextrema()
+                self.assertLessEqual(min_value, 40, side)
+
+    def test_trim_dark_border_noops_for_single_sided_and_unbalanced_edges(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            single_edge = Image.new("RGB", (100, 80), "white")
+            draw = ImageDraw.Draw(single_edge)
+            draw.rectangle((0, 0, 4, 79), fill="black")
+            draw.rectangle((5, 18, 28, 24), fill=(15, 15, 15))
+            draw.rectangle((65, 70, 80, 75), fill=(15, 15, 15))
+            single_edge.save(input_dir / "A001_single_edge.png")
+
+            unbalanced = Image.new("RGB", (100, 80), "white")
+            draw = ImageDraw.Draw(unbalanced)
+            draw.rectangle((0, 0, 99, 79), outline="black", width=2)
+            draw.rectangle((0, 0, 9, 79), fill="black")
+            draw.rectangle((10, 24, 35, 29), fill=(15, 15, 15))
+            unbalanced.save(input_dir / "A001_unbalanced.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(trim_dark_border=True))
+
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            self.assertEqual(records["A001_single_edge.png"]["dark_border_reason"], "incomplete dark edge border evidence")
+            self.assertEqual(records["A001_unbalanced.png"]["dark_border_reason"], "unbalanced dark edge border evidence")
+            for record in records.values():
+                self.assertFalse(record["dark_border_trimmed"])
+                self.assertIsNone(record["dark_border_bbox"])
+                self.assertEqual(record["output_size"], [100, 80])
+                self.assertIn("dark_border_trim_noop", record["operations"])
+
+    def test_trim_dark_border_noops_for_archival_dark_edge_with_auditable_reason(self) -> None:
+        image = Image.new("RGB", (100, 80), (238, 238, 232))
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((0, 0, 5, 79), fill=(35, 35, 35))
+        draw.rectangle((10, 35, 80, 38), fill=(70, 70, 70))
+
+        detection = detect_dark_border_bbox(image)
+
+        self.assertIsNone(detection.bbox)
+        self.assertEqual(detection.reason, "incomplete dark edge border evidence")
 
     def test_trim_dark_border_noops_for_blank_and_edge_content(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
