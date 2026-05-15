@@ -25,6 +25,25 @@ BENCHMARK_JSON = "benchmark_results.json"
 BENCHMARK_CSV = "benchmark_results.csv"
 DIMINISHING_RETURNS_THRESHOLD_RATIO = 0.10
 COMPARISON_PLAN_VERSION = "scan-qc.performance-comparison-plan.v1"
+PROCESSING_OPERATION_TIMING_NAMES = (
+    "auto_crop",
+    "deskew",
+    "trim_dark_border",
+    "despeckle",
+    "normalize_tones",
+    "lighten_edge_shadow",
+    "lighten_background_stains",
+    "lighten_scanlines",
+    "enhance_faded_text",
+    "sharpen_text_edges",
+)
+PROCESSING_OPERATION_TIMING_REQUIRED_FIELDS = (
+    "enabled",
+    "file_count",
+    "elapsed_seconds",
+    "files_per_minute",
+    "average_seconds_per_file",
+)
 
 
 def positive_int(value: str, label: str) -> int:
@@ -503,19 +522,8 @@ def _processing_operation_timings(processing_manifest: dict[str, Any] | None) ->
     records = processing_manifest.get("files")
     if not isinstance(records, list):
         return {}
-    operation_names = [
-        "auto_crop",
-        "deskew",
-        "trim_dark_border",
-        "despeckle",
-        "normalize_tones",
-        "lighten_edge_shadow",
-        "lighten_background_stains",
-        "lighten_scanlines",
-        "enhance_faded_text",
-    ]
     timings: dict[str, Any] = {}
-    for operation in operation_names:
+    for operation in PROCESSING_OPERATION_TIMING_NAMES:
         values = [
             float(record["operation_timings"][operation]["elapsed_seconds"])
             for record in records
@@ -526,9 +534,11 @@ def _processing_operation_timings(processing_manifest: dict[str, Any] | None) ->
         ]
         elapsed_seconds = round(sum(values), 6)
         timings[operation] = {
+            "enabled": bool(values),
             "file_count": len(values),
             "elapsed_seconds": elapsed_seconds,
             "files_per_minute": _files_per_minute(len(values), elapsed_seconds),
+            "average_seconds_per_file": round(elapsed_seconds / len(values), 6) if values else None,
         }
     return timings
 
@@ -565,11 +575,19 @@ def _processing_quality_regression(processing_manifest: dict[str, Any] | None) -
         1 for record in records if isinstance(record, dict) and bool(record.get("processing_warnings"))
     )
     operation_timings = _processing_operation_timings(processing_manifest)
+    timing_integrity = _operation_timing_integrity(operation_timings)
     thresholds = _processing_quality_thresholds()
     algorithm_metrics = _repair_algorithm_metrics(audit_records, operation_timings)
     threshold_violations = _quality_threshold_violations(algorithm_metrics, thresholds)
     failed_files = _coerce_int(summary.get("failed_files"))
-    status = "pass" if failed_files == 0 and guardrail_failed_files == 0 and not threshold_violations else "failed"
+    status = (
+        "pass"
+        if failed_files == 0
+        and guardrail_failed_files == 0
+        and not threshold_violations
+        and timing_integrity["status"] == "pass"
+        else "failed"
+    )
 
     return {
         "schema_version": "scan-qc.processing.quality-regression.v1",
@@ -592,6 +610,8 @@ def _processing_quality_regression(processing_manifest: dict[str, Any] | None) -
         },
         "thresholds": thresholds,
         "algorithm_metrics": algorithm_metrics,
+        "operation_timing_integrity": timing_integrity,
+        "slow_operations": _slow_operation_summary(operation_timings),
         "threshold_violations": threshold_violations,
         "privacy": {
             "aggregate_only": True,
@@ -625,6 +645,8 @@ def _empty_quality_regression_summary(reason: str) -> dict[str, Any]:
         },
         "thresholds": _processing_quality_thresholds(),
         "algorithm_metrics": _repair_algorithm_metrics([], {}),
+        "operation_timing_integrity": _empty_operation_timing_integrity(reason),
+        "slow_operations": [],
         "threshold_violations": [],
         "privacy": {
             "aggregate_only": True,
@@ -637,6 +659,69 @@ def _empty_quality_regression_summary(reason: str) -> dict[str, Any]:
             "contains_row_level_evidence": False,
         },
     }
+
+
+def _operation_timing_integrity(operation_timings: dict[str, Any]) -> dict[str, Any]:
+    missing_operations: list[str] = []
+    incomplete_operations: list[dict[str, Any]] = []
+    for operation in PROCESSING_OPERATION_TIMING_NAMES:
+        timing = operation_timings.get(operation)
+        if not isinstance(timing, dict):
+            missing_operations.append(operation)
+            continue
+        missing_fields = [field for field in PROCESSING_OPERATION_TIMING_REQUIRED_FIELDS if field not in timing]
+        if missing_fields:
+            incomplete_operations.append({"operation": operation, "missing_fields": missing_fields})
+    timing_missing = bool(missing_operations or incomplete_operations)
+    return {
+        "aggregate_only": True,
+        "status": "missing" if timing_missing else "pass",
+        "missing_code": "missing_or_incomplete_processing_operation_timings" if timing_missing else None,
+        "missing_operations": missing_operations,
+        "incomplete_operations": incomplete_operations,
+    }
+
+
+def _empty_operation_timing_integrity(reason: str) -> dict[str, Any]:
+    return {
+        "aggregate_only": True,
+        "status": "not_applicable",
+        "missing_code": reason,
+        "missing_operations": [],
+        "incomplete_operations": [],
+    }
+
+
+def _slow_operation_summary(operation_timings: dict[str, Any], *, limit: int = 5) -> list[dict[str, Any]]:
+    summaries: list[dict[str, Any]] = []
+    for operation in PROCESSING_OPERATION_TIMING_NAMES:
+        timing = operation_timings.get(operation)
+        if not isinstance(timing, dict):
+            continue
+        file_count = _coerce_int(timing.get("file_count"))
+        elapsed_seconds = _coerce_float(timing.get("elapsed_seconds"))
+        average_seconds_per_file = _coerce_float(timing.get("average_seconds_per_file"))
+        if average_seconds_per_file is None and isinstance(elapsed_seconds, int | float) and file_count > 0:
+            average_seconds_per_file = round(elapsed_seconds / file_count, 6)
+        summaries.append(
+            {
+                "operation": operation,
+                "enabled": bool(timing.get("enabled", False)),
+                "file_count": file_count,
+                "elapsed_seconds": elapsed_seconds,
+                "average_seconds_per_file": average_seconds_per_file,
+                "files_per_minute": _coerce_float(timing.get("files_per_minute")),
+            }
+        )
+    summaries.sort(
+        key=lambda item: (
+            item["average_seconds_per_file"] if isinstance(item["average_seconds_per_file"], int | float) else -1,
+            item["elapsed_seconds"] if isinstance(item["elapsed_seconds"], int | float) else -1,
+            item["operation"],
+        ),
+        reverse=True,
+    )
+    return summaries[:limit]
 
 
 def _processing_quality_thresholds() -> dict[str, float]:
