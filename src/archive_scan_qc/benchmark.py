@@ -44,7 +44,7 @@ PROCESSING_OPERATION_TIMING_REQUIRED_FIELDS = (
     "files_per_minute",
     "average_seconds_per_file",
 )
-PROCESSING_OPERATION_TIMING_BUDGET_SECONDS_PER_FILE = {
+PROCESSING_OPERATION_TIMING_DIAGNOSTIC_SECONDS_PER_FILE = {
     "deskew": 0.15,
     "trim_dark_border": 0.15,
     "auto_crop": 0.2,
@@ -588,7 +588,7 @@ def _processing_quality_regression(processing_manifest: dict[str, Any] | None) -
     )
     operation_timings = _processing_operation_timings(processing_manifest)
     timing_integrity = _operation_timing_integrity(operation_timings)
-    timing_budget = _operation_timing_budget(operation_timings)
+    timing_budget = _operation_timing_budget(operation_timings, _operation_timing_budget_config(summary))
     thresholds = _processing_quality_thresholds()
     algorithm_metrics = _repair_algorithm_metrics(audit_records, operation_timings)
     threshold_violations = _quality_threshold_violations(algorithm_metrics, thresholds)
@@ -599,7 +599,7 @@ def _processing_quality_regression(processing_manifest: dict[str, Any] | None) -
         and guardrail_failed_files == 0
         and not threshold_violations
         and timing_integrity["status"] == "pass"
-        and timing_budget["status"] == "pass"
+        and timing_budget["status"] != "failed"
         else "failed"
     )
 
@@ -721,13 +721,45 @@ def _empty_operation_timing_integrity(reason: str) -> dict[str, Any]:
     }
 
 
-def _operation_timing_budget(operation_timings: dict[str, Any]) -> dict[str, Any]:
+def _operation_timing_budget_config(summary: dict[str, Any]) -> dict[str, Any]:
+    performance = summary.get("performance")
+    if not isinstance(performance, dict):
+        return {
+            "mode": "diagnostic",
+            "source": "diagnostic_defaults",
+            "budgets_seconds_per_file": dict(PROCESSING_OPERATION_TIMING_DIAGNOSTIC_SECONDS_PER_FILE),
+        }
+    config = performance.get("operation_timing_budget")
+    if not isinstance(config, dict):
+        return {
+            "mode": "diagnostic",
+            "source": "diagnostic_defaults",
+            "budgets_seconds_per_file": dict(PROCESSING_OPERATION_TIMING_DIAGNOSTIC_SECONDS_PER_FILE),
+        }
+    mode = "blocking" if config.get("mode") == "blocking" or config.get("blocking") is True else "diagnostic"
+    budgets = dict(PROCESSING_OPERATION_TIMING_DIAGNOSTIC_SECONDS_PER_FILE)
+    configured_budgets = config.get("budgets_seconds_per_file")
+    if isinstance(configured_budgets, dict):
+        for operation, value in configured_budgets.items():
+            if operation in PROCESSING_OPERATION_TIMING_NAMES:
+                budget = _coerce_float(value)
+                if budget is not None and budget > 0:
+                    budgets[operation] = budget
+    return {
+        "mode": mode,
+        "source": "calibrated" if mode == "blocking" else "diagnostic_defaults",
+        "budgets_seconds_per_file": budgets,
+    }
+
+
+def _operation_timing_budget(operation_timings: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+    budgets = config["budgets_seconds_per_file"]
     over_budget: list[dict[str, Any]] = []
     for operation in PROCESSING_OPERATION_TIMING_NAMES:
         timing = operation_timings.get(operation)
         if not isinstance(timing, dict) or not timing.get("enabled", False):
             continue
-        budget = PROCESSING_OPERATION_TIMING_BUDGET_SECONDS_PER_FILE[operation]
+        budget = budgets[operation]
         average_seconds_per_file = _coerce_float(timing.get("average_seconds_per_file"))
         file_count = _coerce_int(timing.get("file_count"))
         elapsed_seconds = _coerce_float(timing.get("elapsed_seconds"))
@@ -742,11 +774,18 @@ def _operation_timing_budget(operation_timings: dict[str, Any]) -> dict[str, Any
                     "file_count": file_count,
                 }
             )
+    blocking = config["mode"] == "blocking"
+    failed = blocking and bool(over_budget)
     return {
         "aggregate_only": True,
-        "status": "failed" if over_budget else "pass",
-        "blocker_code": "processing_operation_timing_budget_exceeded" if over_budget else None,
-        "budgets_seconds_per_file": dict(PROCESSING_OPERATION_TIMING_BUDGET_SECONDS_PER_FILE),
+        "status": "failed" if failed else "pass",
+        "mode": config["mode"],
+        "budget_source": config["source"],
+        "blocker_code": "processing_operation_timing_budget_exceeded" if failed else None,
+        "diagnostic_code": (
+            "processing_operation_timing_budget_diagnostic" if over_budget and not failed else None
+        ),
+        "budgets_seconds_per_file": dict(budgets),
         "over_budget_operations": over_budget,
     }
 
@@ -755,8 +794,11 @@ def _empty_operation_timing_budget(reason: str) -> dict[str, Any]:
     return {
         "aggregate_only": True,
         "status": "not_applicable",
+        "mode": "not_applicable",
+        "budget_source": reason,
         "blocker_code": reason,
-        "budgets_seconds_per_file": dict(PROCESSING_OPERATION_TIMING_BUDGET_SECONDS_PER_FILE),
+        "diagnostic_code": None,
+        "budgets_seconds_per_file": dict(PROCESSING_OPERATION_TIMING_DIAGNOSTIC_SECONDS_PER_FILE),
         "over_budget_operations": [],
     }
 

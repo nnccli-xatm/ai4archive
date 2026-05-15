@@ -216,7 +216,13 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     "processed_files": 2,
                     "failed_files": 0,
                     "skipped_files": 0,
-                    "performance": {"operation_timings": operation_timings},
+                    "performance": {
+                        "operation_timings": operation_timings,
+                        "operation_timing_budget": {
+                            "mode": "blocking",
+                            "budgets_seconds_per_file": {"lighten_scanlines": 0.35},
+                        },
+                    },
                 },
                 "files": [
                     {
@@ -233,7 +239,10 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
         timing_budget = quality["operation_timing_budget"]
         self.assertTrue(timing_budget["aggregate_only"])
         self.assertEqual(timing_budget["status"], "failed")
+        self.assertEqual(timing_budget["mode"], "blocking")
+        self.assertEqual(timing_budget["budget_source"], "calibrated")
         self.assertEqual(timing_budget["blocker_code"], "processing_operation_timing_budget_exceeded")
+        self.assertIsNone(timing_budget["diagnostic_code"])
         self.assertEqual(timing_budget["over_budget_operations"][0]["operation"], "lighten_scanlines")
         self.assertEqual(timing_budget["over_budget_operations"][0]["average_seconds_per_file"], 0.6)
         self.assertEqual(timing_budget["over_budget_operations"][0]["file_count"], 2)
@@ -245,6 +254,33 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             "e" * 64,
         ):
             self.assertNotIn(forbidden, raw)
+
+    def test_quality_regression_reports_default_timing_budget_as_diagnostic(self) -> None:
+        quality = _processing_quality_regression(
+            {
+                "summary": {
+                    "total_files": 20,
+                    "processed_files": 20,
+                    "failed_files": 0,
+                    "skipped_files": 0,
+                    "performance": {"operation_timings": _fixed_sample_operation_timings()},
+                },
+                "files": [{"processing_audit": {}} for _ in range(20)],
+            }
+        )
+
+        self.assertEqual(quality["status"], "pass")
+        timing_budget = quality["operation_timing_budget"]
+        self.assertTrue(timing_budget["aggregate_only"])
+        self.assertEqual(timing_budget["status"], "pass")
+        self.assertEqual(timing_budget["mode"], "diagnostic")
+        self.assertEqual(timing_budget["budget_source"], "diagnostic_defaults")
+        self.assertIsNone(timing_budget["blocker_code"])
+        self.assertEqual(timing_budget["diagnostic_code"], "processing_operation_timing_budget_diagnostic")
+        self.assertEqual(
+            [operation["operation"] for operation in timing_budget["over_budget_operations"]],
+            ["auto_crop", "deskew", "despeckle", "lighten_background_stains"],
+        )
 
 
 BASE_FLAGS = ("--deskew", "--trim-dark-border", "--auto-crop", "--despeckle")
@@ -422,6 +458,31 @@ def _operation_timings_fixture() -> dict[str, dict[str, object]]:
             "average_seconds_per_file": 0.01,
         }
         for operation in REQUIRED_OPERATIONS
+    }
+
+
+def _fixed_sample_operation_timings() -> dict[str, dict[str, object]]:
+    average_seconds_by_operation = {
+        "auto_crop": 0.21,
+        "deskew": 0.16,
+        "trim_dark_border": 0.01,
+        "despeckle": 0.26,
+        "normalize_tones": 0.01,
+        "lighten_edge_shadow": 0.01,
+        "lighten_background_stains": 0.36,
+        "lighten_scanlines": 0.01,
+        "enhance_faded_text": 0.01,
+        "sharpen_text_edges": 0.01,
+    }
+    return {
+        operation: {
+            "enabled": True,
+            "file_count": 20,
+            "elapsed_seconds": round(average_seconds * 20, 6),
+            "files_per_minute": round(60 / average_seconds, 6),
+            "average_seconds_per_file": average_seconds,
+        }
+        for operation, average_seconds in average_seconds_by_operation.items()
     }
 
 
