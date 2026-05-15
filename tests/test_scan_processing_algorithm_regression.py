@@ -179,6 +179,49 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in ("synthetic_narrow_gray_combo.png", str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_shallow_deskew_auto_crop_trim_combination_stays_controlled(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-shallow-deskew-combo-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            image = _shallow_stable_text_page().rotate(
+                -0.45,
+                resample=Image.Resampling.BICUBIC,
+                expand=True,
+                fillcolor=(246, 246, 246),
+            )
+            image.save(input_dir / "synthetic_shallow_deskew_combo.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "shallow-deskew-combo", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(trim_dark_border=True, auto_crop=True, deskew=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+            audit = record["processing_audit"]
+
+            self.assertTrue(record["deskewed"])
+            self.assertAlmostEqual(record["skew_angle_degrees"], -0.45, delta=0.25)
+            self.assertFalse(record["dark_border_trimmed"])
+            self.assertFalse(record["cropped"])
+            self.assertLessEqual(audit["size_change_ratio"], 0.04)
+            self.assertEqual(audit["max_trim_margin_ratio"], 0.0)
+            self.assertEqual(audit["crop_ratio"], 0.0)
+            self.assertEqual(audit["cumulative_change_guard_action"], "passed")
+            self.assertEqual(audit["guardrail_failures"], [])
+            self.assertEqual(audit_summary["counts"]["deskewed_files"], 1)
+            self.assertEqual(audit_summary["counts"]["auto_crop_applied_files"], 0)
+            self.assertEqual(audit_summary["counts"]["dark_border_trimmed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            for forbidden in ("synthetic_shallow_deskew_combo.png", str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_risk_combination_pages_skip_or_stay_low_change(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-risk-") as temp_dir:
             root = Path(temp_dir)
@@ -660,6 +703,14 @@ def _synthetic_pages(input_dir: Path) -> None:
     _scanline_page().save(input_dir / "private_scanline_page.png", dpi=(300, 300))
     _faded_text_page().save(input_dir / "private_faded_text_page.png", dpi=(300, 300))
     _blurred_text_page().save(input_dir / "private_blurred_text_page.png", dpi=(300, 300))
+
+
+def _shallow_stable_text_page() -> Image.Image:
+    image = Image.new("RGB", (240, 320), (246, 246, 246))
+    draw = ImageDraw.Draw(image)
+    for y in range(50, 230, 30):
+        draw.rectangle((45, y, 195, y + 3), fill=(50, 50, 50))
+    return image
 
 
 def _safe_full_chain_combination_page() -> Image.Image:

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 from pathlib import Path
 import shutil
 import time
@@ -2057,12 +2058,15 @@ def _process_image(
         elif abs(skew.angle_degrees) > options.deskew_max_degrees:
             operations.append("deskew_noop")
             deskew_reason = "angle exceeds conservative threshold"
-        elif abs(skew.angle_degrees) < 0.2:
-            operations.append("deskew_noop")
-            deskew_reason = "angle below correction threshold"
         elif skew_from_projection and _deskew_has_edge_content_risk(processed):
             operations.append("deskew_noop")
             deskew_reason = "edge content near rotation boundary"
+        elif abs(skew.angle_degrees) <= 1.25 and _deskew_has_color_or_table_risk(processed):
+            operations.append("deskew_noop")
+            deskew_reason = "table or color mark rotation risk"
+        elif abs(skew.angle_degrees) < 0.2:
+            operations.append("deskew_noop")
+            deskew_reason = "angle below correction threshold"
         else:
             processed = _rotate_for_deskew(processed, -skew.angle_degrees)
             operations.append("deskew_conservative")
@@ -4635,13 +4639,13 @@ def _detect_skew(image: Image.Image) -> SkewDetection:
     raw_grayscale = image.convert("L")
     grayscale = ImageOps.autocontrast(raw_grayscale, cutoff=1)
     histogram = grayscale.histogram()
+    raw_histogram = raw_grayscale.histogram()
     total_pixels = width * height
     low = _histogram_percentile(histogram, total_pixels, 0.05)
     high = _histogram_percentile(histogram, total_pixels, 0.95)
+    raw_low = _histogram_percentile(raw_histogram, total_pixels, 0.005)
+    raw_high = _histogram_percentile(raw_histogram, total_pixels, 0.995)
     if high - low < 35:
-        raw_histogram = raw_grayscale.histogram()
-        raw_low = _histogram_percentile(raw_histogram, total_pixels, 0.005)
-        raw_high = _histogram_percentile(raw_histogram, total_pixels, 0.995)
         if raw_high - raw_low < 35:
             return SkewDetection(None, 0.0, "low contrast")
         sparse_threshold = max(0, raw_high - 35)
@@ -4673,6 +4677,10 @@ def _detect_skew(image: Image.Image) -> SkewDetection:
     runner_up = max(score for angle, score in scores.items() if abs(angle - best_angle) >= 1.0)
     confidence = 0.0 if best_score <= 0 else max(0.0, min(1.0, (best_score - runner_up) / best_score))
     skew_angle = round(-best_angle, 2)
+    if abs(skew_angle) < 0.2 or confidence < 0.08:
+        shallow = _detect_shallow_stable_text_skew(image, ink, bbox, raw_high=raw_high)
+        if shallow.angle_degrees is not None:
+            return shallow
     return SkewDetection(skew_angle, round(confidence, 3), "skew detected")
 
 
@@ -4704,6 +4712,140 @@ def _deskew_has_edge_content_risk(image: Image.Image) -> bool:
         or width - right <= horizontal_margin
         or height - bottom <= vertical_margin
     )
+
+
+def _deskew_has_color_or_table_risk(image: Image.Image) -> bool:
+    if image.mode == "RGB" and _tone_color_risk_reason(image):
+        return True
+
+    width, height = image.size
+    if width < 30 or height < 30:
+        return False
+    grayscale = ImageOps.autocontrast(image.convert("L"), cutoff=1)
+    histogram = grayscale.histogram()
+    total_pixels = width * height
+    low = _histogram_percentile(histogram, total_pixels, 0.05)
+    high = _histogram_percentile(histogram, total_pixels, 0.95)
+    if high - low < 35:
+        return False
+    threshold = max(0, min(255, low + int((high - low) * 0.35)))
+    ink = grayscale.point(lambda value: 255 if value <= threshold else 0, mode="L")
+    bbox = ink.getbbox()
+    return bool(bbox and _deskew_has_table_line_risk(ink, bbox))
+
+
+def _detect_shallow_stable_text_skew(
+    image: Image.Image,
+    ink: Image.Image,
+    bbox: tuple[int, int, int, int],
+    *,
+    raw_high: int,
+) -> SkewDetection:
+    if raw_high < 220:
+        return SkewDetection(None, 0.0, "low confidence")
+    if _deskew_has_table_line_risk(ink, bbox):
+        return SkewDetection(None, 0.0, "low confidence")
+
+    sample = ink.crop(bbox)
+    sample.thumbnail((700, 700), Image.Resampling.BILINEAR)
+    sample_width, sample_height = sample.size
+    if sample_width < 80 or sample_height < 60:
+        return SkewDetection(None, 0.0, "low confidence")
+
+    projection = sample.resize((1, sample_height), Image.Resampling.BOX)
+    row_counts = [value * sample_width / 255 for value in projection.tobytes()]
+    active_threshold = max(10.0, sample_width * 0.10)
+    groups: list[tuple[int, int]] = []
+    start: int | None = None
+    for row, count in enumerate(row_counts):
+        if count >= active_threshold:
+            if start is None:
+                start = row
+        elif start is not None:
+            groups.append((start, row))
+            start = None
+    if start is not None:
+        groups.append((start, sample_height))
+    groups = _merge_close_row_groups(groups, max_gap=2)
+
+    line_angles: list[float] = []
+    pixels = sample.load()
+    max_band_height = max(8, int(round(sample_height * 0.045)))
+    min_line_width = max(50, int(round(sample_width * 0.38)))
+    for top, bottom in groups:
+        if bottom - top > max_band_height:
+            continue
+        points: list[tuple[int, int]] = []
+        min_x: int | None = None
+        max_x: int | None = None
+        for y in range(top, bottom):
+            for x in range(sample_width):
+                if pixels[x, y]:
+                    points.append((x, y))
+                    min_x = x if min_x is None else min(min_x, x)
+                    max_x = x if max_x is None else max(max_x, x)
+        if min_x is None or max_x is None or max_x - min_x < min_line_width:
+            continue
+        angle = _least_squares_line_angle(points)
+        if angle is not None and 0.18 <= abs(angle) <= 1.25:
+            line_angles.append(angle)
+
+    if len(line_angles) < 4:
+        return SkewDetection(None, 0.0, "low confidence")
+    average_angle = sum(line_angles) / len(line_angles)
+    spread = max(abs(angle - average_angle) for angle in line_angles)
+    if spread > 0.35:
+        return SkewDetection(None, 0.0, "low confidence")
+    confidence = max(0.0, min(1.0, 0.24 + len(line_angles) * 0.045 - spread * 0.35))
+    return SkewDetection(round(-average_angle, 2), round(confidence, 3), "shallow stable text skew detected")
+
+
+def _merge_close_row_groups(groups: list[tuple[int, int]], *, max_gap: int) -> list[tuple[int, int]]:
+    if not groups:
+        return []
+    merged = [groups[0]]
+    for top, bottom in groups[1:]:
+        prev_top, prev_bottom = merged[-1]
+        if top - prev_bottom <= max_gap:
+            merged[-1] = (prev_top, bottom)
+        else:
+            merged.append((top, bottom))
+    return merged
+
+
+def _least_squares_line_angle(points: list[tuple[int, int]]) -> float | None:
+    if len(points) < 20:
+        return None
+    mean_x = sum(point[0] for point in points) / len(points)
+    mean_y = sum(point[1] for point in points) / len(points)
+    variance_x = sum((point[0] - mean_x) ** 2 for point in points)
+    if variance_x <= 0:
+        return None
+    covariance = sum((point[0] - mean_x) * (point[1] - mean_y) for point in points)
+    slope = covariance / variance_x
+    return math.degrees(math.atan(slope))
+
+
+def _deskew_has_table_line_risk(ink: Image.Image, bbox: tuple[int, int, int, int]) -> bool:
+    sample = ink.crop(bbox)
+    sample.thumbnail((700, 700), Image.Resampling.BILINEAR)
+    width, height = sample.size
+    if width <= 0 or height <= 0:
+        return False
+    pixels = sample.load()
+    long_vertical_runs = 0
+    vertical_min_run = max(18, int(round(height * 0.20)))
+    for x in range(width):
+        run = 0
+        for y in range(height):
+            run = run + 1 if pixels[x, y] else 0
+            if run >= vertical_min_run:
+                long_vertical_runs += 1
+                break
+    if long_vertical_runs >= max(16, int(round(width * 0.05))):
+        return True
+
+    return False
 
 
 def _histogram_percentile(histogram: list[int], total: int, percentile: float) -> int:
