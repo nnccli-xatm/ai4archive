@@ -263,6 +263,14 @@ timing block also reports count-only backend mode fields for the optional NumPy
 candidate filter or the Python/Pillow fallback; fallback is expected and
 non-blocking when NumPy is unavailable. It does not include file lists, paths,
 hashes, thumbnails, or image content.
+When `--deskew --trim-dark-border --auto-crop --despeckle` are combined, size
+change, crop ratio, trim margin, deskew angle, and despeckle pixel ratio remain
+the local guardrails for geometric edits. Pixel-change ratio is still reported
+for aggregate review, but its guardrail is only applied to same-size changes so
+conservative, auditable geometric edits are not rejected solely because the
+derivative must be resized for comparison. The audit summary records aggregate
+counts for files where the pixel guardrail applied directly and files where it
+was deferred to the geometric guardrails.
 Private integration and aggregate baseline summaries also promote the
 despeckle backend capability as public-safe aggregate fields:
 `requested_backend`, `effective_backend_mode`, `numpy_available`,

@@ -761,6 +761,12 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "retry_list_files": summary["retry_list_files"],
             "processing_warning_files": len(warning_records),
             "guardrail_failed_files": guardrail_failed_files,
+            "pixel_change_guardrail_applied_files": sum(
+                1 for audit in audit_records if audit.get("pixel_change_guardrail_applied") is True
+            ),
+            "pixel_change_guardrail_deferred_to_geometric_files": sum(
+                1 for audit in audit_records if audit.get("pixel_change_guardrail_applied") is False
+            ),
             "deskew_safe_skip_files": _int_count(deskew_timing.get("safe_skip_files")),
             "deskew_projection_detection_files": _int_count(deskew_timing.get("projection_detection_files")),
             "deskew_fallback_detection_files": _int_count(deskew_timing.get("fallback_detection_files")),
@@ -1197,9 +1203,21 @@ def _processing_audit(
     pixel_change_ratio = _pixel_change_ratio(source_l, processed_l)
     deskew_abs_angle = round(abs(skew_angle_degrees or 0.0), 6)
     despeckle_pixel_ratio = despeckle_pixels_changed / source_area
+    geometric_change_recorded = (
+        size_change_ratio > 0
+        or crop_ratio > 0
+        or max_trim_margin_ratio > 0
+        or deskew_abs_angle >= 0.2
+    )
     metrics = {
         "size_change_ratio": round(size_change_ratio, 6),
         "pixel_change_ratio": round(pixel_change_ratio, 6),
+        "pixel_change_guardrail_applied": not geometric_change_recorded,
+        "pixel_change_guardrail_scope": (
+            "same_size_pixel_change"
+            if not geometric_change_recorded
+            else "geometric_change_recorded_by_size_crop_trim_or_deskew"
+        ),
         "brightness_delta": round(brightness_delta, 6),
         "contrast_delta": round(contrast_delta, 6),
         "crop_ratio": round(max(0.0, crop_ratio), 6),
@@ -1333,6 +1351,8 @@ def _audit_guardrail_failures(metrics: dict[str, Any], options: ProcessingOption
     ]
     failures = []
     for key, threshold in checks:
+        if key == "pixel_change_ratio" and metrics.get("pixel_change_guardrail_applied") is False:
+            continue
         value = metrics.get(key)
         if isinstance(value, int | float) and value > threshold:
             failures.append(key)
