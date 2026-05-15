@@ -110,31 +110,31 @@ class ScanlineLighteningTest(unittest.TestCase):
         for y in (42, 64, 86):
             near_text_draw.rectangle((42, y, 158, y + 5), fill=(36, 36, 36))
         ImageDraw.Draw(near_text).rectangle((16, 64, 244, 65), fill=(222, 222, 218))
-        cases["near_text"] = (near_text, "no confident")
+        cases["near_text"] = (near_text, "SCANLINE_LOW_CONFIDENCE")
 
         table_line = _scanline_page()
         ImageDraw.Draw(table_line).line((24, 126, 236, 126), fill=(45, 45, 45), width=2)
-        cases["table_line"] = (table_line, "no confident")
+        cases["table_line"] = (table_line, "SCANLINE_LOW_CONFIDENCE")
 
         page_number = _scanline_page()
         ImageDraw.Draw(page_number).rectangle((120, 166, 140, 174), fill=(35, 35, 35))
-        cases["page_number"] = (page_number, "margin content risk")
+        cases["page_number"] = (page_number, "SCANLINE_EDGE_CONTENT_RISK")
 
         red_stamp = _scanline_page()
         ImageDraw.Draw(red_stamp).ellipse((170, 84, 224, 138), outline=(180, 20, 20), width=4)
-        cases["red_stamp"] = (red_stamp, "stamp")
+        cases["red_stamp"] = (red_stamp, "SCANLINE_COLOR_CONTENT_RISK")
 
         color_mark = _scanline_page()
         ImageDraw.Draw(color_mark).rectangle((178, 42, 210, 64), fill=(58, 128, 205))
-        cases["color_mark"] = (color_mark, "color content")
+        cases["color_mark"] = (color_mark, "SCANLINE_COLOR_CONTENT_RISK")
 
         binding_hole = _scanline_page()
         ImageDraw.Draw(binding_hole).ellipse((2, 80, 12, 90), fill=(24, 24, 24))
-        cases["binding_hole"] = (binding_hole, "binding")
+        cases["binding_hole"] = (binding_hole, "SCANLINE_EDGE_CONTENT_RISK")
 
         archival_mark = _scanline_page()
         ImageDraw.Draw(archival_mark).rectangle((4, 112, 18, 154), fill=(60, 60, 60))
-        cases["archival_mark"] = (archival_mark, "edge mark")
+        cases["archival_mark"] = (archival_mark, "SCANLINE_EDGE_CONTENT_RISK")
 
         for name, (image, reason_fragment) in cases.items():
             manifest, source, processed, _process_dir = _process_one(
@@ -146,6 +146,8 @@ class ScanlineLighteningTest(unittest.TestCase):
             self.assertFalse(record["scanlines_lightened"], name)
             self.assertIn("lighten_scanlines_noop", record["operations"], name)
             self.assertIn(reason_fragment, record["scanlines_reason"], name)
+            if reason_fragment.startswith("SCANLINE_"):
+                self.assertRegex(record["scanlines_reason"], r"[\u4e00-\u9fff]+", name)
             self.assertLess(_changed_ratio(source, processed, (0, 0, source.width, source.height)), 0.001, name)
 
     def test_lighten_scanlines_noops_for_low_confidence_pages(self) -> None:
@@ -163,8 +165,8 @@ class ScanlineLighteningTest(unittest.TestCase):
         cases = {
             "normal": (normal, "low-confidence tonal evidence"),
             "dark": (dark, "page is too dark"),
-            "color": (color, "color content"),
-            "broad": (broad, "broad uneven lighting"),
+            "color": (color, "SCANLINE_COLOR_CONTENT_RISK"),
+            "broad": (broad, "SCANLINE_SCOPE_RISK"),
             "low_confidence": (low_confidence, "low-confidence tonal evidence"),
         }
 
@@ -176,6 +178,8 @@ class ScanlineLighteningTest(unittest.TestCase):
             record = manifest["files"][0]
             self.assertFalse(record["scanlines_lightened"], name)
             self.assertIn(reason_fragment, record["scanlines_reason"], name)
+            if reason_fragment.startswith("SCANLINE_"):
+                self.assertRegex(record["scanlines_reason"], r"[\u4e00-\u9fff]+", name)
             self.assertLess(_changed_ratio(source, processed, (0, 0, source.width, source.height)), 0.001, name)
 
     def test_cli_plan_and_combined_processing_stay_guarded(self) -> None:
