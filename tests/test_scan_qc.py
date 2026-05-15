@@ -52,7 +52,12 @@ from archive_scan_qc.processing import (
 from archive_scan_qc.processing_plan import build_processing_plan
 from archive_scan_qc.processing_review import build_processing_review_package
 from archive_scan_qc.production_rehearsal import ProductionRehearsalConfig, run_production_rehearsal
-from archive_scan_qc.production_runner import ProductionRunConfig, build_production_run_summary, run_production_folder
+from archive_scan_qc.production_runner import (
+    ProductionRunConfig,
+    _write_progress,
+    build_production_run_summary,
+    run_production_folder,
+)
 from archive_scan_qc.reports import build_review_summary, write_reports, write_review_export, write_review_summary
 from archive_scan_qc.review_decisions import build_review_decision_verification_summary
 from archive_scan_qc.rework import build_rework_action_list, write_rework_action_list
@@ -166,6 +171,47 @@ def _load_frontend_issue_driver_module():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _production_summary_report(total_files: int, performance: dict[str, object] | None = None) -> dict[str, object]:
+    return {
+        "summary": {
+            "total_files": total_files,
+            "openable_files": total_files,
+            "p0_findings": 0,
+            "p1_findings": 0,
+            "p2_findings": 0,
+            "total_findings": 0,
+            "performance": performance or {},
+        }
+    }
+
+
+def _production_processing_manifest(
+    derivative_dir: Path,
+    *,
+    total_files: int,
+    processed_files: int,
+    resumed_files: int = 0,
+    skipped_files: int = 0,
+    failed_files: int = 0,
+    retry_list_files: int = 0,
+    performance: dict[str, object] | None = None,
+    files: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    return {
+        "image_root": str(derivative_dir / "images"),
+        "summary": {
+            "total_files": total_files,
+            "processed_files": processed_files,
+            "resumed_files": resumed_files,
+            "skipped_files": skipped_files,
+            "failed_files": failed_files,
+            "retry_list_files": retry_list_files,
+            "performance": performance or {},
+        },
+        "files": files or [],
+    }
 
 
 class ScanQcTest(unittest.TestCase):
@@ -6043,6 +6089,209 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn("traceback", stage_timings_text.lower())
             self.assertNotIn("ocr", guidance_text.lower())
             self.assertNotIn("ocr", stage_timings_text.lower())
+
+    def test_running_progress_includes_aggregate_processing_rate_and_wait_estimate(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-production-progress-rate-") as temp_dir:
+            metadata_dir = Path(temp_dir)
+
+            _write_progress(
+                metadata_dir,
+                "running",
+                [
+                    {
+                        "id": "scan",
+                        "label": "检查扫描图片",
+                        "state": "completed",
+                        "total_items": None,
+                        "completed_items": 10,
+                    },
+                    {
+                        "id": "process",
+                        "label": "生成处理后图片",
+                        "state": "running",
+                        "total_items": 10,
+                        "completed_items": 4,
+                    },
+                    {
+                        "id": "summarize",
+                        "label": "整理处理结果",
+                        "state": "pending",
+                        "total_items": None,
+                        "completed_items": None,
+                    },
+                ],
+                current_step="process",
+                stage_timings={"process": 120.0},
+            )
+
+            progress = json.loads((metadata_dir / "production_run_progress.json").read_text(encoding="utf-8"))
+            aggregate = progress["aggregate_processing"]
+            self.assertTrue(aggregate["aggregate_only"])
+            self.assertEqual(aggregate["total_images"], 10)
+            self.assertEqual(aggregate["processed_images"], 4)
+            self.assertEqual(aggregate["remaining_images"], 6)
+            self.assertEqual(aggregate["elapsed_seconds"], 120.0)
+            self.assertEqual(aggregate["images_per_minute"], 2.0)
+            self.assertEqual(aggregate["estimated_remaining_seconds"], 180.0)
+            self.assertIsNone(aggregate["unavailable_reason"])
+
+    def test_finished_summary_retains_final_aggregate_processing_rate(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-production-summary-rate-") as temp_dir:
+            root = Path(temp_dir)
+            summary = build_production_run_summary(
+                config=ProductionRunConfig(
+                    input_dir=root / "input",
+                    derivative_output_dir=root / "derivatives",
+                    metadata_output_dir=root / "metadata",
+                ),
+                report=_production_summary_report(total_files=10),
+                processing_manifest=_production_processing_manifest(
+                    root / "derivatives",
+                    total_files=10,
+                    processed_files=7,
+                    resumed_files=3,
+                ),
+                admin_report_dir=root / "metadata" / "admin_reports",
+                generated_at="2026-01-01T00:00:00+00:00",
+                stage_timings={"process": 300.0},
+            )
+
+            aggregate = summary["aggregate_processing"]
+            self.assertEqual(aggregate["total_images"], 10)
+            self.assertEqual(aggregate["processed_images"], 10)
+            self.assertEqual(aggregate["remaining_images"], 0)
+            self.assertEqual(aggregate["images_per_minute"], 2.0)
+            self.assertEqual(aggregate["estimated_remaining_seconds"], 0.0)
+            self.assertIsNone(aggregate["unavailable_reason"])
+            self.assertEqual(summary["progress"]["aggregate_processing"], aggregate)
+
+    def test_aggregate_processing_estimate_is_unavailable_without_safe_basis(self) -> None:
+        cases = [
+            (
+                {
+                    "id": "process",
+                    "label": "生成处理后图片",
+                    "state": "running",
+                    "total_items": 0,
+                    "completed_items": 0,
+                },
+                {"process": 10.0},
+                "no_total_images",
+            ),
+            (
+                {
+                    "id": "process",
+                    "label": "生成处理后图片",
+                    "state": "running",
+                    "total_items": 5,
+                    "completed_items": 0,
+                },
+                {"process": 10.0},
+                "no_processed_images",
+            ),
+            (
+                {
+                    "id": "process",
+                    "label": "生成处理后图片",
+                    "state": "running",
+                    "total_items": 5,
+                    "completed_items": 2,
+                },
+                {"process": 0.0},
+                "no_elapsed_seconds",
+            ),
+            (
+                {
+                    "id": "process",
+                    "label": "生成处理后图片",
+                    "state": "running",
+                    "total_items": 5,
+                    "completed_items": None,
+                },
+                {},
+                "missing_processed_images",
+            ),
+        ]
+        with tempfile.TemporaryDirectory(prefix="scan-production-rate-unavailable-") as temp_dir:
+            metadata_dir = Path(temp_dir)
+            for index, (process_step, stage_timings, expected_reason) in enumerate(cases):
+                _write_progress(
+                    metadata_dir,
+                    "running",
+                    [
+                        {
+                            "id": "scan",
+                            "label": "检查扫描图片",
+                            "state": "completed",
+                            "total_items": None,
+                            "completed_items": None,
+                        },
+                        process_step,
+                        {
+                            "id": "summarize",
+                            "label": "整理处理结果",
+                            "state": "pending",
+                            "total_items": None,
+                            "completed_items": None,
+                        },
+                    ],
+                    current_step="process",
+                    stage_timings=stage_timings,
+                )
+
+                progress = json.loads((metadata_dir / "production_run_progress.json").read_text(encoding="utf-8"))
+                aggregate = progress["aggregate_processing"]
+                self.assertIsNone(aggregate["images_per_minute"], index)
+                self.assertIsNone(aggregate["estimated_remaining_seconds"], index)
+                self.assertEqual(aggregate["unavailable_reason"], expected_reason)
+
+    def test_aggregate_processing_fields_are_public_aggregate_only(self) -> None:
+        private_values = [
+            "/Users/private/archive/input",
+            "Secret_Case_0001.tif",
+            "b" * 64,
+            "OCR: 张三身份证 110101199001010011",
+            "thumbnail",
+            "Traceback File worker.py line 42",
+            "data:image/png;base64",
+        ]
+        with tempfile.TemporaryDirectory(prefix="scan-production-rate-private-") as temp_dir:
+            root = Path(temp_dir)
+            summary = build_production_run_summary(
+                config=ProductionRunConfig(
+                    input_dir=Path(private_values[0]),
+                    derivative_output_dir=root / "derivatives",
+                    metadata_output_dir=root / "metadata",
+                ),
+                report=_production_summary_report(total_files=3, performance={"ocr": private_values[3]}),
+                processing_manifest=_production_processing_manifest(
+                    root / "derivatives",
+                    total_files=3,
+                    processed_files=1,
+                    failed_files=2,
+                    performance={"stack": private_values[5]},
+                    files=[
+                        {
+                            "source_relative_path": private_values[1],
+                            "source_sha256": private_values[2],
+                            "thumbnail": private_values[6],
+                        }
+                    ],
+                ),
+                admin_report_dir=root / "metadata" / "admin_reports",
+                generated_at="2026-01-01T00:00:00+00:00",
+                stage_timings={"process": 60.0},
+            )
+
+            aggregate_text = json.dumps(summary["aggregate_processing"], ensure_ascii=False, sort_keys=True)
+            self.assertTrue(summary["aggregate_processing"]["aggregate_only"])
+            for private_value in private_values:
+                self.assertNotIn(private_value, aggregate_text)
+            self.assertNotIn(".tif", aggregate_text)
+            self.assertNotIn("sha256", aggregate_text.lower())
+            self.assertNotIn("traceback", aggregate_text.lower())
+            self.assertNotIn("ocr", aggregate_text.lower())
+            self.assertNotIn("thumbnail", aggregate_text.lower())
 
     def test_recovery_advice_generation_preserves_sources_and_successful_outputs(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-recovery-preserve-") as temp_dir:
