@@ -950,6 +950,19 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
     if not isinstance(sharpen_text_edges_timing, dict):
         sharpen_text_edges_timing = {}
     processed_records = [record for record in manifest["files"] if record.get("status") in {"processed", "resumed"}]
+    auto_crop_reasons = [
+        record.get("crop_reason")
+        for record in processed_records
+        if isinstance(record.get("crop_reason"), str)
+    ]
+    auto_crop_skipped_reasons = [
+        reason
+        for record in processed_records
+        for reason in [record.get("crop_reason")]
+        if record.get("cropped") is False
+        and isinstance(reason, str)
+        and reason != "auto crop disabled"
+    ]
     dark_border_reasons = [
         record.get("dark_border_reason")
         for record in processed_records
@@ -1115,6 +1128,16 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             ),
             "dark_border_trimmed_files": sum(
                 1 for record in processed_records if record.get("dark_border_trimmed") is True
+            ),
+            "auto_crop_applied_files": sum(1 for record in processed_records if record.get("cropped") is True),
+            "auto_crop_skipped_files": sum(
+                1
+                for record in processed_records
+                if record.get("cropped") is False
+                and record.get("crop_reason") not in {None, "auto crop disabled"}
+            ),
+            "auto_crop_low_confidence_skip_files": _auto_crop_low_confidence_skip_count(
+                auto_crop_skipped_reasons
             ),
             "dark_border_skipped_files": sum(
                 1
@@ -1282,6 +1305,7 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                 ),
                 "reason_distribution": _reason_counts(reason for reason in dark_border_reasons if isinstance(reason, str)),
             },
+            "auto_crop": _auto_crop_audit_summary(processed_records, audit_records, auto_crop_reasons),
             "deskew": {
                 "corrected_files": sum(1 for record in processed_records if record.get("deskewed") is True),
                 "skipped_files": sum(
@@ -1752,6 +1776,97 @@ def _ratio_distribution(records: list[dict[str, Any]], key: str) -> dict[str, in
         else:
             buckets["0.25+"] += 1
     return buckets
+
+
+def _auto_crop_audit_summary(
+    processed_records: list[dict[str, Any]],
+    audit_records: list[dict[str, Any]],
+    auto_crop_reasons: list[str],
+) -> dict[str, Any]:
+    skipped_reasons = [
+        reason
+        for record in processed_records
+        for reason in [record.get("crop_reason")]
+        if record.get("cropped") is False
+        and isinstance(reason, str)
+        and reason != "auto crop disabled"
+    ]
+    return {
+        "applied_files": sum(1 for record in processed_records if record.get("cropped") is True),
+        "skipped_files": len(skipped_reasons),
+        "cropped_side_distribution": _auto_crop_side_distribution(processed_records),
+        "crop_ratio": _aggregate_metric(
+            [audit for audit in audit_records if _float_metric(audit, "crop_ratio") > 0],
+            "crop_ratio",
+        ),
+        "crop_ratio_distribution": _ratio_distribution(audit_records, "crop_ratio"),
+        "reason_distribution": _reason_counts(reason for reason in auto_crop_reasons if isinstance(reason, str)),
+        "skip_reason_distribution": _reason_counts(skipped_reasons),
+        "protection_triggered_files": _auto_crop_protection_skip_count(skipped_reasons),
+        "low_confidence_skip_files": _auto_crop_low_confidence_skip_count(skipped_reasons),
+        "cumulative_guard_reverted_files": sum(
+            1
+            for record in processed_records
+            if record.get("crop_reason") == "reverted by cumulative change guard"
+        ),
+    }
+
+
+def _auto_crop_side_distribution(processed_records: list[dict[str, Any]]) -> dict[str, int]:
+    sides = {"left": 0, "top": 0, "right": 0, "bottom": 0}
+    for record in processed_records:
+        bbox = record.get("crop_bbox")
+        original_size = record.get("original_size")
+        if (
+            record.get("cropped") is not True
+            or not isinstance(bbox, list)
+            or len(bbox) != 4
+            or not isinstance(original_size, list)
+            or len(original_size) != 2
+        ):
+            continue
+        width, height = original_size
+        if not isinstance(width, int) or not isinstance(height, int):
+            continue
+        left, top, right, bottom = bbox
+        if all(isinstance(value, int) for value in (left, top, right, bottom)):
+            if left > 0:
+                sides["left"] += 1
+            if top > 0:
+                sides["top"] += 1
+            if right < width:
+                sides["right"] += 1
+            if bottom < height:
+                sides["bottom"] += 1
+    return sides
+
+
+def _auto_crop_protection_skip_count(reasons: list[str]) -> int:
+    markers = (
+        "foreground reaches crop safety margin",
+        "inconsistent crop margin evidence",
+        "crop boundary evidence is too sparse",
+        "edge content",
+        "dark edge",
+        "shadow",
+        "binding",
+        "exceeds conservative",
+        "too small",
+    )
+    return sum(1 for reason in reasons if any(marker in reason for marker in markers))
+
+
+def _auto_crop_low_confidence_skip_count(reasons: list[str]) -> int:
+    markers = (
+        "no confident foreground",
+        "low-confidence",
+        "low contrast",
+        "subtle page edge",
+        "weak crop",
+        "image too small",
+        "candidate crop change is too small",
+    )
+    return sum(1 for reason in reasons if any(marker in reason for marker in markers))
 
 
 def _reason_counts(reasons: list[str]) -> dict[str, int]:
@@ -3983,10 +4098,34 @@ def _detect_conservative_crop_bbox(image: Image.Image) -> CropDetection:
     grayscale = image.convert("L")
     background = _corner_background_value(grayscale)
     diff = grayscale.point(lambda value: 255 if abs(value - background) >= 18 else 0)
-    bbox = diff.getbbox()
-    if not bbox:
-        return CropDetection(None, "no confident foreground outside background")
+    strong_bbox = diff.getbbox()
+    strong_result: CropDetection | None = None
+    if strong_bbox:
+        strong_result = _conservative_crop_candidate_from_bbox(diff, strong_bbox, image.size)
+        if strong_result.bbox or strong_result.reason == "foreground reaches crop safety margin":
+            return strong_result
 
+    light_bbox = _detect_light_outer_margin_bbox(grayscale, background)
+    if not light_bbox:
+        return strong_result or CropDetection(None, "no confident foreground outside background")
+
+    bbox = light_bbox
+    left, top, right, bottom = bbox
+    if not _light_crop_has_safe_inner_evidence(grayscale, diff, light_bbox, background):
+        return strong_result or CropDetection(None, "low-confidence subtle page edge evidence")
+
+    if not _crop_boundary_has_consistent_light_evidence(grayscale, light_bbox, background):
+        return strong_result or CropDetection(None, "crop boundary evidence is too sparse")
+
+    return CropDetection((left, top, right, bottom), "conservative crop applied")
+
+
+def _conservative_crop_candidate_from_bbox(
+    diff: Image.Image,
+    bbox: tuple[int, int, int, int],
+    image_size: tuple[int, int],
+) -> CropDetection:
+    width, height = image_size
     left, top, right, bottom = bbox
     margins = (left, top, width - right, height - bottom)
     if min(margins) < 2:
@@ -4006,6 +4145,125 @@ def _detect_conservative_crop_bbox(image: Image.Image) -> CropDetection:
         return CropDetection(None, "crop boundary evidence is too sparse")
 
     return CropDetection(bbox, "conservative crop applied")
+
+
+def _detect_light_outer_margin_bbox(image: Image.Image, background: float) -> tuple[int, int, int, int] | None:
+    width, height = image.size
+    max_x = min(width // 4, max(4, int(width * 0.18)))
+    max_y = min(height // 4, max(4, int(height * 0.18)))
+    threshold = 5.0
+    left = _first_consistent_light_edge(image, background, "left", max_x, threshold)
+    right_margin = _first_consistent_light_edge(image, background, "right", max_x, threshold)
+    top = _first_consistent_light_edge(image, background, "top", max_y, threshold)
+    bottom_margin = _first_consistent_light_edge(image, background, "bottom", max_y, threshold)
+    if None in {left, right_margin, top, bottom_margin}:
+        return None
+    assert left is not None and right_margin is not None and top is not None and bottom_margin is not None
+    right = width - right_margin
+    bottom = height - bottom_margin
+    if right <= left or bottom <= top:
+        return None
+    margins = (left, top, width - right, height - bottom)
+    if min(margins) < 2:
+        return None
+    if max(margins) > max(min(margins) * 3, min(margins) + max(4, int(min(width, height) * 0.08))):
+        return None
+    crop_area_ratio = ((right - left) * (bottom - top)) / max(1, width * height)
+    if crop_area_ratio < 0.45 or crop_area_ratio > 0.98:
+        return None
+    return (left, top, right, bottom)
+
+
+def _first_consistent_light_edge(
+    image: Image.Image,
+    background: float,
+    side: str,
+    max_margin: int,
+    threshold: float,
+) -> int | None:
+    width, height = image.size
+    band = 2
+    required_run = 3
+    run_start: int | None = None
+    run_length = 0
+    for offset in range(1, max_margin + 1):
+        if side == "left":
+            box = (offset, 0, min(width, offset + band), height)
+        elif side == "right":
+            box = (max(0, width - offset - band), 0, width - offset, height)
+        elif side == "top":
+            box = (0, offset, width, min(height, offset + band))
+        else:
+            box = (0, max(0, height - offset - band), width, height - offset)
+        if box[2] <= box[0] or box[3] <= box[1]:
+            continue
+        delta = abs(ImageStat.Stat(image.crop(box)).mean[0] - background)
+        if delta >= threshold:
+            if run_start is None:
+                run_start = offset
+            run_length += 1
+            if run_length >= required_run:
+                return run_start
+        else:
+            run_start = None
+            run_length = 0
+    return None
+
+
+def _light_crop_has_safe_inner_evidence(
+    grayscale: Image.Image,
+    strong_diff: Image.Image,
+    bbox: tuple[int, int, int, int],
+    background: float,
+) -> bool:
+    left, top, right, bottom = bbox
+    crop_width = right - left
+    crop_height = bottom - top
+    if crop_width < 10 or crop_height < 10:
+        return False
+    strong_bbox = strong_diff.getbbox()
+    if not strong_bbox:
+        return False
+    strong_left, strong_top, strong_right, strong_bottom = strong_bbox
+    strong_margins = (
+        strong_left - left,
+        strong_top - top,
+        right - strong_right,
+        bottom - strong_bottom,
+    )
+    boundary_band = max(2, int(min(crop_width, crop_height) * 0.025))
+    strong_touches_boundary = min(strong_margins) <= boundary_band
+    if strong_touches_boundary and not _crop_boundary_has_consistent_evidence(strong_diff, bbox):
+        return False
+    if _light_page_background_mean(grayscale.crop(bbox)) < 135:
+        return False
+    inner = grayscale.crop(
+        (
+            left + max(2, crop_width // 10),
+            top + max(2, crop_height // 10),
+            right - max(2, crop_width // 10),
+            bottom - max(2, crop_height // 10),
+        )
+    )
+    return abs(ImageStat.Stat(inner).mean[0] - background) >= 4.0
+
+
+def _crop_boundary_has_consistent_light_evidence(
+    image: Image.Image,
+    bbox: tuple[int, int, int, int],
+    background: float,
+) -> bool:
+    left, top, right, bottom = bbox
+    crop_width = right - left
+    crop_height = bottom - top
+    band = max(2, int(min(crop_width, crop_height) * 0.02))
+    boundaries = (
+        image.crop((left, top, min(right, left + band), bottom)),
+        image.crop((max(left, right - band), top, right, bottom)),
+        image.crop((left, top, right, min(bottom, top + band))),
+        image.crop((left, max(top, bottom - band), right, bottom)),
+    )
+    return all(abs(ImageStat.Stat(boundary).mean[0] - background) >= 5.0 for boundary in boundaries)
 
 
 def _crop_boundary_has_consistent_evidence(image: Image.Image, bbox: tuple[int, int, int, int]) -> bool:
