@@ -6945,6 +6945,42 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotEqual(record["pre_deskew_size"], record["post_deskew_size"])
             self.assertIn("deskew_conservative", record["operations"])
 
+    def test_deskew_corrects_sparse_stable_edge_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "A001_edges.png"
+            image = _synthetic_sparse_edge_evidence_page().rotate(
+                -2.0,
+                resample=Image.Resampling.BICUBIC,
+                expand=True,
+                fillcolor="white",
+            )
+            image.save(source)
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(deskew=True))
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            record = manifest["files"][0]
+            self.assertEqual(record["status"], "processed")
+            self.assertTrue(record["deskewed"])
+            self.assertAlmostEqual(record["skew_angle_degrees"], -2.0, delta=0.5)
+            self.assertGreaterEqual(record["skew_confidence"], 0.08)
+            self.assertEqual(record["deskew_reason"], "deskew applied")
+            self.assertNotEqual(record["pre_deskew_size"], record["post_deskew_size"])
+            self.assertIn("deskew_conservative", record["operations"])
+            self.assertEqual(audit_summary["counts"]["deskewed_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["deskew"]["corrected_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["deskew"]["reason_distribution"]["deskew applied"], 1)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("A001_edges", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
     def test_deskew_does_not_rotate_blank_or_low_contrast_pages(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -6961,12 +6997,16 @@ class ScanQcTest(unittest.TestCase):
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
             manifest = process_images(report, input_dir, process_dir, ProcessingOptions(deskew=True))
+            audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
 
             records = {record["source_relative_path"]: record for record in manifest["files"]}
             self.assertFalse(records["A001_0001.png"]["deskewed"])
             self.assertFalse(records["A001_0002.png"]["deskewed"])
             self.assertIn(records["A001_0001.png"]["deskew_reason"], {"blank page", "low contrast"})
             self.assertEqual(records["A001_0002.png"]["deskew_reason"], "low contrast")
+            self.assertEqual(audit_summary["counts"]["deskew_skipped_files"], 2)
+            self.assertEqual(audit_summary["guardrails"]["deskew"]["skipped_files"], 2)
+            self.assertGreaterEqual(audit_summary["guardrails"]["deskew"]["reason_distribution"]["low contrast"], 1)
 
     def test_deskew_noops_for_sparse_and_inconsistent_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -7014,6 +7054,11 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(record["pre_deskew_size"], record["post_deskew_size"])
             self.assertEqual(record["output_size"], record["pre_deskew_size"])
             self.assertIn("deskew_noop", record["operations"])
+            self.assertEqual(audit_summary["counts"]["deskew_skipped_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["deskew"]["reason_distribution"]["edge content near rotation boundary"],
+                1,
+            )
             self.assertNotIn(record["source_sha256"], json.dumps(audit_summary, ensure_ascii=False))
 
     def test_deskew_does_not_rotate_large_angle(self) -> None:
@@ -10055,6 +10100,16 @@ def _synthetic_edge_content_skew_page() -> Image.Image:
     draw.line((0, 75, 44, 75), fill=(15, 15, 15), width=3)
     draw.line((235, 0, 235, 179), fill=(40, 40, 40), width=3)
     return image.rotate(-2.5, resample=Image.Resampling.BICUBIC, expand=True, fillcolor="white")
+
+
+def _synthetic_sparse_edge_evidence_page() -> Image.Image:
+    image = Image.new("RGB", (400, 300), "white")
+    draw = ImageDraw.Draw(image)
+    for x in (80, 320):
+        draw.line((x, 45, x, 255), fill=(20, 20, 20), width=3)
+    for y in (70, 230):
+        draw.line((115, y, 285, y), fill=(25, 25, 25), width=2)
+    return image
 
 
 def _synthetic_inconsistent_skew_page() -> Image.Image:
