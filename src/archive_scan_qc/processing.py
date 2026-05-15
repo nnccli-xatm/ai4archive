@@ -1802,6 +1802,17 @@ def _auto_crop_audit_summary(
         "crop_ratio_distribution": _ratio_distribution(audit_records, "crop_ratio"),
         "reason_distribution": _reason_counts(reason for reason in auto_crop_reasons if isinstance(reason, str)),
         "skip_reason_distribution": _reason_counts(skipped_reasons),
+        "post_deskew_safe_crop_files": sum(
+            1
+            for record in processed_records
+            if record.get("crop_reason") == "post-deskew safe canvas crop applied"
+        ),
+        "edge_content_protection_skip_files": sum(
+            1
+            for reason in skipped_reasons
+            if reason == "post-deskew crop skipped: edge content protection"
+        ),
+        "risk_skip_files": sum(1 for reason in skipped_reasons if "crop risk" in reason),
         "protection_triggered_files": _auto_crop_protection_skip_count(skipped_reasons),
         "low_confidence_skip_files": _auto_crop_low_confidence_skip_count(skipped_reasons),
         "cumulative_guard_reverted_files": sum(
@@ -1816,7 +1827,7 @@ def _auto_crop_side_distribution(processed_records: list[dict[str, Any]]) -> dic
     sides = {"left": 0, "top": 0, "right": 0, "bottom": 0}
     for record in processed_records:
         bbox = record.get("crop_bbox")
-        original_size = record.get("original_size")
+        original_size = record.get("post_deskew_size") or record.get("original_size")
         if (
             record.get("cropped") is not True
             or not isinstance(bbox, list)
@@ -1847,10 +1858,12 @@ def _auto_crop_protection_skip_count(reasons: list[str]) -> int:
         "inconsistent crop margin evidence",
         "crop boundary evidence is too sparse",
         "edge content",
+        "edge content protection",
         "dark edge",
         "shadow",
         "binding",
         "exceeds conservative",
+        "crop risk",
         "too small",
     )
     return sum(1 for reason in reasons if any(marker in reason for marker in markers))
@@ -1860,6 +1873,7 @@ def _auto_crop_low_confidence_skip_count(reasons: list[str]) -> int:
     markers = (
         "no confident foreground",
         "low-confidence",
+        "low-confidence canvas edge",
         "low contrast",
         "subtle page edge",
         "weak crop",
@@ -1978,7 +1992,13 @@ def _process_image(
     crop_reason = "auto crop disabled"
     with _operation_timer(operation_timings, "auto_crop", enabled=options.auto_crop):
         if options.auto_crop:
-            crop_detection = _detect_conservative_crop_bbox(processed)
+            crop_detection = (
+                _detect_post_deskew_canvas_crop_bbox(processed)
+                if deskewed
+                else CropDetection(None, "post-deskew crop skipped: deskew not applied")
+            )
+            if crop_detection.bbox is None and crop_detection.reason != "post-deskew crop skipped: edge content protection":
+                crop_detection = _detect_conservative_crop_bbox(processed)
             crop_bbox = crop_detection.bbox
             crop_reason = crop_detection.reason
             if crop_bbox:
@@ -4088,6 +4108,121 @@ def _rotate_for_deskew(image: Image.Image, correction_angle: float) -> Image.Ima
     else:
         fillcolor = fill
     return image.rotate(correction_angle, resample=Image.Resampling.BICUBIC, expand=True, fillcolor=fillcolor)
+
+
+def _detect_post_deskew_canvas_crop_bbox(image: Image.Image) -> CropDetection:
+    width, height = image.size
+    if width < 40 or height < 40:
+        return CropDetection(None, "post-deskew crop skipped: low-confidence canvas edge")
+
+    grayscale = image.convert("L")
+    canvas = float(_corner_background_value(grayscale))
+    page_background = _post_deskew_inner_light_background(grayscale)
+    if page_background < 135 or abs(page_background - canvas) < 3.0:
+        return CropDetection(None, "post-deskew crop skipped: low-confidence canvas edge")
+
+    max_x = min(width // 5, max(4, int(width * 0.14)))
+    max_y = min(height // 5, max(4, int(height * 0.14)))
+    threshold = max(3.0, min(7.0, abs(page_background - canvas) * 0.25))
+    left = _first_post_deskew_canvas_edge(grayscale, canvas, "left", max_x, threshold)
+    right_margin = _first_post_deskew_canvas_edge(grayscale, canvas, "right", max_x, threshold)
+    top = _first_post_deskew_canvas_edge(grayscale, canvas, "top", max_y, threshold)
+    bottom_margin = _first_post_deskew_canvas_edge(grayscale, canvas, "bottom", max_y, threshold)
+    if None in {left, right_margin, top, bottom_margin}:
+        return CropDetection(None, "post-deskew crop skipped: low-confidence canvas edge")
+    assert left is not None and right_margin is not None and top is not None and bottom_margin is not None
+
+    right = width - right_margin
+    bottom = height - bottom_margin
+    if right <= left or bottom <= top:
+        return CropDetection(None, "post-deskew crop skipped: crop risk too large")
+
+    margins = (left, top, width - right, height - bottom)
+    if min(margins) < 2:
+        return CropDetection(None, "post-deskew crop skipped: low-confidence canvas edge")
+    max_trim_ratio = max(left / width, (width - right) / width, top / height, (height - bottom) / height)
+    if max_trim_ratio > 0.14:
+        return CropDetection(None, "post-deskew crop skipped: crop risk too large")
+
+    crop_area_ratio = ((right - left) * (bottom - top)) / max(1, width * height)
+    if crop_area_ratio < 0.70:
+        return CropDetection(None, "post-deskew crop skipped: crop risk too large")
+    if crop_area_ratio > 0.985:
+        return CropDetection(None, "post-deskew crop skipped: low-confidence canvas edge")
+
+    bbox = (left, top, right, bottom)
+    if not _post_deskew_crop_has_page_boundary_evidence(grayscale, bbox, canvas, threshold):
+        return CropDetection(None, "post-deskew crop skipped: low-confidence canvas edge")
+    if _has_protected_dark_content_near_trim_boundary(grayscale, bbox):
+        return CropDetection(None, "post-deskew crop skipped: edge content protection")
+    return CropDetection(bbox, "post-deskew safe canvas crop applied")
+
+
+def _first_post_deskew_canvas_edge(
+    image: Image.Image,
+    canvas: float,
+    side: str,
+    max_margin: int,
+    threshold: float,
+) -> int | None:
+    width, height = image.size
+    band = 2
+    required_run = 2
+    run_start: int | None = None
+    run_length = 0
+    for offset in range(1, max_margin + 1):
+        if side == "left":
+            box = (offset, height // 5, min(width, offset + band), height - height // 5)
+        elif side == "right":
+            box = (max(0, width - offset - band), height // 5, width - offset, height - height // 5)
+        elif side == "top":
+            box = (width // 5, offset, width - width // 5, min(height, offset + band))
+        else:
+            box = (width // 5, max(0, height - offset - band), width - width // 5, height - offset)
+        if box[2] <= box[0] or box[3] <= box[1]:
+            continue
+        delta = abs(ImageStat.Stat(image.crop(box)).mean[0] - canvas)
+        if delta >= threshold:
+            if run_start is None:
+                run_start = offset
+            run_length += 1
+            if run_length >= required_run:
+                return run_start
+        else:
+            run_start = None
+            run_length = 0
+    return None
+
+
+def _post_deskew_inner_light_background(image: Image.Image) -> float:
+    width, height = image.size
+    margin_x = max(1, int(width * 0.20))
+    margin_y = max(1, int(height * 0.20))
+    if margin_x * 2 >= width or margin_y * 2 >= height:
+        sample = image
+    else:
+        sample = image.crop((margin_x, margin_y, width - margin_x, height - margin_y))
+    histogram = sample.histogram()
+    return float(_histogram_percentile(histogram, sample.width * sample.height, 0.82))
+
+
+def _post_deskew_crop_has_page_boundary_evidence(
+    image: Image.Image,
+    bbox: tuple[int, int, int, int],
+    canvas: float,
+    threshold: float,
+) -> bool:
+    left, top, right, bottom = bbox
+    crop_width = right - left
+    crop_height = bottom - top
+    band = max(2, int(min(crop_width, crop_height) * 0.015))
+    boundaries = (
+        image.crop((left, top, min(right, left + band), bottom)),
+        image.crop((max(left, right - band), top, right, bottom)),
+        image.crop((left, top, right, min(bottom, top + band))),
+        image.crop((left, max(top, bottom - band), right, bottom)),
+    )
+    return all(abs(ImageStat.Stat(boundary).mean[0] - canvas) >= threshold for boundary in boundaries)
 
 
 def _detect_conservative_crop_bbox(image: Image.Image) -> CropDetection:
