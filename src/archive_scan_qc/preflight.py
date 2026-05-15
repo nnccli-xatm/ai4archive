@@ -24,6 +24,7 @@ PROCESSING_FLAGS = (
     "lighten_background_stains",
     "lighten_scanlines",
     "enhance_faded_text",
+    "sharpen_text_edges",
     "resume_processing",
 )
 
@@ -49,6 +50,7 @@ class PreflightConfig:
     lighten_background_stains: bool = False
     lighten_scanlines: bool = False
     enhance_faded_text: bool = False
+    sharpen_text_edges: bool = False
     resume_processing: bool = False
 
 

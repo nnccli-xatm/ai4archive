@@ -64,6 +64,9 @@ def build_processing_plan(
         "faded_text_enhancement_candidates": sum(
             1 for record in records if record.get("faded_text_enhancement_candidate")
         ),
+        "text_edge_sharpening_candidates": sum(
+            1 for record in records if record.get("text_edge_sharpening_candidate")
+        ),
     }
     return {
         "schema_version": "scan-qc.processing-plan.v1",
@@ -80,6 +83,7 @@ def build_processing_plan(
             "lighten_background_stains": options.lighten_background_stains,
             "lighten_scanlines": options.lighten_scanlines,
             "enhance_faded_text": options.enhance_faded_text,
+            "sharpen_text_edges": options.sharpen_text_edges,
             "resume_processing": False,
             "reuse_scan_measurements": options.reuse_scan_measurements,
         },
@@ -148,6 +152,11 @@ def _plan_record(item: dict[str, Any], input_dir: Path, options: ProcessingOptio
         "faded_text_delta": 0.0,
         "faded_text_changed_pixel_ratio": 0.0,
         "faded_text_candidate_pixel_ratio": 0.0,
+        "text_edge_sharpening_candidate": False,
+        "text_edges_reason": None,
+        "text_edges_delta": 0.0,
+        "text_edges_changed_pixel_ratio": 0.0,
+        "text_edges_candidate_pixel_ratio": 0.0,
         "processing_audit": None,
         "processing_warnings": [],
         "failure_reason": None,
@@ -204,6 +213,11 @@ def _plan_record(item: dict[str, Any], input_dir: Path, options: ProcessingOptio
             "faded_text_delta": process_info["faded_text_delta"],
             "faded_text_changed_pixel_ratio": process_info["faded_text_changed_pixel_ratio"],
             "faded_text_candidate_pixel_ratio": process_info["faded_text_candidate_pixel_ratio"],
+            "text_edge_sharpening_candidate": process_info["text_edges_sharpened"],
+            "text_edges_reason": process_info["text_edges_reason"],
+            "text_edges_delta": process_info["text_edges_delta"],
+            "text_edges_changed_pixel_ratio": process_info["text_edges_changed_pixel_ratio"],
+            "text_edges_candidate_pixel_ratio": process_info["text_edges_candidate_pixel_ratio"],
             "processing_audit": process_info["processing_audit"],
             "processing_warnings": process_info["processing_warnings"],
         }
@@ -245,6 +259,11 @@ def _write_plan_csv(plan: dict[str, Any], path: Path) -> None:
         "faded_text_delta",
         "faded_text_changed_pixel_ratio",
         "faded_text_candidate_pixel_ratio",
+        "text_edge_sharpening_candidate",
+        "text_edges_reason",
+        "text_edges_delta",
+        "text_edges_changed_pixel_ratio",
+        "text_edges_candidate_pixel_ratio",
         "processing_warnings",
         "failure_reason",
     ]

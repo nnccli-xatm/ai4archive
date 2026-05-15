@@ -20,7 +20,7 @@ import urllib.request
 from unittest import mock
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter, ImageStat
 
 from archive_scan_qc import __version__
 from archive_scan_qc import processing as processing_module
@@ -5770,6 +5770,105 @@ class ScanQcTest(unittest.TestCase):
             self.assertFalse(audit_summary["privacy"]["contains_paths"])
             self.assertNotIn("private_dense_texture", audit_summary_text)
 
+    def test_sharpen_text_edges_lightly_improves_blurred_text_and_records_aggregate_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "private_blurred_text.png"
+            _synthetic_blurred_text_page().save(source, dpi=(300, 300))
+            source_bytes = source.read_bytes()
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(sharpen_text_edges=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+            audit = record["processing_audit"]
+            processed = Image.open(process_dir / record["output_relative_path"])
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertTrue(record["text_edges_sharpened"])
+            self.assertIn("sharpen_text_edges_conservative", record["operations"])
+            self.assertGreater(_edge_energy(processed), _edge_energy(Image.open(source)))
+            self.assertGreater(audit["text_edges_delta"], 3.0)
+            self.assertGreater(audit["text_edges_changed_pixel_ratio"], 0.0)
+            self.assertLessEqual(audit["text_edges_changed_pixel_ratio"], 0.08)
+            self.assertLessEqual(audit["text_edges_candidate_pixel_ratio"], 0.12)
+            self.assertEqual(audit["guardrail_failures"], [])
+            self.assertTrue(audit_summary["operations"]["sharpen_text_edges"])
+            self.assertEqual(audit_summary["counts"]["text_edges_sharpened_files"], 1)
+            self.assertIn("text_edges_changed_pixel_ratio", audit_summary["metrics"])
+            self.assertTrue(audit_summary["timing"]["operation_timings"]["sharpen_text_edges"]["enabled"])
+            self.assertNotIn("private_blurred_text", audit_summary_text)
+
+    def test_sharpen_text_edges_noops_for_clear_color_photo_texture_and_default_off(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            default_process_dir = root / "processed-default"
+            input_dir.mkdir()
+            pages = {
+                "A001_clear_text.png": _synthetic_text_page(),
+                "A002_red_stamp.png": _synthetic_blurred_text_page(red_stamp=True),
+                "A003_photo_like.png": _synthetic_photo_like_page(),
+                "A004_texture_stain.png": _synthetic_texture_stain_page(),
+            }
+            for name, image in pages.items():
+                image.save(input_dir / name, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            default_manifest = process_images(report, input_dir, default_process_dir, ProcessingOptions(workers=1))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(sharpen_text_edges=True, workers=1),
+            )
+            audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
+
+            for record in default_manifest["files"]:
+                self.assertFalse(record["text_edges_sharpened"])
+                self.assertIn("sharpen_text_edges_disabled", record["operations"])
+                self.assertEqual(record["processing_audit"]["text_edges_changed_pixel_ratio"], 0.0)
+            for record in manifest["files"]:
+                self.assertFalse(record["text_edges_sharpened"], record["source_relative_path"])
+                self.assertIn("sharpen_text_edges_noop", record["operations"])
+                self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
+                self.assertLessEqual(record["processing_audit"]["text_edges_changed_pixel_ratio"], 0.002)
+            self.assertTrue(audit_summary["operations"]["sharpen_text_edges"])
+            self.assertEqual(audit_summary["counts"]["text_edges_sharpened_files"], 0)
+
+    def test_sharpen_text_edges_default_off_preserves_derivative_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            _synthetic_blurred_text_page().save(input_dir / "A001_0001.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(workers=1))
+            record = manifest["files"][0]
+
+            self.assertFalse(record["text_edges_sharpened"])
+            self.assertIn("sharpen_text_edges_disabled", record["operations"])
+            self.assertEqual(record["processing_audit"]["text_edges_changed_pixel_ratio"], 0.0)
+            self.assertEqual(
+                _sha256_for_test(input_dir / "A001_0001.png"),
+                _sha256_for_test(process_dir / record["output_relative_path"]),
+            )
+
     def test_process_images_writes_audit_summary_and_retry_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -8783,6 +8882,7 @@ class ScanQcTest(unittest.TestCase):
                 "--lighten-background-stains",
                 "--lighten-scanlines",
                 "--enhance-faded-text",
+                "--sharpen-text-edges",
             ]:
                 with self.assertRaises(SystemExit) as raised:
                     main(["--input", str(input_dir), "--out", str(output_dir), option])
@@ -9578,6 +9678,17 @@ def _synthetic_faded_text_page(
     return image
 
 
+def _synthetic_blurred_text_page(*, red_stamp: bool = False) -> Image.Image:
+    image = Image.new("RGB", (240, 180), (244, 244, 244))
+    draw = ImageDraw.Draw(image)
+    for y in range(38, 132, 18):
+        draw.rectangle((42, y, 164, y + 3), fill=(42, 42, 42))
+        draw.rectangle((46, y + 8, 136, y + 10), fill=(58, 58, 58))
+    if red_stamp:
+        draw.ellipse((166, 48, 216, 98), outline=(180, 40, 35), width=3)
+    return image.filter(ImageFilter.GaussianBlur(radius=0.8))
+
+
 def _synthetic_photo_like_page() -> Image.Image:
     image = Image.new("RGB", (240, 180), (232, 232, 232))
     draw = ImageDraw.Draw(image)
@@ -9619,6 +9730,11 @@ def _sha256_for_test(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _edge_energy(image: Image.Image) -> float:
+    edges = image.convert("L").filter(ImageFilter.FIND_EDGES)
+    return float(ImageStat.Stat(edges).mean[0])
 
 
 def _synthetic_ink_text_page() -> Image.Image:

@@ -80,6 +80,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lighten-background-stains", action="store_true", help="Enable conservative light background stain lightening.")
     parser.add_argument("--lighten-scanlines", action="store_true", help="Enable conservative low-contrast scanline lightening.")
     parser.add_argument("--enhance-faded-text", action="store_true", help="Enable conservative low-contrast faded text enhancement.")
+    parser.add_argument("--sharpen-text-edges", action="store_true", help="Enable conservative blurred text edge sharpening.")
     parser.add_argument(
         "--despeckle-backend",
         choices=("fallback", "numpy"),
@@ -167,6 +168,7 @@ def run_private_integration(args: argparse.Namespace) -> PrivateIntegrationResul
                 lighten_background_stains=getattr(args, "lighten_background_stains", False),
                 lighten_scanlines=getattr(args, "lighten_scanlines", False),
                 enhance_faded_text=getattr(args, "enhance_faded_text", False),
+                sharpen_text_edges=getattr(args, "sharpen_text_edges", False),
                 despeckle_backend=despeckle_backend,
                 resume_processing=args.resume_processing,
                 reuse_scan_measurements=args.reuse_scan_measurements,
@@ -275,6 +277,7 @@ def _public_summary(
             "lighten_background_stains": bool(getattr(args, "lighten_background_stains", False)),
             "lighten_scanlines": bool(getattr(args, "lighten_scanlines", False)),
             "enhance_faded_text": bool(getattr(args, "enhance_faded_text", False)),
+            "sharpen_text_edges": bool(getattr(args, "sharpen_text_edges", False)),
         },
         "despeckle_backend": despeckle_backend,
         "warning_item_count": len(warning_items),
@@ -548,6 +551,7 @@ def _benchmark_operation_timings(benchmark_summary: dict[str, Any] | None) -> di
         "lighten_background_stains",
         "lighten_scanlines",
         "enhance_faded_text",
+        "sharpen_text_edges",
     ]
     totals: dict[str, dict[str, Any]] = {}
     for operation in operation_names:
@@ -683,6 +687,7 @@ def _benchmark_args(args: argparse.Namespace, input_dir: Path, output_root: Path
         lighten_background_stains=getattr(args, "lighten_background_stains", False),
         lighten_scanlines=getattr(args, "lighten_scanlines", False),
         enhance_faded_text=getattr(args, "enhance_faded_text", False),
+        sharpen_text_edges=getattr(args, "sharpen_text_edges", False),
         despeckle_backend=despeckle_backend,
         min_dpi=args.min_dpi,
         name_pattern=args.name_pattern,

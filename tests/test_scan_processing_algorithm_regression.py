@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 
 from archive_scan_qc.benchmark import run_benchmark
 
@@ -70,6 +70,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     "private_stain_page.png",
                     "private_scanline_page.png",
                     "private_faded_text_page.png",
+                    "private_blurred_text_page.png",
                     str(input_dir),
                     "source_relative_path",
                     "source_sha256",
@@ -86,6 +87,7 @@ CONSERVATIVE_REPAIR_FLAGS = (
     "--lighten-background-stains",
     "--lighten-scanlines",
     "--enhance-faded-text",
+    "--sharpen-text-edges",
 )
 REQUIRED_OPERATIONS = (
     "deskew",
@@ -97,6 +99,7 @@ REQUIRED_OPERATIONS = (
     "lighten_background_stains",
     "lighten_scanlines",
     "enhance_faded_text",
+    "sharpen_text_edges",
 )
 CONSERVATIVE_REPAIR_OPERATIONS = (
     "normalize_tones",
@@ -104,6 +107,7 @@ CONSERVATIVE_REPAIR_OPERATIONS = (
     "lighten_background_stains",
     "lighten_scanlines",
     "enhance_faded_text",
+    "sharpen_text_edges",
 )
 
 
@@ -130,6 +134,7 @@ def _benchmark_combo(root: Path, input_dir: Path, label: str, *flags: str) -> di
             lighten_background_stains="--lighten-background-stains" in flag_set,
             lighten_scanlines="--lighten-scanlines" in flag_set,
             enhance_faded_text="--enhance-faded-text" in flag_set,
+            sharpen_text_edges="--sharpen-text-edges" in flag_set,
             reuse_scan_measurements=False,
             despeckle_backend="fallback",
             min_dpi=None,
@@ -164,12 +169,13 @@ def _assert_required_metrics_present(
         "lighten_background_stains": ("delta", "changed_pixel_ratio", "candidate_pixel_ratio"),
         "lighten_scanlines": ("delta", "changed_pixel_ratio", "candidate_pixel_ratio"),
         "enhance_faded_text": ("delta", "changed_pixel_ratio", "candidate_pixel_ratio"),
+        "sharpen_text_edges": ("delta", "changed_pixel_ratio", "candidate_pixel_ratio"),
     }
     for operation, metric_names in expected.items():
         metrics = algorithm_metrics[operation]["metrics"]
         for metric_name in metric_names:
             testcase.assertIn(metric_name, metrics, operation)
-            testcase.assertEqual(metrics[metric_name]["count"], 5, f"{operation}.{metric_name}")
+            testcase.assertEqual(metrics[metric_name]["count"], 6, f"{operation}.{metric_name}")
 
 
 def _assert_algorithm_thresholds(testcase: unittest.TestCase, quality: dict[str, object]) -> None:
@@ -190,6 +196,8 @@ def _assert_algorithm_thresholds(testcase: unittest.TestCase, quality: dict[str,
         ("lighten_scanlines", "candidate_pixel_ratio"): "max_scanlines_candidate_pixel_ratio",
         ("enhance_faded_text", "changed_pixel_ratio"): "max_faded_text_changed_pixel_ratio",
         ("enhance_faded_text", "candidate_pixel_ratio"): "max_faded_text_candidate_pixel_ratio",
+        ("sharpen_text_edges", "changed_pixel_ratio"): "max_text_edges_changed_pixel_ratio",
+        ("sharpen_text_edges", "candidate_pixel_ratio"): "max_text_edges_candidate_pixel_ratio",
     }
     for (operation, metric_name), threshold_name in checks.items():
         observed = algorithm_metrics[operation]["metrics"][metric_name]["max"]
@@ -203,6 +211,7 @@ def _synthetic_pages(input_dir: Path) -> None:
     _stain_page().save(input_dir / "private_stain_page.png", dpi=(300, 300))
     _scanline_page().save(input_dir / "private_scanline_page.png", dpi=(300, 300))
     _faded_text_page().save(input_dir / "private_faded_text_page.png", dpi=(300, 300))
+    _blurred_text_page().save(input_dir / "private_blurred_text_page.png", dpi=(300, 300))
 
 
 def _text_page() -> Image.Image:
@@ -252,3 +261,12 @@ def _faded_text_page() -> Image.Image:
         draw.line((24, y, 104, y), fill=(188, 188, 188), width=2)
         draw.line((28, y + 6, 92, y + 6), fill=(192, 192, 192), width=2)
     return image
+
+
+def _blurred_text_page() -> Image.Image:
+    image = Image.new("RGB", (128, 96), (244, 244, 244))
+    draw = ImageDraw.Draw(image)
+    for y in range(24, 72, 12):
+        draw.line((24, y, 104, y), fill=(42, 42, 42), width=2)
+        draw.line((28, y + 5, 92, y + 5), fill=(58, 58, 58), width=2)
+    return image.filter(ImageFilter.GaussianBlur(radius=0.7))

@@ -71,6 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lighten-background-stains", action="store_true", help="Enable conservative light background stain lightening.")
     parser.add_argument("--lighten-scanlines", action="store_true", help="Enable conservative low-contrast scanline lightening.")
     parser.add_argument("--enhance-faded-text", action="store_true", help="Enable conservative low-contrast faded text enhancement.")
+    parser.add_argument("--sharpen-text-edges", action="store_true", help="Enable conservative blurred text edge sharpening.")
     parser.add_argument(
         "--reuse-scan-measurements",
         action="store_true",
@@ -151,6 +152,7 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
                         lighten_background_stains=args.lighten_background_stains,
                         lighten_scanlines=args.lighten_scanlines,
                         enhance_faded_text=args.enhance_faded_text,
+                        sharpen_text_edges=getattr(args, "sharpen_text_edges", False),
                         despeckle_backend=despeckle_backend,
                         reuse_scan_measurements=getattr(args, "reuse_scan_measurements", False),
                         workers=workers,
@@ -649,6 +651,8 @@ def _processing_quality_thresholds() -> dict[str, float]:
         "max_scanlines_candidate_pixel_ratio": 1.0,
         "max_faded_text_changed_pixel_ratio": 0.10,
         "max_faded_text_candidate_pixel_ratio": 0.18,
+        "max_text_edges_changed_pixel_ratio": 0.08,
+        "max_text_edges_candidate_pixel_ratio": 0.12,
     }
 
 
@@ -731,6 +735,17 @@ def _repair_algorithm_metrics(
                 "candidate_pixel_ratio": "faded_text_candidate_pixel_ratio",
             },
         ),
+        "sharpen_text_edges": _algorithm_summary(
+            audit_records,
+            operation_timings,
+            operation="sharpen_text_edges",
+            changed_flag="text_edges_sharpened",
+            metrics={
+                "delta": "text_edges_delta",
+                "changed_pixel_ratio": "text_edges_changed_pixel_ratio",
+                "candidate_pixel_ratio": "text_edges_candidate_pixel_ratio",
+            },
+        ),
     }
 
 
@@ -772,6 +787,8 @@ def _quality_threshold_violations(
         ("lighten_scanlines", "candidate_pixel_ratio"): "max_scanlines_candidate_pixel_ratio",
         ("enhance_faded_text", "changed_pixel_ratio"): "max_faded_text_changed_pixel_ratio",
         ("enhance_faded_text", "candidate_pixel_ratio"): "max_faded_text_candidate_pixel_ratio",
+        ("sharpen_text_edges", "changed_pixel_ratio"): "max_text_edges_changed_pixel_ratio",
+        ("sharpen_text_edges", "candidate_pixel_ratio"): "max_text_edges_candidate_pixel_ratio",
     }
     violations: list[dict[str, Any]] = []
     for (operation, metric_name), threshold_name in checks.items():
@@ -797,6 +814,7 @@ def _enhancement_changed_files(audit_records: list[dict[str, Any]]) -> int:
         "background_stains_lightened",
         "scanlines_lightened",
         "faded_text_enhanced",
+        "text_edges_sharpened",
     )
     return sum(1 for audit in audit_records if any(audit.get(flag) is True for flag in enhancement_flags))
 
@@ -833,6 +851,7 @@ def _operations(args: argparse.Namespace) -> dict[str, bool | str]:
         "lighten_background_stains": getattr(args, "lighten_background_stains", False),
         "lighten_scanlines": getattr(args, "lighten_scanlines", False),
         "enhance_faded_text": getattr(args, "enhance_faded_text", False),
+        "sharpen_text_edges": getattr(args, "sharpen_text_edges", False),
         "despeckle_backend": getattr(args, "despeckle_backend", "fallback"),
         "reuse_scan_measurements": getattr(args, "reuse_scan_measurements", False),
     }
@@ -872,6 +891,7 @@ def _csv_fields() -> list[str]:
         "lighten_background_stains",
         "lighten_scanlines",
         "enhance_faded_text",
+        "sharpen_text_edges",
         "reuse_scan_measurements",
         "total_files",
         "openable_files",
@@ -923,6 +943,7 @@ def _csv_row(run: dict[str, Any], environment: dict[str, Any]) -> dict[str, Any]
         "lighten_background_stains": operations.get("lighten_background_stains", False),
         "lighten_scanlines": operations.get("lighten_scanlines", False),
         "enhance_faded_text": operations.get("enhance_faded_text", False),
+        "sharpen_text_edges": operations.get("sharpen_text_edges", False),
         "reuse_scan_measurements": operations.get("reuse_scan_measurements", False),
         "total_files": run["total_files"],
         "openable_files": run["openable_files"],
