@@ -138,6 +138,47 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in ("synthetic_safe_combination.png", str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_trim_dark_border_auto_crop_combination_keeps_narrow_gray_edge_change_controlled(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-narrow-gray-trim-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            image = Image.new("RGB", (160, 120), (244, 244, 240))
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((0, 0, 159, 119), outline=(94, 94, 94), width=3)
+            draw.rectangle((54, 45, 106, 50), fill=(20, 20, 20))
+            draw.rectangle((54, 62, 118, 67), fill=(20, 20, 20))
+            image.save(input_dir / "synthetic_narrow_gray_combo.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "narrow-gray-trim", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(trim_dark_border=True, auto_crop=True, deskew=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+            audit = record["processing_audit"]
+
+            self.assertTrue(record["dark_border_trimmed"])
+            self.assertEqual(record["dark_border_bbox"], [3, 3, 157, 117])
+            self.assertFalse(record["cropped"])
+            self.assertEqual(record["crop_reason"], "candidate crop exceeds conservative crop ratio")
+            self.assertEqual(record["output_size"], [154, 114])
+            self.assertLessEqual(audit["max_trim_margin_ratio"], 0.025)
+            self.assertLessEqual(audit["cumulative_change_crop_ratio"], 0.025)
+            self.assertEqual(audit["guardrail_failures"], [])
+            self.assertEqual(audit_summary["counts"]["dark_border_trimmed_files"], 1)
+            self.assertEqual(audit_summary["counts"]["auto_crop_applied_files"], 0)
+            self.assertEqual(audit_summary["counts"]["auto_crop_skipped_files"], 1)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            for forbidden in ("synthetic_narrow_gray_combo.png", str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_risk_combination_pages_skip_or_stay_low_change(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-risk-") as temp_dir:
             root = Path(temp_dir)
