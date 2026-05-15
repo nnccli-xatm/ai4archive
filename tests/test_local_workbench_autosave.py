@@ -180,11 +180,40 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             input_dir.mkdir()
             controller = WorkbenchController()
 
-            with self.assertRaises(ValueError) as raised:
+            with self.assertRaises(WorkbenchPreflightError) as raised:
                 controller.configure(input_dir, output_dir)
 
             self.assertIn("不能和扫描原图文件夹相同", str(raised.exception))
+            guidance = raised.exception.guidance
+            self.assertTrue(guidance["aggregate_only"])
+            self.assertFalse(guidance["ready_to_start"])
+            self.assertFalse(guidance["can_start_processing"])
+            self.assertEqual(guidance["kind"], "unsafe_folder_choice")
+            self.assertIn("不要把输出文件夹放进扫描原图文件夹", " ".join(guidance["next_steps_zh"]))
             self.assertFalse(output_dir.exists())
+
+    def test_configure_rejects_source_inside_output_with_aggregate_guidance(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output_dir = root / "output"
+            input_dir = output_dir / "input"
+            input_dir.mkdir(parents=True)
+            (input_dir / "page.png").write_bytes(b"image")
+            controller = WorkbenchController()
+
+            with self.assertRaises(WorkbenchPreflightError) as raised:
+                controller.configure(input_dir, output_dir)
+
+            guidance = raised.exception.guidance
+            self.assertTrue(guidance["aggregate_only"])
+            self.assertEqual(guidance["kind"], "unsafe_source_inside_output")
+            self.assertFalse(guidance["ready_to_start"])
+            self.assertFalse(guidance["can_start_processing"])
+            self.assertIn("扫描原图文件夹不能放在处理后输出文件夹里面", guidance["message_zh"])
+            self.assertIn("不要把扫描原图文件夹放进输出文件夹", " ".join(guidance["next_steps_zh"]))
+            public_json = json.dumps(guidance, ensure_ascii=False, sort_keys=True)
+            self.assertNotIn(str(root), public_json)
+            self.assertNotIn("page.png", public_json)
 
     def test_configure_rejects_metadata_inside_source_before_creating_directories(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -396,14 +425,41 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertTrue(readiness["aggregate_only"])
             self.assertEqual(readiness["status"], "ready")
             self.assertTrue(readiness["ready_to_start"])
+            self.assertTrue(readiness["can_start_processing"])
             self.assertEqual(readiness["supported_image_count"], 1)
             self.assertFalse(readiness["input_empty"])
             self.assertTrue(readiness["output_writable"])
+            self.assertEqual(readiness["blocking_reasons_zh"], [])
             self.assertEqual(readiness["title_zh"], "文件夹可以开始处理")
             self.assertEqual(readiness["message_zh"], "本批预检结果：已识别到 1 张可处理图片，输出文件夹可以写入。")
             self.assertEqual(readiness["selected_processing_mode"]["id"], "light")
             self.assertNotIn("nested", json.dumps(readiness, ensure_ascii=False))
             self.assertNotIn("a.png", json.dumps(readiness, ensure_ascii=False))
+
+    def test_configure_readiness_blocks_unwritable_output_with_next_steps(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            (input_dir / "page.png").write_bytes(b"image")
+            controller = WorkbenchController()
+
+            with patch("archive_scan_qc.local_workbench._folder_is_writable", return_value=False):
+                readiness = controller.configure(input_dir, output_dir, metadata_dir)["folder_readiness"]
+
+            self.assertTrue(readiness["aggregate_only"])
+            self.assertEqual(readiness["status"], "blocked")
+            self.assertFalse(readiness["ready_to_start"])
+            self.assertFalse(readiness["can_start_processing"])
+            self.assertFalse(readiness["output_writable"])
+            self.assertIn("输出文件夹不能写入", readiness["title_zh"])
+            self.assertIn("磁盘", " ".join(readiness["next_steps_zh"]))
+            self.assertIn("换一个可以写入", " ".join(readiness["next_steps_zh"]))
+            public_json = json.dumps(readiness, ensure_ascii=False, sort_keys=True)
+            for forbidden in [str(root), str(input_dir), str(output_dir), "page.png", "sha256", "OCR", "thumbnail", "data:image"]:
+                self.assertNotIn(forbidden, public_json)
 
     def test_configure_readiness_guides_empty_folder(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
