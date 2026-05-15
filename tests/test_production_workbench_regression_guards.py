@@ -265,6 +265,40 @@ class ProductionWorkbenchRegressionGuardTests(unittest.TestCase):
         ]:
             self.assertNotIn(forbidden, html)
 
+    def test_progress_area_shows_only_aggregate_stage_timings(self) -> None:
+        html = WORKBENCH_HTML.read_text(encoding="utf-8")
+
+        for required in [
+            'id="stageTimingText"',
+            "stageTimingLabel",
+            "function deriveStageTimingLabel(summary, progress)",
+            "source.stage_timings",
+            "检查扫描图片",
+            "生成处理后图片",
+            "整理处理结果",
+            "formatStageSeconds",
+            "seconds.toFixed(1)",
+            '["completed", "finished", "running"].includes(stage.status)',
+            "^[\\u4e00-\\u9fff\\s]{2,18}$",
+            'els.stageTimingText.classList.toggle("hidden", !state.stageTimingLabel);',
+        ]:
+            self.assertIn(required, html)
+
+        start = html.find("function safeStageTimingLabel(stage)")
+        end = html.find("function runningGuidanceText()", start)
+        self.assertNotEqual(start, -1)
+        self.assertNotEqual(end, -1)
+        body = html[start:end]
+        for forbidden in [
+            "source_path",
+            "relative_path",
+            "file_name",
+            "filename",
+            "ocr_text",
+            "<img",
+        ]:
+            self.assertNotIn(forbidden, body.lower())
+
     def test_start_preflight_shows_aggregate_count_and_chinese_recovery(self) -> None:
         html = WORKBENCH_HTML.read_text(encoding="utf-8")
         server = Path(local_workbench_module.__file__).read_text(encoding="utf-8")

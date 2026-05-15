@@ -47,8 +47,11 @@ REQUIRED_TEXT = {
     "可处理图片数量",
     "批次正在运行，请等待",
     "阶段：",
+    "检查扫描图片",
     "已处理",
     "待处理",
+    "生成处理后图片",
+    "整理处理结果",
     "正在统计图片数量",
     "不能更改文件夹和处理方式",
     "处理中，请等待",
@@ -677,6 +680,17 @@ def main() -> int:
         errors.append("missing production-run status loader")
     if "operator_summary" not in html:
         errors.append("missing operator summary mapping")
+    for stage_timing_token in [
+        'id="stageTimingText"',
+        "function deriveStageTimingLabel(summary, progress)",
+        "source.stage_timings",
+        "elapsed_seconds",
+        '["completed", "finished", "running"].includes(stage.status)',
+        'els.stageTimingText.classList.toggle("hidden", !state.stageTimingLabel);',
+        "^[\\u4e00-\\u9fff\\s]{2,18}$",
+    ]:
+        if stage_timing_token not in html:
+            errors.append(f"missing aggregate stage timing display token: {stage_timing_token}")
     for removed_primary_token in [
         'id="pauseButton"',
         'id="resumeButton"',

@@ -39,7 +39,7 @@ function waitForServer(url) {
 
 async function expectOperatorStatusHidesPaths(page, forbiddenPaths) {
   const operatorStatusText = await page
-    .locator("#outputPanel, #loadStatus, #inputStatus, #outputStatus, #readinessBox, #recoveryBox, #stateName, #stateAction, #stateHint, #currentAdvice, #currentRecommendationReason, #currentDecisionStatus, #decisionGuideList, #decisionSaveGuidance, #previewSourceText, #activePreviewModeText, #previewFrame")
+    .locator("#outputPanel, #loadStatus, #inputStatus, #outputStatus, #readinessBox, #recoveryBox, #stateName, #stateAction, #stateHint, #progressText, #stageTimingText, #currentAdvice, #currentRecommendationReason, #currentDecisionStatus, #decisionGuideList, #decisionSaveGuidance, #previewSourceText, #activePreviewModeText, #previewFrame")
     .allTextContents();
   const combined = operatorStatusText.join("\n");
   for (const value of ["/tmp", "/private", "/Users", ...forbiddenPaths]) {
@@ -152,6 +152,14 @@ test.describe("production workbench finish/export browser smoke", () => {
         state: "running",
         current_step: "quality_check",
         steps: [{ id: "quality_check", state: "running", completed_items: 5, total_items: 12 }],
+        stage_timings: {
+          aggregate_only: true,
+          stages: [
+            { id: "scan", label_zh: "检查扫描图片", elapsed_seconds: 1.2, status: "completed", source_path: "/tmp/private-running-input/page001.tif" },
+            { id: "processing", label_zh: "生成处理后图片", elapsed_seconds: 8.5, status: "running", sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+            { id: "summarize", label_zh: "整理处理结果", elapsed_seconds: 0, status: "pending", ocr_text: "PRIVATE_OCR_TEXT" },
+          ],
+        },
       },
     };
 
@@ -180,6 +188,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
     await expect(page.locator("#stateAction")).toHaveText("正在处理");
     await expect(page.locator("#progressText")).toHaveText("阶段：正在检查质量；已处理 5 张 / 共 12 张；待处理 7 张；状态：正在处理");
+    await expect(page.locator("#stageTimingText")).toHaveText("检查扫描图片 1.2 秒；生成处理后图片 8.5 秒");
     await expect(page.locator("#loadStatus")).toHaveText("批次正在运行，请等待。本机正在处理图片，处理完成或失败前不能更改文件夹和处理方式，也不要反复点击开始处理。");
     await expect(page.locator("#inputStatus")).toHaveText("批次正在运行，完成或失败前不能更改原图文件夹。");
     await expect(page.locator("#outputStatus")).toHaveText("批次正在运行，完成或失败前不能更改输出文件夹。");
@@ -190,6 +199,9 @@ test.describe("production workbench finish/export browser smoke", () => {
       "private-running-input",
       "private-running-output",
       "PRQ-PROGRESS-1",
+      "page001.tif",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "PRIVATE_OCR_TEXT",
     ]);
 
     payload = {
@@ -207,6 +219,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     };
     await page.evaluate(() => pollServerStatus());
     await expect(page.locator("#progressText")).toHaveText("阶段：正在生成处理后图片；正在统计图片数量；状态：正在处理");
+    await expect(page.locator("#stageTimingText")).toHaveClass(/hidden/);
     await expectLaunchSetupControlsDisabled(page);
 
     payload = {
@@ -232,6 +245,14 @@ test.describe("production workbench finish/export browser smoke", () => {
           processed_files: 12,
           failed_files: 0,
         },
+        stage_timings: {
+          aggregate_only: true,
+          stages: [
+            { id: "scan", label_zh: "检查扫描图片", elapsed_seconds: 1.3, status: "completed" },
+            { id: "processing", label_zh: "生成处理后图片", elapsed_seconds: 8.8, status: "completed" },
+            { id: "summarize", label_zh: "整理处理结果", elapsed_seconds: 0.4, status: "completed" },
+          ],
+        },
       },
       progress: {
         schema_version: "scan-qc.production-run-progress.v1",
@@ -242,6 +263,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     await page.evaluate(() => pollServerStatus());
     await expect(page.locator("#stateAction")).toHaveText("有图片需要人工确认");
     await expect(page.locator("#progressText")).toHaveText("阶段：等待人工确认；已处理 12 张 / 共 12 张；状态：需要人工确认");
+    await expect(page.locator("#stageTimingText")).toHaveText("检查扫描图片 1.3 秒；生成处理后图片 8.8 秒；整理处理结果 0.4 秒");
     await expect(page.locator("#remainingWorkText")).toHaveText("还需确认 1 张");
     await expect(page.getByRole("button", { name: "确认通过" })).toBeEnabled();
     await expect(page.getByRole("button", { name: "完成并导出结果" })).toBeEnabled();
@@ -797,6 +819,14 @@ test.describe("production workbench finish/export browser smoke", () => {
               failed_files: 0,
               retry_list_files: 0,
             },
+            stage_timings: {
+              aggregate_only: true,
+              stages: [
+                { id: "scan", label_zh: "检查扫描图片", elapsed_seconds: 0.9, status: "completed" },
+                { id: "processing", label_zh: "生成处理后图片", elapsed_seconds: 3.4, status: "completed" },
+                { id: "summarize", label_zh: "整理处理结果", elapsed_seconds: 0.6, status: "completed" },
+              ],
+            },
           },
           progress: { schema_version: "scan-qc.production-run-progress.v1", state: "finished" },
           queue: { schema_version: "scan-qc.production-review-queue.v1", items: [] },
@@ -839,6 +869,7 @@ test.describe("production workbench finish/export browser smoke", () => {
 
     await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
     await expect(page.locator("#stateName")).toHaveText("待完成");
+    await expect(page.locator("#stageTimingText")).toHaveText("检查扫描图片 0.9 秒；生成处理后图片 3.4 秒；整理处理结果 0.6 秒");
     await page.getByRole("button", { name: "完成并导出结果" }).click();
     await expect(page.locator("#finishConfirmPanel")).toBeVisible();
     await expect(page.locator("#finishConfirmMessage")).toHaveText("本批没有需要人工确认的图片。请确认处理后图片已准备好，再完成本批。");
@@ -850,6 +881,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     await page.getByRole("button", { name: "完成并导出结果" }).click();
     await page.getByRole("button", { name: "确认完成本批" }).click();
     await expect(page.locator("#completionTitle")).toHaveText("本批已完成");
+    await expect(page.locator("#stageTimingText")).toHaveText("检查扫描图片 0.9 秒；生成处理后图片 3.4 秒；整理处理结果 0.6 秒");
     expect(finishRequested).toBe(true);
     expect(consoleProblems).toEqual([]);
   });
