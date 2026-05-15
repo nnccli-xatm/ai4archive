@@ -3862,21 +3862,94 @@ def _local_content_change_guard(source_l: Image.Image, processed_l: Image.Image,
             "tile_changed_ratio": 0.0,
             "edge_changed_ratio": 0.0,
         }
-    comparable = processed_l
+
+    numpy_guard = _local_content_change_guard_numpy(source_l, processed_l, options)
+    if numpy_guard is not None:
+        return numpy_guard
+
     content_mask = _high_contrast_content_mask(source_l)
-    changed_mask = ImageChops.difference(source_l, comparable).point(lambda value: 255 if value > 32 else 0)
+    changed_mask = ImageChops.difference(source_l, processed_l).point(lambda value: 255 if value > 32 else 0)
     width, height = source_l.size
     area = max(1, width * height)
     content_pixels = _mask_pixel_count(content_mask)
     changed_content = _mask_intersection_count(content_mask, changed_mask)
     local_ratio = changed_content / max(1, content_pixels)
     content_pixel_ratio = content_pixels / area
-    max_tile_ratio = _max_local_content_tile_change_ratio(content_mask, changed_mask)
+    max_tile_ratio = 0.0
     edge_ratio = _edge_content_change_ratio(content_mask, changed_mask, source_l.size)
     checked = content_pixels >= max(24, int(area * 0.002))
     reasons: list[str] = []
     if checked and local_ratio > options.audit_max_local_content_changed_ratio:
         reasons.append("local_content_changed_ratio")
+    if checked and "local_content_changed_ratio" not in reasons:
+        max_tile_ratio = _max_local_content_tile_change_ratio(content_mask, changed_mask)
+    if checked and max_tile_ratio > options.audit_max_local_content_tile_changed_ratio:
+        reasons.append("local_content_tile_changed_ratio")
+    if checked and edge_ratio > options.audit_max_edge_content_changed_ratio:
+        reasons.append("edge_content_changed_ratio")
+    action = "reverted_to_source" if reasons else "passed"
+    return {
+        "checked": checked,
+        "action": action,
+        "reverted": action == "reverted_to_source",
+        "reasons": sorted(set(reasons)),
+        "content_pixel_ratio": round(content_pixel_ratio, 6),
+        "changed_ratio": round(local_ratio, 6),
+        "tile_changed_ratio": round(max_tile_ratio, 6),
+        "edge_changed_ratio": round(edge_ratio, 6),
+    }
+
+
+def _local_content_change_guard_numpy(
+    source_l: Image.Image,
+    processed_l: Image.Image,
+    options: ProcessingOptions,
+) -> dict[str, Any] | None:
+    np = _load_numpy()
+    if np is None:
+        return None
+    try:
+        source = np.asarray(source_l, dtype=np.int16)
+        processed = np.asarray(processed_l, dtype=np.int16)
+    except (TypeError, ValueError):
+        return None
+    if source.shape != processed.shape or source.ndim != 2:
+        return None
+
+    height, width = source.shape
+    area = max(1, width * height)
+    histogram = np.bincount(source.ravel(), minlength=256)
+    running = np.cumsum(histogram)
+    background = int(np.searchsorted(running, area * 0.9, side="left"))
+    threshold = max(90, min(220, background - 35))
+    content = source <= threshold
+    content_pixels = int(np.count_nonzero(content))
+    checked = content_pixels >= max(24, int(area * 0.002))
+
+    if content_pixels == 0:
+        return {
+            "checked": False,
+            "action": "passed",
+            "reverted": False,
+            "reasons": [],
+            "content_pixel_ratio": 0.0,
+            "changed_ratio": 0.0,
+            "tile_changed_ratio": 0.0,
+            "edge_changed_ratio": 0.0,
+        }
+
+    changed = np.abs(source - processed) > 32
+    changed_content = int(np.count_nonzero(content & changed))
+    local_ratio = changed_content / content_pixels
+    content_pixel_ratio = content_pixels / area
+    edge_ratio = _edge_content_change_ratio_numpy(content, changed)
+    max_tile_ratio = 0.0
+
+    reasons: list[str] = []
+    if checked and local_ratio > options.audit_max_local_content_changed_ratio:
+        reasons.append("local_content_changed_ratio")
+    if checked and "local_content_changed_ratio" not in reasons:
+        max_tile_ratio = _max_local_content_tile_change_ratio_numpy(content, changed)
     if checked and max_tile_ratio > options.audit_max_local_content_tile_changed_ratio:
         reasons.append("local_content_tile_changed_ratio")
     if checked and edge_ratio > options.audit_max_edge_content_changed_ratio:
@@ -3923,6 +3996,22 @@ def _max_local_content_tile_change_ratio(content_mask: Image.Image, changed_mask
     return max_ratio
 
 
+def _max_local_content_tile_change_ratio_numpy(content: Any, changed: Any) -> float:
+    height, width = content.shape
+    tile_size = max(16, min(48, min(width, height) // 3 or 16))
+    max_ratio = 0.0
+    for top in range(0, height, tile_size):
+        for left in range(0, width, tile_size):
+            tile_content = content[top : min(height, top + tile_size), left : min(width, left + tile_size)]
+            content_pixels = int(tile_content.sum())
+            if content_pixels < 8:
+                continue
+            tile_changed = changed[top : min(height, top + tile_size), left : min(width, left + tile_size)]
+            changed_pixels = int((tile_content & tile_changed).sum())
+            max_ratio = max(max_ratio, changed_pixels / content_pixels)
+    return max_ratio
+
+
 def _edge_content_change_ratio(
     content_mask: Image.Image,
     changed_mask: Image.Image,
@@ -3942,8 +4031,29 @@ def _edge_content_change_ratio(
     return _mask_intersection_count(edge_content, changed_mask) / edge_content_pixels
 
 
+def _edge_content_change_ratio_numpy(content: Any, changed: Any) -> float:
+    height, width = content.shape
+    margin = max(4, min(24, min(width, height) // 8))
+    edge_content_pixels = 0
+    edge_changed_pixels = 0
+    for edge_slice in (
+        (slice(0, margin), slice(0, width)),
+        (slice(max(0, height - margin), height), slice(0, width)),
+        (slice(margin, max(margin, height - margin)), slice(0, margin)),
+        (slice(margin, max(margin, height - margin)), slice(max(0, width - margin), width)),
+    ):
+        edge_content = content[edge_slice]
+        if edge_content.size == 0:
+            continue
+        edge_content_pixels += int(edge_content.sum())
+        edge_changed_pixels += int((edge_content & changed[edge_slice]).sum())
+    if edge_content_pixels < 8:
+        return 0.0
+    return edge_changed_pixels / edge_content_pixels
+
+
 def _mask_pixel_count(mask: Image.Image) -> int:
-    return sum(mask.point(lambda value: 1 if value else 0).histogram()[1:])
+    return mask.histogram()[255]
 
 
 def _mask_intersection_count(first: Image.Image, second: Image.Image) -> int:
