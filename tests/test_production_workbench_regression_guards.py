@@ -415,6 +415,14 @@ class ProductionWorkbenchRegressionGuardTests(unittest.TestCase):
         for required in [
             "本批预检结果",
             "function preflightSummaryMessage(readiness)",
+            "function preflightProcessingSummaryMessage(summary)",
+            "readiness.preflight_processing_summary",
+            "summary.aggregate_only !== true",
+            "summary.retry_scope_safe === true",
+            "summary.retry_scope_safe === false || rawState === \"unknown\"",
+            "本批共 ${total} 张：可复用处理后输出 ${reusable} 张，需要新处理或补处理 ${needsProcessing} 张。",
+            "开始前不能安全判断哪些输出可复用。",
+            "系统会保守核对并补齐需要处理的输出",
             "已识别到 ${count} 张可处理图片",
             "本批预检未通过：请先选择扫描原图文件夹和输出文件夹。",
             "本批预检未通过：已识别到 0 张可处理图片，请确认是否选错原图文件夹。",
@@ -445,6 +453,9 @@ class ProductionWorkbenchRegressionGuardTests(unittest.TestCase):
             "output_sha256",
             "ocr_text",
             "thumbnail",
+            "exception",
+            "traceback",
+            "stack",
         ]:
             self.assertNotIn(forbidden, html[html.find("function preflightSummaryMessage"):html.find("function blockedStartMessage")])
 
