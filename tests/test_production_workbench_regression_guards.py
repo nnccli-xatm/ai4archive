@@ -217,7 +217,8 @@ class ProductionWorkbenchRegressionGuardTests(unittest.TestCase):
             "panel.local_reuse_summary",
             "reuse.aggregate_only !== true",
             '"reused_files", "reprocessed_files", "failed_files"',
-            "本批复用了 ${Math.max(0, toNumber(reuse.reused_files))} 张，重新处理 ${Math.max(0, toNumber(reuse.reprocessed_files))} 张，失败 ${Math.max(0, toNumber(reuse.failed_files))} 张。",
+            "reuse.remaining_files",
+            "本批复用了 ${Math.max(0, toNumber(reuse.reused_files))} 张，重新处理 ${Math.max(0, toNumber(reuse.reprocessed_files))} 张，失败 ${Math.max(0, toNumber(reuse.failed_files))} 张，剩余 ${remaining} 张。",
             "state.completionReuseMessage = localReuseMessage(panel);",
             'els.completionReuseMessage.classList.toggle("hidden", !state.completionReuseMessage);',
         ]:
