@@ -8,7 +8,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter
 
-from archive_scan_qc.benchmark import run_benchmark
+from archive_scan_qc.benchmark import _processing_quality_regression, run_benchmark
 
 
 class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
@@ -50,6 +50,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             _assert_algorithm_thresholds(self, base_quality)
             _assert_algorithm_thresholds(self, full_quality)
             _assert_required_metrics_present(self, full_quality)
+            _assert_operation_timing_signal(self, full_quality)
 
             self.assertGreater(base_run["processing"]["processed_files_per_minute"], 0)
             self.assertGreater(full_run["processing"]["processed_files_per_minute"], 0)
@@ -59,6 +60,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 6,
             )
             self.assertGreater(throughput_ratio, 0)
+            self.assertGreaterEqual(throughput_ratio, 0.01)
             for operation in REQUIRED_OPERATIONS:
                 self.assertIn(operation, full_run["processing"]["operation_timings"])
                 self.assertIn("files_per_minute", full_run["processing"]["operation_timings"][operation])
@@ -76,10 +78,50 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     str(input_dir),
                     "source_relative_path",
                     "source_sha256",
+                    "OCR TEXT",
                     '"files": [',
                     '"findings": [',
                 ):
                     self.assertNotIn(forbidden, raw)
+
+    def test_quality_regression_reports_missing_operation_timing_code_without_private_rows(self) -> None:
+        quality = _processing_quality_regression(
+            {
+                "summary": {
+                    "total_files": 2,
+                    "processed_files": 2,
+                    "failed_files": 0,
+                    "skipped_files": 0,
+                    "performance": {"operation_timings": {"deskew": {"enabled": True, "file_count": 2}}},
+                },
+                "files": [
+                    {
+                        "source_relative_path": "private_missing_timing_page.png",
+                        "source_sha256": "a" * 64,
+                        "processing_audit": {"cumulative_change_guard_checked": True},
+                    }
+                ],
+            }
+        )
+        raw = json.dumps(quality, ensure_ascii=False, sort_keys=True)
+
+        self.assertEqual(quality["status"], "failed")
+        integrity = quality["operation_timing_integrity"]
+        self.assertTrue(integrity["aggregate_only"])
+        self.assertEqual(integrity["status"], "missing")
+        self.assertEqual(integrity["missing_code"], "missing_or_incomplete_processing_operation_timings")
+        self.assertIn("auto_crop", integrity["missing_operations"])
+        self.assertEqual(integrity["incomplete_operations"][0]["operation"], "deskew")
+        self.assertIn("elapsed_seconds", integrity["incomplete_operations"][0]["missing_fields"])
+        self.assertEqual(quality["slow_operations"][0]["operation"], "deskew")
+        for forbidden in (
+            "private_missing_timing_page.png",
+            "source_relative_path",
+            "source_sha256",
+            "OCR TEXT",
+            "a" * 64,
+        ):
+            self.assertNotIn(forbidden, raw)
 
 
 BASE_FLAGS = ("--deskew", "--trim-dark-border", "--auto-crop", "--despeckle")
@@ -178,6 +220,27 @@ def _assert_required_metrics_present(
         for metric_name in metric_names:
             testcase.assertIn(metric_name, metrics, operation)
             testcase.assertEqual(metrics[metric_name]["count"], 6, f"{operation}.{metric_name}")
+
+
+def _assert_operation_timing_signal(testcase: unittest.TestCase, quality: dict[str, object]) -> None:
+    integrity = quality["operation_timing_integrity"]
+    testcase.assertTrue(integrity["aggregate_only"])
+    testcase.assertEqual(integrity["status"], "pass")
+    testcase.assertIsNone(integrity["missing_code"])
+    testcase.assertEqual(integrity["missing_operations"], [])
+    testcase.assertEqual(integrity["incomplete_operations"], [])
+    slow_operations = quality["slow_operations"]
+    testcase.assertGreaterEqual(len(slow_operations), 3)
+    previous_average = None
+    for summary in slow_operations:
+        testcase.assertIn(summary["operation"], REQUIRED_OPERATIONS)
+        testcase.assertIn("enabled", summary)
+        testcase.assertGreaterEqual(summary["file_count"], 0)
+        testcase.assertIsNotNone(summary["average_seconds_per_file"])
+        testcase.assertIsNotNone(summary["files_per_minute"])
+        if previous_average is not None:
+            testcase.assertGreaterEqual(previous_average, summary["average_seconds_per_file"])
+        previous_average = summary["average_seconds_per_file"]
 
 
 def _assert_algorithm_thresholds(testcase: unittest.TestCase, quality: dict[str, object]) -> None:

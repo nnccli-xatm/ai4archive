@@ -4902,6 +4902,11 @@ class ScanQcTest(unittest.TestCase):
             self.assertIn("operation_timings", run["processing"])
             self.assertEqual(run["processing"]["operation_timings"]["auto_crop"]["file_count"], 1)
             self.assertEqual(run["processing"]["operation_timings"]["deskew"]["file_count"], 1)
+            quality = run["processing"]["quality_regression"]
+            self.assertEqual(quality["operation_timing_integrity"]["status"], "pass")
+            self.assertEqual(quality["operation_timing_integrity"]["missing_operations"], [])
+            self.assertGreaterEqual(len(quality["slow_operations"]), 1)
+            self.assertIn("average_seconds_per_file", quality["slow_operations"][0])
             self.assertFalse(any(process_dir.glob("*/processing_manifest.json")))
 
     def test_benchmark_recommendations_rank_workers_and_flag_diminishing_returns(self) -> None:
