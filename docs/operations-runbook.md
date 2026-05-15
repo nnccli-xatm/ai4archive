@@ -273,6 +273,11 @@ warning codes. Treat `--despeckle-backend numpy` with
 NumPy performance validation. Actual NumPy performance evidence requires
 `requested_backend=numpy`, `numpy_available=true`, and non-zero
 `backend_counts.numpy` in the aggregate summary.
+`--trim-dark-border` is intentionally conservative: automatic trimming requires
+dark-edge evidence on all four sides with roughly balanced margins. One-sided,
+strongly uneven, low-confidence, or original archival dark edges remain no-op
+and record a `dark_border_reason` in the sensitive local
+`processing_manifest.json` for operator review.
 `run_plan_summary.json` and `run_plan_summary.csv` are also aggregate-only:
 they record batch totals, passed and failed counts, P0/P1/P2 counts,
 processing failure counts, preflight error counts, throughput aggregates, and
