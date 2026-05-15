@@ -3161,10 +3161,11 @@
     async function resetServerBatchState() {
       if (!localApi.enabled) return;
       try {
-        await apiPost("/api/reset-batch", {});
+        return await apiPost("/api/reset-batch", {});
       } catch (error) {
         els.loadStatus.textContent = error.message || "当前不能开始新批次。";
       }
+      return null;
     }
 
     async function prepareNextBatch() {
@@ -3231,7 +3232,11 @@
       window.clearTimeout(localApi.saveTimer);
       localApi.polling = null;
       render();
-      await resetServerBatchState();
+      const resetPayload = await resetServerBatchState();
+      const resetSummary = resetPayload && resetPayload.next_batch_reset;
+      if (resetSummary && resetSummary.message_zh) {
+        els.loadStatus.textContent = resetSummary.message_zh;
+      }
     }
 
     els.resetButton.addEventListener("click", prepareNextBatch);

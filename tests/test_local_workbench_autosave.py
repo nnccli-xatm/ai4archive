@@ -21,7 +21,7 @@ from archive_scan_qc.local_workbench import (
     sanitize_operator_error_zh,
 )
 from archive_scan_qc.production_runner import ProductionRunConfig, build_production_run_summary
-from archive_scan_qc.production_runner import PRODUCTION_RUN_SUMMARY_JSON
+from archive_scan_qc.production_runner import PRODUCTION_RUN_PROGRESS_JSON, PRODUCTION_RUN_SUMMARY_JSON
 from archive_scan_qc.production_review_queue import PRODUCTION_REVIEW_QUEUE_JSON
 from archive_scan_qc.review_decisions import REVIEW_DECISION_VERIFICATION_JSON
 
@@ -224,6 +224,124 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertFalse(reset["folder_readiness"]["ready_to_start"])
             self.assertEqual(reset["folder_readiness"]["status"], "not_configured")
             self.assertEqual(reset["processing_mode"]["id"], "standard")
+            self.assertEqual(
+                reset["next_batch_reset"]["message_zh"],
+                "上一批结果和交接说明已保留；当前工作台队列已清空，可以选择下一批文件夹。",
+            )
+            self.assertTrue(reset["next_batch_reset"]["previous_batch_retained"]["aggregate_only"])
+            self.assertTrue(reset["next_batch_reset"]["current_workspace_cleared"]["queue_cleared"])
+
+    def test_reset_for_next_batch_retains_completed_handoff_and_clears_transient_state(self) -> None:
+        private_hash = "c" * 64
+        private_ocr = "PRIVATE_RESET_OCR_SHOULD_NOT_LEAK"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            private_file = input_dir / "private_reset_page.png"
+            private_file.write_bytes(b"fake image placeholder")
+            (output_dir / "images").mkdir(parents=True)
+            processed_output = output_dir / "images" / "private_reset_page.png"
+            processed_output.write_bytes(b"processed image bytes")
+            controller = WorkbenchController()
+            controller.configure(input_dir, output_dir, metadata_dir)
+
+            (metadata_dir / PRODUCTION_RUN_SUMMARY_JSON).write_text(
+                json.dumps(
+                    {
+                        "operator_summary": {"total_source_images": 1, "derivative_images_ready": 1},
+                        "counts": {"total_files": 1, "openable_files": 1, "processed_files": 1, "resumed_files": 0},
+                        "private_debug": {
+                            "path": str(private_file),
+                            "file_name": private_file.name,
+                            "sha256": private_hash,
+                            "ocr_text": private_ocr,
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            (metadata_dir / PRODUCTION_REVIEW_QUEUE_JSON).write_text(
+                json.dumps(
+                    {
+                        "summary": {"total_items": 1},
+                        "items": [
+                            {
+                                "local_id": "PRQ000001",
+                                "relative_path": private_file.name,
+                                "thumbnail_data_url": "data:image/png;base64,PRIVATE_THUMBNAIL",
+                                "evidence": [{"text": "PRIVATE_LINE_EVIDENCE"}],
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            (metadata_dir / REVIEW_DECISION_DRAFT_JSON).write_text(
+                json.dumps({"operator_decisions": [{"note_zh": "PRIVATE_DRAFT_NOTE"}]}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            (metadata_dir / PRODUCTION_RUN_PROGRESS_JSON).write_text(
+                json.dumps({"status": "running", "current_file": private_file.name}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            result = controller.save_review_decisions(decision_summary([("PRQ000001", "false_positive")]))
+            self.assertTrue(result["completion_panel"]["completion_note_saved"])
+            completion_note_before = (metadata_dir / COMPLETION_NOTE_TXT).read_text(encoding="utf-8")
+
+            reset = controller.reset_for_next_batch()
+
+            self.assertTrue(processed_output.exists())
+            self.assertTrue((metadata_dir / PRODUCTION_RUN_SUMMARY_JSON).exists())
+            self.assertTrue((metadata_dir / REVIEW_DECISION_SUMMARY_JSON).exists())
+            self.assertTrue((metadata_dir / REVIEW_DECISION_VERIFICATION_JSON).exists())
+            self.assertEqual((metadata_dir / COMPLETION_NOTE_TXT).read_text(encoding="utf-8"), completion_note_before)
+            self.assertFalse((metadata_dir / PRODUCTION_REVIEW_QUEUE_JSON).exists())
+            self.assertFalse((metadata_dir / REVIEW_DECISION_DRAFT_JSON).exists())
+            self.assertFalse((metadata_dir / PRODUCTION_RUN_PROGRESS_JSON).exists())
+            self.assertFalse(reset["configured"])
+            self.assertIsNone(reset["queue"])
+            self.assertIsNone(reset["draft_decisions"])
+            self.assertEqual(reset["next_batch_reset"]["previous_batch_retained"]["output_results_retained"], True)
+            self.assertEqual(reset["next_batch_reset"]["previous_batch_retained"]["completion_note_retained"], True)
+            self.assertEqual(reset["next_batch_reset"]["previous_batch_retained"]["handoff_credentials_retained"], True)
+            self.assertEqual(reset["next_batch_reset"]["current_workspace_cleared"]["cleared_transient_artifacts"], 3)
+            reset_text = json.dumps(reset, ensure_ascii=False, sort_keys=True)
+            self.assertIn("上一批结果和交接说明已保留", reset_text)
+            self.assertIn("当前工作台队列已清空", reset_text)
+            assert_public_restore_payload_is_private(
+                self,
+                reset,
+                [
+                    str(root),
+                    str(input_dir),
+                    str(output_dir),
+                    str(metadata_dir),
+                    str(private_file),
+                    private_file.name,
+                    private_hash,
+                    private_ocr,
+                    "PRIVATE_THUMBNAIL",
+                    "PRIVATE_LINE_EVIDENCE",
+                    "PRIVATE_DRAFT_NOTE",
+                    PRODUCTION_RUN_SUMMARY_JSON,
+                    PRODUCTION_REVIEW_QUEUE_JSON,
+                    REVIEW_DECISION_SUMMARY_JSON,
+                    REVIEW_DECISION_VERIFICATION_JSON,
+                    REVIEW_DECISION_DRAFT_JSON,
+                    COMPLETION_NOTE_TXT,
+                    "sha256",
+                    "ocr_text",
+                    ".png",
+                    "thumbnail",
+                    "evidence",
+                    "data:image",
+                ],
+            )
 
     def test_configure_unreadable_source_returns_generic_chinese_guidance_when_supported(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

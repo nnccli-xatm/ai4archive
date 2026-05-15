@@ -190,6 +190,10 @@ class WorkbenchController:
         with self._lock:
             if self._thread and self._thread.is_alive():
                 raise ValueError("当前批次正在处理，不能开始新批次。")
+            metadata_path = self.metadata_dir
+            derivatives_path = self.derivatives_dir
+            retention_summary = _prepare_next_batch_retention_summary(metadata_path, derivatives_path)
+            cleanup_summary = _clear_next_batch_transient_state(metadata_path)
             self._thread = None
             self.input_dir = None
             self.derivatives_dir = None
@@ -203,7 +207,15 @@ class WorkbenchController:
             self.last_preflight_reuse_summary = None
             self._last_folder_readiness = None
             self._last_preflight_snapshot = None
-        return self.status()
+        status = self.status()
+        status["next_batch_reset"] = {
+            "schema_version": "scan-qc.local-next-batch-reset.v1",
+            "message_zh": "上一批结果和交接说明已保留；当前工作台队列已清空，可以选择下一批文件夹。",
+            "previous_batch_retained": retention_summary,
+            "current_workspace_cleared": cleanup_summary,
+            "next_step_zh": "请选择下一批扫描原图文件夹；输出文件夹可按本批需要重新选择或沿用。",
+        }
+        return status
 
     def _start_run(self) -> dict[str, Any]:
         with self._lock:
@@ -826,6 +838,56 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     except (OSError, json.JSONDecodeError):
         return None
     return payload if isinstance(payload, dict) else None
+
+
+def _prepare_next_batch_retention_summary(
+    metadata_dir: Path | None,
+    derivatives_dir: Path | None,
+) -> dict[str, Any]:
+    metadata_available = metadata_dir is not None and metadata_dir.exists()
+    output_available = derivatives_dir is not None and derivatives_dir.exists()
+    completion_note_retained = bool(metadata_available and (metadata_dir / COMPLETION_NOTE_TXT).exists())
+    aggregate_credentials_retained = bool(
+        metadata_available
+        and (metadata_dir / PRODUCTION_RUN_SUMMARY_JSON).exists()
+        and (metadata_dir / REVIEW_DECISION_SUMMARY_JSON).exists()
+        and (metadata_dir / REVIEW_DECISION_VERIFICATION_JSON).exists()
+    )
+    return {
+        "aggregate_only": True,
+        "output_results_retained": output_available,
+        "completion_note_retained": completion_note_retained,
+        "handoff_credentials_retained": aggregate_credentials_retained,
+        "message_zh": "上一批输出结果、中文交接说明和可交接聚合凭据已保留。",
+    }
+
+
+def _clear_next_batch_transient_state(metadata_dir: Path | None) -> dict[str, Any]:
+    targets = [
+        metadata_dir / PRODUCTION_REVIEW_QUEUE_JSON if metadata_dir else None,
+        metadata_dir / REVIEW_DECISION_DRAFT_JSON if metadata_dir else None,
+        metadata_dir / PRODUCTION_RUN_PROGRESS_JSON if metadata_dir else None,
+    ]
+    cleared_count = 0
+    failed_count = 0
+    for target in targets:
+        if target is None or not target.exists():
+            continue
+        try:
+            target.unlink()
+            cleared_count += 1
+        except OSError as exc:
+            failed_count += 1
+            _write_maintenance_error(metadata_dir, exc)
+    return {
+        "aggregate_only": True,
+        "queue_cleared": True,
+        "draft_review_cleared": True,
+        "running_state_cleared": True,
+        "cleared_transient_artifacts": cleared_count,
+        "cleanup_error_count": failed_count,
+        "message_zh": "当前工作台队列、临时复核状态和运行进度已清空。",
+    }
 
 
 def _pick_operator_folder(payload: dict[str, Any]) -> dict[str, Any]:
