@@ -7958,6 +7958,39 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(record["crop_reason"], "conservative crop applied")
             self.assertEqual(record["output_size"], [96, 70])
 
+    def test_auto_crop_trims_subtle_light_scanner_edge_when_subject_is_safe(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            image = Image.new("RGB", (140, 105), (250, 250, 250))
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((14, 12, 125, 93), fill=(242, 242, 242))
+            draw.rectangle((44, 42, 100, 46), fill=(30, 30, 30))
+            draw.rectangle((48, 58, 92, 62), fill=(35, 35, 35))
+            image.save(input_dir / "A001_0001.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True))
+            audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
+
+            record = manifest["files"][0]
+            self.assertTrue(record["cropped"])
+            self.assertEqual(record["crop_bbox"], [14, 12, 126, 94])
+            self.assertEqual(record["output_size"], [112, 82])
+            self.assertLess(record["processing_audit"]["crop_ratio"], 0.40)
+            with Image.open(process_dir / "images" / "A001_0001.png") as processed:
+                self.assertLess(_box_luma(processed, (30, 30, 88, 54)), 245)
+            self.assertEqual(audit_summary["counts"]["auto_crop_applied_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["auto_crop"]["applied_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["auto_crop"]["cropped_side_distribution"],
+                {"left": 1, "top": 1, "right": 1, "bottom": 1},
+            )
+            self.assertGreater(audit_summary["guardrails"]["auto_crop"]["crop_ratio"]["max"], 0.0)
+
     def test_auto_crop_keeps_edge_content_near_any_side(self) -> None:
         cases = {
             "body_left": lambda draw: draw.rectangle((1, 35, 25, 40), fill=(20, 20, 20)),
@@ -7991,6 +8024,13 @@ class ScanQcTest(unittest.TestCase):
                 self.assertEqual(record["output_size"], [120, 90], name)
                 self.assertEqual(record["crop_reason"], "foreground reaches crop safety margin", name)
                 self.assertIn("auto_crop_noop", record["operations"], name)
+            audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(audit_summary["counts"]["auto_crop_skipped_files"], len(cases))
+            self.assertEqual(audit_summary["guardrails"]["auto_crop"]["protection_triggered_files"], len(cases))
+            self.assertEqual(
+                audit_summary["guardrails"]["auto_crop"]["skip_reason_distribution"],
+                {"foreground reaches crop safety margin": len(cases)},
+            )
 
     def test_auto_crop_noops_for_unsafe_synthetic_candidates_with_reasons(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -8048,6 +8088,24 @@ class ScanQcTest(unittest.TestCase):
                 self.assertEqual(record["crop_reason"], reason, name)
                 self.assertEqual(record["output_size"], [120, 90], name)
                 self.assertIn("auto_crop_noop", record["operations"], name)
+            audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
+            auto_crop = audit_summary["guardrails"]["auto_crop"]
+            self.assertEqual(audit_summary["counts"]["auto_crop_applied_files"], 0)
+            self.assertEqual(audit_summary["counts"]["auto_crop_skipped_files"], len(expected_reasons))
+            self.assertEqual(audit_summary["counts"]["auto_crop_low_confidence_skip_files"], 2)
+            self.assertEqual(auto_crop["applied_files"], 0)
+            self.assertEqual(auto_crop["skipped_files"], len(expected_reasons))
+            self.assertEqual(auto_crop["low_confidence_skip_files"], 2)
+            self.assertEqual(
+                auto_crop["skip_reason_distribution"],
+                {
+                    "no confident foreground outside background": 2,
+                    "foreground reaches crop safety margin": 1,
+                    "candidate crop exceeds conservative crop ratio": 1,
+                    "inconsistent crop margin evidence": 1,
+                    "crop boundary evidence is too sparse": 1,
+                },
+            )
 
     def test_processing_audit_allows_small_synthetic_change(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -8212,6 +8270,10 @@ class ScanQcTest(unittest.TestCase):
             audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
             self.assertEqual(audit_summary["counts"]["dark_border_trimmed_files"], 0)
             self.assertEqual(audit_summary["counts"]["dark_border_skipped_files"], 0)
+            self.assertEqual(audit_summary["counts"]["auto_crop_applied_files"], 0)
+            self.assertEqual(audit_summary["counts"]["auto_crop_skipped_files"], 0)
+            self.assertEqual(audit_summary["guardrails"]["auto_crop"]["applied_files"], 0)
+            self.assertEqual(audit_summary["guardrails"]["auto_crop"]["skipped_files"], 0)
 
     def test_trim_dark_border_trims_edge_border_without_touching_source(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -8937,6 +8999,72 @@ class ScanQcTest(unittest.TestCase):
             self.assertIn("background_stains", audit_summary["guardrails"])
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertNotIn("private_combined_despeckle", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
+    def test_full_retouch_chain_preserves_auto_crop_aggregate_privacy(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            image = Image.new("RGB", (140, 105), (250, 250, 250))
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((14, 12, 125, 93), fill=(242, 242, 242))
+            draw.rectangle((44, 42, 100, 46), fill=(30, 30, 30))
+            draw.rectangle((48, 58, 92, 62), fill=(35, 35, 35))
+            image.save(input_dir / "private_full_chain_crop.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(
+                    auto_crop=True,
+                    deskew=True,
+                    trim_dark_border=True,
+                    despeckle=True,
+                    normalize_tones=True,
+                    lighten_edge_shadow=True,
+                    lighten_background_stains=True,
+                    lighten_scanlines=True,
+                    enhance_faded_text=True,
+                    sharpen_text_edges=True,
+                    workers=1,
+                ),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+
+            self.assertEqual(manifest["summary"]["processed_files"], 1)
+            self.assertEqual(manifest["summary"]["failed_files"], 0)
+            self.assertEqual(record["status"], "processed")
+            self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
+            self.assertEqual(record["processing_audit"]["cumulative_change_guard_action"], "passed")
+            self.assertTrue(record["cropped"])
+            for option in (
+                "auto_crop",
+                "deskew",
+                "trim_dark_border",
+                "despeckle",
+                "normalize_tones",
+                "lighten_edge_shadow",
+                "lighten_background_stains",
+                "lighten_scanlines",
+                "enhance_faded_text",
+                "sharpen_text_edges",
+            ):
+                self.assertTrue(audit_summary["operations"][option], option)
+            self.assertEqual(audit_summary["counts"]["processed_files"], 1)
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["auto_crop_applied_files"], 1)
+            self.assertEqual(audit_summary["counts"]["cumulative_change_guard_reverted_files"], 0)
+            self.assertEqual(audit_summary["guardrails"]["auto_crop"]["applied_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["auto_crop"]["skipped_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_full_chain_crop", audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
 
     def test_multi_worker_retouch_manifest_order_stays_stable(self) -> None:
