@@ -9660,7 +9660,7 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(record["processing_audit"]["local_content_change_guard_action"], "passed")
             self.assertFalse(record["processing_audit"]["local_content_change_guard_reverted"])
             self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
-            self.assertEqual(audit_summary["counts"]["local_content_change_guard_checked_files"], 1)
+            self.assertEqual(audit_summary["counts"]["local_content_change_guard_checked_files"], 0)
             self.assertEqual(audit_summary["counts"]["local_content_change_guard_reverted_files"], 0)
             self.assertEqual(
                 audit_summary["guardrails"]["local_content_change_guard"]["reason_distribution"],
