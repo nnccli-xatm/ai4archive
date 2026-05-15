@@ -8091,6 +8091,103 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn("private_post_deskew_page_number", audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
 
+    def test_full_retouch_chain_stops_post_deskew_crop_when_edge_content_is_protected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            image = Image.new("RGB", (240, 180), (248, 248, 248))
+            draw = ImageDraw.Draw(image)
+            for y in range(48, 128, 18):
+                draw.rectangle((58, y, 182, y + 4), fill=(25, 25, 25))
+            draw.rectangle((104, 164, 126, 172), fill=(20, 20, 20))
+            image.rotate(
+                -2.5,
+                resample=Image.Resampling.BICUBIC,
+                expand=True,
+                fillcolor=(252, 252, 252),
+            ).save(input_dir / "private_full_chain_edge_protection.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(
+                    auto_crop=True,
+                    deskew=True,
+                    trim_dark_border=True,
+                    despeckle=True,
+                    normalize_tones=True,
+                    lighten_edge_shadow=True,
+                    lighten_background_stains=True,
+                    lighten_scanlines=True,
+                    enhance_faded_text=True,
+                    sharpen_text_edges=True,
+                    workers=1,
+                ),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+
+            self.assertEqual(record["status"], "processed")
+            self.assertTrue(record["deskewed"])
+            self.assertFalse(record["dark_border_trimmed"])
+            self.assertFalse(record["cropped"])
+            self.assertEqual(record["crop_reason"], "post-deskew crop skipped: edge content protection")
+            self.assertEqual(record["output_size"], record["post_deskew_size"])
+            operation_order = [
+                operation
+                for operation in record["operations"]
+                if operation
+                in {
+                    "deskew_conservative",
+                    "dark_border_trim_noop",
+                    "auto_crop_noop",
+                    "despeckle_noop",
+                    "normalize_tones_noop",
+                    "lighten_edge_shadow_noop",
+                    "lighten_background_stains_noop",
+                    "lighten_scanlines_noop",
+                    "enhance_faded_text_noop",
+                    "sharpen_text_edges_noop",
+                }
+            ]
+            self.assertEqual(
+                operation_order,
+                [
+                    "deskew_conservative",
+                    "dark_border_trim_noop",
+                    "auto_crop_noop",
+                    "despeckle_noop",
+                    "normalize_tones_noop",
+                    "lighten_edge_shadow_noop",
+                    "lighten_background_stains_noop",
+                    "lighten_scanlines_noop",
+                    "enhance_faded_text_noop",
+                    "sharpen_text_edges_noop",
+                ],
+            )
+            self.assertEqual(record["processing_audit"]["cumulative_change_guard_action"], "passed")
+            self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
+            self.assertEqual(audit_summary["counts"]["processed_files"], 1)
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["auto_crop_applied_files"], 0)
+            self.assertEqual(audit_summary["counts"]["auto_crop_skipped_files"], 1)
+            self.assertEqual(audit_summary["counts"]["cumulative_change_guard_reverted_files"], 0)
+            self.assertEqual(audit_summary["guardrails"]["auto_crop"]["edge_content_protection_skip_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["auto_crop"]["protection_triggered_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["auto_crop"]["skip_reason_distribution"],
+                {"post-deskew crop skipped: edge content protection": 1},
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_full_chain_edge_protection", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
     def test_auto_crop_keeps_edge_content_near_any_side(self) -> None:
         cases = {
             "body_left": lambda draw: draw.rectangle((1, 35, 25, 40), fill=(20, 20, 20)),
@@ -8607,6 +8704,103 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(audit_summary["counts"]["dark_border_trimmed_files"], 1)
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertNotIn("private_combined_trim", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
+    def test_full_retouch_chain_removes_safe_border_with_ordered_aggregate_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            image = Image.new("RGB", (140, 105), (250, 250, 250))
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((0, 0, 139, 104), outline=(8, 8, 8), width=4)
+            draw.rectangle((18, 15, 121, 90), fill=(242, 242, 242))
+            draw.rectangle((44, 42, 100, 46), fill=(30, 30, 30))
+            draw.rectangle((48, 58, 92, 62), fill=(35, 35, 35))
+            image.save(input_dir / "private_full_chain_safe_border.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(
+                    auto_crop=True,
+                    deskew=True,
+                    trim_dark_border=True,
+                    despeckle=True,
+                    normalize_tones=True,
+                    lighten_edge_shadow=True,
+                    lighten_background_stains=True,
+                    lighten_scanlines=True,
+                    enhance_faded_text=True,
+                    sharpen_text_edges=True,
+                    workers=1,
+                ),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+
+            self.assertEqual(record["status"], "processed")
+            self.assertTrue(record["dark_border_trimmed"])
+            self.assertTrue(record["cropped"])
+            self.assertEqual(record["dark_border_reason"], "dark edge border trimmed")
+            self.assertEqual(record["crop_reason"], "conservative crop applied")
+            self.assertEqual(record["processing_audit"]["cumulative_change_guard_action"], "passed")
+            self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
+            operation_order = [
+                operation
+                for operation in record["operations"]
+                if operation
+                in {
+                    "deskew_noop",
+                    "dark_border_trim_conservative",
+                    "auto_crop_conservative",
+                    "despeckle_noop",
+                    "normalize_tones_noop",
+                    "lighten_edge_shadow_noop",
+                    "lighten_background_stains_noop",
+                    "lighten_scanlines_noop",
+                    "enhance_faded_text_noop",
+                    "sharpen_text_edges_noop",
+                }
+            ]
+            self.assertEqual(
+                operation_order,
+                [
+                    "deskew_noop",
+                    "dark_border_trim_conservative",
+                    "auto_crop_conservative",
+                    "despeckle_noop",
+                    "normalize_tones_noop",
+                    "lighten_edge_shadow_noop",
+                    "lighten_background_stains_noop",
+                    "lighten_scanlines_noop",
+                    "enhance_faded_text_noop",
+                    "sharpen_text_edges_noop",
+                ],
+            )
+            self.assertEqual(audit_summary["counts"]["processed_files"], 1)
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["dark_border_trimmed_files"], 1)
+            self.assertEqual(audit_summary["counts"]["auto_crop_applied_files"], 1)
+            self.assertEqual(audit_summary["counts"]["cumulative_change_guard_checked_files"], 1)
+            self.assertEqual(audit_summary["counts"]["cumulative_change_guard_reverted_files"], 0)
+            self.assertEqual(audit_summary["guardrails"]["dark_border_trim"]["trimmed_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["dark_border_trim"]["reason_distribution"],
+                {"dark edge border trimmed": 1},
+            )
+            self.assertEqual(audit_summary["guardrails"]["auto_crop"]["applied_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["auto_crop"]["reason_distribution"],
+                {"conservative crop applied": 1},
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_full_chain_safe_border", audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
 
     def test_trim_dark_border_noops_for_blank_and_edge_content(self) -> None:
