@@ -187,19 +187,24 @@ Run `archive-scan-qc processing-plan` after the scan report and before enabling
 `--process-out`. It opens images for in-memory analysis only and writes
 `processing_plan.json` plus `processing_plan.csv` under its `--out` directory.
 The plan records per-file proposed EXIF transpose, deskew, dark-border trim,
-auto-crop, despeckle, optional tone normalization, skipped, and unopenable
-decisions so operators can review the intended processing before derivative
-files are created. Treat the plan as
+auto-crop, despeckle, optional tone normalization, optional conservative
+edge-shadow lightening, skipped, and unopenable decisions so operators can
+review the intended processing before derivative files are created. Treat the plan as
 sensitive local evidence because it contains row-level paths and hashes. It does
 not embed images, thumbnails, or image bytes.
+
+`--lighten-edge-shadow` is default-off and only targets narrow neutral shadows
+at the page edge. It no-ops when dark marks, text-like pixels, annotations,
+binding holes, color content, deep/dark pages, broad uneven lighting, or low
+confidence would risk changing正文,边注,印章,批注, or archival appearance.
 
 For project-scale production runs, create a local run plan instead of launching
 each batch manually. CSV example:
 
 ```csv
-batch_id,input_dir,report_dir,process_out,manifest_csv,rules_profile,workers,auto_crop,deskew,trim_dark_border,despeckle,resume_processing
-batch-001,/approved-work/input-batches/batch-001,batch-001,/approved-work/processed-derivatives/batch-001,/approved-work/manifests/batch-001.csv,/approved-work/rules/project-rules.json,2,true,true,true,true,false
-batch-002,/approved-work/input-batches/batch-002,batch-002,/approved-work/processed-derivatives/batch-002,/approved-work/manifests/batch-002.csv,/approved-work/rules/project-rules.json,2,true,true,true,true,true
+batch_id,input_dir,report_dir,process_out,manifest_csv,rules_profile,workers,auto_crop,deskew,trim_dark_border,despeckle,lighten_edge_shadow,resume_processing
+batch-001,/approved-work/input-batches/batch-001,batch-001,/approved-work/processed-derivatives/batch-001,/approved-work/manifests/batch-001.csv,/approved-work/rules/project-rules.json,2,true,true,true,true,false,false
+batch-002,/approved-work/input-batches/batch-002,batch-002,/approved-work/processed-derivatives/batch-002,/approved-work/manifests/batch-002.csv,/approved-work/rules/project-rules.json,2,true,true,true,true,false,true
 ```
 
 Run it with:
@@ -216,8 +221,8 @@ JSON plans may be a top-level list of batch objects or an object with
 `project_id` and `batches`. Required batch fields are `batch_id` and
 `input_dir`. Optional fields are `report_dir`, `process_out`, `manifest_csv`,
 `rules_profile`, `workers`, `min_dpi`, `name_pattern`, `auto_crop`, `deskew`,
-`trim_dark_border`, `despeckle`, and `resume_processing`. Relative input,
-manifest, and rules-profile paths resolve relative to the plan file; relative
+`trim_dark_border`, `despeckle`, `normalize_tones`, `lighten_edge_shadow`, and
+`resume_processing`. Relative input, manifest, and rules-profile paths resolve relative to the plan file; relative
 report and processing-output paths resolve under the project `--out` root.
 
 `run-plan` performs preflight first for every batch it attempts. A preflight

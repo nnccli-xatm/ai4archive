@@ -67,6 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--trim-dark-border", action="store_true", help="Enable conservative dark-border trim during processing.")
     parser.add_argument("--despeckle", action="store_true", help="Enable conservative despeckle during processing.")
     parser.add_argument("--normalize-tones", action="store_true", help="Enable conservative gray/dark page tone normalization.")
+    parser.add_argument("--lighten-edge-shadow", action="store_true", help="Enable conservative narrow edge-shadow lightening.")
     parser.add_argument(
         "--reuse-scan-measurements",
         action="store_true",
@@ -143,6 +144,7 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
                         trim_dark_border=args.trim_dark_border,
                         despeckle=args.despeckle,
                         normalize_tones=args.normalize_tones,
+                        lighten_edge_shadow=args.lighten_edge_shadow,
                         despeckle_backend=despeckle_backend,
                         reuse_scan_measurements=getattr(args, "reuse_scan_measurements", False),
                         workers=workers,
@@ -539,6 +541,7 @@ def _operations(args: argparse.Namespace) -> dict[str, bool | str]:
         "trim_dark_border": args.trim_dark_border,
         "despeckle": args.despeckle,
         "normalize_tones": getattr(args, "normalize_tones", False),
+        "lighten_edge_shadow": getattr(args, "lighten_edge_shadow", False),
         "despeckle_backend": getattr(args, "despeckle_backend", "fallback"),
         "reuse_scan_measurements": getattr(args, "reuse_scan_measurements", False),
     }
@@ -574,6 +577,7 @@ def _csv_fields() -> list[str]:
         "trim_dark_border",
         "despeckle",
         "normalize_tones",
+        "lighten_edge_shadow",
         "reuse_scan_measurements",
         "total_files",
         "openable_files",
@@ -616,6 +620,7 @@ def _csv_row(run: dict[str, Any], environment: dict[str, Any]) -> dict[str, Any]
         "trim_dark_border": operations["trim_dark_border"],
         "despeckle": operations["despeckle"],
         "normalize_tones": operations["normalize_tones"],
+        "lighten_edge_shadow": operations.get("lighten_edge_shadow", False),
         "reuse_scan_measurements": operations.get("reuse_scan_measurements", False),
         "total_files": run["total_files"],
         "openable_files": run["openable_files"],

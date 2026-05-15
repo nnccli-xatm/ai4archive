@@ -46,6 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--trim-dark-border", action="store_true")
     parser.add_argument("--despeckle", action="store_true")
     parser.add_argument("--normalize-tones", action="store_true")
+    parser.add_argument("--lighten-edge-shadow", action="store_true")
     parser.add_argument(
         "--despeckle-backend",
         choices=("fallback", "numpy"),
@@ -151,6 +152,7 @@ def _build_baseline_args(args: argparse.Namespace) -> argparse.Namespace:
         "--trim-dark-border",
         "--despeckle",
         "--normalize-tones",
+        "--lighten-edge-shadow",
         "--resume-processing",
         "--reuse-scan-measurements",
         "--skip-benchmark",
