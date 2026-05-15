@@ -2640,14 +2640,23 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
     )
     low_frequency_candidate = ImageChops.multiply(low_frequency_candidate, light_tonal_candidate)
     candidate = ImageChops.lighter(pixel_candidate, low_frequency_candidate)
-    candidate = _clear_mask_edges(candidate, max(3, int(round(min(image.width, image.height) * 0.025))))
-    raw_candidate_ratio = _mask_ratio(candidate)
+    edge_margin = max(3, int(round(min(image.width, image.height) * 0.025)))
+    edge_cleared_candidate = _clear_mask_edges(candidate, edge_margin)
+    edge_candidate_ratio = _mask_ratio(candidate) - _mask_ratio(edge_cleared_candidate)
+    raw_candidate_ratio = _mask_ratio(edge_cleared_candidate)
     if raw_candidate_ratio > 0.09:
         return _background_stains_noop(
             image,
             "background stain lightening skipped: broad uneven lighting is outside conservative scope",
             raw_candidate_ratio,
         )
+    if edge_candidate_ratio > 0.0004:
+        return _background_stains_noop(
+            image,
+            "background stain lightening skipped: binding, edge mark, or margin content risk",
+            edge_candidate_ratio,
+        )
+    candidate = edge_cleared_candidate
     protected = foreground.filter(ImageFilter.MaxFilter(13))
     protected_overlap_ratio = _mask_ratio(ImageChops.multiply(candidate, protected))
     if protected_overlap_ratio > 0.001 or protected_overlap_ratio / max(raw_candidate_ratio, 0.000001) > 0.02:
@@ -2666,9 +2675,15 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
             candidate_ratio,
         )
 
-    components = _mask_components(candidate)
+    components = [component for component in _mask_components(candidate) if len(component) >= 6]
     if not components:
         return _background_stains_noop(image, "background stain lightening skipped: no confident light background stains")
+    if len(components) > 6:
+        return _background_stains_noop(
+            image,
+            "background stain lightening skipped: too many stain candidates outside conservative scope",
+            candidate_ratio,
+        )
     selected: set[tuple[int, int]] = set()
     for component in components:
         area = len(component)
@@ -2787,7 +2802,7 @@ def _background_stain_color_risk_reason(image: Image.Image) -> str | None:
         return "color content, stamp, or annotation risk"
     colored_ratio = colored / total
     weak_warm_ratio = weak_warm_background / total
-    if 0.0008 <= colored_ratio < 0.01:
+    if 0.0008 <= colored_ratio < 0.01 and weak_warm_ratio / max(colored_ratio, 0.000001) < 0.85:
         return "color content, stamp, or annotation risk"
     if colored_ratio >= 0.003 and (weak_warm_ratio / max(colored_ratio, 0.000001) < 0.85 or colored_ratio > 0.16):
         return "color content, stamp, or annotation risk"
