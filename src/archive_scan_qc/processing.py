@@ -3780,6 +3780,7 @@ def _processing_audit(
     if local_content_change_guard is None:
         if _should_check_local_content_change(
             despeckle_pixels_changed=despeckle_pixels_changed,
+            source_area=source_area,
             tone_normalized=tone_normalized,
             tone_background_delta=tone_background_delta,
             tone_contrast_delta=tone_contrast_delta,
@@ -3806,6 +3807,7 @@ def _processing_audit(
 def _should_check_local_content_change(
     *,
     despeckle_pixels_changed: int,
+    source_area: int,
     tone_normalized: bool,
     tone_background_delta: float,
     tone_contrast_delta: float,
@@ -3818,7 +3820,8 @@ def _should_check_local_content_change(
     text_edges_sharpened: bool,
     text_edges_changed_pixel_ratio: float,
 ) -> bool:
-    if despeckle_pixels_changed > 0:
+    despeckle_guard_floor = max(24, int(max(1, source_area) * 0.00005))
+    if despeckle_pixels_changed >= despeckle_guard_floor:
         return True
     if edge_shadow_lightened and edge_shadow_changed_pixel_ratio > 0:
         return True
