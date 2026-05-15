@@ -209,19 +209,38 @@ def aggregate_processing_reuse_precheck(
 
     reusable_files = 0
     needs_processing_files = 0
-    for relative_path in safe_relative_paths:
+    precheck_workers = resolve_worker_count(options.workers, total_files)
+
+    def classify(relative_path: str) -> tuple[str, str | None]:
         source_path = input_dir / relative_path
         try:
             source_sha256 = _sha256(source_path)
         except OSError:
-            return _processing_precheck_unknown(base, "input_file_unreadable", total_files)
+            return "unknown", "input_file_unreadable"
         item = {
             "relative_path": relative_path,
             "sha256": source_sha256,
             "openable": True,
         }
         previous_record = previous_records.get(relative_path)
-        if previous_record and _previous_record_is_current(previous_record, item, input_dir, image_root, options):
+        if not previous_record:
+            return "needs_processing", None
+        try:
+            reusable = _previous_record_is_current(previous_record, item, input_dir, image_root, options)
+        except OSError:
+            reusable = False
+        return ("reusable", None) if reusable else ("needs_processing", None)
+
+    if precheck_workers == 1:
+        decisions = [classify(relative_path) for relative_path in safe_relative_paths]
+    else:
+        with ThreadPoolExecutor(max_workers=precheck_workers) as executor:
+            decisions = list(executor.map(classify, safe_relative_paths))
+
+    for decision, reason in decisions:
+        if decision == "unknown":
+            return _processing_precheck_unknown(base, reason or "input_file_unreadable", total_files)
+        if decision == "reusable":
             reusable_files += 1
         else:
             needs_processing_files += 1
