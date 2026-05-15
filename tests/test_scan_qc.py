@@ -6233,6 +6233,199 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn("private_red_annotation", audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
 
+    def test_lighten_edge_shadow_improves_safe_shadow_with_aggregate_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source_image = _synthetic_edge_shadow_repair_page()
+            source_image.save(input_dir / "private_safe_edge_shadow.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(lighten_edge_shadow=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+            processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+
+            self.assertTrue(record["edge_shadow_lightened"])
+            self.assertEqual(record["edge_shadow_edges"], ["left"])
+            self.assertIn("lighten_edge_shadow_conservative", record["operations"])
+            self.assertGreater(_box_luma(processed, (0, 0, 14, 180)), _box_luma(source_image, (0, 0, 14, 180)) + 6.0)
+            self.assertLess(_changed_ratio_for_test(source_image, processed, (58, 34, 200, 110)), 0.002)
+            self.assertGreater(record["edge_shadow_changed_pixel_ratio"], 0.01)
+            self.assertLess(record["edge_shadow_changed_pixel_ratio"], 0.08)
+            self.assertGreater(record["edge_shadow_candidate_pixel_ratio"], record["edge_shadow_changed_pixel_ratio"])
+            self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
+
+            edge_guard = audit_summary["guardrails"]["edge_shadow"]
+            self.assertTrue(audit_summary["operations"]["lighten_edge_shadow"])
+            self.assertEqual(audit_summary["counts"]["edge_shadow_lightened_files"], 1)
+            self.assertEqual(audit_summary["counts"]["edge_shadow_skipped_files"], 0)
+            self.assertEqual(edge_guard["applied_files"], 1)
+            self.assertEqual(edge_guard["skipped_files"], 0)
+            self.assertEqual(edge_guard["edge_distribution"]["left"], 1)
+            self.assertIn("edge_shadow_candidate_pixel_ratio", audit_summary["metrics"])
+            self.assertIn("candidate_pixel_ratio", edge_guard)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_safe_edge_shadow", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
+    def test_lighten_edge_shadow_skips_protected_content_and_uncertain_pages(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            default_process_dir = root / "processed-default"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "private_default_compatible_edge_shadow.png": _synthetic_edge_shadow_repair_page(),
+                "private_edge_text.png": _synthetic_edge_shadow_repair_page(edge_text=True),
+                "private_page_number.png": _synthetic_edge_shadow_repair_page(page_number=True),
+                "private_table_line.png": _synthetic_edge_shadow_repair_page(table_line=True),
+                "private_red_stamp.png": _synthetic_edge_shadow_repair_page(red_stamp=True),
+                "private_handwriting.png": _synthetic_edge_shadow_repair_page(handwriting=True),
+                "private_binding_hole.png": _synthetic_edge_shadow_repair_page(binding_hole=True),
+                "private_archive_line.png": _synthetic_edge_shadow_repair_page(archive_line=True),
+                "private_photo_texture.png": _synthetic_photo_like_page(),
+                "private_dense_texture.png": _synthetic_edge_shadow_dense_texture_page(),
+                "private_high_contrast_normal.png": _synthetic_high_contrast_dense_text_page(),
+                "private_low_confidence.png": _synthetic_edge_shadow_low_confidence_page(),
+                "private_no_shadow.png": Image.new("RGB", (260, 180), (242, 242, 238)),
+            }
+            for name, image in pages.items():
+                image.save(input_dir / name, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            default_manifest = process_images(report, input_dir, default_process_dir, ProcessingOptions(workers=1))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(lighten_edge_shadow=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for record in default_manifest["files"]:
+                self.assertFalse(record["edge_shadow_lightened"])
+                self.assertIn("lighten_edge_shadow_disabled", record["operations"])
+                self.assertEqual(
+                    _sha256_for_test(input_dir / record["source_relative_path"]),
+                    _sha256_for_test(default_process_dir / record["output_relative_path"]),
+                )
+
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            self.assertTrue(records["private_default_compatible_edge_shadow.png"]["edge_shadow_lightened"])
+            skipped_expectations = {
+                "private_edge_text.png": "risk",
+                "private_page_number.png": "risk",
+                "private_table_line.png": "risk",
+                "private_red_stamp.png": "risk",
+                "private_handwriting.png": "risk",
+                "private_binding_hole.png": "risk",
+                "private_archive_line.png": "risk",
+                "private_photo_texture.png": "risk",
+                "private_dense_texture.png": "risk",
+                "private_high_contrast_normal.png": "risk",
+                "private_low_confidence.png": "low tonal separation",
+                "private_no_shadow.png": "low tonal separation",
+            }
+            for source_name, reason_fragment in skipped_expectations.items():
+                record = records[source_name]
+                processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+                self.assertFalse(record["edge_shadow_lightened"], source_name)
+                self.assertIn("lighten_edge_shadow_noop", record["operations"], source_name)
+                self.assertIn(reason_fragment, record["edge_shadow_reason"], source_name)
+                self.assertEqual(record["processing_audit"]["edge_shadow_changed_pixel_ratio"], 0.0, source_name)
+                self.assertLess(
+                    _changed_ratio_for_test(pages[source_name], processed, (0, 0, processed.width, processed.height)),
+                    0.001,
+                    source_name,
+                )
+
+            edge_guard = audit_summary["guardrails"]["edge_shadow"]
+            self.assertEqual(audit_summary["counts"]["edge_shadow_lightened_files"], 1)
+            self.assertEqual(audit_summary["counts"]["edge_shadow_skipped_files"], len(skipped_expectations))
+            self.assertEqual(edge_guard["applied_files"], 1)
+            self.assertEqual(edge_guard["skipped_files"], len(skipped_expectations))
+            self.assertGreaterEqual(edge_guard["protection_triggered_files"], 8)
+            self.assertGreaterEqual(edge_guard["low_confidence_skip_files"], 2)
+            self.assertGreaterEqual(len(edge_guard["skip_reason_distribution"]), 4)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_default_compatible_edge_shadow", audit_summary_text)
+            self.assertNotIn("private_red_stamp", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
+    def test_combined_processing_chain_with_edge_shadow_audit_stays_aggregate_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            _synthetic_edge_shadow_repair_page().save(input_dir / "private_combined_edge_shadow.png", dpi=(300, 300))
+
+            exit_code = main(
+                [
+                    "--input",
+                    str(input_dir),
+                    "--out",
+                    str(output_dir),
+                    "--process-out",
+                    str(process_dir),
+                    "--auto-crop",
+                    "--deskew",
+                    "--trim-dark-border",
+                    "--despeckle",
+                    "--normalize-tones",
+                    "--lighten-edge-shadow",
+                    "--lighten-background-stains",
+                    "--lighten-scanlines",
+                    "--enhance-faded-text",
+                    "--sharpen-text-edges",
+                    "--workers",
+                    "1",
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            manifest = json.loads((process_dir / "processing_manifest.json").read_text(encoding="utf-8"))
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            self.assertEqual(manifest["summary"]["processed_files"], 1)
+            self.assertEqual(manifest["summary"]["failed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["processed_files"], 1)
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["operations"]["auto_crop"])
+            self.assertTrue(audit_summary["operations"]["deskew"])
+            self.assertTrue(audit_summary["operations"]["trim_dark_border"])
+            self.assertTrue(audit_summary["operations"]["despeckle"])
+            self.assertTrue(audit_summary["operations"]["normalize_tones"])
+            self.assertTrue(audit_summary["operations"]["lighten_edge_shadow"])
+            self.assertTrue(audit_summary["operations"]["lighten_background_stains"])
+            self.assertTrue(audit_summary["operations"]["lighten_scanlines"])
+            self.assertTrue(audit_summary["operations"]["enhance_faded_text"])
+            self.assertTrue(audit_summary["operations"]["sharpen_text_edges"])
+            self.assertIn("edge_shadow", audit_summary["guardrails"])
+            self.assertIn("background_stains", audit_summary["guardrails"])
+            self.assertIn("scanlines", audit_summary["guardrails"])
+            self.assertIn("faded_text", audit_summary["guardrails"])
+            self.assertIn("text_edges", audit_summary["guardrails"])
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            self.assertNotIn("private_combined_edge_shadow", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
     def test_lighten_scanlines_improves_horizontal_and_vertical_lines_with_aggregate_audit(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -10886,6 +11079,62 @@ def _synthetic_repair_scanline_page(
 def _synthetic_scanline_low_confidence_page() -> Image.Image:
     image = Image.new("RGB", (260, 180), (240, 240, 236))
     ImageDraw.Draw(image).rectangle((16, 132, 244, 133), fill=(222, 222, 218))
+    return image
+
+
+def _synthetic_edge_shadow_repair_page(
+    *,
+    edge_text: bool = False,
+    page_number: bool = False,
+    table_line: bool = False,
+    red_stamp: bool = False,
+    handwriting: bool = False,
+    binding_hole: bool = False,
+    archive_line: bool = False,
+) -> Image.Image:
+    image = Image.new("RGB", (260, 180), (242, 242, 238))
+    draw = ImageDraw.Draw(image)
+    for x in range(14):
+        shade = 190 + x * 3
+        draw.line((x, 0, x, image.height - 1), fill=(shade, shade, shade))
+    for y in (46, 68, 90):
+        draw.rectangle((76, y, 184, y + 5), fill=(35, 35, 35))
+    if edge_text:
+        draw.rectangle((16, 74, 42, 78), fill=(28, 28, 28))
+    if page_number:
+        draw.rectangle((120, 162, 142, 172), fill=(32, 32, 32))
+    if table_line:
+        draw.line((2, 124, 236, 124), fill=(45, 45, 45), width=2)
+    if red_stamp:
+        draw.ellipse((174, 88, 230, 144), outline=(180, 28, 28), width=4)
+    if handwriting:
+        draw.line((18, 138, 72, 160), fill=(55, 55, 55), width=2)
+        draw.line((72, 160, 124, 136), fill=(55, 55, 55), width=2)
+    if binding_hole:
+        draw.ellipse((2, 84, 10, 94), fill=(24, 24, 24))
+    if archive_line:
+        draw.rectangle((4, 112, 16, 154), fill=(58, 58, 58))
+    return image
+
+
+def _synthetic_edge_shadow_dense_texture_page() -> Image.Image:
+    image = Image.new("RGB", (260, 180), (238, 238, 234))
+    draw = ImageDraw.Draw(image)
+    for x in range(14):
+        shade = 188 + x * 3
+        draw.line((x, 0, x, image.height - 1), fill=(shade, shade, shade))
+    for x in range(18, 246, 6):
+        for y in range(12, 168, 6):
+            shade = 88 + ((x * 5 + y * 7) % 86)
+            draw.rectangle((x, y, x + 2, y + 2), fill=(shade, shade, shade))
+    return image
+
+
+def _synthetic_edge_shadow_low_confidence_page() -> Image.Image:
+    image = Image.new("RGB", (260, 180), (240, 240, 236))
+    draw = ImageDraw.Draw(image)
+    for x in range(4):
+        draw.line((x, 0, x, image.height - 1), fill=(232 + x, 232 + x, 228 + x))
     return image
 
 
