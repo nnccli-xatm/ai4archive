@@ -5760,7 +5760,7 @@ class ScanQcTest(unittest.TestCase):
             process_dir = root / "processed"
             input_dir.mkdir()
             source = input_dir / "private_faded_text.png"
-            _synthetic_faded_text_page(ink=210).save(source, dpi=(300, 300))
+            _synthetic_faded_text_page(ink=218).save(source, dpi=(300, 300))
             source_bytes = source.read_bytes()
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
@@ -5781,15 +5781,24 @@ class ScanQcTest(unittest.TestCase):
             self.assertGreater(audit["faded_text_delta"], 8)
             self.assertGreater(audit["faded_text_changed_pixel_ratio"], 0)
             self.assertLessEqual(audit["faded_text_changed_pixel_ratio"], 0.10)
+            self.assertGreater(audit["faded_text_candidate_pixel_ratio"], 0)
+            self.assertEqual(record["faded_text_reason_code"], "applied_stable_low_contrast_text")
+            self.assertEqual(record["faded_text_reason_zh"], "检测到浅色纸面上的稳定低对比正文，已保守加深。")
             self.assertEqual(audit["guardrail_failures"], [])
             self.assertTrue(audit_summary["operations"]["enhance_faded_text"])
             self.assertEqual(audit_summary["counts"]["faded_text_enhanced_files"], 1)
             self.assertEqual(audit_summary["counts"]["faded_text_skipped_files"], 0)
             self.assertIn("faded_text_changed_pixel_ratio", audit_summary["metrics"])
+            self.assertIn("faded_text_candidate_pixel_ratio", audit_summary["metrics"])
             self.assertEqual(audit_summary["guardrails"]["faded_text"]["applied_files"], 1)
             self.assertEqual(audit_summary["guardrails"]["faded_text"]["skipped_files"], 0)
             self.assertGreater(audit_summary["guardrails"]["faded_text"]["changed_pixel_ratio"]["max"], 0)
+            self.assertGreater(audit_summary["guardrails"]["faded_text"]["candidate_pixel_ratio"]["max"], 0)
             self.assertIn(record["faded_text_reason"], audit_summary["guardrails"]["faded_text"]["reason_distribution"])
+            self.assertEqual(
+                audit_summary["guardrails"]["faded_text"]["reason_code_distribution"],
+                {"applied_stable_low_contrast_text": 1},
+            )
             self.assertEqual(plan["summary"]["faded_text_enhancement_candidates"], 1)
             self.assertTrue(plan["files"][0]["faded_text_enhancement_candidate"])
 
@@ -5833,6 +5842,10 @@ class ScanQcTest(unittest.TestCase):
                 self.assertIn("enhance_faded_text_noop", record["operations"])
                 self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
                 self.assertEqual(record["processing_audit"]["faded_text_changed_pixel_ratio"], 0.0)
+                self.assertIsInstance(record["faded_text_reason_code"], str)
+                self.assertNotEqual(record["faded_text_reason_code"], "unknown")
+                self.assertIsInstance(record["faded_text_reason_zh"], str)
+                self.assertIn("跳过褪色正文加深", record["faded_text_reason_zh"])
             self.assertTrue(audit_summary["operations"]["enhance_faded_text"])
             self.assertEqual(audit_summary["counts"]["faded_text_enhanced_files"], 0)
             self.assertEqual(audit_summary["counts"]["faded_text_skipped_files"], len(pages))
@@ -5849,6 +5862,12 @@ class ScanQcTest(unittest.TestCase):
                 "faded text enhancement skipped: broad stain, texture, illustration, or table-region risk",
                 faded_guard["skip_reason_distribution"],
             )
+            self.assertIn("protected_color_stamp_annotation", faded_guard["skip_reason_code_distribution"])
+            self.assertIn("protected_edge_mark_or_binding", faded_guard["skip_reason_code_distribution"])
+            self.assertIn("protected_texture_table_or_photo_region", faded_guard["skip_reason_code_distribution"])
+            self.assertIn("low_confidence_text_evidence_too_weak", faded_guard["skip_reason_code_distribution"])
+            self.assertIn("检测到彩色内容、印章或批注风险，跳过褪色正文加深。", faded_guard["skip_reason_zh_distribution"])
+            self.assertIn("检测到边缘痕迹或装订边风险，跳过褪色正文加深。", faded_guard["skip_reason_zh_distribution"])
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertFalse(audit_summary["privacy"]["contains_paths"])
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
