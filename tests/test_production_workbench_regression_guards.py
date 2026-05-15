@@ -153,6 +153,36 @@ class ProductionWorkbenchRegressionGuardTests(unittest.TestCase):
         ]:
             self.assertIn(required, html)
 
+    def test_finish_export_blocks_render_actionable_operator_guidance(self) -> None:
+        html = WORKBENCH_HTML.read_text(encoding="utf-8")
+
+        for required in [
+            'id="finishBlocker"',
+            'id="finishBlockerTitle"',
+            'id="finishBlockerMessage"',
+            'id="finishBlockerSteps"',
+            'id="finishBlockerWaitButton"',
+            'id="finishBlockerReviewButton"',
+            'id="finishBlockerRetryButton"',
+            "function finishBlockerFromError(error)",
+            "blocking_reasons_zh",
+            "完成前还要等待",
+            "继续等待处理完成",
+            "还有待确认项",
+            "返回看图确认",
+            "已经记录的复核决定会保留",
+            "输出图片数量不足",
+            "当前不会显示为本批已完成",
+            "检查输出文件夹",
+            "重试本批次",
+            "state.finishBlocker = finishBlockerFromError(error);",
+            "els.finishBlockerReviewButton.addEventListener",
+        ]:
+            self.assertIn(required, html)
+
+        self.assertIn("state.status = \"complete\";", html)
+        self.assertIn("applyCompletionPanel(payload.completion_panel);", html)
+
     def test_review_decision_buttons_keep_stable_dimensions(self) -> None:
         html = WORKBENCH_HTML.read_text(encoding="utf-8")
 

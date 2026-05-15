@@ -945,6 +945,149 @@ test.describe("production workbench finish/export browser smoke", () => {
     expect(consoleProblems).toEqual([]);
   });
 
+  test("turns processing finish blocks into wait and retry guidance", async ({ page }) => {
+    await page.route("**/api/status", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema_version: "scan-qc.local-production-workbench.v1",
+          running: false,
+          configured: true,
+          folders: { input: "/tmp/block-running-input", derivatives: "/tmp/block-running-output", metadata: "/tmp/block-running-output/_production_workbench" },
+          summary: {
+            schema_version: "scan-qc.production-run.v1",
+            status: "finished",
+            operator_summary: {
+              message_zh: "处理后图片已生成，可以完成并导出结果。",
+              total_source_images: 2,
+              derivative_images_ready: 2,
+              files_needing_attention: 0,
+            },
+            counts: { total_files: 2, processed_files: 2, failed_files: 0 },
+          },
+          progress: { schema_version: "scan-qc.production-run-progress.v1", state: "finished" },
+          queue: { schema_version: "scan-qc.production-review-queue.v1", items: [] },
+        }),
+      });
+    });
+    await page.route("**/api/finish-decisions", async (route) => {
+      await route.fulfill({
+        status: 400,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error_zh: "本批仍在处理中，请等待处理完成后再完成导出。",
+          blocking_reasons_zh: ["本批仍在处理中，请等待处理完成后再完成导出。"],
+        }),
+      });
+    });
+
+    await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
+    await page.getByRole("button", { name: "完成并导出结果" }).click();
+    await page.getByRole("button", { name: "确认完成本批" }).click();
+    await expect(page.locator("#finishBlockerTitle")).toHaveText("完成前还要等待");
+    await expect(page.locator("#finishBlockerMessage")).toHaveText("本批仍在处理中，请等待处理完成后再完成导出。");
+    await expect(page.locator("#finishBlocker")).toContainText("继续等待处理完成");
+    await expect(page.getByRole("button", { name: "继续等待" })).toBeVisible();
+    await expect(page.locator("#completionTitle")).toBeHidden();
+    await expect(page.locator("#completionStatusFact")).toHaveText("未完成");
+  });
+
+  test("keeps review drafts when finish is blocked by pending confirmations", async ({ page }) => {
+    await page.route("**/api/status", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema_version: "scan-qc.local-production-workbench.v1",
+          running: false,
+          configured: true,
+          folders: { input: "/tmp/block-review-input", derivatives: "/tmp/block-review-output", metadata: "/tmp/block-review-output/_production_workbench" },
+          summary: {
+            schema_version: "scan-qc.production-run.v1",
+            status: "needs_review",
+            operator_summary: { message_zh: "有图片需要人工确认。", total_source_images: 1, derivative_images_ready: 1, files_needing_attention: 1 },
+            counts: { total_files: 1, processed_files: 1, failed_files: 0 },
+          },
+          progress: { schema_version: "scan-qc.production-run-progress.v1", state: "needs_review" },
+          queue: {
+            schema_version: "scan-qc.production-review-queue.v1",
+            items: [{ local_id: "PRQ-BLOCK-1", reason_zh: "画面需要确认。", focus_hints_zh: ["确认画面是否完整"], suggested_action: "rescan", severity: "P1", preview_source: "unavailable", preview_sources: { original: false, processed: false } }],
+          },
+        }),
+      });
+    });
+    await page.route("**/api/save-draft-decisions", async (route) => {
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ saved: true, message_zh: "已自动保存" }) });
+    });
+    await page.route("**/api/finish-decisions", async (route) => {
+      await route.fulfill({
+        status: 400,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error_zh: "仍有 1 项待人工确认，请先完成待看图复核后再完成导出。",
+          blocking_reasons_zh: ["仍有 1 项待人工确认，请先完成待看图复核后再完成导出。"],
+        }),
+      });
+    });
+
+    await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
+    await page.locator("#operatorName").fill("复核员乙");
+    await page.getByRole("button", { name: "确认通过" }).click();
+    await expect(page.locator("#decisionSummary")).toHaveText("已决定 1 项，待决定 0 项。");
+    await page.getByRole("button", { name: "完成并导出结果" }).click();
+    await page.getByRole("button", { name: "确认完成本批" }).click();
+    await expect(page.locator("#finishBlockerTitle")).toHaveText("还有待确认项");
+    await expect(page.locator("#finishBlocker")).toContainText("返回看图确认");
+    await expect(page.locator("#finishBlocker")).toContainText("已经记录的复核决定会保留");
+    await expect(page.locator("#operatorName")).toHaveValue("复核员乙");
+    await expect(page.locator("#decisionSummary")).toHaveText("已决定 1 项，待决定 0 项。");
+    await page.getByRole("button", { name: "返回看图确认" }).click();
+    await expect(page.locator("#loadStatus")).toHaveText("已返回看图确认，已保存的决定会继续保留。");
+    await expect(page.locator("#decisionSummary")).toHaveText("已决定 1 项，待决定 0 项。");
+  });
+
+  test("does not show completion when output count is blocked", async ({ page }) => {
+    await page.route("**/api/status", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema_version: "scan-qc.local-production-workbench.v1",
+          running: false,
+          configured: true,
+          folders: { input: "/tmp/block-output-input", derivatives: "/tmp/block-output-output", metadata: "/tmp/block-output-output/_production_workbench" },
+          summary: {
+            schema_version: "scan-qc.production-run.v1",
+            status: "finished",
+            operator_summary: { message_zh: "处理后图片已生成，可以完成并导出结果。", total_source_images: 5, derivative_images_ready: 5, files_needing_attention: 0 },
+            counts: { total_files: 5, processed_files: 5, failed_files: 0 },
+          },
+          progress: { schema_version: "scan-qc.production-run-progress.v1", state: "finished" },
+          queue: { schema_version: "scan-qc.production-review-queue.v1", items: [] },
+        }),
+      });
+    });
+    await page.route("**/api/finish-decisions", async (route) => {
+      await route.fulfill({
+        status: 400,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error_zh: "输出图片数量不足，当前不能完成交接。",
+          blocking_reasons_zh: ["输出图片数量不足，当前不能完成交接。"],
+        }),
+      });
+    });
+
+    await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
+    await page.getByRole("button", { name: "完成并导出结果" }).click();
+    await page.getByRole("button", { name: "确认完成本批" }).click();
+    await expect(page.locator("#finishBlockerTitle")).toHaveText("输出图片数量不足");
+    await expect(page.locator("#finishBlocker")).toContainText("不要交接本批");
+    await expect(page.locator("#finishBlocker")).toContainText("检查输出文件夹");
+    await expect(page.getByRole("button", { name: "重试本批次" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "准备下一批" })).toBeVisible();
+    await expect(page.locator("#completionTitle")).toBeHidden();
+    await expect(page.locator("#completionStatusFact")).toHaveText("未完成");
+  });
+
   test("shows retry action for retryable failures and posts retry request", async ({ page }) => {
     const consoleProblems = [];
     let retryRequested = false;

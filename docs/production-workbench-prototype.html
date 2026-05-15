@@ -466,6 +466,40 @@
       margin-top: 2px;
     }
 
+    .finish-blocker {
+      border: 1px solid #c96f3a;
+      border-radius: 8px;
+      background: #fff4ed;
+      padding: 12px;
+      display: grid;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .finish-blocker h3 {
+      color: #7a2e12;
+    }
+
+    .finish-blocker p,
+    .finish-blocker li {
+      color: var(--ink-2);
+    }
+
+    .finish-blocker ul {
+      margin: 0;
+      padding-left: 20px;
+    }
+
+    .finish-blocker-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .finish-blocker-actions button {
+      min-height: 40px;
+    }
+
     .readiness-box {
       border: 1px solid #b8d8ca;
       border-radius: 8px;
@@ -1372,6 +1406,18 @@
         <div class="handoff">
           <button id="exportButton" disabled>另存复核结果</button>
           <button id="completeButton" disabled>完成并导出结果</button>
+          <div class="finish-blocker hidden" id="finishBlocker" aria-live="polite">
+            <h3 id="finishBlockerTitle">暂不能完成本批</h3>
+            <p id="finishBlockerMessage">请按提示处理后再试。</p>
+            <p><strong>下一步：</strong></p>
+            <ul id="finishBlockerSteps"></ul>
+            <div class="finish-blocker-actions">
+              <button type="button" class="primary-choice hidden" id="finishBlockerWaitButton">继续等待</button>
+              <button type="button" class="primary-choice hidden" id="finishBlockerReviewButton">返回看图确认</button>
+              <button type="button" class="secondary hidden" id="finishBlockerRetryButton">重试本批次</button>
+              <button type="button" class="secondary hidden" id="finishBlockerNextBatchButton">准备下一批</button>
+            </div>
+          </div>
           <div class="handoff-box hidden" id="finishConfirmPanel">
             <h3>确认完成本批</h3>
             <p id="finishConfirmMessage">请确认本批已经检查完，再完成并交接。</p>
@@ -1498,6 +1544,7 @@
       adminHandoffFact: "不需要",
       completionSteps: INITIAL_COMPLETION_STEPS.slice(),
       finishConfirmationVisible: false,
+      finishBlocker: null,
       lastDraftMessage: "",
       operatorMessage: "",
       reviewQueueText: "",
@@ -1609,6 +1656,14 @@
       finishConfirmCounts: document.getElementById("finishConfirmCounts"),
       finishConfirmOutput: document.getElementById("finishConfirmOutput"),
       finishConfirmSteps: document.getElementById("finishConfirmSteps"),
+      finishBlocker: document.getElementById("finishBlocker"),
+      finishBlockerTitle: document.getElementById("finishBlockerTitle"),
+      finishBlockerMessage: document.getElementById("finishBlockerMessage"),
+      finishBlockerSteps: document.getElementById("finishBlockerSteps"),
+      finishBlockerWaitButton: document.getElementById("finishBlockerWaitButton"),
+      finishBlockerReviewButton: document.getElementById("finishBlockerReviewButton"),
+      finishBlockerRetryButton: document.getElementById("finishBlockerRetryButton"),
+      finishBlockerNextBatchButton: document.getElementById("finishBlockerNextBatchButton"),
       confirmFinishButton: document.getElementById("confirmFinishButton"),
       returnReviewButton: document.getElementById("returnReviewButton"),
       outputPlace: document.getElementById("outputPlace"),
@@ -2232,10 +2287,93 @@
       els.outputPanel.classList.toggle("hidden", state.status !== "complete");
       els.failurePanel.classList.toggle("hidden", state.status !== "failed");
       renderRecoveryGuidance();
+      renderFinishBlocker();
       renderFolderReadiness();
       renderFinishConfirmation();
       renderCompletionPanel();
       renderDecisionArea();
+    }
+
+    function clearFinishBlocker() {
+      state.finishBlocker = null;
+    }
+
+    function finishBlockerFromError(error) {
+      const payload = error && error.payload && typeof error.payload === "object" ? error.payload : {};
+      const reasons = Array.isArray(payload.blocking_reasons_zh) ? payload.blocking_reasons_zh.filter(Boolean) : [];
+      const message = reasons[0] || payload.error_zh || (error && error.message) || "完成并导出结果失败。";
+      const combined = [message, ...reasons, payload.message_zh].filter(Boolean).join(" ");
+      const hasProcessingBlock = /仍在处理中|正在处理|处理中|生成处理后图片|处理没有全部完成/.test(combined);
+      const hasPendingReviewBlock = /待确认|待人工确认|待看图|没有决定|复核/.test(combined);
+      const hasOutputShortageBlock = /输出图片数量不足|输出图片.*不足|处理后图片.*不足|处理后图片.*不够|没有处理完|数量不足/.test(combined);
+      if (hasOutputShortageBlock) {
+        return {
+          kind: "output_shortage",
+          title: "输出图片数量不足",
+          message,
+          steps: [
+            "不要交接本批，当前不会显示为本批已完成。",
+            "先检查输出文件夹里的处理后图片数量和画面状态。",
+            "如果输出确实不完整，请重试本批次；仍不正常再重新开始本批或交管理员处理。",
+            "确认可以交接后，再点击完成并导出结果。"
+          ],
+          actions: { retry: true, nextBatch: true }
+        };
+      }
+      if (hasPendingReviewBlock) {
+        return {
+          kind: "pending_review",
+          title: "还有待确认项",
+          message,
+          steps: [
+            "返回看图确认，继续处理剩余待确认图片。",
+            "已经记录的复核决定会保留，不会清空草稿。",
+            "全部待确认图片都有决定后，再点击完成并导出结果。"
+          ],
+          actions: { review: true }
+        };
+      }
+      if (hasProcessingBlock) {
+        return {
+          kind: "processing",
+          title: "完成前还要等待",
+          message,
+          steps: [
+            "本机仍在处理本批图片，请继续等待处理完成。",
+            "稍后刷新进度，再重试完成并导出结果。",
+            "等待期间不要清空当前复核决定，也不要混用下一批文件夹。"
+          ],
+          actions: { wait: true }
+        };
+      }
+      return {
+        kind: "generic",
+        title: "暂不能完成本批",
+        message,
+        steps: Array.isArray(payload.next_steps_zh) && payload.next_steps_zh.length
+          ? payload.next_steps_zh
+          : ["按提示处理当前批次后，再重试完成并导出结果。", "如果仍不能完成，请交管理员处理。"],
+        actions: { wait: true, review: state.reviewItems.length > 0 }
+      };
+    }
+
+    function renderFinishBlocker() {
+      const blocker = state.finishBlocker;
+      els.finishBlocker.classList.toggle("hidden", !blocker);
+      if (!blocker) return;
+      els.finishBlockerTitle.textContent = blocker.title || "暂不能完成本批";
+      els.finishBlockerMessage.textContent = blocker.message || "请按提示处理后再试。";
+      const steps = Array.isArray(blocker.steps) ? blocker.steps : [];
+      els.finishBlockerSteps.innerHTML = steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("");
+      const actions = blocker.actions || {};
+      els.finishBlockerWaitButton.classList.toggle("hidden", !actions.wait);
+      els.finishBlockerReviewButton.classList.toggle("hidden", !actions.review);
+      els.finishBlockerRetryButton.classList.toggle("hidden", !actions.retry);
+      els.finishBlockerNextBatchButton.classList.toggle("hidden", !actions.nextBatch);
+      els.finishBlockerWaitButton.disabled = false;
+      els.finishBlockerReviewButton.disabled = pendingCount() === 0 && state.reviewItems.length === 0;
+      els.finishBlockerRetryButton.disabled = state.status === "processing" || state.status === "checking";
+      els.finishBlockerNextBatchButton.disabled = state.status === "processing" || state.status === "checking";
     }
 
     function finishOutputLabel() {
@@ -3367,6 +3505,7 @@
         state.finishConfirmationVisible = false;
         els.loadStatus.textContent = "正在完成并导出结果。";
         const payload = await apiPost("/api/finish-decisions", decisionArtifact());
+        clearFinishBlocker();
         applyCompletionPanel(payload.completion_panel);
         if (payload.saved && (payload.saved.decision_summary || payload.saved.verification_summary)) state.decisionSaveSummary = DECISION_SAVE_LABEL;
         state.status = "complete";
@@ -3378,7 +3517,10 @@
         els.loadStatus.textContent = payload.message_zh || "完成并导出结果：处理后图片已保存到输出文件夹，复核结果和交接说明已保存到本机状态文件夹。";
         render();
       } catch (error) {
-        els.loadStatus.textContent = error.message || "完成并导出结果失败。";
+        state.finishConfirmationVisible = false;
+        state.finishBlocker = finishBlockerFromError(error);
+        state.operatorMessage = state.finishBlocker.message;
+        els.loadStatus.textContent = state.finishBlocker.message;
         render();
       }
     }
@@ -3390,6 +3532,7 @@
         render();
         return;
       }
+      clearFinishBlocker();
       state.finishConfirmationVisible = true;
       els.loadStatus.textContent = "请确认本批已经检查完，再完成并导出结果。";
       render();
@@ -3401,9 +3544,35 @@
       render();
     }
 
+    async function continueWaitingAfterFinishBlock() {
+      clearFinishBlocker();
+      els.loadStatus.textContent = "正在刷新本机处理状态，请稍候。";
+      render();
+      await pollServerStatus();
+    }
+
+    function returnToReviewAfterFinishBlock() {
+      clearFinishBlocker();
+      state.finishConfirmationVisible = false;
+      state.currentIndex = Math.max(0, firstPendingIndex());
+      els.loadStatus.textContent = "已返回看图确认，已保存的决定会继续保留。";
+      render();
+    }
+
+    async function retryBatchAfterFinishBlock() {
+      clearFinishBlocker();
+      await retryLocalRun();
+    }
+
+    async function prepareNextBatchAfterFinishBlock() {
+      clearFinishBlocker();
+      await prepareNextBatch();
+    }
+
     function recordReviewDecision(decision, source = "button") {
       const button = els.decisionActions.querySelector(`button[data-decision="${decision}"]`);
       if (!button || button.disabled || !hasActivePendingReview()) return false;
+      clearFinishBlocker();
       const item = currentItem();
       if (!item) return false;
       item.decision = decision;
@@ -3477,6 +3646,10 @@
     els.completeButton.addEventListener("click", showFinishConfirmation);
     els.confirmFinishButton.addEventListener("click", finishBatch);
     els.returnReviewButton.addEventListener("click", returnToReviewFromFinishConfirmation);
+    els.finishBlockerWaitButton.addEventListener("click", continueWaitingAfterFinishBlock);
+    els.finishBlockerReviewButton.addEventListener("click", returnToReviewAfterFinishBlock);
+    els.finishBlockerRetryButton.addEventListener("click", retryBatchAfterFinishBlock);
+    els.finishBlockerNextBatchButton.addEventListener("click", prepareNextBatchAfterFinishBlock);
     els.exportButton.addEventListener("click", exportDecisions);
     els.openOutputFolderButton.addEventListener("click", openOutputFolder);
 
@@ -3491,6 +3664,7 @@
     }
 
     async function prepareNextBatch() {
+      clearFinishBlocker();
       const reusableOutputPath = state.lastServerOutputPath && els.outputPath.value.trim() === state.lastServerOutputPath
         ? state.lastServerOutputPath
         : "";
