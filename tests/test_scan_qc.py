@@ -3239,6 +3239,7 @@ class ScanQcTest(unittest.TestCase):
                 "4",
                 "--benchmark-workers-list",
                 "1,2,4,8",
+                "--normalize-tones",
                 "--min-scan-files-per-minute",
                 "100",
                 "--min-processing-files-per-minute",
@@ -3251,6 +3252,7 @@ class ScanQcTest(unittest.TestCase):
         self.assertEqual(Path(baseline_args.out), Path("/placeholder/private-validation-output"))
         self.assertEqual(baseline_args.workers, 4)
         self.assertEqual(baseline_args.benchmark_workers_list, "1,2,4,8")
+        self.assertTrue(baseline_args.normalize_tones)
         self.assertTrue(baseline_args.cleanup_artifacts)
 
     def test_rework_action_list_groups_qc_findings_and_processing_retry(self) -> None:
