@@ -1370,6 +1370,122 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect.poll(() => startRequested).toBe(true);
   });
 
+  test("shows existing output risk prompts without private details", async ({ page }) => {
+    const cases = [
+      {
+        kind: "none",
+        title: "文件夹可以开始处理",
+        message: "本批预检结果：已识别到 3 张可处理图片，输出文件夹可以写入；未发现已有工作台结果，可以开始。",
+        steps: ["确认处理方式无误。", "点击开始处理。"],
+        hidden: true,
+      },
+      {
+        kind: "reusable_current_batch",
+        title: "本批已有可复用处理结果",
+        message: "本批已有可复用处理结果，可以继续本批，只补齐缺失输出。",
+        steps: ["复用已有结果。", "继续本批，只补齐缺失输出。"],
+        promptTitle: "可继续本批",
+        promptText: "可以继续本批，系统会复用已有结果，只补齐缺失输出。",
+      },
+      {
+        kind: "existing_workbench_results",
+        title: "输出文件夹已有本工具结果",
+        message: "输出文件夹已有本工具结果，建议换空输出文件夹后再处理。",
+        steps: ["更换一个空的输出文件夹。", "如上一批还没有交接，请先交接上一批。"],
+        promptTitle: "建议换空输出文件夹",
+        promptText: "建议换空输出文件夹，或先交接上一批后再继续。",
+      },
+      {
+        kind: "completed_handoff",
+        title: "输出文件夹已有完成交接材料",
+        message: "输出文件夹已有完成交接材料，请先完成或归档上一批。",
+        steps: ["先交接上一批。", "更换一个空的输出文件夹。"],
+        promptTitle: "先交接上一批",
+        promptText: "建议换空输出文件夹，或先交接上一批后再继续。",
+      },
+    ];
+    let activeCase = cases[0];
+
+    await page.route("**/api/status", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ schema_version: "scan-qc.local-production-workbench.v1", running: false }),
+      });
+    });
+    await page.route("**/api/configure", async (route) => {
+      const payload = JSON.parse(route.request().postData() || "{}");
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema_version: "scan-qc.local-production-workbench.v1",
+          running: false,
+          configured: true,
+          folders: {
+            input: payload.input_dir,
+            derivatives: payload.derivatives_dir,
+            metadata: `${payload.derivatives_dir}/_production_workbench`,
+          },
+          processing_mode: { id: "standard", label_zh: "标准优化" },
+          folder_readiness: {
+            schema_version: "scan-qc.local-folder-readiness.v1",
+            aggregate_only: true,
+            status: "ready",
+            ready_to_start: true,
+            supported_image_count: 3,
+            input_empty: false,
+            output_writable: true,
+            selected_processing_mode: { id: "standard", label_zh: "标准优化" },
+            title_zh: activeCase.title,
+            message_zh: activeCase.message,
+            next_steps_zh: activeCase.steps,
+            existing_output_risk: {
+              schema_version: "scan-qc.local-existing-output-risk.v1",
+              aggregate_only: true,
+              kind: activeCase.kind,
+              severity: activeCase.kind === "none" ? "none" : "warning",
+              private_path: "/tmp/private-output/batch-001",
+              file_name: "secret-page.png",
+              sha256: "abc123privatehash",
+              ocr_text: "PRIVATE OCR TEXT",
+              thumbnail: "data:image/png;base64,private",
+              evidence: ["row-level-private-evidence"],
+              stack_trace: "Traceback private detail",
+            },
+          },
+        }),
+      });
+    });
+
+    for (const item of cases) {
+      activeCase = item;
+      await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
+      await page.locator("#inputPath").fill(`/tmp/${item.kind}-input`);
+      await page.locator("#outputPath").fill(`/tmp/${item.kind}-output`);
+      await page.getByRole("button", { name: "保存文件夹" }).click();
+      await expect(page.locator("#readinessTitle")).toHaveText(item.title);
+      await expect(page.locator("#readinessMessage")).toHaveText(item.message);
+      await expect(page.getByRole("button", { name: "开始处理" })).toBeEnabled();
+      if (item.hidden) {
+        await expect(page.locator("#readinessRiskPrompt")).toBeHidden();
+      } else {
+        await expect(page.locator("#readinessRiskPrompt")).toBeVisible();
+        await expect(page.locator("#readinessRiskTitle")).toHaveText(item.promptTitle);
+        await expect(page.locator("#readinessRiskMessage")).toContainText(item.promptText);
+      }
+      await expectOperatorStatusHidesPaths(page, [
+        `/tmp/${item.kind}-input`,
+        `/tmp/${item.kind}-output`,
+        "/tmp/private-output/batch-001",
+        "secret-page.png",
+        "abc123privatehash",
+        "PRIVATE OCR TEXT",
+        "data:image/png",
+        "row-level-private-evidence",
+        "Traceback private detail",
+      ]);
+    }
+  });
+
   test("keeps setup controls locked after configure while start request is delayed", async ({ page }) => {
     let startRequested = false;
     let resolveStart;
