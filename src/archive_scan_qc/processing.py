@@ -952,6 +952,11 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
         for record in processed_records
         if isinstance(record.get("deskew_reason"), str)
     ]
+    despeckle_reasons = [
+        record.get("despeckle_reason")
+        for record in processed_records
+        if isinstance(record.get("despeckle_reason"), str)
+    ]
     return {
         "schema_version": "scan-qc.processing.audit.v1",
         "generated_at": manifest["generated_at"],
@@ -1030,6 +1035,13 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                 for record in processed_records
                 if record.get("dark_border_trimmed") is False
                 and record.get("dark_border_reason") not in {None, "dark border trim disabled"}
+            ),
+            "despeckled_files": sum(1 for record in processed_records if record.get("despeckled") is True),
+            "despeckle_skipped_files": sum(
+                1
+                for record in processed_records
+                if record.get("despeckled") is False
+                and record.get("despeckle_reason") not in {None, "despeckle disabled"}
             ),
             "tone_normalized_files": sum(1 for audit in audit_records if audit.get("tone_normalized") is True),
             "edge_shadow_lightened_files": sum(
@@ -1152,6 +1164,20 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                     and record.get("deskew_reason") not in {None, "deskew disabled"}
                 ),
                 "reason_distribution": _reason_counts(reason for reason in deskew_reasons if isinstance(reason, str)),
+            },
+            "despeckle": {
+                "applied_files": sum(1 for record in processed_records if record.get("despeckled") is True),
+                "skipped_files": sum(
+                    1
+                    for record in processed_records
+                    if record.get("despeckled") is False
+                    and record.get("despeckle_reason") not in {None, "despeckle disabled"}
+                ),
+                "pixels_changed": sum(
+                    _int_count(record.get("despeckle_pixels_changed")) for record in processed_records
+                ),
+                "backend_mode": _aggregate_despeckle_backend(processed_records, options.despeckle)["backend_mode"],
+                "reason_distribution": _reason_counts(reason for reason in despeckle_reasons if isinstance(reason, str)),
             },
         },
         "reuse_decisions": {
@@ -3557,6 +3583,8 @@ _DESPECKLE_NEAR_DARK_THRESHOLD = 90
 _DESPECKLE_MIN_BACKGROUND_MEDIAN = 120
 _DESPECKLE_MAX_CANDIDATE_RATIO = 0.02
 _DESPECKLE_MAX_CHANGED_RATIO = 0.01
+_DESPECKLE_MAX_COMPONENT_PIXELS = 4
+_DESPECKLE_MAX_COMPONENT_SPAN = 3
 _DESPECKLE_CONTENT_CONTEXT_RADIUS = 8
 _DESPECKLE_CONTENT_CONTEXT_MIN_DARK_PIXELS = 6
 
@@ -3599,6 +3627,7 @@ def _despeckle_isolated_pixels_with_reason(image: Image.Image, *, backend: str =
     source_pixels: Any = None
     output_pixels: Any = None
     replacements: list[tuple[int, int, tuple[int, int, int]]] = []
+    candidate_set = set(candidates)
     for x, y in candidates:
         dark_neighbors = 0
         neighbor_values: list[int] = []
@@ -3608,7 +3637,7 @@ def _despeckle_isolated_pixels_with_reason(image: Image.Image, *, backend: str =
                     continue
                 value = gray_pixels[nx, ny]
                 neighbor_values.append(value)
-                if value <= _DESPECKLE_NEAR_DARK_THRESHOLD:
+                if value <= _DESPECKLE_NEAR_DARK_THRESHOLD and (nx, ny) not in candidate_set:
                     dark_neighbors += 1
         if dark_neighbors > 1:
             continue
@@ -3618,7 +3647,7 @@ def _despeckle_isolated_pixels_with_reason(image: Image.Image, *, backend: str =
             for nx in range(max(0, x - 2), min(width, x + 3)):
                 if nx == x and ny == y:
                     continue
-                if gray_pixels[nx, ny] <= _DESPECKLE_NEAR_DARK_THRESHOLD:
+                if gray_pixels[nx, ny] <= _DESPECKLE_NEAR_DARK_THRESHOLD and (nx, ny) not in candidate_set:
                     wider_dark += 1
         if wider_dark > 2:
             continue
@@ -3724,46 +3753,22 @@ def _despeckle_candidate_points_numpy(dark_mask: Image.Image) -> list[tuple[int,
 
     try:
         crop = np.asarray(dark_mask.crop(candidate_bbox), dtype=np.uint8) > 0
-        padded = np.pad(crop.astype(np.uint8), 1, mode="constant", constant_values=0)
     except (TypeError, ValueError):
         return None
 
-    neighbor_counts = (
-        padded[:-2, :-2]
-        + padded[:-2, 1:-1]
-        + padded[:-2, 2:]
-        + padded[1:-1, :-2]
-        + padded[1:-1, 2:]
-        + padded[2:, :-2]
-        + padded[2:, 1:-1]
-        + padded[2:, 2:]
-    )
-    candidate_mask = crop & (neighbor_counts <= 1)
-
-    crop_height, crop_width = crop.shape
-    if left == 0:
-        candidate_mask[:, 0] = False
-    if top == 0:
-        candidate_mask[0, :] = False
-    if right == width:
-        candidate_mask[:, crop_width - 1] = False
-    if bottom == height:
-        candidate_mask[crop_height - 1, :] = False
-    margin = _despeckle_protected_edge_margin(width, height)
-    if left < margin:
-        candidate_mask[:, : margin - left] = False
-    if top < margin:
-        candidate_mask[: margin - top, :] = False
-    if right > width - margin:
-        candidate_mask[:, width - margin - left :] = False
-    if bottom > height - margin:
-        candidate_mask[height - margin - top :, :] = False
-
-    local_y_values, local_x_values = np.nonzero(candidate_mask)
-    return [
-        (left + int(local_x), top + int(local_y))
+    _, crop_width = crop.shape
+    local_y_values, local_x_values = np.nonzero(crop)
+    dark_points = {
+        (int(local_x), int(local_y))
         for local_y, local_x in zip(local_y_values, local_x_values)
-    ]
+    }
+    return _despeckle_candidate_points_from_dark_points(
+        dark_points,
+        width=width,
+        height=height,
+        left=left,
+        top=top,
+    )
 
 
 def _despeckle_candidate_points_fallback(dark_mask: Image.Image) -> list[tuple[int, int]]:
@@ -3779,37 +3784,85 @@ def _despeckle_candidate_points_fallback(dark_mask: Image.Image) -> list[tuple[i
     if left >= width - 1 or top >= height - 1 or right <= 1 or bottom <= 1:
         return []
 
-    margin = _despeckle_protected_edge_margin(width, height)
     crop_width = right - left
     crop_values = dark_mask.crop(candidate_bbox).tobytes()
+    dark_points = {
+        (index % crop_width, index // crop_width)
+        for index, mask_value in enumerate(crop_values)
+        if mask_value
+    }
+    return _despeckle_candidate_points_from_dark_points(
+        dark_points,
+        width=width,
+        height=height,
+        left=left,
+        top=top,
+    )
+
+
+def _despeckle_candidate_points_from_dark_points(
+    dark_points: set[tuple[int, int]],
+    *,
+    width: int,
+    height: int,
+    left: int,
+    top: int,
+) -> list[tuple[int, int]]:
+    margin = _despeckle_protected_edge_margin(width, height)
     candidates: list[tuple[int, int]] = []
-    for index, mask_value in enumerate(crop_values):
-        if not mask_value:
+    visited: set[tuple[int, int]] = set()
+    neighbor_offsets = (
+        (-1, -1),
+        (0, -1),
+        (1, -1),
+        (-1, 0),
+        (1, 0),
+        (-1, 1),
+        (0, 1),
+        (1, 1),
+    )
+    for start in sorted(dark_points, key=lambda point: (point[1], point[0])):
+        if start in visited:
             continue
-        local_x = index % crop_width
-        local_y = index // crop_width
-        x = left + local_x
-        y = top + local_y
-        if x == 0 or y == 0 or x == width - 1 or y == height - 1:
+        stack = [start]
+        component: list[tuple[int, int]] = []
+        visited.add(start)
+        while stack:
+            local_x, local_y = stack.pop()
+            component.append((local_x, local_y))
+            for offset_x, offset_y in neighbor_offsets:
+                neighbor = (local_x + offset_x, local_y + offset_y)
+                if neighbor in visited or neighbor not in dark_points:
+                    continue
+                visited.add(neighbor)
+                stack.append(neighbor)
+
+        if len(component) > _DESPECKLE_MAX_COMPONENT_PIXELS:
             continue
-        if x < margin or y < margin or x >= width - margin or y >= height - margin:
+        component_x = [point[0] for point in component]
+        component_y = [point[1] for point in component]
+        if max(component_x) - min(component_x) + 1 > _DESPECKLE_MAX_COMPONENT_SPAN:
+            continue
+        if max(component_y) - min(component_y) + 1 > _DESPECKLE_MAX_COMPONENT_SPAN:
             continue
 
-        dark_neighbors = 0
-        for neighbor_y in range(max(0, local_y - 1), min(bottom - top, local_y + 2)):
-            row_offset = neighbor_y * crop_width
-            for neighbor_x in range(max(0, local_x - 1), min(crop_width, local_x + 2)):
-                if neighbor_x == local_x and neighbor_y == local_y:
-                    continue
-                if crop_values[row_offset + neighbor_x]:
-                    dark_neighbors += 1
-                    if dark_neighbors > 1:
-                        break
-            if dark_neighbors > 1:
-                break
-        if dark_neighbors <= 1:
-            candidates.append((x, y))
-    return candidates
+        absolute_points = [(left + local_x, top + local_y) for local_x, local_y in component]
+        if any(
+            x == 0
+            or y == 0
+            or x == width - 1
+            or y == height - 1
+            or x < margin
+            or y < margin
+            or x >= width - margin
+            or y >= height - margin
+            for x, y in absolute_points
+        ):
+            continue
+
+        candidates.extend(absolute_points)
+
+    return sorted(candidates, key=lambda point: (point[1], point[0]))
 
 
 def _corner_background_value(image: Image.Image) -> int:

@@ -7707,6 +7707,46 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(record["despeckle_reason"], "isolated dark pixels replaced")
             self.assertIn("despeckle_isolated_pixels", record["operations"])
 
+    def test_despeckle_removes_tiny_isolated_blob_and_records_aggregate_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "private_blob_noise.png"
+            image = Image.new("RGB", (100, 80), "white")
+            for point in [(52, 38), (53, 38), (52, 39), (53, 39)]:
+                image.putpixel(point, (0, 0, 0))
+            image.save(source)
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            with Image.open(process_dir / "images" / "private_blob_noise.png") as processed:
+                grayscale = processed.convert("L")
+                for point in [(52, 38), (53, 38), (52, 39), (53, 39)]:
+                    self.assertGreaterEqual(grayscale.getpixel(point), 240)
+            record = manifest["files"][0]
+            self.assertTrue(record["despeckled"])
+            self.assertEqual(record["despeckle_pixels_changed"], 4)
+            self.assertEqual(record["processing_audit"]["despeckle_pixel_ratio"], round(4 / (100 * 80), 6))
+            self.assertLessEqual(record["processing_audit"]["despeckle_pixel_ratio"], 0.001)
+            self.assertEqual(audit_summary["counts"]["despeckled_files"], 1)
+            self.assertEqual(audit_summary["counts"]["despeckle_skipped_files"], 0)
+            self.assertEqual(audit_summary["guardrails"]["despeckle"]["applied_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["despeckle"]["pixels_changed"], 4)
+            self.assertEqual(audit_summary["guardrails"]["despeckle"]["backend_mode"], "fallback")
+            self.assertEqual(
+                audit_summary["guardrails"]["despeckle"]["reason_distribution"]["isolated dark pixels replaced"],
+                1,
+            )
+            self.assertIn("despeckle_pixel_ratio", audit_summary["metrics"])
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_blob_noise", audit_summary_text)
+
     def test_despeckle_preserves_synthetic_text_marks_and_cleans_sparse_noise(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -7726,6 +7766,8 @@ class ScanQcTest(unittest.TestCase):
             draw.line((5, 12, 5, 82), fill=(0, 0, 0), width=2)
             draw.line((11, 21, 18, 25), fill=(0, 0, 0), width=2)
             draw.line((78, 58, 90, 64), fill=(0, 0, 0), width=2)
+            draw.rectangle((96, 56, 101, 61), outline=(0, 0, 0), width=1)
+            image.putpixel((98, 58), (0, 0, 0))
             for point in [(82, 15), (65, 28)]:
                 image.putpixel(point, (0, 0, 0))
             image.save(source)
@@ -7735,7 +7777,7 @@ class ScanQcTest(unittest.TestCase):
 
             with Image.open(process_dir / "images" / "A001_0001.png") as processed:
                 grayscale = processed.convert("L")
-                for protected_point in [(30, 35), (50, 36), (114, 8), (31, 55), (5, 40), (13, 22), (84, 61)]:
+                for protected_point in [(30, 35), (50, 36), (114, 8), (31, 55), (5, 40), (13, 22), (84, 61), (98, 58)]:
                     self.assertLessEqual(grayscale.getpixel(protected_point), 5)
                 for removed_noise in [(82, 15), (65, 28)]:
                     self.assertGreaterEqual(grayscale.getpixel(removed_noise), 240)
@@ -7765,11 +7807,17 @@ class ScanQcTest(unittest.TestCase):
                 grayscale = processed.convert("L")
                 for point in [(4, 4), (76, 55)]:
                     self.assertLessEqual(grayscale.getpixel(point), 5)
+            audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
             record = manifest["files"][0]
             self.assertFalse(record["despeckled"])
             self.assertEqual(record["despeckle_pixels_changed"], 0)
             self.assertEqual(record["despeckle_reason"], "protected edge dark marks preserved")
             self.assertIn("despeckle_noop", record["operations"])
+            self.assertEqual(audit_summary["counts"]["despeckle_skipped_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["despeckle"]["reason_distribution"]["protected edge dark marks preserved"],
+                1,
+            )
 
     def test_despeckle_skips_excessive_pixel_changes_with_manual_review_reason(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -7820,17 +7868,51 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(record["despeckle_pixels_changed"], 0)
             self.assertEqual(record["despeckle_reason"], "despeckle skipped: candidate density exceeds safety threshold")
 
+    def test_despeckle_skips_dense_texture_and_audits_aggregate_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "private_dense_texture.png"
+            image = Image.new("RGB", (100, 100), "white")
+            for y in range(10, 90, 5):
+                for x in range(10, 90, 5):
+                    image.putpixel((x, y), (0, 0, 0))
+            image.save(source)
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            record = manifest["files"][0]
+            self.assertFalse(record["despeckled"])
+            self.assertEqual(record["despeckle_pixels_changed"], 0)
+            self.assertEqual(record["despeckle_reason"], "despeckle skipped: candidate density exceeds safety threshold")
+            self.assertEqual(audit_summary["counts"]["despeckle_skipped_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["despeckle"]["reason_distribution"][
+                    "despeckle skipped: candidate density exceeds safety threshold"
+                ],
+                1,
+            )
+            self.assertNotIn("private_dense_texture", audit_summary_text)
+
     def test_despeckle_candidate_points_prefilter_isolated_speckles_only(self) -> None:
         mask = Image.new("L", (80, 60), 0)
         draw = ImageDraw.Draw(mask)
         draw.line((10, 30, 70, 30), fill=255, width=2)
         draw.rectangle((15, 12, 20, 17), fill=255)
+        for point in [(50, 20), (51, 20), (50, 21), (51, 21)]:
+            mask.putpixel(point, 255)
         for point in [(5, 5), (20, 8), (74, 12), (40, 50)]:
             mask.putpixel(point, 255)
 
         self.assertEqual(
             sorted(_despeckle_candidate_points(mask)),
-            [(5, 5), (20, 8), (40, 50), (74, 12)],
+            [(5, 5), (20, 8), (40, 50), (50, 20), (50, 21), (51, 20), (51, 21), (74, 12)],
         )
 
     def test_despeckle_candidate_points_protect_near_edge_candidates(self) -> None:
@@ -7838,7 +7920,7 @@ class ScanQcTest(unittest.TestCase):
         for point in [(4, 4), (5, 5), (74, 54), (75, 55)]:
             mask.putpixel(point, 255)
 
-        self.assertEqual(sorted(_despeckle_candidate_points(mask)), [(5, 5), (74, 54)])
+        self.assertEqual(sorted(_despeckle_candidate_points(mask)), [])
 
     @unittest.skipUnless(importlib.util.find_spec("numpy"), "NumPy optional fast path unavailable")
     def test_despeckle_candidate_points_numpy_matches_fallback_synthetic_masks(self) -> None:
@@ -7851,6 +7933,11 @@ class ScanQcTest(unittest.TestCase):
         for point in [(5, 5), (20, 8), (74, 12), (40, 50)]:
             isolated.putpixel(point, 255)
         masks.append(isolated)
+
+        tiny_blob = Image.new("L", (80, 60), 0)
+        for point in [(50, 20), (51, 20), (50, 21), (51, 21)]:
+            tiny_blob.putpixel(point, 255)
+        masks.append(tiny_blob)
 
         clustered = Image.new("L", (80, 60), 0)
         draw = ImageDraw.Draw(clustered)
@@ -7975,8 +8062,9 @@ class ScanQcTest(unittest.TestCase):
             input_dir.mkdir()
             source = input_dir / "A001_0001.png"
             image = Image.new("RGB", (80, 60), "white")
-            for point in [(20, 20), (21, 20), (20, 21), (21, 21)]:
-                image.putpixel(point, (0, 0, 0))
+            for y in range(20, 23):
+                for x in range(20, 23):
+                    image.putpixel((x, y), (0, 0, 0))
             image.save(source)
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
@@ -7984,12 +8072,63 @@ class ScanQcTest(unittest.TestCase):
 
             with Image.open(process_dir / "images" / "A001_0001.png") as processed:
                 grayscale = processed.convert("L")
-                for point in [(20, 20), (21, 20), (20, 21), (21, 21)]:
-                    self.assertLessEqual(grayscale.getpixel(point), 5)
+                for y in range(20, 23):
+                    for x in range(20, 23):
+                        self.assertLessEqual(grayscale.getpixel((x, y)), 5)
             record = manifest["files"][0]
             self.assertFalse(record["despeckled"])
             self.assertEqual(record["despeckle_pixels_changed"], 0)
             self.assertEqual(record["despeckle_reason"], "no isolated dark pixels found")
+
+    def test_despeckle_combines_with_crop_deskew_trim_and_tones_aggregate_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "private_combined_despeckle.png"
+            image = Image.new("RGB", (140, 100), "white")
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((12, 12, 127, 87), outline=(0, 0, 0), width=1)
+            draw.line((24, 42, 116, 42), fill=(0, 0, 0), width=2)
+            draw.line((24, 60, 74, 60), fill=(0, 0, 0), width=2)
+            for point in [(88, 25), (89, 25), (88, 26), (89, 26)]:
+                image.putpixel(point, (0, 0, 0))
+            image.save(source)
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(
+                    auto_crop=True,
+                    deskew=True,
+                    trim_dark_border=True,
+                    despeckle=True,
+                    normalize_tones=True,
+                    workers=1,
+                ),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            record = manifest["files"][0]
+            self.assertEqual(manifest["summary"]["processed_files"], 1)
+            self.assertEqual(manifest["summary"]["failed_files"], 0)
+            self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
+            self.assertTrue(audit_summary["operations"]["auto_crop"])
+            self.assertTrue(audit_summary["operations"]["deskew"])
+            self.assertTrue(audit_summary["operations"]["trim_dark_border"])
+            self.assertTrue(audit_summary["operations"]["despeckle"])
+            self.assertTrue(audit_summary["operations"]["normalize_tones"])
+            self.assertEqual(audit_summary["counts"]["processed_files"], 1)
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertIn("despeckle_pixel_ratio", audit_summary["metrics"])
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_combined_despeckle", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
 
     def test_multi_worker_retouch_manifest_order_stays_stable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
