@@ -50,6 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lighten-background-stains", action="store_true")
     parser.add_argument("--lighten-scanlines", action="store_true")
     parser.add_argument("--enhance-faded-text", action="store_true")
+    parser.add_argument("--sharpen-text-edges", action="store_true")
     parser.add_argument(
         "--despeckle-backend",
         choices=("fallback", "numpy"),
@@ -159,6 +160,7 @@ def _build_baseline_args(args: argparse.Namespace) -> argparse.Namespace:
         "--lighten-background-stains",
         "--lighten-scanlines",
         "--enhance-faded-text",
+        "--sharpen-text-edges",
         "--resume-processing",
         "--reuse-scan-measurements",
         "--skip-benchmark",
