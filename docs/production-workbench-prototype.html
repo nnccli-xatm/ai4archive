@@ -479,9 +479,52 @@
       color: var(--green-dark);
     }
 
+    .readiness-box.risk-reusable {
+      border-color: #7cbf9e;
+      background: #ecfbf1;
+    }
+
+    .readiness-box.risk-blocking {
+      border-color: #f0a05d;
+      background: #fff4e8;
+    }
+
+    .readiness-box.risk-blocking h3 {
+      color: #783b08;
+    }
+
     .readiness-box p,
     .readiness-box li {
       color: var(--ink-2);
+    }
+
+    .readiness-risk {
+      border: 1px solid #d7eadf;
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 10px 12px;
+      display: grid;
+      gap: 4px;
+    }
+
+    .readiness-risk strong {
+      color: var(--green-dark);
+      font-size: 15px;
+    }
+
+    .readiness-risk span {
+      color: var(--ink-2);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .readiness-risk.blocking {
+      border-color: #f2b179;
+      background: #fffaf3;
+    }
+
+    .readiness-risk.blocking strong {
+      color: #783b08;
     }
 
     .readiness-facts {
@@ -1162,6 +1205,10 @@
         <div class="readiness-box hidden" id="readinessBox">
           <h3 id="readinessTitle">本批预检结果</h3>
           <p id="readinessMessage">请先保存扫描原图文件夹和处理后输出文件夹。文件夹可以开始处理时，会显示本批可处理图片数量、输出文件夹是否可写和简短中文状态。</p>
+          <div class="readiness-risk hidden" id="readinessRiskPrompt" aria-live="polite">
+            <strong id="readinessRiskTitle">输出文件夹提示</strong>
+            <span id="readinessRiskMessage">请按提示确认输出文件夹。</span>
+          </div>
           <div class="readiness-facts" id="readinessFacts"></div>
           <ul id="readinessSteps"></ul>
         </div>
@@ -1519,6 +1566,9 @@
       readinessBox: document.getElementById("readinessBox"),
       readinessTitle: document.getElementById("readinessTitle"),
       readinessMessage: document.getElementById("readinessMessage"),
+      readinessRiskPrompt: document.getElementById("readinessRiskPrompt"),
+      readinessRiskTitle: document.getElementById("readinessRiskTitle"),
+      readinessRiskMessage: document.getElementById("readinessRiskMessage"),
       readinessFacts: document.getElementById("readinessFacts"),
       readinessSteps: document.getElementById("readinessSteps"),
       currentIssue: document.getElementById("currentIssue"),
@@ -2309,8 +2359,15 @@
       const show = readiness && ["ready", "failed", "choose_input", "choose_output"].includes(state.status);
       els.readinessBox.classList.toggle("hidden", !show);
       if (!show) return;
+      const riskPrompt = existingOutputRiskPrompt(readiness);
+      els.readinessBox.classList.toggle("risk-reusable", riskPrompt.kind === "reusable_current_batch");
+      els.readinessBox.classList.toggle("risk-blocking", riskPrompt.blocking);
       els.readinessTitle.textContent = readiness.title_zh || "本批预检结果";
       els.readinessMessage.textContent = preflightSummaryMessage(readiness);
+      els.readinessRiskPrompt.classList.toggle("hidden", !riskPrompt.show);
+      els.readinessRiskPrompt.classList.toggle("blocking", riskPrompt.blocking);
+      els.readinessRiskTitle.textContent = riskPrompt.title;
+      els.readinessRiskMessage.textContent = riskPrompt.message;
       const mode = readiness.selected_processing_mode || {};
       const facts = [
         ["可处理图片", `${toNumber(readiness.supported_image_count)} 张`],
@@ -2323,6 +2380,30 @@
       els.readinessFacts.innerHTML = facts.map((item) => `<span>${item[0]}：${escapeHtml(item[1])}</span>`).join("");
       const steps = Array.isArray(readiness.next_steps_zh) ? readiness.next_steps_zh : [];
       els.readinessSteps.innerHTML = steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("");
+    }
+
+    function existingOutputRiskPrompt(readiness) {
+      const risk = readiness && readiness.existing_output_risk ? readiness.existing_output_risk : {};
+      const kind = typeof risk.kind === "string" ? risk.kind : "none";
+      if (kind === "reusable_current_batch") {
+        return {
+          kind,
+          show: true,
+          blocking: false,
+          title: "可继续本批",
+          message: "这个输出文件夹里有本批可复用结果。可以继续本批，系统会复用已有结果，只补齐缺失输出。"
+        };
+      }
+      if (kind === "existing_workbench_results" || kind === "completed_handoff") {
+        return {
+          kind,
+          show: true,
+          blocking: true,
+          title: kind === "completed_handoff" ? "先交接上一批" : "建议换空输出文件夹",
+          message: "这个输出文件夹里已有本工具结果或完成交接材料。建议换空输出文件夹，或先交接上一批后再继续。"
+        };
+      }
+      return { kind: "none", show: false, blocking: false, title: "输出文件夹提示", message: "" };
     }
 
     function canStartProcessing() {

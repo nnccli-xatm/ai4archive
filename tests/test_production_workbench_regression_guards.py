@@ -305,6 +305,45 @@ class ProductionWorkbenchRegressionGuardTests(unittest.TestCase):
         ]:
             self.assertNotIn(forbidden, html[html.find("function preflightSummaryMessage"):html.find("function blockedStartMessage")])
 
+    def test_existing_output_risk_prompt_uses_aggregate_kind_without_private_details(self) -> None:
+        html = WORKBENCH_HTML.read_text(encoding="utf-8")
+        start = html.find("function existingOutputRiskPrompt(readiness)")
+        end = html.find("function canStartProcessing()", start)
+        self.assertNotEqual(start, -1)
+        self.assertNotEqual(end, -1)
+        body = html[start:end]
+
+        for required in [
+            'readiness.existing_output_risk',
+            'kind === "reusable_current_batch"',
+            'kind === "existing_workbench_results" || kind === "completed_handoff"',
+            "可继续本批",
+            "只补齐缺失输出",
+            "建议换空输出文件夹",
+            "先交接上一批",
+            "已有本工具结果或完成交接材料",
+            'els.readinessRiskPrompt.classList.toggle("hidden", !riskPrompt.show);',
+            'els.readinessBox.classList.toggle("risk-reusable", riskPrompt.kind === "reusable_current_batch");',
+            'els.readinessBox.classList.toggle("risk-blocking", riskPrompt.blocking);',
+        ]:
+            self.assertIn(required, html)
+
+        for forbidden in [
+            "source_path",
+            "relative_path",
+            "file_name",
+            "filename",
+            "sha256",
+            "hash",
+            "ocr_text",
+            "thumbnail",
+            "evidence",
+            "stack",
+            "traceback",
+            "<img",
+        ]:
+            self.assertNotIn(forbidden, body.lower())
+
 
 if __name__ == "__main__":
     unittest.main()
