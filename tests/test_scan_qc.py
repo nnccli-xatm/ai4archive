@@ -5994,6 +5994,8 @@ class ScanQcTest(unittest.TestCase):
             self.assertGreater(audit["text_edges_changed_pixel_ratio"], 0.0)
             self.assertLessEqual(audit["text_edges_changed_pixel_ratio"], 0.08)
             self.assertLessEqual(audit["text_edges_candidate_pixel_ratio"], 0.12)
+            self.assertEqual(record["text_edges_reason_code"], "applied_stable_blurred_text_edges")
+            self.assertEqual(record["text_edges_reason_zh"], "检测到浅色纸面上的稳定模糊正文边缘，已保守锐化。")
             self.assertEqual(audit["guardrail_failures"], [])
             self.assertTrue(audit_summary["operations"]["sharpen_text_edges"])
             self.assertEqual(audit_summary["counts"]["text_edges_sharpened_files"], 1)
@@ -6005,6 +6007,10 @@ class ScanQcTest(unittest.TestCase):
             self.assertGreater(text_edge_guard["changed_pixel_ratio"]["max"], 0)
             self.assertGreater(text_edge_guard["candidate_pixel_ratio"]["max"], 0)
             self.assertIn(record["text_edges_reason"], text_edge_guard["reason_distribution"])
+            self.assertEqual(
+                text_edge_guard["reason_code_distribution"],
+                {"applied_stable_blurred_text_edges": 1},
+            )
             self.assertTrue(audit_summary["timing"]["operation_timings"]["sharpen_text_edges"]["enabled"])
             self.assertNotIn("private_blurred_text", audit_summary_text)
 
@@ -6025,6 +6031,9 @@ class ScanQcTest(unittest.TestCase):
                 "A006_table_page_number_handwriting.png": _synthetic_blurred_table_text_edge_page(),
                 "A007_too_faint_low_confidence.png": _synthetic_low_confidence_text_edge_page(),
                 "A008_high_contrast_dense_text.png": _synthetic_high_contrast_dense_text_page(),
+                "A009_page_number.png": _synthetic_blurred_text_page(page_number=True),
+                "A010_header_footer.png": _synthetic_blurred_text_page(header_footer=True),
+                "A011_dark_page.png": _synthetic_dark_blurred_text_page(),
             }
             for name, image in pages.items():
                 image.save(input_dir / name, dpi=(300, 300))
@@ -6048,6 +6057,10 @@ class ScanQcTest(unittest.TestCase):
                 self.assertIn("sharpen_text_edges_noop", record["operations"])
                 self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
                 self.assertLessEqual(record["processing_audit"]["text_edges_changed_pixel_ratio"], 0.002)
+                self.assertIsInstance(record["text_edges_reason_code"], str)
+                self.assertNotEqual(record["text_edges_reason_code"], "unknown")
+                self.assertIsInstance(record["text_edges_reason_zh"], str)
+                self.assertIn("跳过正文边缘锐化", record["text_edges_reason_zh"])
             self.assertTrue(audit_summary["operations"]["sharpen_text_edges"])
             self.assertEqual(audit_summary["counts"]["text_edges_sharpened_files"], 0)
             self.assertEqual(audit_summary["counts"]["text_edges_skipped_files"], len(pages))
@@ -6064,6 +6077,23 @@ class ScanQcTest(unittest.TestCase):
             self.assertIn(
                 "text edge sharpening skipped: broad texture, illustration, or table-region risk",
                 text_edge_guard["skip_reason_distribution"],
+            )
+            self.assertIn(
+                "text edge sharpening skipped: header, footer, or page number risk",
+                text_edge_guard["skip_reason_distribution"],
+            )
+            self.assertIn("protected_color_stamp_annotation", text_edge_guard["skip_reason_code_distribution"])
+            self.assertIn("protected_edge_mark_or_binding", text_edge_guard["skip_reason_code_distribution"])
+            self.assertIn("protected_header_footer_or_page_number", text_edge_guard["skip_reason_code_distribution"])
+            self.assertIn("protected_texture_table_or_photo_region", text_edge_guard["skip_reason_code_distribution"])
+            self.assertIn("low_confidence_text_edge_evidence_too_weak", text_edge_guard["skip_reason_code_distribution"])
+            self.assertIn(
+                "检测到页眉页脚或页码风险，跳过正文边缘锐化。",
+                text_edge_guard["skip_reason_zh_distribution"],
+            )
+            self.assertIn(
+                "页面不是浅色纸面背景，跳过正文边缘锐化。",
+                text_edge_guard["skip_reason_zh_distribution"],
             )
 
     def test_sharpen_text_edges_low_candidate_page_uses_fast_noop_path(self) -> None:
@@ -11762,7 +11792,12 @@ def _synthetic_faded_text_page(
     return image
 
 
-def _synthetic_blurred_text_page(*, red_stamp: bool = False) -> Image.Image:
+def _synthetic_blurred_text_page(
+    *,
+    red_stamp: bool = False,
+    page_number: bool = False,
+    header_footer: bool = False,
+) -> Image.Image:
     image = Image.new("RGB", (240, 180), (244, 244, 244))
     draw = ImageDraw.Draw(image)
     for y in range(38, 132, 18):
@@ -11770,6 +11805,20 @@ def _synthetic_blurred_text_page(*, red_stamp: bool = False) -> Image.Image:
         draw.rectangle((46, y + 8, 136, y + 10), fill=(58, 58, 58))
     if red_stamp:
         draw.ellipse((166, 48, 216, 98), outline=(180, 40, 35), width=3)
+    if page_number:
+        draw.text((180, 12), "12", fill=(58, 58, 58))
+    if header_footer:
+        draw.rectangle((48, 18, 170, 20), fill=(64, 64, 64))
+        draw.rectangle((54, 158, 154, 160), fill=(64, 64, 64))
+    return image.filter(ImageFilter.GaussianBlur(radius=0.8))
+
+
+def _synthetic_dark_blurred_text_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), (150, 150, 150))
+    draw = ImageDraw.Draw(image)
+    for y in range(38, 132, 18):
+        draw.rectangle((42, y, 164, y + 3), fill=(70, 70, 70))
+        draw.rectangle((46, y + 8, 136, y + 10), fill=(82, 82, 82))
     return image.filter(ImageFilter.GaussianBlur(radius=0.8))
 
 
