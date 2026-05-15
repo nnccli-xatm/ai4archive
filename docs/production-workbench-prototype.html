@@ -2580,6 +2580,8 @@
       if (!readiness) return "请先保存扫描原图文件夹和处理后输出文件夹。";
       const count = toNumber(readiness.supported_image_count);
       if (readiness.ready_to_start === true) {
+        const processingSummary = preflightProcessingSummaryMessage(readiness.preflight_processing_summary);
+        if (processingSummary) return processingSummary;
         return readiness.message_zh || `本批预检结果：已识别到 ${count} 张可处理图片，输出文件夹可以写入。`;
       }
       if (readiness.status === "not_configured") return "本批预检未通过：请先选择扫描原图文件夹和输出文件夹。";
@@ -2587,6 +2589,29 @@
       if (readiness.status === "unsupported") return "本批预检未通过：已识别到 0 张可处理图片，请确认原图格式是否支持。";
       if (readiness.output_writable === false && count > 0) return `本批预检未通过：已识别到 ${count} 张可处理图片，但输出文件夹不能写入。`;
       return readiness.message_zh || "本批预检未通过：请按提示检查文件夹。";
+    }
+
+    function preflightProcessingSummaryMessage(summary) {
+      if (!summary || summary.aggregate_only !== true) return "";
+      const rawState = String(summary.state || "").trim().toLowerCase();
+      const retryScopeSafe = summary.retry_scope_safe === true;
+      if (retryScopeSafe && rawState !== "unknown") {
+        const hasCounts = ["total_files", "reusable_files", "needs_processing_files"].every((key) =>
+          Object.prototype.hasOwnProperty.call(summary, key) && summary[key] !== null
+        );
+        if (!hasCounts) return "";
+        const total = Math.max(0, toNumber(summary.total_files));
+        const reusable = Math.max(0, toNumber(summary.reusable_files));
+        const needsProcessing = Math.max(0, toNumber(summary.needs_processing_files));
+        return `本批共 ${total} 张：可复用处理后输出 ${reusable} 张，需要新处理或补处理 ${needsProcessing} 张。开始处理后会复用可安全确认的输出，并补齐需要处理的图片。`;
+      }
+      if (summary.retry_scope_safe === false || rawState === "unknown") {
+        const total = Object.prototype.hasOwnProperty.call(summary, "total_files") && summary.total_files !== null
+          ? `本批共 ${Math.max(0, toNumber(summary.total_files))} 张；`
+          : "";
+        return `${total}开始前不能安全判断哪些输出可复用。可以开始处理，系统会保守核对并补齐需要处理的输出；如果不确定是否同一批，请换空输出文件夹或交管理员确认。`;
+      }
+      return "";
     }
 
     function blockedStartMessage() {

@@ -767,6 +767,36 @@ def main() -> int:
         render_after_success_index = save_folders_body.find("render();", success_copy_index)
         if success_copy_index == -1 or render_after_success_index == -1:
             errors.append("saved-folder configure flow does not render after successful save")
+    preflight_summary_start = html.find("function preflightSummaryMessage(readiness)")
+    preflight_summary_end = html.find("function blockedStartMessage()", preflight_summary_start)
+    if preflight_summary_start == -1 or preflight_summary_end == -1:
+        errors.append("missing preflight summary message implementation")
+    else:
+        preflight_summary_body = html[preflight_summary_start:preflight_summary_end]
+        for required_token in [
+            "function preflightProcessingSummaryMessage(summary)",
+            "readiness.preflight_processing_summary",
+            "summary.aggregate_only !== true",
+            "summary.retry_scope_safe === true",
+            "summary.retry_scope_safe === false || rawState === \"unknown\"",
+            "本批共 ${total} 张：可复用处理后输出 ${reusable} 张，需要新处理或补处理 ${needsProcessing} 张。",
+            "开始前不能安全判断哪些输出可复用。",
+            "系统会保守核对并补齐需要处理的输出",
+        ]:
+            if required_token not in preflight_summary_body:
+                errors.append(f"preflight processing summary missing token: {required_token}")
+        for forbidden_token in [
+            "relative_path",
+            "source_sha256",
+            "output_sha256",
+            "ocr_text",
+            "thumbnail",
+            "exception",
+            "traceback",
+            "stack",
+        ]:
+            if forbidden_token in preflight_summary_body:
+                errors.append(f"preflight processing summary includes private/debug token: {forbidden_token}")
     prepare_next_batch_start = html.find("async function prepareNextBatch()")
     prepare_next_batch_end = html.find("els.resetButton.addEventListener", prepare_next_batch_start)
     if prepare_next_batch_start == -1 or prepare_next_batch_end == -1:
