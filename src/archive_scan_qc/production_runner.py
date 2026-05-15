@@ -346,12 +346,17 @@ def _recovery_guidance(local_batch_state: str, processing_summary: dict[str, Any
     retry_list_files = int(processing_summary.get("retry_list_files", 0))
     derivative_images_ready = int(processing_summary.get("processed_files", 0)) + int(processing_summary.get("resumed_files", 0))
     total_files = int(processing_summary.get("total_files", 0))
+    missing_output_files = retry_list_files if retry_list_files else failed_files
+    can_restart_fill_missing_outputs = retry_list_files > 0
     guidance = {
         "schema_version": "scan-qc.local-recovery-guidance.v1",
         "aggregate_only": True,
         "failed_files": failed_files,
         "retryable_files": retry_list_files,
         "derivative_images_ready": derivative_images_ready,
+        "successful_output_files": derivative_images_ready,
+        "missing_output_files": missing_output_files,
+        "can_restart_fill_missing_outputs": can_restart_fill_missing_outputs,
         "total_files": total_files,
     }
     if local_batch_state == "empty_input_folder":
@@ -381,16 +386,28 @@ def _recovery_guidance(local_batch_state: str, processing_summary: dict[str, Any
             }
         )
     elif local_batch_state == "processing_blocked":
+        restart_message = (
+            "可以重新开始本批，系统会只补齐缺失的处理后图片，已经成功输出的图片不会删除。"
+            if can_restart_fill_missing_outputs
+            else "当前没有可自动补齐的缺失输出，请先检查权限、格式或交管理员确认。"
+        )
         guidance.update(
             {
                 "kind": "processing_failed_retryable" if retry_list_files else "processing_failed_admin",
                 "title_zh": "处理没有全部完成",
-                "message_zh": "有文件处理失败。请先检查原图是否能打开、文件夹是否选对、磁盘空间是否足够。",
+                "message_zh": (
+                    f"本批有 {failed_files} 张处理失败，已成功输出 {derivative_images_ready} 张；"
+                    f"{restart_message}"
+                ),
                 "next_steps_zh": [
-                    "确认扫描原图文件夹和处理后输出文件夹选对。",
-                    "检查磁盘空间是否足够，原图是否能正常打开。",
-                    "如果只是少量文件失败，可重新开始处理；系统会尽量复用已经生成的处理后图片。",
-                    "如果再次失败，请交管理员查看本机状态文件夹中的报告。",
+                    "检查扫描原图文件夹是否可读取，原图是否能正常打开。",
+                    "检查处理后输出文件夹是否可写入，磁盘空间是否足够。",
+                    "确认原图是当前支持的常见图片格式。",
+                    (
+                        "重新开始本批，系统会只补齐缺失输出并保留已成功输出。"
+                        if can_restart_fill_missing_outputs
+                        else "如果检查后仍不能处理，请交管理员查看本机私有状态报告。"
+                    ),
                 ],
             }
         )

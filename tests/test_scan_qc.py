@@ -52,7 +52,7 @@ from archive_scan_qc.processing import (
 from archive_scan_qc.processing_plan import build_processing_plan
 from archive_scan_qc.processing_review import build_processing_review_package
 from archive_scan_qc.production_rehearsal import ProductionRehearsalConfig, run_production_rehearsal
-from archive_scan_qc.production_runner import ProductionRunConfig, run_production_folder
+from archive_scan_qc.production_runner import ProductionRunConfig, build_production_run_summary, run_production_folder
 from archive_scan_qc.reports import build_review_summary, write_reports, write_review_export, write_review_summary
 from archive_scan_qc.review_decisions import build_review_decision_verification_summary
 from archive_scan_qc.rework import build_rework_action_list, write_rework_action_list
@@ -5913,6 +5913,169 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(resumed["summary"]["retry_list_files"], 0)
             retry_manifest = json.loads((process_dir / "processing_retry_manifest.json").read_text(encoding="utf-8"))
             self.assertEqual(retry_manifest["summary"]["failed_files"], 0)
+
+    def test_processing_failure_summary_gives_aggregate_chinese_recovery_advice(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-recovery-advice-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "processed"
+            metadata_dir = root / "metadata"
+            summary = build_production_run_summary(
+                config=ProductionRunConfig(
+                    input_dir=input_dir,
+                    derivative_output_dir=output_dir,
+                    metadata_output_dir=metadata_dir,
+                ),
+                report={
+                    "summary": {
+                        "total_files": 5,
+                        "openable_files": 5,
+                        "p0_findings": 0,
+                        "p1_findings": 0,
+                        "p2_findings": 0,
+                        "total_findings": 0,
+                        "performance": {},
+                    }
+                },
+                processing_manifest={
+                    "image_root": str(output_dir / "images"),
+                    "summary": {
+                        "total_files": 5,
+                        "processed_files": 2,
+                        "resumed_files": 1,
+                        "skipped_files": 0,
+                        "failed_files": 2,
+                        "retry_list_files": 2,
+                        "performance": {},
+                    },
+                },
+                admin_report_dir=metadata_dir / "admin_reports",
+                generated_at="2026-01-01T00:00:00+00:00",
+            )
+
+            guidance = summary["recovery_guidance"]
+            guidance_text = json.dumps(guidance, ensure_ascii=False, sort_keys=True)
+            self.assertTrue(guidance["aggregate_only"])
+            self.assertEqual(guidance["kind"], "processing_failed_retryable")
+            self.assertEqual(guidance["failed_files"], 2)
+            self.assertEqual(guidance["successful_output_files"], 3)
+            self.assertEqual(guidance["derivative_images_ready"], 3)
+            self.assertEqual(guidance["missing_output_files"], 2)
+            self.assertTrue(guidance["can_restart_fill_missing_outputs"])
+            self.assertIn("本批有 2 张处理失败", guidance["message_zh"])
+            self.assertIn("已成功输出 3 张", guidance["message_zh"])
+            self.assertIn("只补齐缺失", guidance_text)
+            self.assertIn("可读取", guidance_text)
+            self.assertIn("可写入", guidance_text)
+            self.assertIn("常见图片格式", guidance_text)
+
+    def test_processing_failure_recovery_advice_is_public_aggregate_only(self) -> None:
+        private_values = [
+            "/Users/private/archive/input",
+            "Secret_Case_0001.tif",
+            "a" * 64,
+            "OCR: 张三身份证 110101199001010011",
+            "thumbnail",
+            "Traceback File worker.py line 42",
+            "data:image/png;base64",
+        ]
+        with tempfile.TemporaryDirectory(prefix="scan-processing-recovery-private-") as temp_dir:
+            root = Path(temp_dir)
+            output_dir = root / "processed"
+            metadata_dir = root / "metadata"
+            summary = build_production_run_summary(
+                config=ProductionRunConfig(
+                    input_dir=Path(private_values[0]),
+                    derivative_output_dir=output_dir,
+                    metadata_output_dir=metadata_dir,
+                ),
+                report={
+                    "summary": {
+                        "total_files": 3,
+                        "openable_files": 3,
+                        "p0_findings": 0,
+                        "p1_findings": 0,
+                        "p2_findings": 0,
+                        "total_findings": 0,
+                        "performance": {"private_note": private_values[3]},
+                    },
+                    "files": [{"relative_path": private_values[1], "sha256": private_values[2]}],
+                },
+                processing_manifest={
+                    "image_root": str(output_dir / "images"),
+                    "summary": {
+                        "total_files": 3,
+                        "processed_files": 1,
+                        "resumed_files": 0,
+                        "skipped_files": 0,
+                        "failed_files": 2,
+                        "retry_list_files": 0,
+                        "performance": {"stack": private_values[5]},
+                    },
+                    "files": [{"thumbnail": private_values[6], "failure_reason": private_values[5]}],
+                },
+                admin_report_dir=metadata_dir / "admin_reports",
+                generated_at="2026-01-01T00:00:00+00:00",
+            )
+
+            guidance_text = json.dumps(summary["recovery_guidance"], ensure_ascii=False, sort_keys=True)
+            self.assertIn("本批有 2 张处理失败", guidance_text)
+            self.assertIn("已成功输出 1 张", guidance_text)
+            for private_value in private_values:
+                self.assertNotIn(private_value, guidance_text)
+            self.assertNotIn(".tif", guidance_text)
+            self.assertNotIn("sha256", guidance_text.lower())
+            self.assertNotIn("traceback", guidance_text.lower())
+            self.assertNotIn("ocr", guidance_text.lower())
+
+    def test_recovery_advice_generation_preserves_sources_and_successful_outputs(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-recovery-preserve-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "processed"
+            metadata_dir = root / "metadata"
+            source = input_dir / "source.png"
+            derivative = output_dir / "images" / "source.png"
+            source.parent.mkdir(parents=True)
+            derivative.parent.mkdir(parents=True)
+            source.write_bytes(b"original source bytes")
+            derivative.write_bytes(b"successful derivative bytes")
+
+            build_production_run_summary(
+                config=ProductionRunConfig(
+                    input_dir=input_dir,
+                    derivative_output_dir=output_dir,
+                    metadata_output_dir=metadata_dir,
+                ),
+                report={
+                    "summary": {
+                        "total_files": 2,
+                        "openable_files": 2,
+                        "p0_findings": 0,
+                        "p1_findings": 0,
+                        "p2_findings": 0,
+                        "total_findings": 0,
+                        "performance": {},
+                    }
+                },
+                processing_manifest={
+                    "image_root": str(output_dir / "images"),
+                    "summary": {
+                        "total_files": 2,
+                        "processed_files": 1,
+                        "resumed_files": 0,
+                        "skipped_files": 0,
+                        "failed_files": 1,
+                        "retry_list_files": 1,
+                        "performance": {},
+                    },
+                },
+                admin_report_dir=metadata_dir / "admin_reports",
+                generated_at="2026-01-01T00:00:00+00:00",
+            )
+
+            self.assertEqual(source.read_bytes(), b"original source bytes")
+            self.assertEqual(derivative.read_bytes(), b"successful derivative bytes")
 
     def test_multi_worker_processing_manifest_order_and_outputs_are_stable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

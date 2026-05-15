@@ -2327,11 +2327,16 @@ def _status_recovery_guidance(
         retryable_files = int(counts.get("retry_list_files") or 0)
         derivative_images_ready = int(counts.get("processed_files") or 0) + int(counts.get("resumed_files") or 0)
         total_files = int(counts.get("total_files") or 0)
+        missing_output_files = retryable_files if retryable_files else failed_files
+        can_restart_fill_missing_outputs = retryable_files > 0
         aggregate = {
             **base,
             "failed_files": failed_files,
             "retryable_files": retryable_files,
             "derivative_images_ready": derivative_images_ready,
+            "successful_output_files": derivative_images_ready,
+            "missing_output_files": missing_output_files,
+            "can_restart_fill_missing_outputs": can_restart_fill_missing_outputs,
             "total_files": total_files,
         }
         openable_files = int(counts.get("openable_files") or 0)
@@ -2353,19 +2358,21 @@ def _status_recovery_guidance(
                 "kind": "processing_failed_retryable" if retryable_files else "processing_failed_admin",
                 "title_zh": "处理没有全部完成",
                 "message_zh": (
-                    "本批次有图片没有处理完，可以先检查文件夹后重试本批次。"
-                    if retryable_files
-                    else "本批次没有处理完，当前不能直接重试。"
+                    f"本批有 {failed_files} 张处理失败，已成功输出 {derivative_images_ready} 张；"
+                    "可以重新开始本批，系统会只补齐缺失的处理后图片，已经成功输出的图片不会删除。"
+                    if can_restart_fill_missing_outputs
+                    else f"本批有 {failed_files} 张处理失败，已成功输出 {derivative_images_ready} 张；"
+                    "当前没有可自动补齐的缺失输出，请先检查权限、格式或交管理员确认。"
                 ),
                 "next_steps_zh": [
-                    "检查扫描原图文件夹和输出文件夹是否选对。",
-                    "确认输出磁盘空间足够，原图图片可以正常打开。",
+                    "检查扫描原图文件夹是否可读取，原图是否能正常打开。",
+                    "检查处理后输出文件夹是否可写入，磁盘空间是否足够。",
+                    "确认原图是当前支持的常见图片格式。",
                     (
-                        "点击重试本批次，系统会继续使用当前文件夹。"
-                        if retryable_files
+                        "重新开始本批，系统会只补齐缺失输出并保留已成功输出。"
+                        if can_restart_fill_missing_outputs
                         else "请交管理员处理，不要反复点击开始处理。"
                     ),
-                    "如果文件夹选错了，请返回重新选择文件夹。",
                 ],
             }
         if openable_files == 0:
