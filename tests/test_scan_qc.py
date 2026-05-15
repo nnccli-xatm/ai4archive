@@ -5837,6 +5837,10 @@ class ScanQcTest(unittest.TestCase):
             self.assertTrue(audit_summary["operations"]["enhance_faded_text"])
             self.assertIn("faded_text", audit_summary["guardrails"])
             self.assertIn("skip_reason_distribution", audit_summary["guardrails"]["faded_text"])
+            self.assertTrue(audit_summary["operations"]["sharpen_text_edges"])
+            self.assertIn("text_edges", audit_summary["guardrails"])
+            self.assertIn("skip_reason_distribution", audit_summary["guardrails"]["text_edges"])
+            self.assertIn("candidate_preflight_skip_files", audit_summary["guardrails"]["text_edges"])
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertFalse(audit_summary["privacy"]["contains_paths"])
             self.assertFalse(audit_summary["privacy"]["contains_hashes"])
@@ -5878,7 +5882,14 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(audit["guardrail_failures"], [])
             self.assertTrue(audit_summary["operations"]["sharpen_text_edges"])
             self.assertEqual(audit_summary["counts"]["text_edges_sharpened_files"], 1)
+            self.assertEqual(audit_summary["counts"]["text_edges_skipped_files"], 0)
             self.assertIn("text_edges_changed_pixel_ratio", audit_summary["metrics"])
+            text_edge_guard = audit_summary["guardrails"]["text_edges"]
+            self.assertEqual(text_edge_guard["applied_files"], 1)
+            self.assertEqual(text_edge_guard["skipped_files"], 0)
+            self.assertGreater(text_edge_guard["changed_pixel_ratio"]["max"], 0)
+            self.assertGreater(text_edge_guard["candidate_pixel_ratio"]["max"], 0)
+            self.assertIn(record["text_edges_reason"], text_edge_guard["reason_distribution"])
             self.assertTrue(audit_summary["timing"]["operation_timings"]["sharpen_text_edges"]["enabled"])
             self.assertNotIn("private_blurred_text", audit_summary_text)
 
@@ -5895,6 +5906,10 @@ class ScanQcTest(unittest.TestCase):
                 "A002_red_stamp.png": _synthetic_blurred_text_page(red_stamp=True),
                 "A003_photo_like.png": _synthetic_photo_like_page(),
                 "A004_texture_stain.png": _synthetic_texture_stain_page(),
+                "A005_edge_archival_line.png": _synthetic_blurred_text_edge_risk_page(),
+                "A006_table_page_number_handwriting.png": _synthetic_blurred_table_text_edge_page(),
+                "A007_too_faint_low_confidence.png": _synthetic_low_confidence_text_edge_page(),
+                "A008_high_contrast_dense_text.png": _synthetic_high_contrast_dense_text_page(),
             }
             for name, image in pages.items():
                 image.save(input_dir / name, dpi=(300, 300))
@@ -5920,6 +5935,21 @@ class ScanQcTest(unittest.TestCase):
                 self.assertLessEqual(record["processing_audit"]["text_edges_changed_pixel_ratio"], 0.002)
             self.assertTrue(audit_summary["operations"]["sharpen_text_edges"])
             self.assertEqual(audit_summary["counts"]["text_edges_sharpened_files"], 0)
+            self.assertEqual(audit_summary["counts"]["text_edges_skipped_files"], len(pages))
+            text_edge_guard = audit_summary["guardrails"]["text_edges"]
+            self.assertEqual(text_edge_guard["applied_files"], 0)
+            self.assertEqual(text_edge_guard["skipped_files"], len(pages))
+            self.assertGreaterEqual(text_edge_guard["protection_triggered_files"], 4)
+            self.assertGreaterEqual(text_edge_guard["low_confidence_skip_files"], 2)
+            self.assertEqual(text_edge_guard["changed_pixel_ratio"]["max"], 0.0)
+            self.assertIn(
+                "text edge sharpening skipped: edge mark or binding risk",
+                text_edge_guard["skip_reason_distribution"],
+            )
+            self.assertIn(
+                "text edge sharpening skipped: broad texture, illustration, or table-region risk",
+                text_edge_guard["skip_reason_distribution"],
+            )
 
     def test_sharpen_text_edges_low_candidate_page_uses_fast_noop_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -10591,6 +10621,42 @@ def _synthetic_blurred_text_page(*, red_stamp: bool = False) -> Image.Image:
     if red_stamp:
         draw.ellipse((166, 48, 216, 98), outline=(180, 40, 35), width=3)
     return image.filter(ImageFilter.GaussianBlur(radius=0.8))
+
+
+def _synthetic_blurred_text_edge_risk_page() -> Image.Image:
+    image = _synthetic_blurred_text_page()
+    draw = ImageDraw.Draw(image)
+    draw.line((0, 70, 30, 70), fill=(60, 60, 60), width=2)
+    return image
+
+
+def _synthetic_low_confidence_text_edge_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), (244, 244, 244))
+    draw = ImageDraw.Draw(image)
+    for y in range(38, 132, 18):
+        draw.rectangle((42, y, 164, y + 3), fill=(218, 218, 218))
+        draw.rectangle((46, y + 8, 136, y + 10), fill=(220, 220, 220))
+    return image.filter(ImageFilter.GaussianBlur(radius=0.8))
+
+
+def _synthetic_high_contrast_dense_text_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), (244, 244, 244))
+    draw = ImageDraw.Draw(image)
+    for y in range(35, 145, 14):
+        draw.rectangle((20, y, 220, y + 4), fill=(20, 20, 20))
+    return image
+
+
+def _synthetic_blurred_table_text_edge_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), (244, 244, 244))
+    draw = ImageDraw.Draw(image)
+    for y in range(35, 145, 22):
+        draw.line((25, y, 215, y), fill=(55, 55, 55), width=2)
+    for x in range(25, 216, 38):
+        draw.line((x, 35, x, 145), fill=(55, 55, 55), width=2)
+    draw.text((180, 18), "12", fill=(60, 60, 60))
+    draw.line((48, 158, 116, 166), fill=(90, 90, 90), width=2)
+    return image.filter(ImageFilter.GaussianBlur(radius=0.7))
 
 
 def _synthetic_photo_like_page() -> Image.Image:

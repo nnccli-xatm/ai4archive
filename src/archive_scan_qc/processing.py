@@ -996,6 +996,19 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
         and isinstance(reason, str)
         and reason != "faded text enhancement disabled"
     ]
+    text_edges_reasons = [
+        record.get("text_edges_reason")
+        for record in processed_records
+        if isinstance(record.get("text_edges_reason"), str)
+    ]
+    text_edges_skipped_reasons = [
+        reason
+        for record in processed_records
+        for reason in [record.get("text_edges_reason")]
+        if record.get("text_edges_sharpened") is False
+        and isinstance(reason, str)
+        and reason != "text edge sharpening disabled"
+    ]
     return {
         "schema_version": "scan-qc.processing.audit.v1",
         "generated_at": manifest["generated_at"],
@@ -1113,6 +1126,12 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             ),
             "text_edges_sharpened_files": sum(
                 1 for audit in audit_records if audit.get("text_edges_sharpened") is True
+            ),
+            "text_edges_skipped_files": sum(
+                1
+                for record in processed_records
+                if record.get("text_edges_sharpened") is False
+                and record.get("text_edges_reason") not in {None, "text edge sharpening disabled"}
             ),
             "text_edges_candidate_preflight_skipped_files": _int_count(
                 sharpen_text_edges_timing.get("candidate_preflight_skipped_files")
@@ -1324,6 +1343,53 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                     1
                     for reason in faded_text_skipped_reasons
                     if any(marker in reason for marker in ("too weak", "too sparse", "insufficient", "no stable"))
+                ),
+            },
+            "text_edges": {
+                "applied_files": sum(1 for audit in audit_records if audit.get("text_edges_sharpened") is True),
+                "skipped_files": sum(
+                    1
+                    for record in processed_records
+                    if record.get("text_edges_sharpened") is False
+                    and record.get("text_edges_reason") not in {None, "text edge sharpening disabled"}
+                ),
+                "changed_pixel_ratio": _aggregate_metric(audit_records, "text_edges_changed_pixel_ratio"),
+                "candidate_pixel_ratio": _aggregate_metric(audit_records, "text_edges_candidate_pixel_ratio"),
+                "reason_distribution": _reason_counts(
+                    reason for reason in text_edges_reasons if isinstance(reason, str)
+                ),
+                "skip_reason_distribution": _reason_counts(text_edges_skipped_reasons),
+                "protection_triggered_files": sum(
+                    1
+                    for reason in text_edges_skipped_reasons
+                    if any(
+                        marker in reason
+                        for marker in (
+                            "risk",
+                            "too dense",
+                            "photo-detail",
+                            "table-region",
+                            "edge mark",
+                            "binding",
+                        )
+                    )
+                ),
+                "low_confidence_skip_files": sum(
+                    1
+                    for reason in text_edges_skipped_reasons
+                    if any(
+                        marker in reason
+                        for marker in (
+                            "too weak",
+                            "too little",
+                            "too sparse",
+                            "insufficient",
+                            "below conservative threshold",
+                        )
+                    )
+                ),
+                "candidate_preflight_skip_files": _int_count(
+                    sharpen_text_edges_timing.get("candidate_preflight_skipped_files")
                 ),
             },
         },
@@ -2829,6 +2895,8 @@ def _sharpen_text_edges_conservative(image: Image.Image) -> TextEdgeSharpeningRe
         return _text_edges_noop(image, "text edge sharpening skipped: text edge evidence too weak")
     if p05 < 35 and _dark_pixel_ratio(grayscale, 64) > 0.09:
         return _text_edges_noop(image, "text edge sharpening skipped: dense dark foreground or illustration risk")
+    if _source_protected_edge_dark_ratio(grayscale) > 0.002:
+        return _text_edges_noop(image, "text edge sharpening skipped: edge mark or binding risk")
 
     sample_candidate_ratio = _text_edge_sample_candidate_ratio(grayscale)
     if sample_candidate_ratio < 0.02:
@@ -3033,6 +3101,22 @@ def _protected_edge_dark_ratio(mask: Image.Image) -> float:
     )
     edge_pixels = sum((box[2] - box[0]) * (box[3] - box[1]) for box in boxes)
     dark_pixels = sum(sum(mask.crop(box).histogram()[1:]) for box in boxes)
+    return dark_pixels / max(1, edge_pixels)
+
+
+def _source_protected_edge_dark_ratio(grayscale: Image.Image) -> float:
+    margin = max(5, int(round(min(grayscale.width, grayscale.height) * 0.06)))
+    boxes = (
+        (0, 0, margin, grayscale.height),
+        (grayscale.width - margin, 0, grayscale.width, grayscale.height),
+        (0, 0, grayscale.width, margin),
+        (0, grayscale.height - margin, grayscale.width, grayscale.height),
+    )
+    edge_pixels = sum((box[2] - box[0]) * (box[3] - box[1]) for box in boxes)
+    dark_pixels = 0
+    for box in boxes:
+        histogram = grayscale.crop(box).histogram()
+        dark_pixels += sum(histogram[:96])
     return dark_pixels / max(1, edge_pixels)
 
 
