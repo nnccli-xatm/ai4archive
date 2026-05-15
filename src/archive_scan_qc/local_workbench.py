@@ -333,11 +333,13 @@ class WorkbenchController:
             if isinstance(decision_summary.get("closure_gate_summary"), dict)
             else {}
         )
+        pending_decisions = int(decision_summary.get("pending") or 0)
+        if pending_decisions > 0:
+            raise ValueError(f"仍有 {pending_decisions} 项待人工确认，请先完成待看图复核后再完成导出。")
         if decision_summary.get("completion_status") != "complete" or closure_summary.get("can_complete_delivery") is not True:
             raise ValueError("还有需要重扫/重新处理的图片，先处理后再完成导出。")
 
         total_decisions = int(decision_summary.get("total_decisions") or 0)
-        pending_decisions = int(decision_summary.get("pending") or 0)
         reviewed_decisions = max(0, total_decisions - pending_decisions)
         open_p0_count = int(closure_summary.get("open_p0_count") or 0)
         open_p1_count = int(closure_summary.get("open_p1_count") or 0)
@@ -1501,15 +1503,24 @@ def _completion_handoff_consistency(
         else {}
     )
     decision_summary = decision_summary if isinstance(decision_summary, dict) else verification_summary
+    decision_counts = (
+        decision_summary.get("decision_counts")
+        if isinstance(decision_summary, dict) and isinstance(decision_summary.get("decision_counts"), dict)
+        else {}
+    )
     final_counts = _review_completion_counts(final_decisions)
     issues: list[str] = []
 
     status = str(summary.get("status") or "").strip().lower() if isinstance(summary, dict) else ""
+    local_batch_state = str(summary.get("local_batch_state") or "").strip().lower() if isinstance(summary, dict) else ""
     progress_state = str(progress.get("state") or "").strip().lower() if isinstance(progress, dict) else ""
+    progress_status = str(progress.get("status") or "").strip().lower() if isinstance(progress, dict) else ""
     if status == "blocked":
         issues.append("本机摘要显示仍有失败或阻断，不能交接。")
-    if progress_state == "running":
-        issues.append("本机进度仍显示处理中，请重新开始处理或准备下一批。")
+    if status in {"running", "processing"} or local_batch_state in {"running", "processing"}:
+        issues.append("本机摘要显示本批仍在处理中，请等待处理完成后再完成导出。")
+    if progress_state in {"running", "processing"} or progress_status in {"running", "processing"}:
+        issues.append("本机进度仍显示处理中，请等待处理完成后再完成导出。")
 
     total_files = _optional_nonnegative_int(counts, "total_files")
     openable_files = _optional_nonnegative_int(counts, "openable_files")
@@ -1539,6 +1550,19 @@ def _completion_handoff_consistency(
         derivative_from_counts = int(processed_files or 0) + int(resumed_files or 0)
     if derivative_from_counts is not None and operator_ready is not None and derivative_from_counts != operator_ready:
         issues.append("处理后图片数量与完成摘要不一致，请检查输出文件夹后再完成。")
+    processable_files = openable_files if openable_files is not None else total_files
+    if processable_files is not None and derivative_from_counts is not None:
+        aggregate_handoff_exceptions = (
+            _safe_nonnegative_int(decision_counts.get("needs_rescan"))
+            + _safe_nonnegative_int(decision_counts.get("fixed_externally"))
+            + _safe_nonnegative_int(decision_counts.get("blocked"))
+        )
+        expected_outputs = max(
+            0,
+            int(processable_files) - int(skipped_files or 0) - int(failed_files or 0) - aggregate_handoff_exceptions,
+        )
+        if derivative_from_counts < expected_outputs:
+            issues.append("处理后图片数量少于可处理原图数量，请重新开始处理本批或检查输出文件夹后再完成。")
     if (
         operator_attention is not None
         and failed_files is not None
@@ -1586,7 +1610,7 @@ def _handoff_count_mismatch_guidance(consistency: dict[str, Any]) -> dict[str, A
     return {
         "kind": "handoff_count_mismatch",
         "title_zh": "交接前数量需要确认",
-        "message_zh": "本机状态数量互相不一致，当前不能显示为可以交接。",
+        "message_zh": "本机状态数量互相不一致，当前不能显示为可以交接。请检查输出文件夹，必要时重新开始处理本批。",
         "aggregate_only": True,
         "count_mismatch_detected": True,
         "issues_zh": safe_issues,
