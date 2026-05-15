@@ -63,6 +63,12 @@ class DarkBorderDetection:
     reason: str
 
 
+@dataclass(frozen=True)
+class CropDetection:
+    bbox: tuple[int, int, int, int] | None
+    reason: str
+
+
 def detect_skew(image: Image.Image) -> SkewDetection:
     return _detect_skew(image)
 
@@ -509,6 +515,7 @@ def _process_record(
         "dark_border_bbox": None,
         "dark_border_reason": None,
         "crop_bbox": None,
+        "crop_reason": None,
         "cropped": False,
         "despeckled": False,
         "despeckle_pixels_changed": 0,
@@ -567,6 +574,7 @@ def _process_record(
                 "dark_border_bbox": process_info["dark_border_bbox"],
                 "dark_border_reason": process_info["dark_border_reason"],
                 "crop_bbox": process_info["crop_bbox"],
+                "crop_reason": process_info["crop_reason"],
                 "cropped": process_info["cropped"],
                 "despeckled": process_info["despeckled"],
                 "despeckle_pixels_changed": process_info["despeckle_pixels_changed"],
@@ -600,6 +608,7 @@ def _process_record(
                     "dark_border_bbox": process_info["dark_border_bbox"],
                     "dark_border_reason": process_info["dark_border_reason"],
                     "crop_bbox": process_info["crop_bbox"],
+                    "crop_reason": process_info["crop_reason"],
                     "cropped": process_info["cropped"],
                     "despeckled": process_info["despeckled"],
                     "despeckle_pixels_changed": process_info["despeckle_pixels_changed"],
@@ -1079,9 +1088,12 @@ def _process_image(
             operations.append("dark_border_trim_disabled")
 
     crop_bbox: tuple[int, int, int, int] | None = None
+    crop_reason = "auto crop disabled"
     with _operation_timer(operation_timings, "auto_crop", enabled=options.auto_crop):
         if options.auto_crop:
-            crop_bbox = _detect_conservative_crop_bbox(processed)
+            crop_detection = _detect_conservative_crop_bbox(processed)
+            crop_bbox = crop_detection.bbox
+            crop_reason = crop_detection.reason
             if crop_bbox:
                 processed = processed.crop(crop_bbox)
                 operations.append("auto_crop_conservative")
@@ -1130,6 +1142,7 @@ def _process_image(
         "dark_border_bbox": list(dark_border.bbox) if dark_border.bbox else None,
         "dark_border_reason": dark_border.reason,
         "crop_bbox": list(crop_bbox) if crop_bbox else None,
+        "crop_reason": crop_reason,
         "cropped": crop_bbox is not None,
         "despeckled": despeckled,
         "despeckle_pixels_changed": despeckle_pixels_changed,
@@ -1468,29 +1481,55 @@ def _rotate_for_deskew(image: Image.Image, correction_angle: float) -> Image.Ima
     return image.rotate(correction_angle, resample=Image.Resampling.BICUBIC, expand=True, fillcolor=fillcolor)
 
 
-def _detect_conservative_crop_bbox(image: Image.Image) -> tuple[int, int, int, int] | None:
+def _detect_conservative_crop_bbox(image: Image.Image) -> CropDetection:
     width, height = image.size
     if width < 20 or height < 20:
-        return None
+        return CropDetection(None, "image too small")
 
     grayscale = image.convert("L")
     background = _corner_background_value(grayscale)
     diff = grayscale.point(lambda value: 255 if abs(value - background) >= 18 else 0)
     bbox = diff.getbbox()
     if not bbox:
-        return None
+        return CropDetection(None, "no confident foreground outside background")
 
     left, top, right, bottom = bbox
-    if min(left, top, width - right, height - bottom) < 2:
-        return None
+    margins = (left, top, width - right, height - bottom)
+    if min(margins) < 2:
+        return CropDetection(None, "foreground reaches crop safety margin")
+    if max(margins) > max(min(margins) * 3, min(margins) + max(4, int(min(width, height) * 0.08))):
+        return CropDetection(None, "inconsistent crop margin evidence")
 
     crop_width = right - left
     crop_height = bottom - top
     crop_area_ratio = (crop_width * crop_height) / (width * height)
-    if crop_area_ratio < 0.25 or crop_area_ratio > 0.98:
-        return None
+    if crop_area_ratio < 0.45:
+        return CropDetection(None, "candidate crop exceeds conservative crop ratio")
+    if crop_area_ratio > 0.98:
+        return CropDetection(None, "candidate crop change is too small")
 
-    return bbox
+    if not _crop_boundary_has_consistent_evidence(diff, bbox):
+        return CropDetection(None, "crop boundary evidence is too sparse")
+
+    return CropDetection(bbox, "conservative crop applied")
+
+
+def _crop_boundary_has_consistent_evidence(image: Image.Image, bbox: tuple[int, int, int, int]) -> bool:
+    left, top, right, bottom = bbox
+    crop_width = right - left
+    crop_height = bottom - top
+    min_boundary_pixels = max(3, int(min(crop_width, crop_height) * 0.08))
+    boundaries = (
+        image.crop((left, top, left + 1, bottom)),
+        image.crop((right - 1, top, right, bottom)),
+        image.crop((left, top, right, top + 1)),
+        image.crop((left, bottom - 1, right, bottom)),
+    )
+    for boundary in boundaries:
+        if sum(1 for value in boundary.tobytes() if value) < min_boundary_pixels:
+            return False
+
+    return True
 
 
 def _detect_dark_border_bbox(image: Image.Image) -> DarkBorderDetection:

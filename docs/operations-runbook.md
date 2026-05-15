@@ -908,7 +908,10 @@ Start with these controls:
 - `--process-out`: enables derivative writing; omit for scan-only checks.
 - `archive-scan-qc processing-plan`: writes local dry-run JSON/CSV for operator
   review without derivative images.
-- `--auto-crop`: conservative page-border crop.
+- `--auto-crop`: conservative page-border crop. It only accepts consistent
+  four-side page evidence and leaves blank, low-contrast, near-full-frame,
+  edge-content, sparse-noise, or excessive-crop candidates unchanged with a
+  local manifest reason for review.
 - `--deskew`: conservative small-angle deskew. Pages with insufficient
   foreground, low confidence, excessive angle, inconsistent line evidence, or
   foreground touching a rotation boundary are left unchanged with a local

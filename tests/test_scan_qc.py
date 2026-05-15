@@ -6696,12 +6696,125 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(record["status"], "processed")
             self.assertTrue(record["cropped"])
             self.assertEqual(record["crop_bbox"], [10, 8, 70, 52])
+            self.assertEqual(record["crop_reason"], "conservative crop applied")
             self.assertEqual(record["original_size"], [80, 60])
             self.assertEqual(record["output_size"], [60, 44])
             self.assertGreater(record["processing_audit"]["crop_ratio"], 0.0)
             self.assertEqual(record["processing_warnings"], [])
             self.assertEqual(processed_size, (60, 44))
             self.assertIn("auto_crop_conservative", record["operations"])
+
+    def test_auto_crop_trims_light_outer_margin_with_consistent_page_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            image = Image.new("RGB", (120, 90), "white")
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((12, 10, 107, 79), fill=(225, 225, 225), outline=(80, 80, 80), width=2)
+            image.save(input_dir / "A001_0001.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True))
+
+            record = manifest["files"][0]
+            self.assertTrue(record["cropped"])
+            self.assertEqual(record["crop_bbox"], [12, 10, 108, 80])
+            self.assertEqual(record["crop_reason"], "conservative crop applied")
+            self.assertEqual(record["output_size"], [96, 70])
+
+    def test_auto_crop_keeps_edge_content_near_any_side(self) -> None:
+        cases = {
+            "body_left": lambda draw: draw.rectangle((1, 35, 25, 40), fill=(20, 20, 20)),
+            "page_number_bottom": lambda draw: draw.rectangle((55, 86, 65, 89), fill=(20, 20, 20)),
+            "stamp_right": lambda draw: draw.ellipse((105, 30, 119, 44), outline=(140, 0, 0), width=2),
+            "margin_note_top": lambda draw: draw.rectangle((45, 1, 75, 5), fill=(20, 20, 20)),
+            "binding_line": lambda draw: draw.line((2, 0, 2, 89), fill=(40, 40, 40), width=2),
+            "dark_archival_edge": lambda draw: draw.rectangle((0, 0, 5, 89), fill=(60, 60, 60)),
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            for name, mark in cases.items():
+                image = Image.new("RGB", (120, 90), "white")
+                draw = ImageDraw.Draw(image)
+                draw.rectangle((18, 15, 101, 74), outline=(25, 25, 25), width=2)
+                mark(draw)
+                image.save(input_dir / f"A001_{name}.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True))
+
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            for name in cases:
+                record = records[f"A001_{name}.png"]
+                self.assertFalse(record["cropped"], name)
+                self.assertIsNone(record["crop_bbox"], name)
+                self.assertEqual(record["output_size"], [120, 90], name)
+                self.assertEqual(record["crop_reason"], "foreground reaches crop safety margin", name)
+                self.assertIn("auto_crop_noop", record["operations"], name)
+
+    def test_auto_crop_noops_for_unsafe_synthetic_candidates_with_reasons(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            Image.new("RGB", (120, 90), "white").save(input_dir / "A001_blank.png")
+
+            low_contrast = Image.new("RGB", (120, 90), (245, 245, 245))
+            draw = ImageDraw.Draw(low_contrast)
+            draw.rectangle((12, 10, 107, 79), outline=(235, 235, 235), width=2)
+            low_contrast.save(input_dir / "A001_low_contrast.png")
+
+            near_full = Image.new("RGB", (120, 90), "white")
+            draw = ImageDraw.Draw(near_full)
+            draw.rectangle((1, 1, 118, 88), outline=(20, 20, 20), width=2)
+            near_full.save(input_dir / "A001_near_full.png")
+
+            excessive = Image.new("RGB", (120, 90), "white")
+            draw = ImageDraw.Draw(excessive)
+            draw.rectangle((45, 35, 55, 45), outline=(20, 20, 20), width=2)
+            excessive.save(input_dir / "A001_excessive.png")
+
+            inconsistent = Image.new("RGB", (120, 90), "white")
+            draw = ImageDraw.Draw(inconsistent)
+            draw.rectangle((4, 20, 115, 69), outline=(20, 20, 20), width=2)
+            inconsistent.save(input_dir / "A001_inconsistent.png")
+
+            local_noise = Image.new("RGB", (120, 90), "white")
+            draw = ImageDraw.Draw(local_noise)
+            draw.rectangle((18, 15, 101, 74), outline=(25, 25, 25), width=2)
+            for point in [(8, 8), (112, 81), (60, 2)]:
+                draw.point(point, fill=(0, 0, 0))
+            local_noise.save(input_dir / "A001_local_noise.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True))
+
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            expected_reasons = {
+                "A001_blank.png": "no confident foreground outside background",
+                "A001_low_contrast.png": "no confident foreground outside background",
+                "A001_near_full.png": "foreground reaches crop safety margin",
+                "A001_excessive.png": "candidate crop exceeds conservative crop ratio",
+                "A001_inconsistent.png": "inconsistent crop margin evidence",
+                "A001_local_noise.png": "crop boundary evidence is too sparse",
+            }
+            for name, reason in expected_reasons.items():
+                record = records[name]
+                self.assertFalse(record["cropped"], name)
+                self.assertIsNone(record["crop_bbox"], name)
+                self.assertEqual(record["crop_reason"], reason, name)
+                self.assertEqual(record["output_size"], [120, 90], name)
+                self.assertIn("auto_crop_noop", record["operations"], name)
 
     def test_processing_audit_allows_small_synthetic_change(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -6836,6 +6949,8 @@ class ScanQcTest(unittest.TestCase):
             self.assertFalse(records["A001_0002.png"]["cropped"])
             self.assertEqual(records["A001_0001.png"]["output_size"], [80, 60])
             self.assertEqual(records["A001_0002.png"]["output_size"], [80, 60])
+            self.assertEqual(records["A001_0001.png"]["crop_reason"], "no confident foreground outside background")
+            self.assertEqual(records["A001_0002.png"]["crop_reason"], "no confident foreground outside background")
             self.assertIn("auto_crop_noop", records["A001_0001.png"]["operations"])
             self.assertIn("auto_crop_noop", records["A001_0002.png"]["operations"])
 
