@@ -9,6 +9,8 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter
 
 from archive_scan_qc.benchmark import _processing_quality_regression, run_benchmark
+from archive_scan_qc.processing import ProcessingOptions, process_images
+from archive_scan_qc.scanner import ScanConfig, scan_batch
 
 
 class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
@@ -84,6 +86,113 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     '"findings": [',
                 ):
                     self.assertNotIn(forbidden, raw)
+
+    def test_full_chain_safe_combination_page_stays_conservative(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-safe-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "synthetic_safe_combination.png"
+            _safe_full_chain_combination_page().save(source, dpi=(300, 300))
+            source_bytes = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "safe-combination", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+            audit = record["processing_audit"]
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(record["status"], "processed")
+            with Image.open(process_dir / record["output_relative_path"]) as output:
+                self.assertEqual(output.size, tuple(record["output_size"]))
+            self.assertTrue(record["despeckled"])
+            self.assertTrue(record["scanlines_lightened"])
+            self.assertIn("despeckle_isolated_pixels", record["operations"])
+            self.assertIn("lighten_scanlines_conservative", record["operations"])
+            self.assertFalse(record["background_stains_lightened"])
+            self.assertFalse(record["faded_text_enhanced"])
+            self.assertFalse(record["text_edges_sharpened"])
+            self.assertEqual(audit["guardrail_failures"], [])
+            self.assertEqual(audit["local_content_change_guard_action"], "passed")
+            self.assertEqual(audit["cumulative_change_guard_action"], "passed")
+            self.assertFalse(audit["local_content_change_guard_reverted"])
+            self.assertFalse(audit["cumulative_change_guard_reverted"])
+            self.assertGreater(audit["scanlines_changed_pixel_ratio"], 0.0)
+            self.assertLessEqual(audit["scanlines_changed_pixel_ratio"], 0.04)
+            self.assertLessEqual(audit["despeckle_pixel_ratio"], 0.001)
+            self.assertLessEqual(audit["cumulative_change_pixel_ratio"], 0.05)
+            self.assertLessEqual(audit["cumulative_change_score"], 0.25)
+            self.assertLessEqual(audit["local_content_changed_ratio"], 0.02)
+            self.assertEqual(audit_summary["counts"]["processed_files"], 1)
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["scanlines_lightened_files"], 1)
+            self.assertEqual(audit_summary["counts"]["cumulative_change_guard_reverted_files"], 0)
+            self.assertEqual(audit_summary["counts"]["local_content_change_guard_reverted_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in ("synthetic_safe_combination.png", str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
+    def test_full_chain_risk_combination_pages_skip_or_stay_low_change(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-risk-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_table_page_number_annotation.png": _risk_table_page_number_annotation_page(),
+                "synthetic_stamp_header_footer.png": _risk_stamp_header_footer_page(),
+                "synthetic_dark_photo_edge_trace.png": _risk_dark_photo_edge_trace_page(),
+            }
+            for name, image in pages.items():
+                image.save(input_dir / name, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "risk-combination", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            self.assertEqual(manifest["summary"]["processed_files"], len(pages))
+            self.assertEqual(manifest["summary"]["failed_files"], 0)
+            for record in manifest["files"]:
+                audit = record["processing_audit"]
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    self.assertEqual(output.size, tuple(record["output_size"]))
+                self.assertEqual(record["status"], "processed")
+                self.assertFalse(record["background_stains_lightened"], record["source_relative_path"])
+                self.assertFalse(record["scanlines_lightened"], record["source_relative_path"])
+                self.assertFalse(record["faded_text_enhanced"], record["source_relative_path"])
+                self.assertFalse(record["text_edges_sharpened"], record["source_relative_path"])
+                self.assertFalse(record["cropped"], record["source_relative_path"])
+                self.assertEqual(audit["guardrail_failures"], [])
+                self.assertIn(audit["cumulative_change_guard_action"], {"passed", "reverted_to_source"})
+                self.assertLessEqual(audit["cumulative_change_pixel_ratio"], 0.01)
+                self.assertLessEqual(audit["cumulative_change_score"], 0.08)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["background_stains_lightened_files"], 0)
+            self.assertEqual(audit_summary["counts"]["scanlines_lightened_files"], 0)
+            self.assertEqual(audit_summary["counts"]["faded_text_enhanced_files"], 0)
+            self.assertEqual(audit_summary["counts"]["text_edges_sharpened_files"], 0)
+            self.assertEqual(audit_summary["counts"]["auto_crop_applied_files"], 0)
+            self.assertEqual(audit_summary["counts"]["cumulative_change_guard_reverted_files"], 0)
+            self.assertEqual(audit_summary["guardrails"]["faded_text"]["applied_files"], 0)
+            self.assertEqual(audit_summary["guardrails"]["text_edges"]["applied_files"], 0)
+            self.assertGreaterEqual(audit_summary["guardrails"]["faded_text"]["protection_triggered_files"], 2)
+            self.assertGreaterEqual(audit_summary["guardrails"]["text_edges"]["protection_triggered_files"], 1)
+            self.assertGreaterEqual(audit_summary["guardrails"]["scanlines"]["protection_triggered_files"], 1)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
 
     def test_quality_regression_reports_missing_operation_timing_code_without_private_rows(self) -> None:
         quality = _processing_quality_regression(
@@ -314,6 +423,23 @@ CONSERVATIVE_REPAIR_OPERATIONS = (
 )
 
 
+def _full_chain_options() -> ProcessingOptions:
+    return ProcessingOptions(
+        auto_crop=True,
+        deskew=True,
+        trim_dark_border=True,
+        despeckle=True,
+        normalize_tones=True,
+        lighten_edge_shadow=True,
+        lighten_background_stains=True,
+        lighten_scanlines=True,
+        enhance_faded_text=True,
+        sharpen_text_edges=True,
+        despeckle_backend="fallback",
+        workers=1,
+    )
+
+
 def _benchmark_combo(root: Path, input_dir: Path, label: str, *flags: str) -> dict[str, object]:
     output_dir = root / f"benchmark-{label}"
     process_dir = root / f"processed-{label}"
@@ -493,6 +619,54 @@ def _synthetic_pages(input_dir: Path) -> None:
     _scanline_page().save(input_dir / "private_scanline_page.png", dpi=(300, 300))
     _faded_text_page().save(input_dir / "private_faded_text_page.png", dpi=(300, 300))
     _blurred_text_page().save(input_dir / "private_blurred_text_page.png", dpi=(300, 300))
+
+
+def _safe_full_chain_combination_page() -> Image.Image:
+    image = _scanline_page().resize((240, 180))
+    draw = ImageDraw.Draw(image)
+    for y in range(86, 130, 14):
+        draw.line((58, y, 174, y), fill=(202, 202, 202), width=2)
+    draw.ellipse((165, 28, 210, 58), fill=(222, 222, 222))
+    image.putpixel((24, 24), (0, 0, 0))
+    return image
+
+
+def _risk_table_page_number_annotation_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), (242, 242, 242))
+    draw = ImageDraw.Draw(image)
+    for y in (42, 72, 102, 132):
+        draw.line((26, y, 214, y), fill=(190, 190, 190), width=2)
+    for x in (26, 88, 150, 214):
+        draw.line((x, 42, x, 132), fill=(190, 190, 190), width=2)
+    draw.text((180, 18), "12", fill=(60, 60, 60))
+    draw.line((48, 150, 116, 158), fill=(120, 120, 120), width=2)
+    return image
+
+
+def _risk_stamp_header_footer_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), (244, 244, 244))
+    draw = ImageDraw.Draw(image)
+    for y in range(38, 132, 18):
+        draw.rectangle((42, y, 164, y + 3), fill=(58, 58, 58))
+        draw.rectangle((46, y + 8, 136, y + 10), fill=(76, 76, 76))
+    draw.ellipse((166, 48, 216, 98), outline=(180, 40, 35), width=3)
+    draw.rectangle((48, 18, 170, 20), fill=(64, 64, 64))
+    draw.rectangle((54, 158, 154, 160), fill=(64, 64, 64))
+    return image.filter(ImageFilter.GaussianBlur(radius=0.6))
+
+
+def _risk_dark_photo_edge_trace_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), (150, 150, 150))
+    draw = ImageDraw.Draw(image)
+    for y in range(20, 160):
+        shade = 95 + ((y * 7) % 70)
+        draw.line((24, y, 216, y), fill=(shade, shade, shade))
+    for x in range(34, 210, 12):
+        shade = 90 + (x % 50)
+        draw.line((x, 26, min(216, x + 42), 154), fill=(shade, shade, shade), width=2)
+    draw.rectangle((0, 74, 14, 102), fill=(45, 45, 45))
+    draw.text((184, 12), "9", fill=(42, 42, 42))
+    return image
 
 
 def _text_page() -> Image.Image:
