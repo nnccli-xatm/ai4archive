@@ -61,6 +61,7 @@ class ProductionRunConfig:
     lighten_edge_shadow: bool = False
     lighten_background_stains: bool = False
     lighten_scanlines: bool = False
+    enhance_faded_text: bool = False
     despeckle_backend: str = "fallback"
     resume_processing: bool = True
     reuse_scan_measurements: bool = False
@@ -121,6 +122,7 @@ def run_production_folder(config: ProductionRunConfig) -> dict[str, Any]:
             lighten_edge_shadow=config.lighten_edge_shadow,
             lighten_background_stains=config.lighten_background_stains,
             lighten_scanlines=config.lighten_scanlines,
+            enhance_faded_text=config.enhance_faded_text,
             despeckle_backend=config.despeckle_backend,
             resume_processing=config.resume_processing,
             reuse_scan_measurements=config.reuse_scan_measurements,
@@ -202,6 +204,7 @@ def build_production_run_summary(
         "lighten_edge_shadow": config.lighten_edge_shadow,
         "lighten_background_stains": config.lighten_background_stains,
         "lighten_scanlines": config.lighten_scanlines,
+        "enhance_faded_text": config.enhance_faded_text,
         "despeckle_backend": config.despeckle_backend,
         "resume_processing": config.resume_processing,
     }

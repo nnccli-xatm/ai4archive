@@ -61,6 +61,9 @@ def build_processing_plan(
             1 for record in records if record.get("background_stain_lightening_candidate")
         ),
         "scanline_lightening_candidates": sum(1 for record in records if record.get("scanline_lightening_candidate")),
+        "faded_text_enhancement_candidates": sum(
+            1 for record in records if record.get("faded_text_enhancement_candidate")
+        ),
     }
     return {
         "schema_version": "scan-qc.processing-plan.v1",
@@ -76,6 +79,7 @@ def build_processing_plan(
             "lighten_edge_shadow": options.lighten_edge_shadow,
             "lighten_background_stains": options.lighten_background_stains,
             "lighten_scanlines": options.lighten_scanlines,
+            "enhance_faded_text": options.enhance_faded_text,
             "resume_processing": False,
             "reuse_scan_measurements": options.reuse_scan_measurements,
         },
@@ -139,6 +143,11 @@ def _plan_record(item: dict[str, Any], input_dir: Path, options: ProcessingOptio
         "scanline_lightening_candidate": False,
         "scanlines_reason": None,
         "scanlines_orientation": None,
+        "faded_text_enhancement_candidate": False,
+        "faded_text_reason": None,
+        "faded_text_delta": 0.0,
+        "faded_text_changed_pixel_ratio": 0.0,
+        "faded_text_candidate_pixel_ratio": 0.0,
         "processing_audit": None,
         "processing_warnings": [],
         "failure_reason": None,
@@ -190,6 +199,11 @@ def _plan_record(item: dict[str, Any], input_dir: Path, options: ProcessingOptio
             "scanline_lightening_candidate": process_info["scanlines_lightened"],
             "scanlines_reason": process_info["scanlines_reason"],
             "scanlines_orientation": process_info["scanlines_orientation"],
+            "faded_text_enhancement_candidate": process_info["faded_text_enhanced"],
+            "faded_text_reason": process_info["faded_text_reason"],
+            "faded_text_delta": process_info["faded_text_delta"],
+            "faded_text_changed_pixel_ratio": process_info["faded_text_changed_pixel_ratio"],
+            "faded_text_candidate_pixel_ratio": process_info["faded_text_candidate_pixel_ratio"],
             "processing_audit": process_info["processing_audit"],
             "processing_warnings": process_info["processing_warnings"],
         }
@@ -226,6 +240,11 @@ def _write_plan_csv(plan: dict[str, Any], path: Path) -> None:
         "scanline_lightening_candidate",
         "scanlines_reason",
         "scanlines_orientation",
+        "faded_text_enhancement_candidate",
+        "faded_text_reason",
+        "faded_text_delta",
+        "faded_text_changed_pixel_ratio",
+        "faded_text_candidate_pixel_ratio",
         "processing_warnings",
         "failure_reason",
     ]

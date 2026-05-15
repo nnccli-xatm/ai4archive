@@ -81,6 +81,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lighten-edge-shadow", action="store_true")
     parser.add_argument("--lighten-background-stains", action="store_true")
     parser.add_argument("--lighten-scanlines", action="store_true")
+    parser.add_argument("--enhance-faded-text", action="store_true")
     parser.add_argument(
         "--despeckle-backend",
         choices=("fallback", "numpy"),
@@ -241,6 +242,7 @@ def _baseline_summary(args: argparse.Namespace, private_summary: dict[str, Any])
             "lighten_edge_shadow": bool(getattr(args, "lighten_edge_shadow", False)),
             "lighten_background_stains": bool(getattr(args, "lighten_background_stains", False)),
             "lighten_scanlines": bool(getattr(args, "lighten_scanlines", False)),
+            "enhance_faded_text": bool(getattr(args, "enhance_faded_text", False)),
             "despeckle_backend_requested": private_summary.get("despeckle_backend", {}).get(
                 "requested_backend",
                 getattr(args, "despeckle_backend", "fallback"),

@@ -3243,6 +3243,7 @@ class ScanQcTest(unittest.TestCase):
                 "--lighten-edge-shadow",
                 "--lighten-background-stains",
                 "--lighten-scanlines",
+                "--enhance-faded-text",
                 "--min-scan-files-per-minute",
                 "100",
                 "--min-processing-files-per-minute",
@@ -3259,6 +3260,7 @@ class ScanQcTest(unittest.TestCase):
         self.assertTrue(baseline_args.lighten_edge_shadow)
         self.assertTrue(baseline_args.lighten_background_stains)
         self.assertTrue(baseline_args.lighten_scanlines)
+        self.assertTrue(baseline_args.enhance_faded_text)
         self.assertTrue(baseline_args.cleanup_artifacts)
 
     def test_rework_action_list_groups_qc_findings_and_processing_retry(self) -> None:
@@ -5650,6 +5652,81 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(manifest["files"][0]["deskew_reason"], "deskew disabled")
             self.assertIn("auto_crop_disabled", manifest["files"][0]["operations"])
             self.assertIn("deskew_disabled", manifest["files"][0]["operations"])
+
+    def test_enhance_faded_text_lightly_improves_low_contrast_text_and_records_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "private_faded_text.png"
+            _synthetic_faded_text_page().save(source, dpi=(300, 300))
+            source_bytes = source.read_bytes()
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(enhance_faded_text=True, workers=1),
+            )
+            plan = build_processing_plan(report, input_dir, ProcessingOptions(enhance_faded_text=True))
+            audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
+
+            record = manifest["files"][0]
+            audit = record["processing_audit"]
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertTrue(record["faded_text_enhanced"])
+            self.assertIn("enhance_faded_text_conservative", record["operations"])
+            self.assertGreater(audit["faded_text_delta"], 8)
+            self.assertGreater(audit["faded_text_changed_pixel_ratio"], 0)
+            self.assertLessEqual(audit["faded_text_changed_pixel_ratio"], 0.10)
+            self.assertEqual(audit["guardrail_failures"], [])
+            self.assertTrue(audit_summary["operations"]["enhance_faded_text"])
+            self.assertEqual(audit_summary["counts"]["faded_text_enhanced_files"], 1)
+            self.assertIn("faded_text_changed_pixel_ratio", audit_summary["metrics"])
+            self.assertEqual(plan["summary"]["faded_text_enhancement_candidates"], 1)
+            self.assertTrue(plan["files"][0]["faded_text_enhancement_candidate"])
+
+    def test_enhance_faded_text_noops_for_normal_color_dark_photo_texture_and_default_off(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            default_process_dir = root / "processed-default"
+            input_dir.mkdir()
+            pages = {
+                "A001_high_contrast.png": _synthetic_text_page(),
+                "A002_red_stamp.png": _synthetic_faded_text_page(red_stamp=True),
+                "A003_dark_page.png": _synthetic_faded_text_page(background=150, ink=112),
+                "A004_photo_like.png": _synthetic_photo_like_page(),
+                "A005_texture_stain.png": _synthetic_texture_stain_page(),
+            }
+            for name, image in pages.items():
+                image.save(input_dir / name, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            default_manifest = process_images(report, input_dir, default_process_dir, ProcessingOptions(workers=1))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(enhance_faded_text=True, workers=1),
+            )
+            audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
+
+            for record in default_manifest["files"]:
+                self.assertFalse(record["faded_text_enhanced"])
+                self.assertIn("enhance_faded_text_disabled", record["operations"])
+                self.assertEqual(record["processing_audit"]["faded_text_changed_pixel_ratio"], 0.0)
+            for record in manifest["files"]:
+                self.assertFalse(record["faded_text_enhanced"], record["source_relative_path"])
+                self.assertIn("enhance_faded_text_noop", record["operations"])
+                self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
+            self.assertTrue(audit_summary["operations"]["enhance_faded_text"])
+            self.assertEqual(audit_summary["counts"]["faded_text_enhanced_files"], 0)
 
     def test_process_images_writes_audit_summary_and_retry_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -8663,6 +8740,7 @@ class ScanQcTest(unittest.TestCase):
                 "--lighten-edge-shadow",
                 "--lighten-background-stains",
                 "--lighten-scanlines",
+                "--enhance-faded-text",
             ]:
                 with self.assertRaises(SystemExit) as raised:
                     main(["--input", str(input_dir), "--out", str(output_dir), option])
@@ -9438,6 +9516,46 @@ def _synthetic_text_page() -> Image.Image:
     draw.rectangle((24, 20, 215, 159), outline=(30, 30, 30), width=2)
     for y in range(42, 132, 18):
         draw.rectangle((48, y, 190, y + 4), fill=(20, 20, 20))
+    return image
+
+
+def _synthetic_faded_text_page(
+    *,
+    background: int = 242,
+    ink: int = 188,
+    red_stamp: bool = False,
+) -> Image.Image:
+    image = Image.new("RGB", (240, 180), (background, background, background))
+    draw = ImageDraw.Draw(image)
+    for y in range(36, 132, 18):
+        draw.rectangle((42, y, 136, y + 3), fill=(ink, ink, ink))
+        draw.rectangle((46, y + 8, 118, y + 10), fill=(ink + 4, ink + 4, ink + 4))
+    if red_stamp:
+        draw.ellipse((158, 46, 210, 98), outline=(180, 40, 35), width=3)
+        draw.line((170, 72, 198, 72), fill=(180, 40, 35), width=2)
+    return image
+
+
+def _synthetic_photo_like_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), (232, 232, 232))
+    draw = ImageDraw.Draw(image)
+    for y in range(20, 160):
+        shade = 150 + ((y * 7) % 82)
+        draw.line((24, y, 216, y), fill=(shade, shade, shade))
+    for x in range(34, 210, 12):
+        draw.line((x, 26, min(216, x + 42), 154), fill=(120 + (x % 50), 120 + (x % 50), 120 + (x % 50)), width=2)
+    return image
+
+
+def _synthetic_texture_stain_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), (238, 238, 238))
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((44, 36, 184, 130), fill=(196, 196, 196))
+    for x in range(18, 224, 10):
+        for y in range(14, 166, 14):
+            shade = 190 + ((x + y) % 28)
+            draw.point((x, y), fill=(shade, shade, shade))
+            draw.point((x + 1, y), fill=(shade, shade, shade))
     return image
 
 

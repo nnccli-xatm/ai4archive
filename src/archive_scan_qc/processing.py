@@ -39,6 +39,7 @@ class ProcessingOptions:
     lighten_edge_shadow: bool = False
     lighten_background_stains: bool = False
     lighten_scanlines: bool = False
+    enhance_faded_text: bool = False
     despeckle_backend: str = "fallback"
     resume_processing: bool = False
     reuse_scan_measurements: bool = False
@@ -118,6 +119,16 @@ class ScanlineLighteningResult:
     line_mean_before: float | None
     line_mean_after: float | None
     line_delta: float
+    changed_pixel_ratio: float
+    candidate_pixel_ratio: float
+
+
+@dataclass(frozen=True)
+class FadedTextEnhancementResult:
+    image: Image.Image
+    applied: bool
+    reason: str
+    text_delta: float
     changed_pixel_ratio: float
     candidate_pixel_ratio: float
 
@@ -207,6 +218,7 @@ def process_images(
                 else "lighten_background_stains_disabled"
             ),
             "lighten_scanlines_conservative" if options.lighten_scanlines else "lighten_scanlines_disabled",
+            "enhance_faded_text_conservative" if options.enhance_faded_text else "enhance_faded_text_disabled",
             "reuse_scan_measurements" if options.reuse_scan_measurements else "reuse_scan_measurements_disabled",
             "preserve_source_relative_path",
         ],
@@ -610,6 +622,11 @@ def _process_record(
         "scanlines_delta": 0.0,
         "scanlines_changed_pixel_ratio": 0.0,
         "scanlines_candidate_pixel_ratio": 0.0,
+        "faded_text_enhanced": False,
+        "faded_text_reason": None,
+        "faded_text_delta": 0.0,
+        "faded_text_changed_pixel_ratio": 0.0,
+        "faded_text_candidate_pixel_ratio": 0.0,
         "processing_audit": None,
         "processing_warnings": [],
         "operation_timings": {},
@@ -698,6 +715,11 @@ def _process_record(
                 "scanlines_delta": process_info["scanlines_delta"],
                 "scanlines_changed_pixel_ratio": process_info["scanlines_changed_pixel_ratio"],
                 "scanlines_candidate_pixel_ratio": process_info["scanlines_candidate_pixel_ratio"],
+                "faded_text_enhanced": process_info["faded_text_enhanced"],
+                "faded_text_reason": process_info["faded_text_reason"],
+                "faded_text_delta": process_info["faded_text_delta"],
+                "faded_text_changed_pixel_ratio": process_info["faded_text_changed_pixel_ratio"],
+                "faded_text_candidate_pixel_ratio": process_info["faded_text_candidate_pixel_ratio"],
                 "processing_audit": process_info["processing_audit"],
                 "processing_warnings": process_info["processing_warnings"],
                 "operation_timings": process_info["operation_timings"],
@@ -761,6 +783,11 @@ def _process_record(
                     "scanlines_delta": process_info["scanlines_delta"],
                     "scanlines_changed_pixel_ratio": process_info["scanlines_changed_pixel_ratio"],
                     "scanlines_candidate_pixel_ratio": process_info["scanlines_candidate_pixel_ratio"],
+                    "faded_text_enhanced": process_info["faded_text_enhanced"],
+                    "faded_text_reason": process_info["faded_text_reason"],
+                    "faded_text_delta": process_info["faded_text_delta"],
+                    "faded_text_changed_pixel_ratio": process_info["faded_text_changed_pixel_ratio"],
+                    "faded_text_candidate_pixel_ratio": process_info["faded_text_candidate_pixel_ratio"],
                     "processing_audit": process_info["processing_audit"],
                     "processing_warnings": process_info["processing_warnings"],
                     "operation_timings": process_info["operation_timings"],
@@ -829,6 +856,7 @@ def _processing_options_fingerprint(options: ProcessingOptions) -> str:
         "lighten_edge_shadow": options.lighten_edge_shadow,
         "lighten_background_stains": options.lighten_background_stains,
         "lighten_scanlines": options.lighten_scanlines,
+        "enhance_faded_text": options.enhance_faded_text,
         "despeckle_backend": options.despeckle_backend,
         "reuse_scan_measurements": options.reuse_scan_measurements,
         "deskew_max_degrees": options.deskew_max_degrees,
@@ -887,6 +915,7 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "lighten_edge_shadow": options.lighten_edge_shadow,
             "lighten_background_stains": options.lighten_background_stains,
             "lighten_scanlines": options.lighten_scanlines,
+            "enhance_faded_text": options.enhance_faded_text,
             "resume_processing": options.resume_processing,
             "reuse_scan_measurements": options.reuse_scan_measurements,
         },
@@ -933,6 +962,9 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                 1 for audit in audit_records if audit.get("background_stains_lightened") is True
             ),
             "scanlines_lightened_files": sum(1 for audit in audit_records if audit.get("scanlines_lightened") is True),
+            "faded_text_enhanced_files": sum(
+                1 for audit in audit_records if audit.get("faded_text_enhanced") is True
+            ),
         },
         "thresholds": _audit_thresholds(options),
         "metrics": {
@@ -960,6 +992,13 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "scanlines_delta": _aggregate_metric(audit_records, "scanlines_delta"),
             "scanlines_changed_pixel_ratio": _aggregate_metric(audit_records, "scanlines_changed_pixel_ratio"),
             "scanlines_candidate_pixel_ratio": _aggregate_metric(audit_records, "scanlines_candidate_pixel_ratio"),
+            "faded_text_delta": _aggregate_metric(audit_records, "faded_text_delta"),
+            "faded_text_changed_pixel_ratio": _aggregate_metric(
+                audit_records, "faded_text_changed_pixel_ratio"
+            ),
+            "faded_text_candidate_pixel_ratio": _aggregate_metric(
+                audit_records, "faded_text_candidate_pixel_ratio"
+            ),
         },
         "distributions": {
             "pixel_change_ratio": _ratio_distribution(audit_records, "pixel_change_ratio"),
@@ -1013,6 +1052,7 @@ def _aggregate_operation_timings(records: list[dict[str, Any]], options: Process
         "lighten_edge_shadow": options.lighten_edge_shadow,
         "lighten_background_stains": options.lighten_background_stains,
         "lighten_scanlines": options.lighten_scanlines,
+        "enhance_faded_text": options.enhance_faded_text,
     }
     timings: dict[str, dict[str, Any]] = {}
     for operation, is_enabled in enabled.items():
@@ -1139,6 +1179,8 @@ def _audit_thresholds(options: ProcessingOptions) -> dict[str, float]:
         "max_crop_ratio": options.audit_max_crop_ratio,
         "max_trim_margin_ratio": options.audit_max_trim_margin_ratio,
         "max_despeckle_pixel_ratio": options.audit_max_despeckle_pixel_ratio,
+        "max_faded_text_changed_pixel_ratio": 0.10,
+        "max_faded_text_candidate_pixel_ratio": 0.18,
         "max_deskew_degrees": options.deskew_max_degrees,
     }
 
@@ -1360,6 +1402,19 @@ def _process_image(
         else:
             operations.append("lighten_scanlines_disabled")
 
+    faded_text = FadedTextEnhancementResult(
+        processed, False, "faded text enhancement disabled", 0.0, 0.0, 0.0
+    )
+    with _operation_timer(operation_timings, "enhance_faded_text", enabled=options.enhance_faded_text):
+        if options.enhance_faded_text:
+            faded_text = _enhance_faded_text_conservative(processed)
+            processed = faded_text.image
+            operations.append(
+                "enhance_faded_text_conservative" if faded_text.applied else "enhance_faded_text_noop"
+            )
+        else:
+            operations.append("enhance_faded_text_disabled")
+
     processing_audit = _processing_audit(
         audit_source,
         processed,
@@ -1384,6 +1439,10 @@ def _process_image(
         scanlines.line_delta,
         scanlines.changed_pixel_ratio,
         scanlines.candidate_pixel_ratio,
+        faded_text.applied,
+        faded_text.text_delta,
+        faded_text.changed_pixel_ratio,
+        faded_text.candidate_pixel_ratio,
     )
     processing_warnings = list(processing_audit["guardrail_failures"])
     crop_info = {
@@ -1434,6 +1493,11 @@ def _process_image(
         "scanlines_delta": scanlines.line_delta,
         "scanlines_changed_pixel_ratio": scanlines.changed_pixel_ratio,
         "scanlines_candidate_pixel_ratio": scanlines.candidate_pixel_ratio,
+        "faded_text_enhanced": faded_text.applied,
+        "faded_text_reason": faded_text.reason,
+        "faded_text_delta": faded_text.text_delta,
+        "faded_text_changed_pixel_ratio": faded_text.changed_pixel_ratio,
+        "faded_text_candidate_pixel_ratio": faded_text.candidate_pixel_ratio,
         "processing_audit": processing_audit,
         "processing_warnings": processing_warnings,
         "operation_timings": operation_timings,
@@ -2129,6 +2193,152 @@ def _scanlines_noop(
     )
 
 
+def _enhance_faded_text_conservative(image: Image.Image) -> FadedTextEnhancementResult:
+    if image.width < 80 or image.height < 80:
+        return _faded_text_noop(image, "faded text enhancement skipped: image too small")
+    color_risk = _tone_color_risk_reason(image)
+    if color_risk:
+        return _faded_text_noop(image, "faded text enhancement skipped: color content, stamp, or annotation risk")
+
+    grayscale = image.convert("L")
+    histogram = grayscale.histogram()
+    total = image.width * image.height
+    p01 = _histogram_percentile(histogram, total, 0.01)
+    p05 = _histogram_percentile(histogram, total, 0.05)
+    p50 = _histogram_percentile(histogram, total, 0.50)
+    p95 = _histogram_percentile(histogram, total, 0.95)
+    p99 = _histogram_percentile(histogram, total, 0.99)
+    if p95 < 220 or p50 < 210:
+        return _faded_text_noop(image, "faded text enhancement skipped: page is not a light paper background")
+    if p05 < 105:
+        return _faded_text_noop(image, "faded text enhancement skipped: dark foreground already present")
+    if p99 - p01 < 18:
+        return _faded_text_noop(image, "faded text enhancement skipped: text evidence too weak")
+    if p95 - p05 > 92:
+        return _faded_text_noop(image, "faded text enhancement skipped: contrast already normal or mixed content risk")
+
+    threshold = min(205, p50 - 18, p95 - 22)
+    if threshold < 125:
+        return _faded_text_noop(image, "faded text enhancement skipped: outside conservative faded ink range")
+    candidate = grayscale.point(
+        lambda value: 255 if 95 <= value <= threshold and 18 <= p95 - value <= 70 else 0,
+        mode="L",
+    )
+    candidate = _clear_mask_edges(candidate, max(3, int(round(min(image.width, image.height) * 0.025))))
+    candidate_ratio = _mask_ratio(candidate)
+    if candidate_ratio < 0.0025:
+        return _faded_text_noop(image, "faded text enhancement skipped: foreground evidence too sparse", candidate_ratio)
+    if candidate_ratio > 0.16:
+        return _faded_text_noop(image, "faded text enhancement skipped: foreground too dense", candidate_ratio)
+    if _protected_edge_dark_ratio(candidate) > 0.002:
+        return _faded_text_noop(image, "faded text enhancement skipped: edge mark or binding risk", candidate_ratio)
+
+    components = _mask_components(candidate)
+    if not components:
+        return _faded_text_noop(image, "faded text enhancement skipped: no stable text components", candidate_ratio)
+    selected: set[tuple[int, int]] = set()
+    text_like_components = 0
+    rejected_large_components = 0
+    for component in components:
+        area = len(component)
+        if area < 4:
+            continue
+        xs = [point[0] for point in component]
+        ys = [point[1] for point in component]
+        width = max(xs) - min(xs) + 1
+        height = max(ys) - min(ys) + 1
+        line_like = height <= 8 and width <= image.width * 0.70
+        if area / total > 0.018 or (not line_like and width > image.width * 0.42) or height > image.height * 0.22:
+            rejected_large_components += 1
+            continue
+        fill_ratio = area / max(1, width * height)
+        aspect = max(width / max(1, height), height / max(1, width))
+        if fill_ratio > 0.82 and area > 24 and not line_like:
+            rejected_large_components += 1
+            continue
+        if width >= 5 and height >= 1 and aspect <= 60:
+            text_like_components += 1
+            selected.update(component)
+    if rejected_large_components:
+        return _faded_text_noop(
+            image,
+            "faded text enhancement skipped: broad stain, texture, illustration, or table-region risk",
+            candidate_ratio,
+        )
+    selected_ratio = len(selected) / max(1, total)
+    if text_like_components < 3 or selected_ratio < 0.0025:
+        return _faded_text_noop(image, "faded text enhancement skipped: stable text evidence insufficient", candidate_ratio)
+    if selected_ratio > 0.09:
+        return _faded_text_noop(
+            image,
+            "faded text enhancement skipped: changed area exceeds conservative text scope",
+            candidate_ratio,
+        )
+
+    before_values: list[int] = []
+    after_values: list[int] = []
+    if image.mode == "L":
+        output = grayscale.copy()
+        pixels = output.load()
+        for x, y in selected:
+            value = pixels[x, y]
+            delta = min(24, max(8, int(round((p95 - value) * 0.38))))
+            new_value = max(0, value - delta)
+            pixels[x, y] = new_value
+            before_values.append(value)
+            after_values.append(new_value)
+        result_image = output
+    else:
+        source = image.convert("RGB")
+        output = source.copy()
+        output_pixels = output.load()
+        gray_pixels = grayscale.load()
+        for x, y in selected:
+            gray_value = gray_pixels[x, y]
+            delta = min(24, max(8, int(round((p95 - gray_value) * 0.38))))
+            red_value, green_value, blue_value = output_pixels[x, y]
+            output_pixels[x, y] = (
+                max(0, red_value - delta),
+                max(0, green_value - delta),
+                max(0, blue_value - delta),
+            )
+            before_values.append(gray_value)
+            after_values.append(max(0, gray_value - delta))
+        result_image = output
+
+    before_mean = sum(before_values) / len(before_values)
+    after_mean = sum(after_values) / len(after_values)
+    text_delta = before_mean - after_mean
+    if text_delta < 8:
+        return _faded_text_noop(
+            image,
+            "faded text enhancement skipped: readability delta below conservative threshold",
+            candidate_ratio,
+        )
+    if text_delta > 26:
+        return _faded_text_noop(
+            image,
+            "faded text enhancement skipped: readability delta exceeds conservative threshold",
+            candidate_ratio,
+        )
+    return FadedTextEnhancementResult(
+        result_image,
+        True,
+        "faded text enhancement applied: stable low-contrast neutral text on light paper",
+        round(text_delta, 6),
+        round(selected_ratio, 6),
+        round(candidate_ratio, 6),
+    )
+
+
+def _faded_text_noop(
+    image: Image.Image,
+    reason: str,
+    candidate_pixel_ratio: float = 0.0,
+) -> FadedTextEnhancementResult:
+    return FadedTextEnhancementResult(image, False, reason, 0.0, 0.0, round(candidate_pixel_ratio, 6))
+
+
 def _mask_ratio(mask: Image.Image) -> float:
     histogram = mask.histogram()
     return sum(histogram[1:]) / max(1, mask.width * mask.height)
@@ -2248,6 +2458,10 @@ def _processing_audit(
     scanlines_delta: float = 0.0,
     scanlines_changed_pixel_ratio: float = 0.0,
     scanlines_candidate_pixel_ratio: float = 0.0,
+    faded_text_enhanced: bool = False,
+    faded_text_delta: float = 0.0,
+    faded_text_changed_pixel_ratio: float = 0.0,
+    faded_text_candidate_pixel_ratio: float = 0.0,
 ) -> dict[str, Any]:
     source_width, source_height = source.size
     output_width, output_height = processed.size
@@ -2310,6 +2524,10 @@ def _processing_audit(
         "scanlines_delta": round(scanlines_delta, 6),
         "scanlines_changed_pixel_ratio": round(scanlines_changed_pixel_ratio, 6),
         "scanlines_candidate_pixel_ratio": round(scanlines_candidate_pixel_ratio, 6),
+        "faded_text_enhanced": faded_text_enhanced,
+        "faded_text_delta": round(faded_text_delta, 6),
+        "faded_text_changed_pixel_ratio": round(faded_text_changed_pixel_ratio, 6),
+        "faded_text_candidate_pixel_ratio": round(faded_text_candidate_pixel_ratio, 6),
         "crop_ratio": round(max(0.0, crop_ratio), 6),
         "trim_margins": trim_margins,
         "max_trim_margin_ratio": round(max_trim_margin_ratio, 6),
@@ -2438,10 +2656,14 @@ def _audit_guardrail_failures(metrics: dict[str, Any], options: ProcessingOption
         ("crop_ratio", options.audit_max_crop_ratio),
         ("max_trim_margin_ratio", options.audit_max_trim_margin_ratio),
         ("despeckle_pixel_ratio", options.audit_max_despeckle_pixel_ratio),
+        ("faded_text_changed_pixel_ratio", 0.10),
+        ("faded_text_candidate_pixel_ratio", 0.18),
     ]
     failures = []
     for key, threshold in checks:
         if key == "pixel_change_ratio" and metrics.get("pixel_change_guardrail_applied") is False:
+            continue
+        if key.startswith("faded_text_") and metrics.get("faded_text_enhanced") is not True:
             continue
         value = metrics.get(key)
         if isinstance(value, int | float) and value > threshold:
