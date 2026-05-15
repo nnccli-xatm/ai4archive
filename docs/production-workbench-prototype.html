@@ -112,7 +112,9 @@
 
     button:focus-visible,
     .folder-trigger:focus-visible,
-    .admin-link:focus-visible {
+    .admin-link:focus-visible,
+    .preview-frame:focus-visible,
+    .decision-desk:focus-visible {
       outline: 3px solid rgba(17, 118, 84, .25);
       outline-offset: 2px;
     }
@@ -1220,7 +1222,7 @@
             <div class="zoom-state" id="zoomState" aria-live="polite">查看：适合窗口</div>
             <div class="active-preview-mode" id="activePreviewModeText" aria-live="polite">当前查看：处理后图片</div>
           </div>
-          <div class="preview-frame" id="previewFrame">
+          <div class="preview-frame" id="previewFrame" tabindex="0" aria-label="图片对比查看">
             <div class="scan-line"></div>
             <div class="scan-line mid"></div>
             <div class="scan-line short"></div>
@@ -1244,7 +1246,7 @@
         </div>
       </section>
 
-      <aside class="decision-desk" aria-label="人工确认">
+      <aside class="decision-desk" id="decisionDesk" tabindex="0" aria-label="人工确认">
         <div class="decision-head">
           <h2>当前图片</h2>
           <p class="muted" id="queueText">等待处理开始。</p>
@@ -1290,10 +1292,10 @@
             </label>
           </div>
           <div class="decision-actions" id="decisionActions">
-            <button type="button" class="primary-choice" data-decision="pass" disabled>确认通过</button>
-            <button type="button" class="warning" data-decision="rescan" disabled>退回重扫</button>
-            <button type="button" class="warning" data-decision="reprocess" disabled>重新处理图片</button>
-            <button type="button" class="secondary" data-decision="keep_original_trace" disabled>确认保留原貌</button>
+            <button type="button" class="primary-choice" data-decision="pass" aria-keyshortcuts="1" title="快捷键 1" disabled>确认通过</button>
+            <button type="button" class="warning" data-decision="rescan" aria-keyshortcuts="2" title="快捷键 2" disabled>退回重扫</button>
+            <button type="button" class="warning" data-decision="reprocess" aria-keyshortcuts="3" title="快捷键 3" disabled>重新处理图片</button>
+            <button type="button" class="secondary" data-decision="keep_original_trace" aria-keyshortcuts="4" title="快捷键 4" disabled>确认保留原貌</button>
           </div>
           <div class="decision-guide" aria-label="决定说明">
             <h3>怎么选</h3>
@@ -1645,6 +1647,21 @@
       rescan: "needs_rescan",
       reprocess: "fixed_externally",
       keep_original_trace: "false_positive"
+    };
+
+    const reviewDecisionShortcuts = {
+      Digit1: "pass",
+      Numpad1: "pass",
+      "1": "pass",
+      Digit2: "rescan",
+      Numpad2: "rescan",
+      "2": "rescan",
+      Digit3: "reprocess",
+      Numpad3: "reprocess",
+      "3": "reprocess",
+      Digit4: "keep_original_trace",
+      Numpad4: "keep_original_trace",
+      "4": "keep_original_trace"
     };
 
     const draftDecisionFileName = "scan-qc-review-decisions.draft.json";
@@ -3123,6 +3140,50 @@
       render();
     }
 
+    function recordReviewDecision(decision, source = "button") {
+      const button = els.decisionActions.querySelector(`button[data-decision="${decision}"]`);
+      if (!button || button.disabled || !hasActivePendingReview()) return false;
+      const item = currentItem();
+      if (!item) return false;
+      item.decision = decision;
+      const recordedLabel = decisionLabels[item.decision] || "已确认";
+      stampDecision(item);
+      state.decisions[item.id] = item.decision;
+      state.progress = pendingCount() === 0 ? 94 : Math.min(92, state.progress + 4);
+      state.attentionFiles = pendingCount();
+      state.reviewQueueText = pendingCount() > 0
+        ? `已记录：${recordedLabel}。已自动显示下一张待确认图片。已确认 ${reviewedCount()} 张，还需确认 ${pendingCount()} 张。`
+        : `已记录：${recordedLabel}。所有待确认图片都已确认，可以点击完成并导出结果。`;
+      moveToNextPending();
+      render();
+      if (source === "keyboard" && hasActivePendingReview()) {
+        els.previewFrame.focus({ preventScroll: true });
+      }
+      scheduleDraftSave();
+      return true;
+    }
+
+    function elementAcceptsTextInput(element) {
+      if (!(element instanceof Element)) return false;
+      if (element.isContentEditable) return true;
+      const editable = element.closest("input, textarea, select, [contenteditable=''], [contenteditable='true']");
+      return Boolean(editable);
+    }
+
+    function inReviewShortcutScope(element) {
+      if (!(element instanceof Element)) return false;
+      if (elementAcceptsTextInput(element)) return false;
+      return Boolean(element.closest("#decisionDesk, .preview-zone"));
+    }
+
+    function handleReviewDecisionShortcut(event) {
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      if (!inReviewShortcutScope(event.target)) return;
+      const decision = reviewDecisionShortcuts[event.code] || reviewDecisionShortcuts[event.key];
+      if (!decision) return;
+      if (recordReviewDecision(decision, "keyboard")) event.preventDefault();
+    }
+
     els.inputPath.addEventListener("input", () => {
       state.inputPathDirty = true;
       invalidateFolderReadiness("扫描原图文件夹已更改，请重新保存文件夹。");
@@ -3246,21 +3307,9 @@
     els.decisionActions.addEventListener("click", (event) => {
       const button = event.target.closest("button[data-decision]");
       if (!button || button.disabled) return;
-      const item = currentItem();
-      if (!item) return;
-      item.decision = button.dataset.decision;
-      const recordedLabel = decisionLabels[item.decision] || "已确认";
-      stampDecision(item);
-      state.decisions[item.id] = item.decision;
-      state.progress = pendingCount() === 0 ? 94 : Math.min(92, state.progress + 4);
-      state.attentionFiles = pendingCount();
-      state.reviewQueueText = pendingCount() > 0
-        ? `已记录：${recordedLabel}。已自动显示下一张待确认图片。已确认 ${reviewedCount()} 张，还需确认 ${pendingCount()} 张。`
-        : `已记录：${recordedLabel}。所有待确认图片都已确认，可以点击完成并导出结果。`;
-      moveToNextPending();
-      render();
-      scheduleDraftSave();
+      recordReviewDecision(button.dataset.decision);
     });
+    document.addEventListener("keydown", handleReviewDecisionShortcut);
 
     els.previousReviewedButton.addEventListener("click", () => {
       const index = previousReviewedIndex();

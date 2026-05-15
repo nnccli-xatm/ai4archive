@@ -105,6 +105,9 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.getByRole("button", { name: "保存文件夹" })).toBeVisible();
     await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
     await expect(page.locator("#loadStatus")).toHaveText("请先填写原图文件夹和输出文件夹，点击“保存文件夹”，确认可以开始后再点击“开始处理”。");
+    await page.locator("#pickInputButton").focus();
+    await page.keyboard.press("1");
+    await expect(page.locator("#loadStatus")).toHaveText("请先填写原图文件夹和输出文件夹，点击“保存文件夹”，确认可以开始后再点击“开始处理”。");
     await expect(page.locator(".mode-selector")).toContainText("标准优化");
     await expect(page.locator(".mode-selector")).toContainText("推荐用于正常批量生产");
     await expect(page.locator(".mode-selector")).toContainText("轻度优化");
@@ -495,9 +498,18 @@ test.describe("production workbench finish/export browser smoke", () => {
       ".tif",
     ]);
 
+    await page.keyboard.press("2");
+    await expect(page.locator("#remainingWorkText")).toHaveText("还需确认 3 张");
+    await expect(page.locator("#currentDecisionStatus")).toHaveText("当前决定：未决定");
+    await page.locator("#operatorName").focus();
+    await page.keyboard.press("2");
+    await expect(page.locator("#operatorName")).toHaveValue("2");
+    await expect(page.locator("#remainingWorkText")).toHaveText("还需确认 3 张");
+    await expect(page.locator("#currentDecisionStatus")).toHaveText("当前决定：未决定");
+    await page.locator("#operatorName").fill("复核员甲");
+
     await page.getByRole("button", { name: "放大" }).click();
     await expect(page.locator("#zoomState")).toHaveText("查看：125%");
-    await page.locator("#operatorName").fill("复核员甲");
     await page.locator("#decisionNote").fill("切换查看方式时保留备注。");
     await page.getByRole("button", { name: "查看原图" }).click();
     await expect(page.locator("#previewSourceText")).toHaveText("图片查看：正在查看原图。");
@@ -534,7 +546,8 @@ test.describe("production workbench finish/export browser smoke", () => {
     await page.getByRole("button", { name: "完成并导出结果" }).click();
     await expect(page.locator("#finishConfirmPanel")).toBeHidden();
     await expect(page.locator("#loadStatus")).toHaveText("还有 3 张图片没有决定，暂不能完成。请先逐张选择确认通过、退回重扫、重新处理图片或确认保留原貌。");
-    await page.getByRole("button", { name: "退回重扫" }).click();
+    await page.locator("#previewFrame").focus();
+    await page.keyboard.press("2");
     await expect(page.getByText("已记录：退回重扫。已自动显示下一张待确认图片。已确认 1 张，还需确认 2 张。")).toBeVisible();
     await expect(page.locator("#remainingWorkText")).toHaveText("还需确认 2 张");
     await expect(page.locator("#reviewMovementText")).toHaveText("正在看第 2 张；确认后会自动跳到下一张待确认图片。");
@@ -560,7 +573,8 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#loadStatus")).toHaveText("已自动保存");
     await expect(page.getByRole("button", { name: "完成并导出结果" })).toBeEnabled();
     await page.locator("#decisionNote").fill("本张可以通过。");
-    await page.getByRole("button", { name: "确认通过" }).click();
+    await page.locator("#previewFrame").focus();
+    await page.keyboard.press("1");
     await expect(page.locator("#reviewPositionText")).toHaveText("当前第 2 张 / 共 3 张；还需确认 2 张。");
     await expect(page.locator("#operatorName")).toHaveValue("复核员甲");
     await expect(page.locator("#currentRecommendation")).toHaveText("建议：重新处理图片");
@@ -574,7 +588,8 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator('#comparisonControls button[data-comparison-mode="original"]')).toBeDisabled();
     await expect(page.locator('#comparisonControls button[data-comparison-mode="original"]')).toHaveAttribute("title", "本张没有原图，可查看处理后图片");
     await page.locator("#decisionNote").fill("保留原貌即可。");
-    await page.getByRole("button", { name: "确认保留原貌" }).click();
+    await page.locator("#previewFrame").focus();
+    await page.keyboard.press("4");
     await expect(page.getByText("已记录：确认保留原貌。所有待确认图片都已确认，可以点击完成并导出结果。")).toBeVisible();
     await expect(page.locator("#remainingWorkText")).toHaveText("还需确认 0 张");
     await expect(page.locator("#reviewMovementText")).toHaveText("所有待确认图片都已确认，可以点击完成并导出结果。");
@@ -592,6 +607,10 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.getByRole("button", { name: "重新处理图片" })).toBeDisabled();
     await expect(page.getByRole("button", { name: "确认保留原貌" })).toBeDisabled();
     await expect(page.getByRole("button", { name: "放大" })).toBeDisabled();
+    await page.locator("#previewFrame").focus();
+    await page.keyboard.press("4");
+    await expect(page.locator("#decisionSummary")).toHaveText("已决定 3 项，待决定 0 项。");
+    await expect(page.locator("#currentIssue")).toHaveText("已经没有待确认图片。");
 
     await page.getByRole("button", { name: "完成并导出结果" }).click();
     await expect(page.locator("#finishConfirmPanel")).toBeVisible();

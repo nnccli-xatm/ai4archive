@@ -86,6 +86,16 @@ class ProductionWorkbenchRegressionGuardTests(unittest.TestCase):
             "所有待确认图片都已确认，可以点击完成并导出结果。",
             "可以完成并导出结果。",
             "已自动显示下一张待确认图片",
+            'function recordReviewDecision(decision, source = "button")',
+            'recordReviewDecision(button.dataset.decision);',
+            'if (recordReviewDecision(decision, "keyboard")) event.preventDefault();',
+            'document.addEventListener("keydown", handleReviewDecisionShortcut);',
+            'return Boolean(element.closest("#decisionDesk, .preview-zone"));',
+            "function elementAcceptsTextInput(element)",
+            'aria-keyshortcuts="1"',
+            'aria-keyshortcuts="2"',
+            'aria-keyshortcuts="3"',
+            'aria-keyshortcuts="4"',
         ]:
             self.assertIn(required, html)
 
