@@ -509,6 +509,18 @@ class ScanProcessingReuseTest(unittest.TestCase):
             self.assertEqual(production_summary["local_reuse_summary"]["failed_files"], 0)
             self.assertEqual(production_summary["local_reuse_summary"]["remaining_files"], 0)
             self.assertEqual(processing_module._sha256(source), original_sha)
+            self.assertTrue(production_summary["stage_timings"]["aggregate_only"])
+            self.assertEqual(
+                [(stage["id"], stage["label_zh"], stage["status"]) for stage in production_summary["stage_timings"]["stages"]],
+                [
+                    ("scan", "检查扫描图片", "completed"),
+                    ("process", "生成处理后图片", "completed"),
+                    ("summarize", "整理处理结果", "completed"),
+                ],
+            )
+            for stage in production_summary["stage_timings"]["stages"]:
+                self.assertIsInstance(stage["elapsed_seconds"], float)
+                self.assertGreaterEqual(stage["elapsed_seconds"], 0.0)
 
             public_reuse_text = json.dumps(production_summary["local_reuse_summary"], ensure_ascii=False, sort_keys=True)
             self.assertNotIn("private_page_name.png", public_reuse_text)
@@ -550,6 +562,7 @@ class ScanProcessingReuseTest(unittest.TestCase):
             self.assertEqual(main(args), 0)
             second_manifest = json.loads((derivatives_dir / "processing_manifest.json").read_text(encoding="utf-8"))
             production_summary = json.loads((metadata_dir / "production_run_summary.json").read_text(encoding="utf-8"))
+            progress = json.loads((metadata_dir / "production_run_progress.json").read_text(encoding="utf-8"))
             records = {record["source_relative_path"]: record for record in second_manifest["files"]}
 
             self.assertEqual(records["private_completed_page.png"]["status"], "resumed")
@@ -566,6 +579,19 @@ class ScanProcessingReuseTest(unittest.TestCase):
             self.assertEqual(production_summary["local_reuse_summary"]["reprocessed_files"], 1)
             self.assertEqual(production_summary["local_reuse_summary"]["failed_files"], 0)
             self.assertEqual(production_summary["local_reuse_summary"]["remaining_files"], 0)
+            for timing_payload in (production_summary["stage_timings"], progress["stage_timings"]):
+                self.assertTrue(timing_payload["aggregate_only"])
+                self.assertEqual(
+                    [(stage["id"], stage["label_zh"], stage["status"]) for stage in timing_payload["stages"]],
+                    [
+                        ("scan", "检查扫描图片", "completed"),
+                        ("process", "生成处理后图片", "completed"),
+                        ("summarize", "整理处理结果", "completed"),
+                    ],
+                )
+                for stage in timing_payload["stages"]:
+                    self.assertIsInstance(stage["elapsed_seconds"], float)
+                    self.assertGreaterEqual(stage["elapsed_seconds"], 0.0)
 
     def test_production_run_restart_avoids_reuse_when_input_or_output_identity_changes(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-production-mismatch-") as temp_dir:
