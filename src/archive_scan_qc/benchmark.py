@@ -607,6 +607,12 @@ def _processing_quality_regression(processing_manifest: dict[str, Any] | None) -
             "cumulative_change_guard_reverted_files": sum(
                 1 for audit in audit_records if audit.get("cumulative_change_guard_reverted") is True
             ),
+            "local_content_change_guard_checked_files": sum(
+                1 for audit in audit_records if audit.get("local_content_change_guard_checked") is True
+            ),
+            "local_content_change_guard_reverted_files": sum(
+                1 for audit in audit_records if audit.get("local_content_change_guard_reverted") is True
+            ),
         },
         "thresholds": thresholds,
         "algorithm_metrics": algorithm_metrics,
@@ -642,6 +648,8 @@ def _empty_quality_regression_summary(reason: str) -> dict[str, Any]:
             "enhancement_changed_files": 0,
             "cumulative_change_guard_checked_files": 0,
             "cumulative_change_guard_reverted_files": 0,
+            "local_content_change_guard_checked_files": 0,
+            "local_content_change_guard_reverted_files": 0,
         },
         "thresholds": _processing_quality_thresholds(),
         "algorithm_metrics": _repair_algorithm_metrics([], {}),
@@ -740,6 +748,9 @@ def _processing_quality_thresholds() -> dict[str, float]:
         "max_cumulative_contrast_delta": defaults.audit_max_cumulative_contrast_delta,
         "max_cumulative_crop_ratio": defaults.audit_max_cumulative_crop_ratio,
         "max_cumulative_candidate_pixel_ratio": defaults.audit_max_cumulative_candidate_pixel_ratio,
+        "max_local_content_changed_ratio": defaults.audit_max_local_content_changed_ratio,
+        "max_local_content_tile_changed_ratio": defaults.audit_max_local_content_tile_changed_ratio,
+        "max_edge_content_changed_ratio": defaults.audit_max_edge_content_changed_ratio,
         "max_deskew_degrees": defaults.deskew_max_degrees,
         "max_tone_background_delta": defaults.audit_max_brightness_delta,
         "max_tone_contrast_delta": defaults.audit_max_contrast_delta,

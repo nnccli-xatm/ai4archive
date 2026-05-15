@@ -9074,8 +9074,10 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(record["despeckle_pixels_changed"], 4)
             self.assertEqual(record["processing_audit"]["despeckle_pixel_ratio"], round(4 / (100 * 80), 6))
             self.assertLessEqual(record["processing_audit"]["despeckle_pixel_ratio"], 0.001)
+            self.assertFalse(record["processing_audit"]["local_content_change_guard_checked"])
             self.assertEqual(audit_summary["counts"]["despeckled_files"], 1)
             self.assertEqual(audit_summary["counts"]["despeckle_skipped_files"], 0)
+            self.assertEqual(audit_summary["counts"]["local_content_change_guard_checked_files"], 0)
             self.assertEqual(audit_summary["guardrails"]["despeckle"]["applied_files"], 1)
             self.assertEqual(audit_summary["guardrails"]["despeckle"]["pixels_changed"], 4)
             self.assertEqual(audit_summary["guardrails"]["despeckle"]["backend_mode"], "fallback")
@@ -9549,6 +9551,125 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(audit_summary["guardrails"]["auto_crop"]["skipped_files"], 0)
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertNotIn("private_full_chain_crop", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
+    def test_local_content_change_guard_reverts_small_text_damage_aggregate_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "private_local_text_damage.png"
+            image = Image.new("RGB", (160, 120), "white")
+            draw = ImageDraw.Draw(image)
+            for y in (36, 52, 68):
+                draw.rectangle((30, y, 130, y + 3), fill=(0, 0, 0))
+            draw.rectangle((4, 96, 24, 100), fill=(0, 0, 0))
+            image.save(source)
+
+            def erase_one_text_line(candidate: Image.Image) -> processing_module.ScanlineLighteningResult:
+                damaged = candidate.copy()
+                ImageDraw.Draw(damaged).rectangle((30, 52, 130, 55), fill=(255, 255, 255))
+                ImageDraw.Draw(damaged).rectangle((4, 96, 24, 100), fill=(255, 255, 255))
+                return processing_module.ScanlineLighteningResult(
+                    damaged,
+                    True,
+                    "synthetic local text damage",
+                    "horizontal",
+                    1,
+                    0.0,
+                    255.0,
+                    255.0,
+                    (101 * 4 + 21 * 5) / (160 * 120),
+                    (101 * 4 + 21 * 5) / (160 * 120),
+                )
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            with mock.patch(
+                "archive_scan_qc.processing._lighten_scanlines_conservative",
+                side_effect=erase_one_text_line,
+            ):
+                manifest = process_images(
+                    report,
+                    input_dir,
+                    process_dir,
+                    ProcessingOptions(lighten_scanlines=True, workers=1),
+                )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+
+            self.assertEqual(record["status"], "processed")
+            self.assertFalse(record["scanlines_lightened"])
+            self.assertEqual(record["scanlines_reason"], "reverted by local content change guard")
+            self.assertIn("local_content_change_guard_reverted_to_source", record["operations"])
+            self.assertIn("local_content_change_guard_reverted_to_source", record["processing_warnings"])
+            self.assertEqual(record["processing_audit"]["local_content_change_guard_action"], "reverted_to_source")
+            self.assertTrue(record["processing_audit"]["local_content_change_guard_reverted"])
+            self.assertIn(
+                "local_content_changed_ratio",
+                record["processing_audit"]["local_content_change_guard_reasons"],
+            )
+            self.assertIn(
+                "edge_content_changed_ratio",
+                record["processing_audit"]["local_content_change_guard_reasons"],
+            )
+            with Image.open(process_dir / "images" / "private_local_text_damage.png") as processed:
+                self.assertEqual(processed.convert("RGB").tobytes(), image.tobytes())
+            self.assertEqual(audit_summary["counts"]["local_content_change_guard_checked_files"], 1)
+            self.assertEqual(audit_summary["counts"]["local_content_change_guard_reverted_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["local_content_change_guard"]["reason_distribution"][
+                    "local_content_changed_ratio"
+                ],
+                1,
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_local_text_damage", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
+    def test_local_content_change_guard_allows_safe_background_stain_cleanup(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "private_safe_background_stain.png"
+            image = Image.new("RGB", (240, 170), (240, 240, 236))
+            draw = ImageDraw.Draw(image)
+            for y in (42, 66, 90):
+                draw.rectangle((48, y, 178, y + 5), fill=(38, 38, 38))
+            draw.ellipse((58, 116, 80, 134), fill=(216, 216, 211))
+            draw.ellipse((188, 18, 210, 34), fill=(218, 218, 214))
+            draw.rectangle((196, 112, 208, 124), fill=(214, 214, 210))
+            image.save(source)
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(lighten_background_stains=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+
+            self.assertEqual(record["status"], "processed")
+            self.assertTrue(record["background_stains_lightened"])
+            self.assertEqual(record["processing_audit"]["local_content_change_guard_action"], "passed")
+            self.assertFalse(record["processing_audit"]["local_content_change_guard_reverted"])
+            self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
+            self.assertEqual(audit_summary["counts"]["local_content_change_guard_checked_files"], 0)
+            self.assertEqual(audit_summary["counts"]["local_content_change_guard_reverted_files"], 0)
+            self.assertEqual(
+                audit_summary["guardrails"]["local_content_change_guard"]["reason_distribution"],
+                {},
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_safe_background_stain", audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
 
     def test_multi_worker_retouch_manifest_order_stays_stable(self) -> None:

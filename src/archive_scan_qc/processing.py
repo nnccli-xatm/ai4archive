@@ -59,6 +59,9 @@ class ProcessingOptions:
     audit_max_cumulative_contrast_delta: float = 50.0
     audit_max_cumulative_crop_ratio: float = 0.55
     audit_max_cumulative_candidate_pixel_ratio: float = 1.0
+    audit_max_local_content_changed_ratio: float = 0.20
+    audit_max_local_content_tile_changed_ratio: float = 0.45
+    audit_max_edge_content_changed_ratio: float = 0.18
     workers: int | None = None
 
 
@@ -911,6 +914,15 @@ def _processing_options_fingerprint(options: ProcessingOptions) -> str:
         "audit_max_crop_ratio": options.audit_max_crop_ratio,
         "audit_max_trim_margin_ratio": options.audit_max_trim_margin_ratio,
         "audit_max_despeckle_pixel_ratio": options.audit_max_despeckle_pixel_ratio,
+        "audit_max_cumulative_change_score": options.audit_max_cumulative_change_score,
+        "audit_max_cumulative_pixel_change_ratio": options.audit_max_cumulative_pixel_change_ratio,
+        "audit_max_cumulative_brightness_delta": options.audit_max_cumulative_brightness_delta,
+        "audit_max_cumulative_contrast_delta": options.audit_max_cumulative_contrast_delta,
+        "audit_max_cumulative_crop_ratio": options.audit_max_cumulative_crop_ratio,
+        "audit_max_cumulative_candidate_pixel_ratio": options.audit_max_cumulative_candidate_pixel_ratio,
+        "audit_max_local_content_changed_ratio": options.audit_max_local_content_changed_ratio,
+        "audit_max_local_content_tile_changed_ratio": options.audit_max_local_content_tile_changed_ratio,
+        "audit_max_edge_content_changed_ratio": options.audit_max_edge_content_changed_ratio,
     }
     payload = json.dumps(identity, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -1116,6 +1128,17 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                 for audit in audit_records
                 if audit.get("cumulative_change_guard_action") in {"reverted_to_source", "warn_review"}
             ),
+            "local_content_change_guard_checked_files": sum(
+                1 for audit in audit_records if audit.get("local_content_change_guard_checked") is True
+            ),
+            "local_content_change_guard_reverted_files": sum(
+                1 for audit in audit_records if audit.get("local_content_change_guard_reverted") is True
+            ),
+            "local_content_change_guard_warning_files": sum(
+                1
+                for audit in audit_records
+                if audit.get("local_content_change_guard_action") in {"reverted_to_source", "warn_review"}
+            ),
             "deskew_safe_skip_files": _int_count(deskew_timing.get("safe_skip_files")),
             "deskew_projection_detection_files": _int_count(deskew_timing.get("projection_detection_files")),
             "deskew_fallback_detection_files": _int_count(deskew_timing.get("fallback_detection_files")),
@@ -1262,6 +1285,12 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "cumulative_change_candidate_pixel_ratio": _aggregate_metric(
                 audit_records, "cumulative_change_candidate_pixel_ratio"
             ),
+            "local_content_pixel_ratio": _aggregate_metric(audit_records, "local_content_pixel_ratio"),
+            "local_content_changed_ratio": _aggregate_metric(audit_records, "local_content_changed_ratio"),
+            "local_content_tile_changed_ratio": _aggregate_metric(
+                audit_records, "local_content_tile_changed_ratio"
+            ),
+            "edge_content_changed_ratio": _aggregate_metric(audit_records, "edge_content_changed_ratio"),
         },
         "distributions": {
             "pixel_change_ratio": _ratio_distribution(audit_records, "pixel_change_ratio"),
@@ -1292,6 +1321,25 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                     reason
                     for audit in audit_records
                     for reason in audit.get("cumulative_change_guard_reasons", [])
+                    if isinstance(reason, str)
+                ),
+            },
+            "local_content_change_guard": {
+                "checked_files": sum(
+                    1 for audit in audit_records if audit.get("local_content_change_guard_checked") is True
+                ),
+                "reverted_files": sum(
+                    1 for audit in audit_records if audit.get("local_content_change_guard_reverted") is True
+                ),
+                "warning_files": sum(
+                    1
+                    for audit in audit_records
+                    if audit.get("local_content_change_guard_action") in {"reverted_to_source", "warn_review"}
+                ),
+                "reason_distribution": _reason_counts(
+                    reason
+                    for audit in audit_records
+                    for reason in audit.get("local_content_change_guard_reasons", [])
                     if isinstance(reason, str)
                 ),
             },
@@ -1741,6 +1789,9 @@ def _audit_thresholds(options: ProcessingOptions) -> dict[str, float]:
         "max_cumulative_contrast_delta": options.audit_max_cumulative_contrast_delta,
         "max_cumulative_crop_ratio": options.audit_max_cumulative_crop_ratio,
         "max_cumulative_candidate_pixel_ratio": options.audit_max_cumulative_candidate_pixel_ratio,
+        "max_local_content_changed_ratio": options.audit_max_local_content_changed_ratio,
+        "max_local_content_tile_changed_ratio": options.audit_max_local_content_tile_changed_ratio,
+        "max_edge_content_changed_ratio": options.audit_max_edge_content_changed_ratio,
         "max_tone_changed_pixel_ratio": 1.0,
         "max_faded_text_changed_pixel_ratio": 0.10,
         "max_faded_text_candidate_pixel_ratio": 0.18,
@@ -2142,10 +2193,25 @@ def _process_image(
         text_edges.candidate_pixel_ratio,
     )
     cumulative_guard = _cumulative_change_guard(attempted_audit, options)
+    local_content_guard = {
+        "checked": attempted_audit.get("local_content_change_guard_checked") is True,
+        "action": attempted_audit.get("local_content_change_guard_action", "passed"),
+        "reverted": attempted_audit.get("local_content_change_guard_reverted") is True,
+        "reasons": attempted_audit.get("local_content_change_guard_reasons", []),
+        "content_pixel_ratio": attempted_audit.get("local_content_pixel_ratio", 0.0),
+        "changed_ratio": attempted_audit.get("local_content_changed_ratio", 0.0),
+        "tile_changed_ratio": attempted_audit.get("local_content_tile_changed_ratio", 0.0),
+        "edge_changed_ratio": attempted_audit.get("edge_content_changed_ratio", 0.0),
+    }
+    local_content_guard_reverted = local_content_guard["action"] == "reverted_to_source"
     cumulative_guard_reverted = cumulative_guard["action"] == "reverted_to_source"
-    if cumulative_guard_reverted:
+    guard_reverted = local_content_guard_reverted or cumulative_guard_reverted
+    if guard_reverted:
         processed = audit_source.copy()
-        operations.append("cumulative_change_guard_reverted_to_source")
+        if local_content_guard_reverted:
+            operations.append("local_content_change_guard_reverted_to_source")
+        if cumulative_guard_reverted:
+            operations.append("cumulative_change_guard_reverted_to_source")
         processing_audit = _processing_audit(
             audit_source,
             processed,
@@ -2155,74 +2221,77 @@ def _process_image(
             None,
             0,
             cumulative_change_guard=cumulative_guard,
+            local_content_change_guard=local_content_guard,
         )
     else:
         processing_audit = {**attempted_audit, **_cumulative_change_guard_audit_fields(cumulative_guard)}
     processing_warnings = list(processing_audit["guardrail_failures"])
+    if local_content_guard_reverted:
+        processing_warnings.append("local_content_change_guard_reverted_to_source")
     if cumulative_guard["action"] == "reverted_to_source":
         processing_warnings.append("cumulative_change_guard_reverted_to_source")
     crop_info = {
         "original_size": original_size,
         "output_size": list(processed.size),
-        "pre_deskew_size": original_size if cumulative_guard_reverted else pre_deskew_size,
-        "post_deskew_size": original_size if cumulative_guard_reverted else post_deskew_size,
-        "skew_angle_degrees": None if cumulative_guard_reverted else skew.angle_degrees,
+        "pre_deskew_size": original_size if guard_reverted else pre_deskew_size,
+        "post_deskew_size": original_size if guard_reverted else post_deskew_size,
+        "skew_angle_degrees": None if guard_reverted else skew.angle_degrees,
         "skew_confidence": skew.confidence,
-        "deskewed": False if cumulative_guard_reverted else deskewed,
-        "deskew_reason": "reverted by cumulative change guard" if cumulative_guard_reverted else deskew_reason,
-        "dark_border_trimmed": False if cumulative_guard_reverted else dark_border_trimmed,
-        "dark_border_bbox": None if cumulative_guard_reverted else (list(dark_border.bbox) if dark_border.bbox else None),
-        "dark_border_reason": "reverted by cumulative change guard" if cumulative_guard_reverted else dark_border.reason,
-        "crop_bbox": None if cumulative_guard_reverted else (list(crop_bbox) if crop_bbox else None),
-        "crop_reason": "reverted by cumulative change guard" if cumulative_guard_reverted else crop_reason,
-        "cropped": False if cumulative_guard_reverted else crop_bbox is not None,
-        "despeckled": False if cumulative_guard_reverted else despeckled,
-        "despeckle_pixels_changed": 0 if cumulative_guard_reverted else despeckle_pixels_changed,
-        "despeckle_reason": "reverted by cumulative change guard" if cumulative_guard_reverted else despeckle_reason,
+        "deskewed": False if guard_reverted else deskewed,
+        "deskew_reason": _guard_revert_reason(local_content_guard_reverted) if guard_reverted else deskew_reason,
+        "dark_border_trimmed": False if guard_reverted else dark_border_trimmed,
+        "dark_border_bbox": None if guard_reverted else (list(dark_border.bbox) if dark_border.bbox else None),
+        "dark_border_reason": _guard_revert_reason(local_content_guard_reverted) if guard_reverted else dark_border.reason,
+        "crop_bbox": None if guard_reverted else (list(crop_bbox) if crop_bbox else None),
+        "crop_reason": _guard_revert_reason(local_content_guard_reverted) if guard_reverted else crop_reason,
+        "cropped": False if guard_reverted else crop_bbox is not None,
+        "despeckled": False if guard_reverted else despeckled,
+        "despeckle_pixels_changed": 0 if guard_reverted else despeckle_pixels_changed,
+        "despeckle_reason": _guard_revert_reason(local_content_guard_reverted) if guard_reverted else despeckle_reason,
         "despeckle_backend_mode": despeckle_backend_mode,
-        "tone_normalized": False if cumulative_guard_reverted else tone.applied,
-        "tone_reason": "reverted by cumulative change guard" if cumulative_guard_reverted else tone.reason,
-        "tone_background_before": None if cumulative_guard_reverted else tone.background_before,
-        "tone_background_after": None if cumulative_guard_reverted else tone.background_after,
-        "tone_contrast_before": None if cumulative_guard_reverted else tone.contrast_before,
-        "tone_contrast_after": None if cumulative_guard_reverted else tone.contrast_after,
-        "tone_changed_pixel_ratio": 0.0 if cumulative_guard_reverted else tone.changed_pixel_ratio,
-        "edge_shadow_lightened": False if cumulative_guard_reverted else edge_shadow.applied,
-        "edge_shadow_reason": "reverted by cumulative change guard" if cumulative_guard_reverted else edge_shadow.reason,
+        "tone_normalized": False if guard_reverted else tone.applied,
+        "tone_reason": _guard_revert_reason(local_content_guard_reverted) if guard_reverted else tone.reason,
+        "tone_background_before": None if guard_reverted else tone.background_before,
+        "tone_background_after": None if guard_reverted else tone.background_after,
+        "tone_contrast_before": None if guard_reverted else tone.contrast_before,
+        "tone_contrast_after": None if guard_reverted else tone.contrast_after,
+        "tone_changed_pixel_ratio": 0.0 if guard_reverted else tone.changed_pixel_ratio,
+        "edge_shadow_lightened": False if guard_reverted else edge_shadow.applied,
+        "edge_shadow_reason": _guard_revert_reason(local_content_guard_reverted) if guard_reverted else edge_shadow.reason,
         "edge_shadow_edges": list(edge_shadow.edges),
-        "edge_shadow_mean_before": None if cumulative_guard_reverted else edge_shadow.edge_mean_before,
-        "edge_shadow_mean_after": None if cumulative_guard_reverted else edge_shadow.edge_mean_after,
-        "edge_shadow_delta": 0.0 if cumulative_guard_reverted else edge_shadow.edge_delta,
-        "edge_shadow_changed_pixel_ratio": 0.0 if cumulative_guard_reverted else edge_shadow.changed_pixel_ratio,
+        "edge_shadow_mean_before": None if guard_reverted else edge_shadow.edge_mean_before,
+        "edge_shadow_mean_after": None if guard_reverted else edge_shadow.edge_mean_after,
+        "edge_shadow_delta": 0.0 if guard_reverted else edge_shadow.edge_delta,
+        "edge_shadow_changed_pixel_ratio": 0.0 if guard_reverted else edge_shadow.changed_pixel_ratio,
         "edge_shadow_candidate_pixel_ratio": 0.0
-        if cumulative_guard_reverted
+        if guard_reverted
         else edge_shadow.candidate_pixel_ratio,
-        "background_stains_lightened": False if cumulative_guard_reverted else background_stains.applied,
-        "background_stains_reason": "reverted by cumulative change guard" if cumulative_guard_reverted else background_stains.reason,
-        "background_stains_mean_before": None if cumulative_guard_reverted else background_stains.stain_mean_before,
-        "background_stains_mean_after": None if cumulative_guard_reverted else background_stains.stain_mean_after,
-        "background_stains_delta": 0.0 if cumulative_guard_reverted else background_stains.stain_delta,
-        "background_stains_changed_pixel_ratio": 0.0 if cumulative_guard_reverted else background_stains.changed_pixel_ratio,
-        "background_stains_candidate_pixel_ratio": 0.0 if cumulative_guard_reverted else background_stains.candidate_pixel_ratio,
-        "scanlines_lightened": False if cumulative_guard_reverted else scanlines.applied,
-        "scanlines_reason": "reverted by cumulative change guard" if cumulative_guard_reverted else scanlines.reason,
+        "background_stains_lightened": False if guard_reverted else background_stains.applied,
+        "background_stains_reason": _guard_revert_reason(local_content_guard_reverted) if guard_reverted else background_stains.reason,
+        "background_stains_mean_before": None if guard_reverted else background_stains.stain_mean_before,
+        "background_stains_mean_after": None if guard_reverted else background_stains.stain_mean_after,
+        "background_stains_delta": 0.0 if guard_reverted else background_stains.stain_delta,
+        "background_stains_changed_pixel_ratio": 0.0 if guard_reverted else background_stains.changed_pixel_ratio,
+        "background_stains_candidate_pixel_ratio": 0.0 if guard_reverted else background_stains.candidate_pixel_ratio,
+        "scanlines_lightened": False if guard_reverted else scanlines.applied,
+        "scanlines_reason": _guard_revert_reason(local_content_guard_reverted) if guard_reverted else scanlines.reason,
         "scanlines_orientation": scanlines.orientation,
-        "scanlines_count": 0 if cumulative_guard_reverted else scanlines.line_count,
-        "scanlines_mean_before": None if cumulative_guard_reverted else scanlines.line_mean_before,
-        "scanlines_mean_after": None if cumulative_guard_reverted else scanlines.line_mean_after,
-        "scanlines_delta": 0.0 if cumulative_guard_reverted else scanlines.line_delta,
-        "scanlines_changed_pixel_ratio": 0.0 if cumulative_guard_reverted else scanlines.changed_pixel_ratio,
-        "scanlines_candidate_pixel_ratio": 0.0 if cumulative_guard_reverted else scanlines.candidate_pixel_ratio,
-        "faded_text_enhanced": False if cumulative_guard_reverted else faded_text.applied,
-        "faded_text_reason": "reverted by cumulative change guard" if cumulative_guard_reverted else faded_text.reason,
-        "faded_text_delta": 0.0 if cumulative_guard_reverted else faded_text.text_delta,
-        "faded_text_changed_pixel_ratio": 0.0 if cumulative_guard_reverted else faded_text.changed_pixel_ratio,
-        "faded_text_candidate_pixel_ratio": 0.0 if cumulative_guard_reverted else faded_text.candidate_pixel_ratio,
-        "text_edges_sharpened": False if cumulative_guard_reverted else text_edges.applied,
-        "text_edges_reason": "reverted by cumulative change guard" if cumulative_guard_reverted else text_edges.reason,
-        "text_edges_delta": 0.0 if cumulative_guard_reverted else text_edges.edge_delta,
-        "text_edges_changed_pixel_ratio": 0.0 if cumulative_guard_reverted else text_edges.changed_pixel_ratio,
-        "text_edges_candidate_pixel_ratio": 0.0 if cumulative_guard_reverted else text_edges.candidate_pixel_ratio,
+        "scanlines_count": 0 if guard_reverted else scanlines.line_count,
+        "scanlines_mean_before": None if guard_reverted else scanlines.line_mean_before,
+        "scanlines_mean_after": None if guard_reverted else scanlines.line_mean_after,
+        "scanlines_delta": 0.0 if guard_reverted else scanlines.line_delta,
+        "scanlines_changed_pixel_ratio": 0.0 if guard_reverted else scanlines.changed_pixel_ratio,
+        "scanlines_candidate_pixel_ratio": 0.0 if guard_reverted else scanlines.candidate_pixel_ratio,
+        "faded_text_enhanced": False if guard_reverted else faded_text.applied,
+        "faded_text_reason": _guard_revert_reason(local_content_guard_reverted) if guard_reverted else faded_text.reason,
+        "faded_text_delta": 0.0 if guard_reverted else faded_text.text_delta,
+        "faded_text_changed_pixel_ratio": 0.0 if guard_reverted else faded_text.changed_pixel_ratio,
+        "faded_text_candidate_pixel_ratio": 0.0 if guard_reverted else faded_text.candidate_pixel_ratio,
+        "text_edges_sharpened": False if guard_reverted else text_edges.applied,
+        "text_edges_reason": _guard_revert_reason(local_content_guard_reverted) if guard_reverted else text_edges.reason,
+        "text_edges_delta": 0.0 if guard_reverted else text_edges.edge_delta,
+        "text_edges_changed_pixel_ratio": 0.0 if guard_reverted else text_edges.changed_pixel_ratio,
+        "text_edges_candidate_pixel_ratio": 0.0 if guard_reverted else text_edges.candidate_pixel_ratio,
         "processing_audit": processing_audit,
         "processing_warnings": processing_warnings,
         "operation_timings": operation_timings,
@@ -2231,6 +2300,14 @@ def _process_image(
         ),
     }
     return processed, operations, crop_info
+
+
+def _guard_revert_reason(local_content_guard_reverted: bool) -> str:
+    return (
+        "reverted by local content change guard"
+        if local_content_guard_reverted
+        else "reverted by cumulative change guard"
+    )
 
 
 class _operation_timer:
@@ -3621,6 +3698,7 @@ def _processing_audit(
     text_edges_changed_pixel_ratio: float = 0.0,
     text_edges_candidate_pixel_ratio: float = 0.0,
     cumulative_change_guard: dict[str, Any] | None = None,
+    local_content_change_guard: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     source_width, source_height = source.size
     output_width, output_height = processed.size
@@ -3699,11 +3777,63 @@ def _processing_audit(
         "deskew_abs_angle_degrees": deskew_abs_angle,
         "despeckle_pixel_ratio": round(despeckle_pixel_ratio, 6),
     }
+    if local_content_change_guard is None:
+        if _should_check_local_content_change(
+            despeckle_pixels_changed=despeckle_pixels_changed,
+            source_area=source_area,
+            tone_normalized=tone_normalized,
+            tone_background_delta=tone_background_delta,
+            tone_contrast_delta=tone_contrast_delta,
+            edge_shadow_lightened=edge_shadow_lightened,
+            edge_shadow_changed_pixel_ratio=edge_shadow_changed_pixel_ratio,
+            scanlines_lightened=scanlines_lightened,
+            scanlines_changed_pixel_ratio=scanlines_changed_pixel_ratio,
+            faded_text_enhanced=faded_text_enhanced,
+            faded_text_changed_pixel_ratio=faded_text_changed_pixel_ratio,
+            text_edges_sharpened=text_edges_sharpened,
+            text_edges_changed_pixel_ratio=text_edges_changed_pixel_ratio,
+        ):
+            local_content_change_guard = _local_content_change_guard(source_l, processed_l, options)
+        else:
+            local_content_change_guard = _local_content_change_guard_passed(checked=False)
+    metrics.update(_local_content_change_guard_audit_fields(local_content_change_guard))
     if cumulative_change_guard is None:
         cumulative_change_guard = _cumulative_change_guard(metrics, options)
     metrics.update(_cumulative_change_guard_audit_fields(cumulative_change_guard))
     failures = _audit_guardrail_failures(metrics, options)
     return {**metrics, "guardrail_failures": failures}
+
+
+def _should_check_local_content_change(
+    *,
+    despeckle_pixels_changed: int,
+    source_area: int,
+    tone_normalized: bool,
+    tone_background_delta: float,
+    tone_contrast_delta: float,
+    edge_shadow_lightened: bool,
+    edge_shadow_changed_pixel_ratio: float,
+    scanlines_lightened: bool,
+    scanlines_changed_pixel_ratio: float,
+    faded_text_enhanced: bool,
+    faded_text_changed_pixel_ratio: float,
+    text_edges_sharpened: bool,
+    text_edges_changed_pixel_ratio: float,
+) -> bool:
+    despeckle_guard_floor = max(24, int(max(1, source_area) * 0.00005))
+    if despeckle_pixels_changed >= despeckle_guard_floor:
+        return True
+    if edge_shadow_lightened and edge_shadow_changed_pixel_ratio > 0:
+        return True
+    if scanlines_lightened and scanlines_changed_pixel_ratio > 0:
+        return True
+    if faded_text_enhanced and faded_text_changed_pixel_ratio > 0:
+        return True
+    if text_edges_sharpened and text_edges_changed_pixel_ratio > 0:
+        return True
+    if tone_normalized and (tone_background_delta > 12.0 or tone_contrast_delta > 18.0):
+        return True
+    return False
 
 
 def _cumulative_change_guard(metrics: dict[str, Any], options: ProcessingOptions) -> dict[str, Any]:
@@ -3766,6 +3896,249 @@ def _cumulative_change_guard(metrics: dict[str, Any], options: ProcessingOptions
         "contrast_delta": round(contrast_delta, 6),
         "crop_ratio": round(crop_ratio, 6),
         "candidate_pixel_ratio": round(candidate_ratio, 6),
+    }
+
+
+def _local_content_change_guard(source_l: Image.Image, processed_l: Image.Image, options: ProcessingOptions) -> dict[str, Any]:
+    if processed_l.size != source_l.size:
+        return _local_content_change_guard_passed(checked=False)
+
+    numpy_guard = _local_content_change_guard_numpy(source_l, processed_l, options)
+    if numpy_guard is not None:
+        return numpy_guard
+
+    histogram = source_l.histogram()
+    threshold = _high_contrast_content_threshold(histogram, source_l.size)
+    content_pixels = sum(histogram[: threshold + 1])
+    changed_mask = ImageChops.difference(source_l, processed_l).point(lambda value: 255 if value > 32 else 0)
+    content_mask = _high_contrast_content_mask(source_l, threshold)
+    changed_content_mask = ImageChops.multiply(content_mask, changed_mask)
+    width, height = source_l.size
+    area = max(1, width * height)
+    changed_content = _mask_pixel_count(changed_content_mask)
+    local_ratio = changed_content / max(1, content_pixels)
+    content_pixel_ratio = content_pixels / area
+    max_tile_ratio = 0.0
+    edge_ratio = _edge_content_change_ratio(content_mask, changed_content_mask, source_l.size)
+    checked = content_pixels >= max(24, int(area * 0.002))
+    reasons: list[str] = []
+    if checked and local_ratio > options.audit_max_local_content_changed_ratio:
+        reasons.append("local_content_changed_ratio")
+    if checked and "local_content_changed_ratio" not in reasons:
+        max_tile_ratio = _max_local_content_tile_change_ratio(content_mask, changed_content_mask)
+    if checked and max_tile_ratio > options.audit_max_local_content_tile_changed_ratio:
+        reasons.append("local_content_tile_changed_ratio")
+    if checked and edge_ratio > options.audit_max_edge_content_changed_ratio:
+        reasons.append("edge_content_changed_ratio")
+    action = "reverted_to_source" if reasons else "passed"
+    return {
+        "checked": checked,
+        "action": action,
+        "reverted": action == "reverted_to_source",
+        "reasons": sorted(set(reasons)),
+        "content_pixel_ratio": round(content_pixel_ratio, 6),
+        "changed_ratio": round(local_ratio, 6),
+        "tile_changed_ratio": round(max_tile_ratio, 6),
+        "edge_changed_ratio": round(edge_ratio, 6),
+    }
+
+
+def _local_content_change_guard_numpy(
+    source_l: Image.Image,
+    processed_l: Image.Image,
+    options: ProcessingOptions,
+) -> dict[str, Any] | None:
+    np = _load_numpy()
+    if np is None:
+        return None
+    try:
+        source = np.asarray(source_l)
+        processed = np.asarray(processed_l)
+    except (TypeError, ValueError):
+        return None
+    if source.shape != processed.shape or source.ndim != 2:
+        return None
+
+    height, width = source.shape
+    area = max(1, width * height)
+    histogram = np.bincount(source.ravel(), minlength=256)
+    running = np.cumsum(histogram)
+    background = int(np.searchsorted(running, area * 0.9, side="left"))
+    threshold = max(90, min(220, background - 35))
+    content = source <= threshold
+    content_pixels = int(np.count_nonzero(content))
+    checked = content_pixels >= max(24, int(area * 0.002))
+
+    if content_pixels == 0:
+        return _local_content_change_guard_passed(checked=False)
+
+    changed = ((source > processed) & ((source - processed) > 32)) | (
+        (processed > source) & ((processed - source) > 32)
+    )
+    changed_content_mask = content & changed
+    changed_content = int(np.count_nonzero(changed_content_mask))
+    local_ratio = changed_content / content_pixels
+    content_pixel_ratio = content_pixels / area
+    edge_ratio = _edge_content_change_ratio_numpy(content, changed_content_mask)
+    max_tile_ratio = 0.0
+
+    reasons: list[str] = []
+    if checked and local_ratio > options.audit_max_local_content_changed_ratio:
+        reasons.append("local_content_changed_ratio")
+    if checked and "local_content_changed_ratio" not in reasons:
+        max_tile_ratio = _max_local_content_tile_change_ratio_numpy(content, changed_content_mask)
+    if checked and max_tile_ratio > options.audit_max_local_content_tile_changed_ratio:
+        reasons.append("local_content_tile_changed_ratio")
+    if checked and edge_ratio > options.audit_max_edge_content_changed_ratio:
+        reasons.append("edge_content_changed_ratio")
+    action = "reverted_to_source" if reasons else "passed"
+    return {
+        "checked": checked,
+        "action": action,
+        "reverted": action == "reverted_to_source",
+        "reasons": sorted(set(reasons)),
+        "content_pixel_ratio": round(content_pixel_ratio, 6),
+        "changed_ratio": round(local_ratio, 6),
+        "tile_changed_ratio": round(max_tile_ratio, 6),
+        "edge_changed_ratio": round(edge_ratio, 6),
+    }
+
+
+def _local_content_change_guard_passed(*, checked: bool) -> dict[str, Any]:
+    return {
+        "checked": checked,
+        "action": "passed",
+        "reverted": False,
+        "reasons": [],
+        "content_pixel_ratio": 0.0,
+        "changed_ratio": 0.0,
+        "tile_changed_ratio": 0.0,
+        "edge_changed_ratio": 0.0,
+    }
+
+
+def _high_contrast_content_threshold(histogram: list[int], size: tuple[int, int]) -> int:
+    total = max(1, size[0] * size[1])
+    running = 0
+    background = 255
+    for value, count in enumerate(histogram):
+        running += count
+        if running >= total * 0.9:
+            background = value
+            break
+    return max(90, min(220, background - 35))
+
+
+def _high_contrast_content_mask(source_l: Image.Image, threshold: int | None = None) -> Image.Image:
+    if threshold is None:
+        threshold = _high_contrast_content_threshold(source_l.histogram(), source_l.size)
+    return source_l.point(lambda value: 255 if value <= threshold else 0)
+
+
+def _max_local_content_tile_change_ratio(content_mask: Image.Image, changed_content_mask: Image.Image) -> float:
+    width, height = content_mask.size
+    changed_bbox = changed_content_mask.getbbox()
+    if changed_bbox is None:
+        return 0.0
+    tile_size = max(16, min(48, min(width, height) // 3 or 16))
+    max_ratio = 0.0
+    left_start = (changed_bbox[0] // tile_size) * tile_size
+    top_start = (changed_bbox[1] // tile_size) * tile_size
+    left_stop = min(width, ((changed_bbox[2] + tile_size - 1) // tile_size) * tile_size)
+    top_stop = min(height, ((changed_bbox[3] + tile_size - 1) // tile_size) * tile_size)
+    for top in range(top_start, top_stop, tile_size):
+        for left in range(left_start, left_stop, tile_size):
+            box = (left, top, min(width, left + tile_size), min(height, top + tile_size))
+            content_pixels = _mask_pixel_count(content_mask.crop(box))
+            if content_pixels < 8:
+                continue
+            changed_pixels = _mask_pixel_count(changed_content_mask.crop(box))
+            max_ratio = max(max_ratio, changed_pixels / content_pixels)
+    return max_ratio
+
+
+def _max_local_content_tile_change_ratio_numpy(content: Any, changed_content: Any) -> float:
+    np = _load_numpy()
+    if np is None:
+        return 0.0
+    height, width = content.shape
+    changed_y, changed_x = np.nonzero(changed_content)
+    if changed_y.size == 0:
+        return 0.0
+    tile_size = max(16, min(48, min(width, height) // 3 or 16))
+    max_ratio = 0.0
+    tile_keys = set(zip((changed_y // tile_size).tolist(), (changed_x // tile_size).tolist()))
+    for tile_y, tile_x in tile_keys:
+        top = tile_y * tile_size
+        left = tile_x * tile_size
+        tile_content = content[top : min(height, top + tile_size), left : min(width, left + tile_size)]
+        content_pixels = int(tile_content.sum())
+        if content_pixels < 8:
+            continue
+        tile_changed = changed_content[top : min(height, top + tile_size), left : min(width, left + tile_size)]
+        changed_pixels = int(tile_changed.sum())
+        max_ratio = max(max_ratio, changed_pixels / content_pixels)
+    return max_ratio
+
+
+def _edge_content_change_ratio(
+    content_mask: Image.Image,
+    changed_mask: Image.Image,
+    size: tuple[int, int],
+) -> float:
+    width, height = size
+    margin = max(4, min(24, min(width, height) // 8))
+    edge = Image.new("L", size, 0)
+    edge.paste(255, (0, 0, width, margin))
+    edge.paste(255, (0, max(0, height - margin), width, height))
+    edge.paste(255, (0, 0, margin, height))
+    edge.paste(255, (max(0, width - margin), 0, width, height))
+    edge_content = ImageChops.multiply(content_mask, edge)
+    edge_content_pixels = _mask_pixel_count(edge_content)
+    if edge_content_pixels < 8:
+        return 0.0
+    return _mask_intersection_count(edge_content, changed_mask) / edge_content_pixels
+
+
+def _edge_content_change_ratio_numpy(content: Any, changed: Any) -> float:
+    height, width = content.shape
+    margin = max(4, min(24, min(width, height) // 8))
+    edge_content_pixels = 0
+    edge_changed_pixels = 0
+    for edge_slice in (
+        (slice(0, margin), slice(0, width)),
+        (slice(max(0, height - margin), height), slice(0, width)),
+        (slice(margin, max(margin, height - margin)), slice(0, margin)),
+        (slice(margin, max(margin, height - margin)), slice(max(0, width - margin), width)),
+    ):
+        edge_content = content[edge_slice]
+        if edge_content.size == 0:
+            continue
+        edge_content_pixels += int(edge_content.sum())
+        edge_changed_pixels += int((edge_content & changed[edge_slice]).sum())
+    if edge_content_pixels < 8:
+        return 0.0
+    return edge_changed_pixels / edge_content_pixels
+
+
+def _mask_pixel_count(mask: Image.Image) -> int:
+    return mask.histogram()[255]
+
+
+def _mask_intersection_count(first: Image.Image, second: Image.Image) -> int:
+    return _mask_pixel_count(ImageChops.multiply(first, second))
+
+
+def _local_content_change_guard_audit_fields(guard: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "local_content_change_guard_checked": guard.get("checked") is True,
+        "local_content_change_guard_action": guard.get("action", "passed"),
+        "local_content_change_guard_reverted": guard.get("reverted") is True,
+        "local_content_change_guard_reasons": guard.get("reasons") if isinstance(guard.get("reasons"), list) else [],
+        "local_content_pixel_ratio": _round_guard_metric(guard.get("content_pixel_ratio")),
+        "local_content_changed_ratio": _round_guard_metric(guard.get("changed_ratio")),
+        "local_content_tile_changed_ratio": _round_guard_metric(guard.get("tile_changed_ratio")),
+        "edge_content_changed_ratio": _round_guard_metric(guard.get("edge_changed_ratio")),
     }
 
 
