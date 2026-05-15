@@ -2717,11 +2717,9 @@
       if (Number.isFinite(Number(panel.processed_output_images))) {
         state.readyImages = Math.max(0, Number(panel.processed_output_images));
         state.outputSummary = `已准备 ${state.readyImages} 张处理后图片`;
-      } else if (panel.derivatives_dir) {
-        state.outputSummary = outputSummaryLabel();
       }
-      if (panel.metadata_dir) state.decisionSaveSummary = DECISION_SAVE_LABEL;
-      if (panel.metadata_dir || panel.completion_note_path) state.completionNoteSummary = COMPLETION_NOTE_LABEL;
+      if (panel.decision_summary_saved || panel.verification_summary_saved) state.decisionSaveSummary = DECISION_SAVE_LABEL;
+      if (panel.completion_note_saved) state.completionNoteSummary = COMPLETION_NOTE_LABEL;
       state.openOutputFolderAvailable = panel.open_output_folder_available === true || (state.outputChosen && Boolean(state.lastServerOutputPath));
       state.openOutputFolderStatus = state.openOutputFolderAvailable
         ? "可以打开输出文件夹检查处理后图片。"
@@ -3094,8 +3092,7 @@
         els.loadStatus.textContent = "正在完成并导出结果。";
         const payload = await apiPost("/api/finish-decisions", decisionArtifact());
         applyCompletionPanel(payload.completion_panel);
-        if (payload.folders && payload.folders.derivatives) state.outputSummary = outputSummaryLabel();
-        if (payload.folders && payload.folders.metadata) state.decisionSaveSummary = DECISION_SAVE_LABEL;
+        if (payload.saved && (payload.saved.decision_summary || payload.saved.verification_summary)) state.decisionSaveSummary = DECISION_SAVE_LABEL;
         state.status = "complete";
         state.progress = 100;
         state.finishConfirmationVisible = false;

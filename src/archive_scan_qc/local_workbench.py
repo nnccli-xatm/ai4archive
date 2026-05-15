@@ -337,9 +337,6 @@ class WorkbenchController:
         summary_path = metadata_dir / REVIEW_DECISION_SUMMARY_JSON
         verification_path = metadata_dir / REVIEW_DECISION_VERIFICATION_JSON
         completion_note_path = metadata_dir / COMPLETION_NOTE_TXT
-        summary_display = _child_display_path(metadata_display, metadata_dir, summary_path)
-        verification_display = _child_display_path(metadata_display, metadata_dir, verification_path)
-        completion_note_display = _child_display_path(metadata_display, metadata_dir, completion_note_path)
         summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         verification_path.write_text(
             json.dumps(verification, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
@@ -348,22 +345,26 @@ class WorkbenchController:
         handoff_counts = _completion_handoff_counts(run_summary, decision_summary)
         reuse_handoff_summary = _local_reuse_handoff_summary(run_summary)
         operator_name = str(summary.get("operator_name") or "").strip()
+        reuse_note = (
+            reuse_handoff_summary["message_zh"]
+            if isinstance(reuse_handoff_summary, dict)
+            else "本批复用了 0 张，重新处理 0 张，失败 0 张，剩余 0 张。"
+        )
         completion_note_path.write_text(
             "\n".join(
                 [
                     "本批已完成交接说明",
+                    "本批次是否完成：已完成，可交接",
                     f"复核人员：{operator_name or '未填写'}",
                     f"处理方式：{_processing_mode_completion_label(processing_mode)}",
-                    f"处理后图片文件夹：{derivatives_display}",
-                    f"复核结果保存位置：{summary_display}",
-                    f"复核校验保存位置：{verification_display}",
-                    f"本机状态文件夹：{metadata_display}",
-                    f"已输出处理后图片：{handoff_counts['processed_output_images']} 张",
+                    f"扫描原图总数：{handoff_counts['total_source_images']} 张",
+                    f"处理后图片数量：{handoff_counts['processed_output_images']} 张",
                     f"需要重扫：{handoff_counts['needs_rescan_images']} 张",
                     f"需要重新处理：{handoff_counts['needs_reprocess_images']} 张",
+                    f"待决定：{pending_decisions}",
+                    reuse_note,
                     f"复核总数：{total_decisions}",
                     f"已确认：{reviewed_decisions}",
-                    f"待决定：{pending_decisions}",
                     f"未关闭 P0：{open_p0_count}",
                     f"未关闭 P1：{open_p1_count}",
                     f"已有人工处理结论：{int(closure_summary.get('manually_handled_count') or reviewed_decisions)}",
@@ -391,13 +392,12 @@ class WorkbenchController:
             "processed_output_images": handoff_counts["processed_output_images"],
             "needs_rescan_images": handoff_counts["needs_rescan_images"],
             "needs_reprocess_images": handoff_counts["needs_reprocess_images"],
+            "total_source_images": handoff_counts["total_source_images"],
             "next_batch_reminder_zh": handoff_counts["next_batch_reminder_zh"],
             "processing_mode": _processing_mode_payload(processing_mode),
-            "derivatives_dir": derivatives_display,
-            "metadata_dir": metadata_display,
-            "decision_summary_path": summary_display,
-            "verification_summary_path": verification_display,
-            "completion_note_path": completion_note_display,
+            "decision_summary_saved": True,
+            "verification_summary_saved": True,
+            "completion_note_saved": True,
             "open_output_folder_available": True,
             "checklist_zh": [
                 f"打开输出文件夹，检查 {handoff_counts['processed_output_images']} 张处理后图片的数量和画面状态",
@@ -420,14 +420,10 @@ class WorkbenchController:
             "schema_version": SERVER_SCHEMA,
             "finished": True,
             "message_zh": "本批已完成：处理后图片已保存到输出文件夹，复核结果和交接说明已保存到本机状态文件夹。",
-            "folders": {
-                "derivatives": derivatives_display,
-                "metadata": metadata_display,
-            },
             "saved": {
-                "decision_summary": summary_display,
-                "verification_summary": verification_display,
-                "completion_note": completion_note_display,
+                "decision_summary": True,
+                "verification_summary": True,
+                "completion_note": True,
             },
             "completion_panel": completion_panel,
             "decision_summary": decision_summary,
@@ -2118,6 +2114,11 @@ def _completion_handoff_counts(run_summary: dict[str, Any] | None, decision_summ
         counts = {}
     if not isinstance(decision_counts, dict):
         decision_counts = {}
+    total_source_images = _safe_nonnegative_int(operator.get("total_source_images"))
+    if total_source_images == 0:
+        total_source_images = _safe_nonnegative_int(counts.get("openable_files"))
+    if total_source_images == 0:
+        total_source_images = _safe_nonnegative_int(counts.get("total_files"))
     processed_output_images = _safe_nonnegative_int(operator.get("derivative_images_ready"))
     if processed_output_images == 0:
         processed_output_images = _safe_nonnegative_int(counts.get("processed_files")) + _safe_nonnegative_int(
@@ -2126,6 +2127,7 @@ def _completion_handoff_counts(run_summary: dict[str, Any] | None, decision_summ
     needs_rescan_images = _safe_nonnegative_int(decision_counts.get("needs_rescan"))
     needs_reprocess_images = _safe_nonnegative_int(decision_counts.get("fixed_externally"))
     return {
+        "total_source_images": total_source_images,
         "processed_output_images": processed_output_images,
         "needs_rescan_images": needs_rescan_images,
         "needs_reprocess_images": needs_reprocess_images,
