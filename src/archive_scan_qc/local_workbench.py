@@ -2453,6 +2453,15 @@ def _safe_nonnegative_int(value: Any) -> int:
         return 0
 
 
+def _safe_optional_nonnegative_int(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return None
+
+
 def _folder_is_writable(path: Path) -> bool:
     if not _path_is_existing_dir(path) or not os.access(path, os.W_OK | os.X_OK):
         return False
@@ -2547,10 +2556,50 @@ def _status_recovery_guidance(
         if isinstance(guidance, dict):
             return guidance
         counts = summary.get("counts") if isinstance(summary.get("counts"), dict) else {}
-        failed_files = int(counts.get("failed_files") or 0)
-        retryable_files = int(counts.get("retry_list_files") or 0)
-        derivative_images_ready = int(counts.get("processed_files") or 0) + int(counts.get("resumed_files") or 0)
-        total_files = int(counts.get("total_files") or 0)
+        total_files_value = _safe_optional_nonnegative_int(counts.get("total_files"))
+        failed_files_value = _safe_optional_nonnegative_int(counts.get("failed_files"))
+        retryable_files_value = _safe_optional_nonnegative_int(counts.get("retry_list_files"))
+        processed_files_value = _safe_optional_nonnegative_int(counts.get("processed_files"))
+        resumed_files_value = _safe_optional_nonnegative_int(counts.get("resumed_files"))
+        if (
+            summary.get("status") == "blocked"
+            and (
+                total_files_value is None
+                or failed_files_value is None
+                or retryable_files_value is None
+                or processed_files_value is None
+                or resumed_files_value is None
+            )
+        ):
+            known_counts = {
+                key: value
+                for key, value in {
+                    "total_files": total_files_value,
+                    "failed_files": failed_files_value,
+                    "retryable_files": retryable_files_value,
+                    "processed_files": processed_files_value,
+                    "resumed_files": resumed_files_value,
+                }.items()
+                if value is not None
+            }
+            return {
+                "schema_version": "scan-qc.local-recovery-guidance.v1",
+                "aggregate_only": True,
+                "kind": "processing_retry_scope_unknown",
+                "title_zh": "不能安全判断重试范围",
+                "message_zh": "本机状态文件不完整，不能安全判断本批应重试哪些图片；当前不会误报完成，也不会编造重试数量。",
+                "retry_scope_safe": False,
+                "known_counts": known_counts,
+                "next_steps_zh": [
+                    "检查扫描原图文件夹和处理后输出文件夹是否仍然正确。",
+                    "需要继续本批时可以重新开始处理；系统会保守处理需要补齐或重新生成的输出。",
+                    "如果反复出现，请交管理员查看本机私有状态报告。",
+                ],
+            }
+        failed_files = failed_files_value or 0
+        retryable_files = retryable_files_value or 0
+        derivative_images_ready = (processed_files_value or 0) + (resumed_files_value or 0)
+        total_files = total_files_value or 0
         missing_output_files = retryable_files if retryable_files else failed_files
         can_restart_fill_missing_outputs = retryable_files > 0
         aggregate = {
