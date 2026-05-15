@@ -24,6 +24,7 @@ STEP_LABELS = {
     "summarize": "整理处理结果",
 }
 STAGE_TIMING_SCHEMA_VERSION = "scan-qc.production-stage-timings.v1"
+AGGREGATE_PROCESSING_SCHEMA_VERSION = "scan-qc.aggregate-processing-rate.v1"
 PROCESSING_MODE_LABELS_ZH = {
     "standard": "标准优化",
     "qc_only": "只质检不修图",
@@ -200,6 +201,17 @@ def build_production_run_summary(
         "failed_files": failed_files,
         "remaining_files": int(processing_summary.get("retry_list_files", failed_files)),
     }
+    completed_processing_items = (
+        int(processing_summary.get("processed_files", 0))
+        + int(processing_summary.get("resumed_files", 0))
+        + int(processing_summary.get("skipped_files", 0))
+        + failed_files
+    )
+    aggregate_processing = _aggregate_processing_payload(
+        total_items=processing_summary.get("total_files"),
+        completed_items=completed_processing_items,
+        elapsed_seconds=(stage_timings or {}).get("process"),
+    )
     artifacts = {
         "summary": str(config.metadata_output_dir.resolve() / PRODUCTION_RUN_SUMMARY_JSON),
         "progress": str(config.metadata_output_dir.resolve() / PRODUCTION_RUN_PROGRESS_JSON),
@@ -253,12 +265,14 @@ def build_production_run_summary(
             "remaining_files": local_reuse_summary["remaining_files"],
         },
         "local_reuse_summary": local_reuse_summary,
+        "aggregate_processing": aggregate_processing,
         "progress": {
             "state": "completed",
             "total_steps": 3,
             "completed_steps": 3,
             "total_items": processing_summary["total_files"],
             "completed_items": processing_summary["total_files"],
+            "aggregate_processing": aggregate_processing,
         },
         "performance": {
             "scan": scan_summary["performance"],
@@ -303,6 +317,7 @@ def _write_progress(
         "total_steps": len(steps),
         "steps": steps,
         "stage_timings": _stage_timings_payload(stage_timings, steps=steps),
+        "aggregate_processing": _aggregate_processing_from_steps(steps, stage_timings),
     }
     if summary_path is not None:
         payload["summary"] = str(summary_path)
@@ -335,6 +350,84 @@ def _stage_timings_payload(
         "aggregate_only": True,
         "stages": stages,
     }
+
+
+def _aggregate_processing_from_steps(
+    steps: list[dict[str, Any]],
+    stage_timings: dict[str, float] | None,
+) -> dict[str, Any]:
+    process_step = next((step for step in steps if step.get("id") == "process"), {})
+    return _aggregate_processing_payload(
+        total_items=process_step.get("total_items"),
+        completed_items=process_step.get("completed_items"),
+        elapsed_seconds=(stage_timings or {}).get("process"),
+    )
+
+
+def _aggregate_processing_payload(
+    *,
+    total_items: Any,
+    completed_items: Any,
+    elapsed_seconds: Any,
+) -> dict[str, Any]:
+    total_images = _safe_nonnegative_int(total_items)
+    processed_images = _safe_nonnegative_int(completed_items)
+    elapsed = _safe_nonnegative_float(elapsed_seconds)
+    remaining_images: int | None = None
+    images_per_minute: float | None = None
+    estimated_remaining_seconds: float | None = None
+    unavailable_reason: str | None = None
+
+    if total_images is None:
+        unavailable_reason = "missing_total_images"
+    elif processed_images is None:
+        unavailable_reason = "missing_processed_images"
+    else:
+        processed_images = min(processed_images, total_images)
+        remaining_images = max(total_images - processed_images, 0)
+        if total_images == 0:
+            unavailable_reason = "no_total_images"
+        elif processed_images == 0:
+            unavailable_reason = "no_processed_images"
+        elif elapsed is None or elapsed <= 0:
+            unavailable_reason = "no_elapsed_seconds"
+            if remaining_images == 0:
+                estimated_remaining_seconds = 0.0
+        else:
+            images_per_minute = round(processed_images / (elapsed / 60.0), 6)
+            estimated_remaining_seconds = (
+                0.0 if remaining_images == 0 else round(remaining_images / (images_per_minute / 60.0), 6)
+            )
+
+    return {
+        "schema_version": AGGREGATE_PROCESSING_SCHEMA_VERSION,
+        "aggregate_only": True,
+        "total_images": total_images,
+        "processed_images": processed_images,
+        "remaining_images": remaining_images,
+        "elapsed_seconds": None if elapsed is None else round(elapsed, 6),
+        "images_per_minute": images_per_minute,
+        "estimated_remaining_seconds": estimated_remaining_seconds,
+        "unavailable_reason": unavailable_reason,
+    }
+
+
+def _safe_nonnegative_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_nonnegative_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return max(0.0, float(value))
+    except (TypeError, ValueError):
+        return None
 
 
 def _step(
