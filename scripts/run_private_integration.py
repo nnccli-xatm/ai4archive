@@ -76,6 +76,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--trim-dark-border", action="store_true", help="Enable conservative dark-border trim.")
     parser.add_argument("--despeckle", action="store_true", help="Enable conservative despeckle.")
     parser.add_argument("--normalize-tones", action="store_true", help="Enable conservative gray/dark page tone normalization.")
+    parser.add_argument("--lighten-edge-shadow", action="store_true", help="Enable conservative narrow edge-shadow lightening.")
     parser.add_argument(
         "--despeckle-backend",
         choices=("fallback", "numpy"),
@@ -159,6 +160,7 @@ def run_private_integration(args: argparse.Namespace) -> PrivateIntegrationResul
                 trim_dark_border=args.trim_dark_border,
                 despeckle=args.despeckle,
                 normalize_tones=getattr(args, "normalize_tones", False),
+                lighten_edge_shadow=getattr(args, "lighten_edge_shadow", False),
                 despeckle_backend=despeckle_backend,
                 resume_processing=args.resume_processing,
                 reuse_scan_measurements=args.reuse_scan_measurements,
@@ -263,6 +265,7 @@ def _public_summary(
             "benchmark_run_count": len(benchmark_runs),
             "despeckle_backend_requested": despeckle_backend["requested_backend"],
             "reuse_scan_measurements": bool(getattr(args, "reuse_scan_measurements", False)),
+            "lighten_edge_shadow": bool(getattr(args, "lighten_edge_shadow", False)),
         },
         "despeckle_backend": despeckle_backend,
         "warning_item_count": len(warning_items),
@@ -526,7 +529,7 @@ def _has_operation_timing(value: Any) -> bool:
 def _benchmark_operation_timings(benchmark_summary: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
     if not benchmark_summary:
         return {}
-    operation_names = ["auto_crop", "deskew", "trim_dark_border", "despeckle", "normalize_tones"]
+    operation_names = ["auto_crop", "deskew", "trim_dark_border", "despeckle", "normalize_tones", "lighten_edge_shadow"]
     totals: dict[str, dict[str, Any]] = {}
     for operation in operation_names:
         elapsed_seconds = 0.0
@@ -657,6 +660,7 @@ def _benchmark_args(args: argparse.Namespace, input_dir: Path, output_root: Path
         trim_dark_border=args.trim_dark_border,
         despeckle=args.despeckle,
         normalize_tones=getattr(args, "normalize_tones", False),
+        lighten_edge_shadow=getattr(args, "lighten_edge_shadow", False),
         despeckle_backend=despeckle_backend,
         min_dpi=args.min_dpi,
         name_pattern=args.name_pattern,

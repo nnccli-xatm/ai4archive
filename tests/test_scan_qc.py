@@ -3240,6 +3240,7 @@ class ScanQcTest(unittest.TestCase):
                 "--benchmark-workers-list",
                 "1,2,4,8",
                 "--normalize-tones",
+                "--lighten-edge-shadow",
                 "--min-scan-files-per-minute",
                 "100",
                 "--min-processing-files-per-minute",
@@ -3253,6 +3254,7 @@ class ScanQcTest(unittest.TestCase):
         self.assertEqual(baseline_args.workers, 4)
         self.assertEqual(baseline_args.benchmark_workers_list, "1,2,4,8")
         self.assertTrue(baseline_args.normalize_tones)
+        self.assertTrue(baseline_args.lighten_edge_shadow)
         self.assertTrue(baseline_args.cleanup_artifacts)
 
     def test_rework_action_list_groups_qc_findings_and_processing_retry(self) -> None:
@@ -8650,7 +8652,7 @@ class ScanQcTest(unittest.TestCase):
             input_dir.mkdir()
             Image.new("RGB", (32, 24), "white").save(input_dir / "A001_0001.jpg", dpi=(300, 300))
 
-            for option in ["--trim-dark-border", "--despeckle"]:
+            for option in ["--trim-dark-border", "--despeckle", "--normalize-tones", "--lighten-edge-shadow"]:
                 with self.assertRaises(SystemExit) as raised:
                     main(["--input", str(input_dir), "--out", str(output_dir), option])
                 self.assertEqual(raised.exception.code, 2)

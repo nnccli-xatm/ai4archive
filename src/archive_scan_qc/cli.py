@@ -147,6 +147,11 @@ def _add_scan_arguments(parser: argparse.ArgumentParser, *, include_scan_overrid
         help="Conservatively normalize gray/dark low-contrast neutral pages. Requires --process-out.",
     )
     parser.add_argument(
+        "--lighten-edge-shadow",
+        action="store_true",
+        help="Conservatively lighten narrow neutral page-edge shadows. Requires --process-out.",
+    )
+    parser.add_argument(
         "--despeckle-backend",
         choices=("fallback", "numpy"),
         default="fallback",
@@ -273,6 +278,7 @@ def main(argv: list[str] | None = None) -> int:
                 trim_dark_border=args.trim_dark_border,
                 despeckle=args.despeckle,
                 normalize_tones=args.normalize_tones,
+                lighten_edge_shadow=args.lighten_edge_shadow,
                 despeckle_backend=args.despeckle_backend,
                 resume_processing=args.resume_processing,
                 reuse_scan_measurements=args.reuse_scan_measurements,
@@ -382,6 +388,7 @@ def _main_production_run(argv: list[str]) -> int:
     parser.add_argument("--trim-dark-border", action="store_true", help="保守清理扫描黑边。")
     parser.add_argument("--despeckle", action="store_true", help="清理孤立黑点。")
     parser.add_argument("--normalize-tones", action="store_true", help="保守校正偏灰、偏暗的低对比度页面。")
+    parser.add_argument("--lighten-edge-shadow", action="store_true", help="保守减淡不接触正文的页边窄幅阴影。")
     parser.add_argument(
         "--despeckle-backend",
         choices=("fallback", "numpy"),
@@ -431,6 +438,7 @@ def _main_production_run(argv: list[str]) -> int:
                 trim_dark_border=args.trim_dark_border,
                 despeckle=args.despeckle,
                 normalize_tones=args.normalize_tones,
+                lighten_edge_shadow=args.lighten_edge_shadow,
                 despeckle_backend=args.despeckle_backend,
                 resume_processing=args.resume_processing,
                 reuse_scan_measurements=args.reuse_scan_measurements,
@@ -1024,6 +1032,7 @@ def _main_processing_plan(argv: list[str]) -> int:
     parser.add_argument("--trim-dark-border", action="store_true", help="Plan conservative dark scan border trim candidates.")
     parser.add_argument("--despeckle", action="store_true", help="Plan isolated dark speckle cleanup candidates.")
     parser.add_argument("--normalize-tones", action="store_true", help="Plan conservative gray/dark page tone normalization candidates.")
+    parser.add_argument("--lighten-edge-shadow", action="store_true", help="Plan conservative narrow edge-shadow lightening candidates.")
     parser.add_argument(
         "--despeckle-backend",
         choices=("fallback", "numpy"),
@@ -1047,6 +1056,7 @@ def _main_processing_plan(argv: list[str]) -> int:
                 trim_dark_border=args.trim_dark_border,
                 despeckle=args.despeckle,
                 normalize_tones=args.normalize_tones,
+                lighten_edge_shadow=args.lighten_edge_shadow,
                 despeckle_backend=args.despeckle_backend,
                 reuse_scan_measurements=args.reuse_scan_measurements,
             ),
@@ -1206,6 +1216,8 @@ def _validate_processing_flags(parser: argparse.ArgumentParser, args: argparse.N
         parser.error("--despeckle requires --process-out")
     if args.normalize_tones and not args.process_out:
         parser.error("--normalize-tones requires --process-out")
+    if args.lighten_edge_shadow and not args.process_out:
+        parser.error("--lighten-edge-shadow requires --process-out")
     if args.resume_processing and not args.process_out:
         parser.error("--resume-processing requires --process-out")
 

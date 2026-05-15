@@ -40,6 +40,7 @@ class PlanBatch:
     trim_dark_border: bool
     despeckle: bool
     normalize_tones: bool
+    lighten_edge_shadow: bool
     despeckle_backend: str
     resume_processing: bool
     reuse_scan_measurements: bool = False
@@ -185,6 +186,7 @@ def _run_batch(project_id: str, batch: PlanBatch, index: int) -> dict[str, Any]:
                 trim_dark_border=batch.trim_dark_border,
                 despeckle=batch.despeckle,
                 normalize_tones=batch.normalize_tones,
+                lighten_edge_shadow=batch.lighten_edge_shadow,
                 resume_processing=batch.resume_processing,
             )
         )
@@ -250,6 +252,7 @@ def _run_batch(project_id: str, batch: PlanBatch, index: int) -> dict[str, Any]:
                     trim_dark_border=batch.trim_dark_border,
                     despeckle=batch.despeckle,
                     normalize_tones=batch.normalize_tones,
+                    lighten_edge_shadow=batch.lighten_edge_shadow,
                     despeckle_backend=batch.despeckle_backend,
                     resume_processing=batch.resume_processing,
                     reuse_scan_measurements=batch.reuse_scan_measurements,
@@ -363,7 +366,7 @@ def _build_summary(
 
 
 def _aggregate_processing_operation_timings(batches: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    operation_names = ["auto_crop", "deskew", "trim_dark_border", "despeckle", "normalize_tones"]
+    operation_names = ["auto_crop", "deskew", "trim_dark_border", "despeckle", "normalize_tones", "lighten_edge_shadow"]
     totals: dict[str, dict[str, Any]] = {}
     for operation in operation_names:
         elapsed_seconds = 0.0
@@ -542,6 +545,7 @@ def _batch_from_row(row: dict[str, Any], index: int, plan_dir: Path, output_root
         trim_dark_border=_bool(normalized.get("trim_dark_border"), "trim_dark_border", index),
         despeckle=_bool(normalized.get("despeckle"), "despeckle", index),
         normalize_tones=_bool(normalized.get("normalize_tones"), "normalize_tones", index),
+        lighten_edge_shadow=_bool(normalized.get("lighten_edge_shadow"), "lighten_edge_shadow", index),
         despeckle_backend=_despeckle_backend(normalized.get("despeckle_backend"), index),
         resume_processing=_bool(normalized.get("resume_processing"), "resume_processing", index),
         reuse_scan_measurements=_bool(normalized.get("reuse_scan_measurements"), "reuse_scan_measurements", index),

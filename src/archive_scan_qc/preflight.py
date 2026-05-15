@@ -14,7 +14,15 @@ from .rules import RulesProfile, default_rules_profile
 from .scanner import _iter_candidate_files
 
 
-PROCESSING_FLAGS = ("auto_crop", "deskew", "trim_dark_border", "despeckle", "normalize_tones", "resume_processing")
+PROCESSING_FLAGS = (
+    "auto_crop",
+    "deskew",
+    "trim_dark_border",
+    "despeckle",
+    "normalize_tones",
+    "lighten_edge_shadow",
+    "resume_processing",
+)
 
 
 @dataclass(frozen=True)
@@ -34,6 +42,7 @@ class PreflightConfig:
     trim_dark_border: bool = False
     despeckle: bool = False
     normalize_tones: bool = False
+    lighten_edge_shadow: bool = False
     resume_processing: bool = False
 
 

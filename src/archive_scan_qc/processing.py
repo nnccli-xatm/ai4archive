@@ -36,6 +36,7 @@ class ProcessingOptions:
     trim_dark_border: bool = False
     despeckle: bool = False
     normalize_tones: bool = False
+    lighten_edge_shadow: bool = False
     despeckle_backend: str = "fallback"
     resume_processing: bool = False
     reuse_scan_measurements: bool = False
@@ -79,6 +80,18 @@ class ToneNormalizationResult:
     background_after: float | None
     contrast_before: float | None
     contrast_after: float | None
+
+
+@dataclass(frozen=True)
+class EdgeShadowLighteningResult:
+    image: Image.Image
+    applied: bool
+    reason: str
+    edges: tuple[str, ...]
+    edge_mean_before: float | None
+    edge_mean_after: float | None
+    edge_delta: float
+    changed_pixel_ratio: float
 
 
 def detect_skew(image: Image.Image) -> SkewDetection:
@@ -159,6 +172,7 @@ def process_images(
             "auto_crop_conservative" if options.auto_crop else "auto_crop_disabled",
             "despeckle_isolated_pixels" if options.despeckle else "despeckle_disabled",
             "normalize_tones_conservative" if options.normalize_tones else "normalize_tones_disabled",
+            "lighten_edge_shadow_conservative" if options.lighten_edge_shadow else "lighten_edge_shadow_disabled",
             "reuse_scan_measurements" if options.reuse_scan_measurements else "reuse_scan_measurements_disabled",
             "preserve_source_relative_path",
         ],
@@ -539,6 +553,13 @@ def _process_record(
         "tone_background_after": None,
         "tone_contrast_before": None,
         "tone_contrast_after": None,
+        "edge_shadow_lightened": False,
+        "edge_shadow_reason": None,
+        "edge_shadow_edges": [],
+        "edge_shadow_mean_before": None,
+        "edge_shadow_mean_after": None,
+        "edge_shadow_delta": 0.0,
+        "edge_shadow_changed_pixel_ratio": 0.0,
         "processing_audit": None,
         "processing_warnings": [],
         "operation_timings": {},
@@ -604,6 +625,13 @@ def _process_record(
                 "tone_background_after": process_info["tone_background_after"],
                 "tone_contrast_before": process_info["tone_contrast_before"],
                 "tone_contrast_after": process_info["tone_contrast_after"],
+                "edge_shadow_lightened": process_info["edge_shadow_lightened"],
+                "edge_shadow_reason": process_info["edge_shadow_reason"],
+                "edge_shadow_edges": process_info["edge_shadow_edges"],
+                "edge_shadow_mean_before": process_info["edge_shadow_mean_before"],
+                "edge_shadow_mean_after": process_info["edge_shadow_mean_after"],
+                "edge_shadow_delta": process_info["edge_shadow_delta"],
+                "edge_shadow_changed_pixel_ratio": process_info["edge_shadow_changed_pixel_ratio"],
                 "processing_audit": process_info["processing_audit"],
                 "processing_warnings": process_info["processing_warnings"],
                 "operation_timings": process_info["operation_timings"],
@@ -644,6 +672,13 @@ def _process_record(
                     "tone_background_after": process_info["tone_background_after"],
                     "tone_contrast_before": process_info["tone_contrast_before"],
                     "tone_contrast_after": process_info["tone_contrast_after"],
+                    "edge_shadow_lightened": process_info["edge_shadow_lightened"],
+                    "edge_shadow_reason": process_info["edge_shadow_reason"],
+                    "edge_shadow_edges": process_info["edge_shadow_edges"],
+                    "edge_shadow_mean_before": process_info["edge_shadow_mean_before"],
+                    "edge_shadow_mean_after": process_info["edge_shadow_mean_after"],
+                    "edge_shadow_delta": process_info["edge_shadow_delta"],
+                    "edge_shadow_changed_pixel_ratio": process_info["edge_shadow_changed_pixel_ratio"],
                     "processing_audit": process_info["processing_audit"],
                     "processing_warnings": process_info["processing_warnings"],
                     "operation_timings": process_info["operation_timings"],
@@ -709,6 +744,7 @@ def _processing_options_fingerprint(options: ProcessingOptions) -> str:
         "trim_dark_border": options.trim_dark_border,
         "despeckle": options.despeckle,
         "normalize_tones": options.normalize_tones,
+        "lighten_edge_shadow": options.lighten_edge_shadow,
         "despeckle_backend": options.despeckle_backend,
         "reuse_scan_measurements": options.reuse_scan_measurements,
         "deskew_max_degrees": options.deskew_max_degrees,
@@ -764,6 +800,7 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "trim_dark_border": options.trim_dark_border,
             "despeckle": options.despeckle,
             "normalize_tones": options.normalize_tones,
+            "lighten_edge_shadow": options.lighten_edge_shadow,
             "resume_processing": options.resume_processing,
             "reuse_scan_measurements": options.reuse_scan_measurements,
         },
@@ -803,6 +840,9 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "deskew_projection_detection_files": _int_count(deskew_timing.get("projection_detection_files")),
             "deskew_fallback_detection_files": _int_count(deskew_timing.get("fallback_detection_files")),
             "tone_normalized_files": sum(1 for audit in audit_records if audit.get("tone_normalized") is True),
+            "edge_shadow_lightened_files": sum(
+                1 for audit in audit_records if audit.get("edge_shadow_lightened") is True
+            ),
         },
         "thresholds": _audit_thresholds(options),
         "metrics": {
@@ -816,6 +856,10 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "despeckle_pixel_ratio": _aggregate_metric(audit_records, "despeckle_pixel_ratio"),
             "tone_background_delta": _aggregate_metric(audit_records, "tone_background_delta"),
             "tone_contrast_delta": _aggregate_metric(audit_records, "tone_contrast_delta"),
+            "edge_shadow_delta": _aggregate_metric(audit_records, "edge_shadow_delta"),
+            "edge_shadow_changed_pixel_ratio": _aggregate_metric(
+                audit_records, "edge_shadow_changed_pixel_ratio"
+            ),
         },
         "distributions": {
             "pixel_change_ratio": _ratio_distribution(audit_records, "pixel_change_ratio"),
@@ -866,6 +910,7 @@ def _aggregate_operation_timings(records: list[dict[str, Any]], options: Process
         "trim_dark_border": options.trim_dark_border,
         "despeckle": options.despeckle,
         "normalize_tones": options.normalize_tones,
+        "lighten_edge_shadow": options.lighten_edge_shadow,
     }
     timings: dict[str, dict[str, Any]] = {}
     for operation, is_enabled in enabled.items():
@@ -1174,6 +1219,19 @@ def _process_image(
         else:
             operations.append("normalize_tones_disabled")
 
+    edge_shadow = EdgeShadowLighteningResult(
+        processed, False, "edge shadow lightening disabled", (), None, None, 0.0, 0.0
+    )
+    with _operation_timer(operation_timings, "lighten_edge_shadow", enabled=options.lighten_edge_shadow):
+        if options.lighten_edge_shadow:
+            edge_shadow = _lighten_edge_shadow_conservative(processed)
+            processed = edge_shadow.image
+            operations.append(
+                "lighten_edge_shadow_conservative" if edge_shadow.applied else "lighten_edge_shadow_noop"
+            )
+        else:
+            operations.append("lighten_edge_shadow_disabled")
+
     processing_audit = _processing_audit(
         audit_source,
         processed,
@@ -1187,6 +1245,9 @@ def _process_image(
         tone.background_after,
         tone.contrast_before,
         tone.contrast_after,
+        edge_shadow.applied,
+        edge_shadow.edge_delta,
+        edge_shadow.changed_pixel_ratio,
     )
     processing_warnings = list(processing_audit["guardrail_failures"])
     crop_info = {
@@ -1214,6 +1275,13 @@ def _process_image(
         "tone_background_after": tone.background_after,
         "tone_contrast_before": tone.contrast_before,
         "tone_contrast_after": tone.contrast_after,
+        "edge_shadow_lightened": edge_shadow.applied,
+        "edge_shadow_reason": edge_shadow.reason,
+        "edge_shadow_edges": list(edge_shadow.edges),
+        "edge_shadow_mean_before": edge_shadow.edge_mean_before,
+        "edge_shadow_mean_after": edge_shadow.edge_mean_after,
+        "edge_shadow_delta": edge_shadow.edge_delta,
+        "edge_shadow_changed_pixel_ratio": edge_shadow.changed_pixel_ratio,
         "processing_audit": processing_audit,
         "processing_warnings": processing_warnings,
         "operation_timings": operation_timings,
@@ -1381,6 +1449,118 @@ def _normalize_tones_conservative(image: Image.Image) -> ToneNormalizationResult
     )
 
 
+def _lighten_edge_shadow_conservative(image: Image.Image) -> EdgeShadowLighteningResult:
+    if image.width < 80 or image.height < 80:
+        return _edge_shadow_noop(image, "edge shadow lightening skipped: image too small")
+    color_risk = _tone_color_risk_reason(image)
+    if color_risk:
+        return _edge_shadow_noop(image, "edge shadow lightening skipped: color content or annotation risk")
+
+    grayscale = image.convert("L")
+    histogram = grayscale.histogram()
+    total = image.width * image.height
+    p05 = _histogram_percentile(histogram, total, 0.05)
+    p95 = _histogram_percentile(histogram, total, 0.95)
+    if p95 < 170:
+        return _edge_shadow_noop(image, "edge shadow lightening skipped: page is too dark")
+    if p95 - p05 < 28:
+        return _edge_shadow_noop(image, "edge shadow lightening skipped: low tonal separation")
+
+    strip = max(6, min(24, int(round(min(image.width, image.height) * 0.055))))
+    edge_plans: list[tuple[str, tuple[int, int, int, int], tuple[int, int, int, int], float]] = []
+    candidates = [
+        ("left", (0, 0, strip, image.height), (strip, 0, strip * 3, image.height)),
+        (
+            "right",
+            (image.width - strip, 0, image.width, image.height),
+            (image.width - strip * 3, 0, image.width - strip, image.height),
+        ),
+        ("top", (0, 0, image.width, strip), (0, strip, image.width, strip * 3)),
+        (
+            "bottom",
+            (0, image.height - strip, image.width, image.height),
+            (0, image.height - strip * 3, image.width, image.height - strip),
+        ),
+    ]
+    for side, edge_box, inner_box in candidates:
+        edge = grayscale.crop(edge_box)
+        inner = grayscale.crop(inner_box)
+        edge_mean = ImageStat.Stat(edge).mean[0]
+        inner_mean = ImageStat.Stat(inner).mean[0]
+        edge_dark_ratio = _dark_pixel_ratio(edge, 125)
+        inner_dark_ratio = _dark_pixel_ratio(inner, 125)
+        delta = inner_mean - edge_mean
+        if edge_dark_ratio > 0.006:
+            return _edge_shadow_noop(image, f"edge shadow lightening skipped: archival mark or content risk at {side} edge")
+        if inner_dark_ratio > 0.012:
+            return _edge_shadow_noop(image, f"edge shadow lightening skipped:正文 or margin content risk near {side} edge")
+        if 12 <= delta <= 58 and edge_mean >= 135 and inner_mean >= 170:
+            edge_plans.append((side, edge_box, inner_box, min(28.0, delta * 0.72)))
+
+    if not edge_plans:
+        return _edge_shadow_noop(image, "edge shadow lightening skipped: no confident page-edge shadow")
+    if len(edge_plans) > 2:
+        return _edge_shadow_noop(image, "edge shadow lightening skipped: broad uneven lighting is outside conservative edge scope")
+
+    working_l = grayscale.copy()
+    before_values: list[float] = []
+    after_values: list[float] = []
+    changed_pixels = 0
+    for side, edge_box, _inner_box, max_delta in edge_plans:
+        edge = working_l.crop(edge_box)
+        before_values.append(ImageStat.Stat(edge).mean[0])
+        pixels = edge.load()
+        width, height = edge.size
+        for y in range(height):
+            for x in range(width):
+                value = pixels[x, y]
+                if value < 132:
+                    continue
+                distance = (
+                    x
+                    if side == "left"
+                    else width - 1 - x
+                    if side == "right"
+                    else y
+                    if side == "top"
+                    else height - 1 - y
+                )
+                factor = 1.0 - (distance / max(1, (width if side in {"left", "right"} else height)))
+                new_value = min(255, int(round(value + max_delta * max(0.0, factor))))
+                if new_value - value > 2:
+                    changed_pixels += 1
+                pixels[x, y] = new_value
+        working_l.paste(edge, edge_box)
+        after_values.append(ImageStat.Stat(working_l.crop(edge_box)).mean[0])
+
+    changed_ratio = changed_pixels / max(1, image.width * image.height)
+    if changed_ratio > 0.18:
+        return _edge_shadow_noop(image, "edge shadow lightening skipped: changed area exceeds conservative edge scope")
+
+    result_image = working_l if image.mode == "L" else Image.merge("RGB", (working_l, working_l, working_l))
+    before_mean = round(sum(before_values) / len(before_values), 6)
+    after_mean = round(sum(after_values) / len(after_values), 6)
+    return EdgeShadowLighteningResult(
+        result_image,
+        True,
+        "edge shadow lightening applied: narrow neutral page-edge shadow",
+        tuple(side for side, _edge_box, _inner_box, _delta in edge_plans),
+        before_mean,
+        after_mean,
+        round(after_mean - before_mean, 6),
+        round(changed_ratio, 6),
+    )
+
+
+def _edge_shadow_noop(image: Image.Image, reason: str) -> EdgeShadowLighteningResult:
+    return EdgeShadowLighteningResult(image, False, reason, (), None, None, 0.0, 0.0)
+
+
+def _dark_pixel_ratio(image: Image.Image, threshold: int) -> float:
+    histogram = image.histogram()
+    return sum(histogram[:threshold]) / max(1, image.width * image.height)
+
+
 def _tone_color_risk_reason(image: Image.Image) -> str | None:
     if image.mode == "L":
         return None
@@ -1427,6 +1607,9 @@ def _processing_audit(
     tone_background_after: float | None = None,
     tone_contrast_before: float | None = None,
     tone_contrast_after: float | None = None,
+    edge_shadow_lightened: bool = False,
+    edge_shadow_delta: float = 0.0,
+    edge_shadow_changed_pixel_ratio: float = 0.0,
 ) -> dict[str, Any]:
     source_width, source_height = source.size
     output_width, output_height = processed.size
@@ -1478,6 +1661,9 @@ def _processing_audit(
         "tone_normalized": tone_normalized,
         "tone_background_delta": round(tone_background_delta, 6),
         "tone_contrast_delta": round(tone_contrast_delta, 6),
+        "edge_shadow_lightened": edge_shadow_lightened,
+        "edge_shadow_delta": round(edge_shadow_delta, 6),
+        "edge_shadow_changed_pixel_ratio": round(edge_shadow_changed_pixel_ratio, 6),
         "crop_ratio": round(max(0.0, crop_ratio), 6),
         "trim_margins": trim_margins,
         "max_trim_margin_ratio": round(max_trim_margin_ratio, 6),
