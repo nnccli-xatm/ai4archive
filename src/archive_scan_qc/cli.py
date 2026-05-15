@@ -157,6 +157,11 @@ def _add_scan_arguments(parser: argparse.ArgumentParser, *, include_scan_overrid
         help="Conservatively lighten small neutral stains on light page backgrounds. Requires --process-out.",
     )
     parser.add_argument(
+        "--lighten-scanlines",
+        action="store_true",
+        help="Conservatively lighten low-contrast scanlines on protected light backgrounds. Requires --process-out.",
+    )
+    parser.add_argument(
         "--despeckle-backend",
         choices=("fallback", "numpy"),
         default="fallback",
@@ -285,6 +290,7 @@ def main(argv: list[str] | None = None) -> int:
                 normalize_tones=args.normalize_tones,
                 lighten_edge_shadow=args.lighten_edge_shadow,
                 lighten_background_stains=args.lighten_background_stains,
+                lighten_scanlines=args.lighten_scanlines,
                 despeckle_backend=args.despeckle_backend,
                 resume_processing=args.resume_processing,
                 reuse_scan_measurements=args.reuse_scan_measurements,
@@ -359,6 +365,7 @@ def _main_preflight(argv: list[str]) -> int:
             resume_processing=args.resume_processing,
             lighten_edge_shadow=args.lighten_edge_shadow,
             lighten_background_stains=args.lighten_background_stains,
+            lighten_scanlines=args.lighten_scanlines,
         )
     )
     path = write_preflight_report(report, args.out)
@@ -398,6 +405,7 @@ def _main_production_run(argv: list[str]) -> int:
     parser.add_argument("--normalize-tones", action="store_true", help="保守校正偏灰、偏暗的低对比度页面。")
     parser.add_argument("--lighten-edge-shadow", action="store_true", help="保守减淡不接触正文的页边窄幅阴影。")
     parser.add_argument("--lighten-background-stains", action="store_true", help="保守减淡浅色纸面上不接触正文和印章的小范围浅斑。")
+    parser.add_argument("--lighten-scanlines", action="store_true", help="保守减淡浅色背景中不接触正文和档案原貌的低对比扫描线。")
     parser.add_argument(
         "--despeckle-backend",
         choices=("fallback", "numpy"),
@@ -449,6 +457,7 @@ def _main_production_run(argv: list[str]) -> int:
                 normalize_tones=args.normalize_tones,
                 lighten_edge_shadow=args.lighten_edge_shadow,
                 lighten_background_stains=args.lighten_background_stains,
+                lighten_scanlines=args.lighten_scanlines,
                 despeckle_backend=args.despeckle_backend,
                 resume_processing=args.resume_processing,
                 reuse_scan_measurements=args.reuse_scan_measurements,
@@ -1044,6 +1053,7 @@ def _main_processing_plan(argv: list[str]) -> int:
     parser.add_argument("--normalize-tones", action="store_true", help="Plan conservative gray/dark page tone normalization candidates.")
     parser.add_argument("--lighten-edge-shadow", action="store_true", help="Plan conservative narrow edge-shadow lightening candidates.")
     parser.add_argument("--lighten-background-stains", action="store_true", help="Plan conservative light background stain candidates.")
+    parser.add_argument("--lighten-scanlines", action="store_true", help="Plan conservative low-contrast scanline lightening candidates.")
     parser.add_argument(
         "--despeckle-backend",
         choices=("fallback", "numpy"),
@@ -1069,6 +1079,7 @@ def _main_processing_plan(argv: list[str]) -> int:
                 normalize_tones=args.normalize_tones,
                 lighten_edge_shadow=args.lighten_edge_shadow,
                 lighten_background_stains=args.lighten_background_stains,
+                lighten_scanlines=args.lighten_scanlines,
                 despeckle_backend=args.despeckle_backend,
                 reuse_scan_measurements=args.reuse_scan_measurements,
             ),
@@ -1232,6 +1243,8 @@ def _validate_processing_flags(parser: argparse.ArgumentParser, args: argparse.N
         parser.error("--lighten-edge-shadow requires --process-out")
     if args.lighten_background_stains and not args.process_out:
         parser.error("--lighten-background-stains requires --process-out")
+    if args.lighten_scanlines and not args.process_out:
+        parser.error("--lighten-scanlines requires --process-out")
     if args.resume_processing and not args.process_out:
         parser.error("--resume-processing requires --process-out")
 

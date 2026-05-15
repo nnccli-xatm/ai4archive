@@ -69,6 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--normalize-tones", action="store_true", help="Enable conservative gray/dark page tone normalization.")
     parser.add_argument("--lighten-edge-shadow", action="store_true", help="Enable conservative narrow edge-shadow lightening.")
     parser.add_argument("--lighten-background-stains", action="store_true", help="Enable conservative light background stain lightening.")
+    parser.add_argument("--lighten-scanlines", action="store_true", help="Enable conservative low-contrast scanline lightening.")
     parser.add_argument(
         "--reuse-scan-measurements",
         action="store_true",
@@ -147,6 +148,7 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
                         normalize_tones=args.normalize_tones,
                         lighten_edge_shadow=args.lighten_edge_shadow,
                         lighten_background_stains=args.lighten_background_stains,
+                        lighten_scanlines=args.lighten_scanlines,
                         despeckle_backend=despeckle_backend,
                         reuse_scan_measurements=getattr(args, "reuse_scan_measurements", False),
                         workers=workers,
@@ -504,6 +506,7 @@ def _processing_operation_timings(processing_manifest: dict[str, Any] | None) ->
         "normalize_tones",
         "lighten_edge_shadow",
         "lighten_background_stains",
+        "lighten_scanlines",
     ]
     timings: dict[str, Any] = {}
     for operation in operation_names:
@@ -553,6 +556,7 @@ def _operations(args: argparse.Namespace) -> dict[str, bool | str]:
         "normalize_tones": getattr(args, "normalize_tones", False),
         "lighten_edge_shadow": getattr(args, "lighten_edge_shadow", False),
         "lighten_background_stains": getattr(args, "lighten_background_stains", False),
+        "lighten_scanlines": getattr(args, "lighten_scanlines", False),
         "despeckle_backend": getattr(args, "despeckle_backend", "fallback"),
         "reuse_scan_measurements": getattr(args, "reuse_scan_measurements", False),
     }
@@ -590,6 +594,7 @@ def _csv_fields() -> list[str]:
         "normalize_tones",
         "lighten_edge_shadow",
         "lighten_background_stains",
+        "lighten_scanlines",
         "reuse_scan_measurements",
         "total_files",
         "openable_files",
@@ -634,6 +639,7 @@ def _csv_row(run: dict[str, Any], environment: dict[str, Any]) -> dict[str, Any]
         "normalize_tones": operations["normalize_tones"],
         "lighten_edge_shadow": operations.get("lighten_edge_shadow", False),
         "lighten_background_stains": operations.get("lighten_background_stains", False),
+        "lighten_scanlines": operations.get("lighten_scanlines", False),
         "reuse_scan_measurements": operations.get("reuse_scan_measurements", False),
         "total_files": run["total_files"],
         "openable_files": run["openable_files"],

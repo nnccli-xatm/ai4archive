@@ -60,6 +60,7 @@ def build_processing_plan(
         "background_stain_lightening_candidates": sum(
             1 for record in records if record.get("background_stain_lightening_candidate")
         ),
+        "scanline_lightening_candidates": sum(1 for record in records if record.get("scanline_lightening_candidate")),
     }
     return {
         "schema_version": "scan-qc.processing-plan.v1",
@@ -74,6 +75,7 @@ def build_processing_plan(
             "normalize_tones": options.normalize_tones,
             "lighten_edge_shadow": options.lighten_edge_shadow,
             "lighten_background_stains": options.lighten_background_stains,
+            "lighten_scanlines": options.lighten_scanlines,
             "resume_processing": False,
             "reuse_scan_measurements": options.reuse_scan_measurements,
         },
@@ -134,6 +136,9 @@ def _plan_record(item: dict[str, Any], input_dir: Path, options: ProcessingOptio
         "edge_shadow_edges": [],
         "background_stain_lightening_candidate": False,
         "background_stains_reason": None,
+        "scanline_lightening_candidate": False,
+        "scanlines_reason": None,
+        "scanlines_orientation": None,
         "processing_audit": None,
         "processing_warnings": [],
         "failure_reason": None,
@@ -182,6 +187,9 @@ def _plan_record(item: dict[str, Any], input_dir: Path, options: ProcessingOptio
             "edge_shadow_edges": process_info["edge_shadow_edges"],
             "background_stain_lightening_candidate": process_info["background_stains_lightened"],
             "background_stains_reason": process_info["background_stains_reason"],
+            "scanline_lightening_candidate": process_info["scanlines_lightened"],
+            "scanlines_reason": process_info["scanlines_reason"],
+            "scanlines_orientation": process_info["scanlines_orientation"],
             "processing_audit": process_info["processing_audit"],
             "processing_warnings": process_info["processing_warnings"],
         }
@@ -215,6 +223,9 @@ def _write_plan_csv(plan: dict[str, Any], path: Path) -> None:
         "edge_shadow_edges",
         "background_stain_lightening_candidate",
         "background_stains_reason",
+        "scanline_lightening_candidate",
+        "scanlines_reason",
+        "scanlines_orientation",
         "processing_warnings",
         "failure_reason",
     ]

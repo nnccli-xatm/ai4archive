@@ -3242,6 +3242,7 @@ class ScanQcTest(unittest.TestCase):
                 "--normalize-tones",
                 "--lighten-edge-shadow",
                 "--lighten-background-stains",
+                "--lighten-scanlines",
                 "--min-scan-files-per-minute",
                 "100",
                 "--min-processing-files-per-minute",
@@ -3257,6 +3258,7 @@ class ScanQcTest(unittest.TestCase):
         self.assertTrue(baseline_args.normalize_tones)
         self.assertTrue(baseline_args.lighten_edge_shadow)
         self.assertTrue(baseline_args.lighten_background_stains)
+        self.assertTrue(baseline_args.lighten_scanlines)
         self.assertTrue(baseline_args.cleanup_artifacts)
 
     def test_rework_action_list_groups_qc_findings_and_processing_retry(self) -> None:
@@ -8660,6 +8662,7 @@ class ScanQcTest(unittest.TestCase):
                 "--normalize-tones",
                 "--lighten-edge-shadow",
                 "--lighten-background-stains",
+                "--lighten-scanlines",
             ]:
                 with self.assertRaises(SystemExit) as raised:
                     main(["--input", str(input_dir), "--out", str(output_dir), option])
