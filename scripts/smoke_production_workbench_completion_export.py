@@ -103,8 +103,8 @@ def run_smoke() -> dict[str, Any]:
         (metadata_dir / PRODUCTION_RUN_SUMMARY_JSON).write_text(
             json.dumps(
                 {
-                    "operator_summary": {"derivative_images_ready": 7},
-                    "counts": {"processed_files": 7, "resumed_files": 0},
+                    "operator_summary": {"total_source_images": 8, "derivative_images_ready": 7},
+                    "counts": {"total_files": 8, "openable_files": 8, "processed_files": 7, "resumed_files": 0},
                     "local_reuse_summary": {
                         "schema_version": "scan-qc.local-processing-reuse-summary.v1",
                         "aggregate_only": True,
@@ -171,6 +171,7 @@ def run_smoke() -> dict[str, Any]:
         _assert(panel.get("total_review_items") == 3, "completion panel total count changed")
         _assert(panel.get("reviewed_items") == 3, "completion panel reviewed count changed")
         _assert(panel.get("pending_items") == 0, "completion panel pending count changed")
+        _assert(panel.get("total_source_images") == 8, "completion panel original source count changed")
         _assert(panel.get("processed_output_images") == 7, "completion panel output count changed")
         _assert(panel.get("needs_rescan_images") == 1, "completion panel rescan count changed")
         _assert(panel.get("needs_reprocess_images") == 1, "completion panel reprocess count changed")
@@ -187,8 +188,11 @@ def run_smoke() -> dict[str, Any]:
             },
             "completion panel reuse count summary changed",
         )
-        _assert(str(output_dir.resolve()) == panel.get("derivatives_dir"), "derivative artifact pointer changed")
-        _assert(str(metadata_dir.resolve()) == panel.get("metadata_dir"), "metadata artifact pointer changed")
+        _assert(panel.get("decision_summary_saved") is True, "decision summary saved flag missing")
+        _assert(panel.get("verification_summary_saved") is True, "verification summary saved flag missing")
+        _assert(panel.get("completion_note_saved") is True, "completion note saved flag missing")
+        _assert("derivatives_dir" not in panel and "metadata_dir" not in panel, "completion panel exposed local folders")
+        _assert("completion_note_path" not in panel, "completion panel exposed local artifact filename")
 
         artifacts = [
             metadata_dir / REVIEW_DECISION_SUMMARY_JSON,
@@ -206,15 +210,19 @@ def run_smoke() -> dict[str, Any]:
         _assert(saved_summary.get("source_type") == "production_workbench", "saved summary source type changed")
         _assert(verification.get("status") == "pass", "saved verification did not pass")
         _assert("本批已完成交接说明" in completion_note, "completion note missing Chinese handoff title")
+        _assert("本批次是否完成：已完成，可交接" in completion_note, "completion note missing completion state")
+        _assert("扫描原图总数：8 张" in completion_note, "completion note missing source image count")
         _assert("复核总数：3" in completion_note, "completion note missing aggregate total")
-        _assert("已输出处理后图片：7 张" in completion_note, "completion note missing output handoff count")
+        _assert("处理后图片数量：7 张" in completion_note, "completion note missing output handoff count")
         _assert("需要重扫：1 张" in completion_note, "completion note missing rescan handoff count")
         _assert("需要重新处理：1 张" in completion_note, "completion note missing reprocess handoff count")
         _assert("待决定：0" in completion_note, "completion note missing aggregate pending count")
+        _assert("本批复用了 2 张，重新处理 5 张，失败 0 张，剩余 0 张。" in completion_note, "completion note missing reuse handoff counts")
         _assert("未关闭 P0：0" in completion_note, "completion note missing aggregate open P0 count")
         _assert("未关闭 P1：0" in completion_note, "completion note missing aggregate open P1 count")
         _assert("已有人工处理结论：3" in completion_note, "completion note missing aggregate handled count")
         _assert_no_private_terms(saved_summary, "saved summary")
+        _assert_no_private_terms({"completion_note": completion_note}, "completion note")
         _assert_no_private_terms(
             {
                 "title_zh": panel.get("title_zh"),
@@ -225,6 +233,7 @@ def run_smoke() -> dict[str, Any]:
                 "total_review_items": panel.get("total_review_items"),
                 "reviewed_items": panel.get("reviewed_items"),
                 "pending_items": panel.get("pending_items"),
+                "total_source_images": panel.get("total_source_images"),
                 "processed_output_images": panel.get("processed_output_images"),
                 "needs_rescan_images": panel.get("needs_rescan_images"),
                 "needs_reprocess_images": panel.get("needs_reprocess_images"),
@@ -241,6 +250,7 @@ def run_smoke() -> dict[str, Any]:
             "review_items": panel.get("total_review_items"),
             "reviewed_items": panel.get("reviewed_items"),
             "pending_items": panel.get("pending_items"),
+            "total_source_images": panel.get("total_source_images"),
             "processed_output_images": panel.get("processed_output_images"),
             "needs_rescan_images": panel.get("needs_rescan_images"),
             "needs_reprocess_images": panel.get("needs_reprocess_images"),

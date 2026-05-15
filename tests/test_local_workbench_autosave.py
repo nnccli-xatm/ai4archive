@@ -965,20 +965,24 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertEqual(controller.preview_path("PRQ000001", "processed")[1], "processed")
 
     def test_final_completion_still_writes_verifier_outputs(self) -> None:
+        private_hash = "b" * 64
+        private_ocr = "PRIVATE_COMPLETION_OCR_SHOULD_NOT_LEAK"
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             input_dir = root / "input"
             output_dir = root / "output"
             metadata_dir = root / "metadata"
             input_dir.mkdir()
+            private_file = input_dir / "private_completion_page.png"
+            private_file.write_bytes(b"fake image placeholder")
             controller = WorkbenchController()
             controller.configure(input_dir, output_dir, metadata_dir)
 
             (metadata_dir / PRODUCTION_RUN_SUMMARY_JSON).write_text(
                 json.dumps(
                     {
-                        "operator_summary": {"derivative_images_ready": 7},
-                        "counts": {"processed_files": 7, "resumed_files": 0},
+                        "operator_summary": {"total_source_images": 8, "derivative_images_ready": 7},
+                        "counts": {"total_files": 8, "openable_files": 8, "processed_files": 7, "resumed_files": 0},
                         "local_reuse_summary": {
                             "schema_version": "scan-qc.local-processing-reuse-summary.v1",
                             "aggregate_only": True,
@@ -986,6 +990,12 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
                             "reprocessed_files": 5,
                             "failed_files": 0,
                             "remaining_files": 0,
+                        },
+                        "private_debug": {
+                            "path": str(private_file),
+                            "file_name": private_file.name,
+                            "sha256": private_hash,
+                            "ocr_text": private_ocr,
                         },
                     },
                     ensure_ascii=False,
@@ -1039,6 +1049,7 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertEqual(result["completion_panel"]["total_review_items"], 3)
             self.assertEqual(result["completion_panel"]["reviewed_items"], 3)
             self.assertEqual(result["completion_panel"]["pending_items"], 0)
+            self.assertEqual(result["completion_panel"]["total_source_images"], 8)
             self.assertEqual(result["completion_panel"]["processed_output_images"], 7)
             self.assertEqual(result["completion_panel"]["needs_rescan_images"], 1)
             self.assertEqual(result["completion_panel"]["needs_reprocess_images"], 1)
@@ -1069,11 +1080,11 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertIn("推荐用于正常批量生产", result["completion_panel"]["processing_mode"]["purpose_zh"])
             self.assertIn("生成处理后优化图片", result["completion_panel"]["processing_mode"]["output_zh"])
             self.assertNotIn(str(input_dir), json.dumps(result["completion_panel"]["processing_mode"], ensure_ascii=False))
-            self.assertEqual(result["completion_panel"]["derivatives_dir"], str(output_dir.resolve()))
-            self.assertEqual(result["completion_panel"]["metadata_dir"], str(metadata_dir.resolve()))
-            self.assertTrue(result["completion_panel"]["decision_summary_path"].endswith(REVIEW_DECISION_SUMMARY_JSON))
-            self.assertTrue(result["completion_panel"]["verification_summary_path"].endswith(REVIEW_DECISION_VERIFICATION_JSON))
-            self.assertTrue(result["completion_panel"]["completion_note_path"].endswith(COMPLETION_NOTE_TXT))
+            self.assertTrue(result["completion_panel"]["decision_summary_saved"])
+            self.assertTrue(result["completion_panel"]["verification_summary_saved"])
+            self.assertTrue(result["completion_panel"]["completion_note_saved"])
+            self.assertEqual(result["saved"], {"decision_summary": True, "verification_summary": True, "completion_note": True})
+            self.assertNotIn("folders", result)
             self.assertEqual(
                 result["completion_panel"]["next_steps_zh"],
                 [
@@ -1090,15 +1101,17 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertEqual(saved_summary["operator_decisions"][0]["note_zh"], "边缘不清楚，需要补扫。")
             self.assertEqual(saved_summary["operator_decisions"][0]["decided_at"], "2026-05-13T11:00:00.000Z")
             completion_note = (metadata_dir / COMPLETION_NOTE_TXT).read_text(encoding="utf-8")
+            self.assertIn("本批次是否完成：已完成，可交接", completion_note)
             self.assertIn("复核人员：复核员乙", completion_note)
             self.assertIn("处理方式：标准优化", completion_note)
             self.assertIn("推荐用于正常批量生产", completion_note)
-            self.assertIn("处理后图片文件夹：", completion_note)
-            self.assertIn("复核结果保存位置：", completion_note)
+            self.assertIn("扫描原图总数：8 张", completion_note)
             self.assertIn("复核结果和交接说明已保存到本机状态文件夹", completion_note)
-            self.assertIn("已输出处理后图片：7 张", completion_note)
+            self.assertIn("处理后图片数量：7 张", completion_note)
             self.assertIn("需要重扫：1 张", completion_note)
             self.assertIn("需要重新处理：1 张", completion_note)
+            self.assertIn("待决定：0", completion_note)
+            self.assertIn("本批复用了 2 张，重新处理 5 张，失败 0 张，剩余 0 张。", completion_note)
             self.assertIn("交接前检查：打开输出文件夹", completion_note)
             self.assertIn("当前复核队列", completion_note)
             self.assertIn("不要混用批次", completion_note)
@@ -1108,6 +1121,30 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertIn("已有人工处理结论：3", completion_note)
             verification = json.loads((metadata_dir / REVIEW_DECISION_VERIFICATION_JSON).read_text(encoding="utf-8"))
             self.assertEqual(verification["status"], "pass")
+            public_result_text = json.dumps(result, ensure_ascii=False, sort_keys=True)
+            assert_public_restore_payload_is_private(
+                self,
+                {"result": result, "completion_note": completion_note},
+                [
+                    str(root),
+                    str(input_dir),
+                    str(output_dir),
+                    str(metadata_dir),
+                    str(private_file),
+                    private_file.name,
+                    private_hash,
+                    private_ocr,
+                    REVIEW_DECISION_SUMMARY_JSON,
+                    REVIEW_DECISION_VERIFICATION_JSON,
+                    COMPLETION_NOTE_TXT,
+                    "sha256",
+                    "ocr_text",
+                    ".png",
+                ],
+            )
+            self.assertNotIn("derivatives_dir", public_result_text)
+            self.assertNotIn("metadata_dir", public_result_text)
+            self.assertNotIn("completion_note_path", public_result_text)
 
     def test_final_completion_allows_no_review_items(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

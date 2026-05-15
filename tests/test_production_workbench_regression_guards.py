@@ -207,6 +207,8 @@ class ProductionWorkbenchRegressionGuardTests(unittest.TestCase):
         ]:
             self.assertIn(required, server)
         self.assertIn("state.status === \"complete\" && state.outputChosen && state.openOutputFolderAvailable", html)
+        self.assertIn("panel.completion_note_saved", html)
+        self.assertNotIn("panel.completion_note_path", html)
 
     def test_completed_handoff_shows_only_aggregate_reuse_counts_when_available(self) -> None:
         html = WORKBENCH_HTML.read_text(encoding="utf-8")

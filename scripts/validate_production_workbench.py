@@ -480,8 +480,8 @@ def validate_completion_export_smoke(html: str, errors: list[str]) -> None:
         "state.outputSummary = `已准备 ${state.readyImages} 张处理后图片`;",
         "Number.isFinite(Number(panel.needs_rescan_images))",
         "Number.isFinite(Number(panel.needs_reprocess_images))",
-        "if (panel.metadata_dir) state.decisionSaveSummary = DECISION_SAVE_LABEL;",
-        "if (panel.metadata_dir || panel.completion_note_path) state.completionNoteSummary = COMPLETION_NOTE_LABEL;",
+        "if (panel.decision_summary_saved || panel.verification_summary_saved) state.decisionSaveSummary = DECISION_SAVE_LABEL;",
+        "if (panel.completion_note_saved) state.completionNoteSummary = COMPLETION_NOTE_LABEL;",
     ]:
         if required_token not in html:
             errors.append(f"missing completion export smoke token: {required_token}")
@@ -573,6 +573,8 @@ def validate_completion_export_smoke(html: str, errors: list[str]) -> None:
                     errors.append(f"completion panel has unexpected {key}")
             if panel.get("processed_output_images") != 7:
                 errors.append("completion panel missing processed output handoff count")
+            if panel.get("total_source_images") != 0:
+                errors.append("completion panel should expose aggregate original count with a stable zero fallback")
             if panel.get("needs_rescan_images") != 1:
                 errors.append("completion panel missing rescan handoff count")
             if panel.get("needs_reprocess_images") != 1:
@@ -620,11 +622,22 @@ def validate_completion_export_smoke(html: str, errors: list[str]) -> None:
                 ensure_ascii=False,
                 sort_keys=True,
             )
-            for private_value in [str(input_dir), str(output_dir), str(metadata_dir), REVIEW_DECISION_SUMMARY_JSON]:
+            for private_value in [
+                str(input_dir),
+                str(output_dir),
+                str(metadata_dir),
+                REVIEW_DECISION_SUMMARY_JSON,
+                REVIEW_DECISION_VERIFICATION_JSON,
+                COMPLETION_NOTE_TXT,
+            ]:
                 if private_value in public_panel_text:
                     errors.append("completion panel public guidance exposes a local path or artifact filename")
-            if str(output_dir.resolve()) != panel.get("derivatives_dir") or str(metadata_dir.resolve()) != panel.get("metadata_dir"):
-                errors.append("completion panel local artifact pointers are not rooted in the configured local folders")
+            if any(key in panel for key in ["derivatives_dir", "metadata_dir", "decision_summary_path", "verification_summary_path", "completion_note_path"]):
+                errors.append("completion panel exposes local artifact paths instead of aggregate saved flags")
+            if panel.get("decision_summary_saved") is not True or panel.get("verification_summary_saved") is not True:
+                errors.append("completion panel missing saved verifier flags")
+            if panel.get("completion_note_saved") is not True:
+                errors.append("completion panel missing saved handoff note flag")
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         errors.append(f"completion export smoke failed: {exc}")
 
@@ -1002,7 +1015,7 @@ def main() -> int:
         "completion_panel",
         "ready_to_finish",
         "canFinishWithoutReview",
-        "completion_note_path",
+        "completion_note_saved",
         "completion_status_zh",
         "manual_work_zh",
         "admin_handoff_zh",
