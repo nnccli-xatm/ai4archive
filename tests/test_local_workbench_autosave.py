@@ -594,6 +594,97 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
                 [str(root), str(private_file), private_file.name, private_hash, private_ocr, ".png", "sha256", "OCR"],
             )
 
+    def test_recreated_controller_blocks_completed_handoff_when_aggregates_disagree(self) -> None:
+        private_hash = "f" * 64
+        private_ocr = "PRIVATE_RESTORED_OCR_SHOULD_NOT_LEAK"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            metadata_dir.mkdir()
+            private_file = input_dir / "private_restored_page.jpg"
+            private_file.write_bytes(b"fake image placeholder")
+            (metadata_dir / PRODUCTION_RUN_SUMMARY_JSON).write_text(
+                json.dumps(
+                    {
+                        "schema_version": "scan-qc.production-run.v1",
+                        "status": "finished",
+                        "counts": {
+                            "total_files": 5,
+                            "openable_files": 5,
+                            "p0_findings": 0,
+                            "processed_files": 2,
+                            "resumed_files": 0,
+                            "skipped_files": 0,
+                            "failed_files": 0,
+                            "retry_list_files": 0,
+                        },
+                        "operator_summary": {
+                            "message_zh": "处理后图片已经准备好。",
+                            "total_source_images": 5,
+                            "derivative_images_ready": 5,
+                            "files_needing_attention": 0,
+                            "input_folder": str(input_dir),
+                        },
+                        "debug_should_not_surface": {
+                            "file": private_file.name,
+                            "path": str(private_file),
+                            "sha256": private_hash,
+                            "ocr": private_ocr,
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            (metadata_dir / "production_run_progress.json").write_text(
+                json.dumps({"schema_version": "scan-qc.production-run-progress.v1", "state": "finished"}),
+                encoding="utf-8",
+            )
+            (metadata_dir / REVIEW_DECISION_SUMMARY_JSON).write_text(
+                json.dumps(decision_summary([]), ensure_ascii=False),
+                encoding="utf-8",
+            )
+            (metadata_dir / REVIEW_DECISION_VERIFICATION_JSON).write_text(
+                json.dumps(
+                    {
+                        "status": "pass",
+                        "decision_summary": {
+                            "completion_status": "complete",
+                            "total_decisions": 0,
+                            "pending": 0,
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            (metadata_dir / COMPLETION_NOTE_TXT).write_text("历史完成说明", encoding="utf-8")
+
+            status = WorkbenchController().configure(input_dir, output_dir, metadata_dir)
+
+            self.assertEqual(status["restored_batch"]["kind"], "handoff_count_mismatch")
+            self.assertFalse(status["restored_batch"]["can_open_output_folder"])
+            self.assertTrue(status["restored_batch"]["can_prepare_next_batch"])
+            self.assertIsNone(status["completion_panel"])
+            self.assertEqual(status["recovery_guidance"]["title_zh"], "交接前数量需要确认")
+            self.assertIn("当前不能显示为可以交接", status["recovery_guidance"]["message_zh"])
+            assert_public_restore_payload_is_private(
+                self,
+                {
+                    "restored_batch": status["restored_batch"],
+                    "completion_panel": status["completion_panel"],
+                    "recovery_guidance": status["recovery_guidance"],
+                },
+                [str(root), str(private_file), private_file.name, private_hash, private_ocr, ".jpg", "sha256", "OCR"],
+            )
+            controller = WorkbenchController()
+            controller.configure(input_dir, output_dir, metadata_dir)
+            with self.assertRaisesRegex(ValueError, "本批还没有完成"):
+                controller.open_output_folder()
+
     def test_recreated_controller_restores_review_queue_aggregate_state(self) -> None:
         private_hash = "e" * 64
         private_ocr = "PRIVATE_REVIEW_OCR_SHOULD_NOT_LEAK"
@@ -1043,6 +1134,132 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertIn("只质检不修图", completion_note)
             verification = json.loads((metadata_dir / REVIEW_DECISION_VERIFICATION_JSON).read_text(encoding="utf-8"))
             self.assertEqual(verification["status"], "pass")
+
+    def test_final_completion_allows_handoff_when_aggregates_are_consistent(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            controller = WorkbenchController()
+            controller.configure(input_dir, output_dir, metadata_dir)
+
+            (metadata_dir / PRODUCTION_RUN_SUMMARY_JSON).write_text(
+                json.dumps(
+                    {
+                        "schema_version": "scan-qc.production-run.v1",
+                        "status": "finished",
+                        "counts": {
+                            "total_files": 4,
+                            "openable_files": 4,
+                            "p0_findings": 2,
+                            "processed_files": 3,
+                            "resumed_files": 1,
+                            "skipped_files": 0,
+                            "failed_files": 0,
+                            "retry_list_files": 0,
+                        },
+                        "operator_summary": {
+                            "total_source_images": 4,
+                            "derivative_images_ready": 4,
+                            "files_needing_attention": 2,
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            (metadata_dir / "production_run_progress.json").write_text(
+                json.dumps({"schema_version": "scan-qc.production-run-progress.v1", "state": "needs_review"}),
+                encoding="utf-8",
+            )
+            (metadata_dir / PRODUCTION_REVIEW_QUEUE_JSON).write_text(
+                json.dumps({"summary": {"total_items": 2}}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            result = controller.save_review_decisions(
+                decision_summary([("PRQ000001", "needs_rescan"), ("PRQ000002", "false_positive")])
+            )
+
+            self.assertTrue(result["finished"])
+            self.assertEqual(result["completion_panel"]["completion_status_zh"], "本批已完成")
+            self.assertEqual(result["completion_panel"]["processed_output_images"], 4)
+            self.assertTrue(result["completion_panel"]["open_output_folder_available"])
+            self.assertIn("打开输出文件夹", result["completion_panel"]["next_steps_zh"][0])
+
+    def test_final_completion_blocks_handoff_when_summary_counts_disagree(self) -> None:
+        private_hash = "a" * 64
+        private_ocr = "PRIVATE_OCR_SHOULD_NOT_LEAK"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            private_file = input_dir / "private_mismatch_page.png"
+            private_file.write_bytes(b"fake image placeholder")
+            controller = WorkbenchController()
+            controller.configure(input_dir, output_dir, metadata_dir)
+
+            (metadata_dir / PRODUCTION_RUN_SUMMARY_JSON).write_text(
+                json.dumps(
+                    {
+                        "schema_version": "scan-qc.production-run.v1",
+                        "status": "finished",
+                        "counts": {
+                            "total_files": 3,
+                            "openable_files": 3,
+                            "p0_findings": 1,
+                            "processed_files": 1,
+                            "resumed_files": 0,
+                            "skipped_files": 0,
+                            "failed_files": 0,
+                            "retry_list_files": 0,
+                        },
+                        "operator_summary": {
+                            "total_source_images": 3,
+                            "derivative_images_ready": 3,
+                            "files_needing_attention": 1,
+                            "debug_path": str(private_file),
+                        },
+                        "debug_should_not_surface": {
+                            "file": private_file.name,
+                            "sha256": private_hash,
+                            "ocr": private_ocr,
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            (metadata_dir / "production_run_progress.json").write_text(
+                json.dumps({"schema_version": "scan-qc.production-run-progress.v1", "state": "needs_review"}),
+                encoding="utf-8",
+            )
+            (metadata_dir / PRODUCTION_REVIEW_QUEUE_JSON).write_text(
+                json.dumps({"summary": {"total_items": 1}}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "本机状态数量互相不一致"):
+                controller.save_review_decisions(decision_summary([("PRQ000001", "false_positive")]))
+
+            self.assertFalse((metadata_dir / COMPLETION_NOTE_TXT).exists())
+            self.assertFalse((metadata_dir / REVIEW_DECISION_SUMMARY_JSON).exists())
+            assert_public_restore_payload_is_private(
+                self,
+                {
+                    "message_zh": "本机状态数量互相不一致，当前不能显示为可以交接。",
+                    "next_steps_zh": [
+                        "请先检查输出文件夹中的处理后图片数量。",
+                        "如果仍有待确认图片，请重新确认待看图项目。",
+                        "如本批处理被中断或文件夹被改动，请重新开始处理本批。",
+                    ],
+                },
+                [str(root), str(private_file), private_file.name, private_hash, private_ocr, ".png", "sha256", "OCR"],
+            )
 
     def test_open_output_folder_requires_completed_batch_and_returns_operator_safe_message(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

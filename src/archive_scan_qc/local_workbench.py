@@ -314,6 +314,25 @@ class WorkbenchController:
         if decision_summary.get("completion_status") != "complete" or closure_summary.get("can_complete_delivery") is not True:
             raise ValueError("还有需要重扫/重新处理的图片，先处理后再完成导出。")
 
+        total_decisions = int(decision_summary.get("total_decisions") or 0)
+        pending_decisions = int(decision_summary.get("pending") or 0)
+        reviewed_decisions = max(0, total_decisions - pending_decisions)
+        open_p0_count = int(closure_summary.get("open_p0_count") or 0)
+        open_p1_count = int(closure_summary.get("open_p1_count") or 0)
+        run_summary = _read_json(metadata_dir / PRODUCTION_RUN_SUMMARY_JSON)
+        progress = _read_json(metadata_dir / PRODUCTION_RUN_PROGRESS_JSON)
+        queue = _read_json(metadata_dir / PRODUCTION_REVIEW_QUEUE_JSON)
+        handoff_consistency = _completion_handoff_consistency(
+            summary=run_summary,
+            progress=progress,
+            queue=queue,
+            final_decisions=summary,
+            final_verification=verification,
+            decision_summary=decision_summary,
+        )
+        if handoff_consistency.get("consistent") is not True:
+            guidance = _handoff_count_mismatch_guidance(handoff_consistency)
+            raise ValueError(str(guidance["message_zh"]))
         metadata_dir.mkdir(parents=True, exist_ok=True)
         summary_path = metadata_dir / REVIEW_DECISION_SUMMARY_JSON
         verification_path = metadata_dir / REVIEW_DECISION_VERIFICATION_JSON
@@ -326,12 +345,6 @@ class WorkbenchController:
             json.dumps(verification, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
-        total_decisions = int(decision_summary.get("total_decisions") or 0)
-        pending_decisions = int(decision_summary.get("pending") or 0)
-        reviewed_decisions = max(0, total_decisions - pending_decisions)
-        open_p0_count = int(closure_summary.get("open_p0_count") or 0)
-        open_p1_count = int(closure_summary.get("open_p1_count") or 0)
-        run_summary = _read_json(metadata_dir / PRODUCTION_RUN_SUMMARY_JSON)
         handoff_counts = _completion_handoff_counts(run_summary, decision_summary)
         reuse_handoff_summary = _local_reuse_handoff_summary(run_summary)
         operator_name = str(summary.get("operator_name") or "").strip()
@@ -497,6 +510,8 @@ class WorkbenchController:
             last_error=last_error,
             last_preflight_guidance=last_preflight_guidance,
         )
+        if isinstance(restored_batch, dict) and restored_batch.get("kind") == "handoff_count_mismatch":
+            recovery_guidance = _sanitize_operator_guidance(restored_batch)
         return {
             "schema_version": SERVER_SCHEMA,
             "running": running,
@@ -919,9 +934,22 @@ def _run_folder_picker_command(command: list[str]) -> str | None:
 def _batch_has_completed(metadata_dir: Path | None) -> bool:
     if metadata_dir is None:
         return False
+    summary = _read_json(metadata_dir / PRODUCTION_RUN_SUMMARY_JSON)
+    progress = _read_json(metadata_dir / PRODUCTION_RUN_PROGRESS_JSON)
+    queue = _read_json(metadata_dir / PRODUCTION_REVIEW_QUEUE_JSON)
+    final_decisions = _read_json(metadata_dir / REVIEW_DECISION_SUMMARY_JSON)
+    final_verification = _read_json(metadata_dir / REVIEW_DECISION_VERIFICATION_JSON)
+    consistency = _completion_handoff_consistency(
+        summary=summary,
+        progress=progress,
+        queue=queue,
+        final_decisions=final_decisions,
+        final_verification=final_verification,
+    )
+    if consistency.get("consistent") is not True:
+        return False
     if (metadata_dir / COMPLETION_NOTE_TXT).exists():
         return True
-    summary = _read_json(metadata_dir / PRODUCTION_RUN_SUMMARY_JSON)
     status = str(summary.get("status") or "").strip().lower() if isinstance(summary, dict) else ""
     return status in {"completed", "finished"}
 
@@ -1294,6 +1322,21 @@ def _restored_batch_status(
         "auto_started": False,
     }
     if has_final_completion and failed_files == 0:
+        handoff_consistency = _completion_handoff_consistency(
+            summary=summary,
+            progress=progress,
+            queue=queue,
+            final_decisions=final_decisions,
+            final_verification=final_verification,
+            decision_summary=decision_summary,
+        )
+        if handoff_consistency.get("consistent") is not True:
+            guidance = _handoff_count_mismatch_guidance(handoff_consistency)
+            return {
+                **base,
+                **guidance,
+                "can_prepare_next_batch": True,
+            }
         return {
             **base,
             "kind": "completed",
@@ -1360,6 +1403,143 @@ def _restored_batch_status(
             ],
         }
     return None
+
+
+def _completion_handoff_consistency(
+    *,
+    summary: dict[str, Any] | None,
+    progress: dict[str, Any] | None,
+    queue: dict[str, Any] | None,
+    final_decisions: dict[str, Any] | None,
+    final_verification: dict[str, Any] | None,
+    decision_summary: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    counts = summary.get("counts") if isinstance(summary, dict) and isinstance(summary.get("counts"), dict) else {}
+    operator = (
+        summary.get("operator_summary")
+        if isinstance(summary, dict) and isinstance(summary.get("operator_summary"), dict)
+        else {}
+    )
+    queue_summary = queue.get("summary") if isinstance(queue, dict) and isinstance(queue.get("summary"), dict) else {}
+    verification_summary = (
+        final_verification.get("decision_summary")
+        if isinstance(final_verification, dict) and isinstance(final_verification.get("decision_summary"), dict)
+        else {}
+    )
+    decision_summary = decision_summary if isinstance(decision_summary, dict) else verification_summary
+    final_counts = _review_completion_counts(final_decisions)
+    issues: list[str] = []
+
+    status = str(summary.get("status") or "").strip().lower() if isinstance(summary, dict) else ""
+    progress_state = str(progress.get("state") or "").strip().lower() if isinstance(progress, dict) else ""
+    if status == "blocked":
+        issues.append("本机摘要显示仍有失败或阻断，不能交接。")
+    if progress_state == "running":
+        issues.append("本机进度仍显示处理中，请重新开始处理或准备下一批。")
+
+    total_files = _optional_nonnegative_int(counts, "total_files")
+    openable_files = _optional_nonnegative_int(counts, "openable_files")
+    processed_files = _optional_nonnegative_int(counts, "processed_files")
+    resumed_files = _optional_nonnegative_int(counts, "resumed_files")
+    skipped_files = _optional_nonnegative_int(counts, "skipped_files")
+    failed_files = _optional_nonnegative_int(counts, "failed_files")
+    retry_list_files = _optional_nonnegative_int(counts, "retry_list_files")
+    operator_total = _optional_nonnegative_int(operator, "total_source_images")
+    operator_ready = _optional_nonnegative_int(operator, "derivative_images_ready")
+    operator_attention = _optional_nonnegative_int(operator, "files_needing_attention")
+
+    if failed_files and failed_files > 0:
+        issues.append("仍有处理失败图片，请检查输出文件夹后重新开始处理或交管理员确认。")
+    if retry_list_files and retry_list_files > 0:
+        issues.append("仍有可重试图片，请重新开始处理本批。")
+    if total_files is not None and operator_total is not None and total_files != operator_total:
+        issues.append("扫描原图总数与完成摘要不一致，请重新保存文件夹后再确认。")
+    if total_files is not None and openable_files is not None and openable_files > total_files:
+        issues.append("可处理原图数量大于原图总数，请重新保存文件夹后再确认。")
+    if None not in (total_files, processed_files, resumed_files, skipped_files, failed_files):
+        accounted = int(processed_files or 0) + int(resumed_files or 0) + int(skipped_files or 0) + int(failed_files or 0)
+        if accounted != total_files:
+            issues.append("原图总数与已处理、跳过、失败数量不一致，请重新开始处理。")
+    derivative_from_counts = None
+    if processed_files is not None or resumed_files is not None:
+        derivative_from_counts = int(processed_files or 0) + int(resumed_files or 0)
+    if derivative_from_counts is not None and operator_ready is not None and derivative_from_counts != operator_ready:
+        issues.append("处理后图片数量与完成摘要不一致，请检查输出文件夹后再完成。")
+    if (
+        operator_attention is not None
+        and failed_files is not None
+        and _optional_nonnegative_int(counts, "p0_findings") is not None
+        and operator_attention != int(failed_files or 0) + int(_optional_nonnegative_int(counts, "p0_findings") or 0)
+    ):
+        issues.append("待人工确认数量与本机摘要不一致，请重新确认待看图项目。")
+
+    review_totals = [
+        value
+        for value in (
+            _optional_nonnegative_int(queue_summary, "total_items"),
+            _optional_nonnegative_int(decision_summary, "total_decisions"),
+            final_counts["total"] if final_counts["total"] else None,
+        )
+        if value is not None
+    ]
+    if len(set(review_totals)) > 1:
+        issues.append("待人工确认数量与复核记录不一致，请重新确认待看图项目。")
+    decision_total = _optional_nonnegative_int(decision_summary, "total_decisions")
+    decision_pending = _optional_nonnegative_int(decision_summary, "pending")
+    if decision_total is not None and decision_pending is not None:
+        reviewed = max(0, decision_total - decision_pending)
+        if reviewed + decision_pending != decision_total:
+            issues.append("复核完成数量与待确认数量不一致，请重新确认待看图项目。")
+    if decision_pending and decision_pending > 0:
+        issues.append("仍有待人工确认图片，请先完成复核决定。")
+    if final_counts["pending"] > 0:
+        issues.append("已保存复核决定仍有待处理图片，请重新确认待看图项目。")
+    if final_counts["total"] and final_counts["reviewed"] + final_counts["pending"] != final_counts["total"]:
+        issues.append("已保存复核数量不一致，请重新确认待看图项目。")
+
+    return {
+        "schema_version": "scan-qc.local-handoff-consistency.v1",
+        "aggregate_only": True,
+        "consistent": not issues,
+        "issue_count": len(issues),
+        "issues_zh": _dedupe_preserve_order(issues),
+    }
+
+
+def _handoff_count_mismatch_guidance(consistency: dict[str, Any]) -> dict[str, Any]:
+    issues = consistency.get("issues_zh") if isinstance(consistency, dict) else None
+    safe_issues = [issue for issue in issues if isinstance(issue, str) and _is_known_operator_guidance_text_zh(issue)] if isinstance(issues, list) else []
+    return {
+        "kind": "handoff_count_mismatch",
+        "title_zh": "交接前数量需要确认",
+        "message_zh": "本机状态数量互相不一致，当前不能显示为可以交接。",
+        "aggregate_only": True,
+        "count_mismatch_detected": True,
+        "issues_zh": safe_issues,
+        "next_steps_zh": [
+            "请先检查输出文件夹中的处理后图片数量。",
+            "如果仍有待确认图片，请重新确认待看图项目。",
+            "如本批处理被中断或文件夹被改动，请重新开始处理本批。",
+            "确认无误后再完成本批；也可以准备下一批重新选择文件夹。",
+        ],
+    }
+
+
+def _optional_nonnegative_int(container: dict[str, Any], key: str) -> int | None:
+    if not isinstance(container, dict) or key not in container or container.get(key) is None:
+        return None
+    return _safe_nonnegative_int(container.get(key))
+
+
+def _dedupe_preserve_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        deduped.append(value)
+    return deduped
 
 
 def _review_completion_counts(decisions: dict[str, Any] | None) -> dict[str, Any]:
