@@ -983,6 +983,19 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
         and isinstance(reason, str)
         and reason != "scanline lightening disabled"
     ]
+    faded_text_reasons = [
+        record.get("faded_text_reason")
+        for record in processed_records
+        if isinstance(record.get("faded_text_reason"), str)
+    ]
+    faded_text_skipped_reasons = [
+        reason
+        for record in processed_records
+        for reason in [record.get("faded_text_reason")]
+        if record.get("faded_text_enhanced") is False
+        and isinstance(reason, str)
+        and reason != "faded text enhancement disabled"
+    ]
     return {
         "schema_version": "scan-qc.processing.audit.v1",
         "generated_at": manifest["generated_at"],
@@ -1091,6 +1104,12 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             ),
             "faded_text_enhanced_files": sum(
                 1 for audit in audit_records if audit.get("faded_text_enhanced") is True
+            ),
+            "faded_text_skipped_files": sum(
+                1
+                for record in processed_records
+                if record.get("faded_text_enhanced") is False
+                and record.get("faded_text_reason") not in {None, "faded text enhancement disabled"}
             ),
             "text_edges_sharpened_files": sum(
                 1 for audit in audit_records if audit.get("text_edges_sharpened") is True
@@ -1275,6 +1294,36 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                     1
                     for reason in scanlines_skipped_reasons
                     if "low-confidence" in reason or "no confident" in reason
+                ),
+            },
+            "faded_text": {
+                "applied_files": sum(1 for audit in audit_records if audit.get("faded_text_enhanced") is True),
+                "skipped_files": sum(
+                    1
+                    for record in processed_records
+                    if record.get("faded_text_enhanced") is False
+                    and record.get("faded_text_reason") not in {None, "faded text enhancement disabled"}
+                ),
+                "changed_pixel_ratio": _aggregate_metric(audit_records, "faded_text_changed_pixel_ratio"),
+                "candidate_pixel_ratio": _aggregate_metric(audit_records, "faded_text_candidate_pixel_ratio"),
+                "reason_distribution": _reason_counts(
+                    reason for reason in faded_text_reasons if isinstance(reason, str)
+                ),
+                "skip_reason_distribution": _reason_counts(faded_text_skipped_reasons),
+                "protection_triggered_files": sum(
+                    1
+                    for reason in faded_text_skipped_reasons
+                    if any(marker in reason for marker in ("risk", "too dense", "dark foreground already present"))
+                ),
+                "conservative_scope_skip_files": sum(
+                    1
+                    for reason in faded_text_skipped_reasons
+                    if "conservative" in reason or "outside" in reason
+                ),
+                "low_confidence_skip_files": sum(
+                    1
+                    for reason in faded_text_skipped_reasons
+                    if any(marker in reason for marker in ("too weak", "too sparse", "insufficient", "no stable"))
                 ),
             },
         },
@@ -2611,7 +2660,7 @@ def _enhance_faded_text_conservative(image: Image.Image) -> FadedTextEnhancement
     if p95 - p05 > 92:
         return _faded_text_noop(image, "faded text enhancement skipped: contrast already normal or mixed content risk")
 
-    threshold = min(205, p50 - 18, p95 - 22)
+    threshold = min(214, p50 - 12, p95 - 14)
     if threshold < 125:
         return _faded_text_noop(image, "faded text enhancement skipped: outside conservative faded ink range")
     sampled_candidate_ratio = _faded_text_sample_candidate_ratio(grayscale, threshold, p95)
@@ -2627,18 +2676,20 @@ def _enhance_faded_text_conservative(image: Image.Image) -> FadedTextEnhancement
             "faded text enhancement skipped: foreground too dense",
             sampled_candidate_ratio,
         )
-    candidate = grayscale.point(
-        lambda value: 255 if 95 <= value <= threshold and 18 <= p95 - value <= 70 else 0,
+    raw_candidate = grayscale.point(
+        lambda value: 255 if 95 <= value <= threshold and 14 <= p95 - value <= 76 else 0,
         mode="L",
     )
-    candidate = _clear_mask_edges(candidate, max(3, int(round(min(image.width, image.height) * 0.025))))
+    raw_candidate_ratio = _mask_ratio(raw_candidate)
+    if _protected_edge_dark_ratio(raw_candidate) > 0.002:
+        return _faded_text_noop(image, "faded text enhancement skipped: edge mark or binding risk", raw_candidate_ratio)
+
+    candidate = _clear_mask_edges(raw_candidate, max(3, int(round(min(image.width, image.height) * 0.025))))
     candidate_ratio = _mask_ratio(candidate)
     if candidate_ratio < 0.0025:
         return _faded_text_noop(image, "faded text enhancement skipped: foreground evidence too sparse", candidate_ratio)
     if candidate_ratio > 0.16:
         return _faded_text_noop(image, "faded text enhancement skipped: foreground too dense", candidate_ratio)
-    if _protected_edge_dark_ratio(candidate) > 0.002:
-        return _faded_text_noop(image, "faded text enhancement skipped: edge mark or binding risk", candidate_ratio)
 
     components = _mask_components(candidate)
     if not components:
@@ -2750,7 +2801,7 @@ def _faded_text_sample_candidate_ratio(grayscale: Image.Image, threshold: float,
     sample = grayscale.copy()
     sample.thumbnail((96, 96), Image.Resampling.BILINEAR)
     candidate = sample.point(
-        lambda value: 255 if 95 <= value <= threshold and 18 <= p95 - value <= 70 else 0,
+        lambda value: 255 if 95 <= value <= threshold and 14 <= p95 - value <= 76 else 0,
         mode="L",
     )
     candidate = _clear_mask_edges(candidate, max(2, int(round(min(sample.width, sample.height) * 0.025))))
