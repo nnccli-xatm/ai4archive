@@ -657,6 +657,8 @@ def _process_record(
         "faded_text_candidate_pixel_ratio": 0.0,
         "text_edges_sharpened": False,
         "text_edges_reason": None,
+        "text_edges_reason_code": None,
+        "text_edges_reason_zh": None,
         "text_edges_delta": 0.0,
         "text_edges_changed_pixel_ratio": 0.0,
         "text_edges_candidate_pixel_ratio": 0.0,
@@ -759,6 +761,8 @@ def _process_record(
                 "faded_text_candidate_pixel_ratio": process_info["faded_text_candidate_pixel_ratio"],
                 "text_edges_sharpened": process_info["text_edges_sharpened"],
                 "text_edges_reason": process_info["text_edges_reason"],
+                "text_edges_reason_code": process_info["text_edges_reason_code"],
+                "text_edges_reason_zh": process_info["text_edges_reason_zh"],
                 "text_edges_delta": process_info["text_edges_delta"],
                 "text_edges_changed_pixel_ratio": process_info["text_edges_changed_pixel_ratio"],
                 "text_edges_candidate_pixel_ratio": process_info["text_edges_candidate_pixel_ratio"],
@@ -836,6 +840,8 @@ def _process_record(
                     "faded_text_candidate_pixel_ratio": process_info["faded_text_candidate_pixel_ratio"],
                     "text_edges_sharpened": process_info["text_edges_sharpened"],
                     "text_edges_reason": process_info["text_edges_reason"],
+                    "text_edges_reason_code": process_info["text_edges_reason_code"],
+                    "text_edges_reason_zh": process_info["text_edges_reason_zh"],
                     "text_edges_delta": process_info["text_edges_delta"],
                     "text_edges_changed_pixel_ratio": process_info["text_edges_changed_pixel_ratio"],
                     "text_edges_candidate_pixel_ratio": process_info["text_edges_candidate_pixel_ratio"],
@@ -1060,6 +1066,25 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
         record.get("text_edges_reason")
         for record in processed_records
         if isinstance(record.get("text_edges_reason"), str)
+    ]
+    text_edges_reason_codes = [
+        record.get("text_edges_reason_code")
+        for record in processed_records
+        if isinstance(record.get("text_edges_reason_code"), str)
+    ]
+    text_edges_skipped_reason_codes = [
+        code
+        for record in processed_records
+        for code in [record.get("text_edges_reason_code")]
+        if record.get("text_edges_sharpened") is False and isinstance(code, str) and code != "disabled"
+    ]
+    text_edges_skipped_reasons_zh = [
+        reason_zh
+        for record in processed_records
+        for reason_zh in [record.get("text_edges_reason_zh")]
+        if record.get("text_edges_sharpened") is False
+        and isinstance(reason_zh, str)
+        and record.get("text_edges_reason_code") != "disabled"
     ]
     text_edges_skipped_reasons = [
         reason
@@ -1605,6 +1630,9 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                     reason for reason in text_edges_reasons if isinstance(reason, str)
                 ),
                 "skip_reason_distribution": _reason_counts(text_edges_skipped_reasons),
+                "reason_code_distribution": _reason_counts(text_edges_reason_codes),
+                "skip_reason_code_distribution": _reason_counts(text_edges_skipped_reason_codes),
+                "skip_reason_zh_distribution": _reason_counts(text_edges_skipped_reasons_zh),
                 "protection_triggered_files": sum(
                     1
                     for reason in text_edges_skipped_reasons
@@ -2263,6 +2291,9 @@ def _process_image(
     faded_text_reason = _guard_revert_reason(local_content_guard_reverted) if guard_reverted else faded_text.reason
     faded_text_reason_code = _faded_text_reason_code(faded_text_reason)
     faded_text_reason_zh = _faded_text_reason_zh(faded_text_reason_code)
+    text_edges_reason = _guard_revert_reason(local_content_guard_reverted) if guard_reverted else text_edges.reason
+    text_edges_reason_code = _text_edges_reason_code(text_edges_reason)
+    text_edges_reason_zh = _text_edges_reason_zh(text_edges_reason_code)
     crop_info = {
         "original_size": original_size,
         "output_size": list(processed.size),
@@ -2323,7 +2354,9 @@ def _process_image(
         "faded_text_changed_pixel_ratio": 0.0 if guard_reverted else faded_text.changed_pixel_ratio,
         "faded_text_candidate_pixel_ratio": 0.0 if guard_reverted else faded_text.candidate_pixel_ratio,
         "text_edges_sharpened": False if guard_reverted else text_edges.applied,
-        "text_edges_reason": _guard_revert_reason(local_content_guard_reverted) if guard_reverted else text_edges.reason,
+        "text_edges_reason": text_edges_reason,
+        "text_edges_reason_code": text_edges_reason_code,
+        "text_edges_reason_zh": text_edges_reason_zh,
         "text_edges_delta": 0.0 if guard_reverted else text_edges.edge_delta,
         "text_edges_changed_pixel_ratio": 0.0 if guard_reverted else text_edges.changed_pixel_ratio,
         "text_edges_candidate_pixel_ratio": 0.0 if guard_reverted else text_edges.candidate_pixel_ratio,
@@ -3572,6 +3605,12 @@ def _sharpen_text_edges_conservative(image: Image.Image) -> TextEdgeSharpeningRe
             "text edge sharpening skipped: broad texture, illustration, or table-region risk",
             candidate_ratio,
         )
+    if _text_edge_margin_annotation_risk(grayscale, candidate):
+        return _text_edges_noop(
+            image,
+            "text edge sharpening skipped: header, footer, or page number risk",
+            candidate_ratio,
+        )
     if text_like_components < 3 or selected_ratio < 0.0015:
         return _text_edges_noop(
             image,
@@ -3655,6 +3694,110 @@ def _sharpen_text_edges_conservative(image: Image.Image) -> TextEdgeSharpeningRe
     )
 
 
+_TEXT_EDGES_REASON_DETAILS: dict[str, tuple[str, str]] = {
+    "text edge sharpening disabled": ("disabled", "正文边缘锐化未启用。"),
+    "text edge sharpening applied: stable neutral blurred text edges on light paper": (
+        "applied_stable_blurred_text_edges",
+        "检测到浅色纸面上的稳定模糊正文边缘，已保守锐化。",
+    ),
+    "text edge sharpening skipped: image too small": ("image_too_small", "图片尺寸过小，跳过正文边缘锐化。"),
+    "text edge sharpening skipped: color content, stamp, or annotation risk": (
+        "protected_color_stamp_annotation",
+        "检测到彩色内容、印章或批注风险，跳过正文边缘锐化。",
+    ),
+    "text edge sharpening skipped: page is not a light paper background": (
+        "not_light_paper_background",
+        "页面不是浅色纸面背景，跳过正文边缘锐化。",
+    ),
+    "text edge sharpening skipped: text edge evidence too weak": (
+        "low_confidence_text_edge_evidence_too_weak",
+        "正文边缘证据过弱，跳过正文边缘锐化。",
+    ),
+    "text edge sharpening skipped: dense dark foreground or illustration risk": (
+        "protected_dense_dark_foreground_or_illustration",
+        "检测到深色前景过密或插图风险，跳过正文边缘锐化。",
+    ),
+    "text edge sharpening skipped: edge mark or binding risk": (
+        "protected_edge_mark_or_binding",
+        "检测到边缘痕迹或装订边风险，跳过正文边缘锐化。",
+    ),
+    "text edge sharpening skipped: cheap candidate preflight found too little blurred text edge evidence": (
+        "low_confidence_preflight_candidates_too_few",
+        "快速预检显示模糊正文边缘候选过少，跳过正文边缘锐化。",
+    ),
+    "text edge sharpening skipped: header, footer, or page number risk": (
+        "protected_header_footer_or_page_number",
+        "检测到页眉页脚或页码风险，跳过正文边缘锐化。",
+    ),
+    "text edge sharpening skipped: blurred text edge evidence too sparse": (
+        "low_confidence_text_edge_too_sparse",
+        "模糊正文边缘证据过少，跳过正文边缘锐化。",
+    ),
+    "text edge sharpening skipped: edge candidates too dense": (
+        "protected_edge_candidates_too_dense",
+        "边缘候选过密，可能不是正文，跳过正文边缘锐化。",
+    ),
+    "text edge sharpening skipped: fine texture or photo-detail risk": (
+        "protected_photo_texture_detail",
+        "检测到照片纹理或细碎纹理风险，跳过正文边缘锐化。",
+    ),
+    "text edge sharpening skipped: broad texture, illustration, or table-region risk": (
+        "protected_texture_table_or_photo_region",
+        "检测到大块纹理、插图、照片或表格区域风险，跳过正文边缘锐化。",
+    ),
+    "text edge sharpening skipped: stable text edge evidence insufficient": (
+        "low_confidence_stable_text_edge_insufficient",
+        "稳定正文边缘证据不足，跳过正文边缘锐化。",
+    ),
+    "text edge sharpening skipped: changed area exceeds conservative text edge scope": (
+        "outside_conservative_text_edge_scope",
+        "候选变化范围超过保守正文边缘范围，跳过正文边缘锐化。",
+    ),
+    "text edge sharpening skipped: sharpening delta below conservative threshold": (
+        "low_confidence_sharpening_delta_too_low",
+        "锐化幅度低于保守可读性阈值，跳过正文边缘锐化。",
+    ),
+    "text edge sharpening skipped: changed area exceeds conservative threshold": (
+        "outside_conservative_changed_area",
+        "变化范围超过保守阈值，跳过正文边缘锐化。",
+    ),
+    "text edge sharpening skipped: edge delta outside conservative threshold": (
+        "outside_conservative_edge_delta",
+        "正文边缘锐化幅度不在保守范围内，跳过正文边缘锐化。",
+    ),
+    "text edge sharpening skipped: brightness or contrast delta exceeds conservative threshold": (
+        "outside_conservative_tonal_delta",
+        "亮度或对比度变化超过保守阈值，跳过正文边缘锐化。",
+    ),
+    "reverted by local content change guard": (
+        "reverted_by_local_content_change_guard",
+        "局部内容变化保护线已回退本次处理。",
+    ),
+    "reverted by cumulative change guard": (
+        "reverted_by_cumulative_change_guard",
+        "累计变化保护线已回退本次处理。",
+    ),
+}
+
+
+def _text_edges_reason_code(reason: str | None) -> str | None:
+    if reason is None:
+        return None
+    details = _TEXT_EDGES_REASON_DETAILS.get(reason)
+    if details:
+        return details[0]
+    return "unknown"
+
+
+def _text_edges_reason_zh(reason_code: str | None) -> str | None:
+    if reason_code is None:
+        return None
+    for code, reason_zh in _TEXT_EDGES_REASON_DETAILS.values():
+        if code == reason_code:
+            return reason_zh
+    return "正文边缘锐化已按保守规则跳过。"
+
+
 def _text_edge_sample_candidate_ratio(grayscale: Image.Image) -> float:
     sample = grayscale.copy()
     sample.thumbnail((96, 96), Image.Resampling.BILINEAR)
@@ -3666,6 +3809,31 @@ def _text_edge_sample_candidate_ratio(grayscale: Image.Image) -> float:
     candidate = _text_edge_candidate_mask(sample, p95)
     candidate = _clear_mask_edges(candidate, max(2, int(round(min(sample.width, sample.height) * 0.025))))
     return round(_mask_ratio(candidate), 6)
+
+
+def _text_edge_margin_annotation_risk(grayscale: Image.Image, candidate: Image.Image) -> bool:
+    margin = max(8, int(round(grayscale.height * 0.16)))
+    if margin * 2 >= grayscale.height:
+        return False
+    boxes = (
+        (0, 0, grayscale.width, margin),
+        (0, grayscale.height - margin, grayscale.width, grayscale.height),
+    )
+    foreground = grayscale.point(lambda value: 255 if value <= 170 else 0, mode="L")
+    total_candidate = sum(candidate.histogram()[1:])
+    if total_candidate <= 0:
+        return False
+    for box in boxes:
+        area = max(1, (box[2] - box[0]) * (box[3] - box[1]))
+        margin_candidate = sum(candidate.crop(box).histogram()[1:])
+        margin_foreground = sum(foreground.crop(box).histogram()[1:])
+        candidate_share = margin_candidate / total_candidate
+        foreground_ratio = margin_foreground / area
+        if margin_candidate >= 8 and candidate_share >= 0.18 and foreground_ratio >= 0.0008:
+            return True
+        if margin_foreground >= 10 and foreground_ratio >= 0.0025:
+            return True
+    return False
 
 
 def _text_edge_candidate_mask(grayscale: Image.Image, p95: int) -> Image.Image:
