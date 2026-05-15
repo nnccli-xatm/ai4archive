@@ -658,6 +658,7 @@ def _processing_quality_thresholds() -> dict[str, float]:
         "max_deskew_degrees": defaults.deskew_max_degrees,
         "max_tone_background_delta": defaults.audit_max_brightness_delta,
         "max_tone_contrast_delta": defaults.audit_max_contrast_delta,
+        "max_tone_changed_pixel_ratio": 1.0,
         "max_edge_shadow_changed_pixel_ratio": 0.08,
         "max_background_stains_changed_pixel_ratio": 0.08,
         "max_background_stains_candidate_pixel_ratio": 1.0,
@@ -707,7 +708,11 @@ def _repair_algorithm_metrics(
             operation_timings,
             operation="normalize_tones",
             changed_flag="tone_normalized",
-            metrics={"background_delta": "tone_background_delta", "contrast_delta": "tone_contrast_delta"},
+            metrics={
+                "background_delta": "tone_background_delta",
+                "contrast_delta": "tone_contrast_delta",
+                "changed_pixel_ratio": "tone_changed_pixel_ratio",
+            },
         ),
         "lighten_edge_shadow": _algorithm_summary(
             audit_records,
@@ -794,6 +799,7 @@ def _quality_threshold_violations(
         ("despeckle", "pixel_ratio"): "max_despeckle_pixel_ratio",
         ("normalize_tones", "background_delta"): "max_tone_background_delta",
         ("normalize_tones", "contrast_delta"): "max_tone_contrast_delta",
+        ("normalize_tones", "changed_pixel_ratio"): "max_tone_changed_pixel_ratio",
         ("lighten_edge_shadow", "changed_pixel_ratio"): "max_edge_shadow_changed_pixel_ratio",
         ("lighten_background_stains", "changed_pixel_ratio"): "max_background_stains_changed_pixel_ratio",
         ("lighten_background_stains", "candidate_pixel_ratio"): "max_background_stains_candidate_pixel_ratio",
