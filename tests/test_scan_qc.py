@@ -20,7 +20,7 @@ import urllib.request
 from unittest import mock
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFilter, ImageStat
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageStat
 
 from archive_scan_qc import __version__
 from archive_scan_qc import processing as processing_module
@@ -5911,10 +5911,131 @@ class ScanQcTest(unittest.TestCase):
             self.assertFalse(record["text_edges_sharpened"])
             self.assertIn("sharpen_text_edges_disabled", record["operations"])
             self.assertEqual(record["processing_audit"]["text_edges_changed_pixel_ratio"], 0.0)
+            self.assertTrue(record["processing_audit"]["cumulative_change_guard_checked"])
+            self.assertEqual(record["processing_audit"]["cumulative_change_guard_action"], "passed")
             self.assertEqual(
                 _sha256_for_test(input_dir / "A001_0001.png"),
                 _sha256_for_test(process_dir / record["output_relative_path"]),
             )
+
+    def test_cumulative_change_guard_passes_safe_stacked_repairs_and_writes_aggregate_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "private_safe_stacked_repairs.png"
+            Image.new("RGB", (40, 40), (245, 245, 245)).save(source, dpi=(300, 300))
+
+            def small_background_change(image: Image.Image) -> processing_module.BackgroundStainLighteningResult:
+                output = image.copy()
+                draw = ImageDraw.Draw(output)
+                draw.rectangle((2, 2, 9, 9), fill=(230, 230, 230))
+                return processing_module.BackgroundStainLighteningResult(
+                    output, True, "synthetic safe background repair", 10.0, 15.0, 5.0, 0.04, 0.04
+                )
+
+            def small_text_edge_change(image: Image.Image) -> processing_module.TextEdgeSharpeningResult:
+                output = image.copy()
+                draw = ImageDraw.Draw(output)
+                draw.rectangle((20, 20, 27, 27), fill=(228, 228, 228))
+                return processing_module.TextEdgeSharpeningResult(
+                    output, True, "synthetic safe text edge repair", 4.0, 0.04, 0.04
+                )
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            with mock.patch.object(
+                processing_module,
+                "_lighten_background_stains_conservative",
+                side_effect=small_background_change,
+            ), mock.patch.object(
+                processing_module,
+                "_sharpen_text_edges_conservative",
+                side_effect=small_text_edge_change,
+            ):
+                manifest = process_images(
+                    report,
+                    input_dir,
+                    process_dir,
+                    ProcessingOptions(lighten_background_stains=True, sharpen_text_edges=True, workers=1),
+                )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+            audit = record["processing_audit"]
+
+            self.assertEqual(record["status"], "processed")
+            self.assertTrue(record["background_stains_lightened"])
+            self.assertTrue(record["text_edges_sharpened"])
+            self.assertEqual(audit["cumulative_change_guard_action"], "passed")
+            self.assertFalse(audit["cumulative_change_guard_reverted"])
+            self.assertGreater(audit["cumulative_change_score"], 0.0)
+            self.assertEqual(audit["guardrail_failures"], [])
+            self.assertEqual(audit_summary["counts"]["cumulative_change_guard_checked_files"], 1)
+            self.assertEqual(audit_summary["counts"]["cumulative_change_guard_reverted_files"], 0)
+            self.assertIn("cumulative_change_score", audit_summary["metrics"])
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_safe_stacked_repairs", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
+    def test_cumulative_change_guard_reverts_high_risk_stacked_change_without_failing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "private_high_risk_stacked_repairs.png"
+            Image.new("RGB", (40, 40), (245, 245, 245)).save(source, dpi=(300, 300))
+
+            def high_risk_background_change(image: Image.Image) -> processing_module.BackgroundStainLighteningResult:
+                output = Image.new(image.mode, image.size, (20, 20, 20))
+                return processing_module.BackgroundStainLighteningResult(
+                    output, True, "synthetic high risk background repair", 245.0, 20.0, 225.0, 1.0, 1.0
+                )
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            with mock.patch.object(
+                processing_module,
+                "_lighten_background_stains_conservative",
+                side_effect=high_risk_background_change,
+            ):
+                manifest = process_images(
+                    report,
+                    input_dir,
+                    process_dir,
+                    ProcessingOptions(lighten_background_stains=True, workers=1),
+                )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+            audit = record["processing_audit"]
+            processed = Image.open(process_dir / record["output_relative_path"])
+
+            self.assertEqual(record["status"], "processed")
+            self.assertIn("cumulative_change_guard_reverted_to_source", record["operations"])
+            self.assertIn("cumulative_change_guard_reverted_to_source", record["processing_warnings"])
+            self.assertFalse(record["background_stains_lightened"])
+            self.assertEqual(audit["guardrail_failures"], [])
+            self.assertEqual(audit["cumulative_change_guard_action"], "reverted_to_source")
+            self.assertTrue(audit["cumulative_change_guard_reverted"])
+            self.assertIn("cumulative_change_score", audit["cumulative_change_guard_reasons"])
+            self.assertGreater(audit["cumulative_change_score"], 1.0)
+            self.assertIsNone(ImageChops.difference(Image.open(source).convert("RGB"), processed.convert("RGB")).getbbox())
+            self.assertEqual(manifest["summary"]["failed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["cumulative_change_guard_checked_files"], 1)
+            self.assertEqual(audit_summary["counts"]["cumulative_change_guard_reverted_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["cumulative_change_guard"]["reverted_files"], 1)
+            self.assertGreater(audit_summary["guardrails"]["cumulative_change_guard"]["max_score"], 1.0)
+            self.assertEqual(
+                audit_summary["guardrails"]["cumulative_change_guard"]["reason_distribution"][
+                    "cumulative_change_score"
+                ],
+                1,
+            )
+            self.assertNotIn("private_high_risk_stacked_repairs", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
 
     def test_process_images_writes_audit_summary_and_retry_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -53,6 +53,12 @@ class ProcessingOptions:
     audit_max_crop_ratio: float = 0.55
     audit_max_trim_margin_ratio: float = 0.12
     audit_max_despeckle_pixel_ratio: float = 0.01
+    audit_max_cumulative_change_score: float = 1.0
+    audit_max_cumulative_pixel_change_ratio: float = 0.35
+    audit_max_cumulative_brightness_delta: float = 50.0
+    audit_max_cumulative_contrast_delta: float = 50.0
+    audit_max_cumulative_crop_ratio: float = 0.55
+    audit_max_cumulative_candidate_pixel_ratio: float = 1.0
     workers: int | None = None
 
 
@@ -984,6 +990,17 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "pixel_change_guardrail_deferred_to_geometric_files": sum(
                 1 for audit in audit_records if audit.get("pixel_change_guardrail_applied") is False
             ),
+            "cumulative_change_guard_checked_files": sum(
+                1 for audit in audit_records if audit.get("cumulative_change_guard_checked") is True
+            ),
+            "cumulative_change_guard_reverted_files": sum(
+                1 for audit in audit_records if audit.get("cumulative_change_guard_reverted") is True
+            ),
+            "cumulative_change_guard_warning_files": sum(
+                1
+                for audit in audit_records
+                if audit.get("cumulative_change_guard_action") in {"reverted_to_source", "warn_review"}
+            ),
             "deskew_safe_skip_files": _int_count(deskew_timing.get("safe_skip_files")),
             "deskew_projection_detection_files": _int_count(deskew_timing.get("projection_detection_files")),
             "deskew_fallback_detection_files": _int_count(deskew_timing.get("fallback_detection_files")),
@@ -1045,6 +1062,18 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "text_edges_candidate_pixel_ratio": _aggregate_metric(
                 audit_records, "text_edges_candidate_pixel_ratio"
             ),
+            "cumulative_change_score": _aggregate_metric(audit_records, "cumulative_change_score"),
+            "cumulative_change_pixel_ratio": _aggregate_metric(audit_records, "cumulative_change_pixel_ratio"),
+            "cumulative_change_brightness_delta": _aggregate_metric(
+                audit_records, "cumulative_change_brightness_delta"
+            ),
+            "cumulative_change_contrast_delta": _aggregate_metric(
+                audit_records, "cumulative_change_contrast_delta"
+            ),
+            "cumulative_change_crop_ratio": _aggregate_metric(audit_records, "cumulative_change_crop_ratio"),
+            "cumulative_change_candidate_pixel_ratio": _aggregate_metric(
+                audit_records, "cumulative_change_candidate_pixel_ratio"
+            ),
         },
         "distributions": {
             "pixel_change_ratio": _ratio_distribution(audit_records, "pixel_change_ratio"),
@@ -1057,6 +1086,26 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "warning_files": len(warning_records),
             "failed_files": guardrail_failed_files,
             "failure_reasons": _reason_counts(guardrail_failures),
+            "cumulative_change_guard": {
+                "checked_files": sum(
+                    1 for audit in audit_records if audit.get("cumulative_change_guard_checked") is True
+                ),
+                "reverted_files": sum(
+                    1 for audit in audit_records if audit.get("cumulative_change_guard_reverted") is True
+                ),
+                "warning_files": sum(
+                    1
+                    for audit in audit_records
+                    if audit.get("cumulative_change_guard_action") in {"reverted_to_source", "warn_review"}
+                ),
+                "max_score": _aggregate_metric(audit_records, "cumulative_change_score")["max"],
+                "reason_distribution": _reason_counts(
+                    reason
+                    for audit in audit_records
+                    for reason in audit.get("cumulative_change_guard_reasons", [])
+                    if isinstance(reason, str)
+                ),
+            },
         },
         "reuse_decisions": {
             "resume_skipped_existing_derivatives": {
@@ -1232,6 +1281,12 @@ def _audit_thresholds(options: ProcessingOptions) -> dict[str, float]:
         "max_crop_ratio": options.audit_max_crop_ratio,
         "max_trim_margin_ratio": options.audit_max_trim_margin_ratio,
         "max_despeckle_pixel_ratio": options.audit_max_despeckle_pixel_ratio,
+        "max_cumulative_change_score": options.audit_max_cumulative_change_score,
+        "max_cumulative_pixel_change_ratio": options.audit_max_cumulative_pixel_change_ratio,
+        "max_cumulative_brightness_delta": options.audit_max_cumulative_brightness_delta,
+        "max_cumulative_contrast_delta": options.audit_max_cumulative_contrast_delta,
+        "max_cumulative_crop_ratio": options.audit_max_cumulative_crop_ratio,
+        "max_cumulative_candidate_pixel_ratio": options.audit_max_cumulative_candidate_pixel_ratio,
         "max_faded_text_changed_pixel_ratio": 0.10,
         "max_faded_text_candidate_pixel_ratio": 0.18,
         "max_text_edges_changed_pixel_ratio": 0.08,
@@ -1485,7 +1540,7 @@ def _process_image(
         else:
             operations.append("sharpen_text_edges_disabled")
 
-    processing_audit = _processing_audit(
+    attempted_audit = _processing_audit(
         audit_source,
         processed,
         options,
@@ -1518,65 +1573,84 @@ def _process_image(
         text_edges.changed_pixel_ratio,
         text_edges.candidate_pixel_ratio,
     )
+    cumulative_guard = _cumulative_change_guard(attempted_audit, options)
+    cumulative_guard_reverted = cumulative_guard["action"] == "reverted_to_source"
+    if cumulative_guard_reverted:
+        processed = audit_source.copy()
+        operations.append("cumulative_change_guard_reverted_to_source")
+        processing_audit = _processing_audit(
+            audit_source,
+            processed,
+            options,
+            None,
+            None,
+            None,
+            0,
+            cumulative_change_guard=cumulative_guard,
+        )
+    else:
+        processing_audit = {**attempted_audit, **_cumulative_change_guard_audit_fields(cumulative_guard)}
     processing_warnings = list(processing_audit["guardrail_failures"])
+    if cumulative_guard["action"] == "reverted_to_source":
+        processing_warnings.append("cumulative_change_guard_reverted_to_source")
     crop_info = {
         "original_size": original_size,
         "output_size": list(processed.size),
-        "pre_deskew_size": pre_deskew_size,
-        "post_deskew_size": post_deskew_size,
-        "skew_angle_degrees": skew.angle_degrees,
+        "pre_deskew_size": original_size if cumulative_guard_reverted else pre_deskew_size,
+        "post_deskew_size": original_size if cumulative_guard_reverted else post_deskew_size,
+        "skew_angle_degrees": None if cumulative_guard_reverted else skew.angle_degrees,
         "skew_confidence": skew.confidence,
-        "deskewed": deskewed,
-        "deskew_reason": deskew_reason,
-        "dark_border_trimmed": dark_border_trimmed,
-        "dark_border_bbox": list(dark_border.bbox) if dark_border.bbox else None,
-        "dark_border_reason": dark_border.reason,
-        "crop_bbox": list(crop_bbox) if crop_bbox else None,
-        "crop_reason": crop_reason,
-        "cropped": crop_bbox is not None,
-        "despeckled": despeckled,
-        "despeckle_pixels_changed": despeckle_pixels_changed,
-        "despeckle_reason": despeckle_reason,
+        "deskewed": False if cumulative_guard_reverted else deskewed,
+        "deskew_reason": "reverted by cumulative change guard" if cumulative_guard_reverted else deskew_reason,
+        "dark_border_trimmed": False if cumulative_guard_reverted else dark_border_trimmed,
+        "dark_border_bbox": None if cumulative_guard_reverted else (list(dark_border.bbox) if dark_border.bbox else None),
+        "dark_border_reason": "reverted by cumulative change guard" if cumulative_guard_reverted else dark_border.reason,
+        "crop_bbox": None if cumulative_guard_reverted else (list(crop_bbox) if crop_bbox else None),
+        "crop_reason": "reverted by cumulative change guard" if cumulative_guard_reverted else crop_reason,
+        "cropped": False if cumulative_guard_reverted else crop_bbox is not None,
+        "despeckled": False if cumulative_guard_reverted else despeckled,
+        "despeckle_pixels_changed": 0 if cumulative_guard_reverted else despeckle_pixels_changed,
+        "despeckle_reason": "reverted by cumulative change guard" if cumulative_guard_reverted else despeckle_reason,
         "despeckle_backend_mode": despeckle_backend_mode,
-        "tone_normalized": tone.applied,
-        "tone_reason": tone.reason,
-        "tone_background_before": tone.background_before,
-        "tone_background_after": tone.background_after,
-        "tone_contrast_before": tone.contrast_before,
-        "tone_contrast_after": tone.contrast_after,
-        "edge_shadow_lightened": edge_shadow.applied,
-        "edge_shadow_reason": edge_shadow.reason,
+        "tone_normalized": False if cumulative_guard_reverted else tone.applied,
+        "tone_reason": "reverted by cumulative change guard" if cumulative_guard_reverted else tone.reason,
+        "tone_background_before": None if cumulative_guard_reverted else tone.background_before,
+        "tone_background_after": None if cumulative_guard_reverted else tone.background_after,
+        "tone_contrast_before": None if cumulative_guard_reverted else tone.contrast_before,
+        "tone_contrast_after": None if cumulative_guard_reverted else tone.contrast_after,
+        "edge_shadow_lightened": False if cumulative_guard_reverted else edge_shadow.applied,
+        "edge_shadow_reason": "reverted by cumulative change guard" if cumulative_guard_reverted else edge_shadow.reason,
         "edge_shadow_edges": list(edge_shadow.edges),
-        "edge_shadow_mean_before": edge_shadow.edge_mean_before,
-        "edge_shadow_mean_after": edge_shadow.edge_mean_after,
-        "edge_shadow_delta": edge_shadow.edge_delta,
-        "edge_shadow_changed_pixel_ratio": edge_shadow.changed_pixel_ratio,
-        "background_stains_lightened": background_stains.applied,
-        "background_stains_reason": background_stains.reason,
-        "background_stains_mean_before": background_stains.stain_mean_before,
-        "background_stains_mean_after": background_stains.stain_mean_after,
-        "background_stains_delta": background_stains.stain_delta,
-        "background_stains_changed_pixel_ratio": background_stains.changed_pixel_ratio,
-        "background_stains_candidate_pixel_ratio": background_stains.candidate_pixel_ratio,
-        "scanlines_lightened": scanlines.applied,
-        "scanlines_reason": scanlines.reason,
+        "edge_shadow_mean_before": None if cumulative_guard_reverted else edge_shadow.edge_mean_before,
+        "edge_shadow_mean_after": None if cumulative_guard_reverted else edge_shadow.edge_mean_after,
+        "edge_shadow_delta": 0.0 if cumulative_guard_reverted else edge_shadow.edge_delta,
+        "edge_shadow_changed_pixel_ratio": 0.0 if cumulative_guard_reverted else edge_shadow.changed_pixel_ratio,
+        "background_stains_lightened": False if cumulative_guard_reverted else background_stains.applied,
+        "background_stains_reason": "reverted by cumulative change guard" if cumulative_guard_reverted else background_stains.reason,
+        "background_stains_mean_before": None if cumulative_guard_reverted else background_stains.stain_mean_before,
+        "background_stains_mean_after": None if cumulative_guard_reverted else background_stains.stain_mean_after,
+        "background_stains_delta": 0.0 if cumulative_guard_reverted else background_stains.stain_delta,
+        "background_stains_changed_pixel_ratio": 0.0 if cumulative_guard_reverted else background_stains.changed_pixel_ratio,
+        "background_stains_candidate_pixel_ratio": 0.0 if cumulative_guard_reverted else background_stains.candidate_pixel_ratio,
+        "scanlines_lightened": False if cumulative_guard_reverted else scanlines.applied,
+        "scanlines_reason": "reverted by cumulative change guard" if cumulative_guard_reverted else scanlines.reason,
         "scanlines_orientation": scanlines.orientation,
-        "scanlines_count": scanlines.line_count,
-        "scanlines_mean_before": scanlines.line_mean_before,
-        "scanlines_mean_after": scanlines.line_mean_after,
-        "scanlines_delta": scanlines.line_delta,
-        "scanlines_changed_pixel_ratio": scanlines.changed_pixel_ratio,
-        "scanlines_candidate_pixel_ratio": scanlines.candidate_pixel_ratio,
-        "faded_text_enhanced": faded_text.applied,
-        "faded_text_reason": faded_text.reason,
-        "faded_text_delta": faded_text.text_delta,
-        "faded_text_changed_pixel_ratio": faded_text.changed_pixel_ratio,
-        "faded_text_candidate_pixel_ratio": faded_text.candidate_pixel_ratio,
-        "text_edges_sharpened": text_edges.applied,
-        "text_edges_reason": text_edges.reason,
-        "text_edges_delta": text_edges.edge_delta,
-        "text_edges_changed_pixel_ratio": text_edges.changed_pixel_ratio,
-        "text_edges_candidate_pixel_ratio": text_edges.candidate_pixel_ratio,
+        "scanlines_count": 0 if cumulative_guard_reverted else scanlines.line_count,
+        "scanlines_mean_before": None if cumulative_guard_reverted else scanlines.line_mean_before,
+        "scanlines_mean_after": None if cumulative_guard_reverted else scanlines.line_mean_after,
+        "scanlines_delta": 0.0 if cumulative_guard_reverted else scanlines.line_delta,
+        "scanlines_changed_pixel_ratio": 0.0 if cumulative_guard_reverted else scanlines.changed_pixel_ratio,
+        "scanlines_candidate_pixel_ratio": 0.0 if cumulative_guard_reverted else scanlines.candidate_pixel_ratio,
+        "faded_text_enhanced": False if cumulative_guard_reverted else faded_text.applied,
+        "faded_text_reason": "reverted by cumulative change guard" if cumulative_guard_reverted else faded_text.reason,
+        "faded_text_delta": 0.0 if cumulative_guard_reverted else faded_text.text_delta,
+        "faded_text_changed_pixel_ratio": 0.0 if cumulative_guard_reverted else faded_text.changed_pixel_ratio,
+        "faded_text_candidate_pixel_ratio": 0.0 if cumulative_guard_reverted else faded_text.candidate_pixel_ratio,
+        "text_edges_sharpened": False if cumulative_guard_reverted else text_edges.applied,
+        "text_edges_reason": "reverted by cumulative change guard" if cumulative_guard_reverted else text_edges.reason,
+        "text_edges_delta": 0.0 if cumulative_guard_reverted else text_edges.edge_delta,
+        "text_edges_changed_pixel_ratio": 0.0 if cumulative_guard_reverted else text_edges.changed_pixel_ratio,
+        "text_edges_candidate_pixel_ratio": 0.0 if cumulative_guard_reverted else text_edges.candidate_pixel_ratio,
         "processing_audit": processing_audit,
         "processing_warnings": processing_warnings,
         "operation_timings": operation_timings,
@@ -2779,6 +2853,7 @@ def _processing_audit(
     text_edges_delta: float = 0.0,
     text_edges_changed_pixel_ratio: float = 0.0,
     text_edges_candidate_pixel_ratio: float = 0.0,
+    cumulative_change_guard: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     source_width, source_height = source.size
     output_width, output_height = processed.size
@@ -2855,8 +2930,102 @@ def _processing_audit(
         "deskew_abs_angle_degrees": deskew_abs_angle,
         "despeckle_pixel_ratio": round(despeckle_pixel_ratio, 6),
     }
+    if cumulative_change_guard is None:
+        cumulative_change_guard = _cumulative_change_guard(metrics, options)
+    metrics.update(_cumulative_change_guard_audit_fields(cumulative_change_guard))
     failures = _audit_guardrail_failures(metrics, options)
     return {**metrics, "guardrail_failures": failures}
+
+
+def _cumulative_change_guard(metrics: dict[str, Any], options: ProcessingOptions) -> dict[str, Any]:
+    geometric_scope = metrics.get("pixel_change_guardrail_scope") == "geometric_change_recorded_by_size_crop_trim_or_deskew"
+    pixel_ratio = (
+        _float_metric(metrics, "pixel_change_ratio")
+        if metrics.get("pixel_change_guardrail_applied") is True
+        else 0.0
+    )
+    brightness_delta = 0.0 if geometric_scope else _float_metric(metrics, "brightness_delta")
+    contrast_delta = 0.0 if geometric_scope else _float_metric(metrics, "contrast_delta")
+    crop_ratio = max(_float_metric(metrics, "crop_ratio"), _float_metric(metrics, "max_trim_margin_ratio"))
+    candidate_ratio = max(
+        _float_metric(metrics, "background_stains_changed_pixel_ratio"),
+        _float_metric(metrics, "background_stains_candidate_pixel_ratio"),
+        _float_metric(metrics, "scanlines_changed_pixel_ratio"),
+        _float_metric(metrics, "scanlines_candidate_pixel_ratio"),
+        _float_metric(metrics, "faded_text_changed_pixel_ratio"),
+        _float_metric(metrics, "faded_text_candidate_pixel_ratio"),
+        _float_metric(metrics, "text_edges_changed_pixel_ratio"),
+        _float_metric(metrics, "text_edges_candidate_pixel_ratio"),
+    )
+    score_components = {
+        "pixel_change_ratio": _safe_ratio(pixel_ratio, options.audit_max_cumulative_pixel_change_ratio),
+        "brightness_delta": _safe_ratio(brightness_delta, options.audit_max_cumulative_brightness_delta),
+        "contrast_delta": _safe_ratio(contrast_delta, options.audit_max_cumulative_contrast_delta),
+        "crop_ratio": _safe_ratio(crop_ratio, options.audit_max_cumulative_crop_ratio),
+        "candidate_pixel_ratio": _safe_ratio(candidate_ratio, options.audit_max_cumulative_candidate_pixel_ratio),
+    }
+    score = round(max(score_components.values()), 6)
+    reasons = [
+        reason
+        for reason, value in score_components.items()
+        if value > 1.0
+    ]
+    if score > options.audit_max_cumulative_change_score:
+        reasons.append("cumulative_change_score")
+
+    existing_failures = _audit_guardrail_failures(metrics, options)
+    hard_failures = {
+        failure
+        for failure in existing_failures
+        if failure not in {"pixel_change_ratio", "brightness_delta", "contrast_delta"}
+    }
+    action = "passed"
+    if hard_failures:
+        action = "deferred_to_existing_guardrail"
+        reasons = []
+    elif reasons:
+        action = "reverted_to_source"
+
+    return {
+        "checked": True,
+        "action": action,
+        "reverted": action == "reverted_to_source",
+        "reasons": sorted(set(reasons)),
+        "score": score,
+        "pixel_ratio": round(pixel_ratio, 6),
+        "brightness_delta": round(brightness_delta, 6),
+        "contrast_delta": round(contrast_delta, 6),
+        "crop_ratio": round(crop_ratio, 6),
+        "candidate_pixel_ratio": round(candidate_ratio, 6),
+    }
+
+
+def _cumulative_change_guard_audit_fields(guard: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "cumulative_change_guard_checked": guard.get("checked") is True,
+        "cumulative_change_guard_action": guard.get("action", "passed"),
+        "cumulative_change_guard_reverted": guard.get("reverted") is True,
+        "cumulative_change_guard_reasons": guard.get("reasons") if isinstance(guard.get("reasons"), list) else [],
+        "cumulative_change_score": _round_guard_metric(guard.get("score")),
+        "cumulative_change_pixel_ratio": _round_guard_metric(guard.get("pixel_ratio")),
+        "cumulative_change_brightness_delta": _round_guard_metric(guard.get("brightness_delta")),
+        "cumulative_change_contrast_delta": _round_guard_metric(guard.get("contrast_delta")),
+        "cumulative_change_crop_ratio": _round_guard_metric(guard.get("crop_ratio")),
+        "cumulative_change_candidate_pixel_ratio": _round_guard_metric(guard.get("candidate_pixel_ratio")),
+    }
+
+
+def _float_metric(metrics: dict[str, Any], key: str) -> float:
+    value = metrics.get(key)
+    return float(value) if isinstance(value, int | float) else 0.0
+
+
+def _safe_ratio(value: float, threshold: float) -> float:
+    return value / threshold if threshold > 0 else 0.0
+
+
+def _round_guard_metric(value: Any) -> float:
+    return round(float(value), 6) if isinstance(value, int | float) else 0.0
 
 
 def _scan_measurements_for_processing(scan_record: dict[str, Any] | None, image: Image.Image) -> dict[str, Any]:
