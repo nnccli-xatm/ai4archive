@@ -57,6 +57,9 @@ def build_processing_plan(
         "despeckle_candidates": sum(1 for record in records if record.get("despeckle_candidate")),
         "tone_normalization_candidates": sum(1 for record in records if record.get("tone_normalization_candidate")),
         "edge_shadow_lightening_candidates": sum(1 for record in records if record.get("edge_shadow_lightening_candidate")),
+        "background_stain_lightening_candidates": sum(
+            1 for record in records if record.get("background_stain_lightening_candidate")
+        ),
     }
     return {
         "schema_version": "scan-qc.processing-plan.v1",
@@ -70,6 +73,7 @@ def build_processing_plan(
             "despeckle": options.despeckle,
             "normalize_tones": options.normalize_tones,
             "lighten_edge_shadow": options.lighten_edge_shadow,
+            "lighten_background_stains": options.lighten_background_stains,
             "resume_processing": False,
             "reuse_scan_measurements": options.reuse_scan_measurements,
         },
@@ -128,6 +132,8 @@ def _plan_record(item: dict[str, Any], input_dir: Path, options: ProcessingOptio
         "edge_shadow_lightening_candidate": False,
         "edge_shadow_reason": None,
         "edge_shadow_edges": [],
+        "background_stain_lightening_candidate": False,
+        "background_stains_reason": None,
         "processing_audit": None,
         "processing_warnings": [],
         "failure_reason": None,
@@ -174,6 +180,8 @@ def _plan_record(item: dict[str, Any], input_dir: Path, options: ProcessingOptio
             "edge_shadow_lightening_candidate": process_info["edge_shadow_lightened"],
             "edge_shadow_reason": process_info["edge_shadow_reason"],
             "edge_shadow_edges": process_info["edge_shadow_edges"],
+            "background_stain_lightening_candidate": process_info["background_stains_lightened"],
+            "background_stains_reason": process_info["background_stains_reason"],
             "processing_audit": process_info["processing_audit"],
             "processing_warnings": process_info["processing_warnings"],
         }
@@ -205,6 +213,8 @@ def _write_plan_csv(plan: dict[str, Any], path: Path) -> None:
         "edge_shadow_lightening_candidate",
         "edge_shadow_reason",
         "edge_shadow_edges",
+        "background_stain_lightening_candidate",
+        "background_stains_reason",
         "processing_warnings",
         "failure_reason",
     ]
