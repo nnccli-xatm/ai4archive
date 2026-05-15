@@ -102,6 +102,7 @@ class EdgeShadowLighteningResult:
     edge_mean_after: float | None
     edge_delta: float
     changed_pixel_ratio: float
+    candidate_pixel_ratio: float
 
 
 @dataclass(frozen=True)
@@ -625,6 +626,7 @@ def _process_record(
         "edge_shadow_mean_after": None,
         "edge_shadow_delta": 0.0,
         "edge_shadow_changed_pixel_ratio": 0.0,
+        "edge_shadow_candidate_pixel_ratio": 0.0,
         "background_stains_lightened": False,
         "background_stains_reason": None,
         "background_stains_mean_before": None,
@@ -723,6 +725,7 @@ def _process_record(
                 "edge_shadow_mean_after": process_info["edge_shadow_mean_after"],
                 "edge_shadow_delta": process_info["edge_shadow_delta"],
                 "edge_shadow_changed_pixel_ratio": process_info["edge_shadow_changed_pixel_ratio"],
+                "edge_shadow_candidate_pixel_ratio": process_info["edge_shadow_candidate_pixel_ratio"],
                 "background_stains_lightened": process_info["background_stains_lightened"],
                 "background_stains_reason": process_info["background_stains_reason"],
                 "background_stains_mean_before": process_info["background_stains_mean_before"],
@@ -796,6 +799,7 @@ def _process_record(
                     "edge_shadow_mean_after": process_info["edge_shadow_mean_after"],
                     "edge_shadow_delta": process_info["edge_shadow_delta"],
                     "edge_shadow_changed_pixel_ratio": process_info["edge_shadow_changed_pixel_ratio"],
+                    "edge_shadow_candidate_pixel_ratio": process_info["edge_shadow_candidate_pixel_ratio"],
                     "background_stains_lightened": process_info["background_stains_lightened"],
                     "background_stains_reason": process_info["background_stains_reason"],
                     "background_stains_mean_before": process_info["background_stains_mean_before"],
@@ -1009,6 +1013,19 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
         and isinstance(reason, str)
         and reason != "text edge sharpening disabled"
     ]
+    edge_shadow_reasons = [
+        record.get("edge_shadow_reason")
+        for record in processed_records
+        if isinstance(record.get("edge_shadow_reason"), str)
+    ]
+    edge_shadow_skipped_reasons = [
+        reason
+        for record in processed_records
+        for reason in [record.get("edge_shadow_reason")]
+        if record.get("edge_shadow_lightened") is False
+        and isinstance(reason, str)
+        and reason != "edge shadow lightening disabled"
+    ]
     return {
         "schema_version": "scan-qc.processing.audit.v1",
         "generated_at": manifest["generated_at"],
@@ -1099,6 +1116,12 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "edge_shadow_lightened_files": sum(
                 1 for audit in audit_records if audit.get("edge_shadow_lightened") is True
             ),
+            "edge_shadow_skipped_files": sum(
+                1
+                for record in processed_records
+                if record.get("edge_shadow_lightened") is False
+                and record.get("edge_shadow_reason") not in {None, "edge shadow lightening disabled"}
+            ),
             "background_stains_lightened_files": sum(
                 1 for audit in audit_records if audit.get("background_stains_lightened") is True
             ),
@@ -1152,6 +1175,9 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "edge_shadow_delta": _aggregate_metric(audit_records, "edge_shadow_delta"),
             "edge_shadow_changed_pixel_ratio": _aggregate_metric(
                 audit_records, "edge_shadow_changed_pixel_ratio"
+            ),
+            "edge_shadow_candidate_pixel_ratio": _aggregate_metric(
+                audit_records, "edge_shadow_candidate_pixel_ratio"
             ),
             "background_stains_delta": _aggregate_metric(audit_records, "background_stains_delta"),
             "background_stains_changed_pixel_ratio": _aggregate_metric(
@@ -1254,6 +1280,51 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                 ),
                 "backend_mode": _aggregate_despeckle_backend(processed_records, options.despeckle)["backend_mode"],
                 "reason_distribution": _reason_counts(reason for reason in despeckle_reasons if isinstance(reason, str)),
+            },
+            "edge_shadow": {
+                "applied_files": sum(1 for audit in audit_records if audit.get("edge_shadow_lightened") is True),
+                "skipped_files": sum(
+                    1
+                    for record in processed_records
+                    if record.get("edge_shadow_lightened") is False
+                    and record.get("edge_shadow_reason") not in {None, "edge shadow lightening disabled"}
+                ),
+                "edge_distribution": _reason_counts(
+                    edge
+                    for record in processed_records
+                    for edge in record.get("edge_shadow_edges", [])
+                    if record.get("edge_shadow_lightened") is True and isinstance(edge, str)
+                ),
+                "changed_pixel_ratio": _aggregate_metric(audit_records, "edge_shadow_changed_pixel_ratio"),
+                "candidate_pixel_ratio": _aggregate_metric(audit_records, "edge_shadow_candidate_pixel_ratio"),
+                "reason_distribution": _reason_counts(
+                    reason for reason in edge_shadow_reasons if isinstance(reason, str)
+                ),
+                "skip_reason_distribution": _reason_counts(edge_shadow_skipped_reasons),
+                "protection_triggered_files": sum(
+                    1
+                    for reason in edge_shadow_skipped_reasons
+                    if any(
+                        marker in reason
+                        for marker in (
+                            "risk",
+                            "foreground too dense",
+                            "texture",
+                            "archival",
+                            "正文",
+                        )
+                    )
+                ),
+                "conservative_scope_skip_files": sum(
+                    1
+                    for reason in edge_shadow_skipped_reasons
+                    if "conservative" in reason or "broad uneven lighting" in reason
+                ),
+                "low_confidence_skip_files": sum(
+                    1
+                    for reason in edge_shadow_skipped_reasons
+                    if "low-confidence" in reason or "no confident" in reason or "low tonal separation" in reason
+                ),
             },
             "background_stains": {
                 "applied_files": sum(
@@ -1760,7 +1831,7 @@ def _process_image(
             operations.append("normalize_tones_disabled")
 
     edge_shadow = EdgeShadowLighteningResult(
-        processed, False, "edge shadow lightening disabled", (), None, None, 0.0, 0.0
+        processed, False, "edge shadow lightening disabled", (), None, None, 0.0, 0.0, 0.0
     )
     with _operation_timer(operation_timings, "lighten_edge_shadow", enabled=options.lighten_edge_shadow):
         if options.lighten_edge_shadow:
@@ -1842,6 +1913,7 @@ def _process_image(
         edge_shadow.applied,
         edge_shadow.edge_delta,
         edge_shadow.changed_pixel_ratio,
+        edge_shadow.candidate_pixel_ratio,
         background_stains.applied,
         background_stains.stain_delta,
         background_stains.changed_pixel_ratio,
@@ -1911,6 +1983,9 @@ def _process_image(
         "edge_shadow_mean_after": None if cumulative_guard_reverted else edge_shadow.edge_mean_after,
         "edge_shadow_delta": 0.0 if cumulative_guard_reverted else edge_shadow.edge_delta,
         "edge_shadow_changed_pixel_ratio": 0.0 if cumulative_guard_reverted else edge_shadow.changed_pixel_ratio,
+        "edge_shadow_candidate_pixel_ratio": 0.0
+        if cumulative_guard_reverted
+        else edge_shadow.candidate_pixel_ratio,
         "background_stains_lightened": False if cumulative_guard_reverted else background_stains.applied,
         "background_stains_reason": "reverted by cumulative change guard" if cumulative_guard_reverted else background_stains.reason,
         "background_stains_mean_before": None if cumulative_guard_reverted else background_stains.stain_mean_before,
@@ -2122,7 +2197,7 @@ def _lighten_edge_shadow_conservative(image: Image.Image) -> EdgeShadowLightenin
         return _edge_shadow_noop(image, "edge shadow lightening skipped: low tonal separation")
 
     strip = max(6, min(24, int(round(min(image.width, image.height) * 0.055))))
-    edge_plans: list[tuple[str, tuple[int, int, int, int], tuple[int, int, int, int], float]] = []
+    edge_plans: list[tuple[str, tuple[int, int, int, int], tuple[int, int, int, int], float, int, float]] = []
     candidates = [
         ("left", (0, 0, strip, image.height), (strip, 0, strip * 3, image.height)),
         (
@@ -2142,15 +2217,33 @@ def _lighten_edge_shadow_conservative(image: Image.Image) -> EdgeShadowLightenin
         inner = grayscale.crop(inner_box)
         edge_mean = ImageStat.Stat(edge).mean[0]
         inner_mean = ImageStat.Stat(inner).mean[0]
+        edge_std = ImageStat.Stat(edge).stddev[0]
+        inner_std = ImageStat.Stat(inner).stddev[0]
         edge_dark_ratio = _dark_pixel_ratio(edge, 125)
         inner_dark_ratio = _dark_pixel_ratio(inner, 125)
+        edge_foreground_ratio = _dark_pixel_ratio(edge, 164)
+        inner_foreground_ratio = _dark_pixel_ratio(inner, 164)
         delta = inner_mean - edge_mean
         if edge_dark_ratio > 0.006:
             return _edge_shadow_noop(image, f"edge shadow lightening skipped: archival mark or content risk at {side} edge")
         if inner_dark_ratio > 0.012:
             return _edge_shadow_noop(image, f"edge shadow lightening skipped:正文 or margin content risk near {side} edge")
-        if 12 <= delta <= 58 and edge_mean >= 135 and inner_mean >= 170:
-            edge_plans.append((side, edge_box, inner_box, min(28.0, delta * 0.72)))
+        if edge_foreground_ratio > 0.035 or inner_foreground_ratio > 0.045:
+            return _edge_shadow_noop(
+                image,
+                f"edge shadow lightening skipped: foreground too dense near {side} edge",
+            )
+        if edge_std > 24 or inner_std > 32:
+            return _edge_shadow_noop(image, f"edge shadow lightening skipped: texture risk near {side} edge")
+        if 10 <= delta <= 62 and edge_mean >= 132 and inner_mean >= 168:
+            candidate_pixels = _edge_shadow_candidate_pixels(edge, inner_mean)
+            candidate_ratio = candidate_pixels / max(1, total)
+            if candidate_ratio < 0.008:
+                return _edge_shadow_noop(
+                    image,
+                    f"edge shadow lightening skipped: low-confidence narrow shadow near {side} edge",
+                )
+            edge_plans.append((side, edge_box, inner_box, min(30.0, delta * 0.68), candidate_pixels, inner_mean))
 
     if not edge_plans:
         return _edge_shadow_noop(image, "edge shadow lightening skipped: no confident page-edge shadow")
@@ -2161,7 +2254,10 @@ def _lighten_edge_shadow_conservative(image: Image.Image) -> EdgeShadowLightenin
     before_values: list[float] = []
     after_values: list[float] = []
     changed_pixels = 0
-    for side, edge_box, _inner_box, max_delta in edge_plans:
+    candidate_pixels_total = sum(
+        candidate_pixels for _side, _edge_box, _inner_box, _delta, candidate_pixels, _inner_mean in edge_plans
+    )
+    for side, edge_box, _inner_box, max_delta, _candidate_pixels, inner_mean in edge_plans:
         edge = working_l.crop(edge_box)
         before_values.append(ImageStat.Stat(edge).mean[0])
         pixels = edge.load()
@@ -2181,6 +2277,8 @@ def _lighten_edge_shadow_conservative(image: Image.Image) -> EdgeShadowLightenin
                     else height - 1 - y
                 )
                 factor = 1.0 - (distance / max(1, (width if side in {"left", "right"} else height)))
+                if value > 248 or value > inner_mean - 4:
+                    continue
                 new_value = min(255, int(round(value + max_delta * max(0.0, factor))))
                 if new_value - value > 2:
                     changed_pixels += 1
@@ -2195,20 +2293,28 @@ def _lighten_edge_shadow_conservative(image: Image.Image) -> EdgeShadowLightenin
     result_image = working_l if image.mode == "L" else Image.merge("RGB", (working_l, working_l, working_l))
     before_mean = round(sum(before_values) / len(before_values), 6)
     after_mean = round(sum(after_values) / len(after_values), 6)
+    candidate_ratio = candidate_pixels_total / max(1, total)
     return EdgeShadowLighteningResult(
         result_image,
         True,
         "edge shadow lightening applied: narrow neutral page-edge shadow",
-        tuple(side for side, _edge_box, _inner_box, _delta in edge_plans),
+        tuple(side for side, _edge_box, _inner_box, _delta, _candidate_pixels, _inner_mean in edge_plans),
         before_mean,
         after_mean,
         round(after_mean - before_mean, 6),
         round(changed_ratio, 6),
+        round(candidate_ratio, 6),
     )
 
 
 def _edge_shadow_noop(image: Image.Image, reason: str) -> EdgeShadowLighteningResult:
-    return EdgeShadowLighteningResult(image, False, reason, (), None, None, 0.0, 0.0)
+    return EdgeShadowLighteningResult(image, False, reason, (), None, None, 0.0, 0.0, 0.0)
+
+
+def _edge_shadow_candidate_pixels(edge: Image.Image, inner_mean: float) -> int:
+    upper = max(132, min(248, int(round(inner_mean - 4))))
+    histogram = edge.histogram()
+    return sum(histogram[132 : upper + 1])
 
 
 def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundStainLighteningResult:
@@ -3213,6 +3319,7 @@ def _processing_audit(
     edge_shadow_lightened: bool = False,
     edge_shadow_delta: float = 0.0,
     edge_shadow_changed_pixel_ratio: float = 0.0,
+    edge_shadow_candidate_pixel_ratio: float = 0.0,
     background_stains_lightened: bool = False,
     background_stains_delta: float = 0.0,
     background_stains_changed_pixel_ratio: float = 0.0,
@@ -3284,6 +3391,7 @@ def _processing_audit(
         "edge_shadow_lightened": edge_shadow_lightened,
         "edge_shadow_delta": round(edge_shadow_delta, 6),
         "edge_shadow_changed_pixel_ratio": round(edge_shadow_changed_pixel_ratio, 6),
+        "edge_shadow_candidate_pixel_ratio": round(edge_shadow_candidate_pixel_ratio, 6),
         "background_stains_lightened": background_stains_lightened,
         "background_stains_delta": round(background_stains_delta, 6),
         "background_stains_changed_pixel_ratio": round(background_stains_changed_pixel_ratio, 6),
