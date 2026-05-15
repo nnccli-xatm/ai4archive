@@ -8784,6 +8784,47 @@ class ScanQcTest(unittest.TestCase):
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertNotIn("A001_gray_edge", json.dumps(audit_summary, ensure_ascii=False))
 
+    def test_trim_dark_border_trims_narrow_continuous_deep_gray_scan_edge(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            image = Image.new("RGB", (120, 90), (242, 242, 238))
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((0, 0, 119, 89), outline=(92, 92, 92), width=3)
+            draw.rectangle((36, 32, 84, 36), fill=(20, 20, 20))
+            image.save(input_dir / "A001_narrow_gray_edge.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(trim_dark_border=True))
+            audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
+
+            record = manifest["files"][0]
+            self.assertTrue(record["dark_border_trimmed"])
+            self.assertEqual(record["dark_border_bbox"], [3, 3, 117, 87])
+            self.assertEqual(record["output_size"], [114, 84])
+            self.assertLessEqual(record["processing_audit"]["max_trim_margin_ratio"], 0.034)
+            self.assertEqual(record["dark_border_reason"], "dark edge border trimmed")
+            self.assertEqual(audit_summary["counts"]["dark_border_trimmed_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["dark_border_trim"]["reason_distribution"],
+                {"dark edge border trimmed": 1},
+            )
+            self.assertNotIn("A001_narrow_gray_edge", json.dumps(audit_summary, ensure_ascii=False))
+
+    def test_trim_dark_border_keeps_edge_content_inside_narrow_deep_gray_scan_edge(self) -> None:
+        image = Image.new("RGB", (120, 90), (242, 242, 238))
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((0, 0, 119, 89), outline=(92, 92, 92), width=3)
+        draw.rectangle((3, 38, 12, 43), fill=(15, 15, 15))
+
+        detection = detect_dark_border_bbox(image)
+
+        self.assertIsNone(detection.bbox)
+        self.assertEqual(detection.reason, "protected edge content near dark border")
+
     def test_trim_dark_border_noops_for_content_adjacent_to_each_edge(self) -> None:
         cases = {
             "left": (5, 34, 13, 39),

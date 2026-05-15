@@ -5180,8 +5180,13 @@ def _dark_edge_run(image: Image.Image, side: str, max_pixels: int) -> int:
         else:
             values = [pixels[x, height - 1 - offset] for x in range(width)]
         dark_ratio = sum(1 for value in values if value <= 70) / len(values)
+        deep_gray_ratio = sum(1 for value in values if value <= 110) / len(values)
         mean = sum(values) / len(values)
-        if dark_ratio >= 0.70 and mean <= 105:
+        variance = sum((value - mean) ** 2 for value in values) / len(values)
+        stddev = variance**0.5
+        if (dark_ratio >= 0.70 and mean <= 105) or (
+            deep_gray_ratio >= 0.96 and mean <= 118 and stddev <= 18
+        ):
             run = offset + 1
         else:
             break
