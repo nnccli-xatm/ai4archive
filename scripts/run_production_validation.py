@@ -83,6 +83,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional minimum acceptable derivative processing throughput.",
     )
     parser.add_argument(
+        "--main-aggregate-baseline-summary",
+        default=None,
+        type=Path,
+        help="Optional latest-main aggregate_baseline_summary.json for PR-specific throughput regression diagnostics.",
+    )
+    parser.add_argument(
         "--resource-summary",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -101,6 +107,7 @@ def main(argv: list[str] | None = None) -> int:
         acceptance_path, acceptance = write_acceptance_summary(
             output_path=output_root / ACCEPTANCE_JSON,
             aggregate_baseline_summary_path=output_root / BASELINE_JSON,
+            main_aggregate_baseline_summary_path=args.main_aggregate_baseline_summary,
             min_scan_files_per_minute=args.min_scan_files_per_minute,
             min_processing_files_per_minute=args.min_processing_files_per_minute,
         )
@@ -195,6 +202,12 @@ def _print_aggregate_result(
     if include_resource_summary:
         _print_resource_summary(baseline.get("runtime_hardware", {}))
     print(f"Acceptance status: {acceptance['status']}")
+    comparison = acceptance.get("main_comparison")
+    if isinstance(comparison, dict) and comparison.get("provided"):
+        print(f"Main comparison diagnostic: {comparison.get('diagnostic_code')}")
+        scan_comparison = comparison.get("throughput", {}).get("scan_files_per_minute", {})
+        if isinstance(scan_comparison, dict):
+            print(f"Scan delta vs main files/min: {_format_optional_float(scan_comparison.get('delta_files_per_minute'))}")
     if acceptance["blocking_items"]:
         codes = ", ".join(str(item["code"]) for item in acceptance["blocking_items"])
         print(f"Blocking items: {codes}")
