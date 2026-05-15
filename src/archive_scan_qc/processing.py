@@ -970,6 +970,19 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
         and isinstance(reason, str)
         and reason != "background stain lightening disabled"
     ]
+    scanlines_reasons = [
+        record.get("scanlines_reason")
+        for record in processed_records
+        if isinstance(record.get("scanlines_reason"), str)
+    ]
+    scanlines_skipped_reasons = [
+        reason
+        for record in processed_records
+        for reason in [record.get("scanlines_reason")]
+        if record.get("scanlines_lightened") is False
+        and isinstance(reason, str)
+        and reason != "scanline lightening disabled"
+    ]
     return {
         "schema_version": "scan-qc.processing.audit.v1",
         "generated_at": manifest["generated_at"],
@@ -1070,6 +1083,12 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                 and record.get("background_stains_reason") not in {None, "background stain lightening disabled"}
             ),
             "scanlines_lightened_files": sum(1 for audit in audit_records if audit.get("scanlines_lightened") is True),
+            "scanlines_skipped_files": sum(
+                1
+                for record in processed_records
+                if record.get("scanlines_lightened") is False
+                and record.get("scanlines_reason") not in {None, "scanline lightening disabled"}
+            ),
             "faded_text_enhanced_files": sum(
                 1 for audit in audit_records if audit.get("faded_text_enhanced") is True
             ),
@@ -1220,6 +1239,42 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                 ),
                 "low_confidence_skip_files": sum(
                     1 for reason in background_stains_skipped_reasons if "low-confidence" in reason
+                ),
+            },
+            "scanlines": {
+                "applied_files": sum(1 for audit in audit_records if audit.get("scanlines_lightened") is True),
+                "skipped_files": sum(
+                    1
+                    for record in processed_records
+                    if record.get("scanlines_lightened") is False
+                    and record.get("scanlines_reason") not in {None, "scanline lightening disabled"}
+                ),
+                "direction_distribution": _reason_counts(
+                    record.get("scanlines_orientation")
+                    for record in processed_records
+                    if record.get("scanlines_lightened") is True
+                    and isinstance(record.get("scanlines_orientation"), str)
+                ),
+                "changed_pixel_ratio": _aggregate_metric(audit_records, "scanlines_changed_pixel_ratio"),
+                "candidate_pixel_ratio": _aggregate_metric(audit_records, "scanlines_candidate_pixel_ratio"),
+                "reason_distribution": _reason_counts(reason for reason in scanlines_reasons if isinstance(reason, str)),
+                "skip_reason_distribution": _reason_counts(scanlines_skipped_reasons),
+                "protection_triggered_files": sum(
+                    1
+                    for reason in scanlines_skipped_reasons
+                    if any(marker in reason for marker in ("risk", "protected", "foreground too dense"))
+                ),
+                "conservative_scope_skip_files": sum(
+                    1
+                    for reason in scanlines_skipped_reasons
+                    if "outside conservative scope" in reason
+                    or "archival stripe risk" in reason
+                    or "broad uneven lighting" in reason
+                ),
+                "low_confidence_skip_files": sum(
+                    1
+                    for reason in scanlines_skipped_reasons
+                    if "low-confidence" in reason or "no confident" in reason
                 ),
             },
         },
@@ -2278,6 +2333,7 @@ def _lighten_scanlines_conservative(image: Image.Image) -> ScanlineLighteningRes
     histogram = grayscale.histogram()
     total = image.width * image.height
     p01 = _histogram_percentile(histogram, total, 0.01)
+    p05 = _histogram_percentile(histogram, total, 0.05)
     p50 = _histogram_percentile(histogram, total, 0.50)
     p90 = _histogram_percentile(histogram, total, 0.90)
     p95 = _histogram_percentile(histogram, total, 0.95)
@@ -2292,6 +2348,10 @@ def _lighten_scanlines_conservative(image: Image.Image) -> ScanlineLighteningRes
     foreground_ratio = _mask_ratio(foreground)
     if foreground_ratio < 0.0015:
         return _scanlines_noop(image, "scanline lightening skipped: foreground evidence too sparse")
+    if foreground_ratio > 0.08 and p05 < 70:
+        return _scanlines_noop(image, "scanline lightening skipped: foreground too dense")
+    if foreground_ratio > 0.08 and p05 < 165 and p50 < 225:
+        return _scanlines_noop(image, "scanline lightening skipped: photo, illustration, or dense texture risk")
     if foreground_ratio > 0.24:
         return _scanlines_noop(image, "scanline lightening skipped: foreground too dense")
     if _protected_edge_dark_ratio(foreground) > 0.0025:
@@ -2413,6 +2473,7 @@ def _scanline_axis_lightening_plan(
         available_ratio = len(values) / max(1, cross_length)
         protected_ratio = protected_count / max(1, cross_length)
         candidate_ratio = len(selected) / max(1, cross_length)
+        candidate_available_ratio = len(selected) / max(1, len(values))
         dark_ratio = dark / max(1, len(values)) if values else 1.0
         max_dark_ratio = max(max_dark_ratio, dark_ratio)
         mean = sum(values) / len(values) if values else 0.0
@@ -2422,6 +2483,7 @@ def _scanline_axis_lightening_plan(
                 "available_ratio": available_ratio,
                 "protected_ratio": protected_ratio,
                 "candidate_ratio": candidate_ratio,
+                "candidate_available_ratio": candidate_available_ratio,
                 "dark_ratio": dark_ratio,
                 "selected": selected,
             }
@@ -2441,7 +2503,9 @@ def _scanline_axis_lightening_plan(
         stat = line_stats[index]
         if stat["protected_ratio"] > 0.012:
             continue
-        if stat["available_ratio"] < 0.72 or stat["candidate_ratio"] < 0.55:
+        if stat["available_ratio"] < 0.72:
+            continue
+        if stat["candidate_ratio"] < 0.38 or stat["candidate_available_ratio"] < 0.54:
             continue
         neighbor_means = [
             line_stats[neighbor]["mean"]
@@ -2458,7 +2522,7 @@ def _scanline_axis_lightening_plan(
             continue
         candidate_lines.append(index)
         selected.update(stat["selected"])
-        score += min(1.0, stat["candidate_ratio"] / 0.8) * min(1.0, local_delta / 12.0)
+        score += min(1.0, stat["candidate_available_ratio"] / 0.8) * min(1.0, local_delta / 12.0)
 
     if not candidate_lines:
         return _empty_scanline_lightening_plan(orientation, "no confident low-contrast scanlines", candidate_total_ratio)

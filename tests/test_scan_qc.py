@@ -6132,6 +6132,195 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn("private_red_annotation", audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
 
+    def test_lighten_scanlines_improves_horizontal_and_vertical_lines_with_aggregate_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "private_horizontal_scanline.png": _synthetic_repair_scanline_page("horizontal"),
+                "private_vertical_scanline.png": _synthetic_repair_scanline_page("vertical"),
+            }
+            for name, image in pages.items():
+                image.save(input_dir / name, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(lighten_scanlines=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            for source_name, orientation in (
+                ("private_horizontal_scanline.png", "horizontal"),
+                ("private_vertical_scanline.png", "vertical"),
+            ):
+                record = records[source_name]
+                processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+                line_box = (12, 132, 248, 134) if orientation == "horizontal" else (212, 18, 214, 164)
+                protected_box = (36, 36, 164, 96)
+                self.assertTrue(record["scanlines_lightened"], source_name)
+                self.assertEqual(record["scanlines_orientation"], orientation)
+                self.assertIn("lighten_scanlines_conservative", record["operations"])
+                self.assertGreater(
+                    _box_luma(processed, line_box),
+                    _box_luma(pages[source_name], line_box) + 4.0,
+                    source_name,
+                )
+                self.assertLess(_changed_ratio_for_test(pages[source_name], processed, protected_box), 0.002, source_name)
+                self.assertGreater(record["scanlines_changed_pixel_ratio"], 0.0007, source_name)
+                self.assertLess(record["scanlines_changed_pixel_ratio"], 0.035, source_name)
+                self.assertEqual(record["processing_audit"]["guardrail_failures"], [], source_name)
+
+            self.assertEqual(audit_summary["counts"]["scanlines_lightened_files"], 2)
+            self.assertEqual(audit_summary["counts"]["scanlines_skipped_files"], 0)
+            scanline_guard = audit_summary["guardrails"]["scanlines"]
+            self.assertEqual(scanline_guard["applied_files"], 2)
+            self.assertEqual(scanline_guard["skipped_files"], 0)
+            self.assertEqual(scanline_guard["direction_distribution"]["horizontal"], 1)
+            self.assertEqual(scanline_guard["direction_distribution"]["vertical"], 1)
+            self.assertIn("scanlines_changed_pixel_ratio", audit_summary["metrics"])
+            self.assertIn("changed_pixel_ratio", scanline_guard)
+            self.assertEqual(scanline_guard["protection_triggered_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_horizontal_scanline", audit_summary_text)
+            self.assertNotIn("private_vertical_scanline", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
+    def test_lighten_scanlines_skips_protected_content_and_uncertain_pages(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            default_process_dir = root / "processed-default"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "private_default_compatible_scanline.png": _synthetic_repair_scanline_page("horizontal"),
+                "private_table_line.png": _synthetic_repair_scanline_page("horizontal", table_line=True),
+                "private_page_number.png": _synthetic_repair_scanline_page("horizontal", page_number=True),
+                "private_red_stamp.png": _synthetic_repair_scanline_page("horizontal", red_stamp=True),
+                "private_handwriting.png": _synthetic_repair_scanline_page("horizontal", handwriting=True),
+                "private_photo_texture.png": _synthetic_photo_like_page(),
+                "private_dense_table.png": _synthetic_dense_table_scanline_page(),
+                "private_low_confidence.png": _synthetic_scanline_low_confidence_page(),
+                "private_edge_archive_line.png": _synthetic_repair_scanline_page("horizontal", edge_archive_line=True),
+            }
+            for name, image in pages.items():
+                image.save(input_dir / name, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            default_manifest = process_images(report, input_dir, default_process_dir, ProcessingOptions(workers=1))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(lighten_scanlines=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for record in default_manifest["files"]:
+                self.assertFalse(record["scanlines_lightened"])
+                self.assertIn("lighten_scanlines_disabled", record["operations"])
+                self.assertEqual(
+                    _sha256_for_test(input_dir / record["source_relative_path"]),
+                    _sha256_for_test(default_process_dir / record["output_relative_path"]),
+                )
+
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            self.assertTrue(records["private_default_compatible_scanline.png"]["scanlines_lightened"])
+            skipped_expectations = {
+                "private_table_line.png": "no confident",
+                "private_page_number.png": "risk",
+                "private_red_stamp.png": "risk",
+                "private_handwriting.png": "no confident",
+                "private_photo_texture.png": "texture risk",
+                "private_dense_table.png": "foreground too dense",
+                "private_low_confidence.png": "low-confidence",
+                "private_edge_archive_line.png": "risk",
+            }
+            for source_name, reason_fragment in skipped_expectations.items():
+                record = records[source_name]
+                processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+                self.assertFalse(record["scanlines_lightened"], source_name)
+                self.assertIn("lighten_scanlines_noop", record["operations"], source_name)
+                self.assertIn(reason_fragment, record["scanlines_reason"], source_name)
+                self.assertEqual(record["processing_audit"]["scanlines_changed_pixel_ratio"], 0.0, source_name)
+                self.assertLess(
+                    _changed_ratio_for_test(pages[source_name], processed, (0, 0, processed.width, processed.height)),
+                    0.001,
+                    source_name,
+                )
+
+            scanline_guard = audit_summary["guardrails"]["scanlines"]
+            self.assertEqual(audit_summary["counts"]["scanlines_lightened_files"], 1)
+            self.assertEqual(audit_summary["counts"]["scanlines_skipped_files"], len(skipped_expectations))
+            self.assertEqual(scanline_guard["applied_files"], 1)
+            self.assertEqual(scanline_guard["skipped_files"], len(skipped_expectations))
+            self.assertGreaterEqual(scanline_guard["protection_triggered_files"], 4)
+            self.assertGreaterEqual(scanline_guard["low_confidence_skip_files"], 2)
+            self.assertGreaterEqual(len(scanline_guard["skip_reason_distribution"]), 4)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_default_compatible_scanline", audit_summary_text)
+            self.assertNotIn("private_red_stamp", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
+    def test_combined_processing_chain_with_scanline_audit_stays_aggregate_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            _synthetic_repair_scanline_page("horizontal").save(input_dir / "private_combined_scanline.png", dpi=(300, 300))
+
+            exit_code = main(
+                [
+                    "--input",
+                    str(input_dir),
+                    "--out",
+                    str(output_dir),
+                    "--process-out",
+                    str(process_dir),
+                    "--auto-crop",
+                    "--deskew",
+                    "--trim-dark-border",
+                    "--despeckle",
+                    "--lighten-background-stains",
+                    "--lighten-scanlines",
+                    "--normalize-tones",
+                    "--workers",
+                    "1",
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            manifest = json.loads((process_dir / "processing_manifest.json").read_text(encoding="utf-8"))
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            self.assertEqual(manifest["summary"]["processed_files"], 1)
+            self.assertEqual(manifest["summary"]["failed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["processed_files"], 1)
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["operations"]["auto_crop"])
+            self.assertTrue(audit_summary["operations"]["deskew"])
+            self.assertTrue(audit_summary["operations"]["trim_dark_border"])
+            self.assertTrue(audit_summary["operations"]["despeckle"])
+            self.assertTrue(audit_summary["operations"]["lighten_background_stains"])
+            self.assertTrue(audit_summary["operations"]["lighten_scanlines"])
+            self.assertTrue(audit_summary["operations"]["normalize_tones"])
+            self.assertIn("scanlines", audit_summary["guardrails"])
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_combined_scanline", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
     def test_cumulative_change_guard_reverts_high_risk_stacked_change_without_failing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -10500,6 +10689,68 @@ def _synthetic_scanline_page(orientation: str) -> Image.Image:
     else:
         draw.rectangle((178, 0, 183, image.height - 1), fill=(0, 0, 0))
     return image
+
+
+def _synthetic_repair_scanline_page(
+    orientation: str,
+    *,
+    table_line: bool = False,
+    page_number: bool = False,
+    red_stamp: bool = False,
+    handwriting: bool = False,
+    edge_archive_line: bool = False,
+) -> Image.Image:
+    image = Image.new("RGB", (260, 180), (240, 240, 236))
+    draw = ImageDraw.Draw(image)
+    for y in (42, 64, 86):
+        draw.rectangle((42, y, 158, y + 5), fill=(36, 36, 36))
+    if orientation == "horizontal":
+        draw.rectangle((16, 132, 244, 133), fill=(222, 222, 218))
+    elif orientation == "vertical":
+        draw.rectangle((212, 18, 213, 164), fill=(222, 222, 218))
+    else:
+        raise ValueError(orientation)
+    if table_line:
+        draw.line((24, 126, 236, 126), fill=(45, 45, 45), width=2)
+    if page_number:
+        draw.rectangle((120, 166, 140, 174), fill=(35, 35, 35))
+    if red_stamp:
+        draw.ellipse((170, 84, 224, 138), outline=(180, 20, 20), width=4)
+    if handwriting:
+        draw.line((32, 128, 80, 150), fill=(55, 55, 55), width=2)
+        draw.line((80, 150, 126, 126), fill=(55, 55, 55), width=2)
+    if edge_archive_line:
+        draw.rectangle((4, 112, 18, 154), fill=(60, 60, 60))
+    return image
+
+
+def _synthetic_scanline_low_confidence_page() -> Image.Image:
+    image = Image.new("RGB", (260, 180), (240, 240, 236))
+    ImageDraw.Draw(image).rectangle((16, 132, 244, 133), fill=(222, 222, 218))
+    return image
+
+
+def _synthetic_dense_table_scanline_page() -> Image.Image:
+    image = Image.new("RGB", (260, 180), (240, 240, 236))
+    draw = ImageDraw.Draw(image)
+    for x in range(18, 246, 18):
+        draw.line((x, 18, x, 162), fill=(48, 48, 48), width=1)
+    for y in range(18, 162, 12):
+        draw.line((18, y, 246, y), fill=(48, 48, 48), width=1)
+    draw.rectangle((16, 132, 244, 133), fill=(222, 222, 218))
+    return image
+
+
+def _box_luma(image: Image.Image, box: tuple[int, int, int, int]) -> float:
+    return float(ImageStat.Stat(image.crop(box).convert("L")).mean[0])
+
+
+def _changed_ratio_for_test(before: Image.Image, after: Image.Image, box: tuple[int, int, int, int]) -> float:
+    before_l = before.crop(box).convert("L")
+    after_l = after.crop(box).convert("L")
+    diff = ImageChops.difference(before_l, after_l)
+    changed = sum(diff.point(lambda value: 255 if value > 8 else 0).histogram()[1:])
+    return changed / max(1, before_l.width * before_l.height)
 
 
 def _write_minimal_scan_report(
