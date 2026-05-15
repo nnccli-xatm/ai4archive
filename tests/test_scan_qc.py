@@ -7989,6 +7989,18 @@ class ScanQcTest(unittest.TestCase):
 
         self.assertEqual(_despeckle_candidate_points(mask), [])
 
+    def test_despeckle_dense_prefilter_keeps_real_tiny_blob_candidates(self) -> None:
+        mask = Image.new("L", (240, 180), 0)
+        draw = ImageDraw.Draw(mask)
+        draw.rectangle((20, 20, 150, 140), fill=255)
+        for point in [(190, 90), (191, 90), (190, 91), (191, 91)]:
+            mask.putpixel(point, 255)
+
+        self.assertEqual(
+            sorted(_despeckle_candidate_points(mask)),
+            [(190, 90), (190, 91), (191, 90), (191, 91)],
+        )
+
     def test_despeckle_fast_path_preserves_noop_output(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

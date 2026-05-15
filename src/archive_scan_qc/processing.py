@@ -3585,6 +3585,8 @@ _DESPECKLE_MAX_CANDIDATE_RATIO = 0.02
 _DESPECKLE_MAX_CHANGED_RATIO = 0.01
 _DESPECKLE_MAX_COMPONENT_PIXELS = 4
 _DESPECKLE_MAX_COMPONENT_SPAN = 3
+_DESPECKLE_DENSE_PREFILTER_MIN_DARK_PIXELS = 512
+_DESPECKLE_DENSE_PREFILTER_MAX_LOW_CONNECTIVITY_RATIO = 0.01
 _DESPECKLE_CONTENT_CONTEXT_RADIUS = 8
 _DESPECKLE_CONTENT_CONTEXT_MIN_DARK_PIXELS = 6
 
@@ -3785,7 +3787,21 @@ def _despeckle_candidate_points_fallback(dark_mask: Image.Image) -> list[tuple[i
         return []
 
     crop_width = right - left
+    crop_height = bottom - top
     crop_values = dark_mask.crop(candidate_bbox).tobytes()
+    dark_pixel_count = crop_values.count(255)
+    dense_prefilter_candidates = _despeckle_dense_connected_content_candidates(
+        crop_values,
+        crop_width=crop_width,
+        crop_height=crop_height,
+        dark_pixel_count=dark_pixel_count,
+        width=width,
+        height=height,
+        left=left,
+        top=top,
+    )
+    if dense_prefilter_candidates is not None:
+        return dense_prefilter_candidates
     dark_points = {
         (index % crop_width, index // crop_width)
         for index, mask_value in enumerate(crop_values)
@@ -3798,6 +3814,117 @@ def _despeckle_candidate_points_fallback(dark_mask: Image.Image) -> list[tuple[i
         left=left,
         top=top,
     )
+
+
+def _despeckle_dense_connected_content_candidates(
+    crop_values: bytes,
+    *,
+    crop_width: int,
+    crop_height: int,
+    dark_pixel_count: int,
+    width: int,
+    height: int,
+    left: int,
+    top: int,
+) -> list[tuple[int, int]] | None:
+    if dark_pixel_count < _DESPECKLE_DENSE_PREFILTER_MIN_DARK_PIXELS:
+        return None
+
+    max_low_connectivity_pixels = max(
+        12,
+        int(dark_pixel_count * _DESPECKLE_DENSE_PREFILTER_MAX_LOW_CONNECTIVITY_RATIO),
+    )
+    low_connectivity_pixels: list[tuple[int, int]] = []
+    for index, mask_value in enumerate(crop_values):
+        if not mask_value:
+            continue
+        local_x = index % crop_width
+        local_y = index // crop_width
+        dark_neighbors = 0
+        for neighbor_y in range(max(0, local_y - 1), min(crop_height, local_y + 2)):
+            row_offset = neighbor_y * crop_width
+            for neighbor_x in range(max(0, local_x - 1), min(crop_width, local_x + 2)):
+                if neighbor_x == local_x and neighbor_y == local_y:
+                    continue
+                if crop_values[row_offset + neighbor_x]:
+                    dark_neighbors += 1
+                    if dark_neighbors > _DESPECKLE_MAX_COMPONENT_PIXELS - 1:
+                        break
+            if dark_neighbors > _DESPECKLE_MAX_COMPONENT_PIXELS - 1:
+                break
+        if dark_neighbors <= _DESPECKLE_MAX_COMPONENT_PIXELS - 1:
+            low_connectivity_pixels.append((local_x, local_y))
+            if len(low_connectivity_pixels) > max_low_connectivity_pixels:
+                return None
+
+    low_connectivity_set = set(low_connectivity_pixels)
+    margin = _despeckle_protected_edge_margin(width, height)
+    candidates: list[tuple[int, int]] = []
+    visited: set[tuple[int, int]] = set()
+    neighbor_offsets = (
+        (-1, -1),
+        (0, -1),
+        (1, -1),
+        (-1, 0),
+        (1, 0),
+        (-1, 1),
+        (0, 1),
+        (1, 1),
+    )
+    for seed in low_connectivity_pixels:
+        if seed in visited:
+            continue
+        stack = [seed]
+        component: list[tuple[int, int]] = []
+        oversized = False
+        while stack:
+            local_x, local_y = stack.pop()
+            if (local_x, local_y) in visited:
+                continue
+            visited.add((local_x, local_y))
+            component.append((local_x, local_y))
+            if len(component) > _DESPECKLE_MAX_COMPONENT_PIXELS:
+                oversized = True
+                break
+            component_x = [point[0] for point in component]
+            component_y = [point[1] for point in component]
+            if max(component_x) - min(component_x) + 1 > _DESPECKLE_MAX_COMPONENT_SPAN:
+                oversized = True
+                break
+            if max(component_y) - min(component_y) + 1 > _DESPECKLE_MAX_COMPONENT_SPAN:
+                oversized = True
+                break
+            for offset_x, offset_y in neighbor_offsets:
+                neighbor_x = local_x + offset_x
+                neighbor_y = local_y + offset_y
+                if neighbor_x < 0 or neighbor_y < 0 or neighbor_x >= crop_width or neighbor_y >= crop_height:
+                    continue
+                if not crop_values[neighbor_y * crop_width + neighbor_x]:
+                    continue
+                neighbor = (neighbor_x, neighbor_y)
+                if neighbor in visited:
+                    continue
+                stack.append(neighbor)
+
+        if oversized:
+            continue
+        if any(point not in low_connectivity_set for point in component):
+            continue
+        absolute_points = [(left + local_x, top + local_y) for local_x, local_y in component]
+        if any(
+            x == 0
+            or y == 0
+            or x == width - 1
+            or y == height - 1
+            or x < margin
+            or y < margin
+            or x >= width - margin
+            or y >= height - margin
+            for x, y in absolute_points
+        ):
+            continue
+        candidates.extend(absolute_points)
+    return sorted(candidates, key=lambda point: (point[1], point[0]))
 
 
 def _despeckle_candidate_points_from_dark_points(
