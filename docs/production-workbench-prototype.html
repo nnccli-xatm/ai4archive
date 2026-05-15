@@ -638,6 +638,15 @@
       font-size: 13px;
     }
 
+    .stage-timing-text {
+      color: #315447;
+      line-height: 1.35;
+    }
+
+    .stage-timing-text.hidden {
+      display: none;
+    }
+
     .progress-bar {
       height: 12px;
       border-radius: 999px;
@@ -1247,6 +1256,7 @@
           </div>
           <div class="progress-track">
             <span id="progressText">进度：未开始</span>
+            <span class="stage-timing-text hidden" id="stageTimingText"></span>
             <div class="progress-bar" aria-label="处理进度">
               <div class="progress-fill" id="progressFill"></div>
             </div>
@@ -1509,6 +1519,7 @@
       lastServerInputPath: "",
       lastServerOutputPath: "",
       progressLabel: "",
+      stageTimingLabel: "",
       launchLocked: false,
       waitingForNewSetup: false,
       openOutputFolderAvailable: false,
@@ -1536,6 +1547,7 @@
       stateHint: document.getElementById("stateHint"),
       progressFill: document.getElementById("progressFill"),
       progressText: document.getElementById("progressText"),
+      stageTimingText: document.getElementById("stageTimingText"),
       pendingText: document.getElementById("pendingText"),
       sourceText: document.getElementById("sourceText"),
       readyText: document.getElementById("readyText"),
@@ -1914,6 +1926,7 @@
     function invalidateFolderReadiness(message) {
       if (!state.folderReadiness) return;
       state.folderReadiness = null;
+      state.stageTimingLabel = "";
       if (state.status === "ready") state.status = "choose_input";
       state.waitingForNewSetup = true;
       els.loadStatus.textContent = message || "文件夹已更改，请重新保存文件夹。";
@@ -1925,6 +1938,7 @@
         state.progress = 48;
         state.readyImages = state.readyImages || 0;
         state.progressLabel = deriveProgressLabel({ status: "running", operator_summary: {}, counts: {} }, { state: "running" });
+        state.stageTimingLabel = "";
       }
       if (next === "needs_review") {
         state.progress = 82;
@@ -2176,6 +2190,8 @@
       els.stateHint.textContent = hint;
       els.progressFill.style.width = `${state.progress}%`;
       els.progressText.textContent = state.progressLabel || (state.progress ? `进度：${state.progress}%` : "进度：未开始");
+      els.stageTimingText.textContent = state.stageTimingLabel;
+      els.stageTimingText.classList.toggle("hidden", !state.stageTimingLabel);
       els.pendingText.textContent = `${state.attentionFiles} 个`;
       els.sourceText.textContent = `${state.totalImages} 张`;
       els.readyText.textContent = `${state.readyImages} 张`;
@@ -2574,6 +2590,61 @@
       return `阶段：${stage}；${countText}${failureText}；状态：${stateLabel}`;
     }
 
+    const aggregateStageLabelById = {
+      scan: "检查扫描图片",
+      inspect: "检查扫描图片",
+      quality_check: "检查扫描图片",
+      check_scan_images: "检查扫描图片",
+      processing: "生成处理后图片",
+      process: "生成处理后图片",
+      derivatives: "生成处理后图片",
+      generate_derivatives: "生成处理后图片",
+      summarize: "整理处理结果",
+      summary: "整理处理结果",
+      organize_results: "整理处理结果",
+      finish: "整理处理结果"
+    };
+
+    function safeStageTimingLabel(stage) {
+      const rawLabel = typeof stage.label_zh === "string" ? stage.label_zh.trim() : "";
+      const rawId = typeof stage.id === "string" ? stage.id.trim().toLowerCase() : "";
+      const mapped = aggregateStageLabelById[rawId] || "";
+      if (!rawLabel) return mapped;
+      const unsafe = !/^[\u4e00-\u9fff\s]{2,18}$/.test(rawLabel) || /([A-Za-z]:\\|\/Users\/|\/tmp\/|\/private\/|\\\\|\.jpe?g\b|\.png\b|\.tiff?\b)/i.test(rawLabel);
+      return unsafe ? mapped : rawLabel;
+    }
+
+    function formatStageSeconds(value) {
+      const seconds = Number(value);
+      if (!Number.isFinite(seconds) || seconds < 0) return "";
+      return `${seconds.toFixed(1)} 秒`;
+    }
+
+    function stageTimingItems(source, includeAllStages) {
+      const timings = source && source.stage_timings;
+      if (!timings || !Array.isArray(timings.stages)) return [];
+      return timings.stages
+        .map((stage) => {
+          const label = safeStageTimingLabel(stage || {});
+          const elapsed = formatStageSeconds(stage && stage.elapsed_seconds);
+          const status = String((stage && stage.status) || "").toLowerCase();
+          return { label, elapsed, status };
+        })
+        .filter((stage) => {
+          if (!stage.label || !stage.elapsed) return false;
+          if (includeAllStages) return true;
+          return ["completed", "finished", "running"].includes(stage.status);
+        });
+    }
+
+    function deriveStageTimingLabel(summary, progress) {
+      const progressItems = stageTimingItems(progress, false);
+      const summaryItems = progressItems.length ? [] : stageTimingItems(summary, true);
+      const items = progressItems.length ? progressItems : summaryItems;
+      if (!items.length) return "";
+      return items.map((stage) => `${stage.label} ${stage.elapsed}`).join("；");
+    }
+
     function runningGuidanceText() {
       return "批次正在运行，请等待。本机正在处理图片，处理完成或失败前不能更改文件夹和处理方式，也不要反复点击开始处理。";
     }
@@ -2721,6 +2792,7 @@
         : "没有待人工确认图片。";
       state.progress = deriveProgress(summary, progress);
       state.progressLabel = deriveProgressLabel(summary, progress);
+      state.stageTimingLabel = deriveStageTimingLabel(summary, progress);
       state.reviewItems = nextStatus === "needs_review" ? makeReviewItems(state.attentionFiles) : [];
       state.decisions = {};
       state.operatorName = "";
@@ -3193,6 +3265,7 @@
         if (payload.saved && (payload.saved.decision_summary || payload.saved.verification_summary)) state.decisionSaveSummary = DECISION_SAVE_LABEL;
         state.status = "complete";
         state.progress = 100;
+        if (payload.summary || payload.progress) state.stageTimingLabel = deriveStageTimingLabel(payload.summary || {}, payload.progress);
         state.finishConfirmationVisible = false;
         state.operatorMessage = payload.message_zh || "完成并导出结果。";
         els.loadStatus.textContent = payload.message_zh || "完成并导出结果：处理后图片已保存到输出文件夹，复核结果和交接说明已保存到本机状态文件夹。";
@@ -3319,6 +3392,7 @@
       state.status = "choose_input";
       state.progress = 0;
       state.progressLabel = "";
+      state.stageTimingLabel = "";
       state.readyImages = 0;
       state.totalImages = 0;
       state.attentionFiles = 0;
