@@ -15,6 +15,15 @@
     "processed_files": 48,
     "failed_files": 0
   },
+  "preflight_processing_summary": {
+    "schema_version": "scan-qc.preflight-processing-summary.v1",
+    "aggregate_only": true,
+    "state": "current_batch",
+    "retry_scope_safe": true,
+    "total_files": 120,
+    "reusable_files": 36,
+    "needs_processing_files": 84
+  },
   "aggregate_processing": {
     "schema_version": "scan-qc.aggregate-processing-rate.v1",
     "aggregate_only": true,
