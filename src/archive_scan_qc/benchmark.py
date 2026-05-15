@@ -583,6 +583,12 @@ def _processing_quality_regression(processing_manifest: dict[str, Any] | None) -
             "processing_warning_files": processing_warning_files,
             "guardrail_failed_files": guardrail_failed_files,
             "enhancement_changed_files": _enhancement_changed_files(audit_records),
+            "cumulative_change_guard_checked_files": sum(
+                1 for audit in audit_records if audit.get("cumulative_change_guard_checked") is True
+            ),
+            "cumulative_change_guard_reverted_files": sum(
+                1 for audit in audit_records if audit.get("cumulative_change_guard_reverted") is True
+            ),
         },
         "thresholds": thresholds,
         "algorithm_metrics": algorithm_metrics,
@@ -614,6 +620,8 @@ def _empty_quality_regression_summary(reason: str) -> dict[str, Any]:
             "processing_warning_files": 0,
             "guardrail_failed_files": 0,
             "enhancement_changed_files": 0,
+            "cumulative_change_guard_checked_files": 0,
+            "cumulative_change_guard_reverted_files": 0,
         },
         "thresholds": _processing_quality_thresholds(),
         "algorithm_metrics": _repair_algorithm_metrics([], {}),
@@ -641,6 +649,12 @@ def _processing_quality_thresholds() -> dict[str, float]:
         "max_crop_ratio": defaults.audit_max_crop_ratio,
         "max_trim_margin_ratio": defaults.audit_max_trim_margin_ratio,
         "max_despeckle_pixel_ratio": defaults.audit_max_despeckle_pixel_ratio,
+        "max_cumulative_change_score": defaults.audit_max_cumulative_change_score,
+        "max_cumulative_pixel_change_ratio": defaults.audit_max_cumulative_pixel_change_ratio,
+        "max_cumulative_brightness_delta": defaults.audit_max_cumulative_brightness_delta,
+        "max_cumulative_contrast_delta": defaults.audit_max_cumulative_contrast_delta,
+        "max_cumulative_crop_ratio": defaults.audit_max_cumulative_crop_ratio,
+        "max_cumulative_candidate_pixel_ratio": defaults.audit_max_cumulative_candidate_pixel_ratio,
         "max_deskew_degrees": defaults.deskew_max_degrees,
         "max_tone_background_delta": defaults.audit_max_brightness_delta,
         "max_tone_contrast_delta": defaults.audit_max_contrast_delta,
