@@ -10,7 +10,7 @@ from PIL import Image, ImageDraw
 
 import archive_scan_qc.processing as processing_module
 from archive_scan_qc.cli import main
-from archive_scan_qc.processing import ProcessingOptions, process_images
+from archive_scan_qc.processing import ProcessingOptions, aggregate_processing_reuse_precheck, process_images
 from archive_scan_qc.processing_plan import build_processing_plan
 from archive_scan_qc.scanner import ScanConfig, scan_batch
 
@@ -700,6 +700,86 @@ class ScanProcessingReuseTest(unittest.TestCase):
             self.assertEqual(production_summary["local_reuse_summary"]["remaining_files"], 0)
             self.assertEqual(production_summary["local_reuse_summary"]["total_files"], 1)
             self.assertIn("重新处理 1 张", production_summary["local_reuse_summary"]["message_zh"])
+
+    def test_aggregate_processing_reuse_precheck_parallel_matches_serial_aggregate(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-precheck-parallel-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-input"
+            process_dir = root / "private-output"
+            input_dir.mkdir()
+            Image.new("RGB", (80, 60), "white").save(input_dir / "private_reusable_page.png", dpi=(300, 300))
+            Image.new("RGB", (80, 60), (230, 230, 230)).save(input_dir / "private_missing_page.png", dpi=(300, 300))
+            report = scan_batch(ScanConfig("project", "batch", input_dir, root / "scan", workers=1))
+            options = ProcessingOptions(resume_processing=True, reuse_scan_measurements=True, workers=1)
+            manifest = process_images(report, input_dir, process_dir, options)
+            missing_record = next(record for record in manifest["files"] if record["source_relative_path"] == "private_missing_page.png")
+            (process_dir / missing_record["output_relative_path"]).unlink()
+
+            relative_paths = ["private_reusable_page.png", "private_missing_page.png"]
+            with mock.patch("archive_scan_qc.processing.ThreadPoolExecutor", side_effect=AssertionError("serial only")):
+                serial = aggregate_processing_reuse_precheck(input_dir, process_dir, relative_paths, options)
+            parallel = aggregate_processing_reuse_precheck(
+                input_dir,
+                process_dir,
+                relative_paths,
+                ProcessingOptions(resume_processing=True, reuse_scan_measurements=True, workers=4),
+            )
+
+            self.assertEqual(parallel, serial)
+            self.assertTrue(parallel["aggregate_only"])
+            self.assertTrue(parallel["retry_scope_safe"])
+            self.assertEqual(parallel["state"], "ready")
+            self.assertEqual(parallel["total_files"], 2)
+            self.assertEqual(parallel["reusable_files"], 1)
+            self.assertEqual(parallel["needs_processing_files"], 1)
+            self.assertEqual(parallel["unknown_scope_files"], 0)
+            public_precheck_text = json.dumps(parallel, ensure_ascii=False, sort_keys=True)
+            self.assertNotIn("private_reusable_page.png", public_precheck_text)
+            self.assertNotIn("private_missing_page.png", public_precheck_text)
+            self.assertNotIn(str(input_dir), public_precheck_text)
+            self.assertNotIn(manifest["files"][0]["source_sha256"], public_precheck_text)
+            self.assertNotIn(missing_record["output_sha256"], public_precheck_text)
+
+    def test_aggregate_processing_reuse_precheck_parallel_unknown_matches_serial(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-precheck-unknown-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-input"
+            process_dir = root / "private-output"
+            input_dir.mkdir()
+            source = input_dir / "private_unreadable_page.png"
+            Image.new("RGB", (80, 60), "white").save(source, dpi=(300, 300))
+            report = scan_batch(ScanConfig("project", "batch", input_dir, root / "scan", workers=1))
+            process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(resume_processing=True, reuse_scan_measurements=True, workers=1),
+            )
+            source.unlink()
+            relative_paths = ["private_unreadable_page.png"]
+            serial = aggregate_processing_reuse_precheck(
+                input_dir,
+                process_dir,
+                relative_paths,
+                ProcessingOptions(resume_processing=True, reuse_scan_measurements=True, workers=1),
+            )
+            parallel = aggregate_processing_reuse_precheck(
+                input_dir,
+                process_dir,
+                relative_paths,
+                ProcessingOptions(resume_processing=True, reuse_scan_measurements=True, workers=4),
+            )
+
+            self.assertEqual(parallel, serial)
+            self.assertFalse(parallel["retry_scope_safe"])
+            self.assertEqual(parallel["state"], "unknown")
+            self.assertEqual(parallel["total_files"], 1)
+            self.assertIsNone(parallel["reusable_files"])
+            self.assertIsNone(parallel["needs_processing_files"])
+            self.assertEqual(parallel["unknown_scope_files"], 1)
+            public_precheck_text = json.dumps(parallel, ensure_ascii=False, sort_keys=True)
+            self.assertNotIn("private_unreadable_page.png", public_precheck_text)
+            self.assertNotIn(str(input_dir), public_precheck_text)
 
 
 def _dark_border_page() -> Image.Image:
