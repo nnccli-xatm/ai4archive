@@ -476,6 +476,7 @@ def _aggregate_run(
             "worker_mode": processing_performance["mode"] if processing_performance else None,
             "operation_timings": _processing_operation_timings(processing_manifest),
             "scan_measurement_reuse": _processing_scan_measurement_reuse(processing_manifest),
+            "quality_regression": _processing_quality_regression(processing_manifest),
         },
         "scan": {
             "elapsed_seconds": scan_performance["elapsed_seconds"],
@@ -539,6 +540,261 @@ def _processing_scan_measurement_reuse(processing_manifest: dict[str, Any] | Non
         if isinstance(reuse, dict):
             return reuse
     return {}
+
+
+def _processing_quality_regression(processing_manifest: dict[str, Any] | None) -> dict[str, Any]:
+    if not processing_manifest:
+        return _empty_quality_regression_summary("processing_not_enabled")
+    records = processing_manifest.get("files")
+    summary = processing_manifest.get("summary")
+    if not isinstance(records, list) or not isinstance(summary, dict):
+        return _empty_quality_regression_summary("processing_manifest_unavailable")
+
+    audit_records = [
+        record["processing_audit"]
+        for record in records
+        if isinstance(record, dict) and isinstance(record.get("processing_audit"), dict)
+    ]
+    guardrail_failed_files = sum(1 for audit in audit_records if audit.get("guardrail_failures"))
+    processing_warning_files = sum(
+        1 for record in records if isinstance(record, dict) and bool(record.get("processing_warnings"))
+    )
+    operation_timings = _processing_operation_timings(processing_manifest)
+    thresholds = _processing_quality_thresholds()
+    algorithm_metrics = _repair_algorithm_metrics(audit_records, operation_timings)
+    threshold_violations = _quality_threshold_violations(algorithm_metrics, thresholds)
+    failed_files = _coerce_int(summary.get("failed_files"))
+    status = "pass" if failed_files == 0 and guardrail_failed_files == 0 and not threshold_violations else "failed"
+
+    return {
+        "schema_version": "scan-qc.processing.quality-regression.v1",
+        "aggregate_only": True,
+        "status": status,
+        "counts": {
+            "total_files": _coerce_int(summary.get("total_files")),
+            "processed_files": _coerce_int(summary.get("processed_files")),
+            "failed_files": failed_files,
+            "skipped_files": _coerce_int(summary.get("skipped_files")),
+            "processing_warning_files": processing_warning_files,
+            "guardrail_failed_files": guardrail_failed_files,
+            "enhancement_changed_files": _enhancement_changed_files(audit_records),
+        },
+        "thresholds": thresholds,
+        "algorithm_metrics": algorithm_metrics,
+        "threshold_violations": threshold_violations,
+        "privacy": {
+            "aggregate_only": True,
+            "contains_file_list": False,
+            "contains_paths": False,
+            "contains_hashes": False,
+            "contains_ocr": False,
+            "contains_thumbnails": False,
+            "contains_image_content": False,
+            "contains_row_level_evidence": False,
+        },
+    }
+
+
+def _empty_quality_regression_summary(reason: str) -> dict[str, Any]:
+    return {
+        "schema_version": "scan-qc.processing.quality-regression.v1",
+        "aggregate_only": True,
+        "status": "not_applicable",
+        "reason": reason,
+        "counts": {
+            "total_files": 0,
+            "processed_files": 0,
+            "failed_files": 0,
+            "skipped_files": 0,
+            "processing_warning_files": 0,
+            "guardrail_failed_files": 0,
+            "enhancement_changed_files": 0,
+        },
+        "thresholds": _processing_quality_thresholds(),
+        "algorithm_metrics": _repair_algorithm_metrics([], {}),
+        "threshold_violations": [],
+        "privacy": {
+            "aggregate_only": True,
+            "contains_file_list": False,
+            "contains_paths": False,
+            "contains_hashes": False,
+            "contains_ocr": False,
+            "contains_thumbnails": False,
+            "contains_image_content": False,
+            "contains_row_level_evidence": False,
+        },
+    }
+
+
+def _processing_quality_thresholds() -> dict[str, float]:
+    defaults = ProcessingOptions()
+    return {
+        "max_size_change_ratio": defaults.audit_max_size_change_ratio,
+        "max_pixel_change_ratio": defaults.audit_max_pixel_change_ratio,
+        "max_brightness_delta": defaults.audit_max_brightness_delta,
+        "max_contrast_delta": defaults.audit_max_contrast_delta,
+        "max_crop_ratio": defaults.audit_max_crop_ratio,
+        "max_trim_margin_ratio": defaults.audit_max_trim_margin_ratio,
+        "max_despeckle_pixel_ratio": defaults.audit_max_despeckle_pixel_ratio,
+        "max_deskew_degrees": defaults.deskew_max_degrees,
+        "max_tone_background_delta": defaults.audit_max_brightness_delta,
+        "max_tone_contrast_delta": defaults.audit_max_contrast_delta,
+        "max_edge_shadow_changed_pixel_ratio": 0.08,
+        "max_background_stains_changed_pixel_ratio": 0.08,
+        "max_background_stains_candidate_pixel_ratio": 1.0,
+        "max_scanlines_changed_pixel_ratio": 0.08,
+        "max_scanlines_candidate_pixel_ratio": 1.0,
+    }
+
+
+def _repair_algorithm_metrics(
+    audit_records: list[dict[str, Any]], operation_timings: dict[str, Any]
+) -> dict[str, dict[str, Any]]:
+    return {
+        "deskew": _algorithm_summary(
+            audit_records,
+            operation_timings,
+            operation="deskew",
+            changed_flag="deskewed",
+            metrics={"abs_angle_degrees": "deskew_abs_angle_degrees"},
+        ),
+        "trim_dark_border": _algorithm_summary(
+            audit_records,
+            operation_timings,
+            operation="trim_dark_border",
+            changed_flag="dark_border_trimmed",
+            metrics={"max_trim_margin_ratio": "max_trim_margin_ratio"},
+        ),
+        "auto_crop": _algorithm_summary(
+            audit_records,
+            operation_timings,
+            operation="auto_crop",
+            changed_flag="cropped",
+            metrics={"crop_ratio": "crop_ratio"},
+        ),
+        "despeckle": _algorithm_summary(
+            audit_records,
+            operation_timings,
+            operation="despeckle",
+            changed_flag="despeckled",
+            metrics={"pixel_ratio": "despeckle_pixel_ratio"},
+        ),
+        "normalize_tones": _algorithm_summary(
+            audit_records,
+            operation_timings,
+            operation="normalize_tones",
+            changed_flag="tone_normalized",
+            metrics={"background_delta": "tone_background_delta", "contrast_delta": "tone_contrast_delta"},
+        ),
+        "lighten_edge_shadow": _algorithm_summary(
+            audit_records,
+            operation_timings,
+            operation="lighten_edge_shadow",
+            changed_flag="edge_shadow_lightened",
+            metrics={"delta": "edge_shadow_delta", "changed_pixel_ratio": "edge_shadow_changed_pixel_ratio"},
+        ),
+        "lighten_background_stains": _algorithm_summary(
+            audit_records,
+            operation_timings,
+            operation="lighten_background_stains",
+            changed_flag="background_stains_lightened",
+            metrics={
+                "delta": "background_stains_delta",
+                "changed_pixel_ratio": "background_stains_changed_pixel_ratio",
+                "candidate_pixel_ratio": "background_stains_candidate_pixel_ratio",
+            },
+        ),
+        "lighten_scanlines": _algorithm_summary(
+            audit_records,
+            operation_timings,
+            operation="lighten_scanlines",
+            changed_flag="scanlines_lightened",
+            metrics={
+                "delta": "scanlines_delta",
+                "changed_pixel_ratio": "scanlines_changed_pixel_ratio",
+                "candidate_pixel_ratio": "scanlines_candidate_pixel_ratio",
+            },
+        ),
+    }
+
+
+def _algorithm_summary(
+    audit_records: list[dict[str, Any]],
+    operation_timings: dict[str, Any],
+    *,
+    operation: str,
+    changed_flag: str,
+    metrics: dict[str, str],
+) -> dict[str, Any]:
+    timing = operation_timings.get(operation)
+    if not isinstance(timing, dict):
+        timing = {}
+    return {
+        "enabled": bool(timing.get("enabled", False)),
+        "changed_files": sum(1 for audit in audit_records if audit.get(changed_flag) is True),
+        "file_count": _coerce_int(timing.get("file_count")),
+        "elapsed_seconds": _coerce_float(timing.get("elapsed_seconds")),
+        "files_per_minute": _coerce_float(timing.get("files_per_minute")),
+        "metrics": {label: _aggregate_metric(audit_records, key) for label, key in metrics.items()},
+    }
+
+
+def _quality_threshold_violations(
+    algorithm_metrics: dict[str, dict[str, Any]], thresholds: dict[str, float]
+) -> list[dict[str, Any]]:
+    checks = {
+        ("deskew", "abs_angle_degrees"): "max_deskew_degrees",
+        ("trim_dark_border", "max_trim_margin_ratio"): "max_trim_margin_ratio",
+        ("auto_crop", "crop_ratio"): "max_crop_ratio",
+        ("despeckle", "pixel_ratio"): "max_despeckle_pixel_ratio",
+        ("normalize_tones", "background_delta"): "max_tone_background_delta",
+        ("normalize_tones", "contrast_delta"): "max_tone_contrast_delta",
+        ("lighten_edge_shadow", "changed_pixel_ratio"): "max_edge_shadow_changed_pixel_ratio",
+        ("lighten_background_stains", "changed_pixel_ratio"): "max_background_stains_changed_pixel_ratio",
+        ("lighten_background_stains", "candidate_pixel_ratio"): "max_background_stains_candidate_pixel_ratio",
+        ("lighten_scanlines", "changed_pixel_ratio"): "max_scanlines_changed_pixel_ratio",
+        ("lighten_scanlines", "candidate_pixel_ratio"): "max_scanlines_candidate_pixel_ratio",
+    }
+    violations: list[dict[str, Any]] = []
+    for (operation, metric_name), threshold_name in checks.items():
+        metric = algorithm_metrics.get(operation, {}).get("metrics", {}).get(metric_name, {})
+        observed = metric.get("max") if isinstance(metric, dict) else None
+        threshold = thresholds[threshold_name]
+        if isinstance(observed, int | float) and observed > threshold:
+            violations.append(
+                {
+                    "operation": operation,
+                    "metric": metric_name,
+                    "max": round(float(observed), 6),
+                    "threshold": threshold,
+                }
+            )
+    return violations
+
+
+def _enhancement_changed_files(audit_records: list[dict[str, Any]]) -> int:
+    enhancement_flags = (
+        "tone_normalized",
+        "edge_shadow_lightened",
+        "background_stains_lightened",
+        "scanlines_lightened",
+    )
+    return sum(1 for audit in audit_records if any(audit.get(flag) is True for flag in enhancement_flags))
+
+
+def _coerce_int(value: Any) -> int:
+    return int(value) if isinstance(value, int | float) else 0
+
+
+def _coerce_float(value: Any) -> float | None:
+    return round(float(value), 6) if isinstance(value, int | float) else None
+
+
+def _aggregate_metric(records: list[dict[str, Any]], key: str) -> dict[str, float | int | None]:
+    values = [float(record[key]) for record in records if isinstance(record.get(key), int | float)]
+    if not values:
+        return {"count": 0, "average": None, "max": None}
+    return {"count": len(values), "average": round(sum(values) / len(values), 6), "max": round(max(values), 6)}
 
 
 def _files_per_minute(file_count: int, elapsed_seconds: float) -> float:
@@ -606,6 +862,9 @@ def _csv_fields() -> list[str]:
         "processing_failed_files",
         "processing_skipped_files",
         "processing_scan_measurement_reused_files",
+        "processing_guardrail_failed_files",
+        "processing_quality_status",
+        "processing_enhancement_changed_files",
         "scan_elapsed_seconds",
         "scan_files_per_minute",
         "scan_openable_files_per_minute",
@@ -623,6 +882,8 @@ def _csv_fields() -> list[str]:
 def _csv_row(run: dict[str, Any], environment: dict[str, Any]) -> dict[str, Any]:
     operations = run["operations"]
     processing = run["processing"]
+    quality = processing.get("quality_regression", {})
+    quality_counts = quality.get("counts", {}) if isinstance(quality, dict) else {}
     scan = run["scan"]
     severities = run["finding_severity_counts"]
     return {
@@ -653,6 +914,9 @@ def _csv_row(run: dict[str, Any], environment: dict[str, Any]) -> dict[str, Any]
         "processing_scan_measurement_reused_files": processing.get("scan_measurement_reuse", {}).get(
             "files_with_any_reuse", 0
         ),
+        "processing_guardrail_failed_files": quality_counts.get("guardrail_failed_files", 0),
+        "processing_quality_status": quality.get("status") if isinstance(quality, dict) else None,
+        "processing_enhancement_changed_files": quality_counts.get("enhancement_changed_files", 0),
         "scan_elapsed_seconds": scan["elapsed_seconds"],
         "scan_files_per_minute": scan["files_per_minute"],
         "scan_openable_files_per_minute": scan["openable_files_per_minute"],

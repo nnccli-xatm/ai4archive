@@ -315,6 +315,17 @@ warning codes. Treat `--despeckle-backend numpy` with
 NumPy performance validation. Actual NumPy performance evidence requires
 `requested_backend=numpy`, `numpy_available=true`, and non-zero
 `backend_counts.numpy` in the aggregate summary.
+`benchmark_results.json` processing runs include a public-safe
+`quality_regression` block for automatic retouch combinations. Use it to compare
+the default processing path, the base `deskew/trim-dark-border/auto-crop/despeckle`
+path, and the full conservative path with `normalize-tones`,
+`lighten-edge-shadow`, `lighten-background-stains`, and `lighten-scanlines`.
+The block records aggregate status, failure counts, guardrail failed files,
+per-operation timing, changed-file counts, conservative thresholds, and
+max/average delta or changed-ratio metrics only. A public PR or Linear summary
+may cite those aggregate fields and throughput deltas, but must not include
+processing manifests, filenames, paths, hashes, OCR, thumbnails, image content,
+or per-file reasons.
 `--trim-dark-border` is intentionally conservative: automatic trimming requires
 dark-edge evidence on all four sides with roughly balanced margins. One-sided,
 strongly uneven, low-confidence, or original archival dark edges remain no-op
