@@ -167,6 +167,11 @@ def _add_scan_arguments(parser: argparse.ArgumentParser, *, include_scan_overrid
         help="Conservatively darken stable low-contrast neutral text on light paper. Requires --process-out.",
     )
     parser.add_argument(
+        "--sharpen-text-edges",
+        action="store_true",
+        help="Conservatively sharpen stable neutral blurred text edges on light paper. Requires --process-out.",
+    )
+    parser.add_argument(
         "--despeckle-backend",
         choices=("fallback", "numpy"),
         default="fallback",
@@ -297,6 +302,7 @@ def main(argv: list[str] | None = None) -> int:
                 lighten_background_stains=args.lighten_background_stains,
                 lighten_scanlines=args.lighten_scanlines,
                 enhance_faded_text=args.enhance_faded_text,
+                sharpen_text_edges=args.sharpen_text_edges,
                 despeckle_backend=args.despeckle_backend,
                 resume_processing=args.resume_processing,
                 reuse_scan_measurements=args.reuse_scan_measurements,
@@ -373,6 +379,7 @@ def _main_preflight(argv: list[str]) -> int:
             lighten_background_stains=args.lighten_background_stains,
             lighten_scanlines=args.lighten_scanlines,
             enhance_faded_text=args.enhance_faded_text,
+            sharpen_text_edges=args.sharpen_text_edges,
         )
     )
     path = write_preflight_report(report, args.out)
@@ -414,6 +421,7 @@ def _main_production_run(argv: list[str]) -> int:
     parser.add_argument("--lighten-background-stains", action="store_true", help="保守减淡浅色纸面上不接触正文和印章的小范围浅斑。")
     parser.add_argument("--lighten-scanlines", action="store_true", help="保守减淡浅色背景中不接触正文和档案原貌的低对比扫描线。")
     parser.add_argument("--enhance-faded-text", action="store_true", help="保守增强浅色纸面上的低对比浅墨正文。")
+    parser.add_argument("--sharpen-text-edges", action="store_true", help="保守增强浅色纸面上轻微发虚正文的文字边缘清晰度。")
     parser.add_argument(
         "--despeckle-backend",
         choices=("fallback", "numpy"),
@@ -467,6 +475,7 @@ def _main_production_run(argv: list[str]) -> int:
                 lighten_background_stains=args.lighten_background_stains,
                 lighten_scanlines=args.lighten_scanlines,
                 enhance_faded_text=args.enhance_faded_text,
+                sharpen_text_edges=args.sharpen_text_edges,
                 despeckle_backend=args.despeckle_backend,
                 resume_processing=args.resume_processing,
                 reuse_scan_measurements=args.reuse_scan_measurements,
@@ -1064,6 +1073,7 @@ def _main_processing_plan(argv: list[str]) -> int:
     parser.add_argument("--lighten-background-stains", action="store_true", help="Plan conservative light background stain candidates.")
     parser.add_argument("--lighten-scanlines", action="store_true", help="Plan conservative low-contrast scanline lightening candidates.")
     parser.add_argument("--enhance-faded-text", action="store_true", help="Plan conservative low-contrast faded text enhancement candidates.")
+    parser.add_argument("--sharpen-text-edges", action="store_true", help="Plan conservative blurred text edge sharpening candidates.")
     parser.add_argument(
         "--despeckle-backend",
         choices=("fallback", "numpy"),
@@ -1091,6 +1101,7 @@ def _main_processing_plan(argv: list[str]) -> int:
                 lighten_background_stains=args.lighten_background_stains,
                 lighten_scanlines=args.lighten_scanlines,
                 enhance_faded_text=args.enhance_faded_text,
+                sharpen_text_edges=args.sharpen_text_edges,
                 despeckle_backend=args.despeckle_backend,
                 reuse_scan_measurements=args.reuse_scan_measurements,
             ),
@@ -1258,6 +1269,8 @@ def _validate_processing_flags(parser: argparse.ArgumentParser, args: argparse.N
         parser.error("--lighten-scanlines requires --process-out")
     if args.enhance_faded_text and not args.process_out:
         parser.error("--enhance-faded-text requires --process-out")
+    if args.sharpen_text_edges and not args.process_out:
+        parser.error("--sharpen-text-edges requires --process-out")
     if args.resume_processing and not args.process_out:
         parser.error("--resume-processing requires --process-out")
 

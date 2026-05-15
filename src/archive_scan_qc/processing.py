@@ -40,6 +40,7 @@ class ProcessingOptions:
     lighten_background_stains: bool = False
     lighten_scanlines: bool = False
     enhance_faded_text: bool = False
+    sharpen_text_edges: bool = False
     despeckle_backend: str = "fallback"
     resume_processing: bool = False
     reuse_scan_measurements: bool = False
@@ -133,6 +134,17 @@ class FadedTextEnhancementResult:
     candidate_pixel_ratio: float
 
 
+@dataclass(frozen=True)
+class TextEdgeSharpeningResult:
+    image: Image.Image
+    applied: bool
+    reason: str
+    edge_delta: float
+    changed_pixel_ratio: float
+    candidate_pixel_ratio: float
+    preflight_skipped: bool = False
+
+
 def detect_skew(image: Image.Image) -> SkewDetection:
     return _detect_skew(image)
 
@@ -219,6 +231,7 @@ def process_images(
             ),
             "lighten_scanlines_conservative" if options.lighten_scanlines else "lighten_scanlines_disabled",
             "enhance_faded_text_conservative" if options.enhance_faded_text else "enhance_faded_text_disabled",
+            "sharpen_text_edges_conservative" if options.sharpen_text_edges else "sharpen_text_edges_disabled",
             "reuse_scan_measurements" if options.reuse_scan_measurements else "reuse_scan_measurements_disabled",
             "preserve_source_relative_path",
         ],
@@ -627,6 +640,11 @@ def _process_record(
         "faded_text_delta": 0.0,
         "faded_text_changed_pixel_ratio": 0.0,
         "faded_text_candidate_pixel_ratio": 0.0,
+        "text_edges_sharpened": False,
+        "text_edges_reason": None,
+        "text_edges_delta": 0.0,
+        "text_edges_changed_pixel_ratio": 0.0,
+        "text_edges_candidate_pixel_ratio": 0.0,
         "processing_audit": None,
         "processing_warnings": [],
         "operation_timings": {},
@@ -720,6 +738,11 @@ def _process_record(
                 "faded_text_delta": process_info["faded_text_delta"],
                 "faded_text_changed_pixel_ratio": process_info["faded_text_changed_pixel_ratio"],
                 "faded_text_candidate_pixel_ratio": process_info["faded_text_candidate_pixel_ratio"],
+                "text_edges_sharpened": process_info["text_edges_sharpened"],
+                "text_edges_reason": process_info["text_edges_reason"],
+                "text_edges_delta": process_info["text_edges_delta"],
+                "text_edges_changed_pixel_ratio": process_info["text_edges_changed_pixel_ratio"],
+                "text_edges_candidate_pixel_ratio": process_info["text_edges_candidate_pixel_ratio"],
                 "processing_audit": process_info["processing_audit"],
                 "processing_warnings": process_info["processing_warnings"],
                 "operation_timings": process_info["operation_timings"],
@@ -788,6 +811,11 @@ def _process_record(
                     "faded_text_delta": process_info["faded_text_delta"],
                     "faded_text_changed_pixel_ratio": process_info["faded_text_changed_pixel_ratio"],
                     "faded_text_candidate_pixel_ratio": process_info["faded_text_candidate_pixel_ratio"],
+                    "text_edges_sharpened": process_info["text_edges_sharpened"],
+                    "text_edges_reason": process_info["text_edges_reason"],
+                    "text_edges_delta": process_info["text_edges_delta"],
+                    "text_edges_changed_pixel_ratio": process_info["text_edges_changed_pixel_ratio"],
+                    "text_edges_candidate_pixel_ratio": process_info["text_edges_candidate_pixel_ratio"],
                     "processing_audit": process_info["processing_audit"],
                     "processing_warnings": process_info["processing_warnings"],
                     "operation_timings": process_info["operation_timings"],
@@ -857,6 +885,7 @@ def _processing_options_fingerprint(options: ProcessingOptions) -> str:
         "lighten_background_stains": options.lighten_background_stains,
         "lighten_scanlines": options.lighten_scanlines,
         "enhance_faded_text": options.enhance_faded_text,
+        "sharpen_text_edges": options.sharpen_text_edges,
         "despeckle_backend": options.despeckle_backend,
         "reuse_scan_measurements": options.reuse_scan_measurements,
         "deskew_max_degrees": options.deskew_max_degrees,
@@ -903,6 +932,9 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
     deskew_timing = operation_timings.get("deskew") if isinstance(operation_timings, dict) else {}
     if not isinstance(deskew_timing, dict):
         deskew_timing = {}
+    sharpen_text_edges_timing = operation_timings.get("sharpen_text_edges") if isinstance(operation_timings, dict) else {}
+    if not isinstance(sharpen_text_edges_timing, dict):
+        sharpen_text_edges_timing = {}
     return {
         "schema_version": "scan-qc.processing.audit.v1",
         "generated_at": manifest["generated_at"],
@@ -916,6 +948,7 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "lighten_background_stains": options.lighten_background_stains,
             "lighten_scanlines": options.lighten_scanlines,
             "enhance_faded_text": options.enhance_faded_text,
+            "sharpen_text_edges": options.sharpen_text_edges,
             "resume_processing": options.resume_processing,
             "reuse_scan_measurements": options.reuse_scan_measurements,
         },
@@ -965,6 +998,12 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "faded_text_enhanced_files": sum(
                 1 for audit in audit_records if audit.get("faded_text_enhanced") is True
             ),
+            "text_edges_sharpened_files": sum(
+                1 for audit in audit_records if audit.get("text_edges_sharpened") is True
+            ),
+            "text_edges_candidate_preflight_skipped_files": _int_count(
+                sharpen_text_edges_timing.get("candidate_preflight_skipped_files")
+            ),
         },
         "thresholds": _audit_thresholds(options),
         "metrics": {
@@ -998,6 +1037,13 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             ),
             "faded_text_candidate_pixel_ratio": _aggregate_metric(
                 audit_records, "faded_text_candidate_pixel_ratio"
+            ),
+            "text_edges_delta": _aggregate_metric(audit_records, "text_edges_delta"),
+            "text_edges_changed_pixel_ratio": _aggregate_metric(
+                audit_records, "text_edges_changed_pixel_ratio"
+            ),
+            "text_edges_candidate_pixel_ratio": _aggregate_metric(
+                audit_records, "text_edges_candidate_pixel_ratio"
             ),
         },
         "distributions": {
@@ -1053,6 +1099,7 @@ def _aggregate_operation_timings(records: list[dict[str, Any]], options: Process
         "lighten_background_stains": options.lighten_background_stains,
         "lighten_scanlines": options.lighten_scanlines,
         "enhance_faded_text": options.enhance_faded_text,
+        "sharpen_text_edges": options.sharpen_text_edges,
     }
     timings: dict[str, dict[str, Any]] = {}
     for operation, is_enabled in enabled.items():
@@ -1076,6 +1123,12 @@ def _aggregate_operation_timings(records: list[dict[str, Any]], options: Process
             timings[operation].update(_aggregate_deskew_detection_counts(records))
         if operation == "despeckle":
             timings[operation].update(_aggregate_despeckle_backend(records, is_enabled))
+        if operation == "sharpen_text_edges":
+            timings[operation]["candidate_preflight_skipped_files"] = _operation_flag_count(
+                records,
+                operation,
+                "candidate_preflight_skip",
+            )
     return timings
 
 
@@ -1181,6 +1234,8 @@ def _audit_thresholds(options: ProcessingOptions) -> dict[str, float]:
         "max_despeckle_pixel_ratio": options.audit_max_despeckle_pixel_ratio,
         "max_faded_text_changed_pixel_ratio": 0.10,
         "max_faded_text_candidate_pixel_ratio": 0.18,
+        "max_text_edges_changed_pixel_ratio": 0.08,
+        "max_text_edges_candidate_pixel_ratio": 0.12,
         "max_deskew_degrees": options.deskew_max_degrees,
     }
 
@@ -1415,6 +1470,21 @@ def _process_image(
         else:
             operations.append("enhance_faded_text_disabled")
 
+    text_edges = TextEdgeSharpeningResult(
+        processed, False, "text edge sharpening disabled", 0.0, 0.0, 0.0
+    )
+    with _operation_timer(operation_timings, "sharpen_text_edges", enabled=options.sharpen_text_edges):
+        if options.sharpen_text_edges:
+            text_edges = _sharpen_text_edges_conservative(processed)
+            if text_edges.preflight_skipped:
+                operation_timings.setdefault("sharpen_text_edges", {})["candidate_preflight_skip"] = True
+            processed = text_edges.image
+            operations.append(
+                "sharpen_text_edges_conservative" if text_edges.applied else "sharpen_text_edges_noop"
+            )
+        else:
+            operations.append("sharpen_text_edges_disabled")
+
     processing_audit = _processing_audit(
         audit_source,
         processed,
@@ -1443,6 +1513,10 @@ def _process_image(
         faded_text.text_delta,
         faded_text.changed_pixel_ratio,
         faded_text.candidate_pixel_ratio,
+        text_edges.applied,
+        text_edges.edge_delta,
+        text_edges.changed_pixel_ratio,
+        text_edges.candidate_pixel_ratio,
     )
     processing_warnings = list(processing_audit["guardrail_failures"])
     crop_info = {
@@ -1498,6 +1572,11 @@ def _process_image(
         "faded_text_delta": faded_text.text_delta,
         "faded_text_changed_pixel_ratio": faded_text.changed_pixel_ratio,
         "faded_text_candidate_pixel_ratio": faded_text.candidate_pixel_ratio,
+        "text_edges_sharpened": text_edges.applied,
+        "text_edges_reason": text_edges.reason,
+        "text_edges_delta": text_edges.edge_delta,
+        "text_edges_changed_pixel_ratio": text_edges.changed_pixel_ratio,
+        "text_edges_candidate_pixel_ratio": text_edges.candidate_pixel_ratio,
         "processing_audit": processing_audit,
         "processing_warnings": processing_warnings,
         "operation_timings": operation_timings,
@@ -2363,6 +2442,216 @@ def _faded_text_sample_candidate_ratio(grayscale: Image.Image, threshold: float,
     return round(_mask_ratio(candidate), 6)
 
 
+def _sharpen_text_edges_conservative(image: Image.Image) -> TextEdgeSharpeningResult:
+    if image.width < 80 or image.height < 80:
+        return _text_edges_noop(image, "text edge sharpening skipped: image too small")
+    color_risk = _tone_color_risk_reason(image)
+    if color_risk:
+        return _text_edges_noop(image, "text edge sharpening skipped: color content, stamp, or annotation risk")
+
+    grayscale = image.convert("L")
+    histogram = grayscale.histogram()
+    total = image.width * image.height
+    p01 = _histogram_percentile(histogram, total, 0.01)
+    p05 = _histogram_percentile(histogram, total, 0.05)
+    p50 = _histogram_percentile(histogram, total, 0.50)
+    p95 = _histogram_percentile(histogram, total, 0.95)
+    p99 = _histogram_percentile(histogram, total, 0.99)
+    if p95 < 220 or p50 < 205:
+        return _text_edges_noop(image, "text edge sharpening skipped: page is not a light paper background")
+    if p99 - p01 < 45:
+        return _text_edges_noop(image, "text edge sharpening skipped: text edge evidence too weak")
+    if p05 < 35 and _dark_pixel_ratio(grayscale, 64) > 0.09:
+        return _text_edges_noop(image, "text edge sharpening skipped: dense dark foreground or illustration risk")
+
+    sample_candidate_ratio = _text_edge_sample_candidate_ratio(grayscale)
+    if sample_candidate_ratio < 0.02:
+        return _text_edges_noop(
+            image,
+            "text edge sharpening skipped: cheap candidate preflight found too little blurred text edge evidence",
+            sample_candidate_ratio,
+            preflight_skipped=True,
+        )
+
+    candidate = _text_edge_candidate_mask(grayscale, p95)
+    candidate = _clear_mask_edges(candidate, max(3, int(round(min(image.width, image.height) * 0.025))))
+    candidate_ratio = _mask_ratio(candidate)
+    if candidate_ratio < 0.0015:
+        return _text_edges_noop(image, "text edge sharpening skipped: blurred text edge evidence too sparse", candidate_ratio)
+    if candidate_ratio > 0.12:
+        return _text_edges_noop(image, "text edge sharpening skipped: edge candidates too dense", candidate_ratio)
+    if _protected_edge_dark_ratio(candidate) > 0.002:
+        return _text_edges_noop(image, "text edge sharpening skipped: edge mark or binding risk", candidate_ratio)
+
+    components = _mask_components(candidate)
+    if len(components) > 120 and max((len(component) for component in components), default=0) < 24:
+        return _text_edges_noop(
+            image,
+            "text edge sharpening skipped: fine texture or photo-detail risk",
+            candidate_ratio,
+        )
+    selected: set[tuple[int, int]] = set()
+    text_like_components = 0
+    rejected_large_components = 0
+    for component in components:
+        area = len(component)
+        if area < 2:
+            continue
+        xs = [point[0] for point in component]
+        ys = [point[1] for point in component]
+        width = max(xs) - min(xs) + 1
+        height = max(ys) - min(ys) + 1
+        line_like = height <= 10 and width <= image.width * 0.72
+        if area / total > 0.018 or height > image.height * 0.20 or (not line_like and width > image.width * 0.36):
+            rejected_large_components += 1
+            continue
+        fill_ratio = area / max(1, width * height)
+        aspect = max(width / max(1, height), height / max(1, width))
+        if fill_ratio > 0.90 and area > 36 and not line_like:
+            rejected_large_components += 1
+            continue
+        if width >= 2 and height >= 1 and aspect <= 80:
+            text_like_components += 1
+            selected.update(component)
+    selected_ratio = len(selected) / max(1, total)
+    if rejected_large_components:
+        return _text_edges_noop(
+            image,
+            "text edge sharpening skipped: broad texture, illustration, or table-region risk",
+            candidate_ratio,
+        )
+    if text_like_components < 3 or selected_ratio < 0.0015:
+        return _text_edges_noop(
+            image,
+            "text edge sharpening skipped: stable text edge evidence insufficient",
+            candidate_ratio,
+        )
+    if selected_ratio > 0.08:
+        return _text_edges_noop(
+            image,
+            "text edge sharpening skipped: changed area exceeds conservative text edge scope",
+            candidate_ratio,
+        )
+
+    sharpened = grayscale.filter(ImageFilter.UnsharpMask(radius=1.0, percent=90, threshold=2))
+    source_pixels = grayscale.load()
+    sharp_pixels = sharpened.load()
+    changed = 0
+    deltas: list[int] = []
+    if image.mode == "L":
+        output = grayscale.copy()
+        output_pixels = output.load()
+        for x, y in selected:
+            delta = int(sharp_pixels[x, y]) - int(source_pixels[x, y])
+            if 3 <= abs(delta) <= 42:
+                output_pixels[x, y] = max(0, min(255, int(source_pixels[x, y]) + delta))
+                changed += 1
+                deltas.append(abs(delta))
+        result_image = output
+    else:
+        source = image.convert("RGB")
+        output = source.copy()
+        output_pixels = output.load()
+        for x, y in selected:
+            delta = int(sharp_pixels[x, y]) - int(source_pixels[x, y])
+            if 3 <= abs(delta) <= 42:
+                red_value, green_value, blue_value = output_pixels[x, y]
+                output_pixels[x, y] = (
+                    max(0, min(255, red_value + delta)),
+                    max(0, min(255, green_value + delta)),
+                    max(0, min(255, blue_value + delta)),
+                )
+                changed += 1
+                deltas.append(abs(delta))
+        result_image = output
+
+    changed_ratio = changed / max(1, total)
+    if changed_ratio < 0.001:
+        return _text_edges_noop(
+            image,
+            "text edge sharpening skipped: sharpening delta below conservative threshold",
+            candidate_ratio,
+        )
+    if changed_ratio > 0.08:
+        return _text_edges_noop(
+            image,
+            "text edge sharpening skipped: changed area exceeds conservative threshold",
+            candidate_ratio,
+        )
+    edge_delta = sum(deltas) / max(1, len(deltas))
+    if edge_delta < 3 or edge_delta > 24:
+        return _text_edges_noop(
+            image,
+            "text edge sharpening skipped: edge delta outside conservative threshold",
+            candidate_ratio,
+        )
+    brightness_delta, contrast_delta = _tonal_deltas(grayscale, result_image.convert("L"))
+    if brightness_delta > 4.0 or contrast_delta > 8.0:
+        return _text_edges_noop(
+            image,
+            "text edge sharpening skipped: brightness or contrast delta exceeds conservative threshold",
+            candidate_ratio,
+        )
+
+    return TextEdgeSharpeningResult(
+        result_image,
+        True,
+        "text edge sharpening applied: stable neutral blurred text edges on light paper",
+        round(edge_delta, 6),
+        round(changed_ratio, 6),
+        round(candidate_ratio, 6),
+    )
+
+
+def _text_edge_sample_candidate_ratio(grayscale: Image.Image) -> float:
+    sample = grayscale.copy()
+    sample.thumbnail((96, 96), Image.Resampling.BILINEAR)
+    if sample.width < 30 or sample.height < 30:
+        return 0.0
+    histogram = sample.histogram()
+    total = sample.width * sample.height
+    p95 = _histogram_percentile(histogram, total, 0.95)
+    candidate = _text_edge_candidate_mask(sample, p95)
+    candidate = _clear_mask_edges(candidate, max(2, int(round(min(sample.width, sample.height) * 0.025))))
+    return round(_mask_ratio(candidate), 6)
+
+
+def _text_edge_candidate_mask(grayscale: Image.Image, p95: int) -> Image.Image:
+    width, height = grayscale.size
+    edges = grayscale.filter(ImageFilter.FIND_EDGES)
+    source_pixels = grayscale.load()
+    edge_pixels = edges.load()
+    output = Image.new("L", grayscale.size, 0)
+    output_pixels = output.load()
+    for y in range(1, height - 1):
+        for x in range(1, width - 1):
+            value = int(source_pixels[x, y])
+            if not (45 <= value <= min(224, p95 - 8)):
+                continue
+            if int(edge_pixels[x, y]) < 14:
+                continue
+            local_min = 255
+            local_max = 0
+            for ny in range(y - 1, y + 2):
+                for nx in range(x - 1, x + 2):
+                    neighbor = int(source_pixels[nx, ny])
+                    local_min = min(local_min, neighbor)
+                    local_max = max(local_max, neighbor)
+            if local_min <= 190 and local_max >= 210 and local_max - local_min >= 24:
+                output_pixels[x, y] = 255
+    return output
+
+
+def _text_edges_noop(
+    image: Image.Image,
+    reason: str,
+    candidate_pixel_ratio: float = 0.0,
+    *,
+    preflight_skipped: bool = False,
+) -> TextEdgeSharpeningResult:
+    return TextEdgeSharpeningResult(image, False, reason, 0.0, 0.0, round(candidate_pixel_ratio, 6), preflight_skipped)
+
+
 def _mask_ratio(mask: Image.Image) -> float:
     histogram = mask.histogram()
     return sum(histogram[1:]) / max(1, mask.width * mask.height)
@@ -2486,6 +2775,10 @@ def _processing_audit(
     faded_text_delta: float = 0.0,
     faded_text_changed_pixel_ratio: float = 0.0,
     faded_text_candidate_pixel_ratio: float = 0.0,
+    text_edges_sharpened: bool = False,
+    text_edges_delta: float = 0.0,
+    text_edges_changed_pixel_ratio: float = 0.0,
+    text_edges_candidate_pixel_ratio: float = 0.0,
 ) -> dict[str, Any]:
     source_width, source_height = source.size
     output_width, output_height = processed.size
@@ -2552,6 +2845,10 @@ def _processing_audit(
         "faded_text_delta": round(faded_text_delta, 6),
         "faded_text_changed_pixel_ratio": round(faded_text_changed_pixel_ratio, 6),
         "faded_text_candidate_pixel_ratio": round(faded_text_candidate_pixel_ratio, 6),
+        "text_edges_sharpened": text_edges_sharpened,
+        "text_edges_delta": round(text_edges_delta, 6),
+        "text_edges_changed_pixel_ratio": round(text_edges_changed_pixel_ratio, 6),
+        "text_edges_candidate_pixel_ratio": round(text_edges_candidate_pixel_ratio, 6),
         "crop_ratio": round(max(0.0, crop_ratio), 6),
         "trim_margins": trim_margins,
         "max_trim_margin_ratio": round(max_trim_margin_ratio, 6),
@@ -2682,12 +2979,16 @@ def _audit_guardrail_failures(metrics: dict[str, Any], options: ProcessingOption
         ("despeckle_pixel_ratio", options.audit_max_despeckle_pixel_ratio),
         ("faded_text_changed_pixel_ratio", 0.10),
         ("faded_text_candidate_pixel_ratio", 0.18),
+        ("text_edges_changed_pixel_ratio", 0.08),
+        ("text_edges_candidate_pixel_ratio", 0.12),
     ]
     failures = []
     for key, threshold in checks:
         if key == "pixel_change_ratio" and metrics.get("pixel_change_guardrail_applied") is False:
             continue
         if key.startswith("faded_text_") and metrics.get("faded_text_enhanced") is not True:
+            continue
+        if key.startswith("text_edges_") and metrics.get("text_edges_sharpened") is not True:
             continue
         value = metrics.get(key)
         if isinstance(value, int | float) and value > threshold:
