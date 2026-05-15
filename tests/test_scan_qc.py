@@ -6574,6 +6574,54 @@ class ScanQcTest(unittest.TestCase):
             self.assertIn(records["A001_0001.png"]["deskew_reason"], {"blank page", "low contrast"})
             self.assertEqual(records["A001_0002.png"]["deskew_reason"], "low contrast")
 
+    def test_deskew_noops_for_sparse_and_inconsistent_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            sparse = Image.new("RGB", (240, 180), "white")
+            draw = ImageDraw.Draw(sparse)
+            for point in [(20, 20), (90, 40), (130, 120), (200, 150)]:
+                draw.point(point, fill=(10, 10, 10))
+            sparse.save(input_dir / "A001_sparse.png")
+            _synthetic_inconsistent_skew_page().save(input_dir / "A001_inconsistent.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(deskew=True))
+
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            self.assertFalse(records["A001_sparse.png"]["deskewed"])
+            self.assertIn(records["A001_sparse.png"]["deskew_reason"], {"low contrast", "insufficient foreground"})
+            self.assertFalse(records["A001_inconsistent.png"]["deskewed"])
+            self.assertEqual(records["A001_inconsistent.png"]["deskew_reason"], "low confidence")
+            self.assertIn("deskew_noop", records["A001_inconsistent.png"]["operations"])
+
+    def test_deskew_noops_when_edge_content_would_expand_crop_risk(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            _synthetic_edge_content_skew_page().save(input_dir / "A001_edge_content.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(deskew=True))
+            audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
+
+            record = manifest["files"][0]
+            self.assertEqual(record["status"], "processed")
+            self.assertFalse(record["deskewed"])
+            self.assertAlmostEqual(record["skew_angle_degrees"], -2.5, delta=0.75)
+            self.assertGreaterEqual(record["skew_confidence"], 0.08)
+            self.assertEqual(record["deskew_reason"], "edge content near rotation boundary")
+            self.assertEqual(record["pre_deskew_size"], record["post_deskew_size"])
+            self.assertEqual(record["output_size"], record["pre_deskew_size"])
+            self.assertIn("deskew_noop", record["operations"])
+            self.assertNotIn(record["source_sha256"], json.dumps(audit_summary, ensure_ascii=False))
+
     def test_deskew_does_not_rotate_large_angle(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -9157,6 +9205,32 @@ def _synthetic_ink_text_page() -> Image.Image:
     for y in range(42, 132, 18):
         draw.rectangle((48, y, 190, y + 4), fill=255)
     return image
+
+
+def _synthetic_edge_content_skew_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), "white")
+    draw = ImageDraw.Draw(image)
+    for y in range(42, 132, 18):
+        draw.rectangle((48, y, 190, y + 4), fill=(20, 20, 20))
+    draw.rectangle((0, 20, 22, 32), fill=(15, 15, 15))
+    draw.rectangle((210, 146, 239, 160), fill=(15, 15, 15))
+    draw.line((0, 75, 44, 75), fill=(15, 15, 15), width=3)
+    draw.line((235, 0, 235, 179), fill=(40, 40, 40), width=3)
+    return image.rotate(-2.5, resample=Image.Resampling.BICUBIC, expand=True, fillcolor="white")
+
+
+def _synthetic_inconsistent_skew_page() -> Image.Image:
+    image = Image.new("RGB", (300, 220), "white")
+    draw = ImageDraw.Draw(image)
+    for y in range(45, 105, 16):
+        draw.rectangle((50, y, 240, y + 4), fill=(20, 20, 20))
+    overlay = Image.new("RGBA", image.size, (255, 255, 255, 0))
+    overlay_draw = ImageDraw.Draw(overlay)
+    for y in range(130, 190, 16):
+        overlay_draw.rectangle((60, y, 250, y + 4), fill=(20, 20, 20, 255))
+    overlay = overlay.rotate(5.0, resample=Image.Resampling.BICUBIC, expand=False, fillcolor=(255, 255, 255, 0))
+    image = Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB")
+    return image.rotate(-3.0, resample=Image.Resampling.BICUBIC, expand=True, fillcolor="white")
 
 
 def _synthetic_light_noise_page() -> Image.Image:

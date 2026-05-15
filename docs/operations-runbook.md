@@ -909,7 +909,10 @@ Start with these controls:
 - `archive-scan-qc processing-plan`: writes local dry-run JSON/CSV for operator
   review without derivative images.
 - `--auto-crop`: conservative page-border crop.
-- `--deskew`: conservative small-angle deskew.
+- `--deskew`: conservative small-angle deskew. Pages with insufficient
+  foreground, low confidence, excessive angle, inconsistent line evidence, or
+  foreground touching a rotation boundary are left unchanged with a local
+  manifest reason for review.
 - `--trim-dark-border`: dark edge trim before crop.
 - `--despeckle`: isolated dark speckle cleanup.
 - `--rules-profile`: project-specific DPI, filename, and quality thresholds.

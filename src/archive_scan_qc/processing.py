@@ -1007,6 +1007,7 @@ def _process_image(
             options,
         )
         skew = reusable.get("skew") if safe_skip_skew is None else safe_skip_skew
+        skew_from_projection = False
         if isinstance(skew, SkewDetection):
             operations.append("skew_detect_reused_scan_measurement")
             operation_timings.setdefault("deskew", {})["reused_scan_measurement"] = True
@@ -1016,6 +1017,7 @@ def _process_image(
                 operation_timings.setdefault("deskew", {})["safe_skip"] = True
         else:
             skew = _detect_skew(processed)
+            skew_from_projection = True
             operations.append("skew_detect_projection")
             operation_timings.setdefault("deskew", {})["projection_detection"] = True
             if options.reuse_scan_measurements and options.deskew:
@@ -1039,6 +1041,9 @@ def _process_image(
         elif abs(skew.angle_degrees) < 0.2:
             operations.append("deskew_noop")
             deskew_reason = "angle below correction threshold"
+        elif skew_from_projection and _deskew_has_edge_content_risk(processed):
+            operations.append("deskew_noop")
+            deskew_reason = "edge content near rotation boundary"
         else:
             processed = _rotate_for_deskew(processed, -skew.angle_degrees)
             operations.append("deskew_conservative")
@@ -1356,6 +1361,36 @@ def _detect_skew(image: Image.Image) -> SkewDetection:
     confidence = 0.0 if best_score <= 0 else max(0.0, min(1.0, (best_score - runner_up) / best_score))
     skew_angle = round(-best_angle, 2)
     return SkewDetection(skew_angle, round(confidence, 3), "skew detected")
+
+
+def _deskew_has_edge_content_risk(image: Image.Image) -> bool:
+    width, height = image.size
+    if width < 30 or height < 30:
+        return False
+
+    grayscale = ImageOps.autocontrast(image.convert("L"), cutoff=1)
+    histogram = grayscale.histogram()
+    total_pixels = width * height
+    low = _histogram_percentile(histogram, total_pixels, 0.05)
+    high = _histogram_percentile(histogram, total_pixels, 0.95)
+    if high - low < 35:
+        return False
+
+    threshold = max(0, min(255, low + int((high - low) * 0.35)))
+    ink = grayscale.point(lambda value: 255 if value <= threshold else 0, mode="L")
+    bbox = ink.getbbox()
+    if not bbox:
+        return False
+
+    left, top, right, bottom = bbox
+    horizontal_margin = max(2, int(round(width * 0.035)))
+    vertical_margin = max(2, int(round(height * 0.035)))
+    return (
+        left <= horizontal_margin
+        or top <= vertical_margin
+        or width - right <= horizontal_margin
+        or height - bottom <= vertical_margin
+    )
 
 
 def _histogram_percentile(histogram: list[int], total: int, percentile: float) -> int:
