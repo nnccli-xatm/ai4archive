@@ -369,11 +369,6 @@ class WorkbenchController:
         handoff_counts = _completion_handoff_counts(run_summary, decision_summary)
         reuse_handoff_summary = _local_reuse_handoff_summary(run_summary)
         operator_name = str(summary.get("operator_name") or "").strip()
-        reuse_note = (
-            reuse_handoff_summary["message_zh"]
-            if isinstance(reuse_handoff_summary, dict)
-            else "本批复用了 0 张，重新处理 0 张，失败 0 张，剩余 0 张。"
-        )
         stage_timings_note = _completion_stage_timings_note(run_summary)
         completion_note_lines = [
             "本批已完成交接说明",
@@ -385,13 +380,14 @@ class WorkbenchController:
             f"需要重扫：{handoff_counts['needs_rescan_images']} 张",
             f"需要重新处理：{handoff_counts['needs_reprocess_images']} 张",
             f"待决定：{pending_decisions}",
-            reuse_note,
             f"复核总数：{total_decisions}",
             f"已确认：{reviewed_decisions}",
             f"未关闭 P0：{open_p0_count}",
             f"未关闭 P1：{open_p1_count}",
             f"已有人工处理结论：{int(closure_summary.get('manually_handled_count') or reviewed_decisions)}",
         ]
+        if isinstance(reuse_handoff_summary, dict):
+            completion_note_lines.insert(9, reuse_handoff_summary["message_zh"])
         if stage_timings_note:
             completion_note_lines.append(stage_timings_note)
         completion_note_lines.extend(
@@ -2395,20 +2391,30 @@ def _local_reuse_handoff_summary(run_summary: dict[str, Any] | None) -> dict[str
     reuse_summary = run_summary.get("local_reuse_summary") if isinstance(run_summary, dict) else None
     if not isinstance(reuse_summary, dict) or reuse_summary.get("aggregate_only") is not True:
         return None
+    total_files = _safe_nonnegative_int(reuse_summary.get("total_files"))
     reused_files = _safe_nonnegative_int(reuse_summary.get("reused_files"))
     reprocessed_files = _safe_nonnegative_int(reuse_summary.get("reprocessed_files"))
     failed_files = _safe_nonnegative_int(reuse_summary.get("failed_files"))
     remaining_files = _safe_nonnegative_int(reuse_summary.get("remaining_files"))
+    if total_files == 0:
+        total_files = reused_files + reprocessed_files + failed_files + remaining_files
+    next_action_zh = (
+        "还有失败或待处理图片，请先重试本批次；仍失败再交管理员处理。"
+        if failed_files > 0 or remaining_files > 0
+        else "无需整批重跑，检查输出文件夹后交接。"
+    )
     return {
         "schema_version": "scan-qc.local-processing-reuse-summary.v1",
         "aggregate_only": True,
+        "total_files": total_files,
         "reused_files": reused_files,
         "reprocessed_files": reprocessed_files,
         "failed_files": failed_files,
         "remaining_files": remaining_files,
+        "next_action_zh": next_action_zh,
         "message_zh": (
-            f"本批复用了 {reused_files} 张，重新处理 {reprocessed_files} 张，"
-            f"失败 {failed_files} 张，剩余 {remaining_files} 张。"
+            f"本批共 {total_files} 张：已复用 {reused_files} 张，实际重新处理 {reprocessed_files} 张，"
+            f"仍失败 {failed_files} 张，剩余待处理 {remaining_files} 张。{next_action_zh}"
         ),
     }
 

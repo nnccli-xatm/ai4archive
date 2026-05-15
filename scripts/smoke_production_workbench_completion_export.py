@@ -108,6 +108,7 @@ def run_smoke() -> dict[str, Any]:
                     "local_reuse_summary": {
                         "schema_version": "scan-qc.local-processing-reuse-summary.v1",
                         "aggregate_only": True,
+                        "total_files": 8,
                         "reused_files": 2,
                         "reprocessed_files": 5,
                         "failed_files": 0,
@@ -180,11 +181,13 @@ def run_smoke() -> dict[str, Any]:
             == {
                 "schema_version": "scan-qc.local-processing-reuse-summary.v1",
                 "aggregate_only": True,
+                "total_files": 8,
                 "reused_files": 2,
                 "reprocessed_files": 5,
                 "failed_files": 0,
                 "remaining_files": 0,
-                "message_zh": "本批复用了 2 张，重新处理 5 张，失败 0 张，剩余 0 张。",
+                "next_action_zh": "无需整批重跑，检查输出文件夹后交接。",
+                "message_zh": "本批共 8 张：已复用 2 张，实际重新处理 5 张，仍失败 0 张，剩余待处理 0 张。无需整批重跑，检查输出文件夹后交接。",
             },
             "completion panel reuse count summary changed",
         )
@@ -217,7 +220,10 @@ def run_smoke() -> dict[str, Any]:
         _assert("需要重扫：1 张" in completion_note, "completion note missing rescan handoff count")
         _assert("需要重新处理：1 张" in completion_note, "completion note missing reprocess handoff count")
         _assert("待决定：0" in completion_note, "completion note missing aggregate pending count")
-        _assert("本批复用了 2 张，重新处理 5 张，失败 0 张，剩余 0 张。" in completion_note, "completion note missing reuse handoff counts")
+        _assert(
+            "本批共 8 张：已复用 2 张，实际重新处理 5 张，仍失败 0 张，剩余待处理 0 张。无需整批重跑，检查输出文件夹后交接。" in completion_note,
+            "completion note missing reuse handoff counts",
+        )
         _assert("未关闭 P0：0" in completion_note, "completion note missing aggregate open P0 count")
         _assert("未关闭 P1：0" in completion_note, "completion note missing aggregate open P1 count")
         _assert("已有人工处理结论：3" in completion_note, "completion note missing aggregate handled count")

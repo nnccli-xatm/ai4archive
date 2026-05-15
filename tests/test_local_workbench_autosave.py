@@ -1462,10 +1462,12 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
                         "local_reuse_summary": {
                             "schema_version": "scan-qc.local-processing-reuse-summary.v1",
                             "aggregate_only": True,
+                            "total_files": 8,
                             "reused_files": 2,
                             "reprocessed_files": 5,
                             "failed_files": 0,
                             "remaining_files": 0,
+                            "next_action_zh": "无需整批重跑，检查输出文件夹后交接。",
                         },
                         "stage_timings": {
                             "schema_version": "scan-qc.production-stage-timings.v1",
@@ -1561,11 +1563,13 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
                 {
                     "schema_version": "scan-qc.local-processing-reuse-summary.v1",
                     "aggregate_only": True,
+                    "total_files": 8,
                     "reused_files": 2,
                     "reprocessed_files": 5,
                     "failed_files": 0,
                     "remaining_files": 0,
-                    "message_zh": "本批复用了 2 张，重新处理 5 张，失败 0 张，剩余 0 张。",
+                    "next_action_zh": "无需整批重跑，检查输出文件夹后交接。",
+                    "message_zh": "本批共 8 张：已复用 2 张，实际重新处理 5 张，仍失败 0 张，剩余待处理 0 张。无需整批重跑，检查输出文件夹后交接。",
                 },
             )
             self.assertEqual(
@@ -1614,7 +1618,10 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertIn("需要重扫：1 张", completion_note)
             self.assertIn("需要重新处理：1 张", completion_note)
             self.assertIn("待决定：0", completion_note)
-            self.assertIn("本批复用了 2 张，重新处理 5 张，失败 0 张，剩余 0 张。", completion_note)
+            self.assertIn(
+                "本批共 8 张：已复用 2 张，实际重新处理 5 张，仍失败 0 张，剩余待处理 0 张。无需整批重跑，检查输出文件夹后交接。",
+                completion_note,
+            )
             self.assertIn("交接前检查：打开输出文件夹", completion_note)
             self.assertIn("当前复核队列", completion_note)
             self.assertIn("不要混用批次", completion_note)

@@ -559,6 +559,7 @@ def validate_completion_export_smoke(html: str, errors: list[str]) -> None:
                         "local_reuse_summary": {
                             "schema_version": "scan-qc.local-processing-reuse-summary.v1",
                             "aggregate_only": True,
+                            "total_files": 8,
                             "reused_files": 2,
                             "reprocessed_files": 5,
                             "failed_files": 0,
@@ -606,11 +607,13 @@ def validate_completion_export_smoke(html: str, errors: list[str]) -> None:
             expected_reuse = {
                 "schema_version": "scan-qc.local-processing-reuse-summary.v1",
                 "aggregate_only": True,
+                "total_files": 8,
                 "reused_files": 2,
                 "reprocessed_files": 5,
                 "failed_files": 0,
                 "remaining_files": 0,
-                "message_zh": "本批复用了 2 张，重新处理 5 张，失败 0 张，剩余 0 张。",
+                "next_action_zh": "无需整批重跑，检查输出文件夹后交接。",
+                "message_zh": "本批共 8 张：已复用 2 张，实际重新处理 5 张，仍失败 0 张，剩余待处理 0 张。无需整批重跑，检查输出文件夹后交接。",
             }
             if panel.get("local_reuse_summary") != expected_reuse:
                 errors.append("completion panel missing aggregate local reuse handoff counts")
