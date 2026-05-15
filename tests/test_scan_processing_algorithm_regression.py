@@ -166,7 +166,7 @@ def _assert_required_metrics_present(
     assert isinstance(algorithm_metrics, dict)
     expected = {
         "despeckle": ("pixel_ratio",),
-        "normalize_tones": ("background_delta", "contrast_delta"),
+        "normalize_tones": ("background_delta", "contrast_delta", "changed_pixel_ratio"),
         "lighten_edge_shadow": ("delta", "changed_pixel_ratio"),
         "lighten_background_stains": ("delta", "changed_pixel_ratio", "candidate_pixel_ratio"),
         "lighten_scanlines": ("delta", "changed_pixel_ratio", "candidate_pixel_ratio"),
@@ -191,6 +191,7 @@ def _assert_algorithm_thresholds(testcase: unittest.TestCase, quality: dict[str,
         ("despeckle", "pixel_ratio"): "max_despeckle_pixel_ratio",
         ("normalize_tones", "background_delta"): "max_tone_background_delta",
         ("normalize_tones", "contrast_delta"): "max_tone_contrast_delta",
+        ("normalize_tones", "changed_pixel_ratio"): "max_tone_changed_pixel_ratio",
         ("lighten_edge_shadow", "changed_pixel_ratio"): "max_edge_shadow_changed_pixel_ratio",
         ("lighten_background_stains", "changed_pixel_ratio"): "max_background_stains_changed_pixel_ratio",
         ("lighten_background_stains", "candidate_pixel_ratio"): "max_background_stains_candidate_pixel_ratio",

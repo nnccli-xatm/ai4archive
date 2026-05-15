@@ -6233,6 +6233,164 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn("private_red_annotation", audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
 
+    def test_normalize_tones_improves_safe_gray_page_with_aggregate_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = _synthetic_tone_gray_text_page()
+            source.save(input_dir / "private_safe_tone_page.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(normalize_tones=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+            processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+
+            self.assertTrue(record["tone_normalized"])
+            self.assertIn("normalize_tones_conservative", record["operations"])
+            self.assertGreater(record["tone_background_after"], record["tone_background_before"])
+            self.assertGreater(record["tone_contrast_after"], record["tone_contrast_before"])
+            self.assertGreater(record["processing_audit"]["tone_background_delta"], 12)
+            self.assertGreater(record["processing_audit"]["tone_contrast_delta"], 12)
+            self.assertGreater(record["tone_changed_pixel_ratio"], 0.70)
+            self.assertLess(record["tone_changed_pixel_ratio"], 0.95)
+            self.assertGreater(_box_luma(processed, (10, 10, 230, 28)), _box_luma(source, (10, 10, 230, 28)) + 12)
+            self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
+
+            tone_guard = audit_summary["guardrails"]["tone_normalization"]
+            self.assertEqual(audit_summary["counts"]["tone_normalized_files"], 1)
+            self.assertEqual(audit_summary["counts"]["tone_skipped_files"], 0)
+            self.assertEqual(tone_guard["applied_files"], 1)
+            self.assertEqual(tone_guard["skipped_files"], 0)
+            self.assertIn("tone_changed_pixel_ratio", audit_summary["metrics"])
+            self.assertGreater(tone_guard["background_delta"]["max"], 12)
+            self.assertGreater(tone_guard["contrast_delta"]["max"], 12)
+            self.assertLess(tone_guard["changed_pixel_ratio"]["max"], 0.95)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_safe_tone_page", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
+    def test_normalize_tones_skips_protected_and_uncertain_pages_with_reasons(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            default_process_dir = root / "processed-default"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "private_safe_tone_page.png": _synthetic_tone_gray_text_page(),
+                "private_normal_exposure.png": _synthetic_tone_normal_exposure_page(),
+                "private_high_contrast.png": _synthetic_tone_high_contrast_page(),
+                "private_color_photo.png": _synthetic_tone_color_photo_page(),
+                "private_red_stamp.png": _synthetic_tone_gray_text_page(red_stamp=True),
+                "private_handwriting.png": _synthetic_tone_gray_text_page(handwriting=True),
+                "private_paper_texture.png": _synthetic_tone_texture_page(),
+                "private_too_dark.png": _synthetic_tone_dark_page(),
+                "private_overexposed.png": _synthetic_tone_overexposed_page(),
+                "private_high_noise.png": _synthetic_tone_noisy_page(),
+                "private_color_risk.png": _synthetic_tone_color_annotation_page(),
+                "private_low_confidence.png": _synthetic_tone_low_confidence_page(),
+            }
+            for name, image in pages.items():
+                image.save(input_dir / name, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            default_manifest = process_images(report, input_dir, default_process_dir, ProcessingOptions(workers=1))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(normalize_tones=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for record in default_manifest["files"]:
+                self.assertFalse(record["tone_normalized"])
+                self.assertIn("normalize_tones_disabled", record["operations"])
+                self.assertEqual(
+                    _sha256_for_test(input_dir / record["source_relative_path"]),
+                    _sha256_for_test(default_process_dir / record["output_relative_path"]),
+                )
+
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            self.assertTrue(records["private_safe_tone_page.png"]["tone_normalized"])
+            skipped_expectations = {
+                "private_normal_exposure.png": "already normal",
+                "private_high_contrast.png": "high contrast",
+                "private_color_photo.png": "obvious color content",
+                "private_red_stamp.png": "red stamp",
+                "private_handwriting.png": "light color annotation",
+                "private_paper_texture.png": "low-confidence tonal separation",
+                "private_too_dark.png": "too dark",
+                "private_overexposed.png": "overexposed",
+                "private_high_noise.png": "noise",
+                "private_color_risk.png": "light color annotation",
+                "private_low_confidence.png": "low-confidence",
+            }
+            for source_name, reason_fragment in skipped_expectations.items():
+                record = records[source_name]
+                processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+                self.assertFalse(record["tone_normalized"], source_name)
+                self.assertIn("normalize_tones_noop", record["operations"], source_name)
+                self.assertIn(reason_fragment, record["tone_reason"], source_name)
+                self.assertEqual(record["processing_audit"]["tone_changed_pixel_ratio"], 0.0, source_name)
+                self.assertLess(
+                    _changed_ratio_for_test(pages[source_name], processed, (0, 0, processed.width, processed.height)),
+                    0.001,
+                    source_name,
+                )
+
+            tone_guard = audit_summary["guardrails"]["tone_normalization"]
+            self.assertEqual(audit_summary["counts"]["tone_normalized_files"], 1)
+            self.assertEqual(audit_summary["counts"]["tone_skipped_files"], len(skipped_expectations))
+            self.assertEqual(tone_guard["applied_files"], 1)
+            self.assertEqual(tone_guard["skipped_files"], len(skipped_expectations))
+            self.assertGreaterEqual(tone_guard["protection_triggered_files"], 5)
+            self.assertGreaterEqual(tone_guard["low_confidence_skip_files"], 2)
+            self.assertGreaterEqual(tone_guard["conservative_scope_skip_files"], 2)
+            self.assertGreaterEqual(len(tone_guard["skip_reason_distribution"]), 8)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_safe_tone_page", audit_summary_text)
+            self.assertNotIn("private_red_stamp", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
+    def test_normalize_tones_preserves_subtle_paper_color(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = _synthetic_tone_gray_text_page(background=(190, 188, 178), foreground=(92, 90, 82))
+            source.save(input_dir / "private_warm_paper.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(normalize_tones=True, workers=1),
+            )
+            record = manifest["files"][0]
+            processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+            before_pixel = source.getpixel((12, 12))
+            after_pixel = processed.getpixel((12, 12))
+
+            self.assertTrue(record["tone_normalized"])
+            self.assertGreater(after_pixel[0] - after_pixel[2], 6)
+            self.assertLess(abs((after_pixel[0] - after_pixel[2]) - (before_pixel[0] - before_pixel[2])), 4)
+
     def test_lighten_edge_shadow_improves_safe_shadow_with_aggregate_audit(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -10837,6 +10995,97 @@ def _synthetic_high_contrast_dense_text_page() -> Image.Image:
     draw = ImageDraw.Draw(image)
     for y in range(35, 145, 14):
         draw.rectangle((20, y, 220, y + 4), fill=(20, 20, 20))
+    return image
+
+
+def _synthetic_tone_gray_text_page(
+    *,
+    background: tuple[int, int, int] = (188, 188, 188),
+    foreground: tuple[int, int, int] = (92, 92, 92),
+    red_stamp: bool = False,
+    handwriting: bool = False,
+) -> Image.Image:
+    image = Image.new("RGB", (240, 180), background)
+    draw = ImageDraw.Draw(image)
+    for y in (44, 68, 92, 116):
+        draw.rectangle((34, y, 188, y + 5), fill=foreground)
+        draw.rectangle((38, y + 10, 148, y + 13), fill=foreground)
+    if red_stamp:
+        draw.ellipse((164, 98, 220, 154), outline=(180, 28, 28), width=4)
+        draw.line((176, 126, 208, 126), fill=(180, 28, 28), width=2)
+    if handwriting:
+        draw.line((30, 144, 92, 162), fill=(148, 132, 178), width=2)
+        draw.line((92, 162, 154, 140), fill=(148, 132, 178), width=2)
+    return image
+
+
+def _synthetic_tone_normal_exposure_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), (245, 245, 245))
+    draw = ImageDraw.Draw(image)
+    for y in (44, 68, 92, 116):
+        draw.rectangle((34, y, 188, y + 5), fill=(35, 35, 35))
+    return image
+
+
+def _synthetic_tone_high_contrast_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), (218, 218, 218))
+    draw = ImageDraw.Draw(image)
+    for y in (32, 52, 72, 92, 112, 132):
+        draw.rectangle((26, y, 210, y + 6), fill=(42, 42, 42))
+    return image
+
+
+def _synthetic_tone_color_photo_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), (188, 188, 188))
+    draw = ImageDraw.Draw(image)
+    for y in range(24, 156):
+        draw.line((34, y, 206, y), fill=(86 + y % 80, 126 + y % 50, 170 + y % 40))
+    return image
+
+
+def _synthetic_tone_texture_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), (206, 206, 202))
+    draw = ImageDraw.Draw(image)
+    for x in range(0, 240, 6):
+        draw.line((x, 0, x, 179), fill=(198, 198, 194))
+    return image
+
+
+def _synthetic_tone_dark_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), (112, 112, 112))
+    draw = ImageDraw.Draw(image)
+    for y in (44, 68, 92, 116):
+        draw.rectangle((34, y, 188, y + 5), fill=(50, 50, 50))
+    return image
+
+
+def _synthetic_tone_overexposed_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), (250, 250, 250))
+    draw = ImageDraw.Draw(image)
+    for y in (44, 68, 92, 116):
+        draw.rectangle((34, y, 188, y + 5), fill=(226, 226, 226))
+    return image
+
+
+def _synthetic_tone_noisy_page() -> Image.Image:
+    image = _synthetic_tone_gray_text_page()
+    for x in range(0, image.width, 2):
+        for y in range(0, image.height, 3):
+            if (x * 37 + y * 19) % 17 == 0:
+                image.putpixel((x, y), (70, 70, 70) if (x + y) % 2 else (220, 220, 220))
+    return image
+
+
+def _synthetic_tone_color_annotation_page() -> Image.Image:
+    image = _synthetic_tone_gray_text_page()
+    draw = ImageDraw.Draw(image)
+    draw.arc((70, 126, 174, 170), 190, 350, fill=(145, 165, 200), width=2)
+    return image
+
+
+def _synthetic_tone_low_confidence_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), (188, 188, 188))
+    ImageDraw.Draw(image).rectangle((104, 88, 136, 91), fill=(92, 92, 92))
     return image
 
 

@@ -90,6 +90,7 @@ class ToneNormalizationResult:
     background_after: float | None
     contrast_before: float | None
     contrast_after: float | None
+    changed_pixel_ratio: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -619,6 +620,7 @@ def _process_record(
         "tone_background_after": None,
         "tone_contrast_before": None,
         "tone_contrast_after": None,
+        "tone_changed_pixel_ratio": 0.0,
         "edge_shadow_lightened": False,
         "edge_shadow_reason": None,
         "edge_shadow_edges": [],
@@ -718,6 +720,7 @@ def _process_record(
                 "tone_background_after": process_info["tone_background_after"],
                 "tone_contrast_before": process_info["tone_contrast_before"],
                 "tone_contrast_after": process_info["tone_contrast_after"],
+                "tone_changed_pixel_ratio": process_info["tone_changed_pixel_ratio"],
                 "edge_shadow_lightened": process_info["edge_shadow_lightened"],
                 "edge_shadow_reason": process_info["edge_shadow_reason"],
                 "edge_shadow_edges": process_info["edge_shadow_edges"],
@@ -792,6 +795,7 @@ def _process_record(
                     "tone_background_after": process_info["tone_background_after"],
                     "tone_contrast_before": process_info["tone_contrast_before"],
                     "tone_contrast_after": process_info["tone_contrast_after"],
+                    "tone_changed_pixel_ratio": process_info["tone_changed_pixel_ratio"],
                     "edge_shadow_lightened": process_info["edge_shadow_lightened"],
                     "edge_shadow_reason": process_info["edge_shadow_reason"],
                     "edge_shadow_edges": process_info["edge_shadow_edges"],
@@ -1026,6 +1030,19 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
         and isinstance(reason, str)
         and reason != "edge shadow lightening disabled"
     ]
+    tone_reasons = [
+        record.get("tone_reason")
+        for record in processed_records
+        if isinstance(record.get("tone_reason"), str)
+    ]
+    tone_skipped_reasons = [
+        reason
+        for record in processed_records
+        for reason in [record.get("tone_reason")]
+        if record.get("tone_normalized") is False
+        and isinstance(reason, str)
+        and reason != "tone normalization disabled"
+    ]
     return {
         "schema_version": "scan-qc.processing.audit.v1",
         "generated_at": manifest["generated_at"],
@@ -1113,6 +1130,12 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                 and record.get("despeckle_reason") not in {None, "despeckle disabled"}
             ),
             "tone_normalized_files": sum(1 for audit in audit_records if audit.get("tone_normalized") is True),
+            "tone_skipped_files": sum(
+                1
+                for record in processed_records
+                if record.get("tone_normalized") is False
+                and record.get("tone_reason") not in {None, "tone normalization disabled"}
+            ),
             "edge_shadow_lightened_files": sum(
                 1 for audit in audit_records if audit.get("edge_shadow_lightened") is True
             ),
@@ -1172,6 +1195,7 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "despeckle_pixel_ratio": _aggregate_metric(audit_records, "despeckle_pixel_ratio"),
             "tone_background_delta": _aggregate_metric(audit_records, "tone_background_delta"),
             "tone_contrast_delta": _aggregate_metric(audit_records, "tone_contrast_delta"),
+            "tone_changed_pixel_ratio": _aggregate_metric(audit_records, "tone_changed_pixel_ratio"),
             "edge_shadow_delta": _aggregate_metric(audit_records, "edge_shadow_delta"),
             "edge_shadow_changed_pixel_ratio": _aggregate_metric(
                 audit_records, "edge_shadow_changed_pixel_ratio"
@@ -1221,6 +1245,7 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "crop_ratio": _ratio_distribution(audit_records, "crop_ratio"),
             "max_trim_margin_ratio": _ratio_distribution(audit_records, "max_trim_margin_ratio"),
             "despeckle_pixel_ratio": _ratio_distribution(audit_records, "despeckle_pixel_ratio"),
+            "tone_changed_pixel_ratio": _ratio_distribution(audit_records, "tone_changed_pixel_ratio"),
         },
         "guardrails": {
             "enabled": True,
@@ -1280,6 +1305,54 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                 ),
                 "backend_mode": _aggregate_despeckle_backend(processed_records, options.despeckle)["backend_mode"],
                 "reason_distribution": _reason_counts(reason for reason in despeckle_reasons if isinstance(reason, str)),
+            },
+            "tone_normalization": {
+                "applied_files": sum(1 for audit in audit_records if audit.get("tone_normalized") is True),
+                "skipped_files": sum(
+                    1
+                    for record in processed_records
+                    if record.get("tone_normalized") is False
+                    and record.get("tone_reason") not in {None, "tone normalization disabled"}
+                ),
+                "background_delta": _aggregate_metric(audit_records, "tone_background_delta"),
+                "contrast_delta": _aggregate_metric(audit_records, "tone_contrast_delta"),
+                "changed_pixel_ratio": _aggregate_metric(audit_records, "tone_changed_pixel_ratio"),
+                "reason_distribution": _reason_counts(reason for reason in tone_reasons if isinstance(reason, str)),
+                "skip_reason_distribution": _reason_counts(tone_skipped_reasons),
+                "protection_triggered_files": sum(
+                    1
+                    for reason in tone_skipped_reasons
+                    if any(
+                        marker in reason
+                        for marker in (
+                            "risk",
+                            "noise",
+                            "texture",
+                            "high contrast",
+                            "already normal",
+                            "too dense",
+                        )
+                    )
+                ),
+                "conservative_scope_skip_files": sum(
+                    1
+                    for reason in tone_skipped_reasons
+                    if any(marker in reason for marker in ("too dark", "overexposed", "outside conservative"))
+                ),
+                "low_confidence_skip_files": sum(
+                    1
+                    for reason in tone_skipped_reasons
+                    if any(
+                        marker in reason
+                        for marker in (
+                            "low-confidence",
+                            "too sparse",
+                            "tonal separation too small",
+                            "improvement below",
+                            "stretch range too narrow",
+                        )
+                    )
+                ),
             },
             "edge_shadow": {
                 "applied_files": sum(1 for audit in audit_records if audit.get("edge_shadow_lightened") is True),
@@ -1644,6 +1717,7 @@ def _audit_thresholds(options: ProcessingOptions) -> dict[str, float]:
         "max_cumulative_contrast_delta": options.audit_max_cumulative_contrast_delta,
         "max_cumulative_crop_ratio": options.audit_max_cumulative_crop_ratio,
         "max_cumulative_candidate_pixel_ratio": options.audit_max_cumulative_candidate_pixel_ratio,
+        "max_tone_changed_pixel_ratio": 1.0,
         "max_faded_text_changed_pixel_ratio": 0.10,
         "max_faded_text_candidate_pixel_ratio": 0.18,
         "max_text_edges_changed_pixel_ratio": 0.08,
@@ -1910,6 +1984,7 @@ def _process_image(
         tone.background_after,
         tone.contrast_before,
         tone.contrast_after,
+        tone.changed_pixel_ratio,
         edge_shadow.applied,
         edge_shadow.edge_delta,
         edge_shadow.changed_pixel_ratio,
@@ -1976,6 +2051,7 @@ def _process_image(
         "tone_background_after": None if cumulative_guard_reverted else tone.background_after,
         "tone_contrast_before": None if cumulative_guard_reverted else tone.contrast_before,
         "tone_contrast_after": None if cumulative_guard_reverted else tone.contrast_after,
+        "tone_changed_pixel_ratio": 0.0 if cumulative_guard_reverted else tone.changed_pixel_ratio,
         "edge_shadow_lightened": False if cumulative_guard_reverted else edge_shadow.applied,
         "edge_shadow_reason": "reverted by cumulative change guard" if cumulative_guard_reverted else edge_shadow.reason,
         "edge_shadow_edges": list(edge_shadow.edges),
@@ -2055,11 +2131,31 @@ def _normalize_tones_conservative(image: Image.Image) -> ToneNormalizationResult
     p99 = _histogram_percentile(histogram, total, 0.99)
     contrast_before = float(p95 - p05)
     background_before = float(p95)
+    if p95 < 145:
+        return ToneNormalizationResult(
+            image,
+            False,
+            "tone normalization skipped: page is too dark for conservative automatic correction",
+            background_before,
+            background_before,
+            contrast_before,
+            contrast_before,
+        )
+    if p05 > 205 and p95 >= 245:
+        return ToneNormalizationResult(
+            image,
+            False,
+            "tone normalization skipped: page appears overexposed",
+            background_before,
+            background_before,
+            contrast_before,
+            contrast_before,
+        )
     if p99 - p01 < 35:
         return ToneNormalizationResult(
             image,
             False,
-            "tone normalization skipped: tonal separation too small",
+            "tone normalization skipped: low-confidence tonal separation too small",
             background_before,
             background_before,
             contrast_before,
@@ -2075,11 +2171,11 @@ def _normalize_tones_conservative(image: Image.Image) -> ToneNormalizationResult
             contrast_before,
             contrast_before,
         )
-    if p95 < 145:
+    if contrast_before > 135:
         return ToneNormalizationResult(
             image,
             False,
-            "tone normalization skipped: page is too dark for conservative automatic correction",
+            "tone normalization skipped: high contrast text already clear",
             background_before,
             background_before,
             contrast_before,
@@ -2103,7 +2199,7 @@ def _normalize_tones_conservative(image: Image.Image) -> ToneNormalizationResult
         return ToneNormalizationResult(
             image,
             False,
-            "tone normalization skipped: foreground evidence too sparse",
+            "tone normalization skipped: low-confidence foreground evidence too sparse",
             background_before,
             background_before,
             contrast_before,
@@ -2114,6 +2210,18 @@ def _normalize_tones_conservative(image: Image.Image) -> ToneNormalizationResult
             image,
             False,
             "tone normalization skipped: foreground too dense",
+            background_before,
+            background_before,
+            contrast_before,
+            contrast_before,
+        )
+
+    local_noise_ratio = _tone_local_noise_ratio(grayscale)
+    if local_noise_ratio > 0.008:
+        return ToneNormalizationResult(
+            image,
+            False,
+            "tone normalization skipped: high noise or fine texture risk",
             background_before,
             background_before,
             contrast_before,
@@ -2132,8 +2240,8 @@ def _normalize_tones_conservative(image: Image.Image) -> ToneNormalizationResult
             contrast_before,
             contrast_before,
         )
-    target_low = 62
-    target_high = 230
+    target_low = 70
+    target_high = 224
     scale = (target_high - target_low) / (source_high - source_low)
 
     def map_value(value: int) -> int:
@@ -2146,6 +2254,7 @@ def _normalize_tones_conservative(image: Image.Image) -> ToneNormalizationResult
         _histogram_percentile(normalized_histogram, total, 0.95)
         - _histogram_percentile(normalized_histogram, total, 0.05)
     )
+    changed_pixel_ratio = _tone_changed_pixel_ratio(grayscale, normalized_l)
     if background_after - background_before < 12 or contrast_after - contrast_before < 12:
         return ToneNormalizationResult(
             image,
@@ -2155,6 +2264,7 @@ def _normalize_tones_conservative(image: Image.Image) -> ToneNormalizationResult
             background_after,
             contrast_before,
             contrast_after,
+            changed_pixel_ratio,
         )
     if background_after - background_before > 75 or contrast_after - contrast_before > 75:
         return ToneNormalizationResult(
@@ -2165,9 +2275,10 @@ def _normalize_tones_conservative(image: Image.Image) -> ToneNormalizationResult
             background_after,
             contrast_before,
             contrast_after,
+            changed_pixel_ratio,
         )
 
-    normalized = normalized_l if image.mode == "L" else Image.merge("RGB", (normalized_l, normalized_l, normalized_l))
+    normalized = _replace_luminance_preserving_chroma(image, normalized_l)
     return ToneNormalizationResult(
         normalized,
         True,
@@ -2176,7 +2287,29 @@ def _normalize_tones_conservative(image: Image.Image) -> ToneNormalizationResult
         background_after,
         contrast_before,
         contrast_after,
+        changed_pixel_ratio,
     )
+
+
+def _tone_local_noise_ratio(grayscale: Image.Image) -> float:
+    median = grayscale.filter(ImageFilter.MedianFilter(size=3))
+    diff = ImageChops.difference(grayscale, median)
+    changed = sum(diff.point(lambda value: 255 if value > 18 else 0).histogram()[1:])
+    return changed / max(1, grayscale.width * grayscale.height)
+
+
+def _tone_changed_pixel_ratio(source_l: Image.Image, normalized_l: Image.Image) -> float:
+    diff = ImageChops.difference(source_l, normalized_l)
+    changed = sum(diff.point(lambda value: 255 if value > 20 else 0).histogram()[1:])
+    return changed / max(1, source_l.width * source_l.height)
+
+
+def _replace_luminance_preserving_chroma(image: Image.Image, normalized_l: Image.Image) -> Image.Image:
+    if image.mode == "L":
+        return normalized_l
+    ycbcr = image.convert("YCbCr")
+    _y, cb, cr = ycbcr.split()
+    return Image.merge("YCbCr", (normalized_l, cb, cr)).convert("RGB")
 
 
 def _lighten_edge_shadow_conservative(image: Image.Image) -> EdgeShadowLighteningResult:
@@ -3316,6 +3449,7 @@ def _processing_audit(
     tone_background_after: float | None = None,
     tone_contrast_before: float | None = None,
     tone_contrast_after: float | None = None,
+    tone_changed_pixel_ratio: float = 0.0,
     edge_shadow_lightened: bool = False,
     edge_shadow_delta: float = 0.0,
     edge_shadow_changed_pixel_ratio: float = 0.0,
@@ -3388,6 +3522,7 @@ def _processing_audit(
         "tone_normalized": tone_normalized,
         "tone_background_delta": round(tone_background_delta, 6),
         "tone_contrast_delta": round(tone_contrast_delta, 6),
+        "tone_changed_pixel_ratio": round(tone_changed_pixel_ratio, 6),
         "edge_shadow_lightened": edge_shadow_lightened,
         "edge_shadow_delta": round(edge_shadow_delta, 6),
         "edge_shadow_changed_pixel_ratio": round(edge_shadow_changed_pixel_ratio, 6),
