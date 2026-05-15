@@ -1569,6 +1569,7 @@
       lastServerOutputPath: "",
       progressLabel: "",
       aggregateProcessingLabel: "",
+      runningPreflightPlanMessage: "",
       stageTimingLabel: "",
       stageTimingAdvice: "",
       launchLocked: false,
@@ -2915,8 +2916,34 @@
       return slowStageAdviceByLabel[slowest.label] || "";
     }
 
-    function runningGuidanceText() {
-      return "批次正在运行，请等待。本机正在处理图片，处理完成或失败前不能更改文件夹和处理方式，也不要反复点击开始处理。";
+    function runningPreflightSummary(summary) {
+      return (state.folderReadiness && state.folderReadiness.preflight_processing_summary)
+        || (summary && summary.folder_readiness && summary.folder_readiness.preflight_processing_summary)
+        || (summary && summary.preflight_processing_summary)
+        || null;
+    }
+
+    function runningPreflightPlanMessage(summary) {
+      const preflight = runningPreflightSummary(summary);
+      const conservative = "开始前预检摘要暂不能安全用于判断可复用输出。本机会按当前进度继续核对并补齐需要处理的图片。";
+      if (!preflight || preflight.aggregate_only !== true) return conservative;
+      const rawState = String(preflight.state || "").trim().toLowerCase();
+      if (preflight.retry_scope_safe !== true || rawState === "unknown") {
+        return "开始前不能安全判断哪些输出可复用。本机会保守核对并补齐需要处理的输出。";
+      }
+      const hasCounts = ["total_files", "reusable_files", "needs_processing_files"].every((key) =>
+        Object.prototype.hasOwnProperty.call(preflight, key) && preflight[key] !== null
+      );
+      if (!hasCounts) return conservative;
+      const total = Math.max(0, toNumber(preflight.total_files));
+      const reusable = Math.max(0, toNumber(preflight.reusable_files));
+      const needsProcessing = Math.max(0, toNumber(preflight.needs_processing_files));
+      return `开始前判断：本批共 ${total} 张，预计可复用处理后输出 ${reusable} 张，预计需要新处理或补处理 ${needsProcessing} 张。`;
+    }
+
+    function runningGuidanceText(summary) {
+      const plan = runningPreflightPlanMessage(summary);
+      return `批次正在运行，请等待。${plan}当前聚合进度会继续显示已处理、剩余和预计等待；处理完成或失败前不能更改文件夹和处理方式，也不要反复点击开始处理。`;
     }
 
     function makeReviewItems(count) {
@@ -3063,6 +3090,7 @@
       state.progress = deriveProgress(summary, progress);
       state.progressLabel = deriveProgressLabel(summary, progress);
       state.aggregateProcessingLabel = deriveAggregateProcessingLabel(summary, progress);
+      state.runningPreflightPlanMessage = runningPreflightPlanMessage(summary);
       state.stageTimingLabel = deriveStageTimingLabel(summary, progress);
       state.stageTimingAdvice = deriveStageTimingAdvice(summary, progress);
       state.reviewItems = nextStatus === "needs_review" ? makeReviewItems(state.attentionFiles) : [];
@@ -3076,7 +3104,7 @@
         state.progress = pendingCount() === 0 ? Math.max(state.progress, 94) : Math.max(state.progress, 82);
       }
       if (inRunStatus()) {
-        els.loadStatus.textContent = runningGuidanceText();
+        els.loadStatus.textContent = runningGuidanceText(summary);
       }
       render();
     }
@@ -3142,8 +3170,9 @@
         state.launchLocked = false;
         setStatus("processing");
         state.aggregateProcessingLabel = "";
+        state.runningPreflightPlanMessage = runningPreflightPlanMessage(null);
         state.stageTimingAdvice = "";
-        els.loadStatus.textContent = runningGuidanceText();
+        els.loadStatus.textContent = runningGuidanceText(null);
       } else if (payload.recovery_guidance) {
         state.recoveryGuidance = payload.recovery_guidance;
         if (payload.restored_batch) state.recoveryGuidance = payload.restored_batch;
@@ -3219,7 +3248,7 @@
       }
       let payload;
       try {
-        els.loadStatus.textContent = duringLaunch ? runningGuidanceText() : "正在保存文件夹。";
+        els.loadStatus.textContent = duringLaunch ? runningGuidanceText(null) : "正在保存文件夹。";
         payload = await apiPost("/api/configure", {
           input_dir: els.inputPath.value.trim(),
           derivatives_dir: els.outputPath.value.trim(),
@@ -3424,7 +3453,7 @@
       const queueResponse = summary.status === "needs_review" ? await fetch(`${baseName}/production_review_queue.json`) : null;
       const queue = queueResponse && queueResponse.ok ? await queueResponse.json() : null;
       applyRunStatus(summary, await progressResponse.json(), queue);
-      els.loadStatus.textContent = "已加载状态示例。";
+      if (!inRunStatus()) els.loadStatus.textContent = "已加载状态示例。";
     }
 
     function decisionArtifact() {

@@ -731,6 +731,43 @@ def main() -> int:
     ]:
         if stage_timing_token not in html:
             errors.append(f"missing aggregate stage timing display token: {stage_timing_token}")
+    running_preflight_start = html.find("function runningPreflightSummary(summary)")
+    running_preflight_end = html.find("function makeReviewItems(count)", running_preflight_start)
+    if running_preflight_start == -1 or running_preflight_end == -1:
+        errors.append("missing running preflight plan implementation")
+    else:
+        running_preflight_body = html[running_preflight_start:running_preflight_end]
+        for required_token in [
+            "state.folderReadiness && state.folderReadiness.preflight_processing_summary",
+            "summary && summary.preflight_processing_summary",
+            "preflight.aggregate_only !== true",
+            "preflight.retry_scope_safe !== true || rawState === \"unknown\"",
+            "Object.prototype.hasOwnProperty.call(preflight, key) && preflight[key] !== null",
+            "开始前判断：本批共 ${total} 张，预计可复用处理后输出 ${reusable} 张，预计需要新处理或补处理 ${needsProcessing} 张。",
+            "开始前预检摘要暂不能安全用于判断可复用输出。",
+            "开始前不能安全判断哪些输出可复用。",
+            "当前聚合进度会继续显示已处理、剩余和预计等待",
+        ]:
+            if required_token not in running_preflight_body:
+                errors.append(f"running preflight plan missing token: {required_token}")
+        for forbidden_token in [
+            "relative_path",
+            "source_path",
+            "source_sha256",
+            "output_sha256",
+            "sha256",
+            "file_name",
+            "filename",
+            "ocr_text",
+            "OCR",
+            "thumbnail",
+            "<img",
+            "exception",
+            "traceback",
+            "stack",
+        ]:
+            if forbidden_token.lower() in running_preflight_body.lower():
+                errors.append(f"running preflight plan includes private/debug token: {forbidden_token}")
     for removed_primary_token in [
         'id="pauseButton"',
         'id="resumeButton"',
@@ -944,6 +981,21 @@ def main() -> int:
                         errors.append("running aggregate processing fixture does not prove remaining speed estimate")
                     if aggregate.get("estimated_remaining_seconds", 0) <= 0:
                         errors.append("running aggregate processing fixture does not prove positive wait estimate")
+                    preflight = summary.get("preflight_processing_summary")
+                    if not isinstance(preflight, dict):
+                        errors.append("running fixture missing preflight processing plan summary")
+                    else:
+                        expected_preflight = {
+                            "schema_version": "scan-qc.preflight-processing-summary.v1",
+                            "aggregate_only": True,
+                            "state": "current_batch",
+                            "retry_scope_safe": True,
+                            "total_files": 120,
+                            "reusable_files": 36,
+                            "needs_processing_files": 84,
+                        }
+                        if preflight != expected_preflight:
+                            errors.append("running fixture preflight processing plan summary changed unexpectedly")
                 if fixture_name == "production-run-finished":
                     if aggregate.get("remaining_images") != 0 or aggregate.get("estimated_remaining_seconds") != 0.0:
                         errors.append("finished aggregate processing fixture should have no remaining wait")

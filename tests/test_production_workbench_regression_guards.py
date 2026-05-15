@@ -340,18 +340,55 @@ class ProductionWorkbenchRegressionGuardTests(unittest.TestCase):
             "已处理 ${Math.min(completed, total)} 张 / 共 ${total} 张；待处理 ${Math.max(0, total - completed)} 张",
             'els.startButton.textContent = inRunStatus() ? "处理中，请等待" : "开始处理";',
             'els.startButton.title = inRunStatus() ? "批次正在运行，不能重复开始处理。" : (canStartProcessing() ? "" : startBlockedMessage);',
-            "批次正在运行，请等待。本机正在处理图片，处理完成或失败前不能更改文件夹和处理方式，也不要反复点击开始处理。",
+            "function runningPreflightPlanMessage(summary)",
+            "function runningPreflightSummary(summary)",
+            "state.folderReadiness && state.folderReadiness.preflight_processing_summary",
+            "summary && summary.preflight_processing_summary",
+            "preflight.aggregate_only !== true",
+            "preflight.retry_scope_safe !== true || rawState === \"unknown\"",
+            "开始前判断：本批共 ${total} 张，预计可复用处理后输出 ${reusable} 张，预计需要新处理或补处理 ${needsProcessing} 张。",
+            "开始前预检摘要暂不能安全用于判断可复用输出。",
+            "当前聚合进度会继续显示已处理、剩余和预计等待",
+            "处理完成或失败前不能更改文件夹和处理方式，也不要反复点击开始处理。",
         ]:
             self.assertIn(required, html)
 
+        start = html.find("function runningPreflightSummary(summary)")
+        end = html.find("function makeReviewItems(count)", start)
+        self.assertNotEqual(start, -1)
+        self.assertNotEqual(end, -1)
+        running_plan_body = html[start:end]
         for forbidden in [
             "current_file",
             "currentPath",
             "sha256",
             "OCR",
             "row-level",
+            "relative_path",
+            "source_path",
+            "file_name",
+            "filename",
+            "ocr_text",
+            "thumbnail",
+            "<img",
+            "exception",
+            "traceback",
+            "stack",
         ]:
-            self.assertNotIn(forbidden, html)
+            self.assertNotIn(forbidden, running_plan_body.lower())
+
+    def test_running_fixture_covers_safe_preflight_plan_counts(self) -> None:
+        running_summary = json.loads(
+            (ROOT / "docs" / "fixtures" / "production-run-running" / "production_run_summary.json").read_text(encoding="utf-8")
+        )
+        preflight = running_summary["preflight_processing_summary"]
+
+        self.assertTrue(preflight["aggregate_only"])
+        self.assertTrue(preflight["retry_scope_safe"])
+        self.assertNotEqual(preflight["state"], "unknown")
+        self.assertEqual(preflight["total_files"], 120)
+        self.assertEqual(preflight["reusable_files"], 36)
+        self.assertEqual(preflight["needs_processing_files"], 84)
 
     def test_progress_area_shows_only_aggregate_stage_timings(self) -> None:
         html = WORKBENCH_HTML.read_text(encoding="utf-8")
@@ -379,7 +416,7 @@ class ProductionWorkbenchRegressionGuardTests(unittest.TestCase):
             self.assertIn(required, html)
 
         start = html.find("function safeStageTimingLabel(stage)")
-        end = html.find("function runningGuidanceText()", start)
+        end = html.find("function makeReviewItems(count)", start)
         if start == -1:
             start = html.find("function safeStageTimingLabelInfo(stage)")
         self.assertNotEqual(start, -1)
@@ -396,7 +433,7 @@ class ProductionWorkbenchRegressionGuardTests(unittest.TestCase):
             self.assertNotIn(forbidden, body.lower())
 
         advice_start = html.find("function deriveStageTimingAdvice(summary, progress)")
-        advice_end = html.find("function runningGuidanceText()", advice_start)
+        advice_end = html.find("function runningPreflightSummary(summary)", advice_start)
         self.assertNotEqual(advice_start, -1)
         self.assertNotEqual(advice_end, -1)
         advice_body = html[advice_start:advice_end]
