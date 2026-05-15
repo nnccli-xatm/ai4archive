@@ -181,6 +181,16 @@ def _assert_workbench_decision_contract() -> list[str]:
         "`已决定 ${reviewedCount()} 项，待决定 ${pending} 项`",
         "renderPreview(activeItem, Boolean(activeItem));",
         "button.disabled = !activeItem;",
+        'function recordReviewDecision(decision, source = "button")',
+        'recordReviewDecision(button.dataset.decision);',
+        'if (recordReviewDecision(decision, "keyboard")) event.preventDefault();',
+        'document.addEventListener("keydown", handleReviewDecisionShortcut);',
+        'return Boolean(element.closest("#decisionDesk, .preview-zone"));',
+        "function elementAcceptsTextInput(element)",
+        'aria-keyshortcuts="1"',
+        'aria-keyshortcuts="2"',
+        'aria-keyshortcuts="3"',
+        'aria-keyshortcuts="4"',
         "#decisionActions button",
     ]:
         _assert(token in html, f"missing Chinese review status template: {token}")
