@@ -650,6 +650,8 @@ def _process_record(
         "scanlines_candidate_pixel_ratio": 0.0,
         "faded_text_enhanced": False,
         "faded_text_reason": None,
+        "faded_text_reason_code": None,
+        "faded_text_reason_zh": None,
         "faded_text_delta": 0.0,
         "faded_text_changed_pixel_ratio": 0.0,
         "faded_text_candidate_pixel_ratio": 0.0,
@@ -750,6 +752,8 @@ def _process_record(
                 "scanlines_candidate_pixel_ratio": process_info["scanlines_candidate_pixel_ratio"],
                 "faded_text_enhanced": process_info["faded_text_enhanced"],
                 "faded_text_reason": process_info["faded_text_reason"],
+                "faded_text_reason_code": process_info["faded_text_reason_code"],
+                "faded_text_reason_zh": process_info["faded_text_reason_zh"],
                 "faded_text_delta": process_info["faded_text_delta"],
                 "faded_text_changed_pixel_ratio": process_info["faded_text_changed_pixel_ratio"],
                 "faded_text_candidate_pixel_ratio": process_info["faded_text_candidate_pixel_ratio"],
@@ -825,6 +829,8 @@ def _process_record(
                     "scanlines_candidate_pixel_ratio": process_info["scanlines_candidate_pixel_ratio"],
                     "faded_text_enhanced": process_info["faded_text_enhanced"],
                     "faded_text_reason": process_info["faded_text_reason"],
+                    "faded_text_reason_code": process_info["faded_text_reason_code"],
+                    "faded_text_reason_zh": process_info["faded_text_reason_zh"],
                     "faded_text_delta": process_info["faded_text_delta"],
                     "faded_text_changed_pixel_ratio": process_info["faded_text_changed_pixel_ratio"],
                     "faded_text_candidate_pixel_ratio": process_info["faded_text_candidate_pixel_ratio"],
@@ -1020,6 +1026,27 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
         record.get("faded_text_reason")
         for record in processed_records
         if isinstance(record.get("faded_text_reason"), str)
+    ]
+    faded_text_reason_codes = [
+        record.get("faded_text_reason_code")
+        for record in processed_records
+        if isinstance(record.get("faded_text_reason_code"), str)
+    ]
+    faded_text_skipped_reason_codes = [
+        code
+        for record in processed_records
+        for code in [record.get("faded_text_reason_code")]
+        if record.get("faded_text_enhanced") is False
+        and isinstance(code, str)
+        and code != "disabled"
+    ]
+    faded_text_skipped_reasons_zh = [
+        reason_zh
+        for record in processed_records
+        for reason_zh in [record.get("faded_text_reason_zh")]
+        if record.get("faded_text_enhanced") is False
+        and isinstance(reason_zh, str)
+        and record.get("faded_text_reason_code") != "disabled"
     ]
     faded_text_skipped_reasons = [
         reason
@@ -1545,6 +1572,9 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                     reason for reason in faded_text_reasons if isinstance(reason, str)
                 ),
                 "skip_reason_distribution": _reason_counts(faded_text_skipped_reasons),
+                "reason_code_distribution": _reason_counts(faded_text_reason_codes),
+                "skip_reason_code_distribution": _reason_counts(faded_text_skipped_reason_codes),
+                "skip_reason_zh_distribution": _reason_counts(faded_text_skipped_reasons_zh),
                 "protection_triggered_files": sum(
                     1
                     for reason in faded_text_skipped_reasons
@@ -2230,6 +2260,9 @@ def _process_image(
         processing_warnings.append("local_content_change_guard_reverted_to_source")
     if cumulative_guard["action"] == "reverted_to_source":
         processing_warnings.append("cumulative_change_guard_reverted_to_source")
+    faded_text_reason = _guard_revert_reason(local_content_guard_reverted) if guard_reverted else faded_text.reason
+    faded_text_reason_code = _faded_text_reason_code(faded_text_reason)
+    faded_text_reason_zh = _faded_text_reason_zh(faded_text_reason_code)
     crop_info = {
         "original_size": original_size,
         "output_size": list(processed.size),
@@ -2283,7 +2316,9 @@ def _process_image(
         "scanlines_changed_pixel_ratio": 0.0 if guard_reverted else scanlines.changed_pixel_ratio,
         "scanlines_candidate_pixel_ratio": 0.0 if guard_reverted else scanlines.candidate_pixel_ratio,
         "faded_text_enhanced": False if guard_reverted else faded_text.applied,
-        "faded_text_reason": _guard_revert_reason(local_content_guard_reverted) if guard_reverted else faded_text.reason,
+        "faded_text_reason": faded_text_reason,
+        "faded_text_reason_code": faded_text_reason_code,
+        "faded_text_reason_zh": faded_text_reason_zh,
         "faded_text_delta": 0.0 if guard_reverted else faded_text.text_delta,
         "faded_text_changed_pixel_ratio": 0.0 if guard_reverted else faded_text.changed_pixel_ratio,
         "faded_text_candidate_pixel_ratio": 0.0 if guard_reverted else faded_text.candidate_pixel_ratio,
@@ -3213,7 +3248,7 @@ def _enhance_faded_text_conservative(image: Image.Image) -> FadedTextEnhancement
     if p95 - p05 > 92:
         return _faded_text_noop(image, "faded text enhancement skipped: contrast already normal or mixed content risk")
 
-    threshold = min(214, p50 - 12, p95 - 14)
+    threshold = min(224, p50 - 8, p95 - 10)
     if threshold < 125:
         return _faded_text_noop(image, "faded text enhancement skipped: outside conservative faded ink range")
     sampled_candidate_ratio = _faded_text_sample_candidate_ratio(grayscale, threshold, p95)
@@ -3230,7 +3265,7 @@ def _enhance_faded_text_conservative(image: Image.Image) -> FadedTextEnhancement
             sampled_candidate_ratio,
         )
     raw_candidate = grayscale.point(
-        lambda value: 255 if 95 <= value <= threshold and 14 <= p95 - value <= 76 else 0,
+        lambda value: 255 if 95 <= value <= threshold and 10 <= p95 - value <= 76 else 0,
         mode="L",
     )
     raw_candidate_ratio = _mask_ratio(raw_candidate)
@@ -3350,11 +3385,107 @@ def _faded_text_noop(
     return FadedTextEnhancementResult(image, False, reason, 0.0, 0.0, round(candidate_pixel_ratio, 6))
 
 
+_FADED_TEXT_REASON_DETAILS: dict[str, tuple[str, str]] = {
+    "faded text enhancement disabled": ("disabled", "褪色正文加深未启用。"),
+    "faded text enhancement applied: stable low-contrast neutral text on light paper": (
+        "applied_stable_low_contrast_text",
+        "检测到浅色纸面上的稳定低对比正文，已保守加深。",
+    ),
+    "faded text enhancement skipped: image too small": ("image_too_small", "图片尺寸过小，跳过褪色正文加深。"),
+    "faded text enhancement skipped: color content, stamp, or annotation risk": (
+        "protected_color_stamp_annotation",
+        "检测到彩色内容、印章或批注风险，跳过褪色正文加深。",
+    ),
+    "faded text enhancement skipped: page is not a light paper background": (
+        "not_light_paper_background",
+        "页面不是浅色纸面背景，跳过褪色正文加深。",
+    ),
+    "faded text enhancement skipped: dark foreground already present": (
+        "protected_dark_foreground",
+        "页面已有较深前景内容，跳过褪色正文加深。",
+    ),
+    "faded text enhancement skipped: text evidence too weak": (
+        "low_confidence_text_evidence_too_weak",
+        "正文证据过弱，跳过褪色正文加深。",
+    ),
+    "faded text enhancement skipped: contrast already normal or mixed content risk": (
+        "protected_normal_contrast_or_mixed_content",
+        "对比度已正常或存在混合内容风险，跳过褪色正文加深。",
+    ),
+    "faded text enhancement skipped: outside conservative faded ink range": (
+        "outside_conservative_faded_ink_range",
+        "不在保守褪色墨迹范围内，跳过褪色正文加深。",
+    ),
+    "faded text enhancement skipped: foreground evidence too sparse": (
+        "low_confidence_foreground_too_sparse",
+        "前景证据过少，跳过褪色正文加深。",
+    ),
+    "faded text enhancement skipped: foreground too dense": (
+        "protected_foreground_too_dense",
+        "前景候选过密，可能不是正文，跳过褪色正文加深。",
+    ),
+    "faded text enhancement skipped: edge mark or binding risk": (
+        "protected_edge_mark_or_binding",
+        "检测到边缘痕迹或装订边风险，跳过褪色正文加深。",
+    ),
+    "faded text enhancement skipped: no stable text components": (
+        "low_confidence_no_stable_text_components",
+        "没有稳定正文组件，跳过褪色正文加深。",
+    ),
+    "faded text enhancement skipped: broad stain, texture, illustration, or table-region risk": (
+        "protected_texture_table_or_photo_region",
+        "检测到大块污渍、纹理、照片或表格区域风险，跳过褪色正文加深。",
+    ),
+    "faded text enhancement skipped: stable text evidence insufficient": (
+        "low_confidence_stable_text_insufficient",
+        "稳定正文证据不足，跳过褪色正文加深。",
+    ),
+    "faded text enhancement skipped: changed area exceeds conservative text scope": (
+        "outside_conservative_text_scope",
+        "候选变化范围超过保守正文范围，跳过褪色正文加深。",
+    ),
+    "faded text enhancement skipped: readability delta below conservative threshold": (
+        "low_confidence_readability_delta_too_low",
+        "加深幅度低于保守可读性阈值，跳过褪色正文加深。",
+    ),
+    "faded text enhancement skipped: readability delta exceeds conservative threshold": (
+        "outside_conservative_readability_delta",
+        "加深幅度超过保守阈值，跳过褪色正文加深。",
+    ),
+    "reverted by local content change guard": (
+        "reverted_by_local_content_change_guard",
+        "局部内容变化保护线已回退本次处理。",
+    ),
+    "reverted by cumulative change guard": (
+        "reverted_by_cumulative_change_guard",
+        "累计变化保护线已回退本次处理。",
+    ),
+}
+
+
+def _faded_text_reason_code(reason: str | None) -> str | None:
+    if reason is None:
+        return None
+    details = _FADED_TEXT_REASON_DETAILS.get(reason)
+    if details:
+        return details[0]
+    return "unknown"
+
+
+def _faded_text_reason_zh(reason_code: str | None) -> str | None:
+    if reason_code is None:
+        return None
+    for code, reason_zh in _FADED_TEXT_REASON_DETAILS.values():
+        if code == reason_code:
+            return reason_zh
+    return "褪色正文加深已按保守规则跳过。"
+
+
 def _faded_text_sample_candidate_ratio(grayscale: Image.Image, threshold: float, p95: int) -> float:
     sample = grayscale.copy()
     sample.thumbnail((96, 96), Image.Resampling.BILINEAR)
     candidate = sample.point(
-        lambda value: 255 if 95 <= value <= threshold and 14 <= p95 - value <= 76 else 0,
+        lambda value: 255 if 95 <= value <= threshold and 10 <= p95 - value <= 76 else 0,
         mode="L",
     )
     candidate = _clear_mask_edges(candidate, max(2, int(round(min(sample.width, sample.height) * 0.025))))
