@@ -538,6 +538,7 @@ def validate_completion_export_smoke(html: str, errors: list[str]) -> None:
                             "reused_files": 2,
                             "reprocessed_files": 5,
                             "failed_files": 0,
+                            "remaining_files": 0,
                         },
                     },
                     ensure_ascii=False,
@@ -582,7 +583,8 @@ def validate_completion_export_smoke(html: str, errors: list[str]) -> None:
                 "reused_files": 2,
                 "reprocessed_files": 5,
                 "failed_files": 0,
-                "message_zh": "本批复用了 2 张，重新处理 5 张，失败 0 张。",
+                "remaining_files": 0,
+                "message_zh": "本批复用了 2 张，重新处理 5 张，失败 0 张，剩余 0 张。",
             }
             if panel.get("local_reuse_summary") != expected_reuse:
                 errors.append("completion panel missing aggregate local reuse handoff counts")

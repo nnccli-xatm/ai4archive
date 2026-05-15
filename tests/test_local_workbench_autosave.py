@@ -550,6 +550,7 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
                             "reused_files": 1,
                             "reprocessed_files": 2,
                             "failed_files": 0,
+                            "remaining_files": 0,
                         },
                         "debug_should_not_surface": {
                             "file": private_file.name,
@@ -984,6 +985,7 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
                             "reused_files": 2,
                             "reprocessed_files": 5,
                             "failed_files": 0,
+                            "remaining_files": 0,
                         },
                     },
                     ensure_ascii=False,
@@ -1048,7 +1050,8 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
                     "reused_files": 2,
                     "reprocessed_files": 5,
                     "failed_files": 0,
-                    "message_zh": "本批复用了 2 张，重新处理 5 张，失败 0 张。",
+                    "remaining_files": 0,
+                    "message_zh": "本批复用了 2 张，重新处理 5 张，失败 0 张，剩余 0 张。",
                 },
             )
             self.assertEqual(

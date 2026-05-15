@@ -179,6 +179,7 @@ def build_production_run_summary(
         "reused_files": int(processing_summary.get("existing_derivative_reused_files", 0)),
         "reprocessed_files": int(processing_summary.get("reprocessed_files", 0)),
         "failed_files": failed_files,
+        "remaining_files": int(processing_summary.get("retry_list_files", failed_files)),
     }
     artifacts = {
         "summary": str(config.metadata_output_dir.resolve() / PRODUCTION_RUN_SUMMARY_JSON),
@@ -230,6 +231,7 @@ def build_production_run_summary(
             "retry_list_files": processing_summary["retry_list_files"],
             "reused_files": local_reuse_summary["reused_files"],
             "reprocessed_files": local_reuse_summary["reprocessed_files"],
+            "remaining_files": local_reuse_summary["remaining_files"],
         },
         "local_reuse_summary": local_reuse_summary,
         "progress": {

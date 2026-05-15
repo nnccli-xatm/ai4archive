@@ -507,6 +507,7 @@ class ScanProcessingReuseTest(unittest.TestCase):
             self.assertEqual(production_summary["local_reuse_summary"]["reused_files"], 1)
             self.assertEqual(production_summary["local_reuse_summary"]["reprocessed_files"], 0)
             self.assertEqual(production_summary["local_reuse_summary"]["failed_files"], 0)
+            self.assertEqual(production_summary["local_reuse_summary"]["remaining_files"], 0)
             self.assertEqual(processing_module._sha256(source), original_sha)
 
             public_reuse_text = json.dumps(production_summary["local_reuse_summary"], ensure_ascii=False, sort_keys=True)
@@ -515,8 +516,108 @@ class ScanProcessingReuseTest(unittest.TestCase):
             self.assertNotIn(first_manifest["files"][0]["source_sha256"], public_reuse_text)
             self.assertEqual(
                 set(production_summary["local_reuse_summary"]),
-                {"schema_version", "aggregate_only", "reused_files", "reprocessed_files", "failed_files"},
+                {"schema_version", "aggregate_only", "reused_files", "reprocessed_files", "failed_files", "remaining_files"},
             )
+
+    def test_production_run_restart_only_fills_missing_outputs(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-production-partial-reuse-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-input"
+            derivatives_dir = root / "private-derivatives"
+            metadata_dir = root / "private-metadata"
+            input_dir.mkdir()
+            Image.new("RGB", (80, 60), "white").save(input_dir / "private_completed_page.png", dpi=(300, 300))
+            Image.new("RGB", (80, 60), (230, 230, 230)).save(input_dir / "private_missing_page.png", dpi=(300, 300))
+            args = [
+                "production-run",
+                "--input",
+                str(input_dir),
+                "--derivatives-out",
+                str(derivatives_dir),
+                "--metadata-out",
+                str(metadata_dir),
+                "--workers",
+                "1",
+            ]
+
+            self.assertEqual(main(args), 0)
+            first_manifest = json.loads((derivatives_dir / "processing_manifest.json").read_text(encoding="utf-8"))
+            first_records = {record["source_relative_path"]: record for record in first_manifest["files"]}
+            completed_sha = first_records["private_completed_page.png"]["output_sha256"]
+            missing_output = derivatives_dir / first_records["private_missing_page.png"]["output_relative_path"]
+            missing_output.unlink()
+
+            self.assertEqual(main(args), 0)
+            second_manifest = json.loads((derivatives_dir / "processing_manifest.json").read_text(encoding="utf-8"))
+            production_summary = json.loads((metadata_dir / "production_run_summary.json").read_text(encoding="utf-8"))
+            records = {record["source_relative_path"]: record for record in second_manifest["files"]}
+
+            self.assertEqual(records["private_completed_page.png"]["status"], "resumed")
+            self.assertEqual(records["private_completed_page.png"]["output_sha256"], completed_sha)
+            self.assertEqual(records["private_missing_page.png"]["status"], "processed")
+            self.assertTrue(records["private_missing_page.png"]["reprocessed"])
+            self.assertTrue(missing_output.exists())
+            self.assertEqual(second_manifest["summary"]["processed_files"], 1)
+            self.assertEqual(second_manifest["summary"]["resumed_files"], 1)
+            self.assertEqual(second_manifest["summary"]["reprocessed_files"], 1)
+            self.assertEqual(second_manifest["summary"]["existing_derivative_reused_files"], 1)
+            self.assertEqual(second_manifest["summary"]["failed_files"], 0)
+            self.assertEqual(production_summary["local_reuse_summary"]["reused_files"], 1)
+            self.assertEqual(production_summary["local_reuse_summary"]["reprocessed_files"], 1)
+            self.assertEqual(production_summary["local_reuse_summary"]["failed_files"], 0)
+            self.assertEqual(production_summary["local_reuse_summary"]["remaining_files"], 0)
+
+    def test_production_run_restart_avoids_reuse_when_input_or_output_identity_changes(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-production-mismatch-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            metadata_dir = root / "metadata"
+            changed_derivatives_dir = root / "changed-derivatives"
+            input_dir.mkdir()
+            source = input_dir / "page.png"
+            Image.new("RGB", (80, 60), "white").save(source, dpi=(300, 300))
+            base_args = [
+                "production-run",
+                "--input",
+                str(input_dir),
+                "--derivatives-out",
+                str(derivatives_dir),
+                "--metadata-out",
+                str(metadata_dir),
+                "--workers",
+                "1",
+            ]
+
+            self.assertEqual(main(base_args), 0)
+            Image.new("RGB", (80, 60), (200, 200, 200)).save(source, dpi=(300, 300))
+            self.assertEqual(main(base_args), 0)
+            input_changed_manifest = json.loads((derivatives_dir / "processing_manifest.json").read_text(encoding="utf-8"))
+            input_changed_summary = json.loads((metadata_dir / "production_run_summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(input_changed_manifest["summary"]["resumed_files"], 0)
+            self.assertEqual(input_changed_manifest["summary"]["reprocessed_files"], 1)
+            self.assertEqual(input_changed_summary["local_reuse_summary"]["reused_files"], 0)
+            self.assertEqual(input_changed_summary["local_reuse_summary"]["reprocessed_files"], 1)
+
+            changed_output_args = [
+                "production-run",
+                "--input",
+                str(input_dir),
+                "--derivatives-out",
+                str(changed_derivatives_dir),
+                "--metadata-out",
+                str(metadata_dir),
+                "--workers",
+                "1",
+            ]
+            self.assertEqual(main(changed_output_args), 0)
+            output_changed_manifest = json.loads((changed_derivatives_dir / "processing_manifest.json").read_text(encoding="utf-8"))
+            output_changed_summary = json.loads((metadata_dir / "production_run_summary.json").read_text(encoding="utf-8"))
+            self.assertFalse(output_changed_manifest["resume"]["previous_manifest_found"])
+            self.assertEqual(output_changed_manifest["summary"]["resumed_files"], 0)
+            self.assertEqual(output_changed_manifest["summary"]["reprocessed_files"], 0)
+            self.assertEqual(output_changed_summary["local_reuse_summary"]["reused_files"], 0)
+            self.assertEqual(output_changed_summary["local_reuse_summary"]["reprocessed_files"], 0)
 
     def test_production_run_rerun_reprocesses_when_processing_options_change(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-production-reprocess-") as temp_dir:
@@ -551,6 +652,7 @@ class ScanProcessingReuseTest(unittest.TestCase):
             self.assertEqual(production_summary["local_reuse_summary"]["reused_files"], 0)
             self.assertEqual(production_summary["local_reuse_summary"]["reprocessed_files"], 1)
             self.assertEqual(production_summary["local_reuse_summary"]["failed_files"], 0)
+            self.assertEqual(production_summary["local_reuse_summary"]["remaining_files"], 0)
 
 
 def _dark_border_page() -> Image.Image:

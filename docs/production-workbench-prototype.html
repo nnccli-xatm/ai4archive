@@ -2347,7 +2347,8 @@
         Object.prototype.hasOwnProperty.call(reuse, key)
       );
       if (!hasReusableCounts) return "";
-      return `本批复用了 ${Math.max(0, toNumber(reuse.reused_files))} 张，重新处理 ${Math.max(0, toNumber(reuse.reprocessed_files))} 张，失败 ${Math.max(0, toNumber(reuse.failed_files))} 张。`;
+      const remaining = Math.max(0, toNumber(reuse.remaining_files));
+      return `本批复用了 ${Math.max(0, toNumber(reuse.reused_files))} 张，重新处理 ${Math.max(0, toNumber(reuse.reprocessed_files))} 张，失败 ${Math.max(0, toNumber(reuse.failed_files))} 张，剩余 ${remaining} 张。`;
     }
 
     function escapeHtml(value) {

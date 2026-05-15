@@ -2143,13 +2143,18 @@ def _local_reuse_handoff_summary(run_summary: dict[str, Any] | None) -> dict[str
     reused_files = _safe_nonnegative_int(reuse_summary.get("reused_files"))
     reprocessed_files = _safe_nonnegative_int(reuse_summary.get("reprocessed_files"))
     failed_files = _safe_nonnegative_int(reuse_summary.get("failed_files"))
+    remaining_files = _safe_nonnegative_int(reuse_summary.get("remaining_files"))
     return {
         "schema_version": "scan-qc.local-processing-reuse-summary.v1",
         "aggregate_only": True,
         "reused_files": reused_files,
         "reprocessed_files": reprocessed_files,
         "failed_files": failed_files,
-        "message_zh": f"本批复用了 {reused_files} 张，重新处理 {reprocessed_files} 张，失败 {failed_files} 张。",
+        "remaining_files": remaining_files,
+        "message_zh": (
+            f"本批复用了 {reused_files} 张，重新处理 {reprocessed_files} 张，"
+            f"失败 {failed_files} 张，剩余 {remaining_files} 张。"
+        ),
     }
 
 

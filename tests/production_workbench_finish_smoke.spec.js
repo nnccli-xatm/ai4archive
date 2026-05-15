@@ -393,6 +393,7 @@ test.describe("production workbench finish/export browser smoke", () => {
               reused_files: 2,
               reprocessed_files: 1,
               failed_files: 0,
+              remaining_files: 0,
             },
             open_output_folder_available: true,
             checklist_zh: ["打开输出文件夹，检查 3 张处理后图片的数量和画面状态", "需要重扫 0 张，需要重新处理 0 张", "复核结果和交接说明已保存到本机状态文件夹", "准备下一批会清空当前复核队列，请重新选择新一批文件夹"],
@@ -609,7 +610,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     await page.getByRole("button", { name: "确认完成本批" }).click();
     await expect(page.locator("#completionTitle")).toHaveText("本批已完成");
     await expect(page.locator("#completionMessage")).toHaveText("处理后图片已准备好。请检查输出文件夹后再交接。");
-    await expect(page.locator("#completionReuseMessage")).toHaveText("本批复用了 2 张，重新处理 1 张，失败 0 张。");
+    await expect(page.locator("#completionReuseMessage")).toHaveText("本批复用了 2 张，重新处理 1 张，失败 0 张，剩余 0 张。");
     await expect(page.locator("#completionCounts")).toHaveText("共 3 项，已确认 3 项，待决定 0 项。");
     await expect(page.locator("#completionStatusFact")).toHaveText("本批已完成");
     await expect(page.locator("#outputPlace")).toHaveText("已准备 3 张处理后图片");
