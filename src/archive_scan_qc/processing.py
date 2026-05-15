@@ -3750,11 +3750,15 @@ def _despeckle_candidate_points_numpy(dark_mask: Image.Image) -> list[tuple[int,
         return []
 
     left, top, right, bottom = candidate_bbox
+    left = max(0, left - 1)
+    top = max(0, top - 1)
+    right = min(width, right + 1)
+    bottom = min(height, bottom + 1)
     if left >= width - 1 or top >= height - 1 or right <= 1 or bottom <= 1:
         return []
 
     try:
-        crop = np.asarray(dark_mask.crop(candidate_bbox), dtype=np.uint8) > 0
+        crop = np.asarray(dark_mask.crop((left, top, right, bottom)), dtype=np.uint8) > 0
     except (TypeError, ValueError):
         return None
 
@@ -3783,12 +3787,16 @@ def _despeckle_candidate_points_fallback(dark_mask: Image.Image) -> list[tuple[i
         return []
 
     left, top, right, bottom = candidate_bbox
+    left = max(0, left - 1)
+    top = max(0, top - 1)
+    right = min(width, right + 1)
+    bottom = min(height, bottom + 1)
     if left >= width - 1 or top >= height - 1 or right <= 1 or bottom <= 1:
         return []
 
     crop_width = right - left
     crop_height = bottom - top
-    crop_values = dark_mask.crop(candidate_bbox).tobytes()
+    crop_values = dark_mask.crop((left, top, right, bottom)).tobytes()
     dark_pixel_count = crop_values.count(255)
     dense_prefilter_candidates = _despeckle_dense_connected_content_candidates(
         crop_values,
@@ -3830,32 +3838,25 @@ def _despeckle_dense_connected_content_candidates(
     if dark_pixel_count < _DESPECKLE_DENSE_PREFILTER_MIN_DARK_PIXELS:
         return None
 
-    max_low_connectivity_pixels = max(
-        12,
-        int(dark_pixel_count * _DESPECKLE_DENSE_PREFILTER_MAX_LOW_CONNECTIVITY_RATIO),
+    crop = Image.frombytes("L", (crop_width, crop_height), crop_values)
+    neighbor_counts = crop.filter(ImageFilter.Kernel((3, 3), [1] * 9, scale=255))
+    low_connectivity_mask = ImageChops.multiply(
+        crop,
+        neighbor_counts.point(
+            lambda value: 255 if 0 < value <= _DESPECKLE_MAX_COMPONENT_PIXELS else 0,
+            mode="L",
+        ),
     )
-    low_connectivity_pixels: list[tuple[int, int]] = []
-    for index, mask_value in enumerate(crop_values):
-        if not mask_value:
-            continue
-        local_x = index % crop_width
-        local_y = index // crop_width
-        dark_neighbors = 0
-        for neighbor_y in range(max(0, local_y - 1), min(crop_height, local_y + 2)):
-            row_offset = neighbor_y * crop_width
-            for neighbor_x in range(max(0, local_x - 1), min(crop_width, local_x + 2)):
-                if neighbor_x == local_x and neighbor_y == local_y:
-                    continue
-                if crop_values[row_offset + neighbor_x]:
-                    dark_neighbors += 1
-                    if dark_neighbors > _DESPECKLE_MAX_COMPONENT_PIXELS - 1:
-                        break
-            if dark_neighbors > _DESPECKLE_MAX_COMPONENT_PIXELS - 1:
-                break
-        if dark_neighbors <= _DESPECKLE_MAX_COMPONENT_PIXELS - 1:
-            low_connectivity_pixels.append((local_x, local_y))
-            if len(low_connectivity_pixels) > max_low_connectivity_pixels:
-                return None
+    low_connectivity_bbox = low_connectivity_mask.getbbox()
+    if not low_connectivity_bbox:
+        return []
+
+    low_connectivity_values = low_connectivity_mask.tobytes()
+    low_connectivity_pixels = [
+        (index % crop_width, index // crop_width)
+        for index, mask_value in enumerate(low_connectivity_values)
+        if mask_value
+    ]
 
     low_connectivity_set = set(low_connectivity_pixels)
     margin = _despeckle_protected_edge_margin(width, height)
@@ -3877,6 +3878,7 @@ def _despeckle_dense_connected_content_candidates(
         stack = [seed]
         component: list[tuple[int, int]] = []
         oversized = False
+        touches_connected_content = False
         while stack:
             local_x, local_y = stack.pop()
             if (local_x, local_y) in visited:
@@ -3902,13 +3904,14 @@ def _despeckle_dense_connected_content_candidates(
                 if not crop_values[neighbor_y * crop_width + neighbor_x]:
                     continue
                 neighbor = (neighbor_x, neighbor_y)
+                if neighbor not in low_connectivity_set:
+                    touches_connected_content = True
+                    continue
                 if neighbor in visited:
                     continue
                 stack.append(neighbor)
 
-        if oversized:
-            continue
-        if any(point not in low_connectivity_set for point in component):
+        if oversized or touches_connected_content:
             continue
         absolute_points = [(left + local_x, top + local_y) for local_x, local_y in component]
         if any(
