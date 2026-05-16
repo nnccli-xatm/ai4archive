@@ -59,6 +59,7 @@ class ProductionRunConfig:
     scanner_gutter_trim: bool = False
     despeckle: bool = False
     normalize_tones: bool = False
+    normalize_paper_color_cast: bool = False
     lighten_edge_shadow: bool = False
     lighten_corner_shadows: bool = False
     lighten_background_stains: bool = False
@@ -125,6 +126,7 @@ def run_production_folder(config: ProductionRunConfig) -> dict[str, Any]:
             scanner_gutter_trim=config.scanner_gutter_trim,
             despeckle=config.despeckle,
             normalize_tones=config.normalize_tones,
+            normalize_paper_color_cast=config.normalize_paper_color_cast,
             lighten_edge_shadow=config.lighten_edge_shadow,
             lighten_corner_shadows=config.lighten_corner_shadows,
             lighten_background_stains=config.lighten_background_stains,
@@ -212,6 +214,7 @@ def build_production_run_summary(
         "scanner_gutter_trim": config.scanner_gutter_trim,
         "despeckle": config.despeckle,
         "normalize_tones": config.normalize_tones,
+        "normalize_paper_color_cast": config.normalize_paper_color_cast,
         "lighten_edge_shadow": config.lighten_edge_shadow,
         "lighten_corner_shadows": config.lighten_corner_shadows,
         "lighten_background_stains": config.lighten_background_stains,

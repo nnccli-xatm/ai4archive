@@ -21,6 +21,7 @@ PROCESSING_FLAGS = (
     "scanner_gutter_trim",
     "despeckle",
     "normalize_tones",
+    "normalize_paper_color_cast",
     "lighten_edge_shadow",
     "lighten_corner_shadows",
     "lighten_background_stains",
@@ -51,6 +52,7 @@ class PreflightConfig:
     scanner_gutter_trim: bool = False
     despeckle: bool = False
     normalize_tones: bool = False
+    normalize_paper_color_cast: bool = False
     lighten_edge_shadow: bool = False
     lighten_corner_shadows: bool = False
     lighten_background_stains: bool = False

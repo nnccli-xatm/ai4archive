@@ -32,6 +32,7 @@ PROCESSING_OPERATION_TIMING_NAMES = (
     "scanner_gutter_trim",
     "despeckle",
     "normalize_tones",
+    "normalize_paper_color_cast",
     "lighten_edge_shadow",
     "lighten_corner_shadows",
     "lighten_background_stains",
@@ -55,6 +56,7 @@ PROCESSING_OPERATION_TIMING_DIAGNOSTIC_SECONDS_PER_FILE = {
     "auto_crop": 0.2,
     "despeckle": 0.25,
     "normalize_tones": 0.25,
+    "normalize_paper_color_cast": 0.25,
     "lighten_edge_shadow": 0.25,
     "lighten_corner_shadows": 0.25,
     "lighten_background_stains": 0.35,
@@ -107,6 +109,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--scanner-gutter-trim", action="store_true", help="Enable conservative light scanner gutter trim during processing.")
     parser.add_argument("--despeckle", action="store_true", help="Enable conservative despeckle during processing.")
     parser.add_argument("--normalize-tones", action="store_true", help="Enable conservative gray/dark page tone normalization.")
+    parser.add_argument(
+        "--normalize-paper-color-cast",
+        action="store_true",
+        help="Enable conservative mild uniform scanner color-cast normalization.",
+    )
     parser.add_argument("--lighten-edge-shadow", action="store_true", help="Enable conservative narrow edge-shadow lightening.")
     parser.add_argument("--lighten-corner-shadows", action="store_true", help="Enable conservative smooth corner-shadow cleanup.")
     parser.add_argument("--lighten-background-stains", action="store_true", help="Enable conservative light background stain lightening.")
@@ -192,6 +199,7 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
                         scanner_gutter_trim=args.scanner_gutter_trim,
                         despeckle=args.despeckle,
                         normalize_tones=args.normalize_tones,
+                        normalize_paper_color_cast=args.normalize_paper_color_cast,
                         lighten_edge_shadow=args.lighten_edge_shadow,
                         lighten_corner_shadows=args.lighten_corner_shadows,
                         lighten_background_stains=args.lighten_background_stains,
@@ -897,6 +905,10 @@ def _processing_quality_thresholds() -> dict[str, float]:
         "max_tone_background_delta": defaults.audit_max_brightness_delta,
         "max_tone_contrast_delta": defaults.audit_max_contrast_delta,
         "max_tone_changed_pixel_ratio": 1.0,
+        "max_paper_color_cast_delta": 12.0,
+        "max_paper_color_cast_brightness_delta": 4.0,
+        "max_paper_color_cast_changed_pixel_ratio": 1.0,
+        "max_paper_color_cast_candidate_pixel_ratio": 1.0,
         "max_edge_shadow_changed_pixel_ratio": 0.08,
         "max_corner_shadows_changed_pixel_ratio": 0.06,
         "max_corner_shadows_candidate_pixel_ratio": 0.10,
@@ -963,6 +975,18 @@ def _repair_algorithm_metrics(
                 "background_delta": "tone_background_delta",
                 "contrast_delta": "tone_contrast_delta",
                 "changed_pixel_ratio": "tone_changed_pixel_ratio",
+            },
+        ),
+        "normalize_paper_color_cast": _algorithm_summary(
+            audit_records,
+            operation_timings,
+            operation="normalize_paper_color_cast",
+            changed_flag="paper_color_cast_normalized",
+            metrics={
+                "delta": "paper_color_cast_delta",
+                "brightness_delta": "paper_color_cast_brightness_delta",
+                "changed_pixel_ratio": "paper_color_cast_changed_pixel_ratio",
+                "candidate_pixel_ratio": "paper_color_cast_candidate_pixel_ratio",
             },
         ),
         "lighten_edge_shadow": _algorithm_summary(
@@ -1085,6 +1109,10 @@ def _quality_threshold_violations(
         ("normalize_tones", "background_delta"): "max_tone_background_delta",
         ("normalize_tones", "contrast_delta"): "max_tone_contrast_delta",
         ("normalize_tones", "changed_pixel_ratio"): "max_tone_changed_pixel_ratio",
+        ("normalize_paper_color_cast", "delta"): "max_paper_color_cast_delta",
+        ("normalize_paper_color_cast", "brightness_delta"): "max_paper_color_cast_brightness_delta",
+        ("normalize_paper_color_cast", "changed_pixel_ratio"): "max_paper_color_cast_changed_pixel_ratio",
+        ("normalize_paper_color_cast", "candidate_pixel_ratio"): "max_paper_color_cast_candidate_pixel_ratio",
         ("lighten_edge_shadow", "changed_pixel_ratio"): "max_edge_shadow_changed_pixel_ratio",
         ("lighten_corner_shadows", "changed_pixel_ratio"): "max_corner_shadows_changed_pixel_ratio",
         ("lighten_corner_shadows", "candidate_pixel_ratio"): "max_corner_shadows_candidate_pixel_ratio",
@@ -1169,6 +1197,7 @@ def _operations(args: argparse.Namespace) -> dict[str, bool | str]:
         "scanner_gutter_trim": getattr(args, "scanner_gutter_trim", False),
         "despeckle": args.despeckle,
         "normalize_tones": getattr(args, "normalize_tones", False),
+        "normalize_paper_color_cast": getattr(args, "normalize_paper_color_cast", False),
         "lighten_edge_shadow": getattr(args, "lighten_edge_shadow", False),
         "lighten_corner_shadows": getattr(args, "lighten_corner_shadows", False),
         "lighten_background_stains": getattr(args, "lighten_background_stains", False),
@@ -1213,6 +1242,7 @@ def _csv_fields() -> list[str]:
         "scanner_gutter_trim",
         "despeckle",
         "normalize_tones",
+        "normalize_paper_color_cast",
         "lighten_edge_shadow",
         "lighten_corner_shadows",
         "lighten_background_stains",
@@ -1269,6 +1299,7 @@ def _csv_row(run: dict[str, Any], environment: dict[str, Any]) -> dict[str, Any]
         "scanner_gutter_trim": operations.get("scanner_gutter_trim", False),
         "despeckle": operations["despeckle"],
         "normalize_tones": operations["normalize_tones"],
+        "normalize_paper_color_cast": operations.get("normalize_paper_color_cast", False),
         "lighten_edge_shadow": operations.get("lighten_edge_shadow", False),
         "lighten_corner_shadows": operations.get("lighten_corner_shadows", False),
         "lighten_background_stains": operations.get("lighten_background_stains", False),

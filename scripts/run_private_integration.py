@@ -77,6 +77,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--scanner-gutter-trim", action="store_true", help="Enable conservative light scanner gutter trim.")
     parser.add_argument("--despeckle", action="store_true", help="Enable conservative despeckle.")
     parser.add_argument("--normalize-tones", action="store_true", help="Enable conservative gray/dark page tone normalization.")
+    parser.add_argument(
+        "--normalize-paper-color-cast",
+        action="store_true",
+        help="Enable conservative mild uniform scanner color-cast normalization.",
+    )
     parser.add_argument("--lighten-edge-shadow", action="store_true", help="Enable conservative narrow edge-shadow lightening.")
     parser.add_argument("--lighten-corner-shadows", action="store_true", help="Enable conservative smooth corner-shadow cleanup.")
     parser.add_argument("--lighten-background-stains", action="store_true", help="Enable conservative light background stain lightening.")
@@ -169,6 +174,7 @@ def run_private_integration(args: argparse.Namespace) -> PrivateIntegrationResul
                 scanner_gutter_trim=getattr(args, "scanner_gutter_trim", False),
                 despeckle=args.despeckle,
                 normalize_tones=getattr(args, "normalize_tones", False),
+                normalize_paper_color_cast=getattr(args, "normalize_paper_color_cast", False),
                 lighten_edge_shadow=getattr(args, "lighten_edge_shadow", False),
                 lighten_corner_shadows=getattr(args, "lighten_corner_shadows", False),
                 lighten_background_stains=getattr(args, "lighten_background_stains", False),
@@ -281,6 +287,7 @@ def _public_summary(
             "benchmark_run_count": len(benchmark_runs),
             "despeckle_backend_requested": despeckle_backend["requested_backend"],
             "reuse_scan_measurements": bool(getattr(args, "reuse_scan_measurements", False)),
+            "normalize_paper_color_cast": bool(getattr(args, "normalize_paper_color_cast", False)),
             "lighten_edge_shadow": bool(getattr(args, "lighten_edge_shadow", False)),
             "lighten_corner_shadows": bool(getattr(args, "lighten_corner_shadows", False)),
             "scanner_gutter_trim": bool(getattr(args, "scanner_gutter_trim", False)),
@@ -560,6 +567,7 @@ def _benchmark_operation_timings(benchmark_summary: dict[str, Any] | None) -> di
         "scanner_gutter_trim",
         "despeckle",
         "normalize_tones",
+        "normalize_paper_color_cast",
         "lighten_edge_shadow",
         "lighten_corner_shadows",
         "lighten_background_stains",
@@ -700,6 +708,7 @@ def _benchmark_args(args: argparse.Namespace, input_dir: Path, output_root: Path
         scanner_gutter_trim=getattr(args, "scanner_gutter_trim", False),
         despeckle=args.despeckle,
         normalize_tones=getattr(args, "normalize_tones", False),
+        normalize_paper_color_cast=getattr(args, "normalize_paper_color_cast", False),
         lighten_edge_shadow=getattr(args, "lighten_edge_shadow", False),
         lighten_corner_shadows=getattr(args, "lighten_corner_shadows", False),
         lighten_background_stains=getattr(args, "lighten_background_stains", False),

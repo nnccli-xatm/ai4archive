@@ -37,6 +37,7 @@ class ProcessingOptions:
     trim_dark_border: bool = False
     despeckle: bool = False
     normalize_tones: bool = False
+    normalize_paper_color_cast: bool = False
     lighten_edge_shadow: bool = False
     lighten_corner_shadows: bool = False
     lighten_background_stains: bool = False
@@ -111,6 +112,18 @@ class ToneNormalizationResult:
     contrast_before: float | None
     contrast_after: float | None
     changed_pixel_ratio: float = 0.0
+
+
+@dataclass(frozen=True)
+class PaperColorCastNormalizationResult:
+    image: Image.Image
+    applied: bool
+    reason: str
+    reason_code: str
+    color_delta: float
+    brightness_delta: float
+    changed_pixel_ratio: float
+    candidate_pixel_ratio: float
 
 
 @dataclass(frozen=True)
@@ -292,6 +305,11 @@ def process_images(
             "auto_crop_conservative" if options.auto_crop else "auto_crop_disabled",
             "despeckle_isolated_pixels" if options.despeckle else "despeckle_disabled",
             "normalize_tones_conservative" if options.normalize_tones else "normalize_tones_disabled",
+            (
+                "normalize_paper_color_cast_conservative"
+                if options.normalize_paper_color_cast
+                else "normalize_paper_color_cast_disabled"
+            ),
             "lighten_edge_shadow_conservative" if options.lighten_edge_shadow else "lighten_edge_shadow_disabled",
             (
                 "lighten_corner_shadows_conservative"
@@ -693,6 +711,13 @@ def _process_record(
         "tone_contrast_before": None,
         "tone_contrast_after": None,
         "tone_changed_pixel_ratio": 0.0,
+        "paper_color_cast_normalized": False,
+        "paper_color_cast_reason": None,
+        "paper_color_cast_reason_code": None,
+        "paper_color_cast_delta": 0.0,
+        "paper_color_cast_brightness_delta": 0.0,
+        "paper_color_cast_changed_pixel_ratio": 0.0,
+        "paper_color_cast_candidate_pixel_ratio": 0.0,
         "edge_shadow_lightened": False,
         "edge_shadow_reason": None,
         "edge_shadow_edges": [],
@@ -827,6 +852,13 @@ def _process_record(
                 "tone_contrast_before": process_info["tone_contrast_before"],
                 "tone_contrast_after": process_info["tone_contrast_after"],
                 "tone_changed_pixel_ratio": process_info["tone_changed_pixel_ratio"],
+                "paper_color_cast_normalized": process_info["paper_color_cast_normalized"],
+                "paper_color_cast_reason": process_info["paper_color_cast_reason"],
+                "paper_color_cast_reason_code": process_info["paper_color_cast_reason_code"],
+                "paper_color_cast_delta": process_info["paper_color_cast_delta"],
+                "paper_color_cast_brightness_delta": process_info["paper_color_cast_brightness_delta"],
+                "paper_color_cast_changed_pixel_ratio": process_info["paper_color_cast_changed_pixel_ratio"],
+                "paper_color_cast_candidate_pixel_ratio": process_info["paper_color_cast_candidate_pixel_ratio"],
                 "edge_shadow_lightened": process_info["edge_shadow_lightened"],
                 "edge_shadow_reason": process_info["edge_shadow_reason"],
                 "edge_shadow_edges": process_info["edge_shadow_edges"],
@@ -936,6 +968,13 @@ def _process_record(
                     "tone_contrast_before": process_info["tone_contrast_before"],
                     "tone_contrast_after": process_info["tone_contrast_after"],
                     "tone_changed_pixel_ratio": process_info["tone_changed_pixel_ratio"],
+                    "paper_color_cast_normalized": process_info["paper_color_cast_normalized"],
+                    "paper_color_cast_reason": process_info["paper_color_cast_reason"],
+                    "paper_color_cast_reason_code": process_info["paper_color_cast_reason_code"],
+                    "paper_color_cast_delta": process_info["paper_color_cast_delta"],
+                    "paper_color_cast_brightness_delta": process_info["paper_color_cast_brightness_delta"],
+                    "paper_color_cast_changed_pixel_ratio": process_info["paper_color_cast_changed_pixel_ratio"],
+                    "paper_color_cast_candidate_pixel_ratio": process_info["paper_color_cast_candidate_pixel_ratio"],
                     "edge_shadow_lightened": process_info["edge_shadow_lightened"],
                     "edge_shadow_reason": process_info["edge_shadow_reason"],
                     "edge_shadow_edges": process_info["edge_shadow_edges"],
@@ -1066,6 +1105,7 @@ def _processing_options_fingerprint(options: ProcessingOptions) -> str:
         "scanner_gutter_trim": options.scanner_gutter_trim,
         "despeckle": options.despeckle,
         "normalize_tones": options.normalize_tones,
+        "normalize_paper_color_cast": options.normalize_paper_color_cast,
         "lighten_edge_shadow": options.lighten_edge_shadow,
         "lighten_corner_shadows": options.lighten_corner_shadows,
         "lighten_background_stains": options.lighten_background_stains,
@@ -1337,6 +1377,30 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
         and isinstance(reason, str)
         and reason != "tone normalization disabled"
     ]
+    paper_color_cast_reasons = [
+        record.get("paper_color_cast_reason")
+        for record in processed_records
+        if isinstance(record.get("paper_color_cast_reason"), str)
+    ]
+    paper_color_cast_reason_codes = [
+        record.get("paper_color_cast_reason_code")
+        for record in processed_records
+        if isinstance(record.get("paper_color_cast_reason_code"), str)
+    ]
+    paper_color_cast_skipped_reason_codes = [
+        code
+        for record in processed_records
+        for code in [record.get("paper_color_cast_reason_code")]
+        if record.get("paper_color_cast_normalized") is False and isinstance(code, str) and code != "disabled"
+    ]
+    paper_color_cast_skipped_reasons = [
+        reason
+        for record in processed_records
+        for reason in [record.get("paper_color_cast_reason")]
+        if record.get("paper_color_cast_normalized") is False
+        and isinstance(reason, str)
+        and reason != "paper color cast normalization disabled"
+    ]
     combination_reason_codes = [
         audit.get("combination_quality_guard_reason_code")
         for audit in audit_records
@@ -1357,6 +1421,7 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "scanner_gutter_trim": options.scanner_gutter_trim,
             "despeckle": options.despeckle,
             "normalize_tones": options.normalize_tones,
+            "normalize_paper_color_cast": options.normalize_paper_color_cast,
             "lighten_edge_shadow": options.lighten_edge_shadow,
             "lighten_corner_shadows": options.lighten_corner_shadows,
             "lighten_background_stains": options.lighten_background_stains,
@@ -1485,6 +1550,16 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                 if record.get("tone_normalized") is False
                 and record.get("tone_reason") not in {None, "tone normalization disabled"}
             ),
+            "paper_color_cast_normalized_files": sum(
+                1 for audit in audit_records if audit.get("paper_color_cast_normalized") is True
+            ),
+            "paper_color_cast_skipped_files": sum(
+                1
+                for record in processed_records
+                if record.get("paper_color_cast_normalized") is False
+                and record.get("paper_color_cast_reason")
+                not in {None, "paper color cast normalization disabled"}
+            ),
             "edge_shadow_lightened_files": sum(
                 1 for audit in audit_records if audit.get("edge_shadow_lightened") is True
             ),
@@ -1573,6 +1648,19 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "tone_background_delta": _aggregate_metric(audit_records, "tone_background_delta"),
             "tone_contrast_delta": _aggregate_metric(audit_records, "tone_contrast_delta"),
             "tone_changed_pixel_ratio": _aggregate_metric(audit_records, "tone_changed_pixel_ratio"),
+            "paper_color_cast_delta": _aggregate_metric(audit_records, "paper_color_cast_delta"),
+            "paper_color_cast_brightness_delta": _aggregate_metric(
+                audit_records,
+                "paper_color_cast_brightness_delta",
+            ),
+            "paper_color_cast_changed_pixel_ratio": _aggregate_metric(
+                audit_records,
+                "paper_color_cast_changed_pixel_ratio",
+            ),
+            "paper_color_cast_candidate_pixel_ratio": _aggregate_metric(
+                audit_records,
+                "paper_color_cast_candidate_pixel_ratio",
+            ),
             "edge_shadow_delta": _aggregate_metric(audit_records, "edge_shadow_delta"),
             "edge_shadow_changed_pixel_ratio": _aggregate_metric(
                 audit_records, "edge_shadow_changed_pixel_ratio"
@@ -1650,6 +1738,10 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "max_trim_margin_ratio": _ratio_distribution(audit_records, "max_trim_margin_ratio"),
             "despeckle_pixel_ratio": _ratio_distribution(audit_records, "despeckle_pixel_ratio"),
             "tone_changed_pixel_ratio": _ratio_distribution(audit_records, "tone_changed_pixel_ratio"),
+            "paper_color_cast_changed_pixel_ratio": _ratio_distribution(
+                audit_records,
+                "paper_color_cast_changed_pixel_ratio",
+            ),
         },
         "guardrails": {
             "enabled": True,
@@ -1811,6 +1903,57 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                             "stretch range too narrow",
                         )
                     )
+                ),
+            },
+            "paper_color_cast": {
+                "applied_files": sum(
+                    1 for audit in audit_records if audit.get("paper_color_cast_normalized") is True
+                ),
+                "skipped_files": sum(
+                    1
+                    for record in processed_records
+                    if record.get("paper_color_cast_normalized") is False
+                    and record.get("paper_color_cast_reason")
+                    not in {None, "paper color cast normalization disabled"}
+                ),
+                "color_delta": _aggregate_metric(audit_records, "paper_color_cast_delta"),
+                "brightness_delta": _aggregate_metric(audit_records, "paper_color_cast_brightness_delta"),
+                "changed_pixel_ratio": _aggregate_metric(
+                    audit_records,
+                    "paper_color_cast_changed_pixel_ratio",
+                ),
+                "candidate_pixel_ratio": _aggregate_metric(
+                    audit_records,
+                    "paper_color_cast_candidate_pixel_ratio",
+                ),
+                "reason_distribution": _reason_counts(
+                    reason for reason in paper_color_cast_reasons if isinstance(reason, str)
+                ),
+                "skip_reason_distribution": _reason_counts(paper_color_cast_skipped_reasons),
+                "reason_code_distribution": _reason_counts(paper_color_cast_reason_codes),
+                "skip_reason_code_distribution": _reason_counts(paper_color_cast_skipped_reason_codes),
+                "protection_triggered_files": sum(
+                    1
+                    for code in paper_color_cast_skipped_reason_codes
+                    if code
+                    in {
+                        "protected_color_content",
+                        "protected_dark_content",
+                        "protected_edge_mark",
+                        "protected_photo_or_texture",
+                        "colored_paper",
+                        "guardrail_reverted",
+                    }
+                ),
+                "conservative_scope_skip_files": sum(
+                    1
+                    for code in paper_color_cast_skipped_reason_codes
+                    if code in {"too_dark", "too_bright", "cast_too_strong", "changed_area_too_large"}
+                ),
+                "low_confidence_skip_files": sum(
+                    1
+                    for code in paper_color_cast_skipped_reason_codes
+                    if code in {"already_neutral", "low_confidence", "not_uniform"}
                 ),
             },
             "edge_shadow": {
@@ -2153,6 +2296,7 @@ def _aggregate_operation_timings(records: list[dict[str, Any]], options: Process
         "scanner_gutter_trim": options.scanner_gutter_trim,
         "despeckle": options.despeckle,
         "normalize_tones": options.normalize_tones,
+        "normalize_paper_color_cast": options.normalize_paper_color_cast,
         "lighten_edge_shadow": options.lighten_edge_shadow,
         "lighten_corner_shadows": options.lighten_corner_shadows,
         "lighten_background_stains": options.lighten_background_stains,
@@ -2308,6 +2452,10 @@ def _audit_thresholds(options: ProcessingOptions) -> dict[str, float]:
         "max_geometry_combo_crop_ratio": options.audit_max_geometry_combo_crop_ratio,
         "max_geometry_combo_size_change_ratio": options.audit_max_geometry_combo_size_change_ratio,
         "max_tone_changed_pixel_ratio": 1.0,
+        "max_paper_color_cast_delta": 12.0,
+        "max_paper_color_cast_brightness_delta": 4.0,
+        "max_paper_color_cast_changed_pixel_ratio": 1.0,
+        "max_paper_color_cast_candidate_pixel_ratio": 1.0,
         "max_corner_shadows_changed_pixel_ratio": 0.06,
         "max_corner_shadows_candidate_pixel_ratio": 0.10,
         "max_fold_shadows_changed_pixel_ratio": 0.075,
@@ -2632,6 +2780,32 @@ def _process_image(
         else:
             operations.append("normalize_tones_disabled")
 
+    paper_color_cast = PaperColorCastNormalizationResult(
+        processed,
+        False,
+        "paper color cast normalization disabled",
+        "disabled",
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+    )
+    with _operation_timer(
+        operation_timings,
+        "normalize_paper_color_cast",
+        enabled=options.normalize_paper_color_cast,
+    ):
+        if options.normalize_paper_color_cast:
+            paper_color_cast = _normalize_paper_color_cast_conservative(processed)
+            processed = paper_color_cast.image
+            operations.append(
+                "normalize_paper_color_cast_conservative"
+                if paper_color_cast.applied
+                else "normalize_paper_color_cast_noop"
+            )
+        else:
+            operations.append("normalize_paper_color_cast_disabled")
+
     edge_shadow = EdgeShadowLighteningResult(
         processed, False, "edge shadow lightening disabled", (), None, None, 0.0, 0.0, 0.0
     )
@@ -2755,6 +2929,11 @@ def _process_image(
         tone.contrast_before,
         tone.contrast_after,
         tone.changed_pixel_ratio,
+        paper_color_cast.applied,
+        paper_color_cast.color_delta,
+        paper_color_cast.brightness_delta,
+        paper_color_cast.changed_pixel_ratio,
+        paper_color_cast.candidate_pixel_ratio,
         edge_shadow.applied,
         edge_shadow.edge_delta,
         edge_shadow.changed_pixel_ratio,
@@ -2820,6 +2999,7 @@ def _process_image(
                 scanlines.applied,
                 faded_text.applied,
                 text_edges.applied,
+                paper_color_cast.applied,
             ),
             reasons=(
                 deskew_reason,
@@ -2836,6 +3016,7 @@ def _process_image(
                 scanlines.reason,
                 faded_text.reason,
                 text_edges.reason,
+                paper_color_cast.reason,
             ),
         ),
     )
@@ -2921,6 +3102,17 @@ def _process_image(
         "tone_contrast_before": None if guard_reverted else tone.contrast_before,
         "tone_contrast_after": None if guard_reverted else tone.contrast_after,
         "tone_changed_pixel_ratio": 0.0 if guard_reverted else tone.changed_pixel_ratio,
+        "paper_color_cast_normalized": False if guard_reverted else paper_color_cast.applied,
+        "paper_color_cast_reason": guard_reason if guard_reverted else paper_color_cast.reason,
+        "paper_color_cast_reason_code": (
+            "guardrail_reverted" if guard_reverted else paper_color_cast.reason_code
+        ),
+        "paper_color_cast_delta": 0.0 if guard_reverted else paper_color_cast.color_delta,
+        "paper_color_cast_brightness_delta": 0.0 if guard_reverted else paper_color_cast.brightness_delta,
+        "paper_color_cast_changed_pixel_ratio": 0.0 if guard_reverted else paper_color_cast.changed_pixel_ratio,
+        "paper_color_cast_candidate_pixel_ratio": (
+            0.0 if guard_reverted else paper_color_cast.candidate_pixel_ratio
+        ),
         "edge_shadow_lightened": False if guard_reverted else edge_shadow.applied,
         "edge_shadow_reason": guard_reason if guard_reverted else edge_shadow.reason,
         "edge_shadow_edges": list(edge_shadow.edges),
@@ -3253,6 +3445,260 @@ def _replace_luminance_preserving_chroma(image: Image.Image, normalized_l: Image
     ycbcr = image.convert("YCbCr")
     _y, cb, cr = ycbcr.split()
     return Image.merge("YCbCr", (normalized_l, cb, cr)).convert("RGB")
+
+
+def _normalize_paper_color_cast_conservative(image: Image.Image) -> PaperColorCastNormalizationResult:
+    if image.width < 60 or image.height < 60:
+        return _paper_color_cast_noop(image, "paper color cast normalization skipped: image too small", "too_small")
+    if image.mode == "L":
+        return _paper_color_cast_noop(
+            image,
+            "paper color cast normalization skipped: grayscale image",
+            "not_rgb",
+        )
+
+    source = image.convert("RGB")
+    sample = source.copy()
+    sample.thumbnail((420, 420), Image.Resampling.BILINEAR)
+    pixels = list(sample.get_flattened_data() if hasattr(sample, "get_flattened_data") else sample.getdata())
+    total = max(1, len(pixels))
+    brightness_values = [sum(pixel) / 3 for pixel in pixels]
+    brightness_mean = sum(brightness_values) / total
+    brightness_std = _mean_stddev(brightness_values, brightness_mean)
+    brightness_sorted = sorted(brightness_values)
+    p05 = brightness_sorted[min(total - 1, int(total * 0.05))]
+    p95 = brightness_sorted[min(total - 1, int(total * 0.95))]
+    means = [sum(pixel[index] for pixel in pixels) / total for index in range(3)]
+    protected_reason = _paper_color_cast_protection_reason(sample, means)
+    if protected_reason:
+        return _paper_color_cast_noop(image, protected_reason[0], protected_reason[1])
+    if brightness_mean < 218 or p05 < 205:
+        return _paper_color_cast_noop(
+            image,
+            "paper color cast normalization skipped: page is too dark for scanner-cast correction",
+            "too_dark",
+        )
+    if p95 > 252 and p05 > 244:
+        return _paper_color_cast_noop(
+            image,
+            "paper color cast normalization skipped: page appears overexposed",
+            "too_bright",
+        )
+    if brightness_std > 10.5 or p95 - p05 > 28:
+        return _paper_color_cast_noop(
+            image,
+            "paper color cast normalization skipped: background is not uniform enough",
+            "not_uniform",
+        )
+
+    channel_spread = max(means) - min(means)
+    if channel_spread < 4.0:
+        return _paper_color_cast_noop(
+            image,
+            "paper color cast normalization skipped: already near neutral",
+            "already_neutral",
+        )
+    if channel_spread > 18.0 or min(means) < 212:
+        return _paper_color_cast_noop(
+            image,
+            "paper color cast normalization skipped: colored paper or strong color evidence",
+            "colored_paper",
+        )
+
+    dominant_spreads = [max(pixel) - min(pixel) for pixel in pixels if sum(pixel) / 3 >= 205]
+    if not dominant_spreads:
+        return _paper_color_cast_noop(
+            image,
+            "paper color cast normalization skipped: low-confidence paper evidence",
+            "low_confidence",
+        )
+    spread_mean = sum(dominant_spreads) / len(dominant_spreads)
+    spread_std = _mean_stddev(dominant_spreads, spread_mean)
+    if spread_std > 4.8:
+        return _paper_color_cast_noop(
+            image,
+            "paper color cast normalization skipped: color cast is not uniform",
+            "not_uniform",
+        )
+
+    target = sum(means) / 3
+    offsets = [max(-9.0, min(9.0, target - mean)) for mean in means]
+    if max(abs(offset) for offset in offsets) < 2.0:
+        return _paper_color_cast_noop(
+            image,
+            "paper color cast normalization skipped: correction below conservative threshold",
+            "low_confidence",
+        )
+
+    protected_mask = _paper_color_cast_protected_mask(source, means)
+    unprotected_count = source.width * source.height - _mask_pixel_count(protected_mask)
+    candidate_ratio = unprotected_count / max(1, source.width * source.height)
+    if candidate_ratio < 0.94:
+        return _paper_color_cast_noop(
+            image,
+            "paper color cast normalization skipped: protected content occupies too much of the page",
+            "protected_dark_content",
+            candidate_ratio,
+        )
+
+    output = source.copy()
+    output_pixels = output.load()
+    protected_pixels = protected_mask.load()
+    changed = 0
+    for y in range(output.height):
+        for x in range(output.width):
+            if protected_pixels[x, y]:
+                continue
+            red_value, green_value, blue_value = output_pixels[x, y]
+            values = (red_value, green_value, blue_value)
+            corrected = tuple(max(0, min(255, int(round(value + offsets[index])))) for index, value in enumerate(values))
+            if max(abs(corrected[index] - values[index]) for index in range(3)) > 1:
+                changed += 1
+            output_pixels[x, y] = corrected
+
+    changed_ratio = changed / max(1, source.width * source.height)
+    if changed_ratio < 0.85:
+        return _paper_color_cast_noop(
+            image,
+            "paper color cast normalization skipped: low-confidence uniform paper area",
+            "low_confidence",
+            candidate_ratio,
+        )
+    if changed_ratio > 1.0:
+        return _paper_color_cast_noop(
+            image,
+            "paper color cast normalization skipped: changed area exceeds conservative scope",
+            "changed_area_too_large",
+            candidate_ratio,
+        )
+
+    before_l = source.convert("L")
+    after_l = output.convert("L")
+    brightness_delta, _contrast_delta = _tonal_deltas(before_l, after_l)
+    if brightness_delta > 4.0:
+        return _paper_color_cast_noop(
+            image,
+            "paper color cast normalization skipped: brightness delta exceeds conservative threshold",
+            "cast_too_strong",
+            candidate_ratio,
+        )
+    after_sample = output.copy()
+    after_sample.thumbnail(sample.size, Image.Resampling.BILINEAR)
+    after_pixels = list(
+        after_sample.get_flattened_data() if hasattr(after_sample, "get_flattened_data") else after_sample.getdata()
+    )
+    after_means = [sum(pixel[index] for pixel in after_pixels) / max(1, len(after_pixels)) for index in range(3)]
+    after_spread = max(after_means) - min(after_means)
+    color_delta = channel_spread - after_spread
+    if color_delta < 3.0 or color_delta > 12.0:
+        return _paper_color_cast_noop(
+            image,
+            "paper color cast normalization skipped: color delta outside conservative threshold",
+            "cast_too_strong" if color_delta > 12.0 else "low_confidence",
+            candidate_ratio,
+        )
+    return PaperColorCastNormalizationResult(
+        output,
+        True,
+        "paper color cast normalization applied: mild uniform scanner cast on bright neutral paper",
+        "applied_mild_uniform_scanner_cast",
+        round(color_delta, 6),
+        round(brightness_delta, 6),
+        round(changed_ratio, 6),
+        round(candidate_ratio, 6),
+    )
+
+
+def _paper_color_cast_protection_reason(
+    sample: Image.Image,
+    background_means: list[float],
+) -> tuple[str, str] | None:
+    pixels = list(sample.get_flattened_data() if hasattr(sample, "get_flattened_data") else sample.getdata())
+    total = max(1, len(pixels))
+    bg_brightness = sum(background_means) / 3
+    colored = 0
+    red_or_blue = 0
+    dark = 0
+    texture = 0
+    for red_value, green_value, blue_value in pixels:
+        brightness = (red_value + green_value + blue_value) / 3
+        spread = max(red_value, green_value, blue_value) - min(red_value, green_value, blue_value)
+        bg_distance = max(abs(red_value - background_means[0]), abs(green_value - background_means[1]), abs(blue_value - background_means[2]))
+        if brightness < bg_brightness - 45:
+            dark += 1
+        if red_value >= 110 and red_value - green_value >= 34 and red_value - blue_value >= 34:
+            red_or_blue += 1
+        if blue_value >= 105 and blue_value - red_value >= 30 and blue_value - green_value >= 18:
+            red_or_blue += 1
+        if spread > 24 and bg_distance > 18 and 40 < brightness < 248:
+            colored += 1
+        if bg_distance > 32 and brightness >= 120:
+            texture += 1
+    if red_or_blue / total >= 0.00035 or colored / total >= 0.0012:
+        return (
+            "paper color cast normalization skipped: protected color content, stamp, seal, map, chart, or annotation risk",
+            "protected_color_content",
+        )
+    if dark / total >= 0.004:
+        return (
+            "paper color cast normalization skipped: protected handwriting, text, photograph, or archival mark risk",
+            "protected_dark_content",
+        )
+    if texture / total >= 0.012:
+        return (
+            "paper color cast normalization skipped: photo, chart, map, texture, or colored record risk",
+            "protected_photo_or_texture",
+        )
+    if _source_protected_edge_dark_ratio(sample.convert("L")) > 0.001:
+        return (
+            "paper color cast normalization skipped: protected edge or corner archival mark risk",
+            "protected_edge_mark",
+        )
+    return None
+
+
+def _paper_color_cast_protected_mask(source: Image.Image, background_means: list[float]) -> Image.Image:
+    mask = Image.new("L", source.size, 0)
+    pixels = source.load()
+    mask_pixels = mask.load()
+    bg_brightness = sum(background_means) / 3
+    for y in range(source.height):
+        for x in range(source.width):
+            red_value, green_value, blue_value = pixels[x, y]
+            brightness = (red_value + green_value + blue_value) / 3
+            spread = max(red_value, green_value, blue_value) - min(red_value, green_value, blue_value)
+            bg_distance = max(
+                abs(red_value - background_means[0]),
+                abs(green_value - background_means[1]),
+                abs(blue_value - background_means[2]),
+            )
+            if brightness < bg_brightness - 45 or (spread > 24 and bg_distance > 18):
+                mask_pixels[x, y] = 255
+    return mask.filter(ImageFilter.MaxFilter(5))
+
+
+def _paper_color_cast_noop(
+    image: Image.Image,
+    reason: str,
+    reason_code: str,
+    candidate_pixel_ratio: float = 0.0,
+) -> PaperColorCastNormalizationResult:
+    return PaperColorCastNormalizationResult(
+        image,
+        False,
+        reason,
+        reason_code,
+        0.0,
+        0.0,
+        0.0,
+        round(candidate_pixel_ratio, 6),
+    )
+
+
+def _mean_stddev(values: list[float], mean: float) -> float:
+    if not values:
+        return 0.0
+    return math.sqrt(sum((value - mean) ** 2 for value in values) / len(values))
 
 
 def _lighten_edge_shadow_conservative(image: Image.Image) -> EdgeShadowLighteningResult:
@@ -5556,6 +6002,11 @@ def _processing_audit(
     tone_contrast_before: float | None = None,
     tone_contrast_after: float | None = None,
     tone_changed_pixel_ratio: float = 0.0,
+    paper_color_cast_normalized: bool = False,
+    paper_color_cast_delta: float = 0.0,
+    paper_color_cast_brightness_delta: float = 0.0,
+    paper_color_cast_changed_pixel_ratio: float = 0.0,
+    paper_color_cast_candidate_pixel_ratio: float = 0.0,
     edge_shadow_lightened: bool = False,
     edge_shadow_delta: float = 0.0,
     edge_shadow_changed_pixel_ratio: float = 0.0,
@@ -5635,14 +6086,20 @@ def _processing_audit(
     metrics = {
         "size_change_ratio": round(size_change_ratio, 6),
         "pixel_change_ratio": round(pixel_change_ratio, 6),
-        "pixel_change_guardrail_applied": not geometric_change_recorded and not tone_normalized,
+        "pixel_change_guardrail_applied": (
+            not geometric_change_recorded and not tone_normalized and not paper_color_cast_normalized
+        ),
         "pixel_change_guardrail_scope": (
             "same_size_pixel_change"
-            if not geometric_change_recorded and not tone_normalized
+            if not geometric_change_recorded and not tone_normalized and not paper_color_cast_normalized
             else (
                 "tone_normalization_recorded_by_brightness_and_contrast"
                 if tone_normalized and not geometric_change_recorded
-                else "geometric_change_recorded_by_size_crop_trim_or_deskew"
+                else (
+                    "paper_color_cast_recorded_by_color_delta"
+                    if paper_color_cast_normalized and not geometric_change_recorded
+                    else "geometric_change_recorded_by_size_crop_trim_or_deskew"
+                )
             )
         ),
         "brightness_delta": round(brightness_delta, 6),
@@ -5651,6 +6108,11 @@ def _processing_audit(
         "tone_background_delta": round(tone_background_delta, 6),
         "tone_contrast_delta": round(tone_contrast_delta, 6),
         "tone_changed_pixel_ratio": round(tone_changed_pixel_ratio, 6),
+        "paper_color_cast_normalized": paper_color_cast_normalized,
+        "paper_color_cast_delta": round(paper_color_cast_delta, 6),
+        "paper_color_cast_brightness_delta": round(paper_color_cast_brightness_delta, 6),
+        "paper_color_cast_changed_pixel_ratio": round(paper_color_cast_changed_pixel_ratio, 6),
+        "paper_color_cast_candidate_pixel_ratio": round(paper_color_cast_candidate_pixel_ratio, 6),
         "edge_shadow_lightened": edge_shadow_lightened,
         "edge_shadow_delta": round(edge_shadow_delta, 6),
         "edge_shadow_changed_pixel_ratio": round(edge_shadow_changed_pixel_ratio, 6),
@@ -5699,6 +6161,8 @@ def _processing_audit(
             tone_normalized=tone_normalized,
             tone_background_delta=tone_background_delta,
             tone_contrast_delta=tone_contrast_delta,
+            paper_color_cast_normalized=paper_color_cast_normalized,
+            paper_color_cast_changed_pixel_ratio=paper_color_cast_changed_pixel_ratio,
             edge_shadow_lightened=edge_shadow_lightened,
             edge_shadow_changed_pixel_ratio=edge_shadow_changed_pixel_ratio,
             corner_shadows_lightened=corner_shadows_lightened,
@@ -5740,6 +6204,8 @@ def _should_check_local_content_change(
     tone_normalized: bool,
     tone_background_delta: float,
     tone_contrast_delta: float,
+    paper_color_cast_normalized: bool,
+    paper_color_cast_changed_pixel_ratio: float,
     edge_shadow_lightened: bool,
     edge_shadow_changed_pixel_ratio: float,
     corner_shadows_lightened: bool,
@@ -5774,6 +6240,8 @@ def _should_check_local_content_change(
         return True
     if tone_normalized and (tone_background_delta > 12.0 or tone_contrast_delta > 18.0):
         return True
+    if paper_color_cast_normalized and 0.0 < paper_color_cast_changed_pixel_ratio < 0.25:
+        return True
     return False
 
 
@@ -5802,6 +6270,7 @@ def _cumulative_change_guard(metrics: dict[str, Any], options: ProcessingOptions
         _float_metric(metrics, "faded_text_candidate_pixel_ratio"),
         _float_metric(metrics, "text_edges_changed_pixel_ratio"),
         _float_metric(metrics, "text_edges_candidate_pixel_ratio"),
+        _float_metric(metrics, "paper_color_cast_candidate_pixel_ratio"),
     )
     score_components = {
         "pixel_change_ratio": _safe_ratio(pixel_ratio, options.audit_max_cumulative_pixel_change_ratio),
@@ -5978,6 +6447,7 @@ def _combination_non_geometry_candidate_ratio(metrics: dict[str, Any]) -> float:
         _float_metric(metrics, "scanlines_candidate_pixel_ratio"),
         _float_metric(metrics, "faded_text_candidate_pixel_ratio"),
         _float_metric(metrics, "text_edges_candidate_pixel_ratio"),
+        _float_metric(metrics, "paper_color_cast_candidate_pixel_ratio"),
     )
 
 
@@ -6391,6 +6861,10 @@ def _audit_guardrail_failures(metrics: dict[str, Any], options: ProcessingOption
         ("crop_ratio", options.audit_max_crop_ratio),
         ("max_trim_margin_ratio", options.audit_max_trim_margin_ratio),
         ("despeckle_pixel_ratio", options.audit_max_despeckle_pixel_ratio),
+        ("paper_color_cast_delta", 12.0),
+        ("paper_color_cast_brightness_delta", 4.0),
+        ("paper_color_cast_changed_pixel_ratio", 1.0),
+        ("paper_color_cast_candidate_pixel_ratio", 1.0),
         ("corner_shadows_changed_pixel_ratio", 0.06),
         ("corner_shadows_candidate_pixel_ratio", 0.10),
         ("fold_shadows_changed_pixel_ratio", 0.075),
@@ -6413,6 +6887,8 @@ def _audit_guardrail_failures(metrics: dict[str, Any], options: ProcessingOption
         if key.startswith("corner_shadows_") and metrics.get("corner_shadows_lightened") is not True:
             continue
         if key.startswith("fold_shadows_") and metrics.get("fold_shadows_lightened") is not True:
+            continue
+        if key.startswith("paper_color_cast_") and metrics.get("paper_color_cast_normalized") is not True:
             continue
         if key.startswith("text_edges_") and metrics.get("text_edges_sharpened") is not True:
             continue

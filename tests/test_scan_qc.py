@@ -3361,6 +3361,7 @@ class ScanQcTest(unittest.TestCase):
                 "--benchmark-workers-list",
                 "1,2,4,8",
                 "--normalize-tones",
+                "--normalize-paper-color-cast",
                 "--lighten-edge-shadow",
                 "--lighten-background-stains",
                 "--lighten-fold-shadows",
@@ -3381,6 +3382,7 @@ class ScanQcTest(unittest.TestCase):
         self.assertEqual(baseline_args.workers, 4)
         self.assertEqual(baseline_args.benchmark_workers_list, "1,2,4,8")
         self.assertTrue(baseline_args.normalize_tones)
+        self.assertTrue(baseline_args.normalize_paper_color_cast)
         self.assertTrue(baseline_args.lighten_edge_shadow)
         self.assertTrue(baseline_args.lighten_background_stains)
         self.assertTrue(baseline_args.lighten_fold_shadows)
@@ -6788,6 +6790,109 @@ class ScanQcTest(unittest.TestCase):
             self.assertTrue(record["tone_normalized"])
             self.assertGreater(after_pixel[0] - after_pixel[2], 6)
             self.assertLess(abs((after_pixel[0] - after_pixel[2]) - (before_pixel[0] - before_pixel[2])), 4)
+
+    def test_normalize_paper_color_cast_corrects_safe_uniform_cast_with_aggregate_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            default_process_dir = root / "processed-default"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source_path = input_dir / "private_safe_uniform_cast.png"
+            source = Image.new("RGB", (180, 140), (246, 243, 234))
+            source.save(source_path, dpi=(300, 300))
+            source_sha = _sha256_for_test(source_path)
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            default_manifest = process_images(report, input_dir, default_process_dir, ProcessingOptions(workers=1))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(normalize_paper_color_cast=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            default_record = default_manifest["files"][0]
+            record = manifest["files"][0]
+            processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+
+            self.assertEqual(source_sha, _sha256_for_test(source_path))
+            self.assertFalse(default_record["paper_color_cast_normalized"])
+            self.assertIn("normalize_paper_color_cast_disabled", default_record["operations"])
+            self.assertTrue(record["paper_color_cast_normalized"])
+            self.assertEqual(record["paper_color_cast_reason_code"], "applied_mild_uniform_scanner_cast")
+            self.assertIn("normalize_paper_color_cast_conservative", record["operations"])
+            self.assertGreater(record["paper_color_cast_delta"], 6.0)
+            self.assertLessEqual(record["paper_color_cast_delta"], 12.0)
+            self.assertLessEqual(record["paper_color_cast_brightness_delta"], 4.0)
+            self.assertGreater(record["paper_color_cast_changed_pixel_ratio"], 0.85)
+            self.assertLessEqual(record["paper_color_cast_changed_pixel_ratio"], 1.0)
+            before_spread = _mean_channel_spread(source)
+            after_spread = _mean_channel_spread(processed)
+            self.assertLess(after_spread, before_spread - 6.0)
+            self.assertLess(_mean_luma_delta(source, processed), 4.0)
+            self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
+
+            cast_guard = audit_summary["guardrails"]["paper_color_cast"]
+            self.assertTrue(audit_summary["operations"]["normalize_paper_color_cast"])
+            self.assertEqual(audit_summary["counts"]["paper_color_cast_normalized_files"], 1)
+            self.assertEqual(audit_summary["counts"]["paper_color_cast_skipped_files"], 0)
+            self.assertEqual(cast_guard["applied_files"], 1)
+            self.assertEqual(cast_guard["skipped_files"], 0)
+            self.assertIn("paper_color_cast_delta", audit_summary["metrics"])
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_safe_uniform_cast", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
+    def test_normalize_paper_color_cast_skips_protected_color_and_archival_content(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "private_red_stamp.png": _uniform_cast_page(red_stamp=True),
+                "private_blue_annotation.png": _uniform_cast_page(blue_annotation=True),
+                "private_handwriting.png": _uniform_cast_page(handwriting=True),
+                "private_photo.png": _uniform_cast_page(photo=True),
+                "private_chart.png": _uniform_cast_page(chart=True),
+                "private_colored_paper.png": Image.new("RGB", (180, 140), (230, 214, 178)),
+                "private_edge_mark.png": _uniform_cast_page(edge_mark=True),
+            }
+            for name, image in pages.items():
+                image.save(input_dir / name, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(normalize_paper_color_cast=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            for source_name, source in pages.items():
+                record = records[source_name]
+                processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+                self.assertFalse(record["paper_color_cast_normalized"], source_name)
+                self.assertIn("normalize_paper_color_cast_noop", record["operations"], source_name)
+                self.assertLess(_changed_ratio_for_test(source, processed, (0, 0, source.width, source.height)), 0.001)
+
+            guard = audit_summary["guardrails"]["paper_color_cast"]
+            self.assertEqual(audit_summary["counts"]["paper_color_cast_normalized_files"], 0)
+            self.assertEqual(audit_summary["counts"]["paper_color_cast_skipped_files"], len(pages))
+            self.assertEqual(guard["applied_files"], 0)
+            self.assertEqual(guard["skipped_files"], len(pages))
+            self.assertGreaterEqual(guard["protection_triggered_files"], 6)
+            self.assertGreaterEqual(len(guard["skip_reason_code_distribution"]), 3)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_red_stamp", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
 
     def test_lighten_edge_shadow_improves_safe_shadow_with_aggregate_audit(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -12746,6 +12851,37 @@ def _synthetic_tone_low_confidence_page() -> Image.Image:
     return image
 
 
+def _uniform_cast_page(
+    *,
+    red_stamp: bool = False,
+    blue_annotation: bool = False,
+    handwriting: bool = False,
+    photo: bool = False,
+    chart: bool = False,
+    edge_mark: bool = False,
+) -> Image.Image:
+    image = Image.new("RGB", (180, 140), (246, 243, 232))
+    draw = ImageDraw.Draw(image)
+    if red_stamp:
+        draw.ellipse((112, 72, 158, 118), outline=(190, 28, 28), width=4)
+    if blue_annotation:
+        draw.line((28, 36, 142, 44), fill=(42, 84, 190), width=3)
+    if handwriting:
+        draw.line((26, 92, 80, 110), fill=(64, 54, 50), width=2)
+        draw.line((80, 110, 136, 88), fill=(64, 54, 50), width=2)
+    if photo:
+        for y in range(24, 104):
+            draw.line((46, y, 136, y), fill=(70 + y % 90, 118 + y % 50, 168 + y % 44))
+    if chart:
+        for x in range(36, 146, 22):
+            draw.line((x, 28, x, 112), fill=(70, 120, 190), width=2)
+        for y in range(34, 112, 18):
+            draw.line((32, y, 150, y), fill=(180, 70, 60), width=2)
+    if edge_mark:
+        draw.rectangle((0, 54, 12, 74), fill=(62, 48, 44))
+    return image
+
+
 def _synthetic_blurred_table_text_edge_page() -> Image.Image:
     image = Image.new("RGB", (240, 180), (244, 244, 244))
     draw = ImageDraw.Draw(image)
@@ -13209,6 +13345,17 @@ def _changed_ratio_for_test(before: Image.Image, after: Image.Image, box: tuple[
     diff = ImageChops.difference(before_l, after_l)
     changed = sum(diff.point(lambda value: 255 if value > 8 else 0).histogram()[1:])
     return changed / max(1, before_l.width * before_l.height)
+
+
+def _mean_channel_spread(image: Image.Image) -> float:
+    means = ImageStat.Stat(image.convert("RGB")).mean
+    return max(means) - min(means)
+
+
+def _mean_luma_delta(before: Image.Image, after: Image.Image) -> float:
+    before_mean = ImageStat.Stat(before.convert("L")).mean[0]
+    after_mean = ImageStat.Stat(after.convert("L")).mean[0]
+    return abs(before_mean - after_mean)
 
 
 def _write_minimal_scan_report(
