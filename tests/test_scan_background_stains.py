@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from PIL import Image, ImageChops, ImageDraw, ImageStat
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageStat
 
 from archive_scan_qc.cli import main
 from archive_scan_qc.processing import ProcessingOptions, process_images
@@ -34,6 +34,19 @@ def _light_page_with_stains() -> Image.Image:
     draw.ellipse((188, 18, 210, 34), fill=(218, 218, 214))
     draw.rectangle((196, 112, 208, 124), fill=(214, 214, 210))
     return image
+
+
+def _light_page_with_soft_cloud_stain(color: tuple[int, int, int] = (224, 218, 178)) -> Image.Image:
+    image = Image.new("RGB", (320, 220), (242, 242, 236))
+    draw = ImageDraw.Draw(image)
+    for y in (48, 74, 100):
+        draw.rectangle((72, y, 220, y + 5), fill=(36, 36, 36))
+    mask = Image.new("L", image.size, 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.ellipse((170, 125, 260, 185), fill=180)
+    mask = mask.filter(ImageFilter.GaussianBlur(9))
+    stain = Image.new("RGB", image.size, color)
+    return Image.composite(stain, image, mask)
 
 
 def _process_one(image: Image.Image, options: ProcessingOptions) -> tuple[dict, Image.Image, Image.Image, Path]:
@@ -84,6 +97,39 @@ class BackgroundStainProcessingTest(unittest.TestCase):
         with Image.open(process_dir / "images" / "page.png") as output:
             output.verify()
 
+    def test_lighten_background_stains_reduces_soft_pale_yellow_cloud(self) -> None:
+        manifest, source, processed, process_dir = _process_one(
+            _light_page_with_soft_cloud_stain(),
+            ProcessingOptions(lighten_background_stains=True, workers=1),
+        )
+
+        record = manifest["files"][0]
+        audit_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+        audit = json.loads(audit_text)
+        before_rgb = ImageStat.Stat(source.crop((190, 142, 238, 174)).convert("RGB")).mean
+        after_rgb = ImageStat.Stat(processed.crop((190, 142, 238, 174)).convert("RGB")).mean
+        self.assertTrue(record["background_stains_lightened"])
+        self.assertGreater(_mean_luma(processed, (170, 125, 260, 185)), _mean_luma(source, (170, 125, 260, 185)) + 6)
+        self.assertGreater(after_rgb[2] - before_rgb[2], after_rgb[0] - before_rgb[0])
+        self.assertLessEqual(record["background_stains_changed_pixel_ratio"], 0.085)
+        self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
+        self.assertEqual(audit["counts"]["background_stains_lightened_files"], 1)
+        self.assertTrue(audit["privacy"]["aggregate_only"])
+        for forbidden in ("page.png", str(process_dir), "source_relative_path", "source_sha256"):
+            self.assertNotIn(forbidden, audit_text)
+
+    def test_lighten_background_stains_reduces_soft_local_gray_cloud(self) -> None:
+        manifest, source, processed, _process_dir = _process_one(
+            _light_page_with_soft_cloud_stain((218, 218, 214)),
+            ProcessingOptions(lighten_background_stains=True, workers=1),
+        )
+
+        record = manifest["files"][0]
+        self.assertTrue(record["background_stains_lightened"])
+        self.assertGreater(_mean_luma(processed, (170, 125, 260, 185)), _mean_luma(source, (170, 125, 260, 185)) + 5)
+        self.assertLessEqual(record["background_stains_changed_pixel_ratio"], 0.085)
+        self.assertEqual(record["processing_audit"]["cumulative_change_guard_action"], "passed")
+
     def test_lighten_background_stains_is_default_off(self) -> None:
         manifest, source, processed, _process_dir = _process_one(_light_page_with_stains(), ProcessingOptions(workers=1))
 
@@ -122,6 +168,21 @@ class BackgroundStainProcessingTest(unittest.TestCase):
             hist_draw.rectangle((48, y, 178, y + 5), fill=(38, 38, 38))
         hist_draw.ellipse((28, 108, 80, 140), fill=(218, 218, 214))
         cases["historical_damage"] = (historical_damage, "historical damage risk")
+
+        page_number = _light_page_with_stains()
+        page_draw = ImageDraw.Draw(page_number)
+        page_draw.ellipse((178, 16, 212, 38), fill=(218, 218, 214))
+        page_draw.text((184, 19), "12", fill=(35, 35, 35))
+        cases["page_number"] = (page_number, "near text")
+
+        table_line = _light_page_with_stains()
+        table_draw = ImageDraw.Draw(table_line)
+        table_draw.ellipse((170, 112, 212, 134), fill=(218, 218, 214))
+        for y in (118, 128):
+            table_draw.line((150, y, 222, y), fill=(52, 52, 52), width=1)
+        for x in (168, 198):
+            table_draw.line((x, 110, x, 138), fill=(52, 52, 52), width=1)
+        cases["table_line"] = (table_line, "near text")
 
         for name, (image, reason_fragment) in cases.items():
             manifest, source, processed, _process_dir = _process_one(
