@@ -219,6 +219,43 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in ("synthetic_safe_combination.png", str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_segmented_scanline_chain_stays_aggregate_and_guarded(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-segmented-scanline-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "private_segmented_scanline.png"
+            _segmented_scanline_page().save(source, dpi=(300, 300))
+            source_bytes = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "segmented-scanline", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+            audit = record["processing_audit"]
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(record["status"], "processed")
+            self.assertTrue(record["scanlines_lightened"])
+            self.assertEqual(record["scanlines_orientation"], "horizontal")
+            self.assertIn("lighten_scanlines_conservative", record["operations"])
+            self.assertEqual(audit["guardrail_failures"], [])
+            self.assertEqual(audit["local_content_change_guard_action"], "passed")
+            self.assertEqual(audit["cumulative_change_guard_action"], "passed")
+            self.assertEqual(audit["combination_quality_guard_action"], "passed")
+            self.assertGreater(audit["scanlines_changed_pixel_ratio"], 0.0007)
+            self.assertLessEqual(audit["scanlines_changed_pixel_ratio"], 0.04)
+            self.assertEqual(audit_summary["counts"]["scanlines_lightened_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["scanlines"]["applied_files"], 1)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in ("private_segmented_scanline.png", str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_low_confidence_combination_preserves_original_with_public_reason_code(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-low-confidence-combo-") as temp_dir:
             root = Path(temp_dir)
@@ -921,6 +958,16 @@ def _scanline_page() -> Image.Image:
         draw.line((6, y, 121, y), fill=(218, 218, 218), width=1)
     for y in range(34, 58, 12):
         draw.line((42, y, 86, y), fill=(50, 50, 50), width=2)
+    return image
+
+
+def _segmented_scanline_page() -> Image.Image:
+    image = Image.new("RGB", (260, 180), (240, 240, 236))
+    draw = ImageDraw.Draw(image)
+    for y in (42, 64, 86):
+        draw.rectangle((42, y, 158, y + 5), fill=(36, 36, 36))
+    for x0, x1 in ((16, 48), (96, 128), (196, 228)):
+        draw.rectangle((x0, 132, x1, 133), fill=(226, 226, 222))
     return image
 
 

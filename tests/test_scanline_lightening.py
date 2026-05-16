@@ -39,6 +39,22 @@ def _scanline_page(orientation: str = "horizontal") -> Image.Image:
     return image
 
 
+def _segmented_scanline_page(orientation: str = "horizontal") -> Image.Image:
+    image = Image.new("RGB", (260, 180), (240, 240, 236))
+    draw = ImageDraw.Draw(image)
+    for y in (42, 64, 86):
+        draw.rectangle((42, y, 158, y + 5), fill=(36, 36, 36))
+    if orientation == "horizontal":
+        for x0, x1 in ((16, 48), (96, 128), (196, 228)):
+            draw.rectangle((x0, 132, x1, 133), fill=(226, 226, 222))
+    elif orientation == "vertical":
+        for y0, y1 in ((18, 50), (72, 104), (132, 164)):
+            draw.rectangle((212, y0, 213, y1), fill=(226, 226, 222))
+    else:
+        raise ValueError(orientation)
+    return image
+
+
 def _process_one(image: Image.Image, options: ProcessingOptions) -> tuple[dict, Image.Image, Image.Image, Path]:
     temp = tempfile.TemporaryDirectory(prefix="scanline-lightening-")
     root = Path(temp.name)
@@ -92,6 +108,27 @@ class ScanlineLighteningTest(unittest.TestCase):
             self.assertGreater(audit["metrics"]["scanlines_delta"]["max"], 4, orientation)
             with Image.open(process_dir / "images" / "page.png") as output:
                 output.verify()
+
+    def test_lighten_scanlines_improves_safe_segmented_lines(self) -> None:
+        cases = {
+            "horizontal": ((12, 132, 232, 134), (36, 36, 164, 96)),
+            "vertical": ((212, 18, 214, 166), (36, 36, 164, 96)),
+        }
+        for orientation, (line_box, text_box) in cases.items():
+            manifest, source, processed, _process_dir = _process_one(
+                _segmented_scanline_page(orientation),
+                ProcessingOptions(lighten_scanlines=True, workers=1),
+            )
+
+            record = manifest["files"][0]
+            self.assertEqual(record["status"], "processed", orientation)
+            self.assertTrue(record["scanlines_lightened"], orientation)
+            self.assertEqual(record["scanlines_orientation"], orientation)
+            self.assertGreater(_mean_luma(processed, line_box), _mean_luma(source, line_box) + 2.0, orientation)
+            self.assertLess(_changed_ratio(source, processed, text_box), 0.002, orientation)
+            self.assertGreater(record["scanlines_changed_pixel_ratio"], 0.0007, orientation)
+            self.assertLess(record["scanlines_changed_pixel_ratio"], 0.035, orientation)
+            self.assertEqual(record["processing_audit"]["guardrail_failures"], [], orientation)
 
     def test_lighten_scanlines_is_default_off(self) -> None:
         manifest, source, processed, _process_dir = _process_one(_scanline_page(), ProcessingOptions(workers=1))
@@ -159,6 +196,10 @@ class ScanlineLighteningTest(unittest.TestCase):
         draw = ImageDraw.Draw(broad)
         for y in range(20, 160, 8):
             draw.rectangle((16, y, 244, y + 1), fill=(222, 222, 218))
+        deep_line = _scanline_page()
+        ImageDraw.Draw(deep_line).rectangle((16, 132, 244, 133), fill=(158, 158, 154))
+        wide_stripe = _scanline_page()
+        ImageDraw.Draw(wide_stripe).rectangle((16, 128, 244, 139), fill=(222, 222, 218))
         low_confidence = Image.new("RGB", (260, 180), (240, 240, 236))
         ImageDraw.Draw(low_confidence).rectangle((16, 132, 244, 133), fill=(222, 222, 218))
 
@@ -167,6 +208,8 @@ class ScanlineLighteningTest(unittest.TestCase):
             "dark": (dark, "page is too dark"),
             "color": (color, "SCANLINE_COLOR_CONTENT_RISK"),
             "broad": (broad, "SCANLINE_SCOPE_RISK"),
+            "deep_line": (deep_line, "low-confidence"),
+            "wide_stripe": (wide_stripe, "SCANLINE_SCOPE_RISK"),
             "low_confidence": (low_confidence, "low-confidence tonal evidence"),
         }
 
