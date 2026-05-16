@@ -157,6 +157,11 @@ def _add_scan_arguments(parser: argparse.ArgumentParser, *, include_scan_overrid
         help="Conservatively lighten narrow neutral page-edge shadows. Requires --process-out.",
     )
     parser.add_argument(
+        "--lighten-corner-shadows",
+        action="store_true",
+        help="Conservatively lighten smooth neutral corner shadows. Requires --process-out.",
+    )
+    parser.add_argument(
         "--lighten-background-stains",
         action="store_true",
         help="Conservatively lighten small neutral stains on light page backgrounds. Requires --process-out.",
@@ -315,6 +320,7 @@ def main(argv: list[str] | None = None) -> int:
                 despeckle=args.despeckle,
                 normalize_tones=args.normalize_tones,
                 lighten_edge_shadow=args.lighten_edge_shadow,
+                lighten_corner_shadows=args.lighten_corner_shadows,
                 lighten_background_stains=args.lighten_background_stains,
                 lighten_fold_shadows=args.lighten_fold_shadows,
                 clean_bleed_through=args.clean_bleed_through,
@@ -395,6 +401,7 @@ def _main_preflight(argv: list[str]) -> int:
             normalize_tones=args.normalize_tones,
             resume_processing=args.resume_processing,
             lighten_edge_shadow=args.lighten_edge_shadow,
+            lighten_corner_shadows=args.lighten_corner_shadows,
             lighten_background_stains=args.lighten_background_stains,
             lighten_fold_shadows=args.lighten_fold_shadows,
             clean_bleed_through=args.clean_bleed_through,
@@ -440,6 +447,7 @@ def _main_production_run(argv: list[str]) -> int:
     parser.add_argument("--despeckle", action="store_true", help="清理孤立黑点。")
     parser.add_argument("--normalize-tones", action="store_true", help="保守校正偏灰、偏暗的低对比度页面。")
     parser.add_argument("--lighten-edge-shadow", action="store_true", help="保守减淡不接触正文的页边窄幅阴影。")
+    parser.add_argument("--lighten-corner-shadows", action="store_true", help="保守减淡不接触正文和标记的页面角落阴影。")
     parser.add_argument("--lighten-background-stains", action="store_true", help="保守减淡浅色纸面上不接触正文和印章的小范围浅斑。")
     parser.add_argument("--lighten-fold-shadows", action="store_true", help="保守减淡干净背景中的窄幅折痕阴影。")
     parser.add_argument("--clean-bleed-through", action="store_true", help="保守清理浅色背景中不接触正文和印章的轻微背面透印。")
@@ -497,6 +505,7 @@ def _main_production_run(argv: list[str]) -> int:
                 despeckle=args.despeckle,
                 normalize_tones=args.normalize_tones,
                 lighten_edge_shadow=args.lighten_edge_shadow,
+                lighten_corner_shadows=args.lighten_corner_shadows,
                 lighten_background_stains=args.lighten_background_stains,
                 lighten_fold_shadows=args.lighten_fold_shadows,
                 clean_bleed_through=args.clean_bleed_through,
@@ -1105,6 +1114,7 @@ def _main_processing_plan(argv: list[str]) -> int:
     parser.add_argument("--despeckle", action="store_true", help="Plan isolated dark speckle cleanup candidates.")
     parser.add_argument("--normalize-tones", action="store_true", help="Plan conservative gray/dark page tone normalization candidates.")
     parser.add_argument("--lighten-edge-shadow", action="store_true", help="Plan conservative narrow edge-shadow lightening candidates.")
+    parser.add_argument("--lighten-corner-shadows", action="store_true", help="Plan conservative smooth corner-shadow cleanup candidates.")
     parser.add_argument("--lighten-background-stains", action="store_true", help="Plan conservative light background stain candidates.")
     parser.add_argument("--lighten-fold-shadows", action="store_true", help="Plan conservative narrow fold shadow cleanup candidates.")
     parser.add_argument("--clean-bleed-through", action="store_true", help="Plan conservative faint reverse-side ghost cleanup candidates.")
@@ -1136,6 +1146,7 @@ def _main_processing_plan(argv: list[str]) -> int:
                 despeckle=args.despeckle,
                 normalize_tones=args.normalize_tones,
                 lighten_edge_shadow=args.lighten_edge_shadow,
+                lighten_corner_shadows=args.lighten_corner_shadows,
                 lighten_background_stains=args.lighten_background_stains,
                 lighten_fold_shadows=args.lighten_fold_shadows,
                 clean_bleed_through=args.clean_bleed_through,
@@ -1305,6 +1316,8 @@ def _validate_processing_flags(parser: argparse.ArgumentParser, args: argparse.N
         parser.error("--normalize-tones requires --process-out")
     if args.lighten_edge_shadow and not args.process_out:
         parser.error("--lighten-edge-shadow requires --process-out")
+    if args.lighten_corner_shadows and not args.process_out:
+        parser.error("--lighten-corner-shadows requires --process-out")
     if args.lighten_background_stains and not args.process_out:
         parser.error("--lighten-background-stains requires --process-out")
     if args.lighten_fold_shadows and not args.process_out:

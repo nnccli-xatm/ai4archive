@@ -38,6 +38,7 @@ class ProcessingOptions:
     despeckle: bool = False
     normalize_tones: bool = False
     lighten_edge_shadow: bool = False
+    lighten_corner_shadows: bool = False
     lighten_background_stains: bool = False
     lighten_fold_shadows: bool = False
     clean_bleed_through: bool = False
@@ -121,6 +122,20 @@ class EdgeShadowLighteningResult:
     edge_mean_before: float | None
     edge_mean_after: float | None
     edge_delta: float
+    changed_pixel_ratio: float
+    candidate_pixel_ratio: float
+
+
+@dataclass(frozen=True)
+class CornerShadowCleanupResult:
+    image: Image.Image
+    applied: bool
+    reason: str
+    reason_code: str
+    corners: tuple[str, ...]
+    corner_mean_before: float | None
+    corner_mean_after: float | None
+    corner_delta: float
     changed_pixel_ratio: float
     candidate_pixel_ratio: float
 
@@ -278,6 +293,11 @@ def process_images(
             "despeckle_isolated_pixels" if options.despeckle else "despeckle_disabled",
             "normalize_tones_conservative" if options.normalize_tones else "normalize_tones_disabled",
             "lighten_edge_shadow_conservative" if options.lighten_edge_shadow else "lighten_edge_shadow_disabled",
+            (
+                "lighten_corner_shadows_conservative"
+                if options.lighten_corner_shadows
+                else "lighten_corner_shadows_disabled"
+            ),
             (
                 "lighten_background_stains_conservative"
                 if options.lighten_background_stains
@@ -681,6 +701,15 @@ def _process_record(
         "edge_shadow_delta": 0.0,
         "edge_shadow_changed_pixel_ratio": 0.0,
         "edge_shadow_candidate_pixel_ratio": 0.0,
+        "corner_shadows_lightened": False,
+        "corner_shadows_reason": None,
+        "corner_shadows_reason_code": None,
+        "corner_shadows_corners": [],
+        "corner_shadows_mean_before": None,
+        "corner_shadows_mean_after": None,
+        "corner_shadows_delta": 0.0,
+        "corner_shadows_changed_pixel_ratio": 0.0,
+        "corner_shadows_candidate_pixel_ratio": 0.0,
         "background_stains_lightened": False,
         "background_stains_reason": None,
         "background_stains_mean_before": None,
@@ -806,6 +835,15 @@ def _process_record(
                 "edge_shadow_delta": process_info["edge_shadow_delta"],
                 "edge_shadow_changed_pixel_ratio": process_info["edge_shadow_changed_pixel_ratio"],
                 "edge_shadow_candidate_pixel_ratio": process_info["edge_shadow_candidate_pixel_ratio"],
+                "corner_shadows_lightened": process_info["corner_shadows_lightened"],
+                "corner_shadows_reason": process_info["corner_shadows_reason"],
+                "corner_shadows_reason_code": process_info["corner_shadows_reason_code"],
+                "corner_shadows_corners": process_info["corner_shadows_corners"],
+                "corner_shadows_mean_before": process_info["corner_shadows_mean_before"],
+                "corner_shadows_mean_after": process_info["corner_shadows_mean_after"],
+                "corner_shadows_delta": process_info["corner_shadows_delta"],
+                "corner_shadows_changed_pixel_ratio": process_info["corner_shadows_changed_pixel_ratio"],
+                "corner_shadows_candidate_pixel_ratio": process_info["corner_shadows_candidate_pixel_ratio"],
                 "background_stains_lightened": process_info["background_stains_lightened"],
                 "background_stains_reason": process_info["background_stains_reason"],
                 "background_stains_mean_before": process_info["background_stains_mean_before"],
@@ -906,6 +944,15 @@ def _process_record(
                     "edge_shadow_delta": process_info["edge_shadow_delta"],
                     "edge_shadow_changed_pixel_ratio": process_info["edge_shadow_changed_pixel_ratio"],
                     "edge_shadow_candidate_pixel_ratio": process_info["edge_shadow_candidate_pixel_ratio"],
+                    "corner_shadows_lightened": process_info["corner_shadows_lightened"],
+                    "corner_shadows_reason": process_info["corner_shadows_reason"],
+                    "corner_shadows_reason_code": process_info["corner_shadows_reason_code"],
+                    "corner_shadows_corners": process_info["corner_shadows_corners"],
+                    "corner_shadows_mean_before": process_info["corner_shadows_mean_before"],
+                    "corner_shadows_mean_after": process_info["corner_shadows_mean_after"],
+                    "corner_shadows_delta": process_info["corner_shadows_delta"],
+                    "corner_shadows_changed_pixel_ratio": process_info["corner_shadows_changed_pixel_ratio"],
+                    "corner_shadows_candidate_pixel_ratio": process_info["corner_shadows_candidate_pixel_ratio"],
                     "background_stains_lightened": process_info["background_stains_lightened"],
                     "background_stains_reason": process_info["background_stains_reason"],
                     "background_stains_mean_before": process_info["background_stains_mean_before"],
@@ -1020,6 +1067,7 @@ def _processing_options_fingerprint(options: ProcessingOptions) -> str:
         "despeckle": options.despeckle,
         "normalize_tones": options.normalize_tones,
         "lighten_edge_shadow": options.lighten_edge_shadow,
+        "lighten_corner_shadows": options.lighten_corner_shadows,
         "lighten_background_stains": options.lighten_background_stains,
         "lighten_fold_shadows": options.lighten_fold_shadows,
         "clean_bleed_through": options.clean_bleed_through,
@@ -1252,6 +1300,30 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
         and isinstance(reason, str)
         and reason != "edge shadow lightening disabled"
     ]
+    corner_shadows_reasons = [
+        record.get("corner_shadows_reason")
+        for record in processed_records
+        if isinstance(record.get("corner_shadows_reason"), str)
+    ]
+    corner_shadows_reason_codes = [
+        record.get("corner_shadows_reason_code")
+        for record in processed_records
+        if isinstance(record.get("corner_shadows_reason_code"), str)
+    ]
+    corner_shadows_skipped_reason_codes = [
+        code
+        for record in processed_records
+        for code in [record.get("corner_shadows_reason_code")]
+        if record.get("corner_shadows_lightened") is False and isinstance(code, str) and code != "disabled"
+    ]
+    corner_shadows_skipped_reasons = [
+        reason
+        for record in processed_records
+        for reason in [record.get("corner_shadows_reason")]
+        if record.get("corner_shadows_lightened") is False
+        and isinstance(reason, str)
+        and reason != "corner shadow cleanup disabled"
+    ]
     tone_reasons = [
         record.get("tone_reason")
         for record in processed_records
@@ -1286,6 +1358,7 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "despeckle": options.despeckle,
             "normalize_tones": options.normalize_tones,
             "lighten_edge_shadow": options.lighten_edge_shadow,
+            "lighten_corner_shadows": options.lighten_corner_shadows,
             "lighten_background_stains": options.lighten_background_stains,
             "lighten_fold_shadows": options.lighten_fold_shadows,
             "clean_bleed_through": options.clean_bleed_through,
@@ -1421,6 +1494,15 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                 if record.get("edge_shadow_lightened") is False
                 and record.get("edge_shadow_reason") not in {None, "edge shadow lightening disabled"}
             ),
+            "corner_shadows_lightened_files": sum(
+                1 for audit in audit_records if audit.get("corner_shadows_lightened") is True
+            ),
+            "corner_shadows_skipped_files": sum(
+                1
+                for record in processed_records
+                if record.get("corner_shadows_lightened") is False
+                and record.get("corner_shadows_reason") not in {None, "corner shadow cleanup disabled"}
+            ),
             "background_stains_lightened_files": sum(
                 1 for audit in audit_records if audit.get("background_stains_lightened") is True
             ),
@@ -1497,6 +1579,13 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             ),
             "edge_shadow_candidate_pixel_ratio": _aggregate_metric(
                 audit_records, "edge_shadow_candidate_pixel_ratio"
+            ),
+            "corner_shadows_delta": _aggregate_metric(audit_records, "corner_shadows_delta"),
+            "corner_shadows_changed_pixel_ratio": _aggregate_metric(
+                audit_records, "corner_shadows_changed_pixel_ratio"
+            ),
+            "corner_shadows_candidate_pixel_ratio": _aggregate_metric(
+                audit_records, "corner_shadows_candidate_pixel_ratio"
             ),
             "background_stains_delta": _aggregate_metric(audit_records, "background_stains_delta"),
             "background_stains_changed_pixel_ratio": _aggregate_metric(
@@ -1769,6 +1858,51 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                     if "low-confidence" in reason or "no confident" in reason or "low tonal separation" in reason
                 ),
             },
+            "corner_shadows": {
+                "applied_files": sum(1 for audit in audit_records if audit.get("corner_shadows_lightened") is True),
+                "skipped_files": sum(
+                    1
+                    for record in processed_records
+                    if record.get("corner_shadows_lightened") is False
+                    and record.get("corner_shadows_reason") not in {None, "corner shadow cleanup disabled"}
+                ),
+                "corner_distribution": _reason_counts(
+                    corner
+                    for record in processed_records
+                    for corner in record.get("corner_shadows_corners", [])
+                    if record.get("corner_shadows_lightened") is True and isinstance(corner, str)
+                ),
+                "changed_pixel_ratio": _aggregate_metric(audit_records, "corner_shadows_changed_pixel_ratio"),
+                "candidate_pixel_ratio": _aggregate_metric(audit_records, "corner_shadows_candidate_pixel_ratio"),
+                "reason_distribution": _reason_counts(
+                    reason for reason in corner_shadows_reasons if isinstance(reason, str)
+                ),
+                "skip_reason_distribution": _reason_counts(corner_shadows_skipped_reasons),
+                "reason_code_distribution": _reason_counts(corner_shadows_reason_codes),
+                "skip_reason_code_distribution": _reason_counts(corner_shadows_skipped_reason_codes),
+                "protection_triggered_files": sum(
+                    1
+                    for code in corner_shadows_skipped_reason_codes
+                    if code
+                    in {
+                        "protected_content",
+                        "color_content",
+                        "texture_or_photo",
+                        "detail_too_high",
+                        "guardrail_reverted",
+                    }
+                ),
+                "conservative_scope_skip_files": sum(
+                    1
+                    for code in corner_shadows_skipped_reason_codes
+                    if code in {"too_dark", "broad_uneven_lighting", "changed_area_too_large"}
+                ),
+                "low_confidence_skip_files": sum(
+                    1
+                    for code in corner_shadows_skipped_reason_codes
+                    if code in {"low_confidence", "low_tonal_separation", "no_candidate"}
+                ),
+            },
             "background_stains": {
                 "applied_files": sum(
                     1 for audit in audit_records if audit.get("background_stains_lightened") is True
@@ -2020,6 +2154,7 @@ def _aggregate_operation_timings(records: list[dict[str, Any]], options: Process
         "despeckle": options.despeckle,
         "normalize_tones": options.normalize_tones,
         "lighten_edge_shadow": options.lighten_edge_shadow,
+        "lighten_corner_shadows": options.lighten_corner_shadows,
         "lighten_background_stains": options.lighten_background_stains,
         "lighten_fold_shadows": options.lighten_fold_shadows,
         "clean_bleed_through": options.clean_bleed_through,
@@ -2173,6 +2308,8 @@ def _audit_thresholds(options: ProcessingOptions) -> dict[str, float]:
         "max_geometry_combo_crop_ratio": options.audit_max_geometry_combo_crop_ratio,
         "max_geometry_combo_size_change_ratio": options.audit_max_geometry_combo_size_change_ratio,
         "max_tone_changed_pixel_ratio": 1.0,
+        "max_corner_shadows_changed_pixel_ratio": 0.06,
+        "max_corner_shadows_candidate_pixel_ratio": 0.10,
         "max_fold_shadows_changed_pixel_ratio": 0.075,
         "max_fold_shadows_candidate_pixel_ratio": 0.12,
         "max_bleed_through_changed_pixel_ratio": 0.045,
@@ -2508,6 +2645,21 @@ def _process_image(
         else:
             operations.append("lighten_edge_shadow_disabled")
 
+    corner_shadows = CornerShadowCleanupResult(
+        processed, False, "corner shadow cleanup disabled", "disabled", (), None, None, 0.0, 0.0, 0.0
+    )
+    with _operation_timer(operation_timings, "lighten_corner_shadows", enabled=options.lighten_corner_shadows):
+        if options.lighten_corner_shadows:
+            corner_shadows = _lighten_corner_shadows_conservative(processed)
+            processed = corner_shadows.image
+            operations.append(
+                "lighten_corner_shadows_conservative"
+                if corner_shadows.applied
+                else "lighten_corner_shadows_noop"
+            )
+        else:
+            operations.append("lighten_corner_shadows_disabled")
+
     background_stains = BackgroundStainLighteningResult(
         processed, False, "background stain lightening disabled", None, None, 0.0, 0.0, 0.0
     )
@@ -2607,6 +2759,10 @@ def _process_image(
         edge_shadow.edge_delta,
         edge_shadow.changed_pixel_ratio,
         edge_shadow.candidate_pixel_ratio,
+        corner_shadows.applied,
+        corner_shadows.corner_delta,
+        corner_shadows.changed_pixel_ratio,
+        corner_shadows.candidate_pixel_ratio,
         background_stains.applied,
         background_stains.stain_delta,
         background_stains.changed_pixel_ratio,
@@ -2657,6 +2813,7 @@ def _process_image(
                 despeckled,
                 tone.applied,
                 edge_shadow.applied,
+                corner_shadows.applied,
                 background_stains.applied,
                 fold_shadows.applied,
                 bleed_through.applied,
@@ -2672,6 +2829,7 @@ def _process_image(
                 despeckle_reason,
                 tone.reason,
                 edge_shadow.reason,
+                corner_shadows.reason,
                 background_stains.reason,
                 fold_shadows.reason,
                 bleed_through.reason,
@@ -2773,6 +2931,17 @@ def _process_image(
         "edge_shadow_candidate_pixel_ratio": 0.0
         if guard_reverted
         else edge_shadow.candidate_pixel_ratio,
+        "corner_shadows_lightened": False if guard_reverted else corner_shadows.applied,
+        "corner_shadows_reason": guard_reason if guard_reverted else corner_shadows.reason,
+        "corner_shadows_reason_code": (
+            "guardrail_reverted" if guard_reverted else corner_shadows.reason_code
+        ),
+        "corner_shadows_corners": list(corner_shadows.corners),
+        "corner_shadows_mean_before": None if guard_reverted else corner_shadows.corner_mean_before,
+        "corner_shadows_mean_after": None if guard_reverted else corner_shadows.corner_mean_after,
+        "corner_shadows_delta": 0.0 if guard_reverted else corner_shadows.corner_delta,
+        "corner_shadows_changed_pixel_ratio": 0.0 if guard_reverted else corner_shadows.changed_pixel_ratio,
+        "corner_shadows_candidate_pixel_ratio": 0.0 if guard_reverted else corner_shadows.candidate_pixel_ratio,
         "background_stains_lightened": False if guard_reverted else background_stains.applied,
         "background_stains_reason": guard_reason if guard_reverted else background_stains.reason,
         "background_stains_mean_before": None if guard_reverted else background_stains.stain_mean_before,
@@ -3279,6 +3448,228 @@ def _edge_shadow_near_edge_color_risk(image: Image.Image, margin: int) -> bool:
             if spread > 18 and 30 < brightness < 250:
                 colored += 1
         if red / total >= 0.0008 or colored / total >= 0.004:
+            return True
+    return False
+
+
+def _lighten_corner_shadows_conservative(image: Image.Image) -> CornerShadowCleanupResult:
+    if image.width < 90 or image.height < 90:
+        return _corner_shadows_noop(image, "corner shadow cleanup skipped: image too small", "too_small")
+
+    grayscale = image.convert("L")
+    histogram = grayscale.histogram()
+    total = image.width * image.height
+    p05 = _histogram_percentile(histogram, total, 0.05)
+    p95 = _histogram_percentile(histogram, total, 0.95)
+    if p95 < 182:
+        return _corner_shadows_noop(image, "corner shadow cleanup skipped: page is too dark", "too_dark")
+    if p95 - p05 < 24:
+        return _corner_shadows_noop(
+            image,
+            "corner shadow cleanup skipped: low tonal separation",
+            "low_tonal_separation",
+        )
+
+    radius = max(28, min(90, int(round(min(image.width, image.height) * 0.24))))
+    if image.mode != "L" and _corner_shadow_color_risk(image, radius):
+        return _corner_shadows_noop(
+            image,
+            "corner shadow cleanup skipped: color content or annotation risk in page corner",
+            "color_content",
+        )
+
+    corner_specs = (
+        ("top_left", 0, 0, 1, 1),
+        ("top_right", image.width - radius, 0, -1, 1),
+        ("bottom_left", 0, image.height - radius, 1, -1),
+        ("bottom_right", image.width - radius, image.height - radius, -1, -1),
+    )
+    plans: list[dict[str, Any]] = []
+    for corner, left, top, x_direction, y_direction in corner_specs:
+        corner_box = (left, top, left + radius, top + radius)
+        inner_left = radius if x_direction > 0 else image.width - radius * 2
+        inner_top = radius if y_direction > 0 else image.height - radius * 2
+        if inner_left < 0 or inner_top < 0 or inner_left + radius > image.width or inner_top + radius > image.height:
+            continue
+        inner_box = (inner_left, inner_top, inner_left + radius, inner_top + radius)
+        corner_crop = grayscale.crop(corner_box)
+        inner_crop = grayscale.crop(inner_box)
+        corner_mean = ImageStat.Stat(corner_crop).mean[0]
+        inner_mean = ImageStat.Stat(inner_crop).mean[0]
+        corner_std = ImageStat.Stat(corner_crop).stddev[0]
+        inner_std = ImageStat.Stat(inner_crop).stddev[0]
+        dark_ratio = _dark_pixel_ratio(corner_crop, 142)
+        foreground_ratio = _dark_pixel_ratio(corner_crop, 166)
+        inner_dark_ratio = _dark_pixel_ratio(inner_crop, 150)
+        delta = inner_mean - corner_mean
+        if dark_ratio > 0.0015:
+            return _corner_shadows_noop(
+                image,
+                f"corner shadow cleanup skipped: protected dark content near {corner} corner",
+                "protected_content",
+            )
+        if inner_dark_ratio > 0.04:
+            continue
+        if foreground_ratio > 0.03:
+            return _corner_shadows_noop(
+                image,
+                f"corner shadow cleanup skipped: detail too dense near {corner} corner",
+                "detail_too_high",
+            )
+        if corner_std > 25 or inner_std > 30:
+            return _corner_shadows_noop(
+                image,
+                f"corner shadow cleanup skipped: texture or photo detail near {corner} corner",
+                "texture_or_photo",
+            )
+        if not (7 <= delta <= 58 and corner_mean >= 165 and inner_mean >= 205):
+            continue
+        candidate_pixels, continuity = _corner_shadow_candidate_profile(corner_crop, inner_mean, x_direction, y_direction)
+        candidate_ratio = candidate_pixels / max(1, total)
+        if candidate_ratio < 0.003 or continuity < 0.52:
+            continue
+        plans.append(
+            {
+                "corner": corner,
+                "box": corner_box,
+                "radius": radius,
+                "x_direction": x_direction,
+                "y_direction": y_direction,
+                "max_delta": min(32.0, delta * 0.72),
+                "candidate_pixels": candidate_pixels,
+                "inner_mean": inner_mean,
+            }
+        )
+
+    if not plans:
+        return _corner_shadows_noop(
+            image,
+            "corner shadow cleanup skipped: no confident smooth neutral corner shadow",
+            "no_candidate",
+        )
+    if len(plans) > 2:
+        return _corner_shadows_noop(
+            image,
+            "corner shadow cleanup skipped: broad uneven lighting is outside conservative corner scope",
+            "broad_uneven_lighting",
+        )
+
+    working_l = grayscale.copy()
+    before_values: list[float] = []
+    after_values: list[float] = []
+    changed_pixels = 0
+    candidate_pixels_total = sum(int(plan["candidate_pixels"]) for plan in plans)
+    for plan in plans:
+        box = plan["box"]
+        corner_crop = working_l.crop(box)
+        before_values.append(ImageStat.Stat(corner_crop).mean[0])
+        pixels = corner_crop.load()
+        width, height = corner_crop.size
+        max_distance = math.sqrt((width - 1) ** 2 + (height - 1) ** 2)
+        for y in range(height):
+            for x in range(width):
+                value = pixels[x, y]
+                if value < 150 or value > plan["inner_mean"] - 4:
+                    continue
+                dx = x if plan["x_direction"] > 0 else width - 1 - x
+                dy = y if plan["y_direction"] > 0 else height - 1 - y
+                distance = math.sqrt(dx * dx + dy * dy)
+                if distance > max_distance:
+                    continue
+                factor = max(0.0, 1.0 - (distance / max(1.0, max_distance)) * 0.75)
+                new_value = min(255, int(round(value + float(plan["max_delta"]) * factor)))
+                if new_value - value > 2:
+                    changed_pixels += 1
+                    pixels[x, y] = new_value
+        working_l.paste(corner_crop, box)
+        after_values.append(ImageStat.Stat(working_l.crop(box)).mean[0])
+
+    changed_ratio = changed_pixels / max(1, total)
+    candidate_ratio = candidate_pixels_total / max(1, total)
+    if changed_ratio <= 0.0:
+        return _corner_shadows_noop(
+            image,
+            "corner shadow cleanup skipped: candidate correction below conservative threshold",
+            "low_confidence",
+        )
+    if changed_ratio > 0.06 or candidate_ratio > 0.10:
+        return _corner_shadows_noop(
+            image,
+            "corner shadow cleanup skipped: changed area exceeds conservative corner scope",
+            "changed_area_too_large",
+        )
+
+    result_image = _replace_luminance_preserving_chroma(image, working_l)
+    before_mean = round(sum(before_values) / len(before_values), 6)
+    after_mean = round(sum(after_values) / len(after_values), 6)
+    return CornerShadowCleanupResult(
+        result_image,
+        True,
+        "corner shadow cleanup applied: smooth neutral corner shadow",
+        "applied",
+        tuple(str(plan["corner"]) for plan in plans),
+        before_mean,
+        after_mean,
+        round(after_mean - before_mean, 6),
+        round(changed_ratio, 6),
+        round(candidate_ratio, 6),
+    )
+
+
+def _corner_shadows_noop(image: Image.Image, reason: str, reason_code: str) -> CornerShadowCleanupResult:
+    return CornerShadowCleanupResult(image, False, reason, reason_code, (), None, None, 0.0, 0.0, 0.0)
+
+
+def _corner_shadow_candidate_profile(
+    corner: Image.Image,
+    inner_mean: float,
+    x_direction: int,
+    y_direction: int,
+) -> tuple[int, float]:
+    upper = max(150, min(248, int(round(inner_mean - 4))))
+    pixels = corner.load()
+    width, height = corner.size
+    candidate_pixels = 0
+    covered_rings: set[int] = set()
+    max_distance = math.sqrt((width - 1) ** 2 + (height - 1) ** 2)
+    for y in range(height):
+        for x in range(width):
+            value = pixels[x, y]
+            if 150 <= value <= upper:
+                candidate_pixels += 1
+                dx = x if x_direction > 0 else width - 1 - x
+                dy = y if y_direction > 0 else height - 1 - y
+                distance = math.sqrt(dx * dx + dy * dy)
+                covered_rings.add(min(7, int((distance / max(1.0, max_distance)) * 8)))
+    return candidate_pixels, len(covered_rings) / 8
+
+
+def _corner_shadow_color_risk(image: Image.Image, radius: int) -> bool:
+    if image.mode == "L":
+        return False
+    sample = image.convert("RGB")
+    boxes = (
+        (0, 0, radius, radius),
+        (image.width - radius, 0, image.width, radius),
+        (0, image.height - radius, radius, image.height),
+        (image.width - radius, image.height - radius, image.width, image.height),
+    )
+    for box in boxes:
+        crop = sample.crop(box)
+        total = max(1, crop.width * crop.height)
+        colored = 0
+        red = 0
+        pixel_data = crop.get_flattened_data() if hasattr(crop, "get_flattened_data") else crop.getdata()
+        for red_value, green_value, blue_value in pixel_data:
+            high = max(red_value, green_value, blue_value)
+            low = min(red_value, green_value, blue_value)
+            brightness = (red_value + green_value + blue_value) / 3
+            spread = high - low
+            if red_value >= 105 and red_value - green_value >= 32 and red_value - blue_value >= 32:
+                red += 1
+            if spread > 16 and 35 < brightness < 250:
+                colored += 1
+        if red / total >= 0.0006 or colored / total >= 0.003:
             return True
     return False
 
@@ -5169,6 +5560,10 @@ def _processing_audit(
     edge_shadow_delta: float = 0.0,
     edge_shadow_changed_pixel_ratio: float = 0.0,
     edge_shadow_candidate_pixel_ratio: float = 0.0,
+    corner_shadows_lightened: bool = False,
+    corner_shadows_delta: float = 0.0,
+    corner_shadows_changed_pixel_ratio: float = 0.0,
+    corner_shadows_candidate_pixel_ratio: float = 0.0,
     background_stains_lightened: bool = False,
     background_stains_delta: float = 0.0,
     background_stains_changed_pixel_ratio: float = 0.0,
@@ -5260,6 +5655,10 @@ def _processing_audit(
         "edge_shadow_delta": round(edge_shadow_delta, 6),
         "edge_shadow_changed_pixel_ratio": round(edge_shadow_changed_pixel_ratio, 6),
         "edge_shadow_candidate_pixel_ratio": round(edge_shadow_candidate_pixel_ratio, 6),
+        "corner_shadows_lightened": corner_shadows_lightened,
+        "corner_shadows_delta": round(corner_shadows_delta, 6),
+        "corner_shadows_changed_pixel_ratio": round(corner_shadows_changed_pixel_ratio, 6),
+        "corner_shadows_candidate_pixel_ratio": round(corner_shadows_candidate_pixel_ratio, 6),
         "background_stains_lightened": background_stains_lightened,
         "background_stains_delta": round(background_stains_delta, 6),
         "background_stains_changed_pixel_ratio": round(background_stains_changed_pixel_ratio, 6),
@@ -5302,6 +5701,8 @@ def _processing_audit(
             tone_contrast_delta=tone_contrast_delta,
             edge_shadow_lightened=edge_shadow_lightened,
             edge_shadow_changed_pixel_ratio=edge_shadow_changed_pixel_ratio,
+            corner_shadows_lightened=corner_shadows_lightened,
+            corner_shadows_changed_pixel_ratio=corner_shadows_changed_pixel_ratio,
             fold_shadows_lightened=fold_shadows_lightened,
             fold_shadows_changed_pixel_ratio=fold_shadows_changed_pixel_ratio,
             bleed_through_cleaned=bleed_through_cleaned,
@@ -5341,6 +5742,8 @@ def _should_check_local_content_change(
     tone_contrast_delta: float,
     edge_shadow_lightened: bool,
     edge_shadow_changed_pixel_ratio: float,
+    corner_shadows_lightened: bool,
+    corner_shadows_changed_pixel_ratio: float,
     fold_shadows_lightened: bool,
     fold_shadows_changed_pixel_ratio: float,
     bleed_through_cleaned: bool,
@@ -5356,6 +5759,8 @@ def _should_check_local_content_change(
     if despeckle_pixels_changed >= despeckle_guard_floor:
         return True
     if edge_shadow_lightened and edge_shadow_changed_pixel_ratio > 0:
+        return True
+    if corner_shadows_lightened and corner_shadows_changed_pixel_ratio > 0:
         return True
     if fold_shadows_lightened and fold_shadows_changed_pixel_ratio > 0:
         return True
@@ -5385,6 +5790,8 @@ def _cumulative_change_guard(metrics: dict[str, Any], options: ProcessingOptions
     candidate_ratio = max(
         _float_metric(metrics, "background_stains_changed_pixel_ratio"),
         _float_metric(metrics, "background_stains_candidate_pixel_ratio"),
+        _float_metric(metrics, "corner_shadows_changed_pixel_ratio"),
+        _float_metric(metrics, "corner_shadows_candidate_pixel_ratio"),
         _float_metric(metrics, "fold_shadows_changed_pixel_ratio"),
         _float_metric(metrics, "fold_shadows_candidate_pixel_ratio"),
         _float_metric(metrics, "bleed_through_changed_pixel_ratio"),
@@ -5565,6 +5972,7 @@ def _combination_text_high_frequency_risk_reasons(metrics: dict[str, Any], optio
 def _combination_non_geometry_candidate_ratio(metrics: dict[str, Any]) -> float:
     return max(
         _float_metric(metrics, "background_stains_candidate_pixel_ratio"),
+        _float_metric(metrics, "corner_shadows_candidate_pixel_ratio"),
         _float_metric(metrics, "fold_shadows_candidate_pixel_ratio"),
         _float_metric(metrics, "bleed_through_candidate_pixel_ratio"),
         _float_metric(metrics, "scanlines_candidate_pixel_ratio"),
@@ -5983,6 +6391,8 @@ def _audit_guardrail_failures(metrics: dict[str, Any], options: ProcessingOption
         ("crop_ratio", options.audit_max_crop_ratio),
         ("max_trim_margin_ratio", options.audit_max_trim_margin_ratio),
         ("despeckle_pixel_ratio", options.audit_max_despeckle_pixel_ratio),
+        ("corner_shadows_changed_pixel_ratio", 0.06),
+        ("corner_shadows_candidate_pixel_ratio", 0.10),
         ("fold_shadows_changed_pixel_ratio", 0.075),
         ("fold_shadows_candidate_pixel_ratio", 0.12),
         ("bleed_through_changed_pixel_ratio", 0.045),
@@ -5999,6 +6409,8 @@ def _audit_guardrail_failures(metrics: dict[str, Any], options: ProcessingOption
         if key.startswith("faded_text_") and metrics.get("faded_text_enhanced") is not True:
             continue
         if key.startswith("bleed_through_") and metrics.get("bleed_through_cleaned") is not True:
+            continue
+        if key.startswith("corner_shadows_") and metrics.get("corner_shadows_lightened") is not True:
             continue
         if key.startswith("fold_shadows_") and metrics.get("fold_shadows_lightened") is not True:
             continue

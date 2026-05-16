@@ -42,6 +42,7 @@ class PlanBatch:
     despeckle: bool
     normalize_tones: bool
     lighten_edge_shadow: bool
+    lighten_corner_shadows: bool
     lighten_background_stains: bool
     lighten_fold_shadows: bool
     clean_bleed_through: bool
@@ -195,6 +196,7 @@ def _run_batch(project_id: str, batch: PlanBatch, index: int) -> dict[str, Any]:
                 despeckle=batch.despeckle,
                 normalize_tones=batch.normalize_tones,
                 lighten_edge_shadow=batch.lighten_edge_shadow,
+                lighten_corner_shadows=batch.lighten_corner_shadows,
                 lighten_background_stains=batch.lighten_background_stains,
                 lighten_fold_shadows=batch.lighten_fold_shadows,
                 lighten_scanlines=batch.lighten_scanlines,
@@ -267,6 +269,7 @@ def _run_batch(project_id: str, batch: PlanBatch, index: int) -> dict[str, Any]:
                     despeckle=batch.despeckle,
                     normalize_tones=batch.normalize_tones,
                     lighten_edge_shadow=batch.lighten_edge_shadow,
+                    lighten_corner_shadows=batch.lighten_corner_shadows,
                     lighten_background_stains=batch.lighten_background_stains,
                     lighten_fold_shadows=batch.lighten_fold_shadows,
                     clean_bleed_through=batch.clean_bleed_through,
@@ -394,6 +397,7 @@ def _aggregate_processing_operation_timings(batches: list[dict[str, Any]]) -> di
         "despeckle",
         "normalize_tones",
         "lighten_edge_shadow",
+        "lighten_corner_shadows",
         "lighten_background_stains",
         "lighten_fold_shadows",
         "clean_bleed_through",
@@ -581,6 +585,7 @@ def _batch_from_row(row: dict[str, Any], index: int, plan_dir: Path, output_root
         despeckle=_bool(normalized.get("despeckle"), "despeckle", index),
         normalize_tones=_bool(normalized.get("normalize_tones"), "normalize_tones", index),
         lighten_edge_shadow=_bool(normalized.get("lighten_edge_shadow"), "lighten_edge_shadow", index),
+        lighten_corner_shadows=_bool(normalized.get("lighten_corner_shadows"), "lighten_corner_shadows", index),
         lighten_background_stains=_bool(
             normalized.get("lighten_background_stains"),
             "lighten_background_stains",

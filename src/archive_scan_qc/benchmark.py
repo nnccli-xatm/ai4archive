@@ -33,6 +33,7 @@ PROCESSING_OPERATION_TIMING_NAMES = (
     "despeckle",
     "normalize_tones",
     "lighten_edge_shadow",
+    "lighten_corner_shadows",
     "lighten_background_stains",
     "lighten_fold_shadows",
     "clean_bleed_through",
@@ -55,6 +56,7 @@ PROCESSING_OPERATION_TIMING_DIAGNOSTIC_SECONDS_PER_FILE = {
     "despeckle": 0.25,
     "normalize_tones": 0.25,
     "lighten_edge_shadow": 0.25,
+    "lighten_corner_shadows": 0.25,
     "lighten_background_stains": 0.35,
     "lighten_fold_shadows": 0.35,
     "clean_bleed_through": 0.35,
@@ -106,6 +108,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--despeckle", action="store_true", help="Enable conservative despeckle during processing.")
     parser.add_argument("--normalize-tones", action="store_true", help="Enable conservative gray/dark page tone normalization.")
     parser.add_argument("--lighten-edge-shadow", action="store_true", help="Enable conservative narrow edge-shadow lightening.")
+    parser.add_argument("--lighten-corner-shadows", action="store_true", help="Enable conservative smooth corner-shadow cleanup.")
     parser.add_argument("--lighten-background-stains", action="store_true", help="Enable conservative light background stain lightening.")
     parser.add_argument("--lighten-fold-shadows", action="store_true", help="Enable conservative narrow fold-shadow cleanup.")
     parser.add_argument("--clean-bleed-through", action="store_true", help="Enable conservative faint reverse-side ghost cleanup.")
@@ -190,6 +193,7 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
                         despeckle=args.despeckle,
                         normalize_tones=args.normalize_tones,
                         lighten_edge_shadow=args.lighten_edge_shadow,
+                        lighten_corner_shadows=args.lighten_corner_shadows,
                         lighten_background_stains=args.lighten_background_stains,
                         lighten_fold_shadows=getattr(args, "lighten_fold_shadows", False),
                         clean_bleed_through=args.clean_bleed_through,
@@ -894,6 +898,8 @@ def _processing_quality_thresholds() -> dict[str, float]:
         "max_tone_contrast_delta": defaults.audit_max_contrast_delta,
         "max_tone_changed_pixel_ratio": 1.0,
         "max_edge_shadow_changed_pixel_ratio": 0.08,
+        "max_corner_shadows_changed_pixel_ratio": 0.06,
+        "max_corner_shadows_candidate_pixel_ratio": 0.10,
         "max_background_stains_changed_pixel_ratio": 0.08,
         "max_background_stains_candidate_pixel_ratio": 1.0,
         "max_fold_shadows_changed_pixel_ratio": 0.075,
@@ -965,6 +971,17 @@ def _repair_algorithm_metrics(
             operation="lighten_edge_shadow",
             changed_flag="edge_shadow_lightened",
             metrics={"delta": "edge_shadow_delta", "changed_pixel_ratio": "edge_shadow_changed_pixel_ratio"},
+        ),
+        "lighten_corner_shadows": _algorithm_summary(
+            audit_records,
+            operation_timings,
+            operation="lighten_corner_shadows",
+            changed_flag="corner_shadows_lightened",
+            metrics={
+                "delta": "corner_shadows_delta",
+                "changed_pixel_ratio": "corner_shadows_changed_pixel_ratio",
+                "candidate_pixel_ratio": "corner_shadows_candidate_pixel_ratio",
+            },
         ),
         "lighten_background_stains": _algorithm_summary(
             audit_records,
@@ -1069,6 +1086,8 @@ def _quality_threshold_violations(
         ("normalize_tones", "contrast_delta"): "max_tone_contrast_delta",
         ("normalize_tones", "changed_pixel_ratio"): "max_tone_changed_pixel_ratio",
         ("lighten_edge_shadow", "changed_pixel_ratio"): "max_edge_shadow_changed_pixel_ratio",
+        ("lighten_corner_shadows", "changed_pixel_ratio"): "max_corner_shadows_changed_pixel_ratio",
+        ("lighten_corner_shadows", "candidate_pixel_ratio"): "max_corner_shadows_candidate_pixel_ratio",
         ("lighten_background_stains", "changed_pixel_ratio"): "max_background_stains_changed_pixel_ratio",
         ("lighten_background_stains", "candidate_pixel_ratio"): "max_background_stains_candidate_pixel_ratio",
         ("lighten_fold_shadows", "changed_pixel_ratio"): "max_fold_shadows_changed_pixel_ratio",
@@ -1103,6 +1122,7 @@ def _enhancement_changed_files(audit_records: list[dict[str, Any]]) -> int:
     enhancement_flags = (
         "tone_normalized",
         "edge_shadow_lightened",
+        "corner_shadows_lightened",
         "background_stains_lightened",
         "fold_shadows_lightened",
         "bleed_through_cleaned",
@@ -1150,6 +1170,7 @@ def _operations(args: argparse.Namespace) -> dict[str, bool | str]:
         "despeckle": args.despeckle,
         "normalize_tones": getattr(args, "normalize_tones", False),
         "lighten_edge_shadow": getattr(args, "lighten_edge_shadow", False),
+        "lighten_corner_shadows": getattr(args, "lighten_corner_shadows", False),
         "lighten_background_stains": getattr(args, "lighten_background_stains", False),
         "lighten_fold_shadows": getattr(args, "lighten_fold_shadows", False),
         "clean_bleed_through": getattr(args, "clean_bleed_through", False),
@@ -1193,6 +1214,7 @@ def _csv_fields() -> list[str]:
         "despeckle",
         "normalize_tones",
         "lighten_edge_shadow",
+        "lighten_corner_shadows",
         "lighten_background_stains",
         "lighten_fold_shadows",
         "clean_bleed_through",
@@ -1248,6 +1270,7 @@ def _csv_row(run: dict[str, Any], environment: dict[str, Any]) -> dict[str, Any]
         "despeckle": operations["despeckle"],
         "normalize_tones": operations["normalize_tones"],
         "lighten_edge_shadow": operations.get("lighten_edge_shadow", False),
+        "lighten_corner_shadows": operations.get("lighten_corner_shadows", False),
         "lighten_background_stains": operations.get("lighten_background_stains", False),
         "lighten_fold_shadows": operations.get("lighten_fold_shadows", False),
         "clean_bleed_through": operations.get("clean_bleed_through", False),
