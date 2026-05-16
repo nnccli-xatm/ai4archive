@@ -9815,6 +9815,41 @@ class ScanQcTest(unittest.TestCase):
             )
             self.assertNotIn("A001_narrow_gray_edge", json.dumps(audit_summary, ensure_ascii=False))
 
+    def test_trim_dark_border_trims_broken_scan_edge_with_light_glare_gap(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "A001_broken_glare_edge.png"
+            image = Image.new("RGB", (120, 90), (244, 244, 240))
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((0, 0, 119, 89), outline=(20, 20, 20), width=4)
+            draw.rectangle((0, 26, 3, 54), fill=(244, 244, 240))
+            draw.rectangle((40, 38, 84, 43), fill=(25, 25, 25))
+            image.save(source)
+            source_bytes = source.read_bytes()
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(trim_dark_border=True))
+            audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
+
+            record = manifest["files"][0]
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertTrue(record["dark_border_trimmed"])
+            self.assertEqual(record["dark_border_bbox"], [4, 4, 116, 86])
+            self.assertEqual(record["output_size"], [112, 82])
+            self.assertLessEqual(record["processing_audit"]["max_trim_margin_ratio"], 0.045)
+            self.assertEqual(record["dark_border_reason"], "broken dark edge border trimmed")
+            self.assertEqual(audit_summary["counts"]["dark_border_trimmed_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["dark_border_trim"]["reason_distribution"],
+                {"broken dark edge border trimmed": 1},
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("A001_broken_glare_edge", json.dumps(audit_summary, ensure_ascii=False))
+
     def test_trim_dark_border_keeps_edge_content_inside_narrow_deep_gray_scan_edge(self) -> None:
         image = Image.new("RGB", (120, 90), (242, 242, 238))
         draw = ImageDraw.Draw(image)
@@ -9871,6 +9906,44 @@ class ScanQcTest(unittest.TestCase):
                 ],
                 4,
             )
+
+    def test_trim_dark_border_noops_for_broken_edge_with_near_boundary_page_number(self) -> None:
+        image = Image.new("RGB", (120, 90), (244, 244, 240))
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((0, 0, 119, 89), outline=(20, 20, 20), width=4)
+        draw.rectangle((0, 26, 3, 54), fill=(244, 244, 240))
+        draw.rectangle((4, 36, 13, 42), fill=(15, 15, 15))
+        draw.rectangle((42, 48, 82, 53), fill=(25, 25, 25))
+
+        detection = detect_dark_border_bbox(image)
+
+        self.assertIsNone(detection.bbox)
+        self.assertEqual(detection.reason, "protected edge content near dark border")
+
+    def test_trim_dark_border_noops_for_fragmented_broken_frame_blocks(self) -> None:
+        image = Image.new("RGB", (120, 90), (244, 244, 240))
+        draw = ImageDraw.Draw(image)
+        for box in [
+            (0, 0, 3, 18),
+            (0, 36, 3, 53),
+            (0, 72, 3, 89),
+            (116, 0, 119, 18),
+            (116, 36, 119, 53),
+            (116, 72, 119, 89),
+            (0, 0, 24, 3),
+            (48, 0, 72, 3),
+            (96, 0, 119, 3),
+            (0, 86, 24, 89),
+            (48, 86, 72, 89),
+            (96, 86, 119, 89),
+        ]:
+            draw.rectangle(box, fill=(20, 20, 20))
+        draw.rectangle((42, 40, 82, 45), fill=(25, 25, 25))
+
+        detection = detect_dark_border_bbox(image)
+
+        self.assertIsNone(detection.bbox)
+        self.assertEqual(detection.reason, "no confident dark edge border")
 
     def test_trim_dark_border_noops_for_single_sided_and_unbalanced_edges(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
