@@ -11116,6 +11116,47 @@ class ScanQcTest(unittest.TestCase):
             for forbidden in ("private_small_soil_spots", str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_despeckle_removes_sparse_tiny_pinhole_cluster_with_aggregate_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "private_tiny_pinhole_cluster.png"
+            image = Image.new("RGB", (120, 90), (246, 246, 242))
+            dust_points = [(60, 40), (61, 40), (60, 41), (61, 41), (60, 42), (61, 42)]
+            for point in dust_points:
+                image.putpixel(point, (52, 52, 52))
+            image.save(source)
+            source_bytes = source.read_bytes()
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            with Image.open(process_dir / "images" / "private_tiny_pinhole_cluster.png") as processed:
+                grayscale = processed.convert("L")
+                for point in dust_points:
+                    self.assertGreaterEqual(grayscale.getpixel(point), 240)
+            record = manifest["files"][0]
+            self.assertTrue(record["despeckled"])
+            self.assertEqual(record["despeckle_pixels_changed"], len(dust_points))
+            self.assertEqual(record["despeckle_reason"], "isolated dark pixels replaced")
+            self.assertLessEqual(record["processing_audit"]["despeckle_pixel_ratio"], 0.001)
+            self.assertEqual(audit_summary["counts"]["despeckled_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["despeckle"]["pixels_changed"], len(dust_points))
+            despeckle_timing = audit_summary["timing"]["operation_timings"]["despeckle"]
+            self.assertEqual(despeckle_timing["candidate_pixels"]["max"], len(dust_points))
+            self.assertEqual(despeckle_timing["candidate_count"]["max"], len(dust_points))
+            self.assertEqual(despeckle_timing["candidate_count_bucket_distribution"]["5-16"], 1)
+            self.assertEqual(despeckle_timing["reason_code_distribution"]["applied_isolated_pixels"], 1)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_tiny_pinhole_cluster", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
     def test_despeckle_protects_punctuation_lines_red_marks_edges_and_texture(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

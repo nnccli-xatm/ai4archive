@@ -9510,6 +9510,7 @@ _DESPECKLE_MAX_CANDIDATE_RATIO = 0.02
 _DESPECKLE_MAX_LIGHT_SOIL_PREFILTER_RATIO = _DESPECKLE_MAX_CANDIDATE_RATIO
 _DESPECKLE_MAX_CHANGED_RATIO = 0.01
 _DESPECKLE_MAX_COMPONENT_PIXELS = 4
+_DESPECKLE_MAX_TINY_DUST_CLUSTER_PIXELS = 6
 _DESPECKLE_MAX_COMPONENT_SPAN = 3
 _DESPECKLE_DENSE_PREFILTER_MIN_DARK_PIXELS = 512
 _DESPECKLE_DENSE_PREFILTER_MAX_LOW_CONNECTIVITY_RATIO = 0.01
@@ -9753,6 +9754,9 @@ def _despeckle_replacements_numpy(
 
     candidate_mask = np.zeros((height, width), dtype=bool)
     candidate_mask[candidate_y, candidate_x] = True
+    candidate_set = set(candidates)
+    if any(len(_despeckle_candidate_component(candidate_set, x, y)) > 4 for x, y in candidates):
+        return None
     near_non_candidate = (gray <= _DESPECKLE_NEAR_DARK_THRESHOLD) & ~candidate_mask
     dark_neighbors = _despeckle_numpy_rect_counts(np, near_non_candidate, candidate_x, candidate_y, radius=1)
     wider_dark = _despeckle_numpy_rect_counts(np, near_non_candidate, candidate_x, candidate_y, radius=2)
@@ -9779,7 +9783,6 @@ def _despeckle_replacements_numpy(
     if rgb.shape[:2] != (height, width) or rgb.shape[2:] != (3,):
         return None
 
-    candidate_set = set(candidates)
     protected_context = np.asarray(
         [
             _despeckle_has_sparse_text_protected_context(
@@ -9883,7 +9886,16 @@ def _despeckle_replacements_fallback(
     source_pixels: Any = None
     replacements: list[tuple[int, int, tuple[int, int, int]]] = []
     candidate_set = set(candidates)
+    component_cache = {point: _despeckle_candidate_component(candidate_set, point[0], point[1]) for point in candidates}
+    conservative_candidate_set = {
+        component_point
+        for component in component_cache.values()
+        if len(component) <= 4
+        for component_point in component
+    }
     for x, y in candidates:
+        component = component_cache[(x, y)]
+        protection_candidate_set = candidate_set if len(component) > 4 else conservative_candidate_set
         dark_neighbors = 0
         neighbor_values: list[int] = []
         for offset_x, offset_y in _DESPECKLE_NEIGHBOR_OFFSETS:
@@ -9914,6 +9926,17 @@ def _despeckle_replacements_fallback(
         ):
             continue
         median_gray = sorted(neighbor_values)[len(neighbor_values) // 2]
+        if len(component) > 4:
+            component_gray_values = _despeckle_component_surrounding_values(
+                gray_pixels,
+                candidate_set,
+                width,
+                height,
+                component,
+                radius=2,
+            )
+            if component_gray_values:
+                median_gray = sorted(component_gray_values)[len(component_gray_values) // 2]
         if median_gray < _DESPECKLE_MIN_BACKGROUND_MEDIAN:
             continue
 
@@ -9923,39 +9946,74 @@ def _despeckle_replacements_fallback(
         if _despeckle_has_sparse_text_protected_context(
             gray_pixels,
             source_pixels,
-            candidate_set=candidate_set,
+            candidate_set=protection_candidate_set,
             width=width,
             height=height,
             x=x,
             y=y,
+            skip_component_only=len(component) > 4,
         ):
             continue
 
         nearby_content_count = _despeckle_nearby_content_context_count(gray_pixels, width, height, x, y)
+        if len(component) > 4 and nearby_content_count > 0:
+            continue
         if nearby_content_count >= _DESPECKLE_CONTENT_CONTEXT_MIN_DARK_PIXELS:
             if not _despeckle_sparse_text_clearance_allows_cleanup(
                 gray_pixels,
                 source_pixels,
-                candidate_set,
+                protection_candidate_set,
                 width,
                 height,
                 x,
                 y,
                 median_gray,
                 nearby_content_count,
+                skip_component_only=len(component) > 4,
             ):
                 continue
 
         if source is None:
             source = image if image.mode == "RGB" else image.convert("RGB")
             source_pixels = source.load()
-        neighbor_rgb = [
-            source_pixels[x + offset_x, y + offset_y]
-            for offset_x, offset_y in _DESPECKLE_NEIGHBOR_OFFSETS
-        ]
+        neighbor_rgb = []
+        if len(component) > 4:
+            neighbor_rgb = _despeckle_component_surrounding_values(
+                source_pixels,
+                candidate_set,
+                width,
+                height,
+                component,
+                radius=2,
+            )
+        if not neighbor_rgb:
+            neighbor_rgb = [
+                source_pixels[x + offset_x, y + offset_y]
+                for offset_x, offset_y in _DESPECKLE_NEIGHBOR_OFFSETS
+            ]
         replacement = tuple(sorted(channel)[len(channel) // 2] for channel in zip(*neighbor_rgb))
         replacements.append((x, y, replacement))
     return replacements
+
+
+def _despeckle_component_surrounding_values(
+    pixels: Any,
+    candidate_set: set[tuple[int, int]],
+    width: int,
+    height: int,
+    component: list[tuple[int, int]],
+    *,
+    radius: int,
+) -> list[Any]:
+    component_x = [point[0] for point in component]
+    component_y = [point[1] for point in component]
+    values: list[Any] = []
+    for ny in range(max(0, min(component_y) - radius), min(height, max(component_y) + radius + 1)):
+        for nx in range(max(0, min(component_x) - radius), min(width, max(component_x) + radius + 1)):
+            if (nx, ny) in candidate_set:
+                continue
+            values.append(_despeckle_pixel_at(pixels, nx, ny))
+    return values
 
 
 def _despeckle_candidate_mask(image: Image.Image, grayscale: Image.Image) -> tuple[Image.Image, str | None]:
@@ -10105,6 +10163,7 @@ def _despeckle_sparse_text_clearance_allows_cleanup(
     y: int,
     median_gray: int,
     nearby_content_count: int,
+    skip_component_only: bool = False,
 ) -> bool:
     if _despeckle_pixel_at(gray_pixels, x, y) > _DESPECKLE_NEAR_DARK_THRESHOLD:
         return False
@@ -10114,6 +10173,8 @@ def _despeckle_sparse_text_clearance_allows_cleanup(
         return False
 
     component = _despeckle_candidate_component(candidate_set, x, y)
+    component_set = set(component)
+    ignored_points = component_set if skip_component_only else candidate_set
     if len(component) > _DESPECKLE_MAX_COMPONENT_PIXELS:
         return False
     component_x = [point[0] for point in component]
@@ -10127,7 +10188,7 @@ def _despeckle_sparse_text_clearance_allows_cleanup(
     radius = _DESPECKLE_CONTENT_CONTEXT_RADIUS
     for ny in range(max(0, y - radius), min(height, y + radius + 1)):
         for nx in range(max(0, x - radius), min(width, x + radius + 1)):
-            if (nx, ny) in candidate_set:
+            if (nx, ny) in ignored_points:
                 continue
             if _despeckle_pixel_at(gray_pixels, nx, ny) > _DESPECKLE_NEAR_DARK_THRESHOLD:
                 continue
@@ -10145,14 +10206,17 @@ def _despeckle_has_sparse_text_protected_context(
     height: int,
     x: int,
     y: int,
+    skip_component_only: bool = False,
 ) -> bool:
     component = _despeckle_candidate_component(candidate_set, x, y)
+    component_set = set(component)
+    ignored_points = component_set if skip_component_only else candidate_set
     component_x = [point[0] for point in component]
     component_y = [point[1] for point in component]
     radius = _DESPECKLE_CONTENT_CONTEXT_RADIUS
     for ny in range(max(0, min(component_y) - radius), min(height, max(component_y) + radius + 1)):
         for nx in range(max(0, min(component_x) - radius), min(width, max(component_x) + radius + 1)):
-            if (nx, ny) in candidate_set:
+            if (nx, ny) in ignored_points:
                 continue
             if _despeckle_pixel_at(gray_pixels, nx, ny) > _DESPECKLE_NEAR_DARK_THRESHOLD:
                 continue
@@ -10459,14 +10523,22 @@ def _despeckle_candidate_points_from_dark_points(
                 visited.add(neighbor)
                 stack.append(neighbor)
 
-        if len(component) > _DESPECKLE_MAX_COMPONENT_PIXELS:
-            continue
         component_x = [point[0] for point in component]
         component_y = [point[1] for point in component]
-        if max(component_x) - min(component_x) + 1 > _DESPECKLE_MAX_COMPONENT_SPAN:
-            continue
-        if max(component_y) - min(component_y) + 1 > _DESPECKLE_MAX_COMPONENT_SPAN:
-            continue
+        if len(component) > _DESPECKLE_MAX_COMPONENT_PIXELS:
+            if len(component) > _DESPECKLE_MAX_TINY_DUST_CLUSTER_PIXELS:
+                continue
+            if max(component_x) - min(component_x) + 1 > _DESPECKLE_MAX_COMPONENT_SPAN:
+                continue
+            if max(component_y) - min(component_y) + 1 > _DESPECKLE_MAX_COMPONENT_SPAN:
+                continue
+            if _despeckle_component_has_mask_context(component, dark_points):
+                continue
+        if len(component) <= _DESPECKLE_MAX_COMPONENT_PIXELS:
+            if max(component_x) - min(component_x) + 1 > _DESPECKLE_MAX_COMPONENT_SPAN:
+                continue
+            if max(component_y) - min(component_y) + 1 > _DESPECKLE_MAX_COMPONENT_SPAN:
+                continue
 
         absolute_points = [(left + local_x, top + local_y) for local_x, local_y in component]
         if any(
@@ -10485,6 +10557,22 @@ def _despeckle_candidate_points_from_dark_points(
         candidates.extend(absolute_points)
 
     return sorted(candidates, key=lambda point: (point[1], point[0]))
+
+
+def _despeckle_component_has_mask_context(
+    component: list[tuple[int, int]],
+    dark_points: set[tuple[int, int]],
+) -> bool:
+    component_set = set(component)
+    component_x = [point[0] for point in component]
+    component_y = [point[1] for point in component]
+    for local_y in range(min(component_y) - 2, max(component_y) + 3):
+        for local_x in range(min(component_x) - 2, max(component_x) + 3):
+            if (local_x, local_y) in component_set:
+                continue
+            if (local_x, local_y) in dark_points:
+                return True
+    return False
 
 
 def _corner_background_value(image: Image.Image) -> int:
