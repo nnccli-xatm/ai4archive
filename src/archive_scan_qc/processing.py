@@ -8718,11 +8718,12 @@ def _detect_dark_border_bbox(image: Image.Image) -> DarkBorderDetection:
     max_y = max(2, int(height * 0.08))
     min_retain_width = int(width * 0.88)
     min_retain_height = int(height * 0.88)
-    left = _dark_edge_run(grayscale, "left", max_x)
-    right = _dark_edge_run(grayscale, "right", max_x)
-    top = _dark_edge_run(grayscale, "top", max_y)
-    bottom = _dark_edge_run(grayscale, "bottom", max_y)
+    left, left_broken = _dark_edge_run(grayscale, "left", max_x)
+    right, right_broken = _dark_edge_run(grayscale, "right", max_x)
+    top, top_broken = _dark_edge_run(grayscale, "top", max_y)
+    bottom, bottom_broken = _dark_edge_run(grayscale, "bottom", max_y)
     runs = (left, right, top, bottom)
+    has_broken_edge = left_broken or right_broken or top_broken or bottom_broken
 
     if max(runs) < 2:
         return DarkBorderDetection(None, "no confident dark edge border")
@@ -8741,13 +8742,15 @@ def _detect_dark_border_bbox(image: Image.Image) -> DarkBorderDetection:
     if _has_protected_dark_content_near_trim_boundary(grayscale, bbox):
         return DarkBorderDetection(None, "protected edge content near dark border")
 
-    return DarkBorderDetection(bbox, "dark edge border trimmed")
+    reason = "broken dark edge border trimmed" if has_broken_edge else "dark edge border trimmed"
+    return DarkBorderDetection(bbox, reason)
 
 
-def _dark_edge_run(image: Image.Image, side: str, max_pixels: int) -> int:
+def _dark_edge_run(image: Image.Image, side: str, max_pixels: int) -> tuple[int, bool]:
     width, height = image.size
     pixels = image.load()
     run = 0
+    used_broken_edge = False
     for offset in range(max_pixels):
         if side == "left":
             values = [pixels[offset, y] for y in range(height)]
@@ -8757,18 +8760,70 @@ def _dark_edge_run(image: Image.Image, side: str, max_pixels: int) -> int:
             values = [pixels[x, offset] for x in range(width)]
         else:
             values = [pixels[x, height - 1 - offset] for x in range(width)]
-        dark_ratio = sum(1 for value in values if value <= 70) / len(values)
-        deep_gray_ratio = sum(1 for value in values if value <= 110) / len(values)
-        mean = sum(values) / len(values)
-        variance = sum((value - mean) ** 2 for value in values) / len(values)
-        stddev = variance**0.5
-        if (dark_ratio >= 0.70 and mean <= 105) or (
-            deep_gray_ratio >= 0.96 and mean <= 118 and stddev <= 18
-        ):
+        if _is_continuous_dark_edge_line(values):
             run = offset + 1
+        elif _is_broken_dark_edge_line(values):
+            run = offset + 1
+            used_broken_edge = True
         else:
             break
-    return run
+    return run, used_broken_edge
+
+
+def _is_continuous_dark_edge_line(values: list[int]) -> bool:
+    dark_ratio = sum(1 for value in values if value <= 70) / len(values)
+    deep_gray_ratio = sum(1 for value in values if value <= 110) / len(values)
+    mean = sum(values) / len(values)
+    variance = sum((value - mean) ** 2 for value in values) / len(values)
+    stddev = variance**0.5
+    return (dark_ratio >= 0.70 and mean <= 105) or (
+        deep_gray_ratio >= 0.96 and mean <= 118 and stddev <= 18
+    )
+
+
+def _is_broken_dark_edge_line(values: list[int]) -> bool:
+    length = len(values)
+    if length < 40:
+        return False
+
+    dark_pixels = [value <= 70 for value in values]
+    deep_gray_pixels = [value <= 110 for value in values]
+    light_pixels = [value >= 170 for value in values]
+    dark_ratio = sum(1 for is_dark in dark_pixels if is_dark) / length
+    deep_gray_ratio = sum(1 for is_gray in deep_gray_pixels if is_gray) / length
+    mean = sum(values) / length
+    if not ((dark_ratio >= 0.55 and mean <= 125) or (deep_gray_ratio >= 0.62 and mean <= 145)):
+        return False
+
+    light_runs = _boolean_runs(light_pixels)
+    if not light_runs:
+        return False
+    total_light_gap = sum(end - start for start, end in light_runs)
+    longest_light_gap = max(end - start for start, end in light_runs)
+    if len(light_runs) > 2:
+        return False
+    if total_light_gap / length > 0.34 or longest_light_gap / length > 0.34:
+        return False
+
+    dark_runs = _boolean_runs(deep_gray_pixels)
+    if not dark_runs:
+        return False
+    longest_dark_run = max(end - start for start, end in dark_runs)
+    return longest_dark_run / length >= 0.35
+
+
+def _boolean_runs(flags: list[bool]) -> list[tuple[int, int]]:
+    runs: list[tuple[int, int]] = []
+    start: int | None = None
+    for index, flag in enumerate(flags):
+        if flag and start is None:
+            start = index
+        elif not flag and start is not None:
+            runs.append((start, index))
+            start = None
+    if start is not None:
+        runs.append((start, len(flags)))
+    return runs
 
 
 def _light_page_background_mean(image: Image.Image) -> float:
