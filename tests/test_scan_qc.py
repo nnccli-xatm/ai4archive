@@ -8031,6 +8031,38 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn("A001_edges", audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
 
+    def test_deskew_corrects_shallow_stable_text_on_light_paper(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            image = _synthetic_shallow_stable_text_page().rotate(
+                -0.45,
+                resample=Image.Resampling.BICUBIC,
+                expand=True,
+                fillcolor=(246, 246, 246),
+            )
+            image.save(input_dir / "A001_shallow_text.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(deskew=True, workers=1))
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            record = manifest["files"][0]
+            self.assertEqual(record["status"], "processed")
+            self.assertTrue(record["deskewed"])
+            self.assertAlmostEqual(record["skew_angle_degrees"], -0.45, delta=0.25)
+            self.assertGreaterEqual(record["skew_confidence"], 0.08)
+            self.assertEqual(record["deskew_reason"], "deskew applied")
+            self.assertEqual(audit_summary["counts"]["deskewed_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["deskew"]["reason_distribution"]["deskew applied"], 1)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("A001_shallow_text", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
     def test_deskew_does_not_rotate_blank_or_low_contrast_pages(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -8057,6 +8089,42 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(audit_summary["counts"]["deskew_skipped_files"], 2)
             self.assertEqual(audit_summary["guardrails"]["deskew"]["skipped_files"], 2)
             self.assertGreaterEqual(audit_summary["guardrails"]["deskew"]["reason_distribution"]["low contrast"], 1)
+
+    def test_deskew_noops_for_shallow_table_and_color_mark_risks(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            _synthetic_shallow_table_page().rotate(
+                -0.45,
+                resample=Image.Resampling.BICUBIC,
+                expand=True,
+                fillcolor=(246, 246, 246),
+            ).save(input_dir / "A001_table.png", dpi=(300, 300))
+            _synthetic_shallow_stable_text_page(red_mark=True).rotate(
+                -0.45,
+                resample=Image.Resampling.BICUBIC,
+                expand=True,
+                fillcolor=(246, 246, 246),
+            ).save(input_dir / "A001_red_mark.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(deskew=True, workers=1))
+            audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
+
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            for name in ("A001_table.png", "A001_red_mark.png"):
+                self.assertEqual(records[name]["status"], "processed")
+                self.assertFalse(records[name]["deskewed"])
+                self.assertEqual(records[name]["deskew_reason"], "table or color mark rotation risk")
+                self.assertIn("deskew_noop", records[name]["operations"])
+            self.assertEqual(audit_summary["counts"]["deskew_skipped_files"], 2)
+            self.assertEqual(
+                audit_summary["guardrails"]["deskew"]["reason_distribution"]["table or color mark rotation risk"],
+                2,
+            )
 
     def test_deskew_noops_for_sparse_and_inconsistent_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -12147,6 +12215,27 @@ def _synthetic_ink_text_page() -> Image.Image:
     draw = ImageDraw.Draw(image)
     for y in range(42, 132, 18):
         draw.rectangle((48, y, 190, y + 4), fill=255)
+    return image
+
+
+def _synthetic_shallow_stable_text_page(*, red_mark: bool = False) -> Image.Image:
+    image = Image.new("RGB", (240, 320), (246, 246, 246))
+    draw = ImageDraw.Draw(image)
+    for y in range(50, 230, 30):
+        draw.rectangle((45, y, 195, y + 3), fill=(50, 50, 50))
+    if red_mark:
+        draw.ellipse((164, 42, 210, 88), outline=(180, 38, 32), width=3)
+        draw.line((176, 66, 198, 66), fill=(180, 38, 32), width=2)
+    return image
+
+
+def _synthetic_shallow_table_page() -> Image.Image:
+    image = Image.new("RGB", (240, 320), (246, 246, 246))
+    draw = ImageDraw.Draw(image)
+    for y in range(48, 230, 30):
+        draw.line((34, y, 206, y), fill=(50, 50, 50), width=2)
+    for x in range(34, 207, 22):
+        draw.line((x, 48, x, 228), fill=(50, 50, 50), width=2)
     return image
 
 
