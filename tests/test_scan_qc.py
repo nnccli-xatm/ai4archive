@@ -7070,6 +7070,109 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn("private_sparse_text_cast", audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
 
+    def test_normalize_paper_color_cast_corrects_subtle_cool_cast_without_foreground_shift(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            default_process_dir = root / "processed-default"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source_path = input_dir / "private_subtle_cool_text_cast.png"
+            source = Image.new("RGB", (240, 180), (244, 246, 247))
+            draw = ImageDraw.Draw(source)
+            for y in (42, 66, 90):
+                draw.rectangle((36, y, 128, y + 3), fill=(58, 58, 58))
+            draw.rectangle((182, 24, 196, 30), fill=(72, 72, 72))
+            source.save(source_path, dpi=(300, 300))
+            source_sha = _sha256_for_test(source_path)
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            default_manifest = process_images(report, input_dir, default_process_dir, ProcessingOptions(workers=1))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(normalize_paper_color_cast=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            default_record = default_manifest["files"][0]
+            record = manifest["files"][0]
+            processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+
+            self.assertEqual(source_sha, _sha256_for_test(source_path))
+            self.assertFalse(default_record["paper_color_cast_normalized"])
+            self.assertIn("normalize_paper_color_cast_disabled", default_record["operations"])
+            self.assertTrue(record["paper_color_cast_normalized"])
+            self.assertEqual(record["paper_color_cast_reason_code"], "applied_mild_uniform_scanner_cast")
+            self.assertGreater(record["paper_color_cast_delta"], 2.0)
+            self.assertLessEqual(record["paper_color_cast_delta"], 4.0)
+            self.assertLessEqual(record["paper_color_cast_brightness_delta"], 2.0)
+            self.assertGreater(record["paper_color_cast_changed_pixel_ratio"], 0.90)
+            self.assertLessEqual(record["paper_color_cast_candidate_pixel_ratio"], 0.95)
+            self.assertLess(_mean_channel_spread(processed), _mean_channel_spread(source) - 2.0)
+            self.assertLess(_mean_luma_delta(source, processed), 2.0)
+            self.assertLess(_changed_ratio_for_test(source, processed, (34, 40, 130, 95)), 0.001)
+            self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
+
+            cast_guard = audit_summary["guardrails"]["paper_color_cast"]
+            self.assertEqual(audit_summary["counts"]["paper_color_cast_normalized_files"], 1)
+            self.assertEqual(cast_guard["reason_code_distribution"]["applied_mild_uniform_scanner_cast"], 1)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_subtle_cool_text_cast", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
+    def test_normalize_paper_color_cast_skips_ambiguous_cool_cast_evidence_with_public_codes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            mixed_cast = Image.new("RGB", (180, 140), (244, 246, 247))
+            ImageDraw.Draw(mixed_cast).rectangle((90, 0, 179, 139), fill=(235, 248, 247))
+            pages = {
+                "private_cool_colored_paper.png": Image.new("RGB", (180, 140), (229, 237, 235)),
+                "private_mixed_cool_cast.png": mixed_cast,
+            }
+            for name, image in pages.items():
+                image.save(input_dir / name, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(normalize_paper_color_cast=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            expected_codes = {
+                "private_cool_colored_paper.png": "colored_paper",
+                "private_mixed_cool_cast.png": "not_uniform",
+            }
+            for source_name, reason_code in expected_codes.items():
+                source = pages[source_name]
+                record = records[source_name]
+                processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+                self.assertFalse(record["paper_color_cast_normalized"], source_name)
+                self.assertEqual(record["paper_color_cast_reason_code"], reason_code, source_name)
+                self.assertIn("normalize_paper_color_cast_noop", record["operations"], source_name)
+                self.assertLess(_changed_ratio_for_test(source, processed, (0, 0, source.width, source.height)), 0.001)
+
+            guard = audit_summary["guardrails"]["paper_color_cast"]
+            self.assertEqual(audit_summary["counts"]["paper_color_cast_normalized_files"], 0)
+            self.assertEqual(audit_summary["counts"]["paper_color_cast_skipped_files"], len(pages))
+            self.assertEqual(guard["skip_reason_code_distribution"]["colored_paper"], 1)
+            self.assertEqual(guard["skip_reason_code_distribution"]["not_uniform"], 1)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_cool_colored_paper", audit_summary_text)
+            self.assertNotIn("private_mixed_cool_cast", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
     def test_normalize_paper_color_cast_corrects_tiny_protected_color_marks(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

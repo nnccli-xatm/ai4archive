@@ -3829,11 +3829,19 @@ def _normalize_paper_color_cast_conservative(image: Image.Image) -> PaperColorCa
         )
 
     channel_spread = max(means) - min(means)
-    if channel_spread < 4.0:
+    cool_cast_evidence = means[0] == min(means) and max(means[1], means[2]) - means[0] >= 2.5
+    min_cast_spread = 2.5 if cool_cast_evidence and brightness_mean >= 240 else 4.0
+    if channel_spread < min_cast_spread:
         return _paper_color_cast_noop(
             image,
             "paper color cast normalization skipped: already near neutral",
             "already_neutral",
+        )
+    if cool_cast_evidence and brightness_mean < 240 and channel_spread >= 8.0:
+        return _paper_color_cast_noop(
+            image,
+            "paper color cast normalization skipped: colored paper or strong color evidence",
+            "colored_paper",
         )
     if channel_spread > 18.0 or min(means) < 212:
         return _paper_color_cast_noop(
@@ -3860,7 +3868,8 @@ def _normalize_paper_color_cast_conservative(image: Image.Image) -> PaperColorCa
 
     target = sum(means) / 3
     offsets = [max(-9.0, min(9.0, target - mean)) for mean in means]
-    if max(abs(offset) for offset in offsets) < 2.0:
+    min_offset = 1.25 if cool_cast_evidence and channel_spread < 4.0 else 2.0
+    if max(abs(offset) for offset in offsets) < min_offset:
         return _paper_color_cast_noop(
             image,
             "paper color cast normalization skipped: correction below conservative threshold",
@@ -3927,7 +3936,8 @@ def _normalize_paper_color_cast_conservative(image: Image.Image) -> PaperColorCa
     after_means = [sum(pixel[index] for pixel in after_pixels) / max(1, len(after_pixels)) for index in range(3)]
     after_spread = max(after_means) - min(after_means)
     color_delta = channel_spread - after_spread
-    if color_delta < 3.0 or color_delta > 12.0:
+    min_color_delta = 2.0 if cool_cast_evidence and channel_spread < 4.0 else 3.0
+    if color_delta < min_color_delta or color_delta > 12.0:
         return _paper_color_cast_noop(
             image,
             "paper color cast normalization skipped: color delta outside conservative threshold",
