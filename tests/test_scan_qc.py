@@ -5854,6 +5854,43 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(plan["summary"]["faded_text_enhancement_candidates"], 1)
             self.assertTrue(plan["files"][0]["faded_text_enhancement_candidate"])
 
+    def test_enhance_faded_text_preserves_thin_low_contrast_gray_strokes_in_preflight(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            _synthetic_faded_text_page(ink=224).save(input_dir / "private_low_contrast_gray_text.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(enhance_faded_text=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            record = manifest["files"][0]
+            audit = record["processing_audit"]
+            self.assertTrue(record["faded_text_enhanced"])
+            self.assertEqual(record["faded_text_reason_code"], "applied_stable_low_contrast_text")
+            self.assertGreaterEqual(audit["faded_text_delta"], 8.0)
+            self.assertGreater(audit["faded_text_changed_pixel_ratio"], 0.0)
+            self.assertLessEqual(audit["faded_text_changed_pixel_ratio"], 0.10)
+            self.assertLessEqual(audit["faded_text_candidate_pixel_ratio"], 0.16)
+            self.assertEqual(audit["guardrail_failures"], [])
+            self.assertEqual(audit_summary["counts"]["faded_text_enhanced_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["faded_text"]["reason_code_distribution"],
+                {"applied_stable_low_contrast_text": 1},
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_low_contrast_gray_text", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
     def test_enhance_faded_text_noops_for_normal_color_dark_photo_texture_and_default_off(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

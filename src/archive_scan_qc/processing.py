@@ -6079,7 +6079,7 @@ def _faded_text_reason_zh(reason_code: str | None) -> str | None:
 
 def _faded_text_sample_candidate_ratio(grayscale: Image.Image, threshold: float, p95: int) -> float:
     sample = grayscale.copy()
-    sample.thumbnail((96, 96), Image.Resampling.BILINEAR)
+    sample.thumbnail((96, 96), Image.Resampling.NEAREST)
     candidate = sample.point(
         lambda value: 255 if 95 <= value <= threshold and 10 <= p95 - value <= 76 else 0,
         mode="L",
