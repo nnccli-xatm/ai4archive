@@ -5327,7 +5327,7 @@ def _clean_bleed_through_conservative(image: Image.Image) -> BleedThroughCleanup
     for y in range(edge_margin, image.height - edge_margin):
         for x in range(edge_margin, image.width - edge_margin):
             value = int(source_pixels[x, y])
-            if not (190 <= value <= background - 5 and 5 <= background - value <= 32):
+            if not (190 <= value <= background - 4 and 4 <= background - value <= 32):
                 continue
             if int(edge_pixels[x, y]) >= 22:
                 continue
