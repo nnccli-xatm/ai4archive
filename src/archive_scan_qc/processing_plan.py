@@ -66,6 +66,9 @@ def build_processing_plan(
             1 for record in records if record.get("background_stain_lightening_candidate")
         ),
         "scanline_lightening_candidates": sum(1 for record in records if record.get("scanline_lightening_candidate")),
+        "illumination_gradient_leveling_candidates": sum(
+            1 for record in records if record.get("illumination_gradient_leveling_candidate")
+        ),
         "faded_text_enhancement_candidates": sum(
             1 for record in records if record.get("faded_text_enhancement_candidate")
         ),
@@ -90,6 +93,7 @@ def build_processing_plan(
             "lighten_corner_shadows": options.lighten_corner_shadows,
             "lighten_background_stains": options.lighten_background_stains,
             "lighten_fold_shadows": options.lighten_fold_shadows,
+            "level_illumination_gradient": options.level_illumination_gradient,
             "clean_bleed_through": options.clean_bleed_through,
             "lighten_scanlines": options.lighten_scanlines,
             "enhance_faded_text": options.enhance_faded_text,
@@ -169,6 +173,12 @@ def _plan_record(item: dict[str, Any], input_dir: Path, options: ProcessingOptio
         "corner_shadows_corners": [],
         "background_stain_lightening_candidate": False,
         "background_stains_reason": None,
+        "illumination_gradient_leveling_candidate": False,
+        "illumination_gradient_reason": None,
+        "illumination_gradient_reason_code": None,
+        "illumination_gradient_orientation": None,
+        "illumination_gradient_changed_pixel_ratio": 0.0,
+        "illumination_gradient_candidate_pixel_ratio": 0.0,
         "scanline_lightening_candidate": False,
         "scanlines_reason": None,
         "scanlines_orientation": None,
@@ -245,6 +255,14 @@ def _plan_record(item: dict[str, Any], input_dir: Path, options: ProcessingOptio
             "corner_shadows_corners": process_info["corner_shadows_corners"],
             "background_stain_lightening_candidate": process_info["background_stains_lightened"],
             "background_stains_reason": process_info["background_stains_reason"],
+            "illumination_gradient_leveling_candidate": process_info["illumination_gradient_levelled"],
+            "illumination_gradient_reason": process_info["illumination_gradient_reason"],
+            "illumination_gradient_reason_code": process_info["illumination_gradient_reason_code"],
+            "illumination_gradient_orientation": process_info["illumination_gradient_orientation"],
+            "illumination_gradient_changed_pixel_ratio": process_info["illumination_gradient_changed_pixel_ratio"],
+            "illumination_gradient_candidate_pixel_ratio": process_info[
+                "illumination_gradient_candidate_pixel_ratio"
+            ],
             "scanline_lightening_candidate": process_info["scanlines_lightened"],
             "scanlines_reason": process_info["scanlines_reason"],
             "scanlines_orientation": process_info["scanlines_orientation"],
@@ -305,6 +323,12 @@ def _write_plan_csv(plan: dict[str, Any], path: Path) -> None:
         "corner_shadows_corners",
         "background_stain_lightening_candidate",
         "background_stains_reason",
+        "illumination_gradient_leveling_candidate",
+        "illumination_gradient_reason",
+        "illumination_gradient_reason_code",
+        "illumination_gradient_orientation",
+        "illumination_gradient_changed_pixel_ratio",
+        "illumination_gradient_candidate_pixel_ratio",
         "scanline_lightening_candidate",
         "scanlines_reason",
         "scanlines_orientation",

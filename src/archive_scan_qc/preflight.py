@@ -26,6 +26,7 @@ PROCESSING_FLAGS = (
     "lighten_corner_shadows",
     "lighten_background_stains",
     "lighten_fold_shadows",
+    "level_illumination_gradient",
     "clean_bleed_through",
     "lighten_scanlines",
     "enhance_faded_text",
@@ -57,6 +58,7 @@ class PreflightConfig:
     lighten_corner_shadows: bool = False
     lighten_background_stains: bool = False
     lighten_fold_shadows: bool = False
+    level_illumination_gradient: bool = False
     clean_bleed_through: bool = False
     lighten_scanlines: bool = False
     enhance_faded_text: bool = False
