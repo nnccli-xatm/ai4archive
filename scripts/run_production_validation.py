@@ -47,6 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--scanner-gutter-trim", action="store_true")
     parser.add_argument("--despeckle", action="store_true")
     parser.add_argument("--normalize-tones", action="store_true")
+    parser.add_argument("--normalize-paper-color-cast", action="store_true")
     parser.add_argument("--lighten-edge-shadow", action="store_true")
     parser.add_argument("--lighten-corner-shadows", action="store_true")
     parser.add_argument("--lighten-background-stains", action="store_true")
@@ -168,6 +169,7 @@ def _build_baseline_args(args: argparse.Namespace) -> argparse.Namespace:
         "--scanner-gutter-trim",
         "--despeckle",
         "--normalize-tones",
+        "--normalize-paper-color-cast",
         "--lighten-edge-shadow",
         "--lighten-corner-shadows",
         "--lighten-background-stains",

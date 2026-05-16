@@ -41,6 +41,7 @@ class PlanBatch:
     scanner_gutter_trim: bool
     despeckle: bool
     normalize_tones: bool
+    normalize_paper_color_cast: bool
     lighten_edge_shadow: bool
     lighten_corner_shadows: bool
     lighten_background_stains: bool
@@ -195,6 +196,7 @@ def _run_batch(project_id: str, batch: PlanBatch, index: int) -> dict[str, Any]:
                 scanner_gutter_trim=batch.scanner_gutter_trim,
                 despeckle=batch.despeckle,
                 normalize_tones=batch.normalize_tones,
+                normalize_paper_color_cast=batch.normalize_paper_color_cast,
                 lighten_edge_shadow=batch.lighten_edge_shadow,
                 lighten_corner_shadows=batch.lighten_corner_shadows,
                 lighten_background_stains=batch.lighten_background_stains,
@@ -268,6 +270,7 @@ def _run_batch(project_id: str, batch: PlanBatch, index: int) -> dict[str, Any]:
                     scanner_gutter_trim=batch.scanner_gutter_trim,
                     despeckle=batch.despeckle,
                     normalize_tones=batch.normalize_tones,
+                    normalize_paper_color_cast=batch.normalize_paper_color_cast,
                     lighten_edge_shadow=batch.lighten_edge_shadow,
                     lighten_corner_shadows=batch.lighten_corner_shadows,
                     lighten_background_stains=batch.lighten_background_stains,
@@ -396,6 +399,7 @@ def _aggregate_processing_operation_timings(batches: list[dict[str, Any]]) -> di
         "scanner_gutter_trim",
         "despeckle",
         "normalize_tones",
+        "normalize_paper_color_cast",
         "lighten_edge_shadow",
         "lighten_corner_shadows",
         "lighten_background_stains",
@@ -584,6 +588,11 @@ def _batch_from_row(row: dict[str, Any], index: int, plan_dir: Path, output_root
         scanner_gutter_trim=_bool(normalized.get("scanner_gutter_trim"), "scanner_gutter_trim", index),
         despeckle=_bool(normalized.get("despeckle"), "despeckle", index),
         normalize_tones=_bool(normalized.get("normalize_tones"), "normalize_tones", index),
+        normalize_paper_color_cast=_bool(
+            normalized.get("normalize_paper_color_cast"),
+            "normalize_paper_color_cast",
+            index,
+        ),
         lighten_edge_shadow=_bool(normalized.get("lighten_edge_shadow"), "lighten_edge_shadow", index),
         lighten_corner_shadows=_bool(normalized.get("lighten_corner_shadows"), "lighten_corner_shadows", index),
         lighten_background_stains=_bool(

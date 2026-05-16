@@ -152,6 +152,11 @@ def _add_scan_arguments(parser: argparse.ArgumentParser, *, include_scan_overrid
         help="Conservatively normalize gray/dark low-contrast neutral pages. Requires --process-out.",
     )
     parser.add_argument(
+        "--normalize-paper-color-cast",
+        action="store_true",
+        help="Conservatively neutralize mild uniform scanner color cast on otherwise plain bright paper. Requires --process-out.",
+    )
+    parser.add_argument(
         "--lighten-edge-shadow",
         action="store_true",
         help="Conservatively lighten narrow neutral page-edge shadows. Requires --process-out.",
@@ -319,6 +324,7 @@ def main(argv: list[str] | None = None) -> int:
                 scanner_gutter_trim=args.scanner_gutter_trim,
                 despeckle=args.despeckle,
                 normalize_tones=args.normalize_tones,
+                normalize_paper_color_cast=args.normalize_paper_color_cast,
                 lighten_edge_shadow=args.lighten_edge_shadow,
                 lighten_corner_shadows=args.lighten_corner_shadows,
                 lighten_background_stains=args.lighten_background_stains,
@@ -399,6 +405,7 @@ def _main_preflight(argv: list[str]) -> int:
             scanner_gutter_trim=args.scanner_gutter_trim,
             despeckle=args.despeckle,
             normalize_tones=args.normalize_tones,
+            normalize_paper_color_cast=args.normalize_paper_color_cast,
             resume_processing=args.resume_processing,
             lighten_edge_shadow=args.lighten_edge_shadow,
             lighten_corner_shadows=args.lighten_corner_shadows,
@@ -446,6 +453,7 @@ def _main_production_run(argv: list[str]) -> int:
     parser.add_argument("--scanner-gutter-trim", action="store_true", help="保守裁掉窄幅浅灰扫描台边。")
     parser.add_argument("--despeckle", action="store_true", help="清理孤立黑点。")
     parser.add_argument("--normalize-tones", action="store_true", help="保守校正偏灰、偏暗的低对比度页面。")
+    parser.add_argument("--normalize-paper-color-cast", action="store_true", help="保守校正浅色纸面上的轻微统一扫描偏色。")
     parser.add_argument("--lighten-edge-shadow", action="store_true", help="保守减淡不接触正文的页边窄幅阴影。")
     parser.add_argument("--lighten-corner-shadows", action="store_true", help="保守减淡不接触正文和标记的页面角落阴影。")
     parser.add_argument("--lighten-background-stains", action="store_true", help="保守减淡浅色纸面上不接触正文和印章的小范围浅斑。")
@@ -504,6 +512,7 @@ def _main_production_run(argv: list[str]) -> int:
                 scanner_gutter_trim=args.scanner_gutter_trim,
                 despeckle=args.despeckle,
                 normalize_tones=args.normalize_tones,
+                normalize_paper_color_cast=args.normalize_paper_color_cast,
                 lighten_edge_shadow=args.lighten_edge_shadow,
                 lighten_corner_shadows=args.lighten_corner_shadows,
                 lighten_background_stains=args.lighten_background_stains,
@@ -1113,6 +1122,11 @@ def _main_processing_plan(argv: list[str]) -> int:
     parser.add_argument("--scanner-gutter-trim", action="store_true", help="Plan conservative light scanner gutter trim candidates.")
     parser.add_argument("--despeckle", action="store_true", help="Plan isolated dark speckle cleanup candidates.")
     parser.add_argument("--normalize-tones", action="store_true", help="Plan conservative gray/dark page tone normalization candidates.")
+    parser.add_argument(
+        "--normalize-paper-color-cast",
+        action="store_true",
+        help="Plan conservative mild uniform scanner color-cast normalization candidates.",
+    )
     parser.add_argument("--lighten-edge-shadow", action="store_true", help="Plan conservative narrow edge-shadow lightening candidates.")
     parser.add_argument("--lighten-corner-shadows", action="store_true", help="Plan conservative smooth corner-shadow cleanup candidates.")
     parser.add_argument("--lighten-background-stains", action="store_true", help="Plan conservative light background stain candidates.")
@@ -1145,6 +1159,7 @@ def _main_processing_plan(argv: list[str]) -> int:
                 scanner_gutter_trim=args.scanner_gutter_trim,
                 despeckle=args.despeckle,
                 normalize_tones=args.normalize_tones,
+                normalize_paper_color_cast=args.normalize_paper_color_cast,
                 lighten_edge_shadow=args.lighten_edge_shadow,
                 lighten_corner_shadows=args.lighten_corner_shadows,
                 lighten_background_stains=args.lighten_background_stains,
@@ -1314,6 +1329,8 @@ def _validate_processing_flags(parser: argparse.ArgumentParser, args: argparse.N
         parser.error("--despeckle requires --process-out")
     if args.normalize_tones and not args.process_out:
         parser.error("--normalize-tones requires --process-out")
+    if args.normalize_paper_color_cast and not args.process_out:
+        parser.error("--normalize-paper-color-cast requires --process-out")
     if args.lighten_edge_shadow and not args.process_out:
         parser.error("--lighten-edge-shadow requires --process-out")
     if args.lighten_corner_shadows and not args.process_out:
