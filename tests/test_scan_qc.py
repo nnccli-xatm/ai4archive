@@ -6679,7 +6679,7 @@ class ScanQcTest(unittest.TestCase):
             default_process_dir = root / "processed-default"
             process_dir = root / "processed"
             input_dir.mkdir()
-            page = _synthetic_bleed_through_page("pale_ghost")
+            page = _synthetic_bleed_through_page("pale_diffuse_ghost")
             source_name = "private_faint_reverse_ghost.png"
             page.save(input_dir / source_name, dpi=(300, 300))
             source_bytes = (input_dir / source_name).read_bytes()
@@ -6768,9 +6768,23 @@ class ScanQcTest(unittest.TestCase):
                 source_name = record["source_relative_path"]
                 self.assertFalse(record["bleed_through_cleaned"], source_name)
                 self.assertIn("clean_bleed_through_noop", record["operations"], source_name)
+                self.assertIsInstance(record["bleed_through_reason"], str)
+                self.assertTrue(record["bleed_through_reason"].startswith("bleed-through cleanup skipped:"), source_name)
                 self.assertEqual(record["processing_audit"]["bleed_through_changed_pixel_ratio"], 0.0)
                 processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
                 self.assertIsNone(ImageChops.difference(pages[source_name].convert("RGB"), processed).getbbox())
+
+            reasons_by_source = {
+                record["source_relative_path"]: record["bleed_through_reason"] for record in manifest["files"]
+            }
+            self.assertEqual(
+                reasons_by_source["private_light_foreground_text.png"],
+                "bleed-through cleanup skipped: table line, page number, or annotation risk",
+            )
+            self.assertEqual(
+                reasons_by_source["private_red_stamp.png"],
+                "bleed-through cleanup skipped: color content, stamp, or annotation risk",
+            )
 
             self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 0)
             self.assertEqual(audit_summary["counts"]["bleed_through_skipped_files"], 6)
@@ -14503,6 +14517,14 @@ def _synthetic_bleed_through_page(variant: str) -> Image.Image:
         mask = mask.filter(ImageFilter.GaussianBlur(2.0))
         ghost = Image.new("RGB", image.size, (214, 214, 210))
         image.paste(ghost, (0, 0), mask.point(lambda value: int(value * 0.65)))
+    elif variant == "pale_diffuse_ghost":
+        mask = Image.new("L", image.size, 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.text((124, 82), "321", fill=255)
+        mask_draw.text((124, 104), "654", fill=255)
+        mask = mask.filter(ImageFilter.GaussianBlur(2.4))
+        ghost = Image.new("RGB", image.size, (232, 232, 228))
+        image.paste(ghost, (0, 0), mask.point(lambda value: int(value * 0.55)))
     elif variant == "text":
         draw.text((124, 86), "321", fill=(215, 215, 210))
         draw.line((120, 112, 206, 112), fill=(215, 215, 210), width=1)

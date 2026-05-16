@@ -5489,6 +5489,7 @@ def _clean_bleed_through_conservative(image: Image.Image) -> BleedThroughCleanup
         return _bleed_through_noop(image, "bleed-through cleanup skipped: edge content or binding risk")
 
     background = max(p90, p95 - 1)
+    min_ghost_signal = 2 if p50 >= 230 and p95 >= 238 else 4
     edge_signal = grayscale.filter(ImageFilter.FIND_EDGES)
     protected = foreground.filter(ImageFilter.MaxFilter(17))
     edge_margin = max(5, int(round(min(image.width, image.height) * 0.045)))
@@ -5499,7 +5500,10 @@ def _clean_bleed_through_conservative(image: Image.Image) -> BleedThroughCleanup
     for y in range(edge_margin, image.height - edge_margin):
         for x in range(edge_margin, image.width - edge_margin):
             value = int(source_pixels[x, y])
-            if not (190 <= value <= background - 4 and 4 <= background - value <= 32):
+            if not (
+                190 <= value <= background - min_ghost_signal
+                and min_ghost_signal <= background - value <= 32
+            ):
                 continue
             if int(edge_pixels[x, y]) >= 22:
                 continue
