@@ -9036,6 +9036,9 @@ _DESPECKLE_DENSE_PREFILTER_MIN_DARK_PIXELS = 512
 _DESPECKLE_DENSE_PREFILTER_MAX_LOW_CONNECTIVITY_RATIO = 0.01
 _DESPECKLE_CONTENT_CONTEXT_RADIUS = 8
 _DESPECKLE_CONTENT_CONTEXT_MIN_DARK_PIXELS = 6
+_DESPECKLE_SPARSE_TEXT_CLEARANCE_RADIUS = 5
+_DESPECKLE_SPARSE_TEXT_MIN_BACKGROUND_MEDIAN = 220
+_DESPECKLE_SPARSE_TEXT_MAX_NEARBY_CONTENT_PIXELS = 64
 _DESPECKLE_NEIGHBOR_OFFSETS = tuple(
     (offset_x, offset_y)
     for offset_y in (-1, 0, 1)
@@ -9151,16 +9154,6 @@ def _despeckle_replacements_numpy(
     median_gray = np.partition(neighbor_values, len(_DESPECKLE_NEIGHBOR_OFFSETS) // 2, axis=1)[
         :, len(_DESPECKLE_NEIGHBOR_OFFSETS) // 2
     ]
-    eligible = (
-        (dark_neighbors <= 1)
-        & (wider_dark <= 2)
-        & ~((gray[candidate_y, candidate_x] > _DESPECKLE_DARK_THRESHOLD) & (texture_counts >= 3))
-        & (nearby_content < _DESPECKLE_CONTENT_CONTEXT_MIN_DARK_PIXELS)
-        & (median_gray >= _DESPECKLE_MIN_BACKGROUND_MEDIAN)
-    )
-    if not bool(np.any(eligible)):
-        return []
-
     source = image if image.mode == "RGB" else image.convert("RGB")
     try:
         rgb = np.asarray(source, dtype=np.uint8)
@@ -9168,6 +9161,55 @@ def _despeckle_replacements_numpy(
         return None
     if rgb.shape[:2] != (height, width) or rgb.shape[2:] != (3,):
         return None
+
+    candidate_set = set(candidates)
+    protected_context = np.asarray(
+        [
+            _despeckle_has_sparse_text_protected_context(
+                lambda nx, ny: int(gray[ny, nx]),
+                lambda nx, ny: (int(rgb[ny, nx, 0]), int(rgb[ny, nx, 1]), int(rgb[ny, nx, 2])),
+                candidate_set=candidate_set,
+                width=width,
+                height=height,
+                x=int(x_value),
+                y=int(y_value),
+            )
+            for x_value, y_value in zip(candidate_x.tolist(), candidate_y.tolist())
+        ],
+        dtype=bool,
+    )
+    eligible = (
+        (dark_neighbors <= 1)
+        & (wider_dark <= 2)
+        & ~((gray[candidate_y, candidate_x] > _DESPECKLE_DARK_THRESHOLD) & (texture_counts >= 3))
+        & (nearby_content < _DESPECKLE_CONTENT_CONTEXT_MIN_DARK_PIXELS)
+        & (median_gray >= _DESPECKLE_MIN_BACKGROUND_MEDIAN)
+        & ~protected_context
+    )
+    if bool(np.any(~eligible & (nearby_content >= _DESPECKLE_CONTENT_CONTEXT_MIN_DARK_PIXELS))):
+        extra_eligible = []
+        for x_value, y_value, median_value, nearby_value in zip(
+            candidate_x.tolist(),
+            candidate_y.tolist(),
+            median_gray.tolist(),
+            nearby_content.tolist(),
+        ):
+            extra_eligible.append(
+                _despeckle_sparse_text_clearance_allows_cleanup(
+                    lambda nx, ny: int(gray[ny, nx]),
+                    lambda nx, ny: (int(rgb[ny, nx, 0]), int(rgb[ny, nx, 1]), int(rgb[ny, nx, 2])),
+                    candidate_set,
+                    width,
+                    height,
+                    int(x_value),
+                    int(y_value),
+                    int(median_value),
+                    int(nearby_value),
+                )
+            )
+        eligible = eligible | (np.asarray(extra_eligible, dtype=bool) & ~protected_context)
+    if not bool(np.any(eligible)):
+        return []
 
     eligible_x = candidate_x[eligible]
     eligible_y = candidate_y[eligible]
@@ -9254,12 +9296,38 @@ def _despeckle_replacements_fallback(
             y,
         ):
             continue
-        if _despeckle_has_nearby_content_context(gray_pixels, width, height, x, y):
-            continue
-
         median_gray = sorted(neighbor_values)[len(neighbor_values) // 2]
         if median_gray < _DESPECKLE_MIN_BACKGROUND_MEDIAN:
             continue
+
+        if source is None:
+            source = image if image.mode == "RGB" else image.convert("RGB")
+            source_pixels = source.load()
+        if _despeckle_has_sparse_text_protected_context(
+            gray_pixels,
+            source_pixels,
+            candidate_set=candidate_set,
+            width=width,
+            height=height,
+            x=x,
+            y=y,
+        ):
+            continue
+
+        nearby_content_count = _despeckle_nearby_content_context_count(gray_pixels, width, height, x, y)
+        if nearby_content_count >= _DESPECKLE_CONTENT_CONTEXT_MIN_DARK_PIXELS:
+            if not _despeckle_sparse_text_clearance_allows_cleanup(
+                gray_pixels,
+                source_pixels,
+                candidate_set,
+                width,
+                height,
+                x,
+                y,
+                median_gray,
+                nearby_content_count,
+            ):
+                continue
 
         if source is None:
             source = image if image.mode == "RGB" else image.convert("RGB")
@@ -9354,6 +9422,28 @@ def _despeckle_mask_touches_protected_edge(dark_mask: Image.Image) -> bool:
 
 
 def _despeckle_has_nearby_content_context(gray_pixels: Any, width: int, height: int, x: int, y: int) -> bool:
+    return (
+        _despeckle_nearby_content_context_count(
+            gray_pixels,
+            width,
+            height,
+            x,
+            y,
+            stop_at=_DESPECKLE_CONTENT_CONTEXT_MIN_DARK_PIXELS,
+        )
+        >= _DESPECKLE_CONTENT_CONTEXT_MIN_DARK_PIXELS
+    )
+
+
+def _despeckle_nearby_content_context_count(
+    gray_pixels: Any,
+    width: int,
+    height: int,
+    x: int,
+    y: int,
+    *,
+    stop_at: int | None = None,
+) -> int:
     dark_pixels = 0
     radius = _DESPECKLE_CONTENT_CONTEXT_RADIUS
     for ny in range(max(0, y - radius), min(height, y + radius + 1)):
@@ -9364,9 +9454,105 @@ def _despeckle_has_nearby_content_context(gray_pixels: Any, width: int, height: 
                 continue
             if gray_pixels[nx, ny] <= _DESPECKLE_NEAR_DARK_THRESHOLD:
                 dark_pixels += 1
-                if dark_pixels >= _DESPECKLE_CONTENT_CONTEXT_MIN_DARK_PIXELS:
-                    return True
+                if stop_at is not None and dark_pixels >= stop_at:
+                    return dark_pixels
+    return dark_pixels
+
+
+def _despeckle_sparse_text_clearance_allows_cleanup(
+    gray_pixels: Any,
+    rgb_pixels: Any | None,
+    candidate_set: set[tuple[int, int]],
+    width: int,
+    height: int,
+    x: int,
+    y: int,
+    median_gray: int,
+    nearby_content_count: int,
+) -> bool:
+    if _despeckle_pixel_at(gray_pixels, x, y) > _DESPECKLE_NEAR_DARK_THRESHOLD:
+        return False
+    if median_gray < _DESPECKLE_SPARSE_TEXT_MIN_BACKGROUND_MEDIAN:
+        return False
+    if nearby_content_count > _DESPECKLE_SPARSE_TEXT_MAX_NEARBY_CONTENT_PIXELS:
+        return False
+
+    component = _despeckle_candidate_component(candidate_set, x, y)
+    if len(component) > _DESPECKLE_MAX_COMPONENT_PIXELS:
+        return False
+    component_x = [point[0] for point in component]
+    component_y = [point[1] for point in component]
+    if max(component_x) - min(component_x) + 1 > 2:
+        return False
+    if max(component_y) - min(component_y) + 1 > 2:
+        return False
+
+    clearance = _DESPECKLE_SPARSE_TEXT_CLEARANCE_RADIUS
+    radius = _DESPECKLE_CONTENT_CONTEXT_RADIUS
+    for ny in range(max(0, y - radius), min(height, y + radius + 1)):
+        for nx in range(max(0, x - radius), min(width, x + radius + 1)):
+            if (nx, ny) in candidate_set:
+                continue
+            if _despeckle_pixel_at(gray_pixels, nx, ny) > _DESPECKLE_NEAR_DARK_THRESHOLD:
+                continue
+            if abs(nx - x) <= clearance and abs(ny - y) <= clearance:
+                return False
+    return True
+
+
+def _despeckle_has_sparse_text_protected_context(
+    gray_pixels: Any,
+    rgb_pixels: Any | None,
+    *,
+    candidate_set: set[tuple[int, int]],
+    width: int,
+    height: int,
+    x: int,
+    y: int,
+) -> bool:
+    component = _despeckle_candidate_component(candidate_set, x, y)
+    component_x = [point[0] for point in component]
+    component_y = [point[1] for point in component]
+    radius = _DESPECKLE_CONTENT_CONTEXT_RADIUS
+    for ny in range(max(0, min(component_y) - radius), min(height, max(component_y) + radius + 1)):
+        for nx in range(max(0, min(component_x) - radius), min(width, max(component_x) + radius + 1)):
+            if (nx, ny) in candidate_set:
+                continue
+            if _despeckle_pixel_at(gray_pixels, nx, ny) > _DESPECKLE_NEAR_DARK_THRESHOLD:
+                continue
+            if rgb_pixels is not None and _despeckle_pixel_color_protected(_despeckle_pixel_at(rgb_pixels, nx, ny)):
+                return True
+            if any(abs(nx - cx) <= 1 and abs(ny - cy) > 2 for cx, cy in component):
+                return True
     return False
+
+
+def _despeckle_pixel_at(pixels: Any, x: int, y: int) -> Any:
+    if callable(pixels):
+        return pixels(x, y)
+    return pixels[x, y]
+
+
+def _despeckle_candidate_component(
+    candidate_set: set[tuple[int, int]],
+    x: int,
+    y: int,
+) -> list[tuple[int, int]]:
+    stack = [(x, y)]
+    visited: set[tuple[int, int]] = set()
+    component: list[tuple[int, int]] = []
+    while stack:
+        point = stack.pop()
+        if point in visited or point not in candidate_set:
+            continue
+        visited.add(point)
+        component.append(point)
+        point_x, point_y = point
+        for offset_x, offset_y in _DESPECKLE_NEIGHBOR_OFFSETS:
+            neighbor = (point_x + offset_x, point_y + offset_y)
+            if neighbor not in visited and neighbor in candidate_set:
+                stack.append(neighbor)
+    return component
 
 
 def _despeckle_has_candidate_texture_context(
