@@ -112,6 +112,19 @@ class ScannerGutterTrimDetection:
 
 
 @dataclass(frozen=True)
+class DespeckleResult:
+    image: Image.Image
+    changed_pixels: int
+    backend_mode: str
+    reason: str
+    reason_code: str
+    candidate_pixels: int
+    candidate_count: int
+    candidate_count_bucket: str
+    replacement_work_performed: bool
+
+
+@dataclass(frozen=True)
 class ToneNormalizationResult:
     image: Image.Image
     applied: bool
@@ -2584,6 +2597,7 @@ def _aggregate_operation_timings(records: list[dict[str, Any]], options: Process
             timings[operation].update(_aggregate_deskew_detection_counts(records))
         if operation == "despeckle":
             timings[operation].update(_aggregate_despeckle_backend(records, is_enabled))
+            timings[operation].update(_aggregate_despeckle_candidate_counts(records))
         if operation == "sharpen_text_edges":
             timings[operation]["candidate_preflight_skipped_files"] = _operation_flag_count(
                 records,
@@ -2627,6 +2641,21 @@ def _aggregate_deskew_detection_counts(records: list[dict[str, Any]]) -> dict[st
     }
 
 
+def _aggregate_despeckle_candidate_counts(records: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "safe_skip_files": _operation_flag_count(records, "despeckle", "safe_skip"),
+        "replacement_work_files": _operation_flag_count(records, "despeckle", "replacement_work_performed"),
+        "reason_code_distribution": _operation_value_distribution(records, "despeckle", "reason_code"),
+        "candidate_count_bucket_distribution": _operation_value_distribution(
+            records,
+            "despeckle",
+            "candidate_count_bucket",
+        ),
+        "candidate_pixels": _operation_numeric_summary(records, "despeckle", "candidate_pixels"),
+        "candidate_count": _operation_numeric_summary(records, "despeckle", "candidate_count"),
+    }
+
+
 def _operation_value_distribution(records: list[dict[str, Any]], operation: str, key: str) -> dict[str, int]:
     values = [
         record["operation_timings"][operation].get(key)
@@ -2636,6 +2665,19 @@ def _operation_value_distribution(records: list[dict[str, Any]], operation: str,
         and isinstance(record["operation_timings"][operation].get(key), str)
     ]
     return _reason_counts(value for value in values if isinstance(value, str))
+
+
+def _operation_numeric_summary(records: list[dict[str, Any]], operation: str, key: str) -> dict[str, Any]:
+    values = [
+        int(record["operation_timings"][operation].get(key))
+        for record in records
+        if isinstance(record.get("operation_timings"), dict)
+        and isinstance(record["operation_timings"].get(operation), dict)
+        and isinstance(record["operation_timings"][operation].get(key), int)
+    ]
+    if not values:
+        return {"count": 0, "max": None, "total": 0}
+    return {"count": len(values), "max": max(values), "total": sum(values)}
 
 
 def _aggregate_scan_measurement_reuse(records: list[dict[str, Any]]) -> dict[str, Any]:
@@ -3056,10 +3098,21 @@ def _process_image(
     despeckle_backend_mode = "disabled"
     with _operation_timer(operation_timings, "despeckle", enabled=options.despeckle):
         if options.despeckle:
-            processed, despeckle_pixels_changed, despeckle_backend_mode, despeckle_reason = _despeckle_isolated_pixels_with_reason(
+            despeckle_result = _despeckle_isolated_pixels_with_reason(
                 processed,
                 backend=options.despeckle_backend,
             )
+            processed = despeckle_result.image
+            despeckle_pixels_changed = despeckle_result.changed_pixels
+            despeckle_backend_mode = despeckle_result.backend_mode
+            despeckle_reason = despeckle_result.reason
+            despeckle_timing = operation_timings.setdefault("despeckle", {})
+            despeckle_timing["reason_code"] = despeckle_result.reason_code
+            despeckle_timing["candidate_pixels"] = despeckle_result.candidate_pixels
+            despeckle_timing["candidate_count"] = despeckle_result.candidate_count
+            despeckle_timing["candidate_count_bucket"] = despeckle_result.candidate_count_bucket
+            despeckle_timing["replacement_work_performed"] = despeckle_result.replacement_work_performed
+            despeckle_timing["safe_skip"] = despeckle_result.changed_pixels == 0
             if despeckle_pixels_changed:
                 operations.append("despeckle_isolated_pixels")
                 despeckled = True
@@ -9285,24 +9338,59 @@ _DESPECKLE_NEIGHBOR_OFFSETS = tuple(
 
 
 def _despeckle_isolated_pixels(image: Image.Image, *, backend: str = "fallback") -> tuple[Image.Image, int, str]:
-    processed, changed, backend_mode, _reason = _despeckle_isolated_pixels_with_reason(image, backend=backend)
-    return processed, changed, backend_mode
+    result = _despeckle_isolated_pixels_with_reason(image, backend=backend)
+    return result.image, result.changed_pixels, result.backend_mode
 
 
-def _despeckle_isolated_pixels_with_reason(image: Image.Image, *, backend: str = "fallback") -> tuple[Image.Image, int, str, str]:
+def _despeckle_isolated_pixels_with_reason(image: Image.Image, *, backend: str = "fallback") -> DespeckleResult:
     if backend not in {"fallback", "numpy"}:
         raise ValueError("despeckle backend must be fallback or numpy")
 
     grayscale = image.convert("L")
     width, height = grayscale.size
     if width < 3 or height < 3:
-        return image.copy(), 0, "not_applicable", "despeckle not applicable to very small image"
+        return _despeckle_result(
+            image,
+            changed_pixels=0,
+            backend_mode="not_applicable",
+            reason="despeckle not applicable to very small image",
+            candidate_pixels=0,
+            candidate_count=0,
+            replacement_work_performed=False,
+        )
 
     candidate_mask, prefilter_reason = _despeckle_candidate_mask(image, grayscale)
     if prefilter_reason is not None:
-        return image.copy(), 0, "not_applicable", prefilter_reason
+        return _despeckle_result(
+            image,
+            changed_pixels=0,
+            backend_mode="not_applicable",
+            reason=prefilter_reason,
+            candidate_pixels=0,
+            candidate_count=0,
+            replacement_work_performed=False,
+        )
     if not candidate_mask.getbbox():
-        return image.copy(), 0, "not_applicable", "no isolated dark pixels found"
+        return _despeckle_result(
+            image,
+            changed_pixels=0,
+            backend_mode="not_applicable",
+            reason="no isolated dark pixels found",
+            candidate_pixels=0,
+            candidate_count=0,
+            replacement_work_performed=False,
+        )
+    candidate_pixels = _despeckle_mask_pixel_count(candidate_mask)
+    if _despeckle_mask_confined_to_protected_edge(candidate_mask):
+        return _despeckle_result(
+            image,
+            changed_pixels=0,
+            backend_mode="not_applicable",
+            reason="protected edge dark marks preserved",
+            candidate_pixels=candidate_pixels,
+            candidate_count=0,
+            replacement_work_performed=False,
+        )
     candidates, backend_mode = _despeckle_candidate_points_with_backend(candidate_mask, backend=backend)
     if not candidates:
         reason = (
@@ -9310,13 +9398,30 @@ def _despeckle_isolated_pixels_with_reason(image: Image.Image, *, backend: str =
             if _despeckle_mask_touches_protected_edge(candidate_mask)
             else "no isolated dark pixels found"
         )
-        return image.copy(), 0, backend_mode, reason
+        return _despeckle_result(
+            image,
+            changed_pixels=0,
+            backend_mode=backend_mode,
+            reason=reason,
+            candidate_pixels=candidate_pixels,
+            candidate_count=0,
+            replacement_work_performed=False,
+        )
 
     source_area = max(1, width * height)
     if len(candidates) / source_area > _DESPECKLE_MAX_CANDIDATE_RATIO:
-        return image.copy(), 0, backend_mode, "despeckle skipped: candidate density exceeds safety threshold"
+        return _despeckle_result(
+            image,
+            changed_pixels=0,
+            backend_mode=backend_mode,
+            reason="despeckle skipped: candidate density exceeds safety threshold",
+            candidate_pixels=candidate_pixels,
+            candidate_count=len(candidates),
+            replacement_work_performed=False,
+        )
 
     replacements: list[tuple[int, int, tuple[int, int, int]]] | None = None
+    replacement_work_performed = True
     if backend_mode == "numpy":
         replacements = _despeckle_replacements_numpy(image, grayscale, candidates)
         if replacements is None:
@@ -9326,9 +9431,25 @@ def _despeckle_isolated_pixels_with_reason(image: Image.Image, *, backend: str =
 
     changed = len(replacements)
     if not changed:
-        return image.copy(), 0, backend_mode, "no isolated dark pixels found"
+        return _despeckle_result(
+            image,
+            changed_pixels=0,
+            backend_mode=backend_mode,
+            reason="no isolated dark pixels found",
+            candidate_pixels=candidate_pixels,
+            candidate_count=len(candidates),
+            replacement_work_performed=replacement_work_performed,
+        )
     if changed / source_area > _DESPECKLE_MAX_CHANGED_RATIO:
-        return image.copy(), 0, backend_mode, "despeckle skipped: pixel change ratio exceeds safety threshold"
+        return _despeckle_result(
+            image,
+            changed_pixels=0,
+            backend_mode=backend_mode,
+            reason="despeckle skipped: pixel change ratio exceeds safety threshold",
+            candidate_pixels=candidate_pixels,
+            candidate_count=len(candidates),
+            replacement_work_performed=replacement_work_performed,
+        )
 
     source = image if image.mode == "RGB" else image.convert("RGB")
     output = source.copy()
@@ -9337,10 +9458,80 @@ def _despeckle_isolated_pixels_with_reason(image: Image.Image, *, backend: str =
         output_pixels[x, y] = replacement
 
     if image.mode == "L":
-        return output.convert("L"), changed, backend_mode, "isolated dark pixels replaced"
-    if image.mode == "RGB":
-        return output, changed, backend_mode, "isolated dark pixels replaced"
-    return output.convert(image.mode), changed, backend_mode, "isolated dark pixels replaced"
+        result_image = output.convert("L")
+    elif image.mode == "RGB":
+        result_image = output
+    else:
+        result_image = output.convert(image.mode)
+    return _despeckle_result(
+        result_image,
+        changed_pixels=changed,
+        backend_mode=backend_mode,
+        reason="isolated dark pixels replaced",
+        candidate_pixels=candidate_pixels,
+        candidate_count=len(candidates),
+        replacement_work_performed=replacement_work_performed,
+    )
+
+
+def _despeckle_result(
+    image: Image.Image,
+    *,
+    changed_pixels: int,
+    backend_mode: str,
+    reason: str,
+    candidate_pixels: int,
+    candidate_count: int,
+    replacement_work_performed: bool,
+) -> DespeckleResult:
+    return DespeckleResult(
+        image=image.copy() if changed_pixels == 0 else image,
+        changed_pixels=changed_pixels,
+        backend_mode=backend_mode,
+        reason=reason,
+        reason_code=_despeckle_reason_code(reason, changed_pixels),
+        candidate_pixels=candidate_pixels,
+        candidate_count=candidate_count,
+        candidate_count_bucket=_despeckle_count_bucket(candidate_count),
+        replacement_work_performed=replacement_work_performed,
+    )
+
+
+def _despeckle_reason_code(reason: str, changed_pixels: int) -> str:
+    if changed_pixels:
+        return "applied_isolated_pixels"
+    if reason == "despeckle skipped: candidate density exceeds safety threshold":
+        return "candidate_density_exceeds_safety_threshold"
+    if reason == "despeckle skipped: pixel change ratio exceeds safety threshold":
+        return "pixel_change_ratio_exceeds_safety_threshold"
+    if reason == "protected edge dark marks preserved":
+        return "protected_edge_dark_marks"
+    if reason == "despeckle not applicable to very small image":
+        return "not_applicable_small_image"
+    return "no_isolated_candidates"
+
+
+def _despeckle_count_bucket(count: int) -> str:
+    if count <= 0:
+        return "0"
+    if count <= 4:
+        return "1-4"
+    if count <= 16:
+        return "5-16"
+    if count <= 64:
+        return "17-64"
+    if count <= 256:
+        return "65-256"
+    if count <= 1024:
+        return "257-1024"
+    return "1025+"
+
+
+def _despeckle_mask_pixel_count(mask: Image.Image) -> int:
+    bbox = mask.getbbox()
+    if bbox is None:
+        return 0
+    return mask.crop(bbox).tobytes().count(255)
 
 
 def _despeckle_replacements_numpy(
@@ -9656,6 +9847,25 @@ def _despeckle_mask_touches_protected_edge(dark_mask: Image.Image) -> bool:
     margin = _despeckle_protected_edge_margin(width, height)
     left, top, right, bottom = bbox
     return left < margin or top < margin or right > width - margin or bottom > height - margin
+
+
+def _despeckle_mask_confined_to_protected_edge(dark_mask: Image.Image) -> bool:
+    bbox = dark_mask.getbbox()
+    if not bbox:
+        return False
+    width, height = dark_mask.size
+    margin = _despeckle_protected_edge_margin(width, height)
+    left, top, right, bottom = bbox
+    crop_width = right - left
+    crop_values = dark_mask.crop(bbox).tobytes()
+    index = crop_values.find(255)
+    while index != -1:
+        x = left + (index % crop_width)
+        y = top + (index // crop_width)
+        if margin <= x < width - margin and margin <= y < height - margin:
+            return False
+        index = crop_values.find(255, index + 1)
+    return True
 
 
 def _despeckle_has_nearby_content_context(gray_pixels: Any, width: int, height: int, x: int, y: int) -> bool:
