@@ -5696,9 +5696,13 @@ def _has_protected_dark_content_near_trim_boundary(
 
 
 _DESPECKLE_DARK_THRESHOLD = 60
+_DESPECKLE_LIGHT_SOIL_MIN_BACKGROUND = 205
+_DESPECKLE_LIGHT_SOIL_MIN_DELTA = 18
+_DESPECKLE_LIGHT_SOIL_MAX_VALUE = 226
 _DESPECKLE_NEAR_DARK_THRESHOLD = 90
 _DESPECKLE_MIN_BACKGROUND_MEDIAN = 120
 _DESPECKLE_MAX_CANDIDATE_RATIO = 0.02
+_DESPECKLE_MAX_LIGHT_SOIL_PREFILTER_RATIO = _DESPECKLE_MAX_CANDIDATE_RATIO
 _DESPECKLE_MAX_CHANGED_RATIO = 0.01
 _DESPECKLE_MAX_COMPONENT_PIXELS = 4
 _DESPECKLE_MAX_COMPONENT_SPAN = 3
@@ -5722,16 +5726,16 @@ def _despeckle_isolated_pixels_with_reason(image: Image.Image, *, backend: str =
     if width < 3 or height < 3:
         return image.copy(), 0, "not_applicable", "despeckle not applicable to very small image"
 
-    min_value, _max_value = grayscale.getextrema()
-    if min_value > _DESPECKLE_DARK_THRESHOLD:
+    candidate_mask, prefilter_reason = _despeckle_candidate_mask(image, grayscale)
+    if prefilter_reason is not None:
+        return image.copy(), 0, "not_applicable", prefilter_reason
+    if not candidate_mask.getbbox():
         return image.copy(), 0, "not_applicable", "no isolated dark pixels found"
-
-    dark_mask = grayscale.point(lambda value: 255 if value <= _DESPECKLE_DARK_THRESHOLD else 0, mode="L")
-    candidates, backend_mode = _despeckle_candidate_points_with_backend(dark_mask, backend=backend)
+    candidates, backend_mode = _despeckle_candidate_points_with_backend(candidate_mask, backend=backend)
     if not candidates:
         reason = (
             "protected edge dark marks preserved"
-            if _despeckle_mask_touches_protected_edge(dark_mask)
+            if _despeckle_mask_touches_protected_edge(candidate_mask)
             else "no isolated dark pixels found"
         )
         return image.copy(), 0, backend_mode, reason
@@ -5769,6 +5773,14 @@ def _despeckle_isolated_pixels_with_reason(image: Image.Image, *, backend: str =
                 if gray_pixels[nx, ny] <= _DESPECKLE_NEAR_DARK_THRESHOLD and (nx, ny) not in candidate_set:
                     wider_dark += 1
         if wider_dark > 2:
+            continue
+        if gray_pixels[x, y] > _DESPECKLE_DARK_THRESHOLD and _despeckle_has_candidate_texture_context(
+            candidate_set,
+            width,
+            height,
+            x,
+            y,
+        ):
             continue
         if _despeckle_has_nearby_content_context(gray_pixels, width, height, x, y):
             continue
@@ -5808,6 +5820,72 @@ def _despeckle_isolated_pixels_with_reason(image: Image.Image, *, backend: str =
     return output.convert(image.mode), changed, backend_mode, "isolated dark pixels replaced"
 
 
+def _despeckle_candidate_mask(image: Image.Image, grayscale: Image.Image) -> tuple[Image.Image, str | None]:
+    width, height = grayscale.size
+    histogram = grayscale.histogram()
+    total = width * height
+    p50 = _histogram_percentile(histogram, total, 0.50)
+    p95 = _histogram_percentile(histogram, total, 0.95)
+    light_soil_threshold = min(_DESPECKLE_LIGHT_SOIL_MAX_VALUE, p95 - _DESPECKLE_LIGHT_SOIL_MIN_DELTA)
+    include_light_soil = p50 >= _DESPECKLE_LIGHT_SOIL_MIN_BACKGROUND and light_soil_threshold > _DESPECKLE_DARK_THRESHOLD
+    dark_mask = grayscale.point(lambda value: 255 if value <= _DESPECKLE_DARK_THRESHOLD else 0, mode="L")
+    if include_light_soil:
+        light_soil_ratio = sum(histogram[_DESPECKLE_DARK_THRESHOLD + 1 : light_soil_threshold + 1]) / max(1, total)
+        if light_soil_ratio > _DESPECKLE_MAX_LIGHT_SOIL_PREFILTER_RATIO:
+            if dark_mask.getbbox():
+                return dark_mask, None
+            return Image.new("L", grayscale.size, 0), "despeckle skipped: candidate density exceeds safety threshold"
+    if include_light_soil:
+        mask = grayscale.point(
+            lambda value: 255
+            if value <= _DESPECKLE_DARK_THRESHOLD
+            or (value <= light_soil_threshold and p95 - value >= _DESPECKLE_LIGHT_SOIL_MIN_DELTA)
+            else 0,
+            mode="L",
+        )
+    else:
+        mask = dark_mask
+    if image.mode == "L" or not mask.getbbox():
+        return mask, None
+
+    source_rgb = image.convert("RGB")
+    rgb_pixels = source_rgb.load()
+    mask_pixels = mask.load()
+    bbox = mask.getbbox()
+    if bbox is None:
+        return mask, None
+    left, top, right, bottom = bbox
+    crop_width = right - left
+    crop_values = mask.crop(bbox).tobytes()
+    index = crop_values.find(255)
+    while index != -1:
+        x = left + (index % crop_width)
+        y = top + (index // crop_width)
+        if _despeckle_pixel_color_protected(rgb_pixels[x, y]):
+            mask_pixels[x, y] = 0
+        index = crop_values.find(255, index + 1)
+    return mask, None
+
+
+def _despeckle_pixel_color_protected(pixel: tuple[int, int, int]) -> bool:
+    red_value, green_value, blue_value = pixel
+    high = max(pixel)
+    low = min(pixel)
+    spread = high - low
+    brightness = sum(pixel) / 3
+    if red_value >= 105 and red_value - green_value >= 30 and red_value - blue_value >= 30:
+        return True
+    weak_warm_soil = (
+        brightness >= 155
+        and red_value >= green_value >= blue_value
+        and red_value - green_value <= 24
+        and green_value - blue_value <= 55
+    )
+    if weak_warm_soil:
+        return False
+    return spread > 28 and brightness > 70
+
+
 def _despeckle_protected_edge_margin(width: int, height: int) -> int:
     return min(5, max(1, min(width, height) // 12))
 
@@ -5834,6 +5912,28 @@ def _despeckle_has_nearby_content_context(gray_pixels: Any, width: int, height: 
             if gray_pixels[nx, ny] <= _DESPECKLE_NEAR_DARK_THRESHOLD:
                 dark_pixels += 1
                 if dark_pixels >= _DESPECKLE_CONTENT_CONTEXT_MIN_DARK_PIXELS:
+                    return True
+    return False
+
+
+def _despeckle_has_candidate_texture_context(
+    candidate_set: set[tuple[int, int]],
+    width: int,
+    height: int,
+    x: int,
+    y: int,
+) -> bool:
+    nearby_candidates = 0
+    radius = _DESPECKLE_CONTENT_CONTEXT_RADIUS
+    for ny in range(max(0, y - radius), min(height, y + radius + 1)):
+        for nx in range(max(0, x - radius), min(width, x + radius + 1)):
+            if nx == x and ny == y:
+                continue
+            if abs(nx - x) <= 2 and abs(ny - y) <= 2:
+                continue
+            if (nx, ny) in candidate_set:
+                nearby_candidates += 1
+                if nearby_candidates >= 3:
                     return True
     return False
 
