@@ -5,10 +5,12 @@ import importlib.util
 import json
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter
 
+from archive_scan_qc import processing as processing_module
 from archive_scan_qc.benchmark import _processing_quality_regression, run_benchmark
 from archive_scan_qc.processing import ProcessingOptions, _combination_quality_guard, process_images
 from archive_scan_qc.scanner import ScanConfig, scan_batch
@@ -296,6 +298,177 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertFalse(audit_summary["privacy"]["contains_paths"])
             self.assertFalse(audit_summary["privacy"]["contains_hashes"])
             for forbidden in ("private_cloud_stain_combo.png", str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
+    def test_full_chain_reverts_low_contrast_foreground_weakening_aggregate_only(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-faint-foreground-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "private_faint_foreground_guard.png"
+            image = Image.new("RGB", (180, 120), (242, 242, 238))
+            draw = ImageDraw.Draw(image)
+            draw.ellipse((104, 24, 152, 68), fill=(224, 224, 220))
+            for y in (38, 56, 74):
+                draw.rectangle((34, y, 136, y + 3), fill=(207, 207, 203))
+            draw.line((42, 94, 136, 104), fill=(205, 205, 201), width=2)
+            image.save(source, dpi=(300, 300))
+            source_bytes = source.read_bytes()
+
+            def lift_faint_strokes(current: Image.Image) -> processing_module.BackgroundStainLighteningResult:
+                changed = current.copy()
+                changed_draw = ImageDraw.Draw(changed)
+                changed_draw.ellipse((104, 24, 152, 68), fill=(235, 235, 232))
+                for y in (38, 56, 74):
+                    changed_draw.rectangle((34, y, 136, y + 3), fill=(235, 235, 232))
+                return processing_module.BackgroundStainLighteningResult(
+                    changed,
+                    True,
+                    "background stains lightened: stable isolated stains on light paper",
+                    224.0,
+                    235.0,
+                    11.0,
+                    0.050,
+                    0.050,
+                )
+
+            def lift_handwriting(current: Image.Image) -> processing_module.ScanlineLighteningResult:
+                changed = current.copy()
+                ImageDraw.Draw(changed).line((42, 94, 136, 104), fill=(235, 235, 232), width=2)
+                return processing_module.ScanlineLighteningResult(
+                    changed,
+                    True,
+                    "scanlines lightened: stable horizontal scanline pattern",
+                    "horizontal",
+                    1,
+                    205.0,
+                    235.0,
+                    30.0,
+                    0.010,
+                    0.010,
+                )
+
+            report = scan_batch(ScanConfig("synthetic-regression", "faint-foreground-guard", input_dir, output_dir))
+            with mock.patch.object(
+                processing_module,
+                "_lighten_background_stains_conservative",
+                side_effect=lift_faint_strokes,
+            ), mock.patch.object(
+                processing_module,
+                "_lighten_scanlines_conservative",
+                side_effect=lift_handwriting,
+            ):
+                manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+            audit = record["processing_audit"]
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(record["status"], "processed")
+            self.assertFalse(record["background_stains_lightened"])
+            self.assertFalse(record["scanlines_lightened"])
+            self.assertEqual(audit["processed_output_safety_guard_action"], "reverted_to_source")
+            self.assertEqual(audit["processed_output_safety_guard_reason_code"], "processed_output_quality_reverted")
+            self.assertIn("protected_foreground_weakening", audit["processed_output_safety_guard_reasons"])
+            self.assertIn("processed_output_safety_guard_reverted_to_source", record["operations"])
+            with Image.open(process_dir / record["output_relative_path"]) as processed:
+                self.assertEqual(processed.convert("RGB").tobytes(), image.tobytes())
+            self.assertEqual(audit_summary["counts"]["processed_output_safety_guard_reverted_files"], 1)
+            self.assertEqual(
+                audit_summary["counts"]["processed_output_foreground_weakening_guard_reverted_files"],
+                1,
+            )
+            self.assertEqual(
+                audit_summary["guardrails"]["processed_output_safety_guard"]["reason_distribution"][
+                    "protected_foreground_weakening"
+                ],
+                1,
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            for forbidden in ("private_faint_foreground_guard", str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
+    def test_full_chain_reverts_edge_annotation_foreground_weakening_aggregate_only(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-edge-annotation-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "private_edge_annotation_guard.png"
+            image = Image.new("RGB", (180, 120), (242, 242, 238))
+            draw = ImageDraw.Draw(image)
+            draw.ellipse((86, 34, 152, 84), fill=(224, 224, 220))
+            draw.rectangle((4, 92, 24, 98), fill=(205, 205, 201))
+            draw.text((144, 8), "12", fill=(206, 206, 202))
+            image.save(source, dpi=(300, 300))
+
+            def lift_page_number(current: Image.Image) -> processing_module.BackgroundStainLighteningResult:
+                changed = current.copy()
+                changed_draw = ImageDraw.Draw(changed)
+                changed_draw.ellipse((86, 34, 152, 84), fill=(235, 235, 232))
+                changed_draw.text((144, 8), "12", fill=(235, 235, 232))
+                return processing_module.BackgroundStainLighteningResult(
+                    changed,
+                    True,
+                    "background stains lightened: stable isolated stains on light paper",
+                    224.0,
+                    235.0,
+                    11.0,
+                    0.045,
+                    0.045,
+                )
+
+            def lift_edge_mark(current: Image.Image) -> processing_module.ScanlineLighteningResult:
+                changed = current.copy()
+                ImageDraw.Draw(changed).rectangle((4, 92, 24, 98), fill=(235, 235, 232))
+                return processing_module.ScanlineLighteningResult(
+                    changed,
+                    True,
+                    "scanlines lightened: stable horizontal scanline pattern",
+                    "horizontal",
+                    1,
+                    205.0,
+                    235.0,
+                    30.0,
+                    0.008,
+                    0.008,
+                )
+
+            report = scan_batch(ScanConfig("synthetic-regression", "edge-annotation-guard", input_dir, output_dir))
+            with mock.patch.object(
+                processing_module,
+                "_lighten_background_stains_conservative",
+                side_effect=lift_page_number,
+            ), mock.patch.object(
+                processing_module,
+                "_lighten_scanlines_conservative",
+                side_effect=lift_edge_mark,
+            ):
+                manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+            audit = record["processing_audit"]
+
+            self.assertEqual(record["status"], "processed")
+            self.assertFalse(record["background_stains_lightened"])
+            self.assertFalse(record["scanlines_lightened"])
+            self.assertEqual(audit["processed_output_safety_guard_action"], "reverted_to_source")
+            self.assertIn("protected_foreground_weakening", audit["processed_output_safety_guard_reasons"])
+            with Image.open(process_dir / record["output_relative_path"]) as processed:
+                self.assertEqual(processed.convert("RGB").tobytes(), image.tobytes())
+            self.assertEqual(
+                audit_summary["guardrails"]["processed_output_safety_guard"]["reason_distribution"][
+                    "protected_foreground_weakening"
+                ],
+                1,
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            for forbidden in ("private_edge_annotation_guard", str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
     def test_low_confidence_combination_preserves_original_with_public_reason_code(self) -> None:

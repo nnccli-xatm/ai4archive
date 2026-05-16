@@ -1670,6 +1670,12 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                 if audit.get("processed_output_safety_guard_reverted") is True
                 and "dark_foreground_loss" in audit.get("processed_output_safety_guard_reasons", [])
             ),
+            "processed_output_foreground_weakening_guard_reverted_files": sum(
+                1
+                for audit in audit_records
+                if audit.get("processed_output_safety_guard_reverted") is True
+                and "protected_foreground_weakening" in audit.get("processed_output_safety_guard_reasons", [])
+            ),
             "deskew_safe_skip_files": _int_count(deskew_timing.get("safe_skip_files")),
             "deskew_projection_detection_files": _int_count(deskew_timing.get("projection_detection_files")),
             "deskew_fallback_detection_files": _int_count(deskew_timing.get("fallback_detection_files")),
@@ -3346,7 +3352,7 @@ def _process_image(
         crop_bbox,
         dark_border.bbox,
         scanner_gutter.bbox,
-        skew.angle_degrees,
+        skew.angle_degrees if deskewed else None,
         despeckle_pixels_changed,
         tone.applied,
         tone.background_before,
@@ -7674,6 +7680,12 @@ def _processed_output_safety_guard(metrics: dict[str, Any], options: ProcessingO
     ):
         reasons.append("dark_foreground_loss")
     if (
+        source_dark_ratio >= 0.003
+        and _processed_output_foreground_risk_operation_count(metrics) >= 2
+        and dark_loss_ratio > max(0.60, options.audit_max_processed_dark_pixel_loss_ratio)
+    ):
+        reasons.append("protected_foreground_weakening")
+    if (
         _float_metric(metrics, "pixel_change_ratio") > options.audit_max_processed_full_page_change_ratio
         and metrics.get("pixel_change_guardrail_scope") == "same_size_pixel_change"
         and metrics.get("tone_normalized") is not True
@@ -7688,6 +7700,27 @@ def _processed_output_safety_guard(metrics: dict[str, Any], options: ProcessingO
         "reason_code": "processed_output_quality_reverted" if reasons else "safe_processed_output_passed",
         "reasons": sorted(set(reasons)),
     }
+
+
+def _processed_output_foreground_risk_operation_count(metrics: dict[str, Any]) -> int:
+    risk_operations = (
+        ("tone_normalized", "tone_changed_pixel_ratio"),
+        ("paper_color_cast_normalized", "paper_color_cast_changed_pixel_ratio"),
+        ("edge_shadow_lightened", "edge_shadow_changed_pixel_ratio"),
+        ("corner_shadows_lightened", "corner_shadows_changed_pixel_ratio"),
+        ("background_stains_lightened", "background_stains_changed_pixel_ratio"),
+        ("fold_shadows_lightened", "fold_shadows_changed_pixel_ratio"),
+        ("illumination_gradient_levelled", "illumination_gradient_changed_pixel_ratio"),
+        ("bleed_through_cleaned", "bleed_through_changed_pixel_ratio"),
+        ("scanlines_lightened", "scanlines_changed_pixel_ratio"),
+        ("faded_text_enhanced", "faded_text_changed_pixel_ratio"),
+        ("text_edges_sharpened", "text_edges_changed_pixel_ratio"),
+    )
+    return sum(
+        1
+        for applied_key, changed_key in risk_operations
+        if metrics.get(applied_key) is True and _float_metric(metrics, changed_key) > 0.0
+    )
 
 
 def _local_content_change_guard(source_l: Image.Image, processed_l: Image.Image, options: ProcessingOptions) -> dict[str, Any]:
