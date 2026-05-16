@@ -7549,9 +7549,14 @@ class ScanQcTest(unittest.TestCase):
                 "private_vertical_scanline.png": _synthetic_repair_scanline_page("vertical"),
                 "private_broken_horizontal_scanline.png": _synthetic_broken_repair_scanline_page("horizontal"),
                 "private_broken_vertical_scanline.png": _synthetic_broken_repair_scanline_page("vertical"),
+                "private_faint_broken_sparse_scanline.png": _synthetic_faint_broken_sparse_scanline_page(),
             }
             for name, image in pages.items():
                 image.save(input_dir / name, dpi=(300, 300))
+            source_hashes_before = {
+                name: _sha256_for_test(input_dir / name)
+                for name in pages
+            }
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
             manifest = process_images(
@@ -7569,6 +7574,7 @@ class ScanQcTest(unittest.TestCase):
                 ("private_vertical_scanline.png", "vertical"),
                 ("private_broken_horizontal_scanline.png", "horizontal"),
                 ("private_broken_vertical_scanline.png", "vertical"),
+                ("private_faint_broken_sparse_scanline.png", "horizontal"),
             ):
                 record = records[source_name]
                 processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
@@ -7589,13 +7595,14 @@ class ScanQcTest(unittest.TestCase):
                 self.assertGreater(record["scanlines_delta"], 3.0, source_name)
                 self.assertGreater(record["scanlines_candidate_pixel_ratio"], 0.0007, source_name)
                 self.assertEqual(record["processing_audit"]["guardrail_failures"], [], source_name)
+                self.assertEqual(source_hashes_before[source_name], _sha256_for_test(input_dir / source_name))
 
-            self.assertEqual(audit_summary["counts"]["scanlines_lightened_files"], 4)
+            self.assertEqual(audit_summary["counts"]["scanlines_lightened_files"], 5)
             self.assertEqual(audit_summary["counts"]["scanlines_skipped_files"], 0)
             scanline_guard = audit_summary["guardrails"]["scanlines"]
-            self.assertEqual(scanline_guard["applied_files"], 4)
+            self.assertEqual(scanline_guard["applied_files"], 5)
             self.assertEqual(scanline_guard["skipped_files"], 0)
-            self.assertEqual(scanline_guard["direction_distribution"]["horizontal"], 2)
+            self.assertEqual(scanline_guard["direction_distribution"]["horizontal"], 3)
             self.assertEqual(scanline_guard["direction_distribution"]["vertical"], 2)
             self.assertIn("scanlines_changed_pixel_ratio", audit_summary["metrics"])
             self.assertIn("changed_pixel_ratio", scanline_guard)
@@ -7605,6 +7612,7 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn("private_vertical_scanline", audit_summary_text)
             self.assertNotIn("private_broken_horizontal_scanline", audit_summary_text)
             self.assertNotIn("private_broken_vertical_scanline", audit_summary_text)
+            self.assertNotIn("private_faint_broken_sparse_scanline", audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
 
     def test_lighten_scanlines_skips_protected_content_and_uncertain_pages(self) -> None:
@@ -14576,6 +14584,14 @@ def _synthetic_broken_repair_scanline_page(orientation: str) -> Image.Image:
             draw.rectangle((212, y0, 213, y0 + 9), fill=(232, 232, 228))
     else:
         raise ValueError(orientation)
+    return image
+
+
+def _synthetic_faint_broken_sparse_scanline_page() -> Image.Image:
+    image = _synthetic_repair_scanline_page("horizontal", scanline=False)
+    draw = ImageDraw.Draw(image)
+    for x0 in (18, 54, 92, 132, 172, 212):
+        draw.rectangle((x0, 132, x0 + 14, 133), fill=(235, 235, 231))
     return image
 
 

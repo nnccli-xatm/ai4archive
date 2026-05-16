@@ -5898,7 +5898,7 @@ def _scanline_axis_lightening_plan(
             if candidate_mean is None:
                 continue
             candidate_delta = local_mean - candidate_mean
-            if not (1.2 <= local_delta <= 12.0 and 5.5 <= candidate_delta <= 24.0):
+            if not (1.2 <= local_delta <= 12.0 and 5.0 <= candidate_delta <= 24.0):
                 continue
             if stat["dark_ratio"] > 0.001:
                 continue
