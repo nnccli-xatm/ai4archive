@@ -424,6 +424,80 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in ("synthetic_shallow_deskew_combo.png", str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_post_deskew_corner_wedge_crop_stays_within_geometry_limits(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-post-deskew-wedge-full-chain-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            image = Image.new("RGB", (320, 240), (248, 248, 248))
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((58, 50, 262, 184), outline=(160, 160, 160), width=1)
+            for y in (70, 92, 114, 136, 158):
+                draw.rectangle((72, y, 248, y + 3), fill=(35, 35, 35))
+            image.rotate(
+                1.0,
+                resample=Image.Resampling.BICUBIC,
+                expand=True,
+                fillcolor=(245, 245, 245),
+            ).save(input_dir / "private_full_chain_post_deskew_wedge.png", dpi=(300, 300))
+
+            report = scan_batch(
+                ScanConfig("synthetic-regression", "post-deskew-wedge-full-chain", input_dir, output_dir)
+            )
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(
+                    auto_crop=True,
+                    deskew=True,
+                    trim_dark_border=True,
+                    scanner_gutter_trim=True,
+                    despeckle=True,
+                    normalize_tones=True,
+                    lighten_edge_shadow=True,
+                    lighten_background_stains=True,
+                    level_illumination_gradient=True,
+                    lighten_scanlines=True,
+                    enhance_faded_text=True,
+                    sharpen_text_edges=True,
+                    workers=1,
+                ),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+            audit = record["processing_audit"]
+
+            self.assertEqual(record["status"], "processed")
+            self.assertTrue(record["deskewed"])
+            self.assertTrue(record["cropped"])
+            self.assertEqual(record["crop_reason"], "post-deskew safe canvas crop applied")
+            self.assertEqual(record["output_size"], [318, 238])
+            self.assertEqual(audit["guardrail_failures"], [])
+            self.assertEqual(audit["cumulative_change_guard_action"], "passed")
+            self.assertEqual(audit["combination_quality_guard_reason_code"], "safe_combination_passed")
+            self.assertEqual(audit["processed_output_safety_guard_reason_code"], "safe_processed_output_passed")
+            self.assertLessEqual(audit["crop_ratio"], 0.06)
+            self.assertLessEqual(audit["cumulative_change_crop_ratio"], 0.06)
+            self.assertEqual(audit["max_trim_margin_ratio"], 0.0)
+            self.assertTrue(audit_summary["operations"]["deskew"])
+            self.assertTrue(audit_summary["operations"]["trim_dark_border"])
+            self.assertTrue(audit_summary["operations"]["scanner_gutter_trim"])
+            self.assertTrue(audit_summary["operations"]["auto_crop"])
+            self.assertEqual(audit_summary["counts"]["auto_crop_applied_files"], 1)
+            self.assertEqual(audit_summary["counts"]["scanner_gutter_trimmed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            for forbidden in (
+                "private_full_chain_post_deskew_wedge.png",
+                str(input_dir),
+                "source_relative_path",
+                "source_sha256",
+            ):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_risk_combination_pages_skip_or_stay_low_change(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-risk-") as temp_dir:
             root = Path(temp_dir)
