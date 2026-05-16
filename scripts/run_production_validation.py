@@ -48,6 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--normalize-tones", action="store_true")
     parser.add_argument("--lighten-edge-shadow", action="store_true")
     parser.add_argument("--lighten-background-stains", action="store_true")
+    parser.add_argument("--lighten-fold-shadows", action="store_true")
     parser.add_argument("--clean-bleed-through", action="store_true")
     parser.add_argument("--lighten-scanlines", action="store_true")
     parser.add_argument("--enhance-faded-text", action="store_true")
@@ -166,6 +167,7 @@ def _build_baseline_args(args: argparse.Namespace) -> argparse.Namespace:
         "--normalize-tones",
         "--lighten-edge-shadow",
         "--lighten-background-stains",
+        "--lighten-fold-shadows",
         "--clean-bleed-through",
         "--lighten-scanlines",
         "--enhance-faded-text",

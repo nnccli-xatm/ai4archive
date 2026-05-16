@@ -39,6 +39,7 @@ class ProcessingOptions:
     normalize_tones: bool = False
     lighten_edge_shadow: bool = False
     lighten_background_stains: bool = False
+    lighten_fold_shadows: bool = False
     clean_bleed_through: bool = False
     lighten_scanlines: bool = False
     enhance_faded_text: bool = False
@@ -124,6 +125,20 @@ class BackgroundStainLighteningResult:
     stain_mean_before: float | None
     stain_mean_after: float | None
     stain_delta: float
+    changed_pixel_ratio: float
+    candidate_pixel_ratio: float
+
+
+@dataclass(frozen=True)
+class FoldShadowCleanupResult:
+    image: Image.Image
+    applied: bool
+    reason: str
+    orientation: str | None
+    band_count: int
+    band_mean_before: float | None
+    band_mean_after: float | None
+    band_delta: float
     changed_pixel_ratio: float
     candidate_pixel_ratio: float
 
@@ -259,6 +274,7 @@ def process_images(
                 if options.lighten_background_stains
                 else "lighten_background_stains_disabled"
             ),
+            "lighten_fold_shadows_conservative" if options.lighten_fold_shadows else "lighten_fold_shadows_disabled",
             "clean_bleed_through_conservative" if options.clean_bleed_through else "clean_bleed_through_disabled",
             "lighten_scanlines_conservative" if options.lighten_scanlines else "lighten_scanlines_disabled",
             "enhance_faded_text_conservative" if options.enhance_faded_text else "enhance_faded_text_disabled",
@@ -659,6 +675,16 @@ def _process_record(
         "background_stains_delta": 0.0,
         "background_stains_changed_pixel_ratio": 0.0,
         "background_stains_candidate_pixel_ratio": 0.0,
+        "fold_shadows_lightened": False,
+        "fold_shadows_reason": None,
+        "fold_shadows_reason_code": None,
+        "fold_shadows_orientation": None,
+        "fold_shadows_count": 0,
+        "fold_shadows_mean_before": None,
+        "fold_shadows_mean_after": None,
+        "fold_shadows_delta": 0.0,
+        "fold_shadows_changed_pixel_ratio": 0.0,
+        "fold_shadows_candidate_pixel_ratio": 0.0,
         "bleed_through_cleaned": False,
         "bleed_through_reason": None,
         "bleed_through_mean_before": None,
@@ -770,6 +796,16 @@ def _process_record(
                 "background_stains_delta": process_info["background_stains_delta"],
                 "background_stains_changed_pixel_ratio": process_info["background_stains_changed_pixel_ratio"],
                 "background_stains_candidate_pixel_ratio": process_info["background_stains_candidate_pixel_ratio"],
+                "fold_shadows_lightened": process_info["fold_shadows_lightened"],
+                "fold_shadows_reason": process_info["fold_shadows_reason"],
+                "fold_shadows_reason_code": process_info["fold_shadows_reason_code"],
+                "fold_shadows_orientation": process_info["fold_shadows_orientation"],
+                "fold_shadows_count": process_info["fold_shadows_count"],
+                "fold_shadows_mean_before": process_info["fold_shadows_mean_before"],
+                "fold_shadows_mean_after": process_info["fold_shadows_mean_after"],
+                "fold_shadows_delta": process_info["fold_shadows_delta"],
+                "fold_shadows_changed_pixel_ratio": process_info["fold_shadows_changed_pixel_ratio"],
+                "fold_shadows_candidate_pixel_ratio": process_info["fold_shadows_candidate_pixel_ratio"],
                 "bleed_through_cleaned": process_info["bleed_through_cleaned"],
                 "bleed_through_reason": process_info["bleed_through_reason"],
                 "bleed_through_mean_before": process_info["bleed_through_mean_before"],
@@ -856,6 +892,16 @@ def _process_record(
                     "background_stains_delta": process_info["background_stains_delta"],
                     "background_stains_changed_pixel_ratio": process_info["background_stains_changed_pixel_ratio"],
                     "background_stains_candidate_pixel_ratio": process_info["background_stains_candidate_pixel_ratio"],
+                    "fold_shadows_lightened": process_info["fold_shadows_lightened"],
+                    "fold_shadows_reason": process_info["fold_shadows_reason"],
+                    "fold_shadows_reason_code": process_info["fold_shadows_reason_code"],
+                    "fold_shadows_orientation": process_info["fold_shadows_orientation"],
+                    "fold_shadows_count": process_info["fold_shadows_count"],
+                    "fold_shadows_mean_before": process_info["fold_shadows_mean_before"],
+                    "fold_shadows_mean_after": process_info["fold_shadows_mean_after"],
+                    "fold_shadows_delta": process_info["fold_shadows_delta"],
+                    "fold_shadows_changed_pixel_ratio": process_info["fold_shadows_changed_pixel_ratio"],
+                    "fold_shadows_candidate_pixel_ratio": process_info["fold_shadows_candidate_pixel_ratio"],
                     "bleed_through_cleaned": process_info["bleed_through_cleaned"],
                     "bleed_through_reason": process_info["bleed_through_reason"],
                     "bleed_through_mean_before": process_info["bleed_through_mean_before"],
@@ -953,6 +999,7 @@ def _processing_options_fingerprint(options: ProcessingOptions) -> str:
         "normalize_tones": options.normalize_tones,
         "lighten_edge_shadow": options.lighten_edge_shadow,
         "lighten_background_stains": options.lighten_background_stains,
+        "lighten_fold_shadows": options.lighten_fold_shadows,
         "clean_bleed_through": options.clean_bleed_through,
         "lighten_scanlines": options.lighten_scanlines,
         "enhance_faded_text": options.enhance_faded_text,
@@ -1061,6 +1108,30 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
         if record.get("background_stains_lightened") is False
         and isinstance(reason, str)
         and reason != "background stain lightening disabled"
+    ]
+    fold_shadows_reasons = [
+        record.get("fold_shadows_reason")
+        for record in processed_records
+        if isinstance(record.get("fold_shadows_reason"), str)
+    ]
+    fold_shadows_reason_codes = [
+        record.get("fold_shadows_reason_code")
+        for record in processed_records
+        if isinstance(record.get("fold_shadows_reason_code"), str)
+    ]
+    fold_shadows_skipped_reason_codes = [
+        code
+        for record in processed_records
+        for code in [record.get("fold_shadows_reason_code")]
+        if record.get("fold_shadows_lightened") is False and isinstance(code, str) and code != "disabled"
+    ]
+    fold_shadows_skipped_reasons = [
+        reason
+        for record in processed_records
+        for reason in [record.get("fold_shadows_reason")]
+        if record.get("fold_shadows_lightened") is False
+        and isinstance(reason, str)
+        and reason != "fold shadow cleanup disabled"
     ]
     scanlines_reasons = [
         record.get("scanlines_reason")
@@ -1188,6 +1259,7 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "normalize_tones": options.normalize_tones,
             "lighten_edge_shadow": options.lighten_edge_shadow,
             "lighten_background_stains": options.lighten_background_stains,
+            "lighten_fold_shadows": options.lighten_fold_shadows,
             "clean_bleed_through": options.clean_bleed_through,
             "lighten_scanlines": options.lighten_scanlines,
             "enhance_faded_text": options.enhance_faded_text,
@@ -1321,6 +1393,15 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                 if record.get("background_stains_lightened") is False
                 and record.get("background_stains_reason") not in {None, "background stain lightening disabled"}
             ),
+            "fold_shadows_lightened_files": sum(
+                1 for audit in audit_records if audit.get("fold_shadows_lightened") is True
+            ),
+            "fold_shadows_skipped_files": sum(
+                1
+                for record in processed_records
+                if record.get("fold_shadows_lightened") is False
+                and record.get("fold_shadows_reason") not in {None, "fold shadow cleanup disabled"}
+            ),
             "bleed_through_cleaned_files": sum(1 for audit in audit_records if audit.get("bleed_through_cleaned") is True),
             "bleed_through_skipped_files": sum(
                 1
@@ -1383,6 +1464,13 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             ),
             "background_stains_candidate_pixel_ratio": _aggregate_metric(
                 audit_records, "background_stains_candidate_pixel_ratio"
+            ),
+            "fold_shadows_delta": _aggregate_metric(audit_records, "fold_shadows_delta"),
+            "fold_shadows_changed_pixel_ratio": _aggregate_metric(
+                audit_records, "fold_shadows_changed_pixel_ratio"
+            ),
+            "fold_shadows_candidate_pixel_ratio": _aggregate_metric(
+                audit_records, "fold_shadows_candidate_pixel_ratio"
             ),
             "bleed_through_delta": _aggregate_metric(audit_records, "bleed_through_delta"),
             "bleed_through_changed_pixel_ratio": _aggregate_metric(
@@ -1651,6 +1739,44 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                     1 for reason in background_stains_skipped_reasons if "low-confidence" in reason
                 ),
             },
+            "fold_shadows": {
+                "applied_files": sum(1 for audit in audit_records if audit.get("fold_shadows_lightened") is True),
+                "skipped_files": sum(
+                    1
+                    for record in processed_records
+                    if record.get("fold_shadows_lightened") is False
+                    and record.get("fold_shadows_reason") not in {None, "fold shadow cleanup disabled"}
+                ),
+                "orientation_distribution": _reason_counts(
+                    record.get("fold_shadows_orientation")
+                    for record in processed_records
+                    if record.get("fold_shadows_lightened") is True
+                    and isinstance(record.get("fold_shadows_orientation"), str)
+                ),
+                "changed_pixel_ratio": _aggregate_metric(audit_records, "fold_shadows_changed_pixel_ratio"),
+                "candidate_pixel_ratio": _aggregate_metric(audit_records, "fold_shadows_candidate_pixel_ratio"),
+                "reason_distribution": _reason_counts(
+                    reason for reason in fold_shadows_reasons if isinstance(reason, str)
+                ),
+                "skip_reason_distribution": _reason_counts(fold_shadows_skipped_reasons),
+                "reason_code_distribution": _reason_counts(fold_shadows_reason_codes),
+                "skip_reason_code_distribution": _reason_counts(fold_shadows_skipped_reason_codes),
+                "protection_triggered_files": sum(
+                    1
+                    for reason in fold_shadows_skipped_reasons
+                    if any(marker in reason for marker in ("risk", "foreground", "edge-adjacent", "too dense"))
+                ),
+                "conservative_scope_skip_files": sum(
+                    1
+                    for reason in fold_shadows_skipped_reasons
+                    if "conservative" in reason or "broad uneven lighting" in reason
+                ),
+                "low_confidence_skip_files": sum(
+                    1
+                    for reason in fold_shadows_skipped_reasons
+                    if "no confident" in reason or "below conservative" in reason
+                ),
+            },
             "bleed_through": {
                 "applied_files": sum(1 for audit in audit_records if audit.get("bleed_through_cleaned") is True),
                 "skipped_files": sum(
@@ -1840,6 +1966,7 @@ def _aggregate_operation_timings(records: list[dict[str, Any]], options: Process
         "normalize_tones": options.normalize_tones,
         "lighten_edge_shadow": options.lighten_edge_shadow,
         "lighten_background_stains": options.lighten_background_stains,
+        "lighten_fold_shadows": options.lighten_fold_shadows,
         "clean_bleed_through": options.clean_bleed_through,
         "lighten_scanlines": options.lighten_scanlines,
         "enhance_faded_text": options.enhance_faded_text,
@@ -1991,6 +2118,8 @@ def _audit_thresholds(options: ProcessingOptions) -> dict[str, float]:
         "max_geometry_combo_crop_ratio": options.audit_max_geometry_combo_crop_ratio,
         "max_geometry_combo_size_change_ratio": options.audit_max_geometry_combo_size_change_ratio,
         "max_tone_changed_pixel_ratio": 1.0,
+        "max_fold_shadows_changed_pixel_ratio": 0.075,
+        "max_fold_shadows_candidate_pixel_ratio": 0.12,
         "max_bleed_through_changed_pixel_ratio": 0.045,
         "max_bleed_through_candidate_pixel_ratio": 0.065,
         "max_faded_text_changed_pixel_ratio": 0.10,
@@ -2321,6 +2450,19 @@ def _process_image(
         else:
             operations.append("lighten_background_stains_disabled")
 
+    fold_shadows = FoldShadowCleanupResult(
+        processed, False, "fold shadow cleanup disabled", None, 0, None, None, 0.0, 0.0, 0.0
+    )
+    with _operation_timer(operation_timings, "lighten_fold_shadows", enabled=options.lighten_fold_shadows):
+        if options.lighten_fold_shadows:
+            fold_shadows = _lighten_fold_shadows_conservative(processed)
+            processed = fold_shadows.image
+            operations.append(
+                "lighten_fold_shadows_conservative" if fold_shadows.applied else "lighten_fold_shadows_noop"
+            )
+        else:
+            operations.append("lighten_fold_shadows_disabled")
+
     bleed_through = BleedThroughCleanupResult(
         processed, False, "bleed-through cleanup disabled", None, None, 0.0, 0.0, 0.0
     )
@@ -2395,6 +2537,10 @@ def _process_image(
         background_stains.stain_delta,
         background_stains.changed_pixel_ratio,
         background_stains.candidate_pixel_ratio,
+        fold_shadows.applied,
+        fold_shadows.band_delta,
+        fold_shadows.changed_pixel_ratio,
+        fold_shadows.candidate_pixel_ratio,
         bleed_through.applied,
         bleed_through.ghost_delta,
         bleed_through.changed_pixel_ratio,
@@ -2437,6 +2583,7 @@ def _process_image(
                 tone.applied,
                 edge_shadow.applied,
                 background_stains.applied,
+                fold_shadows.applied,
                 bleed_through.applied,
                 scanlines.applied,
                 faded_text.applied,
@@ -2450,6 +2597,7 @@ def _process_image(
                 tone.reason,
                 edge_shadow.reason,
                 background_stains.reason,
+                fold_shadows.reason,
                 bleed_through.reason,
                 scanlines.reason,
                 faded_text.reason,
@@ -2547,6 +2695,16 @@ def _process_image(
         "background_stains_delta": 0.0 if guard_reverted else background_stains.stain_delta,
         "background_stains_changed_pixel_ratio": 0.0 if guard_reverted else background_stains.changed_pixel_ratio,
         "background_stains_candidate_pixel_ratio": 0.0 if guard_reverted else background_stains.candidate_pixel_ratio,
+        "fold_shadows_lightened": False if guard_reverted else fold_shadows.applied,
+        "fold_shadows_reason": guard_reason if guard_reverted else fold_shadows.reason,
+        "fold_shadows_reason_code": _fold_shadows_reason_code(guard_reason if guard_reverted else fold_shadows.reason),
+        "fold_shadows_orientation": fold_shadows.orientation,
+        "fold_shadows_count": 0 if guard_reverted else fold_shadows.band_count,
+        "fold_shadows_mean_before": None if guard_reverted else fold_shadows.band_mean_before,
+        "fold_shadows_mean_after": None if guard_reverted else fold_shadows.band_mean_after,
+        "fold_shadows_delta": 0.0 if guard_reverted else fold_shadows.band_delta,
+        "fold_shadows_changed_pixel_ratio": 0.0 if guard_reverted else fold_shadows.changed_pixel_ratio,
+        "fold_shadows_candidate_pixel_ratio": 0.0 if guard_reverted else fold_shadows.candidate_pixel_ratio,
         "bleed_through_cleaned": False if guard_reverted else bleed_through.applied,
         "bleed_through_reason": guard_reason if guard_reverted else bleed_through.reason,
         "bleed_through_mean_before": None if guard_reverted else bleed_through.ghost_mean_before,
@@ -3348,6 +3506,292 @@ def _background_stains_noop(
         image,
         False,
         reason,
+        None,
+        None,
+        0.0,
+        0.0,
+        round(candidate_pixel_ratio, 6),
+    )
+
+
+def _lighten_fold_shadows_conservative(image: Image.Image) -> FoldShadowCleanupResult:
+    if image.width < 100 or image.height < 100:
+        return _fold_shadows_noop(image, "fold shadow cleanup skipped: image too small")
+    color_risk = _tone_color_risk_reason(image)
+    if color_risk:
+        return _fold_shadows_noop(image, "fold shadow cleanup skipped: color content, stamp, or annotation risk")
+
+    grayscale = image.convert("L")
+    histogram = grayscale.histogram()
+    total = image.width * image.height
+    p01 = _histogram_percentile(histogram, total, 0.01)
+    p05 = _histogram_percentile(histogram, total, 0.05)
+    p50 = _histogram_percentile(histogram, total, 0.50)
+    p90 = _histogram_percentile(histogram, total, 0.90)
+    p95 = _histogram_percentile(histogram, total, 0.95)
+    if p95 < 218 or p50 < 205 or p90 < 214:
+        return _fold_shadows_noop(image, "fold shadow cleanup skipped: page is not a light clean background")
+    if p95 - p01 > 120:
+        return _fold_shadows_noop(image, "fold shadow cleanup skipped: high-contrast foreground or mixed content risk")
+
+    foreground_threshold = min(168, max(92, p50 - 42))
+    foreground = grayscale.point(lambda value: 255 if value <= foreground_threshold else 0, mode="L")
+    foreground_ratio = _mask_ratio(foreground)
+    if foreground_ratio > 0.16:
+        return _fold_shadows_noop(image, "fold shadow cleanup skipped: foreground too dense")
+    if _protected_edge_dark_ratio(foreground) > 0.0015:
+        return _fold_shadows_noop(image, "fold shadow cleanup skipped: edge-adjacent content or binding risk")
+
+    protected = foreground.filter(ImageFilter.MaxFilter(17))
+    vertical = _fold_shadow_axis_plan(grayscale, protected, vertical=True, background=p95)
+    horizontal = _fold_shadow_axis_plan(grayscale, protected, vertical=False, background=p95)
+    plan = vertical if vertical["score"] >= horizontal["score"] else horizontal
+    if plan["reason"]:
+        return _fold_shadows_noop(image, f"fold shadow cleanup skipped: {plan['reason']}", plan["candidate_ratio"])
+
+    selected = plan["selected"]
+    changed_ratio = len(selected) / max(1, total)
+    candidate_ratio = round(plan["candidate_ratio"], 6)
+    if changed_ratio < 0.002:
+        return _fold_shadows_noop(image, "fold shadow cleanup skipped: no confident narrow background band", candidate_ratio)
+    if changed_ratio > 0.075:
+        return _fold_shadows_noop(
+            image,
+            "fold shadow cleanup skipped: changed area exceeds conservative fold scope",
+            candidate_ratio,
+        )
+
+    before_values: list[int] = []
+    after_values: list[int] = []
+    if image.mode == "L":
+        output = grayscale.copy()
+        pixels = output.load()
+        source_pixels = grayscale.load()
+        for x, y in selected:
+            value = int(source_pixels[x, y])
+            delta = min(18, max(3, int(round((p95 - value) * 0.58))))
+            new_value = min(255, value + delta)
+            pixels[x, y] = new_value
+            before_values.append(value)
+            after_values.append(new_value)
+        result_image = output
+    else:
+        source = image.convert("RGB")
+        output = source.copy()
+        output_pixels = output.load()
+        gray_pixels = grayscale.load()
+        for x, y in selected:
+            gray_value = int(gray_pixels[x, y])
+            delta = min(18, max(3, int(round((p95 - gray_value) * 0.58))))
+            red_value, green_value, blue_value = output_pixels[x, y]
+            output_pixels[x, y] = (
+                min(255, red_value + delta),
+                min(255, green_value + delta),
+                min(255, blue_value + delta),
+            )
+            before_values.append(gray_value)
+            after_values.append(min(255, gray_value + delta))
+        result_image = output
+
+    before_mean = round(sum(before_values) / len(before_values), 6)
+    after_mean = round(sum(after_values) / len(after_values), 6)
+    if after_mean - before_mean < 3:
+        return _fold_shadows_noop(
+            image,
+            "fold shadow cleanup skipped: improvement below conservative threshold",
+            candidate_ratio,
+        )
+    return FoldShadowCleanupResult(
+        result_image,
+        True,
+        "fold shadow cleanup applied: narrow neutral background band",
+        plan["orientation"],
+        len(plan["bands"]),
+        before_mean,
+        after_mean,
+        round(after_mean - before_mean, 6),
+        round(changed_ratio, 6),
+        candidate_ratio,
+    )
+
+
+def _fold_shadow_axis_plan(
+    grayscale: Image.Image,
+    protected: Image.Image,
+    *,
+    vertical: bool,
+    background: int,
+) -> dict[str, Any]:
+    width, height = grayscale.size
+    axis_length = width if vertical else height
+    cross_length = height if vertical else width
+    orientation = "vertical" if vertical else "horizontal"
+    edge_margin = max(10, int(round(axis_length * 0.07)))
+    if axis_length <= edge_margin * 2 or cross_length < 80:
+        return _empty_fold_shadow_plan(orientation, "image too small")
+
+    pixels = grayscale.load()
+    protected_pixels = protected.load()
+    stats: list[dict[str, Any]] = []
+    candidate_indexes: list[int] = []
+    all_candidates: set[tuple[int, int]] = set()
+    for index in range(axis_length):
+        values: list[int] = []
+        selected: list[tuple[int, int]] = []
+        protected_count = 0
+        dark_count = 0
+        for cross in range(cross_length):
+            x, y = (index, cross) if vertical else (cross, index)
+            if protected_pixels[x, y]:
+                protected_count += 1
+                continue
+            value = int(pixels[x, y])
+            values.append(value)
+            if value <= 150:
+                dark_count += 1
+            if 4 <= background - value <= 32 and value >= 172:
+                selected.append((x, y))
+        available_ratio = len(values) / max(1, cross_length)
+        candidate_ratio = len(selected) / max(1, cross_length)
+        dark_ratio = dark_count / max(1, len(values)) if values else 1.0
+        mean = sum(values) / len(values) if values else 0.0
+        stats.append(
+            {
+                "mean": mean,
+                "available_ratio": available_ratio,
+                "protected_ratio": protected_count / max(1, cross_length),
+                "candidate_ratio": candidate_ratio,
+                "dark_ratio": dark_ratio,
+                "selected": selected,
+            }
+        )
+        if (
+            edge_margin <= index < axis_length - edge_margin
+            and available_ratio >= 0.92
+            and candidate_ratio >= 0.55
+            and dark_ratio <= 0.0015
+        ):
+            candidate_indexes.append(index)
+            all_candidates.update(selected)
+
+    candidate_total_ratio = len(all_candidates) / max(1, width * height)
+    if candidate_total_ratio > 0.12:
+        return _empty_fold_shadow_plan(
+            orientation,
+            "broad uneven lighting is outside conservative fold scope",
+            candidate_total_ratio,
+        )
+
+    groups = _contiguous_groups(candidate_indexes)
+    min_width = max(3, int(round(axis_length * 0.012)))
+    max_width = max(min_width, int(round(axis_length * 0.08)))
+    selected_groups: list[list[int]] = []
+    selected: set[tuple[int, int]] = set()
+    score = 0.0
+    for group in groups:
+        band_width = len(group)
+        if band_width < min_width or band_width > max_width:
+            continue
+        center = group[len(group) // 2]
+        neighbor_means = [
+            stats[neighbor]["mean"]
+            for offset in range(-(max_width * 2), max_width * 2 + 1)
+            if abs(offset) >= max(min_width, band_width + 2)
+            for neighbor in [center + offset]
+            if 0 <= neighbor < axis_length and stats[neighbor]["available_ratio"] >= 0.92
+        ]
+        if not neighbor_means:
+            continue
+        local_mean = sum(neighbor_means) / len(neighbor_means)
+        band_mean = sum(stats[index]["mean"] for index in group) / len(group)
+        local_delta = local_mean - band_mean
+        if not (4.0 <= local_delta <= 28.0):
+            continue
+        if any(stats[index]["protected_ratio"] > 0.004 for index in group):
+            return _empty_fold_shadow_plan(
+                orientation,
+                "foreground intersects candidate fold band",
+                candidate_total_ratio,
+            )
+        selected_groups.append(group)
+        for index in group:
+            selected.update(stats[index]["selected"])
+        score += min(1.0, local_delta / 12.0) * min(1.0, band_width / max(1, min_width))
+
+    if not selected_groups:
+        return _empty_fold_shadow_plan(
+            orientation,
+            "no confident narrow background fold band",
+            candidate_total_ratio,
+        )
+    if len(selected_groups) > 2:
+        return _empty_fold_shadow_plan(
+            orientation,
+            "too many fold candidates outside conservative scope",
+            candidate_total_ratio,
+        )
+    return {
+        "orientation": orientation,
+        "score": score,
+        "bands": selected_groups,
+        "selected": selected,
+        "candidate_ratio": candidate_total_ratio,
+        "reason": None,
+    }
+
+
+def _empty_fold_shadow_plan(
+    orientation: str,
+    reason: str,
+    candidate_ratio: float = 0.0,
+) -> dict[str, Any]:
+    return {
+        "orientation": orientation,
+        "score": 0.0,
+        "bands": [],
+        "selected": set(),
+        "candidate_ratio": round(candidate_ratio, 6),
+        "reason": reason,
+    }
+
+
+_FOLD_SHADOW_REASON_CODES: dict[str, str] = {
+    "fold shadow cleanup disabled": "disabled",
+    "fold shadow cleanup applied: narrow neutral background band": "applied_narrow_neutral_background_band",
+    "reverted by local content change guard": "reverted_by_local_content_change_guard",
+    "reverted by cumulative change guard": "reverted_by_cumulative_change_guard",
+    "reverted by geometric combination guard": "reverted_by_geometric_combination_guard",
+    "reverted by text high-frequency combination guard": "reverted_by_text_high_frequency_combination_guard",
+    "reverted by combined change guard": "reverted_by_combined_change_guard",
+}
+
+
+def _fold_shadows_reason_code(reason: str | None) -> str | None:
+    if reason is None:
+        return None
+    if reason in _FOLD_SHADOW_REASON_CODES:
+        return _FOLD_SHADOW_REASON_CODES[reason]
+    if reason.startswith("fold shadow cleanup skipped: "):
+        detail = reason.removeprefix("fold shadow cleanup skipped: ")
+        normalized = "".join(character if character.isalnum() else "_" for character in detail.lower()).strip("_")
+        while "__" in normalized:
+            normalized = normalized.replace("__", "_")
+        if normalized:
+            return normalized[:96]
+    return "unknown"
+
+
+def _fold_shadows_noop(
+    image: Image.Image,
+    reason: str,
+    candidate_pixel_ratio: float = 0.0,
+) -> FoldShadowCleanupResult:
+    return FoldShadowCleanupResult(
+        image,
+        False,
+        reason,
+        None,
+        0,
         None,
         None,
         0.0,
@@ -4643,6 +5087,10 @@ def _processing_audit(
     background_stains_delta: float = 0.0,
     background_stains_changed_pixel_ratio: float = 0.0,
     background_stains_candidate_pixel_ratio: float = 0.0,
+    fold_shadows_lightened: bool = False,
+    fold_shadows_delta: float = 0.0,
+    fold_shadows_changed_pixel_ratio: float = 0.0,
+    fold_shadows_candidate_pixel_ratio: float = 0.0,
     bleed_through_cleaned: bool = False,
     bleed_through_delta: float = 0.0,
     bleed_through_changed_pixel_ratio: float = 0.0,
@@ -4722,6 +5170,10 @@ def _processing_audit(
         "background_stains_delta": round(background_stains_delta, 6),
         "background_stains_changed_pixel_ratio": round(background_stains_changed_pixel_ratio, 6),
         "background_stains_candidate_pixel_ratio": round(background_stains_candidate_pixel_ratio, 6),
+        "fold_shadows_lightened": fold_shadows_lightened,
+        "fold_shadows_delta": round(fold_shadows_delta, 6),
+        "fold_shadows_changed_pixel_ratio": round(fold_shadows_changed_pixel_ratio, 6),
+        "fold_shadows_candidate_pixel_ratio": round(fold_shadows_candidate_pixel_ratio, 6),
         "bleed_through_cleaned": bleed_through_cleaned,
         "bleed_through_delta": round(bleed_through_delta, 6),
         "bleed_through_changed_pixel_ratio": round(bleed_through_changed_pixel_ratio, 6),
@@ -4753,6 +5205,8 @@ def _processing_audit(
             tone_contrast_delta=tone_contrast_delta,
             edge_shadow_lightened=edge_shadow_lightened,
             edge_shadow_changed_pixel_ratio=edge_shadow_changed_pixel_ratio,
+            fold_shadows_lightened=fold_shadows_lightened,
+            fold_shadows_changed_pixel_ratio=fold_shadows_changed_pixel_ratio,
             bleed_through_cleaned=bleed_through_cleaned,
             bleed_through_changed_pixel_ratio=bleed_through_changed_pixel_ratio,
             scanlines_lightened=scanlines_lightened,
@@ -4790,6 +5244,8 @@ def _should_check_local_content_change(
     tone_contrast_delta: float,
     edge_shadow_lightened: bool,
     edge_shadow_changed_pixel_ratio: float,
+    fold_shadows_lightened: bool,
+    fold_shadows_changed_pixel_ratio: float,
     bleed_through_cleaned: bool,
     bleed_through_changed_pixel_ratio: float,
     scanlines_lightened: bool,
@@ -4803,6 +5259,8 @@ def _should_check_local_content_change(
     if despeckle_pixels_changed >= despeckle_guard_floor:
         return True
     if edge_shadow_lightened and edge_shadow_changed_pixel_ratio > 0:
+        return True
+    if fold_shadows_lightened and fold_shadows_changed_pixel_ratio > 0:
         return True
     if bleed_through_cleaned and bleed_through_changed_pixel_ratio > 0:
         return True
@@ -4830,6 +5288,8 @@ def _cumulative_change_guard(metrics: dict[str, Any], options: ProcessingOptions
     candidate_ratio = max(
         _float_metric(metrics, "background_stains_changed_pixel_ratio"),
         _float_metric(metrics, "background_stains_candidate_pixel_ratio"),
+        _float_metric(metrics, "fold_shadows_changed_pixel_ratio"),
+        _float_metric(metrics, "fold_shadows_candidate_pixel_ratio"),
         _float_metric(metrics, "bleed_through_changed_pixel_ratio"),
         _float_metric(metrics, "bleed_through_candidate_pixel_ratio"),
         _float_metric(metrics, "scanlines_changed_pixel_ratio"),
@@ -5008,6 +5468,7 @@ def _combination_text_high_frequency_risk_reasons(metrics: dict[str, Any], optio
 def _combination_non_geometry_candidate_ratio(metrics: dict[str, Any]) -> float:
     return max(
         _float_metric(metrics, "background_stains_candidate_pixel_ratio"),
+        _float_metric(metrics, "fold_shadows_candidate_pixel_ratio"),
         _float_metric(metrics, "bleed_through_candidate_pixel_ratio"),
         _float_metric(metrics, "scanlines_candidate_pixel_ratio"),
         _float_metric(metrics, "faded_text_candidate_pixel_ratio"),
@@ -5425,6 +5886,8 @@ def _audit_guardrail_failures(metrics: dict[str, Any], options: ProcessingOption
         ("crop_ratio", options.audit_max_crop_ratio),
         ("max_trim_margin_ratio", options.audit_max_trim_margin_ratio),
         ("despeckle_pixel_ratio", options.audit_max_despeckle_pixel_ratio),
+        ("fold_shadows_changed_pixel_ratio", 0.075),
+        ("fold_shadows_candidate_pixel_ratio", 0.12),
         ("bleed_through_changed_pixel_ratio", 0.045),
         ("bleed_through_candidate_pixel_ratio", 0.065),
         ("faded_text_changed_pixel_ratio", 0.10),
@@ -5439,6 +5902,8 @@ def _audit_guardrail_failures(metrics: dict[str, Any], options: ProcessingOption
         if key.startswith("faded_text_") and metrics.get("faded_text_enhanced") is not True:
             continue
         if key.startswith("bleed_through_") and metrics.get("bleed_through_cleaned") is not True:
+            continue
+        if key.startswith("fold_shadows_") and metrics.get("fold_shadows_lightened") is not True:
             continue
         if key.startswith("text_edges_") and metrics.get("text_edges_sharpened") is not True:
             continue
