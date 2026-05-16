@@ -1906,6 +1906,9 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "faded_text_candidate_pixel_ratio": _aggregate_metric(
                 audit_records, "faded_text_candidate_pixel_ratio"
             ),
+            "faded_text_candidate_text_ratio": _aggregate_metric(
+                audit_records, "faded_text_candidate_pixel_ratio"
+            ),
             "text_edges_delta": _aggregate_metric(audit_records, "text_edges_delta"),
             "text_edges_changed_pixel_ratio": _aggregate_metric(
                 audit_records, "text_edges_changed_pixel_ratio"
@@ -2498,6 +2501,7 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                 ),
                 "changed_pixel_ratio": _aggregate_metric(audit_records, "faded_text_changed_pixel_ratio"),
                 "candidate_pixel_ratio": _aggregate_metric(audit_records, "faded_text_candidate_pixel_ratio"),
+                "candidate_text_ratio": _aggregate_metric(audit_records, "faded_text_candidate_pixel_ratio"),
                 "reason_distribution": _reason_counts(
                     reason for reason in faded_text_reasons if isinstance(reason, str)
                 ),
@@ -2508,7 +2512,31 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                 "protection_triggered_files": sum(
                     1
                     for reason in faded_text_skipped_reasons
-                    if any(marker in reason for marker in ("risk", "too dense", "dark foreground already present"))
+                    if any(
+                        marker in reason
+                        for marker in (
+                            "risk",
+                            "too dense",
+                            "dark foreground already present",
+                            "unstable background",
+                            "scanline",
+                        )
+                    )
+                ),
+                "protected_files": sum(
+                    1
+                    for reason in faded_text_skipped_reasons
+                    if any(
+                        marker in reason
+                        for marker in (
+                            "risk",
+                            "too dense",
+                            "dark foreground already present",
+                            "unstable background",
+                            "scanline",
+                            "edge mark",
+                        )
+                    )
                 ),
                 "conservative_scope_skip_files": sum(
                     1
@@ -6390,6 +6418,7 @@ def _enhance_faded_text_conservative(image: Image.Image) -> FadedTextEnhancement
     if not components:
         return _faded_text_noop(image, "faded text enhancement skipped: no stable text components", candidate_ratio)
     selected: set[tuple[int, int]] = set()
+    component_boxes: list[tuple[int, int, int, int, int]] = []
     text_like_components = 0
     rejected_large_components = 0
     for component in components:
@@ -6401,16 +6430,22 @@ def _enhance_faded_text_conservative(image: Image.Image) -> FadedTextEnhancement
         width = max(xs) - min(xs) + 1
         height = max(ys) - min(ys) + 1
         line_like = height <= 8 and width <= image.width * 0.70
-        if area / total > 0.018 or (not line_like and width > image.width * 0.42) or height > image.height * 0.22:
+        fill_ratio = area / max(1, width * height)
+        flowing_stroke_like = height <= 24 and width <= image.width * 0.65 and fill_ratio <= 0.46
+        if (
+            area / total > 0.018
+            or (not line_like and width > image.width * 0.42 and not flowing_stroke_like)
+            or height > image.height * 0.22
+        ):
             rejected_large_components += 1
             continue
-        fill_ratio = area / max(1, width * height)
         aspect = max(width / max(1, height), height / max(1, width))
         if fill_ratio > 0.82 and area > 24 and not line_like:
             rejected_large_components += 1
             continue
         if width >= 5 and height >= 1 and aspect <= 60:
             text_like_components += 1
+            component_boxes.append((min(xs), min(ys), width, height, area))
             selected.update(component)
     if rejected_large_components:
         return _faded_text_noop(
@@ -6427,6 +6462,15 @@ def _enhance_faded_text_conservative(image: Image.Image) -> FadedTextEnhancement
             "faded text enhancement skipped: changed area exceeds conservative text scope",
             candidate_ratio,
         )
+    structure = _faded_text_structure_evidence(component_boxes, image.size, selected_ratio)
+    if not structure["safe"]:
+        return _faded_text_noop(image, structure["reason"], candidate_ratio)
+    stable_background = _faded_text_background_is_stable(grayscale, candidate, p95)
+    if not stable_background["safe"]:
+        return _faded_text_noop(image, stable_background["reason"], candidate_ratio)
+    enhancement_scale = 0.56 if structure["strong"] and stable_background["strong"] else 0.46
+    min_delta = 10 if structure["strong"] and stable_background["strong"] else 8
+    max_delta = 30 if structure["strong"] and stable_background["strong"] else 24
 
     before_values: list[int] = []
     after_values: list[int] = []
@@ -6435,7 +6479,7 @@ def _enhance_faded_text_conservative(image: Image.Image) -> FadedTextEnhancement
         pixels = output.load()
         for x, y in selected:
             value = pixels[x, y]
-            delta = min(24, max(8, int(round((p95 - value) * 0.38))))
+            delta = min(max_delta, max(min_delta, int(round((p95 - value) * enhancement_scale))))
             new_value = max(0, value - delta)
             pixels[x, y] = new_value
             before_values.append(value)
@@ -6448,7 +6492,7 @@ def _enhance_faded_text_conservative(image: Image.Image) -> FadedTextEnhancement
         gray_pixels = grayscale.load()
         for x, y in selected:
             gray_value = gray_pixels[x, y]
-            delta = min(24, max(8, int(round((p95 - gray_value) * 0.38))))
+            delta = min(max_delta, max(min_delta, int(round((p95 - gray_value) * enhancement_scale))))
             red_value, green_value, blue_value = output_pixels[x, y]
             output_pixels[x, y] = (
                 max(0, red_value - delta),
@@ -6468,7 +6512,7 @@ def _enhance_faded_text_conservative(image: Image.Image) -> FadedTextEnhancement
             "faded text enhancement skipped: readability delta below conservative threshold",
             candidate_ratio,
         )
-    if text_delta > 26:
+    if text_delta > 30:
         return _faded_text_noop(
             image,
             "faded text enhancement skipped: readability delta exceeds conservative threshold",
@@ -6490,6 +6534,97 @@ def _faded_text_noop(
     candidate_pixel_ratio: float = 0.0,
 ) -> FadedTextEnhancementResult:
     return FadedTextEnhancementResult(image, False, reason, 0.0, 0.0, round(candidate_pixel_ratio, 6))
+
+
+def _faded_text_structure_evidence(
+    component_boxes: list[tuple[int, int, int, int, int]],
+    image_size: tuple[int, int],
+    selected_ratio: float,
+) -> dict[str, Any]:
+    if len(component_boxes) < 3:
+        return {
+            "safe": False,
+            "strong": False,
+            "reason": "faded text enhancement skipped: stable text evidence insufficient",
+        }
+    image_width, image_height = image_size
+    thin_or_medium = 0
+    long_rule_like = 0
+    y_bands: set[int] = set()
+    x_bands: set[int] = set()
+    for left, top, width, height, area in component_boxes:
+        if height <= 10 and width <= image_width * 0.58:
+            thin_or_medium += 1
+        elif height <= 24 and width <= image_width * 0.65 and area / max(1, width * height) <= 0.46:
+            thin_or_medium += 1
+        if height <= 3 and width >= image_width * 0.48:
+            long_rule_like += 1
+        y_bands.add(min(15, int((top + height / 2) / max(1, image_height) * 16)))
+        x_bands.add(min(11, int((left + width / 2) / max(1, image_width) * 12)))
+    if long_rule_like >= max(3, int(math.ceil(len(component_boxes) * 0.60))):
+        return {
+            "safe": False,
+            "strong": False,
+            "reason": "faded text enhancement skipped: scanline or ruled background risk",
+        }
+    if thin_or_medium < max(3, int(math.ceil(len(component_boxes) * 0.55))):
+        return {
+            "safe": False,
+            "strong": False,
+            "reason": "faded text enhancement skipped: stable text evidence insufficient",
+        }
+    strong = (
+        thin_or_medium >= max(4, int(math.ceil(len(component_boxes) * 0.72)))
+        and len(y_bands) >= 2
+        and len(x_bands) >= 1
+        and selected_ratio <= 0.055
+    )
+    return {"safe": True, "strong": strong, "reason": ""}
+
+
+def _faded_text_background_is_stable(
+    grayscale: Image.Image,
+    candidate: Image.Image,
+    paper_highlight: int,
+) -> dict[str, Any]:
+    protected = candidate.filter(ImageFilter.MaxFilter(7))
+    gray_pixels = grayscale.load()
+    protected_pixels = protected.load()
+    step = max(1, int(round(math.sqrt(max(1, grayscale.width * grayscale.height) / 45000))))
+    values: list[int] = []
+    texture_hits = 0
+    checked = 0
+    for y in range(0, grayscale.height, step):
+        for x in range(0, grayscale.width, step):
+            if protected_pixels[x, y]:
+                continue
+            value = int(gray_pixels[x, y])
+            values.append(value)
+            checked += 1
+            if abs(value - paper_highlight) > 30:
+                texture_hits += 1
+    if len(values) < 200:
+        return {
+            "safe": False,
+            "strong": False,
+            "reason": "faded text enhancement skipped: stable paper background insufficient",
+        }
+    values.sort()
+    low = values[int(len(values) * 0.05)]
+    high = values[min(len(values) - 1, int(len(values) * 0.95))]
+    spread = high - low
+    texture_ratio = texture_hits / max(1, checked)
+    if spread > 24 or texture_ratio > 0.035:
+        return {
+            "safe": False,
+            "strong": False,
+            "reason": "faded text enhancement skipped: unstable background texture or stain risk",
+        }
+    return {
+        "safe": True,
+        "strong": spread <= 14 and texture_ratio <= 0.015,
+        "reason": "",
+    }
 
 
 _FADED_TEXT_REASON_DETAILS: dict[str, tuple[str, str]] = {
@@ -6546,6 +6681,18 @@ _FADED_TEXT_REASON_DETAILS: dict[str, tuple[str, str]] = {
     "faded text enhancement skipped: stable text evidence insufficient": (
         "low_confidence_stable_text_insufficient",
         "稳定正文证据不足，跳过褪色正文加深。",
+    ),
+    "faded text enhancement skipped: scanline or ruled background risk": (
+        "protected_scanline_or_ruled_background",
+        "检测到扫描线或格线背景风险，跳过褪色正文加深。",
+    ),
+    "faded text enhancement skipped: stable paper background insufficient": (
+        "low_confidence_stable_paper_insufficient",
+        "稳定纸面背景证据不足，跳过褪色正文加深。",
+    ),
+    "faded text enhancement skipped: unstable background texture or stain risk": (
+        "protected_unstable_background_texture_or_stain",
+        "检测到背景纹理或污渍风险，跳过褪色正文加深。",
     ),
     "faded text enhancement skipped: changed area exceeds conservative text scope": (
         "outside_conservative_text_scope",

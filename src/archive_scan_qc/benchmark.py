@@ -1140,6 +1140,7 @@ def _repair_algorithm_metrics(
                 "delta": "faded_text_delta",
                 "changed_pixel_ratio": "faded_text_changed_pixel_ratio",
                 "candidate_pixel_ratio": "faded_text_candidate_pixel_ratio",
+                "candidate_text_ratio": "faded_text_candidate_pixel_ratio",
             },
         ),
         "sharpen_text_edges": _algorithm_summary(

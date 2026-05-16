@@ -1220,7 +1220,7 @@ def _assert_required_metrics_present(
         ),
         "clean_bleed_through": ("delta", "changed_pixel_ratio", "candidate_pixel_ratio"),
         "lighten_scanlines": ("delta", "changed_pixel_ratio", "candidate_pixel_ratio"),
-        "enhance_faded_text": ("delta", "changed_pixel_ratio", "candidate_pixel_ratio"),
+        "enhance_faded_text": ("delta", "changed_pixel_ratio", "candidate_pixel_ratio", "candidate_text_ratio"),
         "sharpen_text_edges": ("delta", "changed_pixel_ratio", "candidate_pixel_ratio"),
     }
     for operation, metric_names in expected.items():
