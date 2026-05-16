@@ -3794,6 +3794,21 @@ def _normalize_paper_color_cast_conservative(image: Image.Image) -> PaperColorCa
     protected_reason = _paper_color_cast_protection_reason(sample, means)
     if protected_reason:
         return _paper_color_cast_noop(image, protected_reason[0], protected_reason[1])
+    paper_pixels = [
+        pixel
+        for pixel, brightness in zip(pixels, brightness_values, strict=False)
+        if brightness >= brightness_mean - 45
+    ]
+    if len(paper_pixels) / total >= 0.90:
+        pixels = paper_pixels
+        total = max(1, len(pixels))
+        brightness_values = [sum(pixel) / 3 for pixel in pixels]
+        brightness_mean = sum(brightness_values) / total
+        brightness_std = _mean_stddev(brightness_values, brightness_mean)
+        brightness_sorted = sorted(brightness_values)
+        p05 = brightness_sorted[min(total - 1, int(total * 0.05))]
+        p95 = brightness_sorted[min(total - 1, int(total * 0.95))]
+        means = [sum(pixel[index] for pixel in pixels) / total for index in range(3)]
     if brightness_mean < 218 or p05 < 205:
         return _paper_color_cast_noop(
             image,
@@ -3855,7 +3870,7 @@ def _normalize_paper_color_cast_conservative(image: Image.Image) -> PaperColorCa
     protected_mask = _paper_color_cast_protected_mask(source, means)
     unprotected_count = source.width * source.height - _mask_pixel_count(protected_mask)
     candidate_ratio = unprotected_count / max(1, source.width * source.height)
-    if candidate_ratio < 0.94:
+    if candidate_ratio < 0.90:
         return _paper_color_cast_noop(
             image,
             "paper color cast normalization skipped: protected content occupies too much of the page",
@@ -3961,7 +3976,7 @@ def _paper_color_cast_protection_reason(
             "paper color cast normalization skipped: protected color content, stamp, seal, map, chart, or annotation risk",
             "protected_color_content",
         )
-    if dark / total >= 0.004:
+    if dark / total >= 0.004 and not _paper_color_cast_sparse_dark_content_is_safe(sample, background_means):
         return (
             "paper color cast normalization skipped: protected handwriting, text, photograph, or archival mark risk",
             "protected_dark_content",
@@ -3977,6 +3992,41 @@ def _paper_color_cast_protection_reason(
             "protected_edge_mark",
         )
     return None
+
+
+def _paper_color_cast_sparse_dark_content_is_safe(sample: Image.Image, background_means: list[float]) -> bool:
+    bg_brightness = sum(background_means) / 3
+    dark = sample.convert("L").point(lambda value: 255 if value < bg_brightness - 45 else 0, mode="L")
+    dark_ratio = _mask_pixel_count(dark) / max(1, sample.width * sample.height)
+    if dark_ratio < 0.004:
+        return True
+    if dark_ratio > 0.08:
+        return False
+    if _source_protected_edge_dark_ratio(sample.convert("L")) > 0.001:
+        return False
+
+    components = [component for component in _mask_components(dark) if len(component) >= 8]
+    if not components:
+        return False
+    safe_components = 0
+    for component in components:
+        area = len(component)
+        xs = [point[0] for point in component]
+        ys = [point[1] for point in component]
+        width = max(xs) - min(xs) + 1
+        height = max(ys) - min(ys) + 1
+        density = area / max(1, width * height)
+        aspect_ratio = width / max(1, height)
+        if area > sample.width * sample.height * 0.035:
+            return False
+        if width >= 8 and height <= 8 and aspect_ratio >= 2.0 and density >= 0.35:
+            safe_components += 1
+            continue
+        if area <= 90 and width <= 28 and height <= 18 and density >= 0.20:
+            safe_components += 1
+            continue
+        return False
+    return safe_components >= 1
 
 
 def _paper_color_cast_protected_mask(source: Image.Image, background_means: list[float]) -> Image.Image:
