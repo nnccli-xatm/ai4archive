@@ -10156,6 +10156,56 @@ class ScanQcTest(unittest.TestCase):
             self.assertIn("scanner_gutter_trim", audit_summary["timing"]["operation_timings"])
             self.assertNotIn("A001_safe_light_gutter", json.dumps(audit_summary))
 
+    def test_scanner_gutter_trim_removes_safe_pale_edge_band_and_preserves_source(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-pale-gutter-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            disabled_process_dir = root / "processed-disabled"
+            input_dir.mkdir()
+            source_path = input_dir / "A001_safe_pale_edge_band.png"
+
+            image = Image.new("RGB", (240, 180), (248, 248, 248))
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((12, 0, 239, 179), fill=(236, 236, 236))
+            draw.rectangle((46, 32, 204, 148), outline=(60, 60, 60), width=2)
+            image.save(source_path)
+            source_bytes_before = source_path.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic", "pale-gutter", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(scanner_gutter_trim=True, workers=1))
+            record = manifest["files"][0]
+            audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
+
+            self.assertEqual(source_path.read_bytes(), source_bytes_before)
+            self.assertEqual(record["output_size"], [228, 180])
+            self.assertTrue(record["scanner_gutter_trimmed"])
+            self.assertEqual(record["scanner_gutter_reason"], "scanner gutter trim applied")
+            self.assertEqual(record["scanner_gutter_trim_margins"]["left"], 0.05)
+            self.assertLessEqual(record["processing_audit"]["scanner_gutter_max_trim_margin_ratio"], 0.05)
+            with Image.open(process_dir / "images" / source_path.name) as processed:
+                self.assertLessEqual(processed.convert("L").getpixel((34, 32)), 80)
+            self.assertEqual(audit_summary["counts"]["scanner_gutter_trimmed_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["scanner_gutter_trim"]["reason_distribution"],
+                {"scanner gutter trim applied": 1},
+            )
+            self.assertNotIn("A001_safe_pale_edge_band", json.dumps(audit_summary))
+
+            disabled = process_images(
+                report,
+                input_dir,
+                disabled_process_dir,
+                ProcessingOptions(scanner_gutter_trim=False, workers=1),
+            )
+            disabled_record = disabled["files"][0]
+            self.assertEqual(disabled_record["output_size"], [240, 180])
+            self.assertFalse(disabled_record["scanner_gutter_trimmed"])
+            self.assertEqual(disabled_record["scanner_gutter_reason"], "scanner gutter trim disabled")
+            self.assertIn("scanner_gutter_trim_disabled", disabled_record["operations"])
+            self.assertEqual(source_path.read_bytes(), source_bytes_before)
+
     def test_scanner_gutter_trim_preserves_edge_content_and_archival_marks(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-light-gutter-protection-") as temp_dir:
             root = Path(temp_dir)
@@ -10188,6 +10238,64 @@ class ScanQcTest(unittest.TestCase):
                 self.assertFalse(record["scanner_gutter_trimmed"], record["source_relative_path"])
                 self.assertIn("scanner_gutter_trim_noop", record["operations"])
                 self.assertEqual(record["processing_audit"]["scanner_gutter_max_trim_margin_ratio"], 0.0)
+                self.assertIn(
+                    record["scanner_gutter_reason"],
+                    {
+                        "scanner gutter skipped: protected edge content",
+                        "scanner gutter skipped: no narrow uniform light band",
+                    },
+                )
+
+    def test_scanner_gutter_trim_skips_ambiguous_pale_edge_bands_with_public_reasons(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-light-gutter-ambiguous-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            multi_edge = Image.new("RGB", (240, 180), (248, 248, 248))
+            multi_draw = ImageDraw.Draw(multi_edge)
+            multi_draw.rectangle((12, 12, 227, 179), fill=(236, 236, 236))
+            multi_draw.rectangle((46, 32, 194, 148), outline=(60, 60, 60), width=2)
+            multi_edge.save(input_dir / "A001_multi_edge.png")
+
+            colored_paper = Image.new("RGB", (240, 180), (248, 248, 248))
+            colored_draw = ImageDraw.Draw(colored_paper)
+            colored_draw.rectangle((12, 0, 239, 179), fill=(226, 238, 202))
+            colored_draw.rectangle((46, 32, 204, 148), outline=(60, 60, 60), width=2)
+            colored_paper.save(input_dir / "A002_colored_paper.png")
+
+            non_uniform = Image.new("RGB", (240, 180), (248, 248, 248))
+            non_uniform_draw = ImageDraw.Draw(non_uniform)
+            non_uniform_draw.rectangle((12, 0, 239, 179), fill=(236, 236, 236))
+            for y in range(0, 180, 6):
+                non_uniform_draw.line((0, y, 11, y), fill=(230, 230, 230))
+            non_uniform_draw.rectangle((46, 32, 204, 148), outline=(60, 60, 60), width=2)
+            non_uniform.save(input_dir / "A003_non_uniform.png")
+
+            report = scan_batch(ScanConfig("synthetic", "light-gutter-ambiguous", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(scanner_gutter_trim=True, workers=1))
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            self.assertEqual(records["A001_multi_edge.png"]["output_size"], [240, 180])
+            self.assertFalse(records["A001_multi_edge.png"]["scanner_gutter_trimmed"])
+            self.assertEqual(
+                records["A001_multi_edge.png"]["scanner_gutter_reason"],
+                "scanner gutter skipped: ambiguous multi-edge light band",
+            )
+            self.assertEqual(records["A002_colored_paper.png"]["output_size"], [240, 180])
+            self.assertFalse(records["A002_colored_paper.png"]["scanner_gutter_trimmed"])
+            self.assertEqual(
+                records["A002_colored_paper.png"]["scanner_gutter_reason"],
+                "scanner gutter skipped: colored or non-neutral original",
+            )
+            self.assertEqual(records["A003_non_uniform.png"]["output_size"], [240, 180])
+            self.assertFalse(records["A003_non_uniform.png"]["scanner_gutter_trimmed"])
+            self.assertEqual(
+                records["A003_non_uniform.png"]["scanner_gutter_reason"],
+                "scanner gutter skipped: no narrow uniform light band",
+            )
 
     def test_despeckle_removes_isolated_noise_without_breaking_lines(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

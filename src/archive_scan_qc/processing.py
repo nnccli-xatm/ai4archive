@@ -8503,6 +8503,9 @@ def _detect_light_scanner_gutter_bbox(image: Image.Image) -> ScannerGutterTrimDe
     if width < 80 or height < 80:
         return ScannerGutterTrimDetection(None, "image too small", empty_margins)
 
+    if _has_colored_scanner_gutter_risk(image):
+        return ScannerGutterTrimDetection(None, "scanner gutter skipped: colored or non-neutral original", empty_margins)
+
     grayscale = image.convert("L")
     if _light_page_background_mean(grayscale) < 220:
         return ScannerGutterTrimDetection(None, "scanner gutter skipped: page background not light", empty_margins)
@@ -8516,6 +8519,8 @@ def _detect_light_scanner_gutter_bbox(image: Image.Image) -> ScannerGutterTrimDe
 
     if max(left, right, top, bottom) < 3:
         return ScannerGutterTrimDetection(None, "scanner gutter skipped: no narrow uniform light band", empty_margins)
+    if sum(1 for margin in (left, right, top, bottom) if margin) > 2:
+        return ScannerGutterTrimDetection(None, "scanner gutter skipped: ambiguous multi-edge light band", empty_margins)
 
     bbox = (left, top, width - right, height - bottom)
     if bbox[2] <= bbox[0] or bbox[3] <= bbox[1]:
@@ -8527,6 +8532,8 @@ def _detect_light_scanner_gutter_bbox(image: Image.Image) -> ScannerGutterTrimDe
         return ScannerGutterTrimDetection(None, "scanner gutter skipped: protected edge content", empty_margins)
     if _has_protected_dark_content_near_active_trim_boundary(grayscale, bbox, (left, top, right, bottom)):
         return ScannerGutterTrimDetection(None, "scanner gutter skipped: protected edge content", empty_margins)
+    if not _has_inset_document_content_for_scanner_gutter(grayscale, bbox, (left, top, right, bottom)):
+        return ScannerGutterTrimDetection(None, "scanner gutter skipped: no inset content evidence", empty_margins)
 
     margins = _trim_margins((width, height), bbox)
     return ScannerGutterTrimDetection(bbox, "scanner gutter trim applied", margins)
@@ -8561,7 +8568,7 @@ def _light_scanner_gutter_run(image: Image.Image, side: str, max_pixels: int) ->
 def _is_uniform_light_scanner_gutter_band(band: Image.Image, inner: Image.Image) -> bool:
     stat = ImageStat.Stat(band)
     mean = stat.mean[0]
-    if mean < 215 or mean > 246 or stat.stddev[0] > 5.5:
+    if mean < 215 or mean > 252 or stat.stddev[0] > 5.5:
         return False
     values = band.tobytes()
     if not values:
@@ -8570,7 +8577,30 @@ def _is_uniform_light_scanner_gutter_band(band: Image.Image, inner: Image.Image)
     if dark_or_marked / len(values) > 0.001:
         return False
     inner_mean = ImageStat.Stat(inner).mean[0] if inner.size[0] and inner.size[1] else 255
-    return inner_mean >= 235 and inner_mean - mean >= 4.0
+    contrast = abs(inner_mean - mean)
+    return inner_mean >= 225 and 4.0 <= contrast <= 18.0
+
+
+def _has_colored_scanner_gutter_risk(image: Image.Image) -> bool:
+    sample = image.convert("RGB")
+    sample.thumbnail((160, 160))
+    pixel_bytes = sample.tobytes()
+    if not pixel_bytes:
+        return False
+
+    colored = 0
+    colored_light_background = 0
+    total = len(pixel_bytes) // 3
+    for offset in range(0, len(pixel_bytes), 3):
+        red, green, blue = pixel_bytes[offset], pixel_bytes[offset + 1], pixel_bytes[offset + 2]
+        channel_range = max(red, green, blue) - min(red, green, blue)
+        luminance = (red + green + blue) / 3
+        if channel_range >= 34:
+            colored += 1
+            if luminance >= 170:
+                colored_light_background += 1
+
+    return (colored / total) >= 0.01 or (colored_light_background / total) >= 0.004
 
 
 def _light_scanner_gutter_trimmed_area_has_marks(
@@ -8627,6 +8657,52 @@ def _has_protected_dark_content_near_active_trim_boundary(
         if dark_pixels >= 8 and dark_pixels / max(1, len(values)) >= 0.01:
             return True
     return False
+
+
+def _has_inset_document_content_for_scanner_gutter(
+    image: Image.Image,
+    bbox: tuple[int, int, int, int],
+    active_margins: tuple[int, int, int, int],
+) -> bool:
+    width, height = image.size
+    left, top, right, bottom = bbox
+    left_margin, top_margin, right_margin, bottom_margin = active_margins
+    inset_x = max(8, int(width * 0.08))
+    inset_y = max(8, int(height * 0.08))
+    content_box = (
+        min(right, left + inset_x),
+        min(bottom, top + inset_y),
+        max(left, right - inset_x),
+        max(top, bottom - inset_y),
+    )
+    if content_box[2] <= content_box[0] or content_box[3] <= content_box[1]:
+        return False
+    values = image.crop(content_box).tobytes()
+    dark_content = sum(1 for value in values if value <= 170)
+    if dark_content < max(12, int(len(values) * 0.0008)):
+        return False
+
+    # Active-edge gutters are only safe when the document marks are clearly inset
+    # from the new crop boundary, not merely sitting on the paper edge.
+    protect_depth = max(6, int(min(width, height) * 0.06))
+    edge_boxes: list[tuple[int, int, int, int]] = []
+    if left_margin:
+        edge_boxes.append((left, top, min(right, left + protect_depth), bottom))
+    if right_margin:
+        edge_boxes.append((max(left, right - protect_depth), top, right, bottom))
+    if top_margin:
+        edge_boxes.append((left, top, right, min(bottom, top + protect_depth)))
+    if bottom_margin:
+        edge_boxes.append((left, max(top, bottom - protect_depth), right, bottom))
+    for edge_box in edge_boxes:
+        if edge_box[2] <= edge_box[0] or edge_box[3] <= edge_box[1]:
+            continue
+        edge_values = image.crop(edge_box).tobytes()
+        edge_dark_content = sum(1 for value in edge_values if value <= 170)
+        if edge_dark_content >= 6:
+            return False
+
+    return True
 
 
 def _detect_dark_border_bbox(image: Image.Image) -> DarkBorderDetection:
