@@ -4231,7 +4231,8 @@ def _lighten_corner_shadows_conservative(image: Image.Image) -> CornerShadowClea
     p95 = _histogram_percentile(histogram, total, 0.95)
     if p95 < 182:
         return _corner_shadows_noop(image, "corner shadow cleanup skipped: page is too dark", "too_dark")
-    if p95 - p05 < 24:
+    soft_pair_mode = 14 <= p95 - p05 < 24 and p95 >= 225
+    if p95 - p05 < 24 and not soft_pair_mode:
         return _corner_shadows_noop(
             image,
             "corner shadow cleanup skipped: low tonal separation",
@@ -4290,11 +4291,26 @@ def _lighten_corner_shadows_conservative(image: Image.Image) -> CornerShadowClea
                 f"corner shadow cleanup skipped: texture or photo detail near {corner} corner",
                 "texture_or_photo",
             )
-        if not (7 <= delta <= 58 and corner_mean >= 165 and inner_mean >= 205):
-            continue
         candidate_pixels, continuity = _corner_shadow_candidate_profile(corner_crop, inner_mean, x_direction, y_direction)
         candidate_ratio = candidate_pixels / max(1, total)
-        if candidate_ratio < 0.003 or continuity < 0.52:
+        strict_candidate = (
+            7 <= delta <= 58
+            and corner_mean >= 165
+            and inner_mean >= 205
+            and candidate_ratio >= 0.003
+            and continuity >= 0.52
+        )
+        soft_pair_candidate = (
+            soft_pair_mode
+            and 4.4 <= delta <= 22
+            and corner_mean >= 210
+            and inner_mean >= 226
+            and corner_std <= 12
+            and inner_std <= 12
+            and candidate_ratio >= 0.018
+            and continuity >= 0.50
+        )
+        if not (strict_candidate or soft_pair_candidate):
             continue
         plans.append(
             {
@@ -4303,9 +4319,10 @@ def _lighten_corner_shadows_conservative(image: Image.Image) -> CornerShadowClea
                 "radius": radius,
                 "x_direction": x_direction,
                 "y_direction": y_direction,
-                "max_delta": min(32.0, delta * 0.72),
+                "max_delta": min(32.0, delta * (1.15 if soft_pair_candidate and not strict_candidate else 0.72)),
                 "candidate_pixels": candidate_pixels,
                 "inner_mean": inner_mean,
+                "soft_pair_candidate": soft_pair_candidate and not strict_candidate,
             }
         )
 
@@ -4315,6 +4332,20 @@ def _lighten_corner_shadows_conservative(image: Image.Image) -> CornerShadowClea
             "corner shadow cleanup skipped: no confident smooth neutral corner shadow",
             "no_candidate",
         )
+    if any(bool(plan.get("soft_pair_candidate")) for plan in plans):
+        soft_pair_corners = tuple(str(plan["corner"]) for plan in plans)
+        allowed_soft_pairs = {
+            ("top_left", "top_right"),
+            ("bottom_left", "bottom_right"),
+            ("top_left", "bottom_right"),
+            ("top_right", "bottom_left"),
+        }
+        if len(plans) != 2 or soft_pair_corners not in allowed_soft_pairs:
+            return _corner_shadows_noop(
+                image,
+                "corner shadow cleanup skipped: no confident paired smooth neutral corner shadows",
+                "no_candidate",
+            )
     if len(plans) > 2:
         return _corner_shadows_noop(
             image,
@@ -4346,7 +4377,8 @@ def _lighten_corner_shadows_conservative(image: Image.Image) -> CornerShadowClea
                     continue
                 factor = max(0.0, 1.0 - (distance / max(1.0, max_distance)) * 0.75)
                 new_value = min(255, int(round(value + float(plan["max_delta"]) * factor)))
-                if new_value - value > 2:
+                minimum_lift = 1 if bool(plan.get("soft_pair_candidate")) else 2
+                if new_value - value > minimum_lift:
                     changed_pixels += 1
                     pixels[x, y] = new_value
         working_l.paste(corner_crop, box)
