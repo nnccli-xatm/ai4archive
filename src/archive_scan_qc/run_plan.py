@@ -42,6 +42,7 @@ class PlanBatch:
     normalize_tones: bool
     lighten_edge_shadow: bool
     lighten_background_stains: bool
+    lighten_fold_shadows: bool
     clean_bleed_through: bool
     lighten_scanlines: bool
     enhance_faded_text: bool
@@ -193,6 +194,7 @@ def _run_batch(project_id: str, batch: PlanBatch, index: int) -> dict[str, Any]:
                 normalize_tones=batch.normalize_tones,
                 lighten_edge_shadow=batch.lighten_edge_shadow,
                 lighten_background_stains=batch.lighten_background_stains,
+                lighten_fold_shadows=batch.lighten_fold_shadows,
                 lighten_scanlines=batch.lighten_scanlines,
                 enhance_faded_text=batch.enhance_faded_text,
                 sharpen_text_edges=batch.sharpen_text_edges,
@@ -263,6 +265,7 @@ def _run_batch(project_id: str, batch: PlanBatch, index: int) -> dict[str, Any]:
                     normalize_tones=batch.normalize_tones,
                     lighten_edge_shadow=batch.lighten_edge_shadow,
                     lighten_background_stains=batch.lighten_background_stains,
+                    lighten_fold_shadows=batch.lighten_fold_shadows,
                     clean_bleed_through=batch.clean_bleed_through,
                     lighten_scanlines=batch.lighten_scanlines,
                     enhance_faded_text=batch.enhance_faded_text,
@@ -388,6 +391,7 @@ def _aggregate_processing_operation_timings(batches: list[dict[str, Any]]) -> di
         "normalize_tones",
         "lighten_edge_shadow",
         "lighten_background_stains",
+        "lighten_fold_shadows",
         "clean_bleed_through",
         "lighten_scanlines",
         "enhance_faded_text",
@@ -577,6 +581,7 @@ def _batch_from_row(row: dict[str, Any], index: int, plan_dir: Path, output_root
             "lighten_background_stains",
             index,
         ),
+        lighten_fold_shadows=_bool(normalized.get("lighten_fold_shadows"), "lighten_fold_shadows", index),
         clean_bleed_through=_bool(normalized.get("clean_bleed_through"), "clean_bleed_through", index),
         lighten_scanlines=_bool(normalized.get("lighten_scanlines"), "lighten_scanlines", index),
         enhance_faded_text=_bool(normalized.get("enhance_faded_text"), "enhance_faded_text", index),

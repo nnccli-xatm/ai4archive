@@ -3363,6 +3363,7 @@ class ScanQcTest(unittest.TestCase):
                 "--normalize-tones",
                 "--lighten-edge-shadow",
                 "--lighten-background-stains",
+                "--lighten-fold-shadows",
                 "--clean-bleed-through",
                 "--lighten-scanlines",
                 "--enhance-faded-text",
@@ -3382,6 +3383,7 @@ class ScanQcTest(unittest.TestCase):
         self.assertTrue(baseline_args.normalize_tones)
         self.assertTrue(baseline_args.lighten_edge_shadow)
         self.assertTrue(baseline_args.lighten_background_stains)
+        self.assertTrue(baseline_args.lighten_fold_shadows)
         self.assertTrue(baseline_args.clean_bleed_through)
         self.assertTrue(baseline_args.lighten_scanlines)
         self.assertTrue(baseline_args.enhance_faded_text)
@@ -8945,8 +8947,11 @@ class ScanQcTest(unittest.TestCase):
             self.assertFalse(record["despeckled"])
             self.assertEqual(record["despeckle_pixels_changed"], 0)
             self.assertEqual(record["despeckle_reason"], "despeckle disabled")
+            self.assertFalse(record["fold_shadows_lightened"])
+            self.assertEqual(record["fold_shadows_reason"], "fold shadow cleanup disabled")
             self.assertIn("dark_border_trim_disabled", record["operations"])
             self.assertIn("despeckle_disabled", record["operations"])
+            self.assertIn("lighten_fold_shadows_disabled", record["operations"])
             audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
             self.assertEqual(audit_summary["counts"]["dark_border_trimmed_files"], 0)
             self.assertEqual(audit_summary["counts"]["dark_border_skipped_files"], 0)
@@ -10148,6 +10153,108 @@ class ScanQcTest(unittest.TestCase):
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertNotIn("private_safe_background_stain", audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
+
+    def test_fold_shadow_cleanup_is_opt_in_and_lightens_safe_narrow_background_band(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "private_safe_fold_shadow.png"
+            image = Image.new("RGB", (220, 160), (242, 242, 238))
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((105, 14, 113, 146), fill=(218, 218, 214))
+            image.save(source)
+            source_bytes = source.read_bytes()
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            disabled_manifest = process_images(report, input_dir, process_dir / "disabled", ProcessingOptions(workers=1))
+            disabled_record = disabled_manifest["files"][0]
+            self.assertFalse(disabled_record["fold_shadows_lightened"])
+            self.assertEqual(disabled_record["fold_shadows_reason"], "fold shadow cleanup disabled")
+            with Image.open(process_dir / "disabled" / "images" / "private_safe_fold_shadow.png") as disabled:
+                self.assertEqual(disabled.convert("RGB").tobytes(), image.tobytes())
+
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir / "enabled",
+                ProcessingOptions(lighten_fold_shadows=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "enabled" / "processing_audit_summary.json").read_text(
+                encoding="utf-8"
+            )
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertTrue(record["fold_shadows_lightened"])
+            self.assertEqual(record["fold_shadows_reason_code"], "applied_narrow_neutral_background_band")
+            self.assertEqual(record["fold_shadows_orientation"], "vertical")
+            self.assertGreater(record["fold_shadows_changed_pixel_ratio"], 0.002)
+            self.assertLessEqual(record["fold_shadows_changed_pixel_ratio"], 0.075)
+            self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
+            with Image.open(process_dir / "enabled" / "images" / "private_safe_fold_shadow.png") as processed:
+                grayscale = processed.convert("L")
+                self.assertGreater(grayscale.getpixel((109, 40)), image.convert("L").getpixel((109, 40)))
+                self.assertEqual(grayscale.getpixel((30, 40)), image.convert("L").getpixel((30, 40)))
+            self.assertTrue(audit_summary["operations"]["lighten_fold_shadows"])
+            self.assertEqual(audit_summary["counts"]["fold_shadows_lightened_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["fold_shadows"]["applied_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["fold_shadows"]["reason_code_distribution"][
+                    "applied_narrow_neutral_background_band"
+                ],
+                1,
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_safe_fold_shadow", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
+    def test_fold_shadow_cleanup_preserves_foreground_marks_and_edge_content(self) -> None:
+        cases = {
+            "text": lambda draw: draw.rectangle((78, 58, 140, 64), fill=(30, 30, 30)),
+            "stamp": lambda draw: draw.ellipse((96, 48, 124, 76), outline=(190, 20, 20), width=3),
+            "table_grid": lambda draw: [
+                draw.line((52, y, 168, y), fill=(35, 35, 35), width=2) for y in (46, 78, 110)
+            ],
+            "page_number": lambda draw: draw.rectangle((104, 132, 116, 138), fill=(35, 35, 35)),
+            "handwriting": lambda draw: draw.line((82, 44, 138, 92), fill=(45, 45, 45), width=2),
+            "edge_content": lambda draw: draw.rectangle((4, 32, 18, 118), fill=(35, 35, 35)),
+        }
+        for name, draw_mark in cases.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                input_dir = root / "input"
+                output_dir = root / "reports"
+                process_dir = root / "processed"
+                input_dir.mkdir()
+                image = Image.new("RGB", (220, 160), (242, 242, 238))
+                draw = ImageDraw.Draw(image)
+                draw.rectangle((105, 14, 113, 146), fill=(218, 218, 214))
+                draw_mark(draw)
+                source = input_dir / f"private_fold_protected_{name}.png"
+                image.save(source)
+
+                report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+                manifest = process_images(
+                    report,
+                    input_dir,
+                    process_dir,
+                    ProcessingOptions(lighten_fold_shadows=True, workers=1),
+                )
+                audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+                audit_summary = json.loads(audit_summary_text)
+
+                with Image.open(process_dir / "images" / f"private_fold_protected_{name}.png") as processed:
+                    self.assertEqual(processed.convert("RGB").tobytes(), image.tobytes(), name)
+                record = manifest["files"][0]
+                self.assertFalse(record["fold_shadows_lightened"])
+                self.assertNotEqual(record["fold_shadows_reason_code"], "applied_narrow_neutral_background_band")
+                self.assertEqual(audit_summary["counts"]["fold_shadows_lightened_files"], 0)
+                self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+                self.assertNotIn(f"private_fold_protected_{name}", audit_summary_text)
 
     def test_combined_change_guard_reverts_high_risk_stack_and_preserves_source(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -11462,6 +11569,7 @@ class ScanQcTest(unittest.TestCase):
                 "--normalize-tones",
                 "--lighten-edge-shadow",
                 "--lighten-background-stains",
+                "--lighten-fold-shadows",
                 "--lighten-scanlines",
                 "--enhance-faded-text",
                 "--sharpen-text-edges",

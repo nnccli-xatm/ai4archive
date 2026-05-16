@@ -25,6 +25,7 @@ REGRESSION_SIGNAL_OPERATIONS = (
     "normalize_tones",
     "lighten_edge_shadow",
     "lighten_background_stains",
+    "lighten_fold_shadows",
     "clean_bleed_through",
     "lighten_scanlines",
     "enhance_faded_text",
@@ -78,6 +79,7 @@ def run_synthetic_comparison(args: argparse.Namespace) -> dict[str, Any]:
                 "--despeckle-backend",
                 "fallback",
                 "--reuse-scan-measurements",
+                "--lighten-fold-shadows",
             ],
         },
         {
@@ -91,6 +93,7 @@ def run_synthetic_comparison(args: argparse.Namespace) -> dict[str, Any]:
                 "--despeckle-backend",
                 "numpy",
                 "--reuse-scan-measurements",
+                "--lighten-fold-shadows",
             ],
         },
     ]
