@@ -9842,6 +9842,93 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn("private_safe_background_stain", audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
 
+    def test_combined_change_guard_reverts_high_risk_stack_and_preserves_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "private_high_risk_combo.png"
+            image = Image.new("RGB", (180, 120), (242, 242, 238))
+            draw = ImageDraw.Draw(image)
+            for y in range(26, 92, 16):
+                draw.rectangle((34, y, 142, y + 4), fill=(58, 58, 58))
+            image.save(source)
+            source_bytes = source.read_bytes()
+
+            def broad_background_change(current: Image.Image) -> processing_module.BackgroundStainLighteningResult:
+                changed = current.copy()
+                changed.paste((225, 225, 222), (0, 0, 82, current.height))
+                return processing_module.BackgroundStainLighteningResult(
+                    changed,
+                    True,
+                    "background stains lightened: stable isolated stains on light paper",
+                    220.0,
+                    235.0,
+                    10.0,
+                    0.45,
+                    0.45,
+                )
+
+            def broad_faded_text_change(current: Image.Image) -> processing_module.FadedTextEnhancementResult:
+                changed = current.copy()
+                changed.paste((214, 214, 211), (82, 0, 98, current.height))
+                return processing_module.FadedTextEnhancementResult(
+                    changed,
+                    True,
+                    "faded text enhancement applied: stable low-contrast neutral text on light paper",
+                    12.0,
+                    0.09,
+                    0.09,
+                )
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            with mock.patch(
+                "archive_scan_qc.processing._lighten_background_stains_conservative",
+                side_effect=broad_background_change,
+            ), mock.patch(
+                "archive_scan_qc.processing._enhance_faded_text_conservative",
+                side_effect=broad_faded_text_change,
+            ):
+                manifest = process_images(
+                    report,
+                    input_dir,
+                    process_dir,
+                    ProcessingOptions(lighten_background_stains=True, enhance_faded_text=True, workers=1),
+                )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+            audit = record["processing_audit"]
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(record["status"], "processed")
+            self.assertFalse(record["background_stains_lightened"])
+            self.assertFalse(record["faded_text_enhanced"])
+            self.assertEqual(audit["combination_quality_guard_action"], "reverted_to_source")
+            self.assertEqual(
+                audit["combination_quality_guard_reason_code"],
+                "combined_change_too_large_reverted",
+            )
+            self.assertIn("combination_quality_guard_reverted_to_source", record["operations"])
+            with Image.open(process_dir / "images" / "private_high_risk_combo.png") as processed:
+                self.assertEqual(processed.convert("RGB").tobytes(), image.tobytes())
+            self.assertEqual(audit_summary["counts"]["combination_quality_guard_reverted_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["combination_quality_guard"]["reason_code_distribution"][
+                    "combined_change_too_large_reverted"
+                ],
+                1,
+            )
+            for forbidden in (
+                "private_high_risk_combo",
+                str(input_dir),
+                "source_relative_path",
+                "source_sha256",
+            ):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_multi_worker_retouch_manifest_order_stays_stable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

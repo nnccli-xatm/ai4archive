@@ -9,11 +9,82 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter
 
 from archive_scan_qc.benchmark import _processing_quality_regression, run_benchmark
-from archive_scan_qc.processing import ProcessingOptions, process_images
+from archive_scan_qc.processing import ProcessingOptions, _combination_quality_guard, process_images
 from archive_scan_qc.scanner import ScanConfig, scan_batch
 
 
 class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
+    def test_combination_quality_guard_classifies_public_reason_codes(self) -> None:
+        options = ProcessingOptions()
+        base_metrics = _combination_guard_metrics()
+        passed = _combination_quality_guard(
+            base_metrics,
+            options,
+            cumulative_change_guard=_guard_passed(),
+            local_content_change_guard=_guard_passed(),
+        )
+        self.assertEqual(passed["action"], "passed")
+        self.assertEqual(passed["reason_code"], "safe_combination_passed")
+
+        combined = _combination_quality_guard(
+            dict(base_metrics, pixel_change_ratio=0.42),
+            options,
+            cumulative_change_guard=_guard_reverted("pixel_change_ratio", "cumulative_change_score"),
+            local_content_change_guard=_guard_passed(),
+        )
+        self.assertEqual(combined["action"], "reverted_to_source")
+        self.assertEqual(combined["reason_code"], "combined_change_too_large_reverted")
+
+        geometry = _combination_quality_guard(
+            dict(base_metrics, size_change_ratio=0.21, crop_ratio=0.19, deskew_abs_angle_degrees=1.0),
+            ProcessingOptions(audit_max_geometry_combo_crop_ratio=0.18, audit_max_geometry_combo_size_change_ratio=0.18),
+            cumulative_change_guard=_guard_passed(),
+            local_content_change_guard=_guard_passed(),
+        )
+        self.assertEqual(geometry["reason_code"], "safe_combination_passed")
+
+        geometry = _combination_quality_guard(
+            dict(
+                base_metrics,
+                pixel_change_guardrail_scope="geometric_change_recorded_by_size_crop_trim_or_deskew",
+                pixel_change_guardrail_applied=False,
+                size_change_ratio=0.21,
+                crop_ratio=0.19,
+                deskew_abs_angle_degrees=1.0,
+            ),
+            ProcessingOptions(audit_max_geometry_combo_crop_ratio=0.18, audit_max_geometry_combo_size_change_ratio=0.18),
+            cumulative_change_guard=_guard_passed(),
+            local_content_change_guard=_guard_passed(),
+        )
+        self.assertEqual(geometry["reason_code"], "geometric_risk_reverted")
+        self.assertIn("geometry_crop_or_trim_ratio", geometry["reasons"])
+
+        text = _combination_quality_guard(
+            dict(
+                base_metrics,
+                faded_text_enhanced=True,
+                text_edges_sharpened=True,
+                faded_text_changed_pixel_ratio=0.06,
+                text_edges_changed_pixel_ratio=0.05,
+                local_content_changed_ratio=0.13,
+            ),
+            options,
+            cumulative_change_guard=_guard_passed(),
+            local_content_change_guard=_guard_passed(),
+        )
+        self.assertEqual(text["reason_code"], "text_high_frequency_risk_reverted")
+        self.assertIn("text_combo_changed_pixel_ratio", text["reasons"])
+
+        low_confidence = _combination_quality_guard(
+            base_metrics,
+            options,
+            cumulative_change_guard=_guard_passed(),
+            local_content_change_guard=_guard_passed(),
+            low_confidence_original_preserved=True,
+        )
+        self.assertEqual(low_confidence["action"], "kept_original")
+        self.assertEqual(low_confidence["reason_code"], "low_confidence_original_preserved")
+
     def test_synthetic_combinations_emit_aggregate_quality_and_performance_regression_fields(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-algorithm-regression-") as temp_dir:
             root = Path(temp_dir)
@@ -119,8 +190,11 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertEqual(audit["guardrail_failures"], [])
             self.assertEqual(audit["local_content_change_guard_action"], "passed")
             self.assertEqual(audit["cumulative_change_guard_action"], "passed")
+            self.assertEqual(audit["combination_quality_guard_action"], "passed")
+            self.assertEqual(audit["combination_quality_guard_reason_code"], "safe_combination_passed")
             self.assertFalse(audit["local_content_change_guard_reverted"])
             self.assertFalse(audit["cumulative_change_guard_reverted"])
+            self.assertFalse(audit["combination_quality_guard_reverted"])
             self.assertGreater(audit["scanlines_changed_pixel_ratio"], 0.0)
             self.assertLessEqual(audit["scanlines_changed_pixel_ratio"], 0.04)
             self.assertLessEqual(audit["despeckle_pixel_ratio"], 0.001)
@@ -132,10 +206,59 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertEqual(audit_summary["counts"]["scanlines_lightened_files"], 1)
             self.assertEqual(audit_summary["counts"]["cumulative_change_guard_reverted_files"], 0)
             self.assertEqual(audit_summary["counts"]["local_content_change_guard_reverted_files"], 0)
+            self.assertEqual(audit_summary["counts"]["combination_quality_guard_reverted_files"], 0)
+            self.assertEqual(
+                audit_summary["guardrails"]["combination_quality_guard"]["reason_code_distribution"][
+                    "safe_combination_passed"
+                ],
+                1,
+            )
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertFalse(audit_summary["privacy"]["contains_paths"])
             self.assertFalse(audit_summary["privacy"]["contains_hashes"])
             for forbidden in ("synthetic_safe_combination.png", str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
+    def test_low_confidence_combination_preserves_original_with_public_reason_code(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-low-confidence-combo-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "synthetic_low_confidence_combo.png"
+            Image.new("RGB", (150, 110), (244, 244, 244)).save(source, dpi=(300, 300))
+            source_bytes = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "low-confidence-combo", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(enhance_faded_text=True, sharpen_text_edges=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+            audit = record["processing_audit"]
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(record["status"], "processed")
+            self.assertFalse(record["faded_text_enhanced"])
+            self.assertFalse(record["text_edges_sharpened"])
+            self.assertEqual(audit["combination_quality_guard_action"], "kept_original")
+            self.assertEqual(
+                audit["combination_quality_guard_reason_code"],
+                "low_confidence_original_preserved",
+            )
+            self.assertEqual(
+                audit_summary["guardrails"]["combination_quality_guard"]["reason_code_distribution"][
+                    "low_confidence_original_preserved"
+                ],
+                1,
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            for forbidden in ("synthetic_low_confidence_combo.png", str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
     def test_trim_dark_border_auto_crop_combination_keeps_narrow_gray_edge_change_controlled(self) -> None:
@@ -817,3 +940,35 @@ def _blurred_text_page() -> Image.Image:
         draw.line((24, y, 104, y), fill=(42, 42, 42), width=2)
         draw.line((28, y + 5, 92, y + 5), fill=(58, 58, 58), width=2)
     return image.filter(ImageFilter.GaussianBlur(radius=0.7))
+
+
+def _combination_guard_metrics() -> dict[str, object]:
+    return {
+        "size_change_ratio": 0.0,
+        "pixel_change_guardrail_scope": "same_size_pixel_change",
+        "pixel_change_guardrail_applied": True,
+        "pixel_change_ratio": 0.18,
+        "brightness_delta": 8.0,
+        "contrast_delta": 8.0,
+        "crop_ratio": 0.0,
+        "max_trim_margin_ratio": 0.0,
+        "deskew_abs_angle_degrees": 0.0,
+        "background_stains_candidate_pixel_ratio": 0.04,
+        "scanlines_candidate_pixel_ratio": 0.04,
+        "faded_text_enhanced": False,
+        "faded_text_changed_pixel_ratio": 0.04,
+        "faded_text_candidate_pixel_ratio": 0.04,
+        "text_edges_sharpened": False,
+        "text_edges_changed_pixel_ratio": 0.0,
+        "text_edges_candidate_pixel_ratio": 0.0,
+        "local_content_changed_ratio": 0.02,
+        "edge_content_changed_ratio": 0.02,
+    }
+
+
+def _guard_passed() -> dict[str, object]:
+    return {"checked": True, "action": "passed", "reverted": False, "reasons": []}
+
+
+def _guard_reverted(*reasons: str) -> dict[str, object]:
+    return {"checked": True, "action": "reverted_to_source", "reverted": True, "reasons": list(reasons)}
