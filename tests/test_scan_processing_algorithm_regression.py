@@ -108,8 +108,10 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 self.assertEqual(quality["counts"]["failed_files"], 0)
                 self.assertEqual(quality["counts"]["guardrail_failed_files"], 0)
                 self.assertEqual(quality["counts"]["cumulative_change_guard_reverted_files"], 0)
+                self.assertEqual(quality["counts"]["processed_output_safety_guard_reverted_files"], 0)
                 self.assertTrue(quality["aggregate_only"])
                 self.assertTrue(quality["privacy"]["aggregate_only"])
+                self.assertTrue(quality["processed_output_safety_guard"]["aggregate_only"])
                 for operation in REQUIRED_OPERATIONS:
                     self.assertIn(operation, quality["algorithm_metrics"])
                     self.assertIn("metrics", quality["algorithm_metrics"][operation])
@@ -117,6 +119,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertEqual(default_quality["status"], "pass")
             self.assertEqual(default_quality["counts"]["enhancement_changed_files"], 0)
             self.assertEqual(default_quality["counts"]["cumulative_change_guard_checked_files"], 6)
+            self.assertEqual(default_quality["counts"]["processed_output_safety_guard_checked_files"], 6)
             for operation in CONSERVATIVE_REPAIR_OPERATIONS:
                 self.assertFalse(default_quality["algorithm_metrics"][operation]["enabled"], operation)
                 self.assertEqual(default_quality["algorithm_metrics"][operation]["changed_files"], 0, operation)

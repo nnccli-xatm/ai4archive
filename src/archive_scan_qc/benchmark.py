@@ -632,6 +632,7 @@ def _processing_quality_regression(processing_manifest: dict[str, Any] | None) -
     )
 
     local_content_guard = _local_content_change_guard_summary(audit_records)
+    processed_output_guard = _processed_output_safety_guard_summary(audit_records)
     return {
         "schema_version": "scan-qc.processing.quality-regression.v1",
         "aggregate_only": True,
@@ -657,8 +658,16 @@ def _processing_quality_regression(processing_manifest: dict[str, Any] | None) -
             "local_content_change_guard_reverted_files": sum(
                 1 for audit in audit_records if audit.get("local_content_change_guard_reverted") is True
             ),
+            "processed_output_safety_guard_checked_files": processed_output_guard["checked_files"],
+            "processed_output_safety_guard_reverted_files": processed_output_guard["reverted_files"],
+            "processed_output_washout_guard_reverted_files": processed_output_guard["washout_reverted_files"],
+            "processed_output_clipping_guard_reverted_files": processed_output_guard["clipping_reverted_files"],
+            "processed_output_foreground_loss_guard_reverted_files": processed_output_guard[
+                "foreground_loss_reverted_files"
+            ],
         },
         "local_content_change_guard": local_content_guard,
+        "processed_output_safety_guard": processed_output_guard,
         "thresholds": thresholds,
         "algorithm_metrics": algorithm_metrics,
         "operation_timing_integrity": timing_integrity,
@@ -697,8 +706,14 @@ def _empty_quality_regression_summary(reason: str) -> dict[str, Any]:
             "local_content_change_guard_checked_files": 0,
             "local_content_change_guard_skipped_files": 0,
             "local_content_change_guard_reverted_files": 0,
+            "processed_output_safety_guard_checked_files": 0,
+            "processed_output_safety_guard_reverted_files": 0,
+            "processed_output_washout_guard_reverted_files": 0,
+            "processed_output_clipping_guard_reverted_files": 0,
+            "processed_output_foreground_loss_guard_reverted_files": 0,
         },
         "local_content_change_guard": _local_content_change_guard_summary([]),
+        "processed_output_safety_guard": _processed_output_safety_guard_summary([]),
         "thresholds": _processing_quality_thresholds(),
         "algorithm_metrics": _repair_algorithm_metrics([], {}),
         "operation_timing_integrity": _empty_operation_timing_integrity(reason),
@@ -886,6 +901,46 @@ def _local_content_change_guard_summary(audit_records: list[dict[str, Any]]) -> 
     }
 
 
+def _processed_output_safety_guard_summary(audit_records: list[dict[str, Any]]) -> dict[str, Any]:
+    checked_files = sum(1 for audit in audit_records if audit.get("processed_output_safety_guard_checked") is True)
+    reverted_files = sum(1 for audit in audit_records if audit.get("processed_output_safety_guard_reverted") is True)
+    warning_files = sum(
+        1
+        for audit in audit_records
+        if audit.get("processed_output_safety_guard_action") in {"reverted_to_source", "warn_review"}
+    )
+    reason_lists = [
+        audit.get("processed_output_safety_guard_reasons", [])
+        for audit in audit_records
+        if isinstance(audit.get("processed_output_safety_guard_reasons"), list)
+    ]
+    return {
+        "aggregate_only": True,
+        "checked_files": checked_files,
+        "skipped_files": max(0, len(audit_records) - checked_files),
+        "reverted_files": reverted_files,
+        "warning_files": warning_files,
+        "washout_reverted_files": sum(
+            1
+            for reasons in reason_lists
+            if "near_white_saturation" in reasons or "bright_page_washout" in reasons
+        ),
+        "clipping_reverted_files": sum(1 for reasons in reason_lists if "highlight_clipping" in reasons),
+        "foreground_loss_reverted_files": sum(1 for reasons in reason_lists if "dark_foreground_loss" in reasons),
+        "reason_code_distribution": _reason_counts(
+            audit.get("processed_output_safety_guard_reason_code")
+            for audit in audit_records
+            if isinstance(audit.get("processed_output_safety_guard_reason_code"), str)
+        ),
+        "reason_distribution": _reason_counts(
+            reason
+            for reasons in reason_lists
+            for reason in reasons
+            if isinstance(reason, str)
+        ),
+    }
+
+
 def _processing_quality_thresholds() -> dict[str, float]:
     defaults = ProcessingOptions()
     return {
@@ -905,6 +960,14 @@ def _processing_quality_thresholds() -> dict[str, float]:
         "max_local_content_changed_ratio": defaults.audit_max_local_content_changed_ratio,
         "max_local_content_tile_changed_ratio": defaults.audit_max_local_content_tile_changed_ratio,
         "max_edge_content_changed_ratio": defaults.audit_max_edge_content_changed_ratio,
+        "max_processed_near_white_ratio": defaults.audit_max_processed_near_white_ratio,
+        "max_processed_near_white_delta": defaults.audit_max_processed_near_white_delta,
+        "max_processed_highlight_clip_ratio": defaults.audit_max_processed_highlight_clip_ratio,
+        "max_processed_highlight_clip_delta": defaults.audit_max_processed_highlight_clip_delta,
+        "max_processed_bright_page_delta": defaults.audit_max_processed_bright_page_delta,
+        "max_processed_dark_pixel_loss_ratio": defaults.audit_max_processed_dark_pixel_loss_ratio,
+        "max_processed_dark_pixel_lift_ratio": defaults.audit_max_processed_dark_pixel_lift_ratio,
+        "max_processed_full_page_change_ratio": defaults.audit_max_processed_full_page_change_ratio,
         "max_deskew_degrees": defaults.deskew_max_degrees,
         "max_tone_background_delta": defaults.audit_max_brightness_delta,
         "max_tone_contrast_delta": defaults.audit_max_contrast_delta,

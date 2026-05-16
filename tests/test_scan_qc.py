@@ -7481,6 +7481,79 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn("private_high_risk_stacked_repairs", audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
 
+    def test_processed_output_safety_guard_reverts_washed_out_clipped_foreground_loss_aggregate_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "private_washed_out_processed_output.png"
+            image = Image.new("RGB", (180, 120), (216, 216, 212))
+            draw = ImageDraw.Draw(image)
+            for y in (24, 44, 64, 84):
+                draw.rectangle((24, y, 146, y + 5), fill=(36, 36, 36))
+            draw.rectangle((8, 104, 44, 110), fill=(48, 48, 48))
+            image.save(source, dpi=(300, 300))
+
+            def washed_out_repair(candidate: Image.Image) -> processing_module.BackgroundStainLighteningResult:
+                output = Image.new(candidate.mode, candidate.size, (255, 255, 255))
+                return processing_module.BackgroundStainLighteningResult(
+                    output,
+                    True,
+                    "synthetic washed out derivative",
+                    216.0,
+                    255.0,
+                    29.0,
+                    1.0,
+                    1.0,
+                )
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            with mock.patch.object(
+                processing_module,
+                "_lighten_background_stains_conservative",
+                side_effect=washed_out_repair,
+            ):
+                manifest = process_images(
+                    report,
+                    input_dir,
+                    process_dir,
+                    ProcessingOptions(lighten_background_stains=True, workers=1),
+                )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+            audit = record["processing_audit"]
+
+            self.assertEqual(record["status"], "processed")
+            self.assertFalse(record["background_stains_lightened"])
+            self.assertEqual(record["background_stains_reason"], "reverted by processed output safety guard")
+            self.assertIn("processed_output_safety_guard_reverted_to_source", record["operations"])
+            self.assertIn("processed_output_safety_guard_reverted_to_source", record["processing_warnings"])
+            self.assertEqual(audit["guardrail_failures"], [])
+            self.assertEqual(audit["processed_output_safety_guard_action"], "reverted_to_source")
+            self.assertTrue(audit["processed_output_safety_guard_reverted"])
+            self.assertEqual(audit["processed_output_safety_guard_reason_code"], "processed_output_quality_reverted")
+            self.assertIn("near_white_saturation", audit["processed_output_safety_guard_reasons"])
+            self.assertIn("highlight_clipping", audit["processed_output_safety_guard_reasons"])
+            self.assertIn("dark_foreground_loss", audit["processed_output_safety_guard_reasons"])
+            with Image.open(process_dir / "images" / "private_washed_out_processed_output.png") as processed:
+                self.assertEqual(processed.convert("RGB").tobytes(), image.tobytes())
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["processed_output_safety_guard_checked_files"], 1)
+            self.assertEqual(audit_summary["counts"]["processed_output_safety_guard_reverted_files"], 1)
+            self.assertEqual(audit_summary["counts"]["processed_output_washout_guard_reverted_files"], 1)
+            self.assertEqual(audit_summary["counts"]["processed_output_clipping_guard_reverted_files"], 1)
+            self.assertEqual(audit_summary["counts"]["processed_output_foreground_loss_guard_reverted_files"], 1)
+            processed_output_guard = audit_summary["guardrails"]["processed_output_safety_guard"]
+            self.assertEqual(processed_output_guard["reverted_files"], 1)
+            self.assertEqual(processed_output_guard["reason_code_distribution"]["processed_output_quality_reverted"], 1)
+            self.assertEqual(processed_output_guard["reason_distribution"]["near_white_saturation"], 1)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_washed_out_processed_output", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
     def test_process_images_writes_audit_summary_and_retry_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
