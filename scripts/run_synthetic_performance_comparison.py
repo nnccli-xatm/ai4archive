@@ -17,6 +17,8 @@ from PIL import Image, ImageDraw
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = REPO_ROOT / "src"
 SUMMARY_JSON = "synthetic_performance_comparison.json"
+FULL_CHAIN_VARIANT_ID = "full_conservative_repair_chain"
+FULL_CHAIN_SYNTHETIC_BUDGET_SECONDS_PER_FILE = 5.0
 REGRESSION_SIGNAL_OPERATIONS = (
     "deskew",
     "trim_dark_border",
@@ -32,6 +34,23 @@ REGRESSION_SIGNAL_OPERATIONS = (
     "sharpen_text_edges",
 )
 DESPECKLE_BACKEND_MODES = ("numpy", "fallback", "not_applicable", "unknown")
+FULL_CHAIN_REPAIR_ARGS = (
+    "--auto-crop",
+    "--deskew",
+    "--trim-dark-border",
+    "--despeckle",
+    "--normalize-tones",
+    "--lighten-edge-shadow",
+    "--lighten-background-stains",
+    "--lighten-fold-shadows",
+    "--clean-bleed-through",
+    "--lighten-scanlines",
+    "--enhance-faded-text",
+    "--sharpen-text-edges",
+    "--despeckle-backend",
+    "fallback",
+    "--reuse-scan-measurements",
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -58,7 +77,9 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Synthetic comparison summary: {args.out.resolve() / SUMMARY_JSON}")
     decision = summary["production_decision"]
     print(f"Production decision: {decision['worth_implementing_next'] or 'none'} - {decision['reason']}")
-    return 0
+    guard = summary["full_chain_regression_guard"]
+    print(f"Full-chain regression guard: {guard['status']} - {guard['message']}")
+    return 1 if guard["status"] == "failed" else 0
 
 
 def run_synthetic_comparison(args: argparse.Namespace) -> dict[str, Any]:
@@ -96,6 +117,11 @@ def run_synthetic_comparison(args: argparse.Namespace) -> dict[str, Any]:
                 "--lighten-fold-shadows",
             ],
         },
+        {
+            "id": FULL_CHAIN_VARIANT_ID,
+            "label": "Full conservative repair chain budget guard",
+            "benchmark_args": list(FULL_CHAIN_REPAIR_ARGS),
+        },
     ]
     variant_summaries = []
     for variant in variants:
@@ -122,6 +148,7 @@ def run_synthetic_comparison(args: argparse.Namespace) -> dict[str, Any]:
         benchmark = json.loads((benchmark_dir / "benchmark_results.json").read_text(encoding="utf-8"))
         variant_summaries.append(_variant_summary(variant, benchmark))
 
+    full_chain_guard = _full_chain_regression_guard(variant_summaries)
     summary = {
         "schema_version": "scan-qc.synthetic-performance-comparison.v1",
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -137,6 +164,7 @@ def run_synthetic_comparison(args: argparse.Namespace) -> dict[str, Any]:
         },
         "variants": variant_summaries,
         "comparison_plan": variant_summaries[0]["comparison_plan"] if variant_summaries else None,
+        "full_chain_regression_guard": full_chain_guard,
         "production_decision": _production_decision(variant_summaries),
     }
     (output_dir / SUMMARY_JSON).write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -179,25 +207,152 @@ def _write_synthetic_images(input_dir: Path, image_count: int, width: int, heigh
 
 
 def _variant_summary(variant: dict[str, Any], benchmark: dict[str, Any]) -> dict[str, Any]:
-    processing = benchmark["recommendations"].get("processing")
-    best_processing_rate = processing["files_per_minute"] if processing else None
+    processing_recommendation = benchmark["recommendations"].get("processing")
+    best_processing_rate = processing_recommendation["files_per_minute"] if processing_recommendation else None
     latest_run = benchmark["runs"][-1] if benchmark["runs"] else {}
+    latest_processing = latest_run.get("processing", {}) if isinstance(latest_run, dict) else {}
     return {
         "id": variant["id"],
         "label": variant["label"],
         "benchmark_schema_version": benchmark["schema_version"],
         "run_count": len(benchmark["runs"]),
         "best_processing_images_per_minute": best_processing_rate,
-        "best_requested_workers": processing["best_requested_workers"] if processing else None,
-        "failures": latest_run.get("processing", {}).get("failed_files"),
+        "best_requested_workers": (
+            processing_recommendation["best_requested_workers"] if processing_recommendation else None
+        ),
+        "failures": latest_processing.get("failed_files") if isinstance(latest_processing, dict) else None,
         "review_needed_counts": latest_run.get("finding_severity_counts", {}),
         "operation_timing_regression_signal": _operation_timing_regression_signal(benchmark),
+        "full_chain_budget_signal": _full_chain_budget_signal(variant, benchmark),
         "quality_difference_summary": (
             "Synthetic aggregate comparison only; inspect deltas in failures and review-needed counts before "
             "using private orchestrator evidence."
         ),
         "environment": benchmark["environment"],
         "comparison_plan": benchmark["comparison_plan"],
+    }
+
+
+def _full_chain_regression_guard(variants: list[dict[str, Any]]) -> dict[str, Any]:
+    full_chain = next((variant for variant in variants if variant.get("id") == FULL_CHAIN_VARIANT_ID), None)
+    if not isinstance(full_chain, dict):
+        return _failed_guard(
+            "missing_full_chain_variant",
+            "Full conservative repair chain variant is missing from the synthetic comparison.",
+        )
+
+    timing_signal = full_chain.get("operation_timing_regression_signal")
+    if not isinstance(timing_signal, dict):
+        return _failed_guard("missing_operation_timing_signal", "Full-chain operation timing signal is missing.")
+
+    missing_operations = timing_signal.get("missing_operations")
+    if isinstance(missing_operations, list) and missing_operations:
+        return _failed_guard(
+            "missing_full_chain_operation_timing",
+            "Full-chain synthetic guard is missing required operation timing signals.",
+            missing_operations=missing_operations,
+        )
+
+    operations = timing_signal.get("operations")
+    disabled_operations: list[str] = []
+    if isinstance(operations, dict):
+        disabled_operations = [
+            operation
+            for operation in REGRESSION_SIGNAL_OPERATIONS
+            if not isinstance(operations.get(operation), dict) or operations[operation].get("enabled") is not True
+        ]
+    if disabled_operations:
+        return _failed_guard(
+            "full_chain_operation_not_enabled",
+            "Full-chain synthetic guard did not enable every required repair operation.",
+            disabled_operations=disabled_operations,
+        )
+
+    budget_signal = full_chain.get("full_chain_budget_signal")
+    if not isinstance(budget_signal, dict):
+        return _failed_guard("missing_full_chain_budget_signal", "Full-chain budget signal is missing.")
+    if budget_signal.get("status") == "failed":
+        return _failed_guard(
+            "full_chain_processing_budget_exceeded",
+            "Full-chain synthetic processing exceeded the aggregate seconds-per-file budget.",
+            budget_signal=budget_signal,
+        )
+
+    return {
+        "schema_version": "scan-qc.synthetic-full-chain-regression-guard.v1",
+        "aggregate_only": True,
+        "status": "pass",
+        "message": "Full conservative chain timing and synthetic budget signals are present.",
+        "required_operations": list(REGRESSION_SIGNAL_OPERATIONS),
+        "budget_signal": budget_signal,
+        "privacy": _privacy_flags(),
+    }
+
+
+def _failed_guard(code: str, message: str, **details: Any) -> dict[str, Any]:
+    return {
+        "schema_version": "scan-qc.synthetic-full-chain-regression-guard.v1",
+        "aggregate_only": True,
+        "status": "failed",
+        "code": code,
+        "message": message,
+        "required_operations": list(REGRESSION_SIGNAL_OPERATIONS),
+        **details,
+        "privacy": _privacy_flags(),
+    }
+
+
+def _full_chain_budget_signal(variant: dict[str, Any], benchmark: dict[str, Any]) -> dict[str, Any] | None:
+    if variant.get("id") != FULL_CHAIN_VARIANT_ID:
+        return None
+    runs = benchmark.get("runs")
+    if not isinstance(runs, list):
+        runs = []
+
+    run_summaries: list[dict[str, Any]] = []
+    over_budget_runs: list[dict[str, Any]] = []
+    for run in runs:
+        if not isinstance(run, dict):
+            continue
+        processing = run.get("processing")
+        if not isinstance(processing, dict):
+            continue
+        elapsed_seconds = _coerce_float(processing.get("elapsed_seconds"))
+        processed_files = _coerce_int(processing.get("processed_files"))
+        if elapsed_seconds is None or processed_files <= 0:
+            continue
+        average_seconds_per_file = round(elapsed_seconds / processed_files, 6)
+        run_summary = {
+            "run_index": _coerce_int(run.get("run_index")),
+            "requested_workers": _coerce_int(run.get("requested_workers")),
+            "processed_files": processed_files,
+            "elapsed_seconds": round(elapsed_seconds, 6),
+            "average_seconds_per_file": average_seconds_per_file,
+        }
+        run_summaries.append(run_summary)
+        if average_seconds_per_file > FULL_CHAIN_SYNTHETIC_BUDGET_SECONDS_PER_FILE:
+            over_budget_runs.append(run_summary)
+
+    missing_signal = not run_summaries
+    status = "failed" if missing_signal or over_budget_runs else "pass"
+    return {
+        "schema_version": "scan-qc.synthetic-full-chain-budget-signal.v1",
+        "aggregate_only": True,
+        "status": status,
+        "code": (
+            "missing_full_chain_processing_budget_signal"
+            if missing_signal
+            else "full_chain_processing_budget_exceeded"
+            if over_budget_runs
+            else None
+        ),
+        "budget_seconds_per_file": FULL_CHAIN_SYNTHETIC_BUDGET_SECONDS_PER_FILE,
+        "run_count": len(run_summaries),
+        "max_average_seconds_per_file": (
+            max(run["average_seconds_per_file"] for run in run_summaries) if run_summaries else None
+        ),
+        "over_budget_runs": over_budget_runs,
+        "privacy": _privacy_flags(),
     }
 
 
@@ -349,8 +504,40 @@ def _files_per_minute(file_count: int, elapsed_seconds: float) -> float:
     return round((file_count / elapsed_seconds) * 60, 2)
 
 
+def _coerce_float(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return float(value)
+    return None
+
+
+def _coerce_int(value: Any) -> int:
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return value
+    return 0
+
+
+def _privacy_flags() -> dict[str, bool]:
+    return {
+        "contains_file_names": False,
+        "contains_paths": False,
+        "contains_hashes": False,
+        "contains_thumbnails": False,
+        "contains_ocr_text": False,
+        "contains_row_level_evidence": False,
+        "contains_image_content": False,
+    }
+
+
 def _production_decision(variants: list[dict[str, Any]]) -> dict[str, Any]:
-    measured = [variant for variant in variants if variant["best_processing_images_per_minute"] is not None]
+    measured = [
+        variant
+        for variant in variants
+        if variant["id"] != FULL_CHAIN_VARIANT_ID and variant["best_processing_images_per_minute"] is not None
+    ]
     if not measured:
         return {"worth_implementing_next": None, "reason": "No processing variants produced throughput metrics."}
     best = max(measured, key=lambda variant: variant["best_processing_images_per_minute"])

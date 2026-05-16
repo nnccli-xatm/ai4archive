@@ -733,6 +733,94 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, raw)
 
+    def test_synthetic_full_chain_guard_requires_enabled_operations_without_private_rows(self) -> None:
+        comparison = _synthetic_performance_comparison_module()
+        operation_timings = _operation_timings_fixture()
+        operation_timings["lighten_fold_shadows"] = dict(operation_timings["lighten_fold_shadows"], enabled=False)
+        benchmark = _full_chain_benchmark_fixture(operation_timings, elapsed_seconds=0.6, processed_files=4)
+
+        guard = comparison._full_chain_regression_guard(
+            [
+                {
+                    "id": comparison.FULL_CHAIN_VARIANT_ID,
+                    "operation_timing_regression_signal": comparison._operation_timing_regression_signal(benchmark),
+                    "full_chain_budget_signal": comparison._full_chain_budget_signal(
+                        {"id": comparison.FULL_CHAIN_VARIANT_ID}, benchmark
+                    ),
+                    "private_path": "/private/archive/private_full_chain_page.png",
+                    "source_sha256": "g" * 64,
+                }
+            ]
+        )
+        raw = json.dumps(guard, ensure_ascii=False, sort_keys=True)
+
+        self.assertEqual(guard["status"], "failed")
+        self.assertEqual(guard["code"], "full_chain_operation_not_enabled")
+        self.assertEqual(guard["disabled_operations"], ["lighten_fold_shadows"])
+        for value in guard["privacy"].values():
+            self.assertFalse(value)
+        for forbidden in (
+            "/private/archive",
+            "private_full_chain_page.png",
+            "source_sha256",
+            "g" * 64,
+        ):
+            self.assertNotIn(forbidden, raw)
+
+    def test_synthetic_full_chain_guard_reports_budget_failures_without_private_rows(self) -> None:
+        comparison = _synthetic_performance_comparison_module()
+        benchmark = _full_chain_benchmark_fixture(
+            _operation_timings_fixture(),
+            elapsed_seconds=comparison.FULL_CHAIN_SYNTHETIC_BUDGET_SECONDS_PER_FILE * 4 + 0.4,
+            processed_files=4,
+        )
+        budget_signal = comparison._full_chain_budget_signal({"id": comparison.FULL_CHAIN_VARIANT_ID}, benchmark)
+        guard = comparison._full_chain_regression_guard(
+            [
+                {
+                    "id": comparison.FULL_CHAIN_VARIANT_ID,
+                    "operation_timing_regression_signal": comparison._operation_timing_regression_signal(benchmark),
+                    "full_chain_budget_signal": budget_signal,
+                }
+            ]
+        )
+        raw = json.dumps(guard, ensure_ascii=False, sort_keys=True)
+
+        self.assertEqual(budget_signal["status"], "failed")
+        self.assertEqual(budget_signal["code"], "full_chain_processing_budget_exceeded")
+        self.assertEqual(guard["status"], "failed")
+        self.assertEqual(guard["code"], "full_chain_processing_budget_exceeded")
+        self.assertEqual(guard["budget_signal"]["over_budget_runs"][0]["processed_files"], 4)
+        for forbidden in (
+            "/private/archive",
+            "private_full_chain_page.png",
+            "source_sha256",
+            "h" * 64,
+        ):
+            self.assertNotIn(forbidden, raw)
+
+        passing_benchmark = _full_chain_benchmark_fixture(
+            _operation_timings_fixture(),
+            elapsed_seconds=0.8,
+            processed_files=4,
+        )
+        passing_guard = comparison._full_chain_regression_guard(
+            [
+                {
+                    "id": comparison.FULL_CHAIN_VARIANT_ID,
+                    "operation_timing_regression_signal": comparison._operation_timing_regression_signal(
+                        passing_benchmark
+                    ),
+                    "full_chain_budget_signal": comparison._full_chain_budget_signal(
+                        {"id": comparison.FULL_CHAIN_VARIANT_ID}, passing_benchmark
+                    ),
+                }
+            ]
+        )
+
+        self.assertEqual(passing_guard["status"], "pass")
+        self.assertEqual(passing_guard["budget_signal"]["status"], "pass")
+
 
 BASE_FLAGS = ("--deskew", "--trim-dark-border", "--auto-crop", "--despeckle")
 BASE_OPERATION_NAMES = ("auto_crop", "deskew", "trim_dark_border", "despeckle")
@@ -943,6 +1031,26 @@ def _operation_timings_fixture() -> dict[str, dict[str, object]]:
             "average_seconds_per_file": 0.01,
         }
         for operation in REQUIRED_OPERATIONS
+    }
+
+
+def _full_chain_benchmark_fixture(
+    operation_timings: dict[str, dict[str, object]], *, elapsed_seconds: float, processed_files: int
+) -> dict[str, object]:
+    return {
+        "runs": [
+            {
+                "run_index": 1,
+                "requested_workers": 1,
+                "processing": {
+                    "processed_files": processed_files,
+                    "elapsed_seconds": elapsed_seconds,
+                    "operation_timings": operation_timings,
+                    "private_path": "/private/archive/private_full_chain_page.png",
+                    "source_sha256": "h" * 64,
+                },
+            }
+        ]
     }
 
 
