@@ -3972,10 +3972,11 @@ def _paper_color_cast_protection_reason(
         if bg_distance > 32 and brightness >= 120:
             texture += 1
     if red_or_blue / total >= 0.00035 or colored / total >= 0.0012:
-        return (
-            "paper color cast normalization skipped: protected color content, stamp, seal, map, chart, or annotation risk",
-            "protected_color_content",
-        )
+        if not _paper_color_cast_tiny_color_mark_is_safe(sample, background_means):
+            return (
+                "paper color cast normalization skipped: protected color content, stamp, seal, map, chart, or annotation risk",
+                "protected_color_content",
+            )
     if dark / total >= 0.004 and not _paper_color_cast_sparse_dark_content_is_safe(sample, background_means):
         return (
             "paper color cast normalization skipped: protected handwriting, text, photograph, or archival mark risk",
@@ -3992,6 +3993,58 @@ def _paper_color_cast_protection_reason(
             "protected_edge_mark",
         )
     return None
+
+
+def _paper_color_cast_tiny_color_mark_is_safe(sample: Image.Image, background_means: list[float]) -> bool:
+    width, height = sample.size
+    total = max(1, width * height)
+    color_mask = Image.new("L", sample.size, 0)
+    source_pixels = sample.load()
+    mask_pixels = color_mask.load()
+    for y in range(height):
+        for x in range(width):
+            red_value, green_value, blue_value = source_pixels[x, y]
+            brightness = (red_value + green_value + blue_value) / 3
+            spread = max(red_value, green_value, blue_value) - min(red_value, green_value, blue_value)
+            bg_distance = max(
+                abs(red_value - background_means[0]),
+                abs(green_value - background_means[1]),
+                abs(blue_value - background_means[2]),
+            )
+            red_mark = red_value >= 110 and red_value - green_value >= 34 and red_value - blue_value >= 34
+            blue_mark = blue_value >= 105 and blue_value - red_value >= 30 and blue_value - green_value >= 18
+            protected_color = spread > 24 and bg_distance > 18 and 40 < brightness < 248
+            if (red_mark or blue_mark) and protected_color:
+                mask_pixels[x, y] = 255
+
+    colored_pixels = _mask_pixel_count(color_mask)
+    colored_ratio = colored_pixels / total
+    if colored_pixels < 8 or colored_ratio > 0.0025:
+        return False
+    components = [component for component in _mask_components(color_mask) if len(component) >= 3]
+    if len(components) != 1:
+        return False
+    component = components[0]
+    xs = [point[0] for point in component]
+    ys = [point[1] for point in component]
+    left = min(xs)
+    top = min(ys)
+    right = max(xs)
+    bottom = max(ys)
+    component_width = right - left + 1
+    component_height = bottom - top + 1
+    component_area = len(component)
+    bbox_area = component_width * component_height
+    edge_margin = max(4, int(round(min(width, height) * 0.06)))
+    if left < edge_margin or top < edge_margin or right >= width - edge_margin or bottom >= height - edge_margin:
+        return False
+    if component_area > total * 0.002 or component_width > width * 0.12 or component_height > height * 0.12:
+        return False
+    if component_area / max(1, bbox_area) < 0.12:
+        return False
+    protected_mask = _paper_color_cast_protected_mask(sample, background_means)
+    protected_overlap = _mask_intersection_count(color_mask, protected_mask)
+    return protected_overlap == colored_pixels
 
 
 def _paper_color_cast_sparse_dark_content_is_safe(sample: Image.Image, background_means: list[float]) -> bool:

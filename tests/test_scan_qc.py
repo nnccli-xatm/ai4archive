@@ -6951,6 +6951,99 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn("private_sparse_text_cast", audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
 
+    def test_normalize_paper_color_cast_corrects_tiny_protected_color_marks(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            default_process_dir = root / "processed-default"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "private_tiny_red_mark.png": _uniform_cast_page(
+                    background=(246, 243, 234),
+                    tiny_red_mark=True,
+                ),
+                "private_tiny_blue_mark.png": _uniform_cast_page(
+                    background=(246, 243, 234),
+                    tiny_blue_mark=True,
+                ),
+            }
+            mark_boxes = {
+                "private_tiny_red_mark.png": (118, 76, 132, 90),
+                "private_tiny_blue_mark.png": (74, 70, 91, 79),
+            }
+            for name, image in pages.items():
+                image.save(input_dir / name, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            default_manifest = process_images(report, input_dir, default_process_dir, ProcessingOptions(workers=1))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(normalize_paper_color_cast=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            default_records = {record["source_relative_path"]: record for record in default_manifest["files"]}
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            for source_name, source in pages.items():
+                default_record = default_records[source_name]
+                record = records[source_name]
+                processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+                mark_box = mark_boxes[source_name]
+                before_mark = source.crop(mark_box)
+                after_mark = processed.crop(mark_box)
+                before_mark_pixels = (
+                    before_mark.get_flattened_data()
+                    if hasattr(before_mark, "get_flattened_data")
+                    else before_mark.getdata()
+                )
+                after_mark_pixels = (
+                    after_mark.get_flattened_data()
+                    if hasattr(after_mark, "get_flattened_data")
+                    else after_mark.getdata()
+                )
+                colored_before = [
+                    pixel
+                    for pixel in before_mark_pixels
+                    if max(pixel) - min(pixel) > 60 and min(pixel) < 120
+                ]
+                colored_after = [
+                    pixel
+                    for pixel in after_mark_pixels
+                    if max(pixel) - min(pixel) > 60 and min(pixel) < 120
+                ]
+
+                self.assertFalse(default_record["paper_color_cast_normalized"], source_name)
+                self.assertIn("normalize_paper_color_cast_disabled", default_record["operations"], source_name)
+                self.assertTrue(record["paper_color_cast_normalized"], source_name)
+                self.assertEqual(record["paper_color_cast_reason_code"], "applied_mild_uniform_scanner_cast")
+                self.assertGreater(record["paper_color_cast_delta"], 6.0)
+                self.assertLessEqual(record["paper_color_cast_delta"], 12.0)
+                self.assertLessEqual(record["paper_color_cast_brightness_delta"], 4.0)
+                self.assertGreater(record["paper_color_cast_changed_pixel_ratio"], 0.95)
+                self.assertLessEqual(record["paper_color_cast_changed_pixel_ratio"], 1.0)
+                self.assertGreater(record["paper_color_cast_candidate_pixel_ratio"], 0.98)
+                self.assertLessEqual(record["paper_color_cast_candidate_pixel_ratio"], 1.0)
+                self.assertLess(_mean_channel_spread(processed), _mean_channel_spread(source) - 6.0)
+                self.assertLess(_mean_luma_delta(source, processed), 4.0)
+                self.assertLess(_changed_ratio_for_test(source, processed, mark_box), 0.001, source_name)
+                self.assertEqual(colored_after, colored_before, source_name)
+                self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
+
+            guard = audit_summary["guardrails"]["paper_color_cast"]
+            self.assertEqual(audit_summary["counts"]["paper_color_cast_normalized_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["paper_color_cast_skipped_files"], 0)
+            self.assertEqual(guard["applied_files"], len(pages))
+            self.assertEqual(guard["skipped_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_tiny_red_mark", audit_summary_text)
+            self.assertNotIn("private_tiny_blue_mark", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
     def test_normalize_paper_color_cast_skips_dense_text_foreground(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -6997,6 +7090,7 @@ class ScanQcTest(unittest.TestCase):
             pages = {
                 "private_red_stamp.png": _uniform_cast_page(red_stamp=True),
                 "private_blue_annotation.png": _uniform_cast_page(blue_annotation=True),
+                "private_edge_tiny_red_mark.png": _uniform_cast_page(edge_tiny_red_mark=True),
                 "private_handwriting.png": _uniform_cast_page(handwriting=True),
                 "private_photo.png": _uniform_cast_page(photo=True),
                 "private_chart.png": _uniform_cast_page(chart=True),
@@ -13542,19 +13636,27 @@ def _synthetic_tone_low_confidence_page() -> Image.Image:
 
 def _uniform_cast_page(
     *,
+    background: tuple[int, int, int] = (246, 243, 232),
     red_stamp: bool = False,
     blue_annotation: bool = False,
+    tiny_red_mark: bool = False,
+    tiny_blue_mark: bool = False,
     handwriting: bool = False,
     photo: bool = False,
     chart: bool = False,
     edge_mark: bool = False,
+    edge_tiny_red_mark: bool = False,
 ) -> Image.Image:
-    image = Image.new("RGB", (180, 140), (246, 243, 232))
+    image = Image.new("RGB", (180, 140), background)
     draw = ImageDraw.Draw(image)
     if red_stamp:
         draw.ellipse((112, 72, 158, 118), outline=(190, 28, 28), width=4)
     if blue_annotation:
         draw.line((28, 36, 142, 44), fill=(42, 84, 190), width=3)
+    if tiny_red_mark:
+        draw.ellipse((120, 78, 129, 87), outline=(190, 28, 28), width=2)
+    if tiny_blue_mark:
+        draw.line((76, 72, 88, 76), fill=(42, 84, 190), width=2)
     if handwriting:
         draw.line((26, 92, 80, 110), fill=(64, 54, 50), width=2)
         draw.line((80, 110, 136, 88), fill=(64, 54, 50), width=2)
@@ -13568,6 +13670,8 @@ def _uniform_cast_page(
             draw.line((32, y, 150, y), fill=(180, 70, 60), width=2)
     if edge_mark:
         draw.rectangle((0, 54, 12, 74), fill=(62, 48, 44))
+    if edge_tiny_red_mark:
+        draw.ellipse((2, 50, 15, 63), outline=(190, 28, 28), width=2)
     return image
 
 
