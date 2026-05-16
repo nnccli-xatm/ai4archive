@@ -2752,6 +2752,7 @@ class ScanQcTest(unittest.TestCase):
             with (
                 mock.patch.object(module, "_load_numpy", return_value=object()),
                 mock.patch("archive_scan_qc.processing._despeckle_candidate_points_numpy", return_value=[(10, 10)]),
+                mock.patch("archive_scan_qc.processing._despeckle_replacements_numpy", return_value=[(10, 10, (255, 255, 255))]),
             ):
                 payload = module.run_private_integration(args).summary
 
@@ -9120,6 +9121,51 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(audit_summary["timing"]["operation_timings"]["despeckle"]["backend_mode"], "fallback")
             self.assertEqual(sum(audit_summary["timing"]["operation_timings"]["despeckle"]["backend_counts"].values()), 1)
 
+    def test_numpy_despeckle_replacement_matches_fallback_for_conservative_cases(self) -> None:
+        if processing_module._load_numpy() is None:
+            self.skipTest("NumPy is not available")
+
+        cases: dict[str, Image.Image] = {}
+        isolated = Image.new("RGB", (100, 80), "white")
+        for point in [(25, 20), (55, 34), (70, 58)]:
+            isolated.putpixel(point, (0, 0, 0))
+        cases["isolated speckles"] = isolated
+
+        colored = Image.new("RGB", (100, 80), "white")
+        colored.putpixel((30, 30), (190, 20, 20))
+        colored.putpixel((65, 45), (0, 0, 0))
+        cases["colored mark protected"] = colored
+
+        edge = Image.new("RGB", (100, 80), "white")
+        edge_draw = ImageDraw.Draw(edge)
+        edge_draw.line((2, 8, 2, 70), fill=(0, 0, 0), width=1)
+        edge.putpixel((50, 40), (0, 0, 0))
+        cases["edge mark protected"] = edge
+
+        text_context = Image.new("RGB", (100, 80), "white")
+        for point in [(45, 40), (37, 40), (53, 40), (45, 32), (45, 48), (38, 35), (52, 45)]:
+            text_context.putpixel(point, (0, 0, 0))
+        cases["nearby content protected"] = text_context
+
+        dense_noise = Image.new("RGB", (100, 80), "white")
+        for y in range(20, 60, 2):
+            for x in range(20, 80, 3):
+                dense_noise.putpixel((x, y), (0, 0, 0))
+        cases["dense noise skipped"] = dense_noise
+
+        for name, image in cases.items():
+            with self.subTest(name=name):
+                fallback_image, fallback_changed, fallback_backend = _despeckle_isolated_pixels(image, backend="fallback")
+                with mock.patch(
+                    "archive_scan_qc.processing._despeckle_replacements_fallback",
+                    side_effect=AssertionError("NumPy replacement path should not use fallback filtering"),
+                ):
+                    numpy_image, numpy_changed, numpy_backend = _despeckle_isolated_pixels(image, backend="numpy")
+
+                self.assertEqual(numpy_backend, "numpy")
+                self.assertEqual(numpy_changed, fallback_changed)
+                self.assertEqual(numpy_image.tobytes(), fallback_image.tobytes())
+
     def test_processing_audit_reports_numpy_despeckle_backend_counts(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -9132,7 +9178,10 @@ class ScanQcTest(unittest.TestCase):
             image.save(input_dir / "synthetic.png")
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            with mock.patch("archive_scan_qc.processing._despeckle_candidate_points_numpy", return_value=[(10, 10)]):
+            with (
+                mock.patch("archive_scan_qc.processing._despeckle_candidate_points_numpy", return_value=[(10, 10)]),
+                mock.patch("archive_scan_qc.processing._despeckle_replacements_numpy", return_value=[(10, 10, (255, 255, 255))]),
+            ):
                 manifest = process_images(
                     report,
                     input_dir,
@@ -9162,6 +9211,34 @@ class ScanQcTest(unittest.TestCase):
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
             with mock.patch("archive_scan_qc.processing._load_numpy", return_value=None):
                 manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, workers=1))
+            audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
+            despeckle_timing = audit_summary["timing"]["operation_timings"]["despeckle"]
+
+            self.assertEqual(manifest["files"][0]["despeckle_backend_mode"], "fallback")
+            self.assertEqual(despeckle_timing["backend_mode"], "fallback")
+            self.assertFalse(despeckle_timing["numpy_available"])
+            self.assertEqual(despeckle_timing["backend_counts"]["numpy"], 0)
+            self.assertEqual(despeckle_timing["backend_counts"]["fallback"], 1)
+
+    def test_requested_numpy_despeckle_falls_back_when_numpy_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            image = Image.new("RGB", (20, 20), "white")
+            image.putpixel((10, 10), (0, 0, 0))
+            image.save(input_dir / "synthetic.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            with mock.patch("archive_scan_qc.processing._load_numpy", return_value=None):
+                manifest = process_images(
+                    report,
+                    input_dir,
+                    process_dir,
+                    ProcessingOptions(despeckle=True, despeckle_backend="numpy", workers=1),
+                )
             audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
             despeckle_timing = audit_summary["timing"]["operation_timings"]["despeckle"]
 

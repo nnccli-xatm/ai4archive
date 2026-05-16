@@ -8513,6 +8513,12 @@ _DESPECKLE_DENSE_PREFILTER_MIN_DARK_PIXELS = 512
 _DESPECKLE_DENSE_PREFILTER_MAX_LOW_CONNECTIVITY_RATIO = 0.01
 _DESPECKLE_CONTENT_CONTEXT_RADIUS = 8
 _DESPECKLE_CONTENT_CONTEXT_MIN_DARK_PIXELS = 6
+_DESPECKLE_NEIGHBOR_OFFSETS = tuple(
+    (offset_x, offset_y)
+    for offset_y in (-1, 0, 1)
+    for offset_x in (-1, 0, 1)
+    if offset_x or offset_y
+)
 
 
 def _despeckle_isolated_pixels(image: Image.Image, *, backend: str = "fallback") -> tuple[Image.Image, int, str]:
@@ -8547,24 +8553,164 @@ def _despeckle_isolated_pixels_with_reason(image: Image.Image, *, backend: str =
     if len(candidates) / source_area > _DESPECKLE_MAX_CANDIDATE_RATIO:
         return image.copy(), 0, backend_mode, "despeckle skipped: candidate density exceeds safety threshold"
 
+    replacements: list[tuple[int, int, tuple[int, int, int]]] | None = None
+    if backend_mode == "numpy":
+        replacements = _despeckle_replacements_numpy(image, grayscale, candidates)
+        if replacements is None:
+            backend_mode = "fallback"
+    if replacements is None:
+        replacements = _despeckle_replacements_fallback(image, grayscale, candidates)
+
+    changed = len(replacements)
+    if not changed:
+        return image.copy(), 0, backend_mode, "no isolated dark pixels found"
+    if changed / source_area > _DESPECKLE_MAX_CHANGED_RATIO:
+        return image.copy(), 0, backend_mode, "despeckle skipped: pixel change ratio exceeds safety threshold"
+
+    source = image if image.mode == "RGB" else image.convert("RGB")
+    output = source.copy()
+    output_pixels = output.load()
+    for x, y, replacement in replacements:
+        output_pixels[x, y] = replacement
+
+    if image.mode == "L":
+        return output.convert("L"), changed, backend_mode, "isolated dark pixels replaced"
+    if image.mode == "RGB":
+        return output, changed, backend_mode, "isolated dark pixels replaced"
+    return output.convert(image.mode), changed, backend_mode, "isolated dark pixels replaced"
+
+
+def _despeckle_replacements_numpy(
+    image: Image.Image,
+    grayscale: Image.Image,
+    candidates: list[tuple[int, int]],
+) -> list[tuple[int, int, tuple[int, int, int]]] | None:
+    np = _load_numpy()
+    if np is None:
+        return None
+    if not candidates:
+        return []
+
+    width, height = grayscale.size
+    try:
+        gray = np.asarray(grayscale, dtype=np.uint8)
+        candidate_x = np.asarray([point[0] for point in candidates], dtype=np.int64)
+        candidate_y = np.asarray([point[1] for point in candidates], dtype=np.int64)
+    except (TypeError, ValueError):
+        return None
+    if gray.shape != (height, width):
+        return None
+    if (
+        bool(np.any(candidate_x <= 0))
+        or bool(np.any(candidate_y <= 0))
+        or bool(np.any(candidate_x >= width - 1))
+        or bool(np.any(candidate_y >= height - 1))
+    ):
+        return None
+
+    candidate_mask = np.zeros((height, width), dtype=bool)
+    candidate_mask[candidate_y, candidate_x] = True
+    near_non_candidate = (gray <= _DESPECKLE_NEAR_DARK_THRESHOLD) & ~candidate_mask
+    dark_neighbors = _despeckle_numpy_rect_counts(np, near_non_candidate, candidate_x, candidate_y, radius=1)
+    wider_dark = _despeckle_numpy_rect_counts(np, near_non_candidate, candidate_x, candidate_y, radius=2)
+    texture_counts = _despeckle_numpy_context_counts(np, candidate_mask, candidate_x, candidate_y)
+    nearby_content = _despeckle_numpy_context_counts(np, gray <= _DESPECKLE_NEAR_DARK_THRESHOLD, candidate_x, candidate_y)
+
+    neighbor_values = np.stack(
+        [
+            gray[candidate_y + offset_y, candidate_x + offset_x]
+            for offset_y in (-1, 0, 1)
+            for offset_x in (-1, 0, 1)
+            if offset_x or offset_y
+        ],
+        axis=1,
+    )
+    median_gray = np.partition(neighbor_values, len(_DESPECKLE_NEIGHBOR_OFFSETS) // 2, axis=1)[
+        :, len(_DESPECKLE_NEIGHBOR_OFFSETS) // 2
+    ]
+    eligible = (
+        (dark_neighbors <= 1)
+        & (wider_dark <= 2)
+        & ~((gray[candidate_y, candidate_x] > _DESPECKLE_DARK_THRESHOLD) & (texture_counts >= 3))
+        & (nearby_content < _DESPECKLE_CONTENT_CONTEXT_MIN_DARK_PIXELS)
+        & (median_gray >= _DESPECKLE_MIN_BACKGROUND_MEDIAN)
+    )
+    if not bool(np.any(eligible)):
+        return []
+
+    source = image if image.mode == "RGB" else image.convert("RGB")
+    try:
+        rgb = np.asarray(source, dtype=np.uint8)
+    except (TypeError, ValueError):
+        return None
+    if rgb.shape[:2] != (height, width) or rgb.shape[2:] != (3,):
+        return None
+
+    eligible_x = candidate_x[eligible]
+    eligible_y = candidate_y[eligible]
+    neighbor_rgb = np.stack(
+        [
+            rgb[eligible_y + offset_y, eligible_x + offset_x, :]
+            for offset_y in (-1, 0, 1)
+            for offset_x in (-1, 0, 1)
+            if offset_x or offset_y
+        ],
+        axis=1,
+    )
+    replacement_rgb = np.partition(neighbor_rgb, len(_DESPECKLE_NEIGHBOR_OFFSETS) // 2, axis=1)[
+        :, len(_DESPECKLE_NEIGHBOR_OFFSETS) // 2, :
+    ]
+    return [
+        (int(x), int(y), (int(rgb_value[0]), int(rgb_value[1]), int(rgb_value[2])))
+        for x, y, rgb_value in zip(eligible_x, eligible_y, replacement_rgb)
+    ]
+
+
+def _despeckle_numpy_rect_counts(
+    np: Any,
+    mask: Any,
+    candidate_x: Any,
+    candidate_y: Any,
+    *,
+    radius: int,
+) -> Any:
+    height, width = mask.shape
+    integral = np.pad(mask.astype(np.int32).cumsum(axis=0).cumsum(axis=1), ((1, 0), (1, 0)))
+    left = np.maximum(0, candidate_x - radius)
+    top = np.maximum(0, candidate_y - radius)
+    right = np.minimum(width, candidate_x + radius + 1)
+    bottom = np.minimum(height, candidate_y + radius + 1)
+    return integral[bottom, right] - integral[top, right] - integral[bottom, left] + integral[top, left]
+
+
+def _despeckle_numpy_context_counts(np: Any, mask: Any, candidate_x: Any, candidate_y: Any) -> Any:
+    radius = _DESPECKLE_CONTENT_CONTEXT_RADIUS
+    outer = _despeckle_numpy_rect_counts(np, mask, candidate_x, candidate_y, radius=radius)
+    inner = _despeckle_numpy_rect_counts(np, mask, candidate_x, candidate_y, radius=2)
+    return outer - inner
+
+
+def _despeckle_replacements_fallback(
+    image: Image.Image,
+    grayscale: Image.Image,
+    candidates: list[tuple[int, int]],
+) -> list[tuple[int, int, tuple[int, int, int]]]:
+    width, height = grayscale.size
     gray_pixels = grayscale.load()
     source: Image.Image | None = None
-    output: Image.Image | None = None
     source_pixels: Any = None
-    output_pixels: Any = None
     replacements: list[tuple[int, int, tuple[int, int, int]]] = []
     candidate_set = set(candidates)
     for x, y in candidates:
         dark_neighbors = 0
         neighbor_values: list[int] = []
-        for ny in range(y - 1, y + 2):
-            for nx in range(x - 1, x + 2):
-                if nx == x and ny == y:
-                    continue
-                value = gray_pixels[nx, ny]
-                neighbor_values.append(value)
-                if value <= _DESPECKLE_NEAR_DARK_THRESHOLD and (nx, ny) not in candidate_set:
-                    dark_neighbors += 1
+        for offset_x, offset_y in _DESPECKLE_NEIGHBOR_OFFSETS:
+            nx = x + offset_x
+            ny = y + offset_y
+            value = gray_pixels[nx, ny]
+            neighbor_values.append(value)
+            if value <= _DESPECKLE_NEAR_DARK_THRESHOLD and (nx, ny) not in candidate_set:
+                dark_neighbors += 1
         if dark_neighbors > 1:
             continue
 
@@ -8596,31 +8742,12 @@ def _despeckle_isolated_pixels_with_reason(image: Image.Image, *, backend: str =
             source = image if image.mode == "RGB" else image.convert("RGB")
             source_pixels = source.load()
         neighbor_rgb = [
-            source_pixels[nx, ny]
-            for ny in range(y - 1, y + 2)
-            for nx in range(x - 1, x + 2)
-            if nx != x or ny != y
+            source_pixels[x + offset_x, y + offset_y]
+            for offset_x, offset_y in _DESPECKLE_NEIGHBOR_OFFSETS
         ]
         replacement = tuple(sorted(channel)[len(channel) // 2] for channel in zip(*neighbor_rgb))
         replacements.append((x, y, replacement))
-
-    changed = len(replacements)
-    if not changed:
-        return image.copy(), 0, backend_mode, "no isolated dark pixels found"
-    if changed / source_area > _DESPECKLE_MAX_CHANGED_RATIO:
-        return image.copy(), 0, backend_mode, "despeckle skipped: pixel change ratio exceeds safety threshold"
-
-    source = image if image.mode == "RGB" else image.convert("RGB")
-    output = source.copy()
-    output_pixels = output.load()
-    for x, y, replacement in replacements:
-        output_pixels[x, y] = replacement
-
-    if image.mode == "L":
-        return output.convert("L"), changed, backend_mode, "isolated dark pixels replaced"
-    if image.mode == "RGB":
-        return output, changed, backend_mode, "isolated dark pixels replaced"
-    return output.convert(image.mode), changed, backend_mode, "isolated dark pixels replaced"
+    return replacements
 
 
 def _despeckle_candidate_mask(image: Image.Image, grayscale: Image.Image) -> tuple[Image.Image, str | None]:
