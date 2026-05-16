@@ -6898,6 +6898,95 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn("private_safe_uniform_cast", audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
 
+    def test_normalize_paper_color_cast_corrects_sparse_text_cast_without_foreground_shift(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            default_process_dir = root / "processed-default"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source_path = input_dir / "private_sparse_text_cast.png"
+            source = _sparse_text_uniform_cast_page()
+            source.save(source_path, dpi=(300, 300))
+            source_sha = _sha256_for_test(source_path)
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            default_manifest = process_images(report, input_dir, default_process_dir, ProcessingOptions(workers=1))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(normalize_paper_color_cast=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            default_record = default_manifest["files"][0]
+            record = manifest["files"][0]
+            processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+
+            self.assertEqual(source_sha, _sha256_for_test(source_path))
+            self.assertFalse(default_record["paper_color_cast_normalized"])
+            self.assertIn("normalize_paper_color_cast_disabled", default_record["operations"])
+            self.assertTrue(record["paper_color_cast_normalized"])
+            self.assertEqual(record["paper_color_cast_reason_code"], "applied_mild_uniform_scanner_cast")
+            self.assertGreater(record["paper_color_cast_delta"], 6.0)
+            self.assertLessEqual(record["paper_color_cast_delta"], 12.0)
+            self.assertLessEqual(record["paper_color_cast_brightness_delta"], 4.0)
+            self.assertGreater(record["paper_color_cast_changed_pixel_ratio"], 0.90)
+            self.assertLessEqual(record["paper_color_cast_changed_pixel_ratio"], 0.95)
+            self.assertGreater(record["paper_color_cast_candidate_pixel_ratio"], 0.90)
+            self.assertLessEqual(record["paper_color_cast_candidate_pixel_ratio"], 0.95)
+            self.assertLess(_mean_channel_spread(processed), _mean_channel_spread(source) - 6.0)
+            self.assertLess(_mean_luma_delta(source, processed), 4.0)
+            self.assertLess(_changed_ratio_for_test(source, processed, (34, 40, 130, 95)), 0.001)
+            self.assertLess(_changed_ratio_for_test(source, processed, (38, 130, 135, 135)), 0.001)
+            self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
+
+            cast_guard = audit_summary["guardrails"]["paper_color_cast"]
+            self.assertEqual(audit_summary["counts"]["paper_color_cast_normalized_files"], 1)
+            self.assertEqual(audit_summary["counts"]["paper_color_cast_skipped_files"], 0)
+            self.assertEqual(cast_guard["applied_files"], 1)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_sparse_text_cast", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
+    def test_normalize_paper_color_cast_skips_dense_text_foreground(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = _dense_text_uniform_cast_page()
+            source.save(input_dir / "private_dense_text_cast.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(normalize_paper_color_cast=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+            processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+
+            self.assertFalse(record["paper_color_cast_normalized"])
+            self.assertEqual(record["paper_color_cast_reason_code"], "protected_dark_content")
+            self.assertIn("normalize_paper_color_cast_noop", record["operations"])
+            self.assertLess(_changed_ratio_for_test(source, processed, (0, 0, source.width, source.height)), 0.001)
+            self.assertEqual(audit_summary["counts"]["paper_color_cast_normalized_files"], 0)
+            self.assertEqual(audit_summary["counts"]["paper_color_cast_skipped_files"], 1)
+            self.assertIn(
+                "protected_dark_content",
+                audit_summary["guardrails"]["paper_color_cast"]["skip_reason_code_distribution"],
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_dense_text_cast", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
     def test_normalize_paper_color_cast_skips_protected_color_and_archival_content(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -13479,6 +13568,25 @@ def _uniform_cast_page(
             draw.line((32, y, 150, y), fill=(180, 70, 60), width=2)
     if edge_mark:
         draw.rectangle((0, 54, 12, 74), fill=(62, 48, 44))
+    return image
+
+
+def _sparse_text_uniform_cast_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), (246, 243, 234))
+    draw = ImageDraw.Draw(image)
+    for y in (42, 66, 90):
+        draw.rectangle((36, y, 128, y + 3), fill=(58, 58, 58))
+    draw.rectangle((182, 24, 196, 30), fill=(72, 72, 72))
+    draw.line((40, 132, 132, 132), fill=(82, 82, 82), width=2)
+    return image
+
+
+def _dense_text_uniform_cast_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), (246, 243, 234))
+    draw = ImageDraw.Draw(image)
+    for y in range(20, 160, 10):
+        draw.rectangle((20, y, 220, y + 4), fill=(58, 58, 58))
+        draw.rectangle((28, y + 6, 190, y + 8), fill=(82, 82, 82))
     return image
 
 
