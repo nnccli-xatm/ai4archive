@@ -6690,6 +6690,7 @@ class ScanQcTest(unittest.TestCase):
             input_dir.mkdir()
             pages = {
                 "private_default_compatible_edge_shadow.png": _synthetic_edge_shadow_repair_page(),
+                "private_center_red_annotation.png": _synthetic_edge_shadow_repair_page(center_red_annotation=True),
                 "private_edge_text.png": _synthetic_edge_shadow_repair_page(edge_text=True),
                 "private_page_number.png": _synthetic_edge_shadow_repair_page(page_number=True),
                 "private_table_line.png": _synthetic_edge_shadow_repair_page(table_line=True),
@@ -6727,6 +6728,17 @@ class ScanQcTest(unittest.TestCase):
 
             records = {record["source_relative_path"]: record for record in manifest["files"]}
             self.assertTrue(records["private_default_compatible_edge_shadow.png"]["edge_shadow_lightened"])
+            centered_red_record = records["private_center_red_annotation.png"]
+            centered_red_processed = Image.open(process_dir / centered_red_record["output_relative_path"]).convert("RGB")
+            self.assertTrue(centered_red_record["edge_shadow_lightened"])
+            self.assertLess(
+                _changed_ratio_for_test(
+                    pages["private_center_red_annotation.png"],
+                    centered_red_processed,
+                    (104, 60, 156, 112),
+                ),
+                0.001,
+            )
             skipped_expectations = {
                 "private_edge_text.png": "risk",
                 "private_page_number.png": "risk",
@@ -6755,9 +6767,9 @@ class ScanQcTest(unittest.TestCase):
                 )
 
             edge_guard = audit_summary["guardrails"]["edge_shadow"]
-            self.assertEqual(audit_summary["counts"]["edge_shadow_lightened_files"], 1)
+            self.assertEqual(audit_summary["counts"]["edge_shadow_lightened_files"], 2)
             self.assertEqual(audit_summary["counts"]["edge_shadow_skipped_files"], len(skipped_expectations))
-            self.assertEqual(edge_guard["applied_files"], 1)
+            self.assertEqual(edge_guard["applied_files"], 2)
             self.assertEqual(edge_guard["skipped_files"], len(skipped_expectations))
             self.assertGreaterEqual(edge_guard["protection_triggered_files"], 8)
             self.assertGreaterEqual(edge_guard["low_confidence_skip_files"], 2)
@@ -12592,6 +12604,7 @@ def _synthetic_edge_shadow_repair_page(
     page_number: bool = False,
     table_line: bool = False,
     red_stamp: bool = False,
+    center_red_annotation: bool = False,
     handwriting: bool = False,
     binding_hole: bool = False,
     archive_line: bool = False,
@@ -12611,6 +12624,8 @@ def _synthetic_edge_shadow_repair_page(
         draw.line((2, 124, 236, 124), fill=(45, 45, 45), width=2)
     if red_stamp:
         draw.ellipse((174, 88, 230, 144), outline=(180, 28, 28), width=4)
+    if center_red_annotation:
+        draw.ellipse((108, 64, 152, 108), outline=(180, 28, 28), width=4)
     if handwriting:
         draw.line((18, 138, 72, 160), fill=(55, 55, 55), width=2)
         draw.line((72, 160, 124, 136), fill=(55, 55, 55), width=2)
