@@ -5843,7 +5843,7 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(source.read_bytes(), source_bytes)
             self.assertTrue(record["faded_text_enhanced"])
             self.assertIn("enhance_faded_text_conservative", record["operations"])
-            self.assertGreater(audit["faded_text_delta"], 8)
+            self.assertGreater(audit["faded_text_delta"], 10)
             self.assertGreater(audit["faded_text_changed_pixel_ratio"], 0)
             self.assertLessEqual(audit["faded_text_changed_pixel_ratio"], 0.10)
             self.assertGreater(audit["faded_text_candidate_pixel_ratio"], 0)
@@ -5855,10 +5855,12 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(audit_summary["counts"]["faded_text_skipped_files"], 0)
             self.assertIn("faded_text_changed_pixel_ratio", audit_summary["metrics"])
             self.assertIn("faded_text_candidate_pixel_ratio", audit_summary["metrics"])
+            self.assertIn("faded_text_candidate_text_ratio", audit_summary["metrics"])
             self.assertEqual(audit_summary["guardrails"]["faded_text"]["applied_files"], 1)
             self.assertEqual(audit_summary["guardrails"]["faded_text"]["skipped_files"], 0)
             self.assertGreater(audit_summary["guardrails"]["faded_text"]["changed_pixel_ratio"]["max"], 0)
             self.assertGreater(audit_summary["guardrails"]["faded_text"]["candidate_pixel_ratio"]["max"], 0)
+            self.assertGreater(audit_summary["guardrails"]["faded_text"]["candidate_text_ratio"]["max"], 0)
             self.assertIn(record["faded_text_reason"], audit_summary["guardrails"]["faded_text"]["reason_distribution"])
             self.assertEqual(
                 audit_summary["guardrails"]["faded_text"]["reason_code_distribution"],
@@ -5866,6 +5868,55 @@ class ScanQcTest(unittest.TestCase):
             )
             self.assertEqual(plan["summary"]["faded_text_enhancement_candidates"], 1)
             self.assertTrue(plan["files"][0]["faded_text_enhancement_candidate"])
+
+    def test_enhance_faded_text_improves_low_contrast_handwriting_without_thickening(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "private_low_contrast_handwriting.png"
+            image = _synthetic_low_contrast_handwriting_page()
+            image.save(source, dpi=(300, 300))
+            source_bytes = source.read_bytes()
+            original = image.convert("L")
+            original_ink = original.point(lambda value: 255 if value <= 226 else 0, mode="L")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(enhance_faded_text=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            record = manifest["files"][0]
+            audit = record["processing_audit"]
+            processed = Image.open(process_dir / record["output_relative_path"]).convert("L")
+            changed = ImageChops.difference(original, processed).point(lambda value: 255 if value else 0, mode="L")
+            changed_pixels = _mask_pixel_count_for_test(changed)
+            thickened_pixels = _mask_pixel_count_for_test(ImageChops.subtract(changed, original_ink))
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertTrue(record["faded_text_enhanced"])
+            self.assertEqual(record["faded_text_reason_code"], "applied_stable_low_contrast_text")
+            self.assertGreaterEqual(audit["faded_text_delta"], 10.0)
+            self.assertGreater(changed_pixels, 0)
+            self.assertLessEqual(audit["faded_text_changed_pixel_ratio"], 0.04)
+            self.assertLessEqual(audit["faded_text_candidate_pixel_ratio"], 0.04)
+            self.assertEqual(thickened_pixels, 0)
+            self.assertEqual(audit["guardrail_failures"], [])
+            self.assertEqual(audit_summary["guardrails"]["faded_text"]["applied_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["faded_text"]["reason_code_distribution"],
+                {"applied_stable_low_contrast_text": 1},
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_low_contrast_handwriting", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
 
     def test_enhance_faded_text_improves_pale_uneven_low_contrast_text_safely(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -6060,6 +6111,7 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(faded_guard["applied_files"], 0)
             self.assertEqual(faded_guard["skipped_files"], len(pages))
             self.assertGreaterEqual(faded_guard["protection_triggered_files"], 4)
+            self.assertGreaterEqual(faded_guard["protected_files"], 4)
             self.assertGreaterEqual(faded_guard["low_confidence_skip_files"], 1)
             self.assertIn(
                 "faded text enhancement skipped: edge mark or binding risk",
@@ -14774,6 +14826,15 @@ def _synthetic_uneven_faded_text_page(
     return image
 
 
+def _synthetic_low_contrast_handwriting_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), (244, 244, 240))
+    draw = ImageDraw.Draw(image)
+    for y in (48, 72, 98, 124):
+        points = [(44, y), (58, y - 6), (76, y + 2), (94, y - 4), (112, y + 3), (132, y - 2), (154, y + 1)]
+        draw.line(points, fill=(222, 222, 218), width=2, joint="curve")
+    return image
+
+
 def _synthetic_blurred_text_page(
     *,
     red_stamp: bool = False,
@@ -16303,6 +16364,10 @@ def _final_handoff_bundle_payload() -> dict[str, object]:
 def _dark_pixel_count(image: Image.Image) -> int:
     grayscale = image.convert("L")
     return sum(grayscale.histogram()[:31])
+
+
+def _mask_pixel_count_for_test(mask: Image.Image) -> int:
+    return sum(mask.convert("L").histogram()[1:])
 
 
 if __name__ == "__main__":
