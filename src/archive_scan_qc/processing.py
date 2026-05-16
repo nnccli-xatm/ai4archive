@@ -96,6 +96,9 @@ class SkewDetection:
 class DarkBorderDetection:
     bbox: tuple[int, int, int, int] | None
     reason: str
+    reason_code: str | None = None
+    edge_sides: tuple[str, ...] = ()
+    band_width_bucket: str | None = None
 
 
 @dataclass(frozen=True)
@@ -734,6 +737,9 @@ def _process_record(
         "dark_border_trimmed": False,
         "dark_border_bbox": None,
         "dark_border_reason": None,
+        "dark_border_reason_code": None,
+        "dark_border_edge_sides": [],
+        "dark_border_band_width_bucket": None,
         "scanner_gutter_trimmed": False,
         "scanner_gutter_bbox": None,
         "scanner_gutter_reason": None,
@@ -884,6 +890,9 @@ def _process_record(
                 "dark_border_trimmed": process_info["dark_border_trimmed"],
                 "dark_border_bbox": process_info["dark_border_bbox"],
                 "dark_border_reason": process_info["dark_border_reason"],
+                "dark_border_reason_code": process_info["dark_border_reason_code"],
+                "dark_border_edge_sides": process_info["dark_border_edge_sides"],
+                "dark_border_band_width_bucket": process_info["dark_border_band_width_bucket"],
                 "scanner_gutter_trimmed": process_info["scanner_gutter_trimmed"],
                 "scanner_gutter_bbox": process_info["scanner_gutter_bbox"],
                 "scanner_gutter_reason": process_info["scanner_gutter_reason"],
@@ -1013,6 +1022,9 @@ def _process_record(
                     "dark_border_trimmed": process_info["dark_border_trimmed"],
                     "dark_border_bbox": process_info["dark_border_bbox"],
                     "dark_border_reason": process_info["dark_border_reason"],
+                    "dark_border_reason_code": process_info["dark_border_reason_code"],
+                    "dark_border_edge_sides": process_info["dark_border_edge_sides"],
+                    "dark_border_band_width_bucket": process_info["dark_border_band_width_bucket"],
                     "scanner_gutter_trimmed": process_info["scanner_gutter_trimmed"],
                     "scanner_gutter_bbox": process_info["scanner_gutter_bbox"],
                     "scanner_gutter_reason": process_info["scanner_gutter_reason"],
@@ -1282,6 +1294,22 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
         record.get("dark_border_reason")
         for record in processed_records
         if isinstance(record.get("dark_border_reason"), str)
+    ]
+    dark_border_reason_codes = [
+        record.get("dark_border_reason_code")
+        for record in processed_records
+        if isinstance(record.get("dark_border_reason_code"), str)
+    ]
+    dark_border_edge_sides = [
+        side
+        for record in processed_records
+        for side in record.get("dark_border_edge_sides", [])
+        if isinstance(side, str)
+    ]
+    dark_border_band_width_buckets = [
+        record.get("dark_border_band_width_bucket")
+        for record in processed_records
+        if isinstance(record.get("dark_border_band_width_bucket"), str)
     ]
     scanner_gutter_reasons = [
         record.get("scanner_gutter_reason")
@@ -2024,6 +2052,13 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                     and record.get("dark_border_reason") not in {None, "dark border trim disabled"}
                 ),
                 "reason_distribution": _reason_counts(reason for reason in dark_border_reasons if isinstance(reason, str)),
+                "guardrail_reason_code_distribution": _reason_counts(
+                    code for code in dark_border_reason_codes if isinstance(code, str)
+                ),
+                "edge_side_distribution": _reason_counts(side for side in dark_border_edge_sides if isinstance(side, str)),
+                "candidate_band_width_bucket_distribution": _reason_counts(
+                    bucket for bucket in dark_border_band_width_buckets if isinstance(bucket, str)
+                ),
             },
             "scanner_gutter_trim": {
                 "trimmed_files": sum(
@@ -3026,7 +3061,11 @@ def _process_image(
             deskewed = True
             deskew_reason = "deskew applied"
 
-    dark_border = DarkBorderDetection(None, "dark border trim disabled")
+    dark_border = DarkBorderDetection(
+        None,
+        "dark border trim disabled",
+        _dark_border_reason_code("dark border trim disabled"),
+    )
     dark_border_trimmed = False
     with _operation_timer(operation_timings, "trim_dark_border", enabled=options.trim_dark_border):
         if options.trim_dark_border:
@@ -3481,6 +3520,11 @@ def _process_image(
         "dark_border_trimmed": False if guard_reverted else dark_border_trimmed,
         "dark_border_bbox": None if guard_reverted else (list(dark_border.bbox) if dark_border.bbox else None),
         "dark_border_reason": guard_reason if guard_reverted else dark_border.reason,
+        "dark_border_reason_code": (
+            _dark_border_reason_code(guard_reason) if guard_reverted else dark_border.reason_code
+        ),
+        "dark_border_edge_sides": [] if guard_reverted else list(dark_border.edge_sides),
+        "dark_border_band_width_bucket": None if guard_reverted else dark_border.band_width_bucket,
         "scanner_gutter_trimmed": False if guard_reverted else scanner_gutter_trimmed,
         "scanner_gutter_bbox": None if guard_reverted else (list(scanner_gutter.bbox) if scanner_gutter.bbox else None),
         "scanner_gutter_reason": guard_reason if guard_reverted else scanner_gutter.reason,
@@ -8037,7 +8081,15 @@ def _scan_record_dark_border(scan_record: dict[str, Any], size: tuple[int, int])
     width, height = size
     if left < 0 or top < 0 or right > width or bottom > height or left >= right or top >= bottom:
         return None
-    return DarkBorderDetection((left, top, right, bottom), reason)
+    edge_sides = _dark_border_edge_sides_from_runs(left, width - right, top, height - bottom)
+    band_width_bucket = _dark_border_band_width_bucket(max(left, width - right, top, height - bottom))
+    return DarkBorderDetection(
+        (left, top, right, bottom),
+        reason,
+        _dark_border_reason_code(reason),
+        edge_sides,
+        band_width_bucket,
+    )
 
 
 def _trim_margins(size: tuple[int, int], bbox: tuple[int, int, int, int] | None) -> dict[str, float]:
@@ -9156,11 +9208,13 @@ def _has_inset_document_content_for_scanner_gutter(
 def _detect_dark_border_bbox(image: Image.Image) -> DarkBorderDetection:
     width, height = image.size
     if width < 40 or height < 40:
-        return DarkBorderDetection(None, "image too small")
+        reason = "image too small"
+        return DarkBorderDetection(None, reason, _dark_border_reason_code(reason))
 
     grayscale = image.convert("L")
     if _light_page_background_mean(grayscale) < 135:
-        return DarkBorderDetection(None, "no light page background for dark border trim")
+        reason = "no light page background for dark border trim"
+        return DarkBorderDetection(None, reason, _dark_border_reason_code(reason))
 
     max_x = max(2, int(width * 0.08))
     max_y = max(2, int(height * 0.08))
@@ -9172,26 +9226,80 @@ def _detect_dark_border_bbox(image: Image.Image) -> DarkBorderDetection:
     bottom, bottom_broken = _dark_edge_run(grayscale, "bottom", max_y)
     runs = (left, right, top, bottom)
     has_broken_edge = left_broken or right_broken or top_broken or bottom_broken
+    edge_sides = _dark_border_edge_sides_from_runs(left, right, top, bottom)
+    band_width_bucket = _dark_border_band_width_bucket(max(runs))
 
     if max(runs) < 2:
-        return DarkBorderDetection(None, "no confident dark edge border")
+        reason = "no confident dark edge border"
+        return DarkBorderDetection(None, reason, _dark_border_reason_code(reason), edge_sides, band_width_bucket)
     if min(runs) < 2:
-        return DarkBorderDetection(None, "incomplete dark edge border evidence")
+        reason = "incomplete dark edge border evidence"
+        return DarkBorderDetection(None, reason, _dark_border_reason_code(reason), edge_sides, band_width_bucket)
     if max(runs) > max(min(runs) * 3, min(runs) + max(2, int(min(width, height) * 0.04))):
-        return DarkBorderDetection(None, "unbalanced dark edge border evidence")
+        reason = "unbalanced dark edge border evidence"
+        return DarkBorderDetection(None, reason, _dark_border_reason_code(reason), edge_sides, band_width_bucket)
 
     bbox = (left, top, width - right, height - bottom)
     retained_width = bbox[2] - bbox[0]
     retained_height = bbox[3] - bbox[1]
     if retained_width < min_retain_width or retained_height < min_retain_height:
-        return DarkBorderDetection(None, "candidate trim exceeds conservative retain ratio")
+        reason = "candidate trim exceeds conservative retain ratio"
+        return DarkBorderDetection(None, reason, _dark_border_reason_code(reason), edge_sides, band_width_bucket)
     if retained_width <= 0 or retained_height <= 0:
-        return DarkBorderDetection(None, "invalid trim candidate")
+        reason = "invalid trim candidate"
+        return DarkBorderDetection(None, reason, _dark_border_reason_code(reason), edge_sides, band_width_bucket)
     if _has_protected_dark_content_near_trim_boundary(grayscale, bbox):
-        return DarkBorderDetection(None, "protected edge content near dark border")
+        reason = "protected edge content near dark border"
+        return DarkBorderDetection(None, reason, _dark_border_reason_code(reason), edge_sides, band_width_bucket)
 
     reason = "broken dark edge border trimmed" if has_broken_edge else "dark edge border trimmed"
-    return DarkBorderDetection(bbox, reason)
+    return DarkBorderDetection(bbox, reason, _dark_border_reason_code(reason), edge_sides, band_width_bucket)
+
+
+def _dark_border_edge_sides_from_runs(left: int, right: int, top: int, bottom: int) -> tuple[str, ...]:
+    return tuple(
+        side
+        for side, run in (("left", left), ("right", right), ("top", top), ("bottom", bottom))
+        if run >= 2
+    )
+
+
+def _dark_border_band_width_bucket(width: int) -> str | None:
+    if width <= 0:
+        return None
+    if width <= 2:
+        return "2px"
+    if width <= 4:
+        return "3-4px"
+    if width <= 8:
+        return "5-8px"
+    if width <= 12:
+        return "9-12px"
+    return "13px+"
+
+
+def _dark_border_reason_code(reason: str | None) -> str | None:
+    if not reason:
+        return None
+    return {
+        "dark edge border trimmed": "trimmed_continuous_edge",
+        "broken dark edge border trimmed": "trimmed_broken_edge",
+        "dark border trim disabled": "disabled",
+        "image too small": "image_too_small",
+        "no light page background for dark border trim": "no_light_page_background",
+        "no confident dark edge border": "no_confident_dark_edge_border",
+        "incomplete dark edge border evidence": "incomplete_dark_edge_border_evidence",
+        "unbalanced dark edge border evidence": "unbalanced_dark_edge_border_evidence",
+        "candidate trim exceeds conservative retain ratio": "candidate_trim_exceeds_conservative_retain_ratio",
+        "invalid trim candidate": "invalid_trim_candidate",
+        "protected edge content near dark border": "protected_edge_content_near_dark_border",
+        "reverted by local content change guard": "reverted_by_local_content_change_guard",
+        "reverted by processed output safety guard": "reverted_by_processed_output_safety_guard",
+        "reverted by geometric combination guard": "reverted_by_geometric_combination_guard",
+        "reverted by text high-frequency combination guard": "reverted_by_text_high_frequency_combination_guard",
+        "reverted by combined change guard": "reverted_by_combined_change_guard",
+        "reverted by cumulative change guard": "reverted_by_cumulative_change_guard",
+    }.get(reason, "guardrail_reverted_or_unknown")
 
 
 def _dark_edge_run(image: Image.Image, side: str, max_pixels: int) -> tuple[int, bool]:

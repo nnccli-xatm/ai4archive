@@ -10303,10 +10303,25 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(record["output_size"], [112, 82])
             self.assertLessEqual(record["processing_audit"]["max_trim_margin_ratio"], 0.045)
             self.assertEqual(record["dark_border_reason"], "broken dark edge border trimmed")
+            self.assertEqual(record["dark_border_reason_code"], "trimmed_broken_edge")
+            self.assertEqual(record["dark_border_edge_sides"], ["left", "right", "top", "bottom"])
+            self.assertEqual(record["dark_border_band_width_bucket"], "3-4px")
             self.assertEqual(audit_summary["counts"]["dark_border_trimmed_files"], 1)
             self.assertEqual(
                 audit_summary["guardrails"]["dark_border_trim"]["reason_distribution"],
                 {"broken dark edge border trimmed": 1},
+            )
+            self.assertEqual(
+                audit_summary["guardrails"]["dark_border_trim"]["guardrail_reason_code_distribution"],
+                {"trimmed_broken_edge": 1},
+            )
+            self.assertEqual(
+                audit_summary["guardrails"]["dark_border_trim"]["edge_side_distribution"],
+                {"left": 1, "right": 1, "top": 1, "bottom": 1},
+            )
+            self.assertEqual(
+                audit_summary["guardrails"]["dark_border_trim"]["candidate_band_width_bucket_distribution"],
+                {"3-4px": 1},
             )
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertNotIn("A001_broken_glare_edge", json.dumps(audit_summary, ensure_ascii=False))
@@ -10321,6 +10336,9 @@ class ScanQcTest(unittest.TestCase):
 
         self.assertIsNone(detection.bbox)
         self.assertEqual(detection.reason, "protected edge content near dark border")
+        self.assertEqual(detection.reason_code, "protected_edge_content_near_dark_border")
+        self.assertEqual(detection.edge_sides, ("left", "right", "top", "bottom"))
+        self.assertEqual(detection.band_width_bucket, "3-4px")
 
     def test_trim_dark_border_noops_for_content_adjacent_to_each_edge(self) -> None:
         cases = {
@@ -10366,6 +10384,16 @@ class ScanQcTest(unittest.TestCase):
                     "protected edge content near dark border"
                 ],
                 4,
+            )
+            self.assertEqual(
+                audit_summary["guardrails"]["dark_border_trim"]["guardrail_reason_code_distribution"][
+                    "protected_edge_content_near_dark_border"
+                ],
+                4,
+            )
+            self.assertEqual(
+                audit_summary["guardrails"]["dark_border_trim"]["candidate_band_width_bucket_distribution"],
+                {"5-8px": 4},
             )
 
     def test_trim_dark_border_noops_for_broken_edge_with_near_boundary_page_number(self) -> None:
