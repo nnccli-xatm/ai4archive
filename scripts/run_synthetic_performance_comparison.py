@@ -17,7 +17,18 @@ from PIL import Image, ImageDraw
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = REPO_ROOT / "src"
 SUMMARY_JSON = "synthetic_performance_comparison.json"
-REGRESSION_SIGNAL_OPERATIONS = ("deskew", "despeckle")
+REGRESSION_SIGNAL_OPERATIONS = (
+    "deskew",
+    "trim_dark_border",
+    "auto_crop",
+    "despeckle",
+    "normalize_tones",
+    "lighten_edge_shadow",
+    "lighten_background_stains",
+    "lighten_scanlines",
+    "enhance_faded_text",
+    "sharpen_text_edges",
+)
 DESPECKLE_BACKEND_MODES = ("numpy", "fallback", "not_applicable", "unknown")
 
 

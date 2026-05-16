@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import tempfile
 import unittest
@@ -673,8 +674,68 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             ["auto_crop", "deskew", "despeckle", "lighten_background_stains"],
         )
 
+    def test_synthetic_performance_signal_covers_conservative_operations_without_private_rows(self) -> None:
+        comparison = _synthetic_performance_comparison_module()
+        operation_timings = {
+            operation: {
+                "enabled": operation in BASE_OPERATION_NAMES,
+                "file_count": 4 if operation in BASE_OPERATION_NAMES else 0,
+                "elapsed_seconds": 0.04 if operation in BASE_OPERATION_NAMES else 0.0,
+                "files_per_minute": 6000.0 if operation in BASE_OPERATION_NAMES else 0.0,
+                "average_seconds_per_file": 0.01 if operation in BASE_OPERATION_NAMES else None,
+            }
+            for operation in REQUIRED_OPERATIONS
+            if operation != "lighten_scanlines"
+        }
+        operation_timings["despeckle"]["backend_counts"] = {
+            "numpy": 0,
+            "fallback": 4,
+            "not_applicable": 0,
+            "unknown": 0,
+        }
+        benchmark = {
+            "runs": [
+                {
+                    "processing": {
+                        "operation_timings": operation_timings,
+                        "private_path": "/private/archive/private_scan_page.png",
+                        "source_sha256": "f" * 64,
+                    }
+                }
+            ]
+        }
+
+        signal = comparison._operation_timing_regression_signal(benchmark)
+        raw = json.dumps(signal, ensure_ascii=False, sort_keys=True)
+
+        self.assertTrue(signal["aggregate_only"])
+        self.assertEqual(signal["required_operations"], list(REQUIRED_OPERATIONS))
+        self.assertFalse(signal["signal_available"])
+        self.assertEqual(signal["missing_operations"], ["lighten_scanlines"])
+        self.assertEqual(set(signal["operations"]), set(REQUIRED_OPERATIONS))
+        self.assertEqual(
+            signal["operations"]["lighten_scanlines"]["missing_reason"],
+            "missing_from_benchmark_processing_operation_timings",
+        )
+        self.assertTrue(signal["operations"]["trim_dark_border"]["signal_available"])
+        self.assertFalse(signal["operations"]["enhance_faded_text"]["enabled"])
+        self.assertEqual(signal["operations"]["despeckle"]["backend_mode"], "fallback")
+        for value in signal["privacy"].values():
+            self.assertFalse(value)
+        for forbidden in (
+            "/private/archive",
+            "private_scan_page.png",
+            "source_sha256",
+            "OCR TEXT",
+            "thumbnail_data",
+            '"findings": [',
+            "f" * 64,
+        ):
+            self.assertNotIn(forbidden, raw)
+
 
 BASE_FLAGS = ("--deskew", "--trim-dark-border", "--auto-crop", "--despeckle")
+BASE_OPERATION_NAMES = ("auto_crop", "deskew", "trim_dark_border", "despeckle")
 CONSERVATIVE_REPAIR_FLAGS = (
     "--normalize-tones",
     "--lighten-edge-shadow",
@@ -892,6 +953,16 @@ def _fixed_sample_operation_timings() -> dict[str, dict[str, object]]:
         }
         for operation, average_seconds in average_seconds_by_operation.items()
     }
+
+
+def _synthetic_performance_comparison_module() -> object:
+    script_path = Path(__file__).resolve().parents[1] / "scripts" / "run_synthetic_performance_comparison.py"
+    spec = importlib.util.spec_from_file_location("run_synthetic_performance_comparison", script_path)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
 
 
 def _synthetic_pages(input_dir: Path) -> None:
