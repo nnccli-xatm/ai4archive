@@ -4869,14 +4869,29 @@ class ScanQcTest(unittest.TestCase):
                 },
             ],
         }
+        for run in benchmark["runs"]:
+            operation_timings = run["processing"]["operation_timings"]
+            for operation in module.REGRESSION_SIGNAL_OPERATIONS:
+                operation_timings.setdefault(
+                    operation,
+                    {
+                        "enabled": False,
+                        "file_count": 0,
+                        "elapsed_seconds": 0.0,
+                        "files_per_minute": 0.0,
+                        "average_seconds_per_file": None,
+                    },
+                )
 
         summary = module._variant_summary({"id": "candidate", "label": "Candidate"}, benchmark)
         raw = json.dumps(summary, ensure_ascii=False, sort_keys=True)
 
         signal = summary["operation_timing_regression_signal"]
         self.assertTrue(signal["aggregate_only"])
+        self.assertEqual(signal["required_operations"], list(module.REGRESSION_SIGNAL_OPERATIONS))
         self.assertTrue(signal["signal_available"])
         self.assertEqual(signal["missing_operations"], [])
+        self.assertEqual(set(signal["operations"]), set(module.REGRESSION_SIGNAL_OPERATIONS))
         self.assertEqual(signal["operations"]["deskew"]["run_count"], 2)
         self.assertEqual(signal["operations"]["deskew"]["file_count"], 16)
         self.assertEqual(signal["operations"]["deskew"]["elapsed_seconds"], 0.6)
@@ -4910,12 +4925,13 @@ class ScanQcTest(unittest.TestCase):
 
         signal = summary["operation_timing_regression_signal"]
         self.assertFalse(signal["signal_available"])
-        self.assertEqual(signal["missing_operations"], ["deskew", "despeckle"])
+        self.assertEqual(signal["missing_operations"], list(module.REGRESSION_SIGNAL_OPERATIONS))
         self.assertFalse(signal["operations"]["deskew"]["signal_available"])
         self.assertEqual(
             signal["operations"]["deskew"]["missing_reason"],
             "missing_from_benchmark_processing_operation_timings",
         )
+        self.assertEqual(set(signal["operations"]), set(module.REGRESSION_SIGNAL_OPERATIONS))
         self.assertFalse(signal["operations"]["despeckle"]["signal_available"])
 
     def test_benchmark_workers_list_order_is_stable(self) -> None:
