@@ -74,6 +74,14 @@ class ProcessingOptions:
     audit_max_text_combo_edge_changed_ratio: float = 0.12
     audit_max_geometry_combo_crop_ratio: float = 0.55
     audit_max_geometry_combo_size_change_ratio: float = 0.55
+    audit_max_processed_near_white_ratio: float = 0.88
+    audit_max_processed_near_white_delta: float = 0.30
+    audit_max_processed_highlight_clip_ratio: float = 0.25
+    audit_max_processed_highlight_clip_delta: float = 0.18
+    audit_max_processed_bright_page_delta: float = 18.0
+    audit_max_processed_dark_pixel_loss_ratio: float = 0.45
+    audit_max_processed_dark_pixel_lift_ratio: float = 0.35
+    audit_max_processed_full_page_change_ratio: float = 0.85
     workers: int | None = None
 
 
@@ -1197,6 +1205,14 @@ def _processing_options_fingerprint(options: ProcessingOptions) -> str:
         "audit_max_text_combo_edge_changed_ratio": options.audit_max_text_combo_edge_changed_ratio,
         "audit_max_geometry_combo_crop_ratio": options.audit_max_geometry_combo_crop_ratio,
         "audit_max_geometry_combo_size_change_ratio": options.audit_max_geometry_combo_size_change_ratio,
+        "audit_max_processed_near_white_ratio": options.audit_max_processed_near_white_ratio,
+        "audit_max_processed_near_white_delta": options.audit_max_processed_near_white_delta,
+        "audit_max_processed_highlight_clip_ratio": options.audit_max_processed_highlight_clip_ratio,
+        "audit_max_processed_highlight_clip_delta": options.audit_max_processed_highlight_clip_delta,
+        "audit_max_processed_bright_page_delta": options.audit_max_processed_bright_page_delta,
+        "audit_max_processed_dark_pixel_loss_ratio": options.audit_max_processed_dark_pixel_loss_ratio,
+        "audit_max_processed_dark_pixel_lift_ratio": options.audit_max_processed_dark_pixel_lift_ratio,
+        "audit_max_processed_full_page_change_ratio": options.audit_max_processed_full_page_change_ratio,
     }
     payload = json.dumps(identity, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -1493,6 +1509,11 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
         for audit in audit_records
         if isinstance(audit.get("combination_quality_guard_risk_tier"), str)
     ]
+    processed_output_reason_codes = [
+        audit.get("processed_output_safety_guard_reason_code")
+        for audit in audit_records
+        if isinstance(audit.get("processed_output_safety_guard_reason_code"), str)
+    ]
     return {
         "schema_version": "scan-qc.processing.audit.v1",
         "generated_at": manifest["generated_at"],
@@ -1580,6 +1601,33 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                 1
                 for audit in audit_records
                 if audit.get("combination_quality_guard_reason_code") == "low_confidence_original_preserved"
+            ),
+            "processed_output_safety_guard_checked_files": sum(
+                1 for audit in audit_records if audit.get("processed_output_safety_guard_checked") is True
+            ),
+            "processed_output_safety_guard_reverted_files": sum(
+                1 for audit in audit_records if audit.get("processed_output_safety_guard_reverted") is True
+            ),
+            "processed_output_washout_guard_reverted_files": sum(
+                1
+                for audit in audit_records
+                if audit.get("processed_output_safety_guard_reverted") is True
+                and any(
+                    reason in {"near_white_saturation", "bright_page_washout"}
+                    for reason in audit.get("processed_output_safety_guard_reasons", [])
+                )
+            ),
+            "processed_output_clipping_guard_reverted_files": sum(
+                1
+                for audit in audit_records
+                if audit.get("processed_output_safety_guard_reverted") is True
+                and "highlight_clipping" in audit.get("processed_output_safety_guard_reasons", [])
+            ),
+            "processed_output_foreground_loss_guard_reverted_files": sum(
+                1
+                for audit in audit_records
+                if audit.get("processed_output_safety_guard_reverted") is True
+                and "dark_foreground_loss" in audit.get("processed_output_safety_guard_reasons", [])
             ),
             "deskew_safe_skip_files": _int_count(deskew_timing.get("safe_skip_files")),
             "deskew_projection_detection_files": _int_count(deskew_timing.get("projection_detection_files")),
@@ -1836,6 +1884,27 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                 audit_records, "local_content_tile_changed_ratio"
             ),
             "edge_content_changed_ratio": _aggregate_metric(audit_records, "edge_content_changed_ratio"),
+            "processed_output_brightness_increase": _aggregate_metric(
+                audit_records, "processed_output_brightness_increase"
+            ),
+            "processed_output_near_white_ratio": _aggregate_metric(
+                audit_records, "processed_output_near_white_ratio"
+            ),
+            "processed_output_near_white_delta": _aggregate_metric(
+                audit_records, "processed_output_near_white_delta"
+            ),
+            "processed_output_highlight_clip_ratio": _aggregate_metric(
+                audit_records, "processed_output_highlight_clip_ratio"
+            ),
+            "processed_output_highlight_clip_delta": _aggregate_metric(
+                audit_records, "processed_output_highlight_clip_delta"
+            ),
+            "processed_output_dark_pixel_loss_ratio": _aggregate_metric(
+                audit_records, "processed_output_dark_pixel_loss_ratio"
+            ),
+            "processed_output_dark_pixel_lift_ratio": _aggregate_metric(
+                audit_records, "processed_output_dark_pixel_lift_ratio"
+            ),
         },
         "distributions": {
             "pixel_change_ratio": _ratio_distribution(audit_records, "pixel_change_ratio"),
@@ -1910,6 +1979,26 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                     reason
                     for audit in audit_records
                     for reason in audit.get("combination_quality_guard_reasons", [])
+                    if isinstance(reason, str)
+                ),
+            },
+            "processed_output_safety_guard": {
+                "checked_files": sum(
+                    1 for audit in audit_records if audit.get("processed_output_safety_guard_checked") is True
+                ),
+                "reverted_files": sum(
+                    1 for audit in audit_records if audit.get("processed_output_safety_guard_reverted") is True
+                ),
+                "warning_files": sum(
+                    1
+                    for audit in audit_records
+                    if audit.get("processed_output_safety_guard_action") in {"reverted_to_source", "warn_review"}
+                ),
+                "reason_code_distribution": _reason_counts(processed_output_reason_codes),
+                "reason_distribution": _reason_counts(
+                    reason
+                    for audit in audit_records
+                    for reason in audit.get("processed_output_safety_guard_reasons", [])
                     if isinstance(reason, str)
                 ),
             },
@@ -2605,6 +2694,14 @@ def _audit_thresholds(options: ProcessingOptions) -> dict[str, float]:
         "max_text_combo_edge_changed_ratio": options.audit_max_text_combo_edge_changed_ratio,
         "max_geometry_combo_crop_ratio": options.audit_max_geometry_combo_crop_ratio,
         "max_geometry_combo_size_change_ratio": options.audit_max_geometry_combo_size_change_ratio,
+        "max_processed_near_white_ratio": options.audit_max_processed_near_white_ratio,
+        "max_processed_near_white_delta": options.audit_max_processed_near_white_delta,
+        "max_processed_highlight_clip_ratio": options.audit_max_processed_highlight_clip_ratio,
+        "max_processed_highlight_clip_delta": options.audit_max_processed_highlight_clip_delta,
+        "max_processed_bright_page_delta": options.audit_max_processed_bright_page_delta,
+        "max_processed_dark_pixel_loss_ratio": options.audit_max_processed_dark_pixel_loss_ratio,
+        "max_processed_dark_pixel_lift_ratio": options.audit_max_processed_dark_pixel_lift_ratio,
+        "max_processed_full_page_change_ratio": options.audit_max_processed_full_page_change_ratio,
         "max_tone_changed_pixel_ratio": 1.0,
         "max_paper_color_cast_delta": 12.0,
         "max_paper_color_cast_brightness_delta": 4.0,
@@ -3208,10 +3305,17 @@ def _process_image(
             ),
         ),
     )
+    processed_output_guard = _processed_output_safety_guard(attempted_audit, options)
     local_content_guard_reverted = local_content_guard["action"] == "reverted_to_source"
     cumulative_guard_reverted = cumulative_guard["action"] == "reverted_to_source"
     combination_guard_reverted = combination_guard["action"] == "reverted_to_source"
-    guard_reverted = local_content_guard_reverted or cumulative_guard_reverted or combination_guard_reverted
+    processed_output_guard_reverted = processed_output_guard["action"] == "reverted_to_source"
+    guard_reverted = (
+        local_content_guard_reverted
+        or cumulative_guard_reverted
+        or combination_guard_reverted
+        or processed_output_guard_reverted
+    )
     if guard_reverted:
         processed = audit_source.copy()
         if local_content_guard_reverted:
@@ -3220,6 +3324,8 @@ def _process_image(
             operations.append("cumulative_change_guard_reverted_to_source")
         if combination_guard_reverted:
             operations.append("combination_quality_guard_reverted_to_source")
+        if processed_output_guard_reverted:
+            operations.append("processed_output_safety_guard_reverted_to_source")
         processing_audit = _processing_audit(
             audit_source,
             processed,
@@ -3232,12 +3338,14 @@ def _process_image(
             cumulative_change_guard=cumulative_guard,
             local_content_change_guard=local_content_guard,
             combination_quality_guard=combination_guard,
+            processed_output_safety_guard=processed_output_guard,
         )
     else:
         processing_audit = {
             **attempted_audit,
             **_cumulative_change_guard_audit_fields(cumulative_guard),
             **_combination_quality_guard_audit_fields(combination_guard),
+            **_processed_output_safety_guard_audit_fields(processed_output_guard),
         }
     processing_warnings = list(processing_audit["guardrail_failures"])
     if local_content_guard_reverted:
@@ -3246,9 +3354,12 @@ def _process_image(
         processing_warnings.append("cumulative_change_guard_reverted_to_source")
     if combination_guard["action"] == "reverted_to_source":
         processing_warnings.append("combination_quality_guard_reverted_to_source")
+    if processed_output_guard["action"] == "reverted_to_source":
+        processing_warnings.append("processed_output_safety_guard_reverted_to_source")
     guard_reason = _guard_revert_reason(
         local_content_guard_reverted,
         combination_guard.get("reason_code") if isinstance(combination_guard, dict) else None,
+        processed_output_guard.get("reason_code") if isinstance(processed_output_guard, dict) else None,
     )
     faded_text_reason = guard_reason if guard_reverted else faded_text.reason
     faded_text_reason_code = _faded_text_reason_code(faded_text_reason)
@@ -3396,9 +3507,15 @@ def _process_image(
     return processed, operations, crop_info
 
 
-def _guard_revert_reason(local_content_guard_reverted: bool, combination_reason_code: Any = None) -> str:
+def _guard_revert_reason(
+    local_content_guard_reverted: bool,
+    combination_reason_code: Any = None,
+    processed_output_reason_code: Any = None,
+) -> str:
     if local_content_guard_reverted:
         return "reverted by local content change guard"
+    if processed_output_reason_code == "processed_output_quality_reverted":
+        return "reverted by processed output safety guard"
     if combination_reason_code == "geometric_risk_reverted":
         return "reverted by geometric combination guard"
     if combination_reason_code == "text_high_frequency_risk_reverted":
@@ -6500,6 +6617,7 @@ def _processing_audit(
     cumulative_change_guard: dict[str, Any] | None = None,
     local_content_change_guard: dict[str, Any] | None = None,
     combination_quality_guard: dict[str, Any] | None = None,
+    processed_output_safety_guard: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     source_width, source_height = source.size
     output_width, output_height = processed.size
@@ -6523,6 +6641,7 @@ def _processing_audit(
     processed_l = processed.convert("L")
     brightness_delta, contrast_delta = _tonal_deltas(source_l, processed_l)
     pixel_change_ratio = _pixel_change_ratio(source_l, processed_l)
+    processed_output_metrics = _processed_output_safety_metrics(source_l, processed_l)
     deskew_abs_angle = round(abs(skew_angle_degrees or 0.0), 6)
     despeckle_pixel_ratio = despeckle_pixels_changed / source_area
     geometric_change_recorded = (
@@ -6615,6 +6734,7 @@ def _processing_audit(
         "scanner_gutter_max_trim_margin_ratio": round(scanner_gutter_max_trim_margin_ratio, 6),
         "deskew_abs_angle_degrees": deskew_abs_angle,
         "despeckle_pixel_ratio": round(despeckle_pixel_ratio, 6),
+        **processed_output_metrics,
     }
     if local_content_change_guard is None:
         if _should_check_local_content_change(
@@ -6657,6 +6777,9 @@ def _processing_audit(
             local_content_change_guard=local_content_change_guard,
         )
     metrics.update(_combination_quality_guard_audit_fields(combination_quality_guard))
+    if processed_output_safety_guard is None:
+        processed_output_safety_guard = _processed_output_safety_guard(metrics, options)
+    metrics.update(_processed_output_safety_guard_audit_fields(processed_output_safety_guard))
     failures = _audit_guardrail_failures(metrics, options)
     return {**metrics, "guardrail_failures": failures}
 
@@ -6930,6 +7053,126 @@ def _combination_passed_risk_tier(metrics: dict[str, Any]) -> str:
     return "low_risk_background"
 
 
+def _processed_output_safety_metrics(source_l: Image.Image, processed_l: Image.Image) -> dict[str, float]:
+    comparable = (
+        processed_l.resize(source_l.size, Image.Resampling.BILINEAR)
+        if processed_l.size != source_l.size
+        else processed_l
+    )
+    width, height = source_l.size
+    area = max(1, width * height)
+    source_histogram = source_l.histogram()
+    processed_histogram = comparable.histogram()
+    source_mean = ImageStat.Stat(source_l).mean[0]
+    processed_mean = ImageStat.Stat(comparable).mean[0]
+    source_near_white_ratio = sum(source_histogram[245:]) / area
+    processed_near_white_ratio = sum(processed_histogram[245:]) / area
+    source_highlight_clip_ratio = sum(source_histogram[253:]) / area
+    processed_highlight_clip_ratio = sum(processed_histogram[253:]) / area
+    dark_threshold = _high_contrast_content_threshold(source_histogram, source_l.size)
+    source_dark_mask = source_l.point(lambda value: 255 if value <= dark_threshold else 0)
+    processed_dark_mask = comparable.point(lambda value: 255 if value <= dark_threshold else 0)
+    source_dark_pixels = _mask_pixel_count(source_dark_mask)
+    processed_dark_pixels = _mask_pixel_count(processed_dark_mask)
+    dark_pixel_loss_ratio = (
+        max(0, source_dark_pixels - processed_dark_pixels) / source_dark_pixels
+        if source_dark_pixels
+        else 0.0
+    )
+    lifted_dark_mask = comparable.point(lambda value: 255 if value > min(245, dark_threshold + 45) else 0)
+    dark_pixel_lift_ratio = (
+        _mask_intersection_count(source_dark_mask, lifted_dark_mask) / source_dark_pixels
+        if source_dark_pixels
+        else 0.0
+    )
+    return {
+        "processed_output_source_mean_luma": round(source_mean, 6),
+        "processed_output_mean_luma": round(processed_mean, 6),
+        "processed_output_brightness_increase": round(max(0.0, processed_mean - source_mean), 6),
+        "processed_output_source_near_white_ratio": round(source_near_white_ratio, 6),
+        "processed_output_near_white_ratio": round(processed_near_white_ratio, 6),
+        "processed_output_near_white_delta": round(
+            max(0.0, processed_near_white_ratio - source_near_white_ratio),
+            6,
+        ),
+        "processed_output_source_highlight_clip_ratio": round(source_highlight_clip_ratio, 6),
+        "processed_output_highlight_clip_ratio": round(processed_highlight_clip_ratio, 6),
+        "processed_output_highlight_clip_delta": round(
+            max(0.0, processed_highlight_clip_ratio - source_highlight_clip_ratio),
+            6,
+        ),
+        "processed_output_source_dark_pixel_ratio": round(source_dark_pixels / area, 6),
+        "processed_output_dark_pixel_ratio": round(processed_dark_pixels / area, 6),
+        "processed_output_dark_pixel_loss_ratio": round(dark_pixel_loss_ratio, 6),
+        "processed_output_dark_pixel_lift_ratio": round(dark_pixel_lift_ratio, 6),
+    }
+
+
+def _processed_output_safety_guard(metrics: dict[str, Any], options: ProcessingOptions) -> dict[str, Any]:
+    reasons: list[str] = []
+    if metrics.get("pixel_change_guardrail_scope") == "geometric_change_recorded_by_size_crop_trim_or_deskew":
+        return {
+            "checked": True,
+            "action": "passed",
+            "reverted": False,
+            "reason_code": "safe_processed_output_passed",
+            "reasons": [],
+        }
+    source_mean = _float_metric(metrics, "processed_output_source_mean_luma")
+    processed_mean = _float_metric(metrics, "processed_output_mean_luma")
+    brightness_increase = _float_metric(metrics, "processed_output_brightness_increase")
+    near_white_ratio = _float_metric(metrics, "processed_output_near_white_ratio")
+    near_white_delta = _float_metric(metrics, "processed_output_near_white_delta")
+    highlight_clip_ratio = _float_metric(metrics, "processed_output_highlight_clip_ratio")
+    highlight_clip_delta = _float_metric(metrics, "processed_output_highlight_clip_delta")
+    source_dark_ratio = _float_metric(metrics, "processed_output_source_dark_pixel_ratio")
+    dark_loss_ratio = _float_metric(metrics, "processed_output_dark_pixel_loss_ratio")
+    dark_lift_ratio = _float_metric(metrics, "processed_output_dark_pixel_lift_ratio")
+
+    if (
+        near_white_ratio > options.audit_max_processed_near_white_ratio
+        and near_white_delta > options.audit_max_processed_near_white_delta
+        and processed_mean >= 230.0
+    ):
+        reasons.append("near_white_saturation")
+    if (
+        highlight_clip_ratio > options.audit_max_processed_highlight_clip_ratio
+        and highlight_clip_delta > options.audit_max_processed_highlight_clip_delta
+    ):
+        reasons.append("highlight_clipping")
+    if (
+        source_mean >= 190.0
+        and processed_mean >= 225.0
+        and brightness_increase > options.audit_max_processed_bright_page_delta
+        and near_white_delta > 0.15
+    ):
+        reasons.append("bright_page_washout")
+    if (
+        source_dark_ratio >= 0.003
+        and brightness_increase > 10.0
+        and (
+            dark_loss_ratio > options.audit_max_processed_dark_pixel_loss_ratio
+            or dark_lift_ratio > options.audit_max_processed_dark_pixel_lift_ratio
+        )
+    ):
+        reasons.append("dark_foreground_loss")
+    if (
+        _float_metric(metrics, "pixel_change_ratio") > options.audit_max_processed_full_page_change_ratio
+        and metrics.get("pixel_change_guardrail_scope") == "same_size_pixel_change"
+        and metrics.get("tone_normalized") is not True
+        and metrics.get("paper_color_cast_normalized") is not True
+    ):
+        reasons.append("suspicious_full_page_change")
+
+    return {
+        "checked": True,
+        "action": "reverted_to_source" if reasons else "passed",
+        "reverted": bool(reasons),
+        "reason_code": "processed_output_quality_reverted" if reasons else "safe_processed_output_passed",
+        "reasons": sorted(set(reasons)),
+    }
+
+
 def _local_content_change_guard(source_l: Image.Image, processed_l: Image.Image, options: ProcessingOptions) -> dict[str, Any]:
     if processed_l.size != source_l.size:
         return _local_content_change_guard_passed(checked=False)
@@ -7198,6 +7441,19 @@ def _combination_quality_guard_audit_fields(guard: dict[str, Any]) -> dict[str, 
         "combination_quality_guard_reason_code": reason_code if isinstance(reason_code, str) else "safe_combination_passed",
         "combination_quality_guard_risk_tier": risk_tier if isinstance(risk_tier, str) else "low_risk_background",
         "combination_quality_guard_reasons": guard.get("reasons") if isinstance(guard.get("reasons"), list) else [],
+    }
+
+
+def _processed_output_safety_guard_audit_fields(guard: dict[str, Any]) -> dict[str, Any]:
+    reason_code = guard.get("reason_code")
+    return {
+        "processed_output_safety_guard_checked": guard.get("checked") is True,
+        "processed_output_safety_guard_action": guard.get("action", "passed"),
+        "processed_output_safety_guard_reverted": guard.get("reverted") is True,
+        "processed_output_safety_guard_reason_code": (
+            reason_code if isinstance(reason_code, str) else "safe_processed_output_passed"
+        ),
+        "processed_output_safety_guard_reasons": guard.get("reasons") if isinstance(guard.get("reasons"), list) else [],
     }
 
 
