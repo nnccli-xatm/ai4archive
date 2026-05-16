@@ -11852,6 +11852,138 @@ class ScanQcTest(unittest.TestCase):
                 self.assertNotIn("private_safe_two_edge_illumination", audit_summary_text)
                 self.assertNotIn(str(input_dir), audit_summary_text)
 
+    def test_illumination_gradient_leveling_reduces_safe_diagonal_falloff(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            width, height = 220, 150
+            image = Image.new("RGB", (width, height))
+            pixels = image.load()
+            for y in range(height):
+                for x in range(width):
+                    position = ((x / (width - 1)) + (y / (height - 1))) / 2
+                    value = int(round(242 - 18 * position))
+                    pixels[x, y] = (value, value, value)
+            source = input_dir / "private_safe_diagonal_illumination.png"
+            image.save(source)
+            source_bytes = source.read_bytes()
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            disabled_manifest = process_images(
+                report,
+                input_dir,
+                process_dir / "disabled",
+                ProcessingOptions(workers=1),
+            )
+            disabled_record = disabled_manifest["files"][0]
+            self.assertFalse(disabled_record["illumination_gradient_levelled"])
+            self.assertEqual(disabled_record["illumination_gradient_reason_code"], "disabled")
+
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir / "enabled",
+                ProcessingOptions(level_illumination_gradient=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "enabled" / "processing_audit_summary.json").read_text(
+                encoding="utf-8"
+            )
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertTrue(record["illumination_gradient_levelled"])
+            self.assertEqual(record["illumination_gradient_reason_code"], "applied")
+            self.assertEqual(record["illumination_gradient_orientation"], "diagonal_tl_br")
+            self.assertGreater(record["illumination_gradient_delta_before"], 12.0)
+            self.assertLess(record["illumination_gradient_delta_after"], record["illumination_gradient_delta_before"])
+            self.assertLessEqual(record["illumination_gradient_correction_delta"], 10.0)
+            self.assertGreater(record["illumination_gradient_candidate_pixel_ratio"], 0.90)
+            self.assertGreater(record["illumination_gradient_changed_pixel_ratio"], 0.70)
+            self.assertLessEqual(record["processing_audit"]["brightness_delta"], 12.0)
+            self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
+            with Image.open(process_dir / "enabled" / "images" / source.name) as processed:
+                original_gray = image.convert("L")
+                processed_gray = processed.convert("L")
+                original_top_left = ImageStat.Stat(original_gray.crop((0, 0, 32, 24))).mean[0]
+                original_bottom_right = ImageStat.Stat(
+                    original_gray.crop((width - 32, height - 24, width, height))
+                ).mean[0]
+                processed_top_left = ImageStat.Stat(processed_gray.crop((0, 0, 32, 24))).mean[0]
+                processed_bottom_right = ImageStat.Stat(
+                    processed_gray.crop((width - 32, height - 24, width, height))
+                ).mean[0]
+                self.assertLess(
+                    abs(processed_top_left - processed_bottom_right),
+                    abs(original_top_left - original_bottom_right) - 5.0,
+                )
+            self.assertTrue(audit_summary["operations"]["level_illumination_gradient"])
+            self.assertEqual(audit_summary["counts"]["illumination_gradient_levelled_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["illumination_gradient"]["applied_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["illumination_gradient"]["orientation_distribution"]["diagonal_tl_br"],
+                1,
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_safe_diagonal_illumination", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
+    def test_illumination_gradient_leveling_skips_diagonal_protected_content(self) -> None:
+        def diagonal_page() -> Image.Image:
+            width, height = 220, 150
+            page = Image.new("RGB", (width, height))
+            pixels = page.load()
+            for y in range(height):
+                for x in range(width):
+                    position = ((x / (width - 1)) + (y / (height - 1))) / 2
+                    value = int(round(242 - 18 * position))
+                    pixels[x, y] = (value, value, value)
+            return page
+
+        cases = {
+            "text": lambda draw: draw.rectangle((48, 58, 172, 65), fill=(30, 30, 30)),
+            "table_lines": lambda draw: [
+                draw.line((52, y, 168, y), fill=(35, 35, 35), width=2) for y in (46, 78, 110)
+            ],
+            "colored_mark": lambda draw: draw.ellipse((88, 42, 132, 86), outline=(190, 20, 20), width=4),
+        }
+        for name, draw_mark in cases.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                input_dir = root / "input"
+                output_dir = root / "reports"
+                process_dir = root / "processed"
+                input_dir.mkdir()
+                image = diagonal_page()
+                draw_mark(ImageDraw.Draw(image))
+                source = input_dir / f"private_diagonal_illumination_protected_{name}.png"
+                image.save(source)
+
+                report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+                manifest = process_images(
+                    report,
+                    input_dir,
+                    process_dir,
+                    ProcessingOptions(level_illumination_gradient=True, workers=1),
+                )
+                audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+                audit_summary = json.loads(audit_summary_text)
+                record = manifest["files"][0]
+
+                self.assertFalse(record["illumination_gradient_levelled"], name)
+                self.assertIn(
+                    record["illumination_gradient_reason_code"],
+                    {"protected_content", "not_uniform", "low_confidence"},
+                )
+                with Image.open(process_dir / "images" / source.name) as processed:
+                    self.assertEqual(processed.convert("RGB").tobytes(), image.tobytes(), name)
+                self.assertEqual(audit_summary["counts"]["illumination_gradient_levelled_files"], 0)
+                self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+                self.assertNotIn(f"private_diagonal_illumination_protected_{name}", audit_summary_text)
+
     def test_illumination_gradient_leveling_skips_two_edge_protected_content(self) -> None:
         def two_edge_page() -> Image.Image:
             width, height = 220, 150

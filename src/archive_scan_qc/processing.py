@@ -4922,7 +4922,9 @@ def _level_illumination_gradient_conservative(image: Image.Image) -> Illuminatio
 
     vertical = _illumination_gradient_axis_plan(grayscale, vertical=True)
     horizontal = _illumination_gradient_axis_plan(grayscale, vertical=False)
-    plan = vertical if vertical["score"] >= horizontal["score"] else horizontal
+    diagonal_tl_br = _illumination_gradient_diagonal_plan(grayscale, top_left_to_bottom_right=True)
+    diagonal_tr_bl = _illumination_gradient_diagonal_plan(grayscale, top_left_to_bottom_right=False)
+    plan = max((vertical, horizontal, diagonal_tl_br, diagonal_tr_bl), key=lambda candidate_plan: candidate_plan["score"])
     if plan["reason_code"] != "applied":
         return _illumination_gradient_noop(image, plan["reason"], plan["reason_code"], plan["candidate_ratio"])
 
@@ -4952,7 +4954,14 @@ def _level_illumination_gradient_conservative(image: Image.Image) -> Illuminatio
             for x in range(image.width):
                 if not candidate_mask[x, y]:
                     continue
-                index = x if plan["orientation"] == "vertical" else y
+                index = _illumination_gradient_profile_index(
+                    plan["orientation"],
+                    x,
+                    y,
+                    image.width,
+                    image.height,
+                    len(corrections),
+                )
                 delta = corrections[index]
                 if delta <= 0:
                     continue
@@ -4971,7 +4980,14 @@ def _level_illumination_gradient_conservative(image: Image.Image) -> Illuminatio
             for x in range(image.width):
                 if not candidate_mask[x, y]:
                     continue
-                index = x if plan["orientation"] == "vertical" else y
+                index = _illumination_gradient_profile_index(
+                    plan["orientation"],
+                    x,
+                    y,
+                    image.width,
+                    image.height,
+                    len(corrections),
+                )
                 delta = corrections[index]
                 if delta <= 0:
                     continue
@@ -4989,7 +5005,15 @@ def _level_illumination_gradient_conservative(image: Image.Image) -> Illuminatio
     changed_ratio = changed / max(1, total)
     if changed_ratio < 0.05:
         return _illumination_gradient_noop(image, "low confidence changed area", "low_confidence", candidate_ratio)
-    after_plan = _illumination_gradient_axis_plan(result_image.convert("L"), vertical=plan["orientation"] == "vertical")
+    if plan["orientation"] == "vertical":
+        after_plan = _illumination_gradient_axis_plan(result_image.convert("L"), vertical=True)
+    elif plan["orientation"] == "horizontal":
+        after_plan = _illumination_gradient_axis_plan(result_image.convert("L"), vertical=False)
+    else:
+        after_plan = _illumination_gradient_diagonal_plan(
+            result_image.convert("L"),
+            top_left_to_bottom_right=plan["orientation"] == "diagonal_tl_br",
+        )
     delta_after = float(after_plan.get("delta", plan["delta"]))
     if delta_after >= plan["delta"] - 2.0:
         return _illumination_gradient_noop(image, "guardrail reverted insufficient improvement", "guardrail_reverted", candidate_ratio)
@@ -5005,6 +5029,26 @@ def _level_illumination_gradient_conservative(image: Image.Image) -> Illuminatio
         round(changed_ratio, 6),
         round(candidate_ratio, 6),
     )
+
+
+def _illumination_gradient_profile_index(
+    orientation: str,
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+    profile_length: int,
+) -> int:
+    if orientation == "vertical":
+        return min(profile_length - 1, max(0, x))
+    if orientation == "horizontal":
+        return min(profile_length - 1, max(0, y))
+    x_position = x / max(1, width - 1)
+    y_position = y / max(1, height - 1)
+    if orientation == "diagonal_tr_bl":
+        x_position = 1.0 - x_position
+    diagonal_position = (x_position + y_position) / 2.0
+    return min(profile_length - 1, max(0, int(round(diagonal_position * (profile_length - 1)))))
 
 
 def _illumination_gradient_axis_plan(grayscale: Image.Image, *, vertical: bool) -> dict[str, Any]:
@@ -5101,6 +5145,81 @@ def _illumination_gradient_axis_plan(grayscale: Image.Image, *, vertical: bool) 
         "reason_code": "applied",
         "score": score,
         "delta": round(delta, 6),
+        "candidate_ratio": round(candidate_ratio, 6),
+        "candidate_threshold": candidate_threshold,
+        "profile": profile,
+    }
+
+
+def _illumination_gradient_diagonal_plan(
+    grayscale: Image.Image,
+    *,
+    top_left_to_bottom_right: bool,
+) -> dict[str, Any]:
+    orientation = "diagonal_tl_br" if top_left_to_bottom_right else "diagonal_tr_bl"
+    sample = grayscale.copy()
+    sample.thumbnail((220, 220), Image.Resampling.BILINEAR)
+    pixels = sample.load()
+    candidate_threshold = 206
+    bins = max(24, min(56, int(round(math.hypot(sample.width, sample.height) / 6))))
+    values_by_bin: list[list[int]] = [[] for _ in range(bins)]
+    bright_counts = 0
+    for y in range(sample.height):
+        y_position = y / max(1, sample.height - 1)
+        for x in range(sample.width):
+            value = int(pixels[x, y])
+            if value < candidate_threshold:
+                continue
+            x_position = x / max(1, sample.width - 1)
+            if not top_left_to_bottom_right:
+                x_position = 1.0 - x_position
+            index = min(bins - 1, max(0, int(round(((x_position + y_position) / 2.0) * (bins - 1)))))
+            values_by_bin[index].append(value)
+            bright_counts += 1
+    min_bin_count = max(4, (sample.width * sample.height) // max(1, bins * 120))
+    profile: list[float] = []
+    for values in values_by_bin:
+        if len(values) < min_bin_count:
+            return _empty_illumination_gradient_plan(orientation, "not a uniform bright background", "not_uniform")
+        values.sort()
+        trim = max(1, len(values) // 10)
+        trimmed = values[trim:-trim] if len(values) > trim * 2 else values
+        profile.append(sum(trimmed) / len(trimmed))
+
+    edge = max(3, bins // 8)
+    start = sum(profile[:edge]) / edge
+    end = sum(profile[-edge:]) / edge
+    candidate_ratio = bright_counts / max(1, sample.width * sample.height)
+    linear_delta = abs(start - end)
+    if linear_delta < 8.0:
+        return _empty_illumination_gradient_plan(orientation, "gradient below conservative threshold", "low_confidence")
+    if linear_delta > 30.0:
+        return _empty_illumination_gradient_plan(orientation, "gradient too strong for conservative leveling", "too_strong")
+
+    linear_expected = [start + (end - start) * (idx / max(1, bins - 1)) for idx in range(bins)]
+    linear_residuals = [abs(value - want) for value, want in zip(profile, linear_expected)]
+    linear_mean_residual = sum(linear_residuals) / len(linear_residuals)
+    if linear_mean_residual > 2.5:
+        return _empty_illumination_gradient_plan(orientation, "gradient is not smooth", "not_uniform")
+
+    direction_changes = 0
+    last_sign = 0
+    for left, right in zip(profile, profile[1:]):
+        diff = right - left
+        sign = 1 if diff > 0.35 else -1 if diff < -0.35 else 0
+        if sign and last_sign and sign != last_sign:
+            direction_changes += 1
+        if sign:
+            last_sign = sign
+    if direction_changes > max(2, bins // 18):
+        return _empty_illumination_gradient_plan(orientation, "gradient is not smooth", "not_uniform")
+
+    return {
+        "orientation": orientation,
+        "reason": "",
+        "reason_code": "applied",
+        "score": linear_delta - linear_mean_residual,
+        "delta": round(linear_delta, 6),
         "candidate_ratio": round(candidate_ratio, 6),
         "candidate_threshold": candidate_threshold,
         "profile": profile,
