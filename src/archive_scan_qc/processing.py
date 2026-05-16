@@ -4900,16 +4900,54 @@ def _illumination_gradient_axis_plan(grayscale: Image.Image, *, vertical: bool) 
     edge = max(4, axis_length // 10)
     start = sum(profile[:edge]) / edge
     end = sum(profile[-edge:]) / edge
-    delta = abs(start - end)
-    if delta < 6.0:
+    center_width = max(6, axis_length // 5)
+    center_start = max(0, (axis_length - center_width) // 2)
+    center_values = profile[center_start : center_start + center_width]
+    center = sum(center_values) / max(1, len(center_values))
+    candidate_ratio = bright_counts / max(1, grayscale.width * grayscale.height)
+
+    linear_delta = abs(start - end)
+    linear_expected = [start + (end - start) * (idx / max(1, axis_length - 1)) for idx in range(axis_length)]
+    linear_residuals = [abs(value - want) for value, want in zip(profile, linear_expected)]
+    linear_mean_residual = sum(linear_residuals) / len(linear_residuals)
+
+    edge_mean = (start + end) / 2
+    two_edge_delta = center - edge_mean
+    side_delta_balance = abs((center - start) - (center - end))
+    center_index = (axis_length - 1) / 2
+    two_edge_expected: list[float] = []
+    for idx in range(axis_length):
+        if idx <= center_index:
+            denominator = max(1.0, center_index)
+            two_edge_expected.append(start + (center - start) * (idx / denominator))
+        else:
+            denominator = max(1.0, axis_length - 1 - center_index)
+            two_edge_expected.append(center + (end - center) * ((idx - center_index) / denominator))
+    two_edge_residuals = [abs(value - want) for value, want in zip(profile, two_edge_expected)]
+    two_edge_mean_residual = sum(two_edge_residuals) / len(two_edge_residuals)
+
+    if linear_delta < 6.0 and two_edge_delta < 6.0:
         return _empty_illumination_gradient_plan(orientation, "gradient below conservative threshold", "low_confidence")
-    if delta > 28.0:
+    if linear_delta > 28.0 or two_edge_delta > 24.0:
         return _empty_illumination_gradient_plan(orientation, "gradient too strong for conservative leveling", "too_strong")
-    expected = [start + (end - start) * (idx / max(1, axis_length - 1)) for idx in range(axis_length)]
-    residuals = [abs(value - want) for value, want in zip(profile, expected)]
-    mean_residual = sum(residuals) / len(residuals)
+
+    plan_shape = "linear"
+    delta = linear_delta
+    mean_residual = linear_mean_residual
+    score = linear_delta - linear_mean_residual
+    if (
+        two_edge_delta >= 6.0
+        and side_delta_balance <= 4.0
+        and two_edge_mean_residual <= 2.4
+        and two_edge_delta - two_edge_mean_residual > score
+    ):
+        plan_shape = "two_edge"
+        delta = two_edge_delta
+        mean_residual = two_edge_mean_residual
+        score = two_edge_delta - two_edge_mean_residual
     if mean_residual > 2.7:
         return _empty_illumination_gradient_plan(orientation, "gradient is not smooth", "not_uniform")
+
     direction_changes = 0
     last_sign = 0
     for left, right in zip(profile, profile[1:]):
@@ -4919,14 +4957,14 @@ def _illumination_gradient_axis_plan(grayscale: Image.Image, *, vertical: bool) 
             direction_changes += 1
         if sign:
             last_sign = sign
-    if direction_changes > max(2, axis_length // 80):
+    max_direction_changes = max(2, axis_length // 80) if plan_shape == "linear" else max(3, axis_length // 90)
+    if direction_changes > max_direction_changes:
         return _empty_illumination_gradient_plan(orientation, "gradient is not smooth", "not_uniform")
-    candidate_ratio = bright_counts / max(1, grayscale.width * grayscale.height)
     return {
         "orientation": orientation,
         "reason": "",
         "reason_code": "applied",
-        "score": delta - mean_residual,
+        "score": score,
         "delta": round(delta, 6),
         "candidate_ratio": round(candidate_ratio, 6),
         "candidate_threshold": candidate_threshold,
