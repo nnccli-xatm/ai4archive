@@ -7284,6 +7284,8 @@ class ScanQcTest(unittest.TestCase):
             pages = {
                 "private_horizontal_scanline.png": _synthetic_repair_scanline_page("horizontal"),
                 "private_vertical_scanline.png": _synthetic_repair_scanline_page("vertical"),
+                "private_broken_horizontal_scanline.png": _synthetic_broken_repair_scanline_page("horizontal"),
+                "private_broken_vertical_scanline.png": _synthetic_broken_repair_scanline_page("vertical"),
             }
             for name, image in pages.items():
                 image.save(input_dir / name, dpi=(300, 300))
@@ -7302,6 +7304,8 @@ class ScanQcTest(unittest.TestCase):
             for source_name, orientation in (
                 ("private_horizontal_scanline.png", "horizontal"),
                 ("private_vertical_scanline.png", "vertical"),
+                ("private_broken_horizontal_scanline.png", "horizontal"),
+                ("private_broken_vertical_scanline.png", "vertical"),
             ):
                 record = records[source_name]
                 processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
@@ -7310,9 +7314,10 @@ class ScanQcTest(unittest.TestCase):
                 self.assertTrue(record["scanlines_lightened"], source_name)
                 self.assertEqual(record["scanlines_orientation"], orientation)
                 self.assertIn("lighten_scanlines_conservative", record["operations"])
+                min_line_delta = 0.4 if "broken" in source_name else 3.0
                 self.assertGreater(
                     _box_luma(processed, line_box),
-                    _box_luma(pages[source_name], line_box) + 3.0,
+                    _box_luma(pages[source_name], line_box) + min_line_delta,
                     source_name,
                 )
                 self.assertLess(_changed_ratio_for_test(pages[source_name], processed, protected_box), 0.002, source_name)
@@ -7322,19 +7327,21 @@ class ScanQcTest(unittest.TestCase):
                 self.assertGreater(record["scanlines_candidate_pixel_ratio"], 0.0007, source_name)
                 self.assertEqual(record["processing_audit"]["guardrail_failures"], [], source_name)
 
-            self.assertEqual(audit_summary["counts"]["scanlines_lightened_files"], 2)
+            self.assertEqual(audit_summary["counts"]["scanlines_lightened_files"], 4)
             self.assertEqual(audit_summary["counts"]["scanlines_skipped_files"], 0)
             scanline_guard = audit_summary["guardrails"]["scanlines"]
-            self.assertEqual(scanline_guard["applied_files"], 2)
+            self.assertEqual(scanline_guard["applied_files"], 4)
             self.assertEqual(scanline_guard["skipped_files"], 0)
-            self.assertEqual(scanline_guard["direction_distribution"]["horizontal"], 1)
-            self.assertEqual(scanline_guard["direction_distribution"]["vertical"], 1)
+            self.assertEqual(scanline_guard["direction_distribution"]["horizontal"], 2)
+            self.assertEqual(scanline_guard["direction_distribution"]["vertical"], 2)
             self.assertIn("scanlines_changed_pixel_ratio", audit_summary["metrics"])
             self.assertIn("changed_pixel_ratio", scanline_guard)
             self.assertEqual(scanline_guard["protection_triggered_files"], 0)
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertNotIn("private_horizontal_scanline", audit_summary_text)
             self.assertNotIn("private_vertical_scanline", audit_summary_text)
+            self.assertNotIn("private_broken_horizontal_scanline", audit_summary_text)
+            self.assertNotIn("private_broken_vertical_scanline", audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
 
     def test_lighten_scanlines_skips_protected_content_and_uncertain_pages(self) -> None:
@@ -13553,6 +13560,20 @@ def _synthetic_repair_scanline_page(
         draw.rectangle((108, 160, 152, 168), fill=(36, 36, 36))
     if edge_archive_line:
         draw.rectangle((4, 112, 18, 154), fill=(60, 60, 60))
+    return image
+
+
+def _synthetic_broken_repair_scanline_page(orientation: str) -> Image.Image:
+    image = _synthetic_repair_scanline_page(orientation, scanline=False)
+    draw = ImageDraw.Draw(image)
+    if orientation == "horizontal":
+        for x0 in (18, 54, 92, 132, 172, 212):
+            draw.rectangle((x0, 132, x0 + 15, 133), fill=(232, 232, 228))
+    elif orientation == "vertical":
+        for y0 in (20, 44, 70, 98, 126, 150):
+            draw.rectangle((212, y0, 213, y0 + 9), fill=(232, 232, 228))
+    else:
+        raise ValueError(orientation)
     return image
 
 
