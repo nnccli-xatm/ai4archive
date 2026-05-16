@@ -406,6 +406,7 @@ def _aggregate_operation_timing(runs: list[Any], operation: str) -> dict[str, An
     deskew_safe_skip_files = 0
     deskew_projection_detection_files = 0
     deskew_fallback_detection_files = 0
+    deskew_safe_skip_reason_code_distribution: dict[str, int] = {}
     backend_counts = {mode: 0 for mode in DESPECKLE_BACKEND_MODES}
 
     for run in runs:
@@ -442,6 +443,13 @@ def _aggregate_operation_timing(runs: list[Any], operation: str) -> dict[str, An
             fallback = timing.get("fallback_detection_files")
             if isinstance(fallback, int):
                 deskew_fallback_detection_files += fallback
+            reason_codes = timing.get("safe_skip_reason_code_distribution")
+            if isinstance(reason_codes, dict):
+                for reason_code, count in reason_codes.items():
+                    if isinstance(reason_code, str) and isinstance(count, int):
+                        deskew_safe_skip_reason_code_distribution[reason_code] = (
+                            deskew_safe_skip_reason_code_distribution.get(reason_code, 0) + count
+                        )
         if operation == "despeckle":
             source_counts = timing.get("backend_counts")
             if isinstance(source_counts, dict):
@@ -467,6 +475,7 @@ def _aggregate_operation_timing(runs: list[Any], operation: str) -> dict[str, An
                     "safe_skip_files": 0,
                     "projection_detection_files": 0,
                     "fallback_detection_files": 0,
+                    "safe_skip_reason_code_distribution": {},
                 }
             )
         return missing
@@ -488,6 +497,7 @@ def _aggregate_operation_timing(runs: list[Any], operation: str) -> dict[str, An
                 "safe_skip_files": deskew_safe_skip_files,
                 "projection_detection_files": deskew_projection_detection_files,
                 "fallback_detection_files": deskew_fallback_detection_files,
+                "safe_skip_reason_code_distribution": deskew_safe_skip_reason_code_distribution,
             }
         )
     if operation == "despeckle":

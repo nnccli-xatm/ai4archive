@@ -48,6 +48,7 @@ from archive_scan_qc.processing import (
     _despeckle_isolated_pixels,
     _deskew_candidate_scores,
     _horizontal_projection_variance,
+    _process_image,
     detect_dark_border_bbox,
     process_images,
 )
@@ -4858,6 +4859,10 @@ class ScanQcTest(unittest.TestCase):
                                 "safe_skip_files": 6,
                                 "projection_detection_files": 2,
                                 "fallback_detection_files": 1,
+                                "safe_skip_reason_code_distribution": {
+                                    "low_contrast": 4,
+                                    "blank_page": 2,
+                                },
                             },
                             "despeckle": {
                                 "enabled": True,
@@ -4888,6 +4893,10 @@ class ScanQcTest(unittest.TestCase):
                                 "safe_skip_files": 4,
                                 "projection_detection_files": 4,
                                 "fallback_detection_files": 2,
+                                "safe_skip_reason_code_distribution": {
+                                    "low_contrast": 1,
+                                    "insufficient_foreground": 3,
+                                },
                             },
                             "despeckle": {
                                 "enabled": True,
@@ -4936,6 +4945,10 @@ class ScanQcTest(unittest.TestCase):
         self.assertEqual(signal["operations"]["deskew"]["safe_skip_files"], 10)
         self.assertEqual(signal["operations"]["deskew"]["projection_detection_files"], 6)
         self.assertEqual(signal["operations"]["deskew"]["fallback_detection_files"], 3)
+        self.assertEqual(
+            signal["operations"]["deskew"]["safe_skip_reason_code_distribution"],
+            {"low_contrast": 5, "blank_page": 2, "insufficient_foreground": 3},
+        )
         despeckle = signal["operations"]["despeckle"]
         self.assertEqual(despeckle["elapsed_seconds"], 2.0)
         self.assertEqual(despeckle["backend_mode"], "mixed")
@@ -9013,6 +9026,9 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(record["deskew_reason"], "deskew applied")
             self.assertNotEqual(record["pre_deskew_size"], record["post_deskew_size"])
             self.assertIn("deskew_conservative", record["operations"])
+            deskew_timing = manifest["summary"]["performance"]["operation_timings"]["deskew"]
+            self.assertEqual(deskew_timing["projection_detection_files"], 1)
+            self.assertEqual(deskew_timing["safe_skip_files"], 0)
 
     def test_deskew_corrects_sparse_stable_edge_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -9154,6 +9170,30 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(audit_summary["counts"]["deskew_skipped_files"], 2)
             self.assertEqual(audit_summary["guardrails"]["deskew"]["skipped_files"], 2)
             self.assertGreaterEqual(audit_summary["guardrails"]["deskew"]["reason_distribution"]["low contrast"], 1)
+            self.assertEqual(audit_summary["counts"]["deskew_safe_skip_files"], 2)
+            self.assertEqual(audit_summary["counts"]["deskew_projection_detection_files"], 0)
+            self.assertEqual(audit_summary["guardrails"]["deskew"]["safe_skip_files"], 2)
+            self.assertEqual(
+                sum(audit_summary["guardrails"]["deskew"]["safe_skip_reason_code_distribution"].values()),
+                2,
+            )
+
+    def test_deskew_page_preflight_skips_no_evidence_without_projection_detection(self) -> None:
+        blank = Image.new("RGB", (240, 180), "white")
+        processed, operations, info = _process_image(blank, ProcessingOptions(deskew=True, workers=1), scan_record=None)
+        timing = info["operation_timings"]["deskew"]
+
+        self.assertFalse(info["deskewed"])
+        self.assertEqual(info["deskew_reason"], "low contrast")
+        self.assertEqual(info["skew_angle_degrees"], None)
+        self.assertEqual(info["skew_confidence"], 0.0)
+        self.assertIn("deskew_safe_skip_page_preflight", operations)
+        self.assertNotIn("skew_detect_projection", operations)
+        self.assertTrue(timing["safe_skip"])
+        self.assertEqual(timing["safe_skip_source"], "page_preflight")
+        self.assertEqual(timing["safe_skip_reason_code"], "low_contrast")
+        self.assertNotIn("projection_detection", timing)
+        self.assertIsNone(ImageChops.difference(blank, processed).getbbox())
 
     def test_deskew_noops_for_shallow_table_and_color_mark_risks(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

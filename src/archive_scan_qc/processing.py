@@ -2029,6 +2029,19 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "auto_crop": _auto_crop_audit_summary(processed_records, audit_records, auto_crop_reasons),
             "deskew": {
                 "corrected_files": sum(1 for record in processed_records if record.get("deskewed") is True),
+                "safe_skip_files": _int_count(deskew_timing.get("safe_skip_files")),
+                "projection_detection_files": _int_count(deskew_timing.get("projection_detection_files")),
+                "fallback_detection_files": _int_count(deskew_timing.get("fallback_detection_files")),
+                "safe_skip_reason_code_distribution": (
+                    deskew_timing.get("safe_skip_reason_code_distribution")
+                    if isinstance(deskew_timing.get("safe_skip_reason_code_distribution"), dict)
+                    else {}
+                ),
+                "safe_skip_source_distribution": (
+                    deskew_timing.get("safe_skip_source_distribution")
+                    if isinstance(deskew_timing.get("safe_skip_source_distribution"), dict)
+                    else {}
+                ),
                 "skipped_files": sum(
                     1
                     for record in processed_records
@@ -2600,12 +2613,29 @@ def _operation_flag_count(records: list[dict[str, Any]], operation: str, flag: s
     )
 
 
-def _aggregate_deskew_detection_counts(records: list[dict[str, Any]]) -> dict[str, int]:
+def _aggregate_deskew_detection_counts(records: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "safe_skip_files": _operation_flag_count(records, "deskew", "safe_skip"),
         "projection_detection_files": _operation_flag_count(records, "deskew", "projection_detection"),
         "fallback_detection_files": _operation_flag_count(records, "deskew", "fallback_detection"),
+        "safe_skip_reason_code_distribution": _operation_value_distribution(
+            records,
+            "deskew",
+            "safe_skip_reason_code",
+        ),
+        "safe_skip_source_distribution": _operation_value_distribution(records, "deskew", "safe_skip_source"),
     }
+
+
+def _operation_value_distribution(records: list[dict[str, Any]], operation: str, key: str) -> dict[str, int]:
+    values = [
+        record["operation_timings"][operation].get(key)
+        for record in records
+        if isinstance(record.get("operation_timings"), dict)
+        and isinstance(record["operation_timings"].get(operation), dict)
+        and isinstance(record["operation_timings"][operation].get(key), str)
+    ]
+    return _reason_counts(value for value in values if isinstance(value, str))
 
 
 def _aggregate_scan_measurement_reuse(records: list[dict[str, Any]]) -> dict[str, Any]:
@@ -2629,6 +2659,11 @@ def _aggregate_scan_measurement_reuse(records: list[dict[str, Any]]) -> dict[str
         "deskew_safe_skip_files": _operation_flag_count(records, "deskew", "safe_skip"),
         "deskew_projection_detection_files": _operation_flag_count(records, "deskew", "projection_detection"),
         "deskew_fallback_detection_files": _operation_flag_count(records, "deskew", "fallback_detection"),
+        "deskew_safe_skip_reason_code_distribution": _operation_value_distribution(
+            records,
+            "deskew",
+            "safe_skip_reason_code",
+        ),
     }
 
 
@@ -2641,6 +2676,7 @@ def _empty_scan_measurement_reuse() -> dict[str, Any]:
         "deskew_safe_skip_files": 0,
         "deskew_projection_detection_files": 0,
         "deskew_fallback_detection_files": 0,
+        "deskew_safe_skip_reason_code_distribution": {},
     }
 
 
@@ -2887,15 +2923,28 @@ def _process_image(
             processed,
             options,
         )
+        safe_skip_source = "scan_measurement" if safe_skip_skew is not None else None
+        if safe_skip_skew is None and options.deskew:
+            safe_skip_skew = _safe_deskew_skip_from_page_evidence(processed)
+            safe_skip_source = "page_preflight" if safe_skip_skew is not None else None
         skew = reusable.get("skew") if safe_skip_skew is None else safe_skip_skew
         skew_from_projection = False
         if isinstance(skew, SkewDetection):
-            operations.append("skew_detect_reused_scan_measurement")
-            operation_timings.setdefault("deskew", {})["reused_scan_measurement"] = True
+            if safe_skip_source in {None, "scan_measurement"}:
+                operations.append("skew_detect_reused_scan_measurement")
+                operation_timings.setdefault("deskew", {})["reused_scan_measurement"] = True
             if safe_skip_skew is not None:
-                operations.append("deskew_safe_skip_scan_measurement")
-                operation_timings.setdefault("deskew", {})["safe_skip_reason"] = "scan measurement proves no correction"
-                operation_timings.setdefault("deskew", {})["safe_skip"] = True
+                safe_skip_operation = (
+                    "deskew_safe_skip_scan_measurement"
+                    if safe_skip_source == "scan_measurement"
+                    else "deskew_safe_skip_page_preflight"
+                )
+                operations.append(safe_skip_operation)
+                timing = operation_timings.setdefault("deskew", {})
+                timing["safe_skip_reason"] = skew.reason
+                timing["safe_skip_reason_code"] = _deskew_safe_skip_reason_code(skew.reason)
+                timing["safe_skip_source"] = safe_skip_source or "unknown"
+                timing["safe_skip"] = True
         else:
             skew = _detect_skew(processed)
             skew_from_projection = True
@@ -7851,6 +7900,62 @@ def _safe_deskew_skip_from_scan_record(
     if skew.confidence >= options.deskew_min_confidence and abs(skew.angle_degrees) < 0.2:
         return skew
     return None
+
+
+def _safe_deskew_skip_from_page_evidence(image: Image.Image) -> SkewDetection | None:
+    width, height = image.size
+    if width < 30 or height < 30:
+        return SkewDetection(None, 0.0, "image too small")
+
+    raw_grayscale = image.convert("L")
+    raw_histogram = raw_grayscale.histogram()
+    total_pixels = width * height
+    raw_low = _histogram_percentile(raw_histogram, total_pixels, 0.005)
+    raw_high = _histogram_percentile(raw_histogram, total_pixels, 0.995)
+    raw_span = raw_high - raw_low
+    if raw_span < 8:
+        return SkewDetection(None, 0.0, "low contrast")
+
+    grayscale = ImageOps.autocontrast(raw_grayscale, cutoff=1)
+    histogram = grayscale.histogram()
+    low = _histogram_percentile(histogram, total_pixels, 0.05)
+    high = _histogram_percentile(histogram, total_pixels, 0.95)
+    if high - low < 35:
+        if raw_high < 220 or raw_span < 8:
+            return SkewDetection(None, 0.0, "low contrast")
+        if raw_span < 35:
+            return None
+        sparse_threshold = max(0, raw_high - 35)
+        sparse_foreground = sum(raw_histogram[: sparse_threshold + 1]) / total_pixels
+        if sparse_foreground < 0.002:
+            return SkewDetection(None, 0.0, "low contrast")
+        return None
+
+    threshold = max(0, min(255, low + int((high - low) * 0.35)))
+    ink = grayscale.point(lambda value: 255 if value <= threshold else 0, mode="L")
+    bbox = ink.getbbox()
+    if not bbox:
+        return SkewDetection(None, 0.0, "blank page")
+
+    ink_ratio = _nonzero_ratio(ink, bbox)
+    if ink_ratio < 0.002:
+        return SkewDetection(None, 0.0, "insufficient foreground")
+    if ink_ratio > 0.65:
+        return SkewDetection(None, 0.0, "foreground too dense")
+    if not _has_deskew_line_evidence(ink, bbox):
+        return SkewDetection(None, 0.0, "low confidence")
+    return None
+
+
+def _deskew_safe_skip_reason_code(reason: str) -> str:
+    return {
+        "image too small": "image_too_small",
+        "low contrast": "low_contrast",
+        "blank page": "blank_page",
+        "insufficient foreground": "insufficient_foreground",
+        "foreground too dense": "foreground_too_dense",
+        "low confidence": "low_line_evidence",
+    }.get(reason, "no_reliable_skew_candidate")
 
 
 _SAFE_DESKEW_NO_CANDIDATE_REASONS = {
