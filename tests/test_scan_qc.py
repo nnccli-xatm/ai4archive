@@ -7135,6 +7135,82 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn("private_safe_corner_shadow", audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
 
+    def test_lighten_corner_shadows_improves_safe_paired_soft_vignettes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            default_process_dir = root / "processed-default"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "private_safe_adjacent_soft_corner_vignettes.png": _synthetic_paired_soft_corner_vignette_page(
+                    ("top_left", "top_right")
+                ),
+                "private_safe_diagonal_soft_corner_vignettes.png": _synthetic_paired_soft_corner_vignette_page(
+                    ("top_left", "bottom_right")
+                ),
+            }
+            for name, image in pages.items():
+                image.save(input_dir / name, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            default_manifest = process_images(report, input_dir, default_process_dir, ProcessingOptions(workers=1))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(lighten_corner_shadows=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for record in default_manifest["files"]:
+                self.assertFalse(record["corner_shadows_lightened"])
+                self.assertEqual(record["corner_shadows_reason_code"], "disabled")
+                self.assertIn("lighten_corner_shadows_disabled", record["operations"])
+                self.assertEqual(
+                    _sha256_for_test(input_dir / record["source_relative_path"]),
+                    _sha256_for_test(default_process_dir / record["output_relative_path"]),
+                )
+
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            expected_corners = {
+                "private_safe_adjacent_soft_corner_vignettes.png": ["top_left", "top_right"],
+                "private_safe_diagonal_soft_corner_vignettes.png": ["top_left", "bottom_right"],
+            }
+            for source_name, corners in expected_corners.items():
+                record = records[source_name]
+                processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+                self.assertTrue(record["corner_shadows_lightened"], source_name)
+                self.assertEqual(record["corner_shadows_reason_code"], "applied", source_name)
+                self.assertEqual(record["corner_shadows_corners"], corners, source_name)
+                self.assertIn("lighten_corner_shadows_conservative", record["operations"], source_name)
+                self.assertGreater(record["corner_shadows_delta"], 0.8, source_name)
+                self.assertGreater(record["corner_shadows_changed_pixel_ratio"], 0.002, source_name)
+                self.assertLessEqual(record["corner_shadows_changed_pixel_ratio"], 0.06, source_name)
+                self.assertGreater(
+                    record["corner_shadows_candidate_pixel_ratio"],
+                    record["corner_shadows_changed_pixel_ratio"],
+                    source_name,
+                )
+                self.assertGreater(
+                    _box_luma(processed, _corner_test_box(corners[0], processed.size)),
+                    _box_luma(pages[source_name], _corner_test_box(corners[0], processed.size)) + 0.8,
+                    source_name,
+                )
+                self.assertEqual(record["processing_audit"]["guardrail_failures"], [], source_name)
+
+            corner_guard = audit_summary["guardrails"]["corner_shadows"]
+            self.assertEqual(audit_summary["counts"]["corner_shadows_lightened_files"], 2)
+            self.assertEqual(corner_guard["applied_files"], 2)
+            self.assertEqual(corner_guard["reason_code_distribution"]["applied"], 2)
+            self.assertIn("candidate_pixel_ratio", corner_guard)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_safe_adjacent_soft_corner_vignettes", audit_summary_text)
+            self.assertNotIn("private_safe_diagonal_soft_corner_vignettes", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
     def test_lighten_corner_shadows_preserves_corner_content_and_skips_uncertain_pages(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -7153,6 +7229,9 @@ class ScanQcTest(unittest.TestCase):
                 "private_corner_blue_mark.png": _synthetic_corner_shadow_page(color_mark=True),
                 "private_corner_photo_texture.png": _synthetic_photo_like_page(),
                 "private_corner_dark_texture.png": _synthetic_corner_dark_texture_page(),
+                "private_paired_soft_corner_page_number.png": _synthetic_paired_soft_corner_vignette_page(
+                    ("top_left", "top_right"), page_number=True
+                ),
             }
             for name, image in pages.items():
                 image.save(input_dir / name, dpi=(300, 300))
@@ -7188,6 +7267,7 @@ class ScanQcTest(unittest.TestCase):
                 "private_corner_blue_mark.png": "color_content",
                 "private_corner_photo_texture.png": "protected_content",
                 "private_corner_dark_texture.png": "detail_too_high",
+                "private_paired_soft_corner_page_number.png": "protected_content",
             }
             for source_name, reason_code in skipped_expectations.items():
                 record = records[source_name]
@@ -13860,6 +13940,36 @@ def _synthetic_corner_shadow_page(
     return image
 
 
+def _synthetic_paired_soft_corner_vignette_page(
+    corners: tuple[str, str],
+    *,
+    page_number: bool = False,
+) -> Image.Image:
+    image = Image.new("RGB", (260, 180), (242, 242, 238))
+    draw = ImageDraw.Draw(image)
+    for corner in corners:
+        for radius in range(64, 2, -2):
+            shade = int(round(242 - (radius / 64) * 22))
+            if corner == "top_left":
+                box = (0, 0, radius * 2, radius * 2)
+                angles = (180, 270)
+            elif corner == "top_right":
+                box = (image.width - radius * 2, 0, image.width, radius * 2)
+                angles = (270, 360)
+            elif corner == "bottom_left":
+                box = (0, image.height - radius * 2, radius * 2, image.height)
+                angles = (90, 180)
+            elif corner == "bottom_right":
+                box = (image.width - radius * 2, image.height - radius * 2, image.width, image.height)
+                angles = (0, 90)
+            else:
+                raise ValueError(f"unsupported corner: {corner}")
+            draw.pieslice(box, *angles, fill=(shade, shade, shade))
+    if page_number:
+        draw.text((16, 14), "12", fill=(28, 28, 28))
+    return image
+
+
 def _synthetic_corner_dark_texture_page() -> Image.Image:
     image = _synthetic_corner_shadow_page()
     draw = ImageDraw.Draw(image)
@@ -13883,6 +13993,19 @@ def _synthetic_dense_table_scanline_page() -> Image.Image:
 
 def _box_luma(image: Image.Image, box: tuple[int, int, int, int]) -> float:
     return float(ImageStat.Stat(image.crop(box).convert("L")).mean[0])
+
+
+def _corner_test_box(corner: str, size: tuple[int, int]) -> tuple[int, int, int, int]:
+    width, height = size
+    if corner == "top_left":
+        return (0, 0, 54, 54)
+    if corner == "top_right":
+        return (width - 54, 0, width, 54)
+    if corner == "bottom_left":
+        return (0, height - 54, 54, height)
+    if corner == "bottom_right":
+        return (width - 54, height - 54, width, height)
+    raise ValueError(f"unsupported corner: {corner}")
 
 
 def _changed_ratio_for_test(before: Image.Image, after: Image.Image, box: tuple[int, int, int, int]) -> float:
