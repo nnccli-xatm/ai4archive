@@ -6574,7 +6574,7 @@ class ScanQcTest(unittest.TestCase):
             default_process_dir = root / "processed-default"
             process_dir = root / "processed"
             input_dir.mkdir()
-            page = _synthetic_bleed_through_page("ghost")
+            page = _synthetic_bleed_through_page("pale_ghost")
             source_name = "private_faint_reverse_ghost.png"
             page.save(input_dir / source_name, dpi=(300, 300))
             source_bytes = (input_dir / source_name).read_bytes()
@@ -6602,6 +6602,8 @@ class ScanQcTest(unittest.TestCase):
             self.assertGreater(audit["bleed_through_delta"], 3.0)
             self.assertGreater(audit["bleed_through_changed_pixel_ratio"], 0.0)
             self.assertLessEqual(audit["bleed_through_changed_pixel_ratio"], 0.01)
+            self.assertGreater(audit["bleed_through_candidate_pixel_ratio"], 0.0)
+            self.assertLessEqual(audit["bleed_through_candidate_pixel_ratio"], 0.065)
             self.assertEqual(audit["guardrail_failures"], [])
             self.assertEqual(audit["combination_quality_guard_reason_code"], "safe_combination_passed")
 
@@ -6618,6 +6620,12 @@ class ScanQcTest(unittest.TestCase):
             self.assertTrue(audit_summary["operations"]["clean_bleed_through"])
             self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 1)
             self.assertEqual(audit_summary["guardrails"]["bleed_through"]["applied_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["bleed_through"]["reason_distribution"][
+                    "bleed-through cleanup applied: faint reverse-side ghost on light background"
+                ],
+                1,
+            )
             self.assertIn("bleed_through_changed_pixel_ratio", audit_summary["metrics"])
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertNotIn("private_faint_reverse_ghost", audit_summary_text)
@@ -6636,6 +6644,7 @@ class ScanQcTest(unittest.TestCase):
                 "private_table_lines.png": _synthetic_bleed_through_page("table"),
                 "private_red_stamp.png": _synthetic_bleed_through_page("stamp"),
                 "private_edge_mark.png": _synthetic_bleed_through_page("edge"),
+                "private_dense_background.png": _synthetic_bleed_through_page("dense"),
             }
             for name, image in pages.items():
                 image.save(input_dir / name, dpi=(300, 300))
@@ -6659,7 +6668,11 @@ class ScanQcTest(unittest.TestCase):
                 self.assertIsNone(ImageChops.difference(pages[source_name].convert("RGB"), processed).getbbox())
 
             self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 0)
-            self.assertEqual(audit_summary["counts"]["bleed_through_skipped_files"], 5)
+            self.assertEqual(audit_summary["counts"]["bleed_through_skipped_files"], 6)
+            self.assertGreaterEqual(
+                len(audit_summary["guardrails"]["bleed_through"]["skip_reason_distribution"]),
+                3,
+            )
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             for private_name in (
                 "private_light_foreground_text",
@@ -6667,6 +6680,7 @@ class ScanQcTest(unittest.TestCase):
                 "private_table_lines",
                 "private_red_stamp",
                 "private_edge_mark",
+                "private_dense_background",
             ):
                 self.assertNotIn(private_name, audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
@@ -13289,6 +13303,13 @@ def _synthetic_bleed_through_page(variant: str) -> Image.Image:
         mask = mask.filter(ImageFilter.GaussianBlur(1.2))
         ghost = Image.new("RGB", image.size, (217, 217, 212))
         image.paste(ghost, (0, 0), mask.point(lambda value: int(value * 0.65)))
+    elif variant == "pale_ghost":
+        mask = Image.new("L", image.size, 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.text((124, 86), "321", fill=255)
+        mask = mask.filter(ImageFilter.GaussianBlur(2.0))
+        ghost = Image.new("RGB", image.size, (214, 214, 210))
+        image.paste(ghost, (0, 0), mask.point(lambda value: int(value * 0.65)))
     elif variant == "text":
         draw.text((124, 86), "321", fill=(215, 215, 210))
         draw.line((120, 112, 206, 112), fill=(215, 215, 210), width=1)
@@ -13303,6 +13324,11 @@ def _synthetic_bleed_through_page(variant: str) -> Image.Image:
         draw.ellipse((120, 80, 188, 134), outline=(190, 80, 80), width=2)
     elif variant == "edge":
         draw.text((4, 86), "321", fill=(219, 219, 214))
+    elif variant == "dense":
+        for x in range(14, 246, 6):
+            for y in range(14, 166, 6):
+                shade = 184 + ((x * 7 + y * 11) % 36)
+                draw.rectangle((x, y, x + 2, y + 2), fill=(shade, shade, shade))
     else:
         raise ValueError(f"unknown bleed-through variant: {variant}")
     return image
