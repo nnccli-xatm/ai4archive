@@ -2600,6 +2600,7 @@ class ScanQcTest(unittest.TestCase):
                     "--benchmark-workers-list",
                     "1",
                     "--no-process-images",
+                    "--clean-bleed-through",
                 ]
             )
             payload = module.run_aggregate_baseline(args)
@@ -2610,6 +2611,7 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(payload["target_environment"]["validation_target"], "puersai-hpc")
             self.assertFalse(payload["target_environment"]["gpu_acceleration_used"])
             self.assertEqual(payload["worker_settings"]["requested_workers"], 1)
+            self.assertTrue(payload["operations"]["clean_bleed_through"])
             self.assertEqual(payload["aggregate_counts"]["total_files"], 1)
             self.assertEqual(payload["aggregate_counts"]["openable_files"], 1)
             self.assertIn("environment", payload)
@@ -2693,6 +2695,33 @@ class ScanQcTest(unittest.TestCase):
         self.assertEqual(hardware["gpu_memory_total_gb"], 0.0)
         self.assertFalse(hardware["gpu_acceleration_used"])
         self.assertTrue(any("nvidia-smi unavailable" in warning for warning in hardware["warnings"]))
+
+    def test_private_integration_parser_reports_clean_bleed_through_option(self) -> None:
+        module = _load_private_integration_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-input"
+            output_dir = root / "private-output"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "private_page_001.png", dpi=(300, 300))
+
+            args = module.build_parser().parse_args(
+                [
+                    "--input",
+                    str(input_dir),
+                    "--out",
+                    str(output_dir),
+                    "--workers",
+                    "1",
+                    "--clean-bleed-through",
+                    "--skip-benchmark",
+                ]
+            )
+            payload = module.run_private_integration(args).summary
+
+        self.assertTrue(args.clean_bleed_through)
+        self.assertTrue(payload["configuration"]["clean_bleed_through"])
+        self.assertTrue(payload["privacy_self_check"]["passed"])
 
     def test_private_integration_reports_numpy_despeckle_backend_available(self) -> None:
         module = _load_private_integration_module()
@@ -3334,6 +3363,7 @@ class ScanQcTest(unittest.TestCase):
                 "--normalize-tones",
                 "--lighten-edge-shadow",
                 "--lighten-background-stains",
+                "--clean-bleed-through",
                 "--lighten-scanlines",
                 "--enhance-faded-text",
                 "--sharpen-text-edges",
@@ -3352,6 +3382,7 @@ class ScanQcTest(unittest.TestCase):
         self.assertTrue(baseline_args.normalize_tones)
         self.assertTrue(baseline_args.lighten_edge_shadow)
         self.assertTrue(baseline_args.lighten_background_stains)
+        self.assertTrue(baseline_args.clean_bleed_through)
         self.assertTrue(baseline_args.lighten_scanlines)
         self.assertTrue(baseline_args.enhance_faded_text)
         self.assertTrue(baseline_args.sharpen_text_edges)
@@ -6491,6 +6522,111 @@ class ScanQcTest(unittest.TestCase):
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertNotIn("private_default_compatible_stain", audit_summary_text)
             self.assertNotIn("private_red_annotation", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
+    def test_clean_bleed_through_improves_faint_reverse_side_ghosts_safely(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            default_process_dir = root / "processed-default"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            page = _synthetic_bleed_through_page("ghost")
+            source_name = "private_faint_reverse_ghost.png"
+            page.save(input_dir / source_name, dpi=(300, 300))
+            source_bytes = (input_dir / source_name).read_bytes()
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            default_manifest = process_images(report, input_dir, default_process_dir, ProcessingOptions(workers=1))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(clean_bleed_through=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            default_record = default_manifest["files"][0]
+            record = manifest["files"][0]
+            processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+
+            self.assertEqual((input_dir / source_name).read_bytes(), source_bytes)
+            self.assertFalse(default_record["bleed_through_cleaned"])
+            self.assertIn("clean_bleed_through_disabled", default_record["operations"])
+            self.assertTrue(record["bleed_through_cleaned"])
+            self.assertIn("clean_bleed_through_conservative", record["operations"])
+            audit = record["processing_audit"]
+            self.assertGreater(audit["bleed_through_delta"], 3.0)
+            self.assertGreater(audit["bleed_through_changed_pixel_ratio"], 0.0)
+            self.assertLessEqual(audit["bleed_through_changed_pixel_ratio"], 0.01)
+            self.assertEqual(audit["guardrail_failures"], [])
+            self.assertEqual(audit["combination_quality_guard_reason_code"], "safe_combination_passed")
+
+            original = page.convert("RGB")
+            ghost_box = (118, 80, 170, 112)
+            before = ImageStat.Stat(original.crop(ghost_box).convert("L")).mean[0]
+            after = ImageStat.Stat(processed.crop(ghost_box).convert("L")).mean[0]
+            self.assertGreater(after - before, 0.05)
+            protected_box = (30, 34, 72, 50)
+            self.assertIsNone(
+                ImageChops.difference(original.crop(protected_box), processed.crop(protected_box)).getbbox()
+            )
+
+            self.assertTrue(audit_summary["operations"]["clean_bleed_through"])
+            self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["bleed_through"]["applied_files"], 1)
+            self.assertIn("bleed_through_changed_pixel_ratio", audit_summary["metrics"])
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_faint_reverse_ghost", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
+    def test_clean_bleed_through_protects_foreground_marks_and_edge_content(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "private_light_foreground_text.png": _synthetic_bleed_through_page("text"),
+                "private_page_number.png": _synthetic_bleed_through_page("page_number"),
+                "private_table_lines.png": _synthetic_bleed_through_page("table"),
+                "private_red_stamp.png": _synthetic_bleed_through_page("stamp"),
+                "private_edge_mark.png": _synthetic_bleed_through_page("edge"),
+            }
+            for name, image in pages.items():
+                image.save(input_dir / name, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(clean_bleed_through=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for record in manifest["files"]:
+                source_name = record["source_relative_path"]
+                self.assertFalse(record["bleed_through_cleaned"], source_name)
+                self.assertIn("clean_bleed_through_noop", record["operations"], source_name)
+                self.assertEqual(record["processing_audit"]["bleed_through_changed_pixel_ratio"], 0.0)
+                processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+                self.assertIsNone(ImageChops.difference(pages[source_name].convert("RGB"), processed).getbbox())
+
+            self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 0)
+            self.assertEqual(audit_summary["counts"]["bleed_through_skipped_files"], 5)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            for private_name in (
+                "private_light_foreground_text",
+                "private_page_number",
+                "private_table_lines",
+                "private_red_stamp",
+                "private_edge_mark",
+            ):
+                self.assertNotIn(private_name, audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
 
     def test_normalize_tones_improves_safe_gray_page_with_aggregate_audit(self) -> None:
@@ -12383,6 +12519,36 @@ def _synthetic_background_stain_page(
         draw.line((166, 56, 194, 56), fill=(180, 40, 35), width=2)
     if edge_mark:
         draw.rectangle((0, 74, 14, 102), fill=(58, 58, 58))
+    return image
+
+
+def _synthetic_bleed_through_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (260, 180), (244, 244, 239))
+    draw = ImageDraw.Draw(image)
+    draw.text((34, 36), "REAL", fill=(70, 70, 70))
+    if variant == "ghost":
+        mask = Image.new("L", image.size, 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.text((124, 86), "321", fill=255)
+        mask = mask.filter(ImageFilter.GaussianBlur(1.2))
+        ghost = Image.new("RGB", image.size, (217, 217, 212))
+        image.paste(ghost, (0, 0), mask.point(lambda value: int(value * 0.65)))
+    elif variant == "text":
+        draw.text((124, 86), "321", fill=(215, 215, 210))
+        draw.line((120, 112, 206, 112), fill=(215, 215, 210), width=1)
+    elif variant == "page_number":
+        draw.text((204, 4), "12", fill=(212, 212, 208))
+    elif variant == "table":
+        for x in range(120, 210, 20):
+            draw.line((x, 80, x, 125), fill=(214, 214, 210), width=1)
+        for y in range(80, 126, 15):
+            draw.line((120, y, 210, y), fill=(214, 214, 210), width=1)
+    elif variant == "stamp":
+        draw.ellipse((120, 80, 188, 134), outline=(190, 80, 80), width=2)
+    elif variant == "edge":
+        draw.text((4, 86), "321", fill=(219, 219, 214))
+    else:
+        raise ValueError(f"unknown bleed-through variant: {variant}")
     return image
 
 

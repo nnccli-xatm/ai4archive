@@ -39,6 +39,7 @@ class ProcessingOptions:
     normalize_tones: bool = False
     lighten_edge_shadow: bool = False
     lighten_background_stains: bool = False
+    clean_bleed_through: bool = False
     lighten_scanlines: bool = False
     enhance_faded_text: bool = False
     sharpen_text_edges: bool = False
@@ -123,6 +124,18 @@ class BackgroundStainLighteningResult:
     stain_mean_before: float | None
     stain_mean_after: float | None
     stain_delta: float
+    changed_pixel_ratio: float
+    candidate_pixel_ratio: float
+
+
+@dataclass(frozen=True)
+class BleedThroughCleanupResult:
+    image: Image.Image
+    applied: bool
+    reason: str
+    ghost_mean_before: float | None
+    ghost_mean_after: float | None
+    ghost_delta: float
     changed_pixel_ratio: float
     candidate_pixel_ratio: float
 
@@ -246,6 +259,7 @@ def process_images(
                 if options.lighten_background_stains
                 else "lighten_background_stains_disabled"
             ),
+            "clean_bleed_through_conservative" if options.clean_bleed_through else "clean_bleed_through_disabled",
             "lighten_scanlines_conservative" if options.lighten_scanlines else "lighten_scanlines_disabled",
             "enhance_faded_text_conservative" if options.enhance_faded_text else "enhance_faded_text_disabled",
             "sharpen_text_edges_conservative" if options.sharpen_text_edges else "sharpen_text_edges_disabled",
@@ -645,6 +659,13 @@ def _process_record(
         "background_stains_delta": 0.0,
         "background_stains_changed_pixel_ratio": 0.0,
         "background_stains_candidate_pixel_ratio": 0.0,
+        "bleed_through_cleaned": False,
+        "bleed_through_reason": None,
+        "bleed_through_mean_before": None,
+        "bleed_through_mean_after": None,
+        "bleed_through_delta": 0.0,
+        "bleed_through_changed_pixel_ratio": 0.0,
+        "bleed_through_candidate_pixel_ratio": 0.0,
         "scanlines_lightened": False,
         "scanlines_reason": None,
         "scanlines_orientation": None,
@@ -749,6 +770,13 @@ def _process_record(
                 "background_stains_delta": process_info["background_stains_delta"],
                 "background_stains_changed_pixel_ratio": process_info["background_stains_changed_pixel_ratio"],
                 "background_stains_candidate_pixel_ratio": process_info["background_stains_candidate_pixel_ratio"],
+                "bleed_through_cleaned": process_info["bleed_through_cleaned"],
+                "bleed_through_reason": process_info["bleed_through_reason"],
+                "bleed_through_mean_before": process_info["bleed_through_mean_before"],
+                "bleed_through_mean_after": process_info["bleed_through_mean_after"],
+                "bleed_through_delta": process_info["bleed_through_delta"],
+                "bleed_through_changed_pixel_ratio": process_info["bleed_through_changed_pixel_ratio"],
+                "bleed_through_candidate_pixel_ratio": process_info["bleed_through_candidate_pixel_ratio"],
                 "scanlines_lightened": process_info["scanlines_lightened"],
                 "scanlines_reason": process_info["scanlines_reason"],
                 "scanlines_orientation": process_info["scanlines_orientation"],
@@ -828,6 +856,13 @@ def _process_record(
                     "background_stains_delta": process_info["background_stains_delta"],
                     "background_stains_changed_pixel_ratio": process_info["background_stains_changed_pixel_ratio"],
                     "background_stains_candidate_pixel_ratio": process_info["background_stains_candidate_pixel_ratio"],
+                    "bleed_through_cleaned": process_info["bleed_through_cleaned"],
+                    "bleed_through_reason": process_info["bleed_through_reason"],
+                    "bleed_through_mean_before": process_info["bleed_through_mean_before"],
+                    "bleed_through_mean_after": process_info["bleed_through_mean_after"],
+                    "bleed_through_delta": process_info["bleed_through_delta"],
+                    "bleed_through_changed_pixel_ratio": process_info["bleed_through_changed_pixel_ratio"],
+                    "bleed_through_candidate_pixel_ratio": process_info["bleed_through_candidate_pixel_ratio"],
                     "scanlines_lightened": process_info["scanlines_lightened"],
                     "scanlines_reason": process_info["scanlines_reason"],
                     "scanlines_orientation": process_info["scanlines_orientation"],
@@ -918,6 +953,7 @@ def _processing_options_fingerprint(options: ProcessingOptions) -> str:
         "normalize_tones": options.normalize_tones,
         "lighten_edge_shadow": options.lighten_edge_shadow,
         "lighten_background_stains": options.lighten_background_stains,
+        "clean_bleed_through": options.clean_bleed_through,
         "lighten_scanlines": options.lighten_scanlines,
         "enhance_faded_text": options.enhance_faded_text,
         "sharpen_text_edges": options.sharpen_text_edges,
@@ -1152,6 +1188,7 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "normalize_tones": options.normalize_tones,
             "lighten_edge_shadow": options.lighten_edge_shadow,
             "lighten_background_stains": options.lighten_background_stains,
+            "clean_bleed_through": options.clean_bleed_through,
             "lighten_scanlines": options.lighten_scanlines,
             "enhance_faded_text": options.enhance_faded_text,
             "sharpen_text_edges": options.sharpen_text_edges,
@@ -1284,6 +1321,13 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                 if record.get("background_stains_lightened") is False
                 and record.get("background_stains_reason") not in {None, "background stain lightening disabled"}
             ),
+            "bleed_through_cleaned_files": sum(1 for audit in audit_records if audit.get("bleed_through_cleaned") is True),
+            "bleed_through_skipped_files": sum(
+                1
+                for record in processed_records
+                if record.get("bleed_through_cleaned") is False
+                and record.get("bleed_through_reason") not in {None, "bleed-through cleanup disabled"}
+            ),
             "scanlines_lightened_files": sum(1 for audit in audit_records if audit.get("scanlines_lightened") is True),
             "scanlines_skipped_files": sum(
                 1
@@ -1339,6 +1383,13 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             ),
             "background_stains_candidate_pixel_ratio": _aggregate_metric(
                 audit_records, "background_stains_candidate_pixel_ratio"
+            ),
+            "bleed_through_delta": _aggregate_metric(audit_records, "bleed_through_delta"),
+            "bleed_through_changed_pixel_ratio": _aggregate_metric(
+                audit_records, "bleed_through_changed_pixel_ratio"
+            ),
+            "bleed_through_candidate_pixel_ratio": _aggregate_metric(
+                audit_records, "bleed_through_candidate_pixel_ratio"
             ),
             "scanlines_delta": _aggregate_metric(audit_records, "scanlines_delta"),
             "scanlines_changed_pixel_ratio": _aggregate_metric(audit_records, "scanlines_changed_pixel_ratio"),
@@ -1600,6 +1651,36 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                     1 for reason in background_stains_skipped_reasons if "low-confidence" in reason
                 ),
             },
+            "bleed_through": {
+                "applied_files": sum(1 for audit in audit_records if audit.get("bleed_through_cleaned") is True),
+                "skipped_files": sum(
+                    1
+                    for record in processed_records
+                    if record.get("bleed_through_cleaned") is False
+                    and record.get("bleed_through_reason") not in {None, "bleed-through cleanup disabled"}
+                ),
+                "changed_pixel_ratio": _aggregate_metric(audit_records, "bleed_through_changed_pixel_ratio"),
+                "candidate_pixel_ratio": _aggregate_metric(audit_records, "bleed_through_candidate_pixel_ratio"),
+                "reason_distribution": _reason_counts(
+                    record.get("bleed_through_reason")
+                    for record in processed_records
+                    if isinstance(record.get("bleed_through_reason"), str)
+                ),
+                "skip_reason_distribution": _reason_counts(
+                    record.get("bleed_through_reason")
+                    for record in processed_records
+                    if record.get("bleed_through_cleaned") is False
+                    and isinstance(record.get("bleed_through_reason"), str)
+                    and record.get("bleed_through_reason") != "bleed-through cleanup disabled"
+                ),
+                "protection_triggered_files": sum(
+                    1
+                    for record in processed_records
+                    if record.get("bleed_through_cleaned") is False
+                    and isinstance(record.get("bleed_through_reason"), str)
+                    and "risk" in record.get("bleed_through_reason", "")
+                ),
+            },
             "scanlines": {
                 "applied_files": sum(1 for audit in audit_records if audit.get("scanlines_lightened") is True),
                 "skipped_files": sum(
@@ -1759,6 +1840,7 @@ def _aggregate_operation_timings(records: list[dict[str, Any]], options: Process
         "normalize_tones": options.normalize_tones,
         "lighten_edge_shadow": options.lighten_edge_shadow,
         "lighten_background_stains": options.lighten_background_stains,
+        "clean_bleed_through": options.clean_bleed_through,
         "lighten_scanlines": options.lighten_scanlines,
         "enhance_faded_text": options.enhance_faded_text,
         "sharpen_text_edges": options.sharpen_text_edges,
@@ -1909,6 +1991,8 @@ def _audit_thresholds(options: ProcessingOptions) -> dict[str, float]:
         "max_geometry_combo_crop_ratio": options.audit_max_geometry_combo_crop_ratio,
         "max_geometry_combo_size_change_ratio": options.audit_max_geometry_combo_size_change_ratio,
         "max_tone_changed_pixel_ratio": 1.0,
+        "max_bleed_through_changed_pixel_ratio": 0.045,
+        "max_bleed_through_candidate_pixel_ratio": 0.065,
         "max_faded_text_changed_pixel_ratio": 0.10,
         "max_faded_text_candidate_pixel_ratio": 0.18,
         "max_text_edges_changed_pixel_ratio": 0.08,
@@ -2237,6 +2321,19 @@ def _process_image(
         else:
             operations.append("lighten_background_stains_disabled")
 
+    bleed_through = BleedThroughCleanupResult(
+        processed, False, "bleed-through cleanup disabled", None, None, 0.0, 0.0, 0.0
+    )
+    with _operation_timer(operation_timings, "clean_bleed_through", enabled=options.clean_bleed_through):
+        if options.clean_bleed_through:
+            bleed_through = _clean_bleed_through_conservative(processed)
+            processed = bleed_through.image
+            operations.append(
+                "clean_bleed_through_conservative" if bleed_through.applied else "clean_bleed_through_noop"
+            )
+        else:
+            operations.append("clean_bleed_through_disabled")
+
     scanlines = ScanlineLighteningResult(
         processed, False, "scanline lightening disabled", None, 0, None, None, 0.0, 0.0, 0.0
     )
@@ -2298,6 +2395,10 @@ def _process_image(
         background_stains.stain_delta,
         background_stains.changed_pixel_ratio,
         background_stains.candidate_pixel_ratio,
+        bleed_through.applied,
+        bleed_through.ghost_delta,
+        bleed_through.changed_pixel_ratio,
+        bleed_through.candidate_pixel_ratio,
         scanlines.applied,
         scanlines.line_delta,
         scanlines.changed_pixel_ratio,
@@ -2336,6 +2437,7 @@ def _process_image(
                 tone.applied,
                 edge_shadow.applied,
                 background_stains.applied,
+                bleed_through.applied,
                 scanlines.applied,
                 faded_text.applied,
                 text_edges.applied,
@@ -2348,6 +2450,7 @@ def _process_image(
                 tone.reason,
                 edge_shadow.reason,
                 background_stains.reason,
+                bleed_through.reason,
                 scanlines.reason,
                 faded_text.reason,
                 text_edges.reason,
@@ -2444,6 +2547,13 @@ def _process_image(
         "background_stains_delta": 0.0 if guard_reverted else background_stains.stain_delta,
         "background_stains_changed_pixel_ratio": 0.0 if guard_reverted else background_stains.changed_pixel_ratio,
         "background_stains_candidate_pixel_ratio": 0.0 if guard_reverted else background_stains.candidate_pixel_ratio,
+        "bleed_through_cleaned": False if guard_reverted else bleed_through.applied,
+        "bleed_through_reason": guard_reason if guard_reverted else bleed_through.reason,
+        "bleed_through_mean_before": None if guard_reverted else bleed_through.ghost_mean_before,
+        "bleed_through_mean_after": None if guard_reverted else bleed_through.ghost_mean_after,
+        "bleed_through_delta": 0.0 if guard_reverted else bleed_through.ghost_delta,
+        "bleed_through_changed_pixel_ratio": 0.0 if guard_reverted else bleed_through.changed_pixel_ratio,
+        "bleed_through_candidate_pixel_ratio": 0.0 if guard_reverted else bleed_through.candidate_pixel_ratio,
         "scanlines_lightened": False if guard_reverted else scanlines.applied,
         "scanlines_reason": guard_reason if guard_reverted else scanlines.reason,
         "scanlines_orientation": scanlines.orientation,
@@ -3244,6 +3354,204 @@ def _background_stains_noop(
         0.0,
         round(candidate_pixel_ratio, 6),
     )
+
+
+def _clean_bleed_through_conservative(image: Image.Image) -> BleedThroughCleanupResult:
+    if image.width < 80 or image.height < 80:
+        return _bleed_through_noop(image, "bleed-through cleanup skipped: image too small")
+    color_risk = _tone_color_risk_reason(image)
+    if color_risk:
+        return _bleed_through_noop(image, "bleed-through cleanup skipped: color content, stamp, or annotation risk")
+
+    grayscale = image.convert("L")
+    histogram = grayscale.histogram()
+    total = image.width * image.height
+    p50 = _histogram_percentile(histogram, total, 0.50)
+    p90 = _histogram_percentile(histogram, total, 0.90)
+    p95 = _histogram_percentile(histogram, total, 0.95)
+    if p95 < 222 or p50 < 216:
+        return _bleed_through_noop(image, "bleed-through cleanup skipped: page is not a light background")
+
+    foreground = grayscale.point(lambda value: 255 if value <= max(150, min(196, p50 - 28)) else 0, mode="L")
+    foreground_ratio = _mask_ratio(foreground)
+    if foreground_ratio > 0.22:
+        return _bleed_through_noop(image, "bleed-through cleanup skipped: foreground too dense")
+    if _protected_edge_dark_ratio(foreground) > 0.0025:
+        return _bleed_through_noop(image, "bleed-through cleanup skipped: edge content or binding risk")
+
+    background = max(p90, p95 - 1)
+    edge_signal = grayscale.filter(ImageFilter.FIND_EDGES)
+    protected = foreground.filter(ImageFilter.MaxFilter(17))
+    edge_margin = max(5, int(round(min(image.width, image.height) * 0.045)))
+    raw_candidate = Image.new("L", image.size, 0)
+    candidate_pixels = raw_candidate.load()
+    source_pixels = grayscale.load()
+    edge_pixels = edge_signal.load()
+    for y in range(edge_margin, image.height - edge_margin):
+        for x in range(edge_margin, image.width - edge_margin):
+            value = int(source_pixels[x, y])
+            if not (190 <= value <= background - 5 and 5 <= background - value <= 32):
+                continue
+            if int(edge_pixels[x, y]) >= 22:
+                continue
+            candidate_pixels[x, y] = 255
+    edge_cleared_candidate = _clear_mask_edges(raw_candidate, edge_margin)
+    edge_candidate_ratio = _mask_ratio(raw_candidate) - _mask_ratio(edge_cleared_candidate)
+    if edge_candidate_ratio > 0.0002 or _protected_edge_dark_ratio(raw_candidate) > 0.00005:
+        return _bleed_through_noop(
+            image,
+            "bleed-through cleanup skipped: edge content or binding risk",
+            edge_candidate_ratio,
+        )
+    candidate = ImageChops.multiply(edge_cleared_candidate, ImageChops.invert(protected))
+    candidate_ratio = _mask_ratio(candidate)
+    if candidate_ratio < 0.0003:
+        return _bleed_through_noop(image, "bleed-through cleanup skipped: no confident faint reverse-side ghosts")
+    if candidate_ratio > 0.065:
+        return _bleed_through_noop(
+            image,
+            "bleed-through cleanup skipped: broad uneven background is outside conservative scope",
+            candidate_ratio,
+        )
+    if _bleed_through_line_risk(candidate):
+        return _bleed_through_noop(
+            image,
+            "bleed-through cleanup skipped: table line, page number, or annotation risk",
+            candidate_ratio,
+        )
+
+    components = [component for component in _mask_components(candidate) if len(component) >= 4]
+    if not components:
+        return _bleed_through_noop(image, "bleed-through cleanup skipped: no confident faint reverse-side ghosts")
+    if len(components) > 28:
+        return _bleed_through_noop(
+            image,
+            "bleed-through cleanup skipped: too many ghost candidates outside conservative scope",
+            candidate_ratio,
+        )
+
+    selected: set[tuple[int, int]] = set()
+    for component in components:
+        area = len(component)
+        xs = [point[0] for point in component]
+        ys = [point[1] for point in component]
+        width = max(xs) - min(xs) + 1
+        height = max(ys) - min(ys) + 1
+        if (
+            min(xs) < edge_margin * 3
+            or min(ys) < max(edge_margin * 3, int(round(image.height * 0.18)))
+            or max(xs) >= image.width - edge_margin * 3
+            or max(ys) >= image.height - max(edge_margin * 3, int(round(image.height * 0.18)))
+        ):
+            return _bleed_through_noop(
+                image,
+                "bleed-through cleanup skipped: edge content or binding risk",
+                candidate_ratio,
+            )
+        if area / total > 0.018 or width > image.width * 0.42 or height > image.height * 0.28:
+            return _bleed_through_noop(
+                image,
+                "bleed-through cleanup skipped: large candidate or archival mark risk",
+                candidate_ratio,
+            )
+        aspect = max(width / max(1, height), height / max(1, width))
+        if aspect > 18 and (width > image.width * 0.18 or height > image.height * 0.18):
+            return _bleed_through_noop(
+                image,
+                "bleed-through cleanup skipped: table line, page number, or annotation risk",
+                candidate_ratio,
+            )
+        if width <= 1 or height <= 1:
+            continue
+        selected.update(component)
+
+    changed_ratio = len(selected) / max(1, total)
+    if changed_ratio < 0.0003:
+        return _bleed_through_noop(image, "bleed-through cleanup skipped: no confident faint reverse-side ghosts", candidate_ratio)
+    if changed_ratio > 0.045:
+        return _bleed_through_noop(
+            image,
+            "bleed-through cleanup skipped: changed area exceeds conservative background scope",
+            candidate_ratio,
+        )
+
+    before_values: list[int] = []
+    after_values: list[int] = []
+    if image.mode == "L":
+        output = grayscale.copy()
+        pixels = output.load()
+        for x, y in selected:
+            value = int(pixels[x, y])
+            new_value = min(255, value + min(18, max(4, int(round((background - value) * 0.62)))))
+            pixels[x, y] = new_value
+            before_values.append(value)
+            after_values.append(new_value)
+        result_image = output
+    else:
+        source = image.convert("RGB")
+        output = source.copy()
+        output_pixels = output.load()
+        gray_pixels = grayscale.load()
+        for x, y in selected:
+            gray_value = int(gray_pixels[x, y])
+            delta = min(18, max(4, int(round((background - gray_value) * 0.62))))
+            red_value, green_value, blue_value = output_pixels[x, y]
+            output_pixels[x, y] = (
+                min(255, red_value + delta),
+                min(255, green_value + delta),
+                min(255, blue_value + delta),
+            )
+            before_values.append(gray_value)
+            after_values.append(min(255, gray_value + delta))
+        result_image = output
+
+    before_mean = round(sum(before_values) / len(before_values), 6)
+    after_mean = round(sum(after_values) / len(after_values), 6)
+    if after_mean - before_mean < 3:
+        return _bleed_through_noop(
+            image,
+            "bleed-through cleanup skipped: improvement below conservative threshold",
+            candidate_ratio,
+        )
+    return BleedThroughCleanupResult(
+        result_image,
+        True,
+        "bleed-through cleanup applied: faint reverse-side ghost on light background",
+        before_mean,
+        after_mean,
+        round(after_mean - before_mean, 6),
+        round(changed_ratio, 6),
+        round(candidate_ratio, 6),
+    )
+
+
+def _bleed_through_noop(
+    image: Image.Image,
+    reason: str,
+    candidate_pixel_ratio: float = 0.0,
+) -> BleedThroughCleanupResult:
+    return BleedThroughCleanupResult(image, False, reason, None, None, 0.0, 0.0, round(candidate_pixel_ratio, 6))
+
+
+def _bleed_through_line_risk(candidate: Image.Image) -> bool:
+    pixels = candidate.load()
+    horizontal = 0
+    for y in range(candidate.height):
+        count = 0
+        for x in range(candidate.width):
+            if pixels[x, y]:
+                count += 1
+        if count / max(1, candidate.width) >= 0.16:
+            horizontal += 1
+    vertical = 0
+    for x in range(candidate.width):
+        count = 0
+        for y in range(candidate.height):
+            if pixels[x, y]:
+                count += 1
+        if count / max(1, candidate.height) >= 0.16:
+            vertical += 1
+    return horizontal >= 2 or vertical >= 2
 
 
 def _lighten_scanlines_conservative(image: Image.Image) -> ScanlineLighteningResult:
@@ -4335,6 +4643,10 @@ def _processing_audit(
     background_stains_delta: float = 0.0,
     background_stains_changed_pixel_ratio: float = 0.0,
     background_stains_candidate_pixel_ratio: float = 0.0,
+    bleed_through_cleaned: bool = False,
+    bleed_through_delta: float = 0.0,
+    bleed_through_changed_pixel_ratio: float = 0.0,
+    bleed_through_candidate_pixel_ratio: float = 0.0,
     scanlines_lightened: bool = False,
     scanlines_delta: float = 0.0,
     scanlines_changed_pixel_ratio: float = 0.0,
@@ -4410,6 +4722,10 @@ def _processing_audit(
         "background_stains_delta": round(background_stains_delta, 6),
         "background_stains_changed_pixel_ratio": round(background_stains_changed_pixel_ratio, 6),
         "background_stains_candidate_pixel_ratio": round(background_stains_candidate_pixel_ratio, 6),
+        "bleed_through_cleaned": bleed_through_cleaned,
+        "bleed_through_delta": round(bleed_through_delta, 6),
+        "bleed_through_changed_pixel_ratio": round(bleed_through_changed_pixel_ratio, 6),
+        "bleed_through_candidate_pixel_ratio": round(bleed_through_candidate_pixel_ratio, 6),
         "scanlines_lightened": scanlines_lightened,
         "scanlines_delta": round(scanlines_delta, 6),
         "scanlines_changed_pixel_ratio": round(scanlines_changed_pixel_ratio, 6),
@@ -4437,6 +4753,8 @@ def _processing_audit(
             tone_contrast_delta=tone_contrast_delta,
             edge_shadow_lightened=edge_shadow_lightened,
             edge_shadow_changed_pixel_ratio=edge_shadow_changed_pixel_ratio,
+            bleed_through_cleaned=bleed_through_cleaned,
+            bleed_through_changed_pixel_ratio=bleed_through_changed_pixel_ratio,
             scanlines_lightened=scanlines_lightened,
             scanlines_changed_pixel_ratio=scanlines_changed_pixel_ratio,
             faded_text_enhanced=faded_text_enhanced,
@@ -4472,6 +4790,8 @@ def _should_check_local_content_change(
     tone_contrast_delta: float,
     edge_shadow_lightened: bool,
     edge_shadow_changed_pixel_ratio: float,
+    bleed_through_cleaned: bool,
+    bleed_through_changed_pixel_ratio: float,
     scanlines_lightened: bool,
     scanlines_changed_pixel_ratio: float,
     faded_text_enhanced: bool,
@@ -4483,6 +4803,8 @@ def _should_check_local_content_change(
     if despeckle_pixels_changed >= despeckle_guard_floor:
         return True
     if edge_shadow_lightened and edge_shadow_changed_pixel_ratio > 0:
+        return True
+    if bleed_through_cleaned and bleed_through_changed_pixel_ratio > 0:
         return True
     if scanlines_lightened and scanlines_changed_pixel_ratio > 0:
         return True
@@ -4508,6 +4830,8 @@ def _cumulative_change_guard(metrics: dict[str, Any], options: ProcessingOptions
     candidate_ratio = max(
         _float_metric(metrics, "background_stains_changed_pixel_ratio"),
         _float_metric(metrics, "background_stains_candidate_pixel_ratio"),
+        _float_metric(metrics, "bleed_through_changed_pixel_ratio"),
+        _float_metric(metrics, "bleed_through_candidate_pixel_ratio"),
         _float_metric(metrics, "scanlines_changed_pixel_ratio"),
         _float_metric(metrics, "scanlines_candidate_pixel_ratio"),
         _float_metric(metrics, "faded_text_changed_pixel_ratio"),
@@ -4684,6 +5008,7 @@ def _combination_text_high_frequency_risk_reasons(metrics: dict[str, Any], optio
 def _combination_non_geometry_candidate_ratio(metrics: dict[str, Any]) -> float:
     return max(
         _float_metric(metrics, "background_stains_candidate_pixel_ratio"),
+        _float_metric(metrics, "bleed_through_candidate_pixel_ratio"),
         _float_metric(metrics, "scanlines_candidate_pixel_ratio"),
         _float_metric(metrics, "faded_text_candidate_pixel_ratio"),
         _float_metric(metrics, "text_edges_candidate_pixel_ratio"),
@@ -5100,6 +5425,8 @@ def _audit_guardrail_failures(metrics: dict[str, Any], options: ProcessingOption
         ("crop_ratio", options.audit_max_crop_ratio),
         ("max_trim_margin_ratio", options.audit_max_trim_margin_ratio),
         ("despeckle_pixel_ratio", options.audit_max_despeckle_pixel_ratio),
+        ("bleed_through_changed_pixel_ratio", 0.045),
+        ("bleed_through_candidate_pixel_ratio", 0.065),
         ("faded_text_changed_pixel_ratio", 0.10),
         ("faded_text_candidate_pixel_ratio", 0.18),
         ("text_edges_changed_pixel_ratio", 0.08),
@@ -5110,6 +5437,8 @@ def _audit_guardrail_failures(metrics: dict[str, Any], options: ProcessingOption
         if key == "pixel_change_ratio" and metrics.get("pixel_change_guardrail_applied") is False:
             continue
         if key.startswith("faded_text_") and metrics.get("faded_text_enhanced") is not True:
+            continue
+        if key.startswith("bleed_through_") and metrics.get("bleed_through_cleaned") is not True:
             continue
         if key.startswith("text_edges_") and metrics.get("text_edges_sharpened") is not True:
             continue

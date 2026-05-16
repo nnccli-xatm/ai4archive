@@ -81,6 +81,7 @@ def build_processing_plan(
             "normalize_tones": options.normalize_tones,
             "lighten_edge_shadow": options.lighten_edge_shadow,
             "lighten_background_stains": options.lighten_background_stains,
+            "clean_bleed_through": options.clean_bleed_through,
             "lighten_scanlines": options.lighten_scanlines,
             "enhance_faded_text": options.enhance_faded_text,
             "sharpen_text_edges": options.sharpen_text_edges,
