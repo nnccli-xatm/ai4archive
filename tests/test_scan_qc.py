@@ -5854,6 +5854,111 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(plan["summary"]["faded_text_enhancement_candidates"], 1)
             self.assertTrue(plan["files"][0]["faded_text_enhancement_candidate"])
 
+    def test_enhance_faded_text_improves_pale_uneven_low_contrast_text_safely(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "private_pale_uneven_faded_text.png"
+            _synthetic_uneven_faded_text_page(ink=228).save(source, dpi=(300, 300))
+            source_bytes = source.read_bytes()
+            original = Image.open(source).convert("L")
+            original_text_mean = ImageStat.Stat(original.crop((42, 38, 138, 132))).mean[0]
+            original_background_mean = ImageStat.Stat(original.crop((156, 34, 222, 128))).mean[0]
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(enhance_faded_text=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            record = manifest["files"][0]
+            audit = record["processing_audit"]
+            processed = Image.open(process_dir / record["output_relative_path"]).convert("L")
+            processed_text_mean = ImageStat.Stat(processed.crop((42, 38, 138, 132))).mean[0]
+            processed_background_mean = ImageStat.Stat(processed.crop((156, 34, 222, 128))).mean[0]
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertTrue(record["faded_text_enhanced"])
+            self.assertEqual(record["faded_text_reason_code"], "applied_stable_low_contrast_text")
+            self.assertGreaterEqual(audit["faded_text_delta"], 8.0)
+            self.assertGreater(audit["faded_text_changed_pixel_ratio"], 0.0)
+            self.assertLessEqual(audit["faded_text_changed_pixel_ratio"], 0.10)
+            self.assertLessEqual(audit["faded_text_candidate_pixel_ratio"], 0.16)
+            self.assertGreater(original_text_mean - processed_text_mean, 2.0)
+            self.assertLess(abs(original_background_mean - processed_background_mean), 0.5)
+            self.assertEqual(audit["guardrail_failures"], [])
+            self.assertEqual(audit["local_content_change_guard_action"], "passed")
+            self.assertFalse(audit["local_content_change_guard_reverted"])
+            self.assertEqual(audit["local_content_change_guard_reasons"], [])
+            self.assertEqual(audit["cumulative_change_guard_action"], "passed")
+            self.assertFalse(audit["cumulative_change_guard_reverted"])
+            self.assertEqual(audit["cumulative_change_guard_reasons"], [])
+            self.assertEqual(audit["combination_quality_guard_reason_code"], "safe_combination_passed")
+            self.assertEqual(audit["processed_output_safety_guard_reason_code"], "safe_processed_output_passed")
+            self.assertEqual(
+                audit_summary["guardrails"]["faded_text"]["reason_code_distribution"],
+                {"applied_stable_low_contrast_text": 1},
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_pale_uneven_faded_text", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
+    def test_enhance_faded_text_skips_pale_protected_and_clear_pages_with_public_codes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "A001_pale_red_stamp.png": _synthetic_uneven_faded_text_page(ink=228, red_stamp=True),
+                "A002_pale_table_handwriting.png": _synthetic_faded_text_table_page(),
+                "A003_clear_text.png": _synthetic_text_page(),
+            }
+            expected_codes = {
+                "A001_pale_red_stamp.png": "protected_color_stamp_annotation",
+                "A002_pale_table_handwriting.png": "protected_texture_table_or_photo_region",
+                "A003_clear_text.png": "protected_dark_foreground",
+            }
+            for name, image in pages.items():
+                image.save(input_dir / name, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(enhance_faded_text=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            for name, expected_code in expected_codes.items():
+                record = records[name]
+                self.assertFalse(record["faded_text_enhanced"], name)
+                self.assertEqual(record["faded_text_reason_code"], expected_code, name)
+                self.assertIsInstance(record["faded_text_reason_zh"], str, name)
+                self.assertIn("跳过褪色正文加深", record["faded_text_reason_zh"], name)
+                self.assertEqual(record["processing_audit"]["faded_text_changed_pixel_ratio"], 0.0, name)
+                self.assertEqual(record["processing_audit"]["guardrail_failures"], [], name)
+            faded_guard = audit_summary["guardrails"]["faded_text"]
+            self.assertEqual(faded_guard["applied_files"], 0)
+            self.assertEqual(faded_guard["skipped_files"], len(pages))
+            self.assertIn("protected_color_stamp_annotation", faded_guard["skip_reason_code_distribution"])
+            self.assertIn("protected_texture_table_or_photo_region", faded_guard["skip_reason_code_distribution"])
+            self.assertIn("protected_dark_foreground", faded_guard["skip_reason_code_distribution"])
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("A001_pale_red_stamp", audit_summary_text)
+            self.assertNotIn("A002_pale_table_handwriting", audit_summary_text)
+
     def test_enhance_faded_text_preserves_thin_low_contrast_gray_strokes_in_preflight(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -13963,6 +14068,28 @@ def _synthetic_faded_text_page(
     for y in range(36, 132, 18):
         draw.rectangle((42, y, 136, y + 3), fill=(ink, ink, ink))
         draw.rectangle((46, y + 8, 118, y + 10), fill=(ink + 4, ink + 4, ink + 4))
+    if red_stamp:
+        draw.ellipse((158, 46, 210, 98), outline=(180, 40, 35), width=3)
+        draw.line((170, 72, 198, 72), fill=(180, 40, 35), width=2)
+    return image
+
+
+def _synthetic_uneven_faded_text_page(
+    *,
+    ink: int = 228,
+    red_stamp: bool = False,
+) -> Image.Image:
+    image = Image.new("RGB", (240, 180), (244, 244, 244))
+    pixels = image.load()
+    for y in range(image.height):
+        base = 244 - (4 if 58 <= y <= 118 else 0) + (2 if (y // 18) % 2 else 0)
+        for x in range(image.width):
+            shade = base - (2 if 28 <= x <= 210 and (x + y) % 37 < 4 else 0)
+            pixels[x, y] = (shade, shade, shade)
+    draw = ImageDraw.Draw(image)
+    for y in range(38, 132, 18):
+        draw.rectangle((42, y, 138, y + 3), fill=(ink, ink, ink))
+        draw.rectangle((48, y + 8, 122, y + 10), fill=(min(255, ink + 2), min(255, ink + 2), min(255, ink + 2)))
     if red_stamp:
         draw.ellipse((158, 46, 210, 98), outline=(180, 40, 35), width=3)
         draw.line((170, 72, 198, 72), fill=(180, 40, 35), width=2)
