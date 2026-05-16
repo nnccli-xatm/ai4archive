@@ -60,6 +60,7 @@ class ProductionRunConfig:
     despeckle: bool = False
     normalize_tones: bool = False
     lighten_edge_shadow: bool = False
+    lighten_corner_shadows: bool = False
     lighten_background_stains: bool = False
     lighten_fold_shadows: bool = False
     clean_bleed_through: bool = False
@@ -125,6 +126,7 @@ def run_production_folder(config: ProductionRunConfig) -> dict[str, Any]:
             despeckle=config.despeckle,
             normalize_tones=config.normalize_tones,
             lighten_edge_shadow=config.lighten_edge_shadow,
+            lighten_corner_shadows=config.lighten_corner_shadows,
             lighten_background_stains=config.lighten_background_stains,
             lighten_fold_shadows=config.lighten_fold_shadows,
             clean_bleed_through=config.clean_bleed_through,
@@ -211,6 +213,7 @@ def build_production_run_summary(
         "despeckle": config.despeckle,
         "normalize_tones": config.normalize_tones,
         "lighten_edge_shadow": config.lighten_edge_shadow,
+        "lighten_corner_shadows": config.lighten_corner_shadows,
         "lighten_background_stains": config.lighten_background_stains,
         "lighten_fold_shadows": config.lighten_fold_shadows,
         "clean_bleed_through": config.clean_bleed_through,

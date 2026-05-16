@@ -78,6 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--despeckle", action="store_true", help="Enable conservative despeckle.")
     parser.add_argument("--normalize-tones", action="store_true", help="Enable conservative gray/dark page tone normalization.")
     parser.add_argument("--lighten-edge-shadow", action="store_true", help="Enable conservative narrow edge-shadow lightening.")
+    parser.add_argument("--lighten-corner-shadows", action="store_true", help="Enable conservative smooth corner-shadow cleanup.")
     parser.add_argument("--lighten-background-stains", action="store_true", help="Enable conservative light background stain lightening.")
     parser.add_argument("--lighten-fold-shadows", action="store_true", help="Enable conservative narrow fold-shadow cleanup.")
     parser.add_argument("--clean-bleed-through", action="store_true", help="Enable conservative faint reverse-side bleed-through cleanup.")
@@ -169,6 +170,7 @@ def run_private_integration(args: argparse.Namespace) -> PrivateIntegrationResul
                 despeckle=args.despeckle,
                 normalize_tones=getattr(args, "normalize_tones", False),
                 lighten_edge_shadow=getattr(args, "lighten_edge_shadow", False),
+                lighten_corner_shadows=getattr(args, "lighten_corner_shadows", False),
                 lighten_background_stains=getattr(args, "lighten_background_stains", False),
                 lighten_fold_shadows=getattr(args, "lighten_fold_shadows", False),
                 clean_bleed_through=getattr(args, "clean_bleed_through", False),
@@ -280,6 +282,7 @@ def _public_summary(
             "despeckle_backend_requested": despeckle_backend["requested_backend"],
             "reuse_scan_measurements": bool(getattr(args, "reuse_scan_measurements", False)),
             "lighten_edge_shadow": bool(getattr(args, "lighten_edge_shadow", False)),
+            "lighten_corner_shadows": bool(getattr(args, "lighten_corner_shadows", False)),
             "scanner_gutter_trim": bool(getattr(args, "scanner_gutter_trim", False)),
             "lighten_background_stains": bool(getattr(args, "lighten_background_stains", False)),
             "lighten_fold_shadows": bool(getattr(args, "lighten_fold_shadows", False)),
@@ -558,6 +561,7 @@ def _benchmark_operation_timings(benchmark_summary: dict[str, Any] | None) -> di
         "despeckle",
         "normalize_tones",
         "lighten_edge_shadow",
+        "lighten_corner_shadows",
         "lighten_background_stains",
         "lighten_fold_shadows",
         "clean_bleed_through",
@@ -697,6 +701,7 @@ def _benchmark_args(args: argparse.Namespace, input_dir: Path, output_root: Path
         despeckle=args.despeckle,
         normalize_tones=getattr(args, "normalize_tones", False),
         lighten_edge_shadow=getattr(args, "lighten_edge_shadow", False),
+        lighten_corner_shadows=getattr(args, "lighten_corner_shadows", False),
         lighten_background_stains=getattr(args, "lighten_background_stains", False),
         lighten_fold_shadows=getattr(args, "lighten_fold_shadows", False),
         clean_bleed_through=getattr(args, "clean_bleed_through", False),

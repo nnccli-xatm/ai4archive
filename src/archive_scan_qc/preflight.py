@@ -22,6 +22,7 @@ PROCESSING_FLAGS = (
     "despeckle",
     "normalize_tones",
     "lighten_edge_shadow",
+    "lighten_corner_shadows",
     "lighten_background_stains",
     "lighten_fold_shadows",
     "clean_bleed_through",
@@ -51,6 +52,7 @@ class PreflightConfig:
     despeckle: bool = False
     normalize_tones: bool = False
     lighten_edge_shadow: bool = False
+    lighten_corner_shadows: bool = False
     lighten_background_stains: bool = False
     lighten_fold_shadows: bool = False
     clean_bleed_through: bool = False
