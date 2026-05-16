@@ -9989,6 +9989,83 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(despeckle_timing["backend_counts"]["numpy"], 0)
             self.assertEqual(despeckle_timing["backend_counts"]["fallback"], 1)
 
+    def test_processing_audit_reports_despeckle_fast_filter_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            clean = Image.new("RGB", (60, 50), "white")
+            clean.save(input_dir / "clean.png")
+            dense = Image.new("RGB", (100, 100), "white")
+            for y in range(7, 95, 5):
+                for x in range(7, 95, 5):
+                    dense.putpixel((x, y), (0, 0, 0))
+            dense.save(input_dir / "dense.png")
+            speckle = Image.new("RGB", (60, 50), "white")
+            for point in [(20, 20), (21, 20), (20, 21), (21, 21)]:
+                speckle.putpixel(point, (0, 0, 0))
+            speckle.save(input_dir / "speckle.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, workers=1))
+            audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
+            despeckle_timing = audit_summary["timing"]["operation_timings"]["despeckle"]
+
+            self.assertEqual(despeckle_timing["file_count"], 3)
+            self.assertEqual(despeckle_timing["safe_skip_files"], 2)
+            self.assertEqual(despeckle_timing["replacement_work_files"], 1)
+            self.assertEqual(despeckle_timing["reason_code_distribution"]["no_isolated_candidates"], 1)
+            self.assertEqual(
+                despeckle_timing["reason_code_distribution"]["candidate_density_exceeds_safety_threshold"],
+                1,
+            )
+            self.assertEqual(despeckle_timing["reason_code_distribution"]["applied_isolated_pixels"], 1)
+            self.assertEqual(despeckle_timing["candidate_count_bucket_distribution"]["0"], 1)
+            self.assertEqual(despeckle_timing["candidate_count_bucket_distribution"]["1-4"], 1)
+            self.assertGreaterEqual(despeckle_timing["candidate_count"]["max"], 4)
+            self.assertEqual(audit_summary["guardrails"]["despeckle"]["applied_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["despeckle"]["skipped_files"], 2)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertEqual([record["despeckle_pixels_changed"] for record in manifest["files"]], [0, 0, 4])
+
+    def test_despeckle_density_fast_filter_skips_replacement_work(self) -> None:
+        image = Image.new("RGB", (100, 100), "white")
+        for y in range(7, 95, 5):
+            for x in range(7, 95, 5):
+                image.putpixel((x, y), (0, 0, 0))
+
+        with mock.patch("archive_scan_qc.processing._despeckle_replacements_fallback") as replacements:
+            _processed, operations, info = _process_image(image, ProcessingOptions(despeckle=True))
+
+        replacements.assert_not_called()
+        self.assertIn("despeckle_noop", operations)
+        self.assertEqual(info["despeckle_reason"], "despeckle skipped: candidate density exceeds safety threshold")
+        timing = info["operation_timings"]["despeckle"]
+        self.assertEqual(timing["reason_code"], "candidate_density_exceeds_safety_threshold")
+        self.assertEqual(timing["replacement_work_performed"], False)
+        self.assertGreater(timing["candidate_count"], 0)
+
+    def test_despeckle_edge_fast_filter_skips_candidate_scan(self) -> None:
+        image = Image.new("RGB", (80, 60), "white")
+        for point in [(0, 10), (79, 20), (30, 0), (40, 59), (4, 4)]:
+            image.putpixel(point, (0, 0, 0))
+
+        with mock.patch("archive_scan_qc.processing._despeckle_candidate_points_with_backend") as candidates:
+            processed, operations, info = _process_image(image, ProcessingOptions(despeckle=True))
+
+        candidates.assert_not_called()
+        self.assertEqual(processed.convert("RGB").tobytes(), image.tobytes())
+        self.assertIn("despeckle_noop", operations)
+        self.assertEqual(info["despeckle_reason"], "protected edge dark marks preserved")
+        timing = info["operation_timings"]["despeckle"]
+        self.assertEqual(timing["reason_code"], "protected_edge_dark_marks")
+        self.assertEqual(timing["candidate_count"], 0)
+        self.assertGreater(timing["candidate_pixels"], 0)
+        self.assertEqual(timing["replacement_work_performed"], False)
+
     def test_requested_numpy_despeckle_falls_back_when_numpy_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
