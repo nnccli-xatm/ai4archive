@@ -73,8 +73,10 @@ class EdgeShadowProcessingTest(unittest.TestCase):
         ImageDraw.Draw(edge_mark).ellipse((2, 66, 10, 74), fill=(30, 30, 30))
         near_body = _edge_shadow_page()
         ImageDraw.Draw(near_body).rectangle((18, 68, 45, 72), fill=(30, 30, 30))
+        edge_red = _edge_shadow_page()
+        ImageDraw.Draw(edge_red).ellipse((174, 84, 214, 124), outline=(180, 28, 28), width=4)
 
-        for image in [edge_mark, near_body]:
+        for image in [edge_mark, near_body, edge_red]:
             manifest, source, processed, _process_dir = self._process_one(
                 image,
                 ProcessingOptions(lighten_edge_shadow=True, workers=1),
@@ -85,13 +87,26 @@ class EdgeShadowProcessingTest(unittest.TestCase):
             self.assertLess(_changed_ratio(source, processed, (0, 0, source.width, source.height)), 0.001)
             self.assertIn("risk", record["edge_shadow_reason"])
 
-    def test_lighten_edge_shadow_noops_for_normal_dark_and_color_pages(self) -> None:
+    def test_lighten_edge_shadow_preserves_red_content_away_from_page_edge(self) -> None:
+        image = _edge_shadow_page()
+        ImageDraw.Draw(image).ellipse((106, 64, 144, 102), outline=(180, 28, 28), width=4)
+
+        manifest, source, processed, _process_dir = self._process_one(
+            image,
+            ProcessingOptions(lighten_edge_shadow=True, workers=1),
+        )
+
+        record = manifest["files"][0]
+        self.assertTrue(record["edge_shadow_lightened"])
+        self.assertEqual(record["edge_shadow_edges"], ["left"])
+        self.assertGreater(_mean_luma(processed, (0, 0, 12, 160)), _mean_luma(source, (0, 0, 12, 160)) + 8)
+        self.assertLess(_changed_ratio(source, processed, (100, 58, 150, 108)), 0.001)
+
+    def test_lighten_edge_shadow_noops_for_normal_and_dark_pages(self) -> None:
         normal = Image.new("RGB", (220, 160), (242, 242, 238))
         dark = Image.new("RGB", (220, 160), (92, 92, 88))
-        color = _edge_shadow_page()
-        ImageDraw.Draw(color).rectangle((110, 62, 138, 86), fill=(210, 40, 40))
 
-        for image in [normal, dark, color]:
+        for image in [normal, dark]:
             manifest, source, processed, _process_dir = self._process_one(
                 image,
                 ProcessingOptions(lighten_edge_shadow=True, workers=1),

@@ -2736,9 +2736,6 @@ def _replace_luminance_preserving_chroma(image: Image.Image, normalized_l: Image
 def _lighten_edge_shadow_conservative(image: Image.Image) -> EdgeShadowLighteningResult:
     if image.width < 80 or image.height < 80:
         return _edge_shadow_noop(image, "edge shadow lightening skipped: image too small")
-    color_risk = _tone_color_risk_reason(image)
-    if color_risk:
-        return _edge_shadow_noop(image, "edge shadow lightening skipped: color content or annotation risk")
 
     grayscale = image.convert("L")
     histogram = grayscale.histogram()
@@ -2751,6 +2748,9 @@ def _lighten_edge_shadow_conservative(image: Image.Image) -> EdgeShadowLightenin
         return _edge_shadow_noop(image, "edge shadow lightening skipped: low tonal separation")
 
     strip = max(6, min(24, int(round(min(image.width, image.height) * 0.055))))
+    color_margin = max(strip * 4, int(round(min(image.width, image.height) * 0.16)))
+    if image.mode != "L" and _edge_shadow_near_edge_color_risk(image, color_margin):
+        return _edge_shadow_noop(image, "edge shadow lightening skipped: color content or annotation risk near page edge")
     edge_plans: list[tuple[str, tuple[int, int, int, int], tuple[int, int, int, int], float, int, float]] = []
     candidates = [
         ("left", (0, 0, strip, image.height), (strip, 0, strip * 3, image.height)),
@@ -2790,9 +2790,9 @@ def _lighten_edge_shadow_conservative(image: Image.Image) -> EdgeShadowLightenin
         if edge_std > 24 or inner_std > 32:
             return _edge_shadow_noop(image, f"edge shadow lightening skipped: texture risk near {side} edge")
         if 10 <= delta <= 62 and edge_mean >= 132 and inner_mean >= 168:
-            candidate_pixels = _edge_shadow_candidate_pixels(edge, inner_mean)
+            candidate_pixels, continuity_ratio = _edge_shadow_candidate_profile(edge, side, inner_mean)
             candidate_ratio = candidate_pixels / max(1, total)
-            if candidate_ratio < 0.008:
+            if candidate_ratio < 0.008 or continuity_ratio < 0.72:
                 return _edge_shadow_noop(
                     image,
                     f"edge shadow lightening skipped: low-confidence narrow shadow near {side} edge",
@@ -2865,10 +2865,64 @@ def _edge_shadow_noop(image: Image.Image, reason: str) -> EdgeShadowLighteningRe
     return EdgeShadowLighteningResult(image, False, reason, (), None, None, 0.0, 0.0, 0.0)
 
 
-def _edge_shadow_candidate_pixels(edge: Image.Image, inner_mean: float) -> int:
+def _edge_shadow_candidate_profile(edge: Image.Image, side: str, inner_mean: float) -> tuple[int, float]:
     upper = max(132, min(248, int(round(inner_mean - 4))))
-    histogram = edge.histogram()
-    return sum(histogram[132 : upper + 1])
+    pixels = edge.load()
+    width, height = edge.size
+    candidate_pixels = 0
+    covered_positions = 0
+    if side in {"left", "right"}:
+        for y in range(height):
+            row_has_candidate = False
+            for x in range(width):
+                if 132 <= pixels[x, y] <= upper:
+                    candidate_pixels += 1
+                    row_has_candidate = True
+            if row_has_candidate:
+                covered_positions += 1
+        continuity_ratio = covered_positions / max(1, height)
+    else:
+        for x in range(width):
+            column_has_candidate = False
+            for y in range(height):
+                if 132 <= pixels[x, y] <= upper:
+                    candidate_pixels += 1
+                    column_has_candidate = True
+            if column_has_candidate:
+                covered_positions += 1
+        continuity_ratio = covered_positions / max(1, width)
+    return candidate_pixels, continuity_ratio
+
+
+def _edge_shadow_near_edge_color_risk(image: Image.Image, margin: int) -> bool:
+    if image.mode == "L":
+        return False
+    width, height = image.size
+    margin = max(1, min(margin, width // 2, height // 2))
+    boxes = (
+        (0, 0, margin, height),
+        (width - margin, 0, width, height),
+        (0, 0, width, margin),
+        (0, height - margin, width, height),
+    )
+    for box in boxes:
+        crop = image.crop(box).convert("RGB")
+        total = max(1, crop.width * crop.height)
+        red = 0
+        colored = 0
+        pixel_data = crop.get_flattened_data() if hasattr(crop, "get_flattened_data") else crop.getdata()
+        for red_value, green_value, blue_value in pixel_data:
+            high = max(red_value, green_value, blue_value)
+            low = min(red_value, green_value, blue_value)
+            spread = high - low
+            brightness = (red_value + green_value + blue_value) / 3
+            if red_value >= 110 and red_value - green_value >= 35 and red_value - blue_value >= 35:
+                red += 1
+            if spread > 18 and 30 < brightness < 250:
+                colored += 1
+        if red / total >= 0.0008 or colored / total >= 0.004:
+            return True
+    return False
 
 
 def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundStainLighteningResult:
