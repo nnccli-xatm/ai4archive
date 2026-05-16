@@ -84,6 +84,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lighten-corner-shadows", action="store_true")
     parser.add_argument("--lighten-background-stains", action="store_true")
     parser.add_argument("--lighten-fold-shadows", action="store_true")
+    parser.add_argument("--level-illumination-gradient", action="store_true")
     parser.add_argument("--clean-bleed-through", action="store_true")
     parser.add_argument("--lighten-scanlines", action="store_true")
     parser.add_argument("--enhance-faded-text", action="store_true")
@@ -251,6 +252,7 @@ def _baseline_summary(args: argparse.Namespace, private_summary: dict[str, Any])
             "lighten_corner_shadows": bool(getattr(args, "lighten_corner_shadows", False)),
             "lighten_background_stains": bool(getattr(args, "lighten_background_stains", False)),
             "lighten_fold_shadows": bool(getattr(args, "lighten_fold_shadows", False)),
+            "level_illumination_gradient": bool(getattr(args, "level_illumination_gradient", False)),
             "clean_bleed_through": bool(getattr(args, "clean_bleed_through", False)),
             "lighten_scanlines": bool(getattr(args, "lighten_scanlines", False)),
             "enhance_faded_text": bool(getattr(args, "enhance_faded_text", False)),

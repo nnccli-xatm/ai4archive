@@ -42,6 +42,7 @@ class ProcessingOptions:
     lighten_corner_shadows: bool = False
     lighten_background_stains: bool = False
     lighten_fold_shadows: bool = False
+    level_illumination_gradient: bool = False
     clean_bleed_through: bool = False
     lighten_scanlines: bool = False
     enhance_faded_text: bool = False
@@ -175,6 +176,20 @@ class FoldShadowCleanupResult:
     band_mean_before: float | None
     band_mean_after: float | None
     band_delta: float
+    changed_pixel_ratio: float
+    candidate_pixel_ratio: float
+
+
+@dataclass(frozen=True)
+class IlluminationGradientLevelingResult:
+    image: Image.Image
+    applied: bool
+    reason: str
+    reason_code: str
+    orientation: str | None
+    gradient_delta_before: float
+    gradient_delta_after: float
+    correction_delta: float
     changed_pixel_ratio: float
     candidate_pixel_ratio: float
 
@@ -322,6 +337,11 @@ def process_images(
                 else "lighten_background_stains_disabled"
             ),
             "lighten_fold_shadows_conservative" if options.lighten_fold_shadows else "lighten_fold_shadows_disabled",
+            (
+                "level_illumination_gradient_conservative"
+                if options.level_illumination_gradient
+                else "level_illumination_gradient_disabled"
+            ),
             "clean_bleed_through_conservative" if options.clean_bleed_through else "clean_bleed_through_disabled",
             "lighten_scanlines_conservative" if options.lighten_scanlines else "lighten_scanlines_disabled",
             "enhance_faded_text_conservative" if options.enhance_faded_text else "enhance_faded_text_disabled",
@@ -752,6 +772,15 @@ def _process_record(
         "fold_shadows_delta": 0.0,
         "fold_shadows_changed_pixel_ratio": 0.0,
         "fold_shadows_candidate_pixel_ratio": 0.0,
+        "illumination_gradient_levelled": False,
+        "illumination_gradient_reason": None,
+        "illumination_gradient_reason_code": None,
+        "illumination_gradient_orientation": None,
+        "illumination_gradient_delta_before": 0.0,
+        "illumination_gradient_delta_after": 0.0,
+        "illumination_gradient_correction_delta": 0.0,
+        "illumination_gradient_changed_pixel_ratio": 0.0,
+        "illumination_gradient_candidate_pixel_ratio": 0.0,
         "bleed_through_cleaned": False,
         "bleed_through_reason": None,
         "bleed_through_mean_before": None,
@@ -893,6 +922,19 @@ def _process_record(
                 "fold_shadows_delta": process_info["fold_shadows_delta"],
                 "fold_shadows_changed_pixel_ratio": process_info["fold_shadows_changed_pixel_ratio"],
                 "fold_shadows_candidate_pixel_ratio": process_info["fold_shadows_candidate_pixel_ratio"],
+                "illumination_gradient_levelled": process_info["illumination_gradient_levelled"],
+                "illumination_gradient_reason": process_info["illumination_gradient_reason"],
+                "illumination_gradient_reason_code": process_info["illumination_gradient_reason_code"],
+                "illumination_gradient_orientation": process_info["illumination_gradient_orientation"],
+                "illumination_gradient_delta_before": process_info["illumination_gradient_delta_before"],
+                "illumination_gradient_delta_after": process_info["illumination_gradient_delta_after"],
+                "illumination_gradient_correction_delta": process_info["illumination_gradient_correction_delta"],
+                "illumination_gradient_changed_pixel_ratio": process_info[
+                    "illumination_gradient_changed_pixel_ratio"
+                ],
+                "illumination_gradient_candidate_pixel_ratio": process_info[
+                    "illumination_gradient_candidate_pixel_ratio"
+                ],
                 "bleed_through_cleaned": process_info["bleed_through_cleaned"],
                 "bleed_through_reason": process_info["bleed_through_reason"],
                 "bleed_through_mean_before": process_info["bleed_through_mean_before"],
@@ -1009,6 +1051,21 @@ def _process_record(
                     "fold_shadows_delta": process_info["fold_shadows_delta"],
                     "fold_shadows_changed_pixel_ratio": process_info["fold_shadows_changed_pixel_ratio"],
                     "fold_shadows_candidate_pixel_ratio": process_info["fold_shadows_candidate_pixel_ratio"],
+                    "illumination_gradient_levelled": process_info["illumination_gradient_levelled"],
+                    "illumination_gradient_reason": process_info["illumination_gradient_reason"],
+                    "illumination_gradient_reason_code": process_info["illumination_gradient_reason_code"],
+                    "illumination_gradient_orientation": process_info["illumination_gradient_orientation"],
+                    "illumination_gradient_delta_before": process_info["illumination_gradient_delta_before"],
+                    "illumination_gradient_delta_after": process_info["illumination_gradient_delta_after"],
+                    "illumination_gradient_correction_delta": process_info[
+                        "illumination_gradient_correction_delta"
+                    ],
+                    "illumination_gradient_changed_pixel_ratio": process_info[
+                        "illumination_gradient_changed_pixel_ratio"
+                    ],
+                    "illumination_gradient_candidate_pixel_ratio": process_info[
+                        "illumination_gradient_candidate_pixel_ratio"
+                    ],
                     "bleed_through_cleaned": process_info["bleed_through_cleaned"],
                     "bleed_through_reason": process_info["bleed_through_reason"],
                     "bleed_through_mean_before": process_info["bleed_through_mean_before"],
@@ -1110,6 +1167,7 @@ def _processing_options_fingerprint(options: ProcessingOptions) -> str:
         "lighten_corner_shadows": options.lighten_corner_shadows,
         "lighten_background_stains": options.lighten_background_stains,
         "lighten_fold_shadows": options.lighten_fold_shadows,
+        "level_illumination_gradient": options.level_illumination_gradient,
         "clean_bleed_through": options.clean_bleed_through,
         "lighten_scanlines": options.lighten_scanlines,
         "enhance_faded_text": options.enhance_faded_text,
@@ -1247,6 +1305,30 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
         if record.get("fold_shadows_lightened") is False
         and isinstance(reason, str)
         and reason != "fold shadow cleanup disabled"
+    ]
+    illumination_gradient_reasons = [
+        record.get("illumination_gradient_reason")
+        for record in processed_records
+        if isinstance(record.get("illumination_gradient_reason"), str)
+    ]
+    illumination_gradient_reason_codes = [
+        record.get("illumination_gradient_reason_code")
+        for record in processed_records
+        if isinstance(record.get("illumination_gradient_reason_code"), str)
+    ]
+    illumination_gradient_skipped_reason_codes = [
+        code
+        for record in processed_records
+        for code in [record.get("illumination_gradient_reason_code")]
+        if record.get("illumination_gradient_levelled") is False and isinstance(code, str) and code != "disabled"
+    ]
+    illumination_gradient_skipped_reasons = [
+        reason
+        for record in processed_records
+        for reason in [record.get("illumination_gradient_reason")]
+        if record.get("illumination_gradient_levelled") is False
+        and isinstance(reason, str)
+        and reason != "illumination gradient leveling disabled"
     ]
     scanlines_reasons = [
         record.get("scanlines_reason")
@@ -1426,6 +1508,7 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "lighten_corner_shadows": options.lighten_corner_shadows,
             "lighten_background_stains": options.lighten_background_stains,
             "lighten_fold_shadows": options.lighten_fold_shadows,
+            "level_illumination_gradient": options.level_illumination_gradient,
             "clean_bleed_through": options.clean_bleed_through,
             "lighten_scanlines": options.lighten_scanlines,
             "enhance_faded_text": options.enhance_faded_text,
@@ -1596,6 +1679,16 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                 if record.get("fold_shadows_lightened") is False
                 and record.get("fold_shadows_reason") not in {None, "fold shadow cleanup disabled"}
             ),
+            "illumination_gradient_levelled_files": sum(
+                1 for audit in audit_records if audit.get("illumination_gradient_levelled") is True
+            ),
+            "illumination_gradient_skipped_files": sum(
+                1
+                for record in processed_records
+                if record.get("illumination_gradient_levelled") is False
+                and record.get("illumination_gradient_reason")
+                not in {None, "illumination gradient leveling disabled"}
+            ),
             "bleed_through_cleaned_files": sum(1 for audit in audit_records if audit.get("bleed_through_cleaned") is True),
             "bleed_through_skipped_files": sum(
                 1
@@ -1688,6 +1781,18 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             ),
             "fold_shadows_candidate_pixel_ratio": _aggregate_metric(
                 audit_records, "fold_shadows_candidate_pixel_ratio"
+            ),
+            "illumination_gradient_correction_delta": _aggregate_metric(
+                audit_records,
+                "illumination_gradient_correction_delta",
+            ),
+            "illumination_gradient_changed_pixel_ratio": _aggregate_metric(
+                audit_records,
+                "illumination_gradient_changed_pixel_ratio",
+            ),
+            "illumination_gradient_candidate_pixel_ratio": _aggregate_metric(
+                audit_records,
+                "illumination_gradient_candidate_pixel_ratio",
             ),
             "bleed_through_delta": _aggregate_metric(audit_records, "bleed_through_delta"),
             "bleed_through_changed_pixel_ratio": _aggregate_metric(
@@ -2108,6 +2213,54 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                     if "no confident" in reason or "below conservative" in reason
                 ),
             },
+            "illumination_gradient": {
+                "applied_files": sum(
+                    1 for audit in audit_records if audit.get("illumination_gradient_levelled") is True
+                ),
+                "skipped_files": sum(
+                    1
+                    for record in processed_records
+                    if record.get("illumination_gradient_levelled") is False
+                    and record.get("illumination_gradient_reason")
+                    not in {None, "illumination gradient leveling disabled"}
+                ),
+                "orientation_distribution": _reason_counts(
+                    record.get("illumination_gradient_orientation")
+                    for record in processed_records
+                    if record.get("illumination_gradient_levelled") is True
+                    and isinstance(record.get("illumination_gradient_orientation"), str)
+                ),
+                "correction_delta": _aggregate_metric(audit_records, "illumination_gradient_correction_delta"),
+                "changed_pixel_ratio": _aggregate_metric(
+                    audit_records,
+                    "illumination_gradient_changed_pixel_ratio",
+                ),
+                "candidate_pixel_ratio": _aggregate_metric(
+                    audit_records,
+                    "illumination_gradient_candidate_pixel_ratio",
+                ),
+                "reason_distribution": _reason_counts(
+                    reason for reason in illumination_gradient_reasons if isinstance(reason, str)
+                ),
+                "skip_reason_distribution": _reason_counts(illumination_gradient_skipped_reasons),
+                "reason_code_distribution": _reason_counts(illumination_gradient_reason_codes),
+                "skip_reason_code_distribution": _reason_counts(illumination_gradient_skipped_reason_codes),
+                "protection_triggered_files": sum(
+                    1 for code in illumination_gradient_skipped_reason_codes if code == "protected_content"
+                ),
+                "not_uniform_skip_files": sum(
+                    1 for code in illumination_gradient_skipped_reason_codes if code == "not_uniform"
+                ),
+                "low_confidence_skip_files": sum(
+                    1 for code in illumination_gradient_skipped_reason_codes if code == "low_confidence"
+                ),
+                "too_strong_skip_files": sum(
+                    1 for code in illumination_gradient_skipped_reason_codes if code == "too_strong"
+                ),
+                "guardrail_reverted_files": sum(
+                    1 for code in illumination_gradient_skipped_reason_codes if code == "guardrail_reverted"
+                ),
+            },
             "bleed_through": {
                 "applied_files": sum(1 for audit in audit_records if audit.get("bleed_through_cleaned") is True),
                 "skipped_files": sum(
@@ -2301,6 +2454,7 @@ def _aggregate_operation_timings(records: list[dict[str, Any]], options: Process
         "lighten_corner_shadows": options.lighten_corner_shadows,
         "lighten_background_stains": options.lighten_background_stains,
         "lighten_fold_shadows": options.lighten_fold_shadows,
+        "level_illumination_gradient": options.level_illumination_gradient,
         "clean_bleed_through": options.clean_bleed_through,
         "lighten_scanlines": options.lighten_scanlines,
         "enhance_faded_text": options.enhance_faded_text,
@@ -2862,6 +3016,34 @@ def _process_image(
         else:
             operations.append("lighten_fold_shadows_disabled")
 
+    illumination_gradient = IlluminationGradientLevelingResult(
+        processed,
+        False,
+        "illumination gradient leveling disabled",
+        "disabled",
+        None,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+    )
+    with _operation_timer(
+        operation_timings,
+        "level_illumination_gradient",
+        enabled=options.level_illumination_gradient,
+    ):
+        if options.level_illumination_gradient:
+            illumination_gradient = _level_illumination_gradient_conservative(processed)
+            processed = illumination_gradient.image
+            operations.append(
+                "level_illumination_gradient_conservative"
+                if illumination_gradient.applied
+                else "level_illumination_gradient_noop"
+            )
+        else:
+            operations.append("level_illumination_gradient_disabled")
+
     bleed_through = BleedThroughCleanupResult(
         processed, False, "bleed-through cleanup disabled", None, None, 0.0, 0.0, 0.0
     )
@@ -2950,6 +3132,10 @@ def _process_image(
         fold_shadows.band_delta,
         fold_shadows.changed_pixel_ratio,
         fold_shadows.candidate_pixel_ratio,
+        illumination_gradient.applied,
+        illumination_gradient.correction_delta,
+        illumination_gradient.changed_pixel_ratio,
+        illumination_gradient.candidate_pixel_ratio,
         bleed_through.applied,
         bleed_through.ghost_delta,
         bleed_through.changed_pixel_ratio,
@@ -2995,6 +3181,7 @@ def _process_image(
                 corner_shadows.applied,
                 background_stains.applied,
                 fold_shadows.applied,
+                illumination_gradient.applied,
                 bleed_through.applied,
                 scanlines.applied,
                 faded_text.applied,
@@ -3012,6 +3199,7 @@ def _process_image(
                 corner_shadows.reason,
                 background_stains.reason,
                 fold_shadows.reason,
+                illumination_gradient.reason,
                 bleed_through.reason,
                 scanlines.reason,
                 faded_text.reason,
@@ -3151,6 +3339,23 @@ def _process_image(
         "fold_shadows_delta": 0.0 if guard_reverted else fold_shadows.band_delta,
         "fold_shadows_changed_pixel_ratio": 0.0 if guard_reverted else fold_shadows.changed_pixel_ratio,
         "fold_shadows_candidate_pixel_ratio": 0.0 if guard_reverted else fold_shadows.candidate_pixel_ratio,
+        "illumination_gradient_levelled": False if guard_reverted else illumination_gradient.applied,
+        "illumination_gradient_reason": guard_reason if guard_reverted else illumination_gradient.reason,
+        "illumination_gradient_reason_code": (
+            "guardrail_reverted" if guard_reverted else illumination_gradient.reason_code
+        ),
+        "illumination_gradient_orientation": illumination_gradient.orientation,
+        "illumination_gradient_delta_before": 0.0
+        if guard_reverted
+        else illumination_gradient.gradient_delta_before,
+        "illumination_gradient_delta_after": 0.0 if guard_reverted else illumination_gradient.gradient_delta_after,
+        "illumination_gradient_correction_delta": 0.0 if guard_reverted else illumination_gradient.correction_delta,
+        "illumination_gradient_changed_pixel_ratio": 0.0
+        if guard_reverted
+        else illumination_gradient.changed_pixel_ratio,
+        "illumination_gradient_candidate_pixel_ratio": 0.0
+        if guard_reverted
+        else illumination_gradient.candidate_pixel_ratio,
         "bleed_through_cleaned": False if guard_reverted else bleed_through.applied,
         "bleed_through_reason": guard_reason if guard_reverted else bleed_through.reason,
         "bleed_through_mean_before": None if guard_reverted else bleed_through.ghost_mean_before,
@@ -4430,6 +4635,255 @@ def _background_stains_noop(
         reason,
         None,
         None,
+        0.0,
+        0.0,
+        round(candidate_pixel_ratio, 6),
+    )
+
+
+def _level_illumination_gradient_conservative(image: Image.Image) -> IlluminationGradientLevelingResult:
+    if image.width < 100 or image.height < 100:
+        return _illumination_gradient_noop(image, "image too small", "low_confidence")
+    color_risk = _illumination_gradient_color_reason_code(image)
+    if color_risk:
+        return _illumination_gradient_noop(image, "protected color content", color_risk)
+
+    grayscale = image.convert("L")
+    histogram = grayscale.histogram()
+    total = image.width * image.height
+    p05 = _histogram_percentile(histogram, total, 0.05)
+    p50 = _histogram_percentile(histogram, total, 0.50)
+    p90 = _histogram_percentile(histogram, total, 0.90)
+    p98 = _histogram_percentile(histogram, total, 0.98)
+    if p50 < 210 or p90 < 220 or p98 < 226:
+        return _illumination_gradient_noop(image, "not a broad bright paper background", "not_uniform")
+    if p98 - p05 > 82:
+        return _illumination_gradient_noop(image, "protected dark or mixed foreground content", "protected_content")
+    foreground = grayscale.point(lambda value: 255 if value <= max(150, min(190, p50 - 36)) else 0, mode="L")
+    foreground_ratio = _mask_ratio(foreground)
+    if foreground_ratio > 0.0015:
+        return _illumination_gradient_noop(image, "protected foreground content", "protected_content")
+    if _source_protected_edge_dark_ratio(grayscale) > 0.0018:
+        return _illumination_gradient_noop(image, "protected edge or border content", "protected_content")
+    if _illumination_gradient_texture_ratio(grayscale) > 0.055:
+        return _illumination_gradient_noop(image, "protected photo, chart, map, or textured content", "protected_content")
+
+    vertical = _illumination_gradient_axis_plan(grayscale, vertical=True)
+    horizontal = _illumination_gradient_axis_plan(grayscale, vertical=False)
+    plan = vertical if vertical["score"] >= horizontal["score"] else horizontal
+    if plan["reason_code"] != "applied":
+        return _illumination_gradient_noop(image, plan["reason"], plan["reason_code"], plan["candidate_ratio"])
+
+    profile: list[float] = plan["profile"]
+    candidate_threshold = plan["candidate_threshold"]
+    target = min(246.0, max(profile))
+    corrections = [max(0, min(10, int(round((target - value) * 0.62)))) for value in profile]
+    if max(corrections, default=0) < 3:
+        return _illumination_gradient_noop(image, "low confidence correction below threshold", "low_confidence")
+
+    candidate = grayscale.point(lambda value: 255 if value >= candidate_threshold else 0, mode="L")
+    candidate = ImageChops.multiply(candidate, foreground.point(lambda value: 0 if value else 255, mode="L"))
+    candidate_pixels = _mask_pixel_count(candidate)
+    candidate_ratio = candidate_pixels / max(1, total)
+    if candidate_ratio < 0.72:
+        return _illumination_gradient_noop(image, "not a uniform bright background", "not_uniform", candidate_ratio)
+    if candidate_ratio > 0.995:
+        candidate_ratio = 1.0
+
+    candidate_mask = candidate.load()
+    if image.mode == "L":
+        output = grayscale.copy()
+        pixels = output.load()
+        source_pixels = grayscale.load()
+        changed = 0
+        for y in range(image.height):
+            for x in range(image.width):
+                if not candidate_mask[x, y]:
+                    continue
+                index = x if plan["orientation"] == "vertical" else y
+                delta = corrections[index]
+                if delta <= 0:
+                    continue
+                value = int(source_pixels[x, y])
+                new_value = min(255, value + delta)
+                if new_value != value:
+                    pixels[x, y] = new_value
+                    changed += 1
+        result_image = output
+    else:
+        source = image.convert("RGB")
+        output = source.copy()
+        output_pixels = output.load()
+        changed = 0
+        for y in range(image.height):
+            for x in range(image.width):
+                if not candidate_mask[x, y]:
+                    continue
+                index = x if plan["orientation"] == "vertical" else y
+                delta = corrections[index]
+                if delta <= 0:
+                    continue
+                red_value, green_value, blue_value = output_pixels[x, y]
+                new_pixel = (
+                    min(255, red_value + delta),
+                    min(255, green_value + delta),
+                    min(255, blue_value + delta),
+                )
+                if new_pixel != (red_value, green_value, blue_value):
+                    output_pixels[x, y] = new_pixel
+                    changed += 1
+        result_image = output
+
+    changed_ratio = changed / max(1, total)
+    if changed_ratio < 0.05:
+        return _illumination_gradient_noop(image, "low confidence changed area", "low_confidence", candidate_ratio)
+    after_plan = _illumination_gradient_axis_plan(result_image.convert("L"), vertical=plan["orientation"] == "vertical")
+    delta_after = float(after_plan.get("delta", plan["delta"]))
+    if delta_after >= plan["delta"] - 2.0:
+        return _illumination_gradient_noop(image, "guardrail reverted insufficient improvement", "guardrail_reverted", candidate_ratio)
+    return IlluminationGradientLevelingResult(
+        result_image,
+        True,
+        "illumination gradient leveling applied: smooth low-amplitude bright paper gradient",
+        "applied",
+        plan["orientation"],
+        round(plan["delta"], 6),
+        round(delta_after, 6),
+        round(max(corrections), 6),
+        round(changed_ratio, 6),
+        round(candidate_ratio, 6),
+    )
+
+
+def _illumination_gradient_axis_plan(grayscale: Image.Image, *, vertical: bool) -> dict[str, Any]:
+    axis_length = grayscale.width if vertical else grayscale.height
+    cross_length = grayscale.height if vertical else grayscale.width
+    orientation = "vertical" if vertical else "horizontal"
+    pixels = grayscale.load()
+    profile: list[float] = []
+    bright_counts = 0
+    candidate_threshold = 206
+    for index in range(axis_length):
+        values: list[int] = []
+        for cross in range(cross_length):
+            x, y = (index, cross) if vertical else (cross, index)
+            value = int(pixels[x, y])
+            if value >= candidate_threshold:
+                values.append(value)
+                bright_counts += 1
+        if len(values) < cross_length * 0.68:
+            profile.append(0.0)
+        else:
+            values.sort()
+            trim = max(1, len(values) // 10)
+            trimmed = values[trim:-trim] if len(values) > trim * 2 else values
+            profile.append(sum(trimmed) / len(trimmed))
+    if any(value <= 0 for value in profile):
+        return _empty_illumination_gradient_plan(orientation, "not a uniform bright background", "not_uniform")
+    edge = max(4, axis_length // 10)
+    start = sum(profile[:edge]) / edge
+    end = sum(profile[-edge:]) / edge
+    delta = abs(start - end)
+    if delta < 6.0:
+        return _empty_illumination_gradient_plan(orientation, "gradient below conservative threshold", "low_confidence")
+    if delta > 28.0:
+        return _empty_illumination_gradient_plan(orientation, "gradient too strong for conservative leveling", "too_strong")
+    expected = [start + (end - start) * (idx / max(1, axis_length - 1)) for idx in range(axis_length)]
+    residuals = [abs(value - want) for value, want in zip(profile, expected)]
+    mean_residual = sum(residuals) / len(residuals)
+    if mean_residual > 2.7:
+        return _empty_illumination_gradient_plan(orientation, "gradient is not smooth", "not_uniform")
+    direction_changes = 0
+    last_sign = 0
+    for left, right in zip(profile, profile[1:]):
+        diff = right - left
+        sign = 1 if diff > 0.35 else -1 if diff < -0.35 else 0
+        if sign and last_sign and sign != last_sign:
+            direction_changes += 1
+        if sign:
+            last_sign = sign
+    if direction_changes > max(2, axis_length // 80):
+        return _empty_illumination_gradient_plan(orientation, "gradient is not smooth", "not_uniform")
+    candidate_ratio = bright_counts / max(1, grayscale.width * grayscale.height)
+    return {
+        "orientation": orientation,
+        "reason": "",
+        "reason_code": "applied",
+        "score": delta - mean_residual,
+        "delta": round(delta, 6),
+        "candidate_ratio": round(candidate_ratio, 6),
+        "candidate_threshold": candidate_threshold,
+        "profile": profile,
+    }
+
+
+def _illumination_gradient_texture_ratio(grayscale: Image.Image) -> float:
+    sample = grayscale.copy()
+    sample.thumbnail((220, 220), Image.Resampling.BILINEAR)
+    edges = sample.filter(ImageFilter.FIND_EDGES)
+    histogram = edges.histogram()
+    return sum(histogram[18:]) / max(1, sample.width * sample.height)
+
+
+def _illumination_gradient_color_reason_code(image: Image.Image) -> str | None:
+    if image.mode == "L":
+        return None
+    sample = image.convert("RGB")
+    sample.thumbnail((240, 240), Image.Resampling.BILINEAR)
+    total = max(1, sample.width * sample.height)
+    colored = 0
+    red = 0
+    pale_colored = 0
+    pixel_data = sample.get_flattened_data() if hasattr(sample, "get_flattened_data") else sample.getdata()
+    for red_value, green_value, blue_value in pixel_data:
+        high = max(red_value, green_value, blue_value)
+        low = min(red_value, green_value, blue_value)
+        spread = high - low
+        brightness = (red_value + green_value + blue_value) / 3
+        if red_value >= 110 and red_value - green_value >= 34 and red_value - blue_value >= 34:
+            red += 1
+        if spread > 16 and 35 < brightness < 250:
+            colored += 1
+        if spread > 10 and brightness >= 170:
+            pale_colored += 1
+    if red / total >= 0.00035:
+        return "protected_content"
+    colored_ratio = colored / total
+    pale_ratio = pale_colored / total
+    if pale_ratio >= 0.18:
+        return "protected_content"
+    if colored_ratio >= 0.0025:
+        return "protected_content"
+    return None
+
+
+def _empty_illumination_gradient_plan(orientation: str, reason: str, reason_code: str) -> dict[str, Any]:
+    return {
+        "orientation": orientation,
+        "reason": reason,
+        "reason_code": reason_code,
+        "score": 0.0,
+        "delta": 0.0,
+        "candidate_ratio": 0.0,
+        "candidate_threshold": 206,
+        "profile": [],
+    }
+
+
+def _illumination_gradient_noop(
+    image: Image.Image,
+    reason: str,
+    reason_code: str,
+    candidate_pixel_ratio: float = 0.0,
+) -> IlluminationGradientLevelingResult:
+    return IlluminationGradientLevelingResult(
+        image,
+        False,
+        f"illumination gradient leveling skipped: {reason}",
+        reason_code,
+        None,
+        0.0,
+        0.0,
         0.0,
         0.0,
         round(candidate_pixel_ratio, 6),
@@ -6023,6 +6477,10 @@ def _processing_audit(
     fold_shadows_delta: float = 0.0,
     fold_shadows_changed_pixel_ratio: float = 0.0,
     fold_shadows_candidate_pixel_ratio: float = 0.0,
+    illumination_gradient_levelled: bool = False,
+    illumination_gradient_correction_delta: float = 0.0,
+    illumination_gradient_changed_pixel_ratio: float = 0.0,
+    illumination_gradient_candidate_pixel_ratio: float = 0.0,
     bleed_through_cleaned: bool = False,
     bleed_through_delta: float = 0.0,
     bleed_through_changed_pixel_ratio: float = 0.0,
@@ -6129,6 +6587,10 @@ def _processing_audit(
         "fold_shadows_delta": round(fold_shadows_delta, 6),
         "fold_shadows_changed_pixel_ratio": round(fold_shadows_changed_pixel_ratio, 6),
         "fold_shadows_candidate_pixel_ratio": round(fold_shadows_candidate_pixel_ratio, 6),
+        "illumination_gradient_levelled": illumination_gradient_levelled,
+        "illumination_gradient_correction_delta": round(illumination_gradient_correction_delta, 6),
+        "illumination_gradient_changed_pixel_ratio": round(illumination_gradient_changed_pixel_ratio, 6),
+        "illumination_gradient_candidate_pixel_ratio": round(illumination_gradient_candidate_pixel_ratio, 6),
         "bleed_through_cleaned": bleed_through_cleaned,
         "bleed_through_delta": round(bleed_through_delta, 6),
         "bleed_through_changed_pixel_ratio": round(bleed_through_changed_pixel_ratio, 6),
@@ -6169,6 +6631,8 @@ def _processing_audit(
             corner_shadows_changed_pixel_ratio=corner_shadows_changed_pixel_ratio,
             fold_shadows_lightened=fold_shadows_lightened,
             fold_shadows_changed_pixel_ratio=fold_shadows_changed_pixel_ratio,
+            illumination_gradient_levelled=illumination_gradient_levelled,
+            illumination_gradient_changed_pixel_ratio=illumination_gradient_changed_pixel_ratio,
             bleed_through_cleaned=bleed_through_cleaned,
             bleed_through_changed_pixel_ratio=bleed_through_changed_pixel_ratio,
             scanlines_lightened=scanlines_lightened,
@@ -6212,6 +6676,8 @@ def _should_check_local_content_change(
     corner_shadows_changed_pixel_ratio: float,
     fold_shadows_lightened: bool,
     fold_shadows_changed_pixel_ratio: float,
+    illumination_gradient_levelled: bool,
+    illumination_gradient_changed_pixel_ratio: float,
     bleed_through_cleaned: bool,
     bleed_through_changed_pixel_ratio: float,
     scanlines_lightened: bool,
@@ -6229,6 +6695,8 @@ def _should_check_local_content_change(
     if corner_shadows_lightened and corner_shadows_changed_pixel_ratio > 0:
         return True
     if fold_shadows_lightened and fold_shadows_changed_pixel_ratio > 0:
+        return True
+    if illumination_gradient_levelled and illumination_gradient_changed_pixel_ratio > 0:
         return True
     if bleed_through_cleaned and bleed_through_changed_pixel_ratio > 0:
         return True
@@ -6262,6 +6730,8 @@ def _cumulative_change_guard(metrics: dict[str, Any], options: ProcessingOptions
         _float_metric(metrics, "corner_shadows_candidate_pixel_ratio"),
         _float_metric(metrics, "fold_shadows_changed_pixel_ratio"),
         _float_metric(metrics, "fold_shadows_candidate_pixel_ratio"),
+        _float_metric(metrics, "illumination_gradient_changed_pixel_ratio"),
+        _float_metric(metrics, "illumination_gradient_candidate_pixel_ratio"),
         _float_metric(metrics, "bleed_through_changed_pixel_ratio"),
         _float_metric(metrics, "bleed_through_candidate_pixel_ratio"),
         _float_metric(metrics, "scanlines_changed_pixel_ratio"),
@@ -6443,6 +6913,7 @@ def _combination_non_geometry_candidate_ratio(metrics: dict[str, Any]) -> float:
         _float_metric(metrics, "background_stains_candidate_pixel_ratio"),
         _float_metric(metrics, "corner_shadows_candidate_pixel_ratio"),
         _float_metric(metrics, "fold_shadows_candidate_pixel_ratio"),
+        _float_metric(metrics, "illumination_gradient_candidate_pixel_ratio"),
         _float_metric(metrics, "bleed_through_candidate_pixel_ratio"),
         _float_metric(metrics, "scanlines_candidate_pixel_ratio"),
         _float_metric(metrics, "faded_text_candidate_pixel_ratio"),

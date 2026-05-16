@@ -37,6 +37,7 @@ PROCESSING_OPERATION_TIMING_NAMES = (
     "lighten_corner_shadows",
     "lighten_background_stains",
     "lighten_fold_shadows",
+    "level_illumination_gradient",
     "clean_bleed_through",
     "lighten_scanlines",
     "enhance_faded_text",
@@ -61,6 +62,7 @@ PROCESSING_OPERATION_TIMING_DIAGNOSTIC_SECONDS_PER_FILE = {
     "lighten_corner_shadows": 0.25,
     "lighten_background_stains": 0.35,
     "lighten_fold_shadows": 0.35,
+    "level_illumination_gradient": 0.35,
     "clean_bleed_through": 0.35,
     "lighten_scanlines": 0.35,
     "enhance_faded_text": 0.35,
@@ -118,6 +120,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lighten-corner-shadows", action="store_true", help="Enable conservative smooth corner-shadow cleanup.")
     parser.add_argument("--lighten-background-stains", action="store_true", help="Enable conservative light background stain lightening.")
     parser.add_argument("--lighten-fold-shadows", action="store_true", help="Enable conservative narrow fold-shadow cleanup.")
+    parser.add_argument("--level-illumination-gradient", action="store_true", help="Enable conservative smooth paper illumination-gradient leveling.")
     parser.add_argument("--clean-bleed-through", action="store_true", help="Enable conservative faint reverse-side ghost cleanup.")
     parser.add_argument("--lighten-scanlines", action="store_true", help="Enable conservative low-contrast scanline lightening.")
     parser.add_argument("--enhance-faded-text", action="store_true", help="Enable conservative low-contrast faded text enhancement.")
@@ -204,6 +207,7 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
                         lighten_corner_shadows=args.lighten_corner_shadows,
                         lighten_background_stains=args.lighten_background_stains,
                         lighten_fold_shadows=getattr(args, "lighten_fold_shadows", False),
+                        level_illumination_gradient=getattr(args, "level_illumination_gradient", False),
                         clean_bleed_through=args.clean_bleed_through,
                         lighten_scanlines=args.lighten_scanlines,
                         enhance_faded_text=args.enhance_faded_text,
@@ -916,6 +920,8 @@ def _processing_quality_thresholds() -> dict[str, float]:
         "max_background_stains_candidate_pixel_ratio": 1.0,
         "max_fold_shadows_changed_pixel_ratio": 0.075,
         "max_fold_shadows_candidate_pixel_ratio": 0.12,
+        "max_illumination_gradient_changed_pixel_ratio": 1.0,
+        "max_illumination_gradient_candidate_pixel_ratio": 1.0,
         "max_bleed_through_changed_pixel_ratio": 0.045,
         "max_bleed_through_candidate_pixel_ratio": 0.065,
         "max_scanlines_changed_pixel_ratio": 0.08,
@@ -1029,6 +1035,17 @@ def _repair_algorithm_metrics(
                 "candidate_pixel_ratio": "fold_shadows_candidate_pixel_ratio",
             },
         ),
+        "level_illumination_gradient": _algorithm_summary(
+            audit_records,
+            operation_timings,
+            operation="level_illumination_gradient",
+            changed_flag="illumination_gradient_levelled",
+            metrics={
+                "correction_delta": "illumination_gradient_correction_delta",
+                "changed_pixel_ratio": "illumination_gradient_changed_pixel_ratio",
+                "candidate_pixel_ratio": "illumination_gradient_candidate_pixel_ratio",
+            },
+        ),
         "clean_bleed_through": _algorithm_summary(
             audit_records,
             operation_timings,
@@ -1120,6 +1137,8 @@ def _quality_threshold_violations(
         ("lighten_background_stains", "candidate_pixel_ratio"): "max_background_stains_candidate_pixel_ratio",
         ("lighten_fold_shadows", "changed_pixel_ratio"): "max_fold_shadows_changed_pixel_ratio",
         ("lighten_fold_shadows", "candidate_pixel_ratio"): "max_fold_shadows_candidate_pixel_ratio",
+        ("level_illumination_gradient", "changed_pixel_ratio"): "max_illumination_gradient_changed_pixel_ratio",
+        ("level_illumination_gradient", "candidate_pixel_ratio"): "max_illumination_gradient_candidate_pixel_ratio",
         ("clean_bleed_through", "changed_pixel_ratio"): "max_bleed_through_changed_pixel_ratio",
         ("clean_bleed_through", "candidate_pixel_ratio"): "max_bleed_through_candidate_pixel_ratio",
         ("lighten_scanlines", "changed_pixel_ratio"): "max_scanlines_changed_pixel_ratio",
@@ -1153,6 +1172,7 @@ def _enhancement_changed_files(audit_records: list[dict[str, Any]]) -> int:
         "corner_shadows_lightened",
         "background_stains_lightened",
         "fold_shadows_lightened",
+        "illumination_gradient_levelled",
         "bleed_through_cleaned",
         "scanlines_lightened",
         "faded_text_enhanced",
@@ -1202,6 +1222,7 @@ def _operations(args: argparse.Namespace) -> dict[str, bool | str]:
         "lighten_corner_shadows": getattr(args, "lighten_corner_shadows", False),
         "lighten_background_stains": getattr(args, "lighten_background_stains", False),
         "lighten_fold_shadows": getattr(args, "lighten_fold_shadows", False),
+        "level_illumination_gradient": getattr(args, "level_illumination_gradient", False),
         "clean_bleed_through": getattr(args, "clean_bleed_through", False),
         "lighten_scanlines": getattr(args, "lighten_scanlines", False),
         "enhance_faded_text": getattr(args, "enhance_faded_text", False),
@@ -1247,6 +1268,7 @@ def _csv_fields() -> list[str]:
         "lighten_corner_shadows",
         "lighten_background_stains",
         "lighten_fold_shadows",
+        "level_illumination_gradient",
         "clean_bleed_through",
         "lighten_scanlines",
         "enhance_faded_text",
@@ -1304,6 +1326,7 @@ def _csv_row(run: dict[str, Any], environment: dict[str, Any]) -> dict[str, Any]
         "lighten_corner_shadows": operations.get("lighten_corner_shadows", False),
         "lighten_background_stains": operations.get("lighten_background_stains", False),
         "lighten_fold_shadows": operations.get("lighten_fold_shadows", False),
+        "level_illumination_gradient": operations.get("level_illumination_gradient", False),
         "clean_bleed_through": operations.get("clean_bleed_through", False),
         "lighten_scanlines": operations.get("lighten_scanlines", False),
         "enhance_faded_text": operations.get("enhance_faded_text", False),

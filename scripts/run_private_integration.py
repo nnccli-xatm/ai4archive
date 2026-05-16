@@ -86,6 +86,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lighten-corner-shadows", action="store_true", help="Enable conservative smooth corner-shadow cleanup.")
     parser.add_argument("--lighten-background-stains", action="store_true", help="Enable conservative light background stain lightening.")
     parser.add_argument("--lighten-fold-shadows", action="store_true", help="Enable conservative narrow fold-shadow cleanup.")
+    parser.add_argument("--level-illumination-gradient", action="store_true", help="Enable conservative smooth paper illumination-gradient leveling.")
     parser.add_argument("--clean-bleed-through", action="store_true", help="Enable conservative faint reverse-side bleed-through cleanup.")
     parser.add_argument("--lighten-scanlines", action="store_true", help="Enable conservative low-contrast scanline lightening.")
     parser.add_argument("--enhance-faded-text", action="store_true", help="Enable conservative low-contrast faded text enhancement.")
@@ -154,6 +155,7 @@ def run_private_integration(args: argparse.Namespace) -> PrivateIntegrationResul
     report_dir = output_root / "scan-reports"
     process_out = output_root / "processed-images" if args.process_images else None
     despeckle_backend = getattr(args, "despeckle_backend", "fallback")
+    processing_flags_enabled = bool(args.process_images)
 
     plan = RunPlan(
         project_id=args.project,
@@ -168,21 +170,25 @@ def run_private_integration(args: argparse.Namespace) -> PrivateIntegrationResul
                 workers=args.workers,
                 min_dpi=args.min_dpi,
                 name_pattern=args.name_pattern,
-                auto_crop=args.auto_crop,
-                deskew=args.deskew,
-                trim_dark_border=args.trim_dark_border,
-                scanner_gutter_trim=getattr(args, "scanner_gutter_trim", False),
-                despeckle=args.despeckle,
-                normalize_tones=getattr(args, "normalize_tones", False),
-                normalize_paper_color_cast=getattr(args, "normalize_paper_color_cast", False),
-                lighten_edge_shadow=getattr(args, "lighten_edge_shadow", False),
-                lighten_corner_shadows=getattr(args, "lighten_corner_shadows", False),
-                lighten_background_stains=getattr(args, "lighten_background_stains", False),
-                lighten_fold_shadows=getattr(args, "lighten_fold_shadows", False),
-                clean_bleed_through=getattr(args, "clean_bleed_through", False),
-                lighten_scanlines=getattr(args, "lighten_scanlines", False),
-                enhance_faded_text=getattr(args, "enhance_faded_text", False),
-                sharpen_text_edges=getattr(args, "sharpen_text_edges", False),
+                auto_crop=processing_flags_enabled and args.auto_crop,
+                deskew=processing_flags_enabled and args.deskew,
+                trim_dark_border=processing_flags_enabled and args.trim_dark_border,
+                scanner_gutter_trim=processing_flags_enabled and getattr(args, "scanner_gutter_trim", False),
+                despeckle=processing_flags_enabled and args.despeckle,
+                normalize_tones=processing_flags_enabled and getattr(args, "normalize_tones", False),
+                normalize_paper_color_cast=processing_flags_enabled
+                and getattr(args, "normalize_paper_color_cast", False),
+                lighten_edge_shadow=processing_flags_enabled and getattr(args, "lighten_edge_shadow", False),
+                lighten_corner_shadows=processing_flags_enabled and getattr(args, "lighten_corner_shadows", False),
+                lighten_background_stains=processing_flags_enabled
+                and getattr(args, "lighten_background_stains", False),
+                lighten_fold_shadows=processing_flags_enabled and getattr(args, "lighten_fold_shadows", False),
+                level_illumination_gradient=processing_flags_enabled
+                and getattr(args, "level_illumination_gradient", False),
+                clean_bleed_through=processing_flags_enabled and getattr(args, "clean_bleed_through", False),
+                lighten_scanlines=processing_flags_enabled and getattr(args, "lighten_scanlines", False),
+                enhance_faded_text=processing_flags_enabled and getattr(args, "enhance_faded_text", False),
+                sharpen_text_edges=processing_flags_enabled and getattr(args, "sharpen_text_edges", False),
                 despeckle_backend=despeckle_backend,
                 resume_processing=args.resume_processing,
                 reuse_scan_measurements=args.reuse_scan_measurements,
@@ -293,6 +299,7 @@ def _public_summary(
             "scanner_gutter_trim": bool(getattr(args, "scanner_gutter_trim", False)),
             "lighten_background_stains": bool(getattr(args, "lighten_background_stains", False)),
             "lighten_fold_shadows": bool(getattr(args, "lighten_fold_shadows", False)),
+            "level_illumination_gradient": bool(getattr(args, "level_illumination_gradient", False)),
             "clean_bleed_through": bool(getattr(args, "clean_bleed_through", False)),
             "lighten_scanlines": bool(getattr(args, "lighten_scanlines", False)),
             "enhance_faded_text": bool(getattr(args, "enhance_faded_text", False)),
@@ -572,6 +579,7 @@ def _benchmark_operation_timings(benchmark_summary: dict[str, Any] | None) -> di
         "lighten_corner_shadows",
         "lighten_background_stains",
         "lighten_fold_shadows",
+        "level_illumination_gradient",
         "clean_bleed_through",
         "lighten_scanlines",
         "enhance_faded_text",
@@ -713,6 +721,7 @@ def _benchmark_args(args: argparse.Namespace, input_dir: Path, output_root: Path
         lighten_corner_shadows=getattr(args, "lighten_corner_shadows", False),
         lighten_background_stains=getattr(args, "lighten_background_stains", False),
         lighten_fold_shadows=getattr(args, "lighten_fold_shadows", False),
+        level_illumination_gradient=getattr(args, "level_illumination_gradient", False),
         clean_bleed_through=getattr(args, "clean_bleed_through", False),
         lighten_scanlines=getattr(args, "lighten_scanlines", False),
         enhance_faded_text=getattr(args, "enhance_faded_text", False),

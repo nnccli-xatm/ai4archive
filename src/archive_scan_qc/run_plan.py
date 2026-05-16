@@ -46,6 +46,7 @@ class PlanBatch:
     lighten_corner_shadows: bool
     lighten_background_stains: bool
     lighten_fold_shadows: bool
+    level_illumination_gradient: bool
     clean_bleed_through: bool
     lighten_scanlines: bool
     enhance_faded_text: bool
@@ -201,6 +202,8 @@ def _run_batch(project_id: str, batch: PlanBatch, index: int) -> dict[str, Any]:
                 lighten_corner_shadows=batch.lighten_corner_shadows,
                 lighten_background_stains=batch.lighten_background_stains,
                 lighten_fold_shadows=batch.lighten_fold_shadows,
+                level_illumination_gradient=batch.level_illumination_gradient,
+                clean_bleed_through=batch.clean_bleed_through,
                 lighten_scanlines=batch.lighten_scanlines,
                 enhance_faded_text=batch.enhance_faded_text,
                 sharpen_text_edges=batch.sharpen_text_edges,
@@ -275,6 +278,7 @@ def _run_batch(project_id: str, batch: PlanBatch, index: int) -> dict[str, Any]:
                     lighten_corner_shadows=batch.lighten_corner_shadows,
                     lighten_background_stains=batch.lighten_background_stains,
                     lighten_fold_shadows=batch.lighten_fold_shadows,
+                    level_illumination_gradient=batch.level_illumination_gradient,
                     clean_bleed_through=batch.clean_bleed_through,
                     lighten_scanlines=batch.lighten_scanlines,
                     enhance_faded_text=batch.enhance_faded_text,
@@ -404,6 +408,7 @@ def _aggregate_processing_operation_timings(batches: list[dict[str, Any]]) -> di
         "lighten_corner_shadows",
         "lighten_background_stains",
         "lighten_fold_shadows",
+        "level_illumination_gradient",
         "clean_bleed_through",
         "lighten_scanlines",
         "enhance_faded_text",
@@ -601,6 +606,11 @@ def _batch_from_row(row: dict[str, Any], index: int, plan_dir: Path, output_root
             index,
         ),
         lighten_fold_shadows=_bool(normalized.get("lighten_fold_shadows"), "lighten_fold_shadows", index),
+        level_illumination_gradient=_bool(
+            normalized.get("level_illumination_gradient"),
+            "level_illumination_gradient",
+            index,
+        ),
         clean_bleed_through=_bool(normalized.get("clean_bleed_through"), "clean_bleed_through", index),
         lighten_scanlines=_bool(normalized.get("lighten_scanlines"), "lighten_scanlines", index),
         enhance_faded_text=_bool(normalized.get("enhance_faded_text"), "enhance_faded_text", index),
