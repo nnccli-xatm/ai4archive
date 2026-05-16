@@ -5653,9 +5653,11 @@ def _scanline_axis_lightening_plan(
         dark_ratio = dark / max(1, len(values)) if values else 1.0
         max_dark_ratio = max(max_dark_ratio, dark_ratio)
         mean = sum(values) / len(values) if values else 0.0
+        candidate_mean = sum(pixels[x, y] for x, y in selected) / len(selected) if selected else None
         line_stats.append(
             {
                 "mean": mean,
+                "candidate_mean": candidate_mean,
                 "available_ratio": available_ratio,
                 "protected_ratio": protected_ratio,
                 "candidate_ratio": candidate_ratio,
@@ -5698,7 +5700,13 @@ def _scanline_axis_lightening_plan(
             and 3 <= stat["segment_count"] <= 8
             and stat["longest_segment_ratio"] >= 0.07
         )
-        if not (continuous_candidate or segmented_candidate):
+        broken_segmented_candidate = (
+            stat["candidate_ratio"] >= 0.20
+            and stat["candidate_available_ratio"] >= 0.28
+            and 4 <= stat["segment_count"] <= 10
+            and stat["longest_segment_ratio"] >= 0.045
+        )
+        if not (continuous_candidate or segmented_candidate or broken_segmented_candidate):
             continue
         neighbor_means = [
             line_stats[neighbor]["mean"]
@@ -5711,11 +5719,29 @@ def _scanline_axis_lightening_plan(
             continue
         local_mean = sum(neighbor_means) / len(neighbor_means)
         local_delta = local_mean - stat["mean"]
-        if not (3.0 <= local_delta <= 22.0):
+        broken_only = broken_segmented_candidate and not (continuous_candidate or segmented_candidate)
+        if broken_only:
+            candidate_mean = stat["candidate_mean"]
+            if candidate_mean is None:
+                continue
+            candidate_delta = local_mean - candidate_mean
+            if not (1.2 <= local_delta <= 12.0 and 5.5 <= candidate_delta <= 24.0):
+                continue
+            if stat["dark_ratio"] > 0.001:
+                continue
+            score_delta = candidate_delta
+        else:
+            if not (3.0 <= local_delta <= 22.0):
+                continue
+            score_delta = local_delta
+        if (
+            segmented_candidate
+            and not continuous_candidate
+            and not broken_only
+            and (local_delta < 4.5 or stat["dark_ratio"] > 0.002)
+        ):
             continue
-        if segmented_candidate and not continuous_candidate and (local_delta < 4.5 or stat["dark_ratio"] > 0.002):
-            continue
-        if local_delta < 4.5 and (
+        if not broken_only and local_delta < 4.5 and (
             stat["candidate_ratio"] < 0.68
             or stat["candidate_available_ratio"] < 0.80
             or stat["dark_ratio"] > 0.002
@@ -5723,7 +5749,7 @@ def _scanline_axis_lightening_plan(
             continue
         candidate_lines.append(index)
         selected.update(stat["selected"])
-        score += min(1.0, stat["candidate_available_ratio"] / 0.8) * min(1.0, local_delta / 12.0)
+        score += min(1.0, stat["candidate_available_ratio"] / 0.8) * min(1.0, score_delta / 12.0)
 
     if not candidate_lines:
         return _empty_scanline_lightening_plan(
