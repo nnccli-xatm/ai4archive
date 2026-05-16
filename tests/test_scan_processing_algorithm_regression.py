@@ -822,8 +822,8 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
         self.assertEqual(passing_guard["budget_signal"]["status"], "pass")
 
 
-BASE_FLAGS = ("--deskew", "--trim-dark-border", "--auto-crop", "--despeckle")
-BASE_OPERATION_NAMES = ("auto_crop", "deskew", "trim_dark_border", "despeckle")
+BASE_FLAGS = ("--deskew", "--trim-dark-border", "--scanner-gutter-trim", "--auto-crop", "--despeckle")
+BASE_OPERATION_NAMES = ("auto_crop", "deskew", "trim_dark_border", "scanner_gutter_trim", "despeckle")
 CONSERVATIVE_REPAIR_FLAGS = (
     "--normalize-tones",
     "--lighten-edge-shadow",
@@ -837,6 +837,7 @@ CONSERVATIVE_REPAIR_FLAGS = (
 REQUIRED_OPERATIONS = (
     "deskew",
     "trim_dark_border",
+    "scanner_gutter_trim",
     "auto_crop",
     "despeckle",
     "normalize_tones",
@@ -865,6 +866,7 @@ def _full_chain_options() -> ProcessingOptions:
         auto_crop=True,
         deskew=True,
         trim_dark_border=True,
+        scanner_gutter_trim=True,
         despeckle=True,
         normalize_tones=True,
         lighten_edge_shadow=True,
@@ -896,6 +898,7 @@ def _benchmark_combo(root: Path, input_dir: Path, label: str, *flags: str) -> di
             auto_crop="--auto-crop" in flag_set,
             deskew="--deskew" in flag_set,
             trim_dark_border="--trim-dark-border" in flag_set,
+            scanner_gutter_trim="--scanner-gutter-trim" in flag_set,
             despeckle="--despeckle" in flag_set,
             normalize_tones="--normalize-tones" in flag_set,
             lighten_edge_shadow="--lighten-edge-shadow" in flag_set,
@@ -996,6 +999,7 @@ def _assert_algorithm_thresholds(testcase: unittest.TestCase, quality: dict[str,
     checks = {
         ("deskew", "abs_angle_degrees"): "max_deskew_degrees",
         ("trim_dark_border", "max_trim_margin_ratio"): "max_trim_margin_ratio",
+        ("scanner_gutter_trim", "max_trim_margin_ratio"): "max_trim_margin_ratio",
         ("auto_crop", "crop_ratio"): "max_crop_ratio",
         ("despeckle", "pixel_ratio"): "max_despeckle_pixel_ratio",
         ("normalize_tones", "background_delta"): "max_tone_background_delta",
@@ -1059,6 +1063,7 @@ def _fixed_sample_operation_timings() -> dict[str, dict[str, object]]:
         "auto_crop": 0.21,
         "deskew": 0.16,
         "trim_dark_border": 0.01,
+        "scanner_gutter_trim": 0.01,
         "despeckle": 0.26,
         "normalize_tones": 0.01,
         "lighten_edge_shadow": 0.01,

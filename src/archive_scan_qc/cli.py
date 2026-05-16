@@ -137,6 +137,11 @@ def _add_scan_arguments(parser: argparse.ArgumentParser, *, include_scan_overrid
         help="Conservatively trim dark scan borders in derivative images. Requires --process-out.",
     )
     parser.add_argument(
+        "--scanner-gutter-trim",
+        action="store_true",
+        help="Conservatively trim narrow uniform light-gray scanner gutters. Requires --process-out.",
+    )
+    parser.add_argument(
         "--despeckle",
         action="store_true",
         help="Replace isolated dark speckles in derivative images. Requires --process-out.",
@@ -306,6 +311,7 @@ def main(argv: list[str] | None = None) -> int:
                 auto_crop=args.auto_crop,
                 deskew=args.deskew,
                 trim_dark_border=args.trim_dark_border,
+                scanner_gutter_trim=args.scanner_gutter_trim,
                 despeckle=args.despeckle,
                 normalize_tones=args.normalize_tones,
                 lighten_edge_shadow=args.lighten_edge_shadow,
@@ -384,6 +390,7 @@ def _main_preflight(argv: list[str]) -> int:
             auto_crop=args.auto_crop,
             deskew=args.deskew,
             trim_dark_border=args.trim_dark_border,
+            scanner_gutter_trim=args.scanner_gutter_trim,
             despeckle=args.despeckle,
             normalize_tones=args.normalize_tones,
             resume_processing=args.resume_processing,
@@ -429,6 +436,7 @@ def _main_production_run(argv: list[str]) -> int:
     parser.add_argument("--auto-crop", action="store_true", help="保守裁切处理后图片边缘。")
     parser.add_argument("--deskew", action="store_true", help="保守校正处理后图片的小角度倾斜。")
     parser.add_argument("--trim-dark-border", action="store_true", help="保守清理扫描黑边。")
+    parser.add_argument("--scanner-gutter-trim", action="store_true", help="保守裁掉窄幅浅灰扫描台边。")
     parser.add_argument("--despeckle", action="store_true", help="清理孤立黑点。")
     parser.add_argument("--normalize-tones", action="store_true", help="保守校正偏灰、偏暗的低对比度页面。")
     parser.add_argument("--lighten-edge-shadow", action="store_true", help="保守减淡不接触正文的页边窄幅阴影。")
@@ -485,6 +493,7 @@ def _main_production_run(argv: list[str]) -> int:
                 auto_crop=args.auto_crop,
                 deskew=args.deskew,
                 trim_dark_border=args.trim_dark_border,
+                scanner_gutter_trim=args.scanner_gutter_trim,
                 despeckle=args.despeckle,
                 normalize_tones=args.normalize_tones,
                 lighten_edge_shadow=args.lighten_edge_shadow,
@@ -1092,6 +1101,7 @@ def _main_processing_plan(argv: list[str]) -> int:
     parser.add_argument("--auto-crop", action="store_true", help="Plan conservative page-border crop candidates.")
     parser.add_argument("--deskew", action="store_true", help="Plan conservative small-angle deskew candidates.")
     parser.add_argument("--trim-dark-border", action="store_true", help="Plan conservative dark scan border trim candidates.")
+    parser.add_argument("--scanner-gutter-trim", action="store_true", help="Plan conservative light scanner gutter trim candidates.")
     parser.add_argument("--despeckle", action="store_true", help="Plan isolated dark speckle cleanup candidates.")
     parser.add_argument("--normalize-tones", action="store_true", help="Plan conservative gray/dark page tone normalization candidates.")
     parser.add_argument("--lighten-edge-shadow", action="store_true", help="Plan conservative narrow edge-shadow lightening candidates.")
@@ -1122,6 +1132,7 @@ def _main_processing_plan(argv: list[str]) -> int:
                 auto_crop=args.auto_crop,
                 deskew=args.deskew,
                 trim_dark_border=args.trim_dark_border,
+                scanner_gutter_trim=args.scanner_gutter_trim,
                 despeckle=args.despeckle,
                 normalize_tones=args.normalize_tones,
                 lighten_edge_shadow=args.lighten_edge_shadow,
@@ -1286,6 +1297,8 @@ def _validate_processing_flags(parser: argparse.ArgumentParser, args: argparse.N
         parser.error("--deskew requires --process-out")
     if args.trim_dark_border and not args.process_out:
         parser.error("--trim-dark-border requires --process-out")
+    if args.scanner_gutter_trim and not args.process_out:
+        parser.error("--scanner-gutter-trim requires --process-out")
     if args.despeckle and not args.process_out:
         parser.error("--despeckle requires --process-out")
     if args.normalize_tones and not args.process_out:

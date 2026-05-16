@@ -38,6 +38,7 @@ class PlanBatch:
     auto_crop: bool
     deskew: bool
     trim_dark_border: bool
+    scanner_gutter_trim: bool
     despeckle: bool
     normalize_tones: bool
     lighten_edge_shadow: bool
@@ -190,6 +191,7 @@ def _run_batch(project_id: str, batch: PlanBatch, index: int) -> dict[str, Any]:
                 auto_crop=batch.auto_crop,
                 deskew=batch.deskew,
                 trim_dark_border=batch.trim_dark_border,
+                scanner_gutter_trim=batch.scanner_gutter_trim,
                 despeckle=batch.despeckle,
                 normalize_tones=batch.normalize_tones,
                 lighten_edge_shadow=batch.lighten_edge_shadow,
@@ -261,6 +263,7 @@ def _run_batch(project_id: str, batch: PlanBatch, index: int) -> dict[str, Any]:
                     auto_crop=batch.auto_crop,
                     deskew=batch.deskew,
                     trim_dark_border=batch.trim_dark_border,
+                    scanner_gutter_trim=batch.scanner_gutter_trim,
                     despeckle=batch.despeckle,
                     normalize_tones=batch.normalize_tones,
                     lighten_edge_shadow=batch.lighten_edge_shadow,
@@ -387,6 +390,7 @@ def _aggregate_processing_operation_timings(batches: list[dict[str, Any]]) -> di
         "auto_crop",
         "deskew",
         "trim_dark_border",
+        "scanner_gutter_trim",
         "despeckle",
         "normalize_tones",
         "lighten_edge_shadow",
@@ -573,6 +577,7 @@ def _batch_from_row(row: dict[str, Any], index: int, plan_dir: Path, output_root
         auto_crop=_bool(normalized.get("auto_crop"), "auto_crop", index),
         deskew=_bool(normalized.get("deskew"), "deskew", index),
         trim_dark_border=_bool(normalized.get("trim_dark_border"), "trim_dark_border", index),
+        scanner_gutter_trim=_bool(normalized.get("scanner_gutter_trim"), "scanner_gutter_trim", index),
         despeckle=_bool(normalized.get("despeckle"), "despeckle", index),
         normalize_tones=_bool(normalized.get("normalize_tones"), "normalize_tones", index),
         lighten_edge_shadow=_bool(normalized.get("lighten_edge_shadow"), "lighten_edge_shadow", index),

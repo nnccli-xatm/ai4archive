@@ -18,6 +18,7 @@ PROCESSING_FLAGS = (
     "auto_crop",
     "deskew",
     "trim_dark_border",
+    "scanner_gutter_trim",
     "despeckle",
     "normalize_tones",
     "lighten_edge_shadow",
@@ -46,6 +47,7 @@ class PreflightConfig:
     auto_crop: bool = False
     deskew: bool = False
     trim_dark_border: bool = False
+    scanner_gutter_trim: bool = False
     despeckle: bool = False
     normalize_tones: bool = False
     lighten_edge_shadow: bool = False

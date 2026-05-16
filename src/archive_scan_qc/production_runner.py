@@ -56,6 +56,7 @@ class ProductionRunConfig:
     auto_crop: bool = False
     deskew: bool = False
     trim_dark_border: bool = False
+    scanner_gutter_trim: bool = False
     despeckle: bool = False
     normalize_tones: bool = False
     lighten_edge_shadow: bool = False
@@ -120,6 +121,7 @@ def run_production_folder(config: ProductionRunConfig) -> dict[str, Any]:
             auto_crop=config.auto_crop,
             deskew=config.deskew,
             trim_dark_border=config.trim_dark_border,
+            scanner_gutter_trim=config.scanner_gutter_trim,
             despeckle=config.despeckle,
             normalize_tones=config.normalize_tones,
             lighten_edge_shadow=config.lighten_edge_shadow,
@@ -205,6 +207,7 @@ def build_production_run_summary(
         "auto_crop": config.auto_crop,
         "deskew": config.deskew,
         "trim_dark_border": config.trim_dark_border,
+        "scanner_gutter_trim": config.scanner_gutter_trim,
         "despeckle": config.despeckle,
         "normalize_tones": config.normalize_tones,
         "lighten_edge_shadow": config.lighten_edge_shadow,

@@ -76,6 +76,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--auto-crop", action="store_true")
     parser.add_argument("--deskew", action="store_true")
     parser.add_argument("--trim-dark-border", action="store_true")
+    parser.add_argument("--scanner-gutter-trim", action="store_true")
     parser.add_argument("--despeckle", action="store_true")
     parser.add_argument("--normalize-tones", action="store_true")
     parser.add_argument("--lighten-edge-shadow", action="store_true")
@@ -240,6 +241,7 @@ def _baseline_summary(args: argparse.Namespace, private_summary: dict[str, Any])
             "auto_crop": bool(args.auto_crop),
             "deskew": bool(args.deskew),
             "trim_dark_border": bool(args.trim_dark_border),
+            "scanner_gutter_trim": bool(getattr(args, "scanner_gutter_trim", False)),
             "despeckle": bool(args.despeckle),
             "normalize_tones": bool(getattr(args, "normalize_tones", False)),
             "lighten_edge_shadow": bool(getattr(args, "lighten_edge_shadow", False)),
