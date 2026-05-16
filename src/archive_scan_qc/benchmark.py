@@ -29,6 +29,7 @@ PROCESSING_OPERATION_TIMING_NAMES = (
     "auto_crop",
     "deskew",
     "trim_dark_border",
+    "scanner_gutter_trim",
     "despeckle",
     "normalize_tones",
     "lighten_edge_shadow",
@@ -49,6 +50,7 @@ PROCESSING_OPERATION_TIMING_REQUIRED_FIELDS = (
 PROCESSING_OPERATION_TIMING_DIAGNOSTIC_SECONDS_PER_FILE = {
     "deskew": 0.15,
     "trim_dark_border": 0.15,
+    "scanner_gutter_trim": 0.15,
     "auto_crop": 0.2,
     "despeckle": 0.25,
     "normalize_tones": 0.25,
@@ -100,6 +102,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--auto-crop", action="store_true", help="Enable conservative auto-crop during processing.")
     parser.add_argument("--deskew", action="store_true", help="Enable conservative deskew during processing.")
     parser.add_argument("--trim-dark-border", action="store_true", help="Enable conservative dark-border trim during processing.")
+    parser.add_argument("--scanner-gutter-trim", action="store_true", help="Enable conservative light scanner gutter trim during processing.")
     parser.add_argument("--despeckle", action="store_true", help="Enable conservative despeckle during processing.")
     parser.add_argument("--normalize-tones", action="store_true", help="Enable conservative gray/dark page tone normalization.")
     parser.add_argument("--lighten-edge-shadow", action="store_true", help="Enable conservative narrow edge-shadow lightening.")
@@ -183,6 +186,7 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
                         auto_crop=args.auto_crop,
                         deskew=args.deskew,
                         trim_dark_border=args.trim_dark_border,
+                        scanner_gutter_trim=args.scanner_gutter_trim,
                         despeckle=args.despeckle,
                         normalize_tones=args.normalize_tones,
                         lighten_edge_shadow=args.lighten_edge_shadow,
@@ -923,6 +927,13 @@ def _repair_algorithm_metrics(
             changed_flag="dark_border_trimmed",
             metrics={"max_trim_margin_ratio": "max_trim_margin_ratio"},
         ),
+        "scanner_gutter_trim": _algorithm_summary(
+            audit_records,
+            operation_timings,
+            operation="scanner_gutter_trim",
+            changed_flag="scanner_gutter_trimmed",
+            metrics={"max_trim_margin_ratio": "scanner_gutter_max_trim_margin_ratio"},
+        ),
         "auto_crop": _algorithm_summary(
             audit_records,
             operation_timings,
@@ -1051,6 +1062,7 @@ def _quality_threshold_violations(
     checks = {
         ("deskew", "abs_angle_degrees"): "max_deskew_degrees",
         ("trim_dark_border", "max_trim_margin_ratio"): "max_trim_margin_ratio",
+        ("scanner_gutter_trim", "max_trim_margin_ratio"): "max_trim_margin_ratio",
         ("auto_crop", "crop_ratio"): "max_crop_ratio",
         ("despeckle", "pixel_ratio"): "max_despeckle_pixel_ratio",
         ("normalize_tones", "background_delta"): "max_tone_background_delta",
@@ -1134,6 +1146,7 @@ def _operations(args: argparse.Namespace) -> dict[str, bool | str]:
         "deskew": args.deskew,
         "auto_crop": args.auto_crop,
         "trim_dark_border": args.trim_dark_border,
+        "scanner_gutter_trim": getattr(args, "scanner_gutter_trim", False),
         "despeckle": args.despeckle,
         "normalize_tones": getattr(args, "normalize_tones", False),
         "lighten_edge_shadow": getattr(args, "lighten_edge_shadow", False),
@@ -1176,6 +1189,7 @@ def _csv_fields() -> list[str]:
         "deskew",
         "auto_crop",
         "trim_dark_border",
+        "scanner_gutter_trim",
         "despeckle",
         "normalize_tones",
         "lighten_edge_shadow",
@@ -1230,6 +1244,7 @@ def _csv_row(run: dict[str, Any], environment: dict[str, Any]) -> dict[str, Any]
         "deskew": operations["deskew"],
         "auto_crop": operations["auto_crop"],
         "trim_dark_border": operations["trim_dark_border"],
+        "scanner_gutter_trim": operations.get("scanner_gutter_trim", False),
         "despeckle": operations["despeckle"],
         "normalize_tones": operations["normalize_tones"],
         "lighten_edge_shadow": operations.get("lighten_edge_shadow", False),

@@ -44,6 +44,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--auto-crop", action="store_true")
     parser.add_argument("--deskew", action="store_true")
     parser.add_argument("--trim-dark-border", action="store_true")
+    parser.add_argument("--scanner-gutter-trim", action="store_true")
     parser.add_argument("--despeckle", action="store_true")
     parser.add_argument("--normalize-tones", action="store_true")
     parser.add_argument("--lighten-edge-shadow", action="store_true")
@@ -163,6 +164,7 @@ def _build_baseline_args(args: argparse.Namespace) -> argparse.Namespace:
         "--auto-crop",
         "--deskew",
         "--trim-dark-border",
+        "--scanner-gutter-trim",
         "--despeckle",
         "--normalize-tones",
         "--lighten-edge-shadow",

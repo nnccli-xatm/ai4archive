@@ -9358,6 +9358,72 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(records["A001_0001.png"]["output_size"], [100, 80])
             self.assertEqual(records["A001_0002.png"]["output_size"], [100, 80])
 
+    def test_scanner_gutter_trim_removes_safe_narrow_light_gutter_with_aggregate_audit(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-light-gutter-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            image = Image.new("RGB", (240, 180), (236, 236, 236))
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((10, 0, 239, 179), fill=(248, 248, 248))
+            draw.rectangle((36, 32, 204, 148), outline=(60, 60, 60), width=2)
+            image.save(input_dir / "A001_safe_light_gutter.png")
+
+            report = scan_batch(ScanConfig("synthetic", "light-gutter", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(scanner_gutter_trim=True, workers=1))
+            record = manifest["files"][0]
+            audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
+
+            self.assertEqual(record["output_size"], [230, 180])
+            self.assertTrue(record["scanner_gutter_trimmed"])
+            self.assertEqual(record["scanner_gutter_reason"], "scanner gutter trim applied")
+            self.assertIn("scanner_gutter_trim_conservative", record["operations"])
+            self.assertLessEqual(record["processing_audit"]["scanner_gutter_max_trim_margin_ratio"], 0.05)
+            self.assertEqual(audit_summary["counts"]["scanner_gutter_trimmed_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["scanner_gutter_trim"]["trimmed_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["scanner_gutter_trim"]["reason_distribution"],
+                {"scanner gutter trim applied": 1},
+            )
+            self.assertTrue(audit_summary["operations"]["scanner_gutter_trim"])
+            self.assertIn("scanner_gutter_trim", audit_summary["timing"]["operation_timings"])
+            self.assertNotIn("A001_safe_light_gutter", json.dumps(audit_summary))
+
+    def test_scanner_gutter_trim_preserves_edge_content_and_archival_marks(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-light-gutter-protection-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            cases = {
+                "A001_page_number.png": lambda draw: draw.text((1, 80), "12", fill=(40, 40, 40)),
+                "A002_border_line.png": lambda draw: draw.line((10, 0, 10, 179), fill=(40, 40, 40), width=2),
+                "A003_stamp_mark.png": lambda draw: draw.rectangle((3, 20, 8, 28), fill=(160, 30, 30)),
+                "A004_handwritten_mark.png": lambda draw: draw.line((2, 120, 8, 126), fill=(30, 30, 30), width=2),
+                "A005_archival_edge.png": lambda draw: draw.rectangle((0, 0, 6, 179), fill=(70, 70, 70)),
+            }
+            for filename, mark in cases.items():
+                image = Image.new("RGB", (240, 180), (236, 236, 236))
+                draw = ImageDraw.Draw(image)
+                draw.rectangle((10, 0, 239, 179), fill=(248, 248, 248))
+                mark(draw)
+                image.save(input_dir / filename)
+
+            report = scan_batch(ScanConfig("synthetic", "light-gutter-protection", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(scanner_gutter_trim=True, workers=1))
+            audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
+
+            self.assertEqual(audit_summary["counts"]["scanner_gutter_trimmed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["scanner_gutter_skipped_files"], len(cases))
+            for record in manifest["files"]:
+                self.assertEqual(record["output_size"], [240, 180])
+                self.assertFalse(record["scanner_gutter_trimmed"], record["source_relative_path"])
+                self.assertIn("scanner_gutter_trim_noop", record["operations"])
+                self.assertEqual(record["processing_audit"]["scanner_gutter_max_trim_margin_ratio"], 0.0)
+
     def test_despeckle_removes_isolated_noise_without_breaking_lines(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -10377,6 +10443,11 @@ class ScanQcTest(unittest.TestCase):
                 input_dir / "A001_skew.png"
             )
             _synthetic_dark_border_page().save(input_dir / "A001_border.png")
+            gutter = Image.new("RGB", (240, 180), (236, 236, 236))
+            gutter_draw = ImageDraw.Draw(gutter)
+            gutter_draw.rectangle((10, 0, 239, 179), fill=(248, 248, 248))
+            gutter_draw.rectangle((36, 32, 204, 148), outline=(60, 60, 60), width=2)
+            gutter.save(input_dir / "A001_light_gutter.png")
             Image.new("RGB", (240, 180), "white").save(input_dir / "A001_clean.png")
             (input_dir / "A001_broken.png").write_text("not an image", encoding="utf-8")
 
@@ -10395,6 +10466,7 @@ class ScanQcTest(unittest.TestCase):
                         str(plan_dir),
                         "--deskew",
                         "--trim-dark-border",
+                        "--scanner-gutter-trim",
                         "--auto-crop",
                         "--despeckle",
                     ]
@@ -10411,10 +10483,12 @@ class ScanQcTest(unittest.TestCase):
             self.assertFalse(plan["privacy"]["contains_image_content"])
             self.assertTrue(rows["A001_skew.png"]["deskew_candidate"])
             self.assertTrue(rows["A001_border.png"]["dark_border_trim_candidate"])
+            self.assertTrue(rows["A001_light_gutter.png"]["scanner_gutter_trim_candidate"])
             self.assertFalse(rows["A001_clean.png"]["deskew_candidate"])
             self.assertFalse(rows["A001_clean.png"]["dark_border_trim_candidate"])
             self.assertEqual(rows["A001_broken.png"]["status"], "unopenable")
-            self.assertEqual(plan["summary"]["total_files"], 4)
+            self.assertEqual(plan["summary"]["scanner_gutter_trim_candidates"], 1)
+            self.assertEqual(plan["summary"]["total_files"], 5)
             self.assertEqual(plan["summary"]["unopenable_files"], 1)
 
     def test_processing_plan_artifacts_are_deterministic(self) -> None:
@@ -11565,6 +11639,7 @@ class ScanQcTest(unittest.TestCase):
 
             for option in [
                 "--trim-dark-border",
+                "--scanner-gutter-trim",
                 "--despeckle",
                 "--normalize-tones",
                 "--lighten-edge-shadow",

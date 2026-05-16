@@ -44,6 +44,7 @@ class ProcessingOptions:
     lighten_scanlines: bool = False
     enhance_faded_text: bool = False
     sharpen_text_edges: bool = False
+    scanner_gutter_trim: bool = False
     despeckle_backend: str = "fallback"
     resume_processing: bool = False
     reuse_scan_measurements: bool = False
@@ -90,6 +91,13 @@ class DarkBorderDetection:
 class CropDetection:
     bbox: tuple[int, int, int, int] | None
     reason: str
+
+
+@dataclass(frozen=True)
+class ScannerGutterTrimDetection:
+    bbox: tuple[int, int, int, int] | None
+    reason: str
+    margins: dict[str, float]
 
 
 @dataclass(frozen=True)
@@ -265,6 +273,7 @@ def process_images(
             "skew_detect_projection",
             "deskew_conservative" if options.deskew else "deskew_disabled",
             "dark_border_trim_conservative" if options.trim_dark_border else "dark_border_trim_disabled",
+            "scanner_gutter_trim_conservative" if options.scanner_gutter_trim else "scanner_gutter_trim_disabled",
             "auto_crop_conservative" if options.auto_crop else "auto_crop_disabled",
             "despeckle_isolated_pixels" if options.despeckle else "despeckle_disabled",
             "normalize_tones_conservative" if options.normalize_tones else "normalize_tones_disabled",
@@ -646,6 +655,10 @@ def _process_record(
         "dark_border_trimmed": False,
         "dark_border_bbox": None,
         "dark_border_reason": None,
+        "scanner_gutter_trimmed": False,
+        "scanner_gutter_bbox": None,
+        "scanner_gutter_reason": None,
+        "scanner_gutter_trim_margins": {"left": 0.0, "top": 0.0, "right": 0.0, "bottom": 0.0},
         "crop_bbox": None,
         "crop_reason": None,
         "cropped": False,
@@ -767,6 +780,10 @@ def _process_record(
                 "dark_border_trimmed": process_info["dark_border_trimmed"],
                 "dark_border_bbox": process_info["dark_border_bbox"],
                 "dark_border_reason": process_info["dark_border_reason"],
+                "scanner_gutter_trimmed": process_info["scanner_gutter_trimmed"],
+                "scanner_gutter_bbox": process_info["scanner_gutter_bbox"],
+                "scanner_gutter_reason": process_info["scanner_gutter_reason"],
+                "scanner_gutter_trim_margins": process_info["scanner_gutter_trim_margins"],
                 "crop_bbox": process_info["crop_bbox"],
                 "crop_reason": process_info["crop_reason"],
                 "cropped": process_info["cropped"],
@@ -863,6 +880,10 @@ def _process_record(
                     "dark_border_trimmed": process_info["dark_border_trimmed"],
                     "dark_border_bbox": process_info["dark_border_bbox"],
                     "dark_border_reason": process_info["dark_border_reason"],
+                    "scanner_gutter_trimmed": process_info["scanner_gutter_trimmed"],
+                    "scanner_gutter_bbox": process_info["scanner_gutter_bbox"],
+                    "scanner_gutter_reason": process_info["scanner_gutter_reason"],
+                    "scanner_gutter_trim_margins": process_info["scanner_gutter_trim_margins"],
                     "crop_bbox": process_info["crop_bbox"],
                     "crop_reason": process_info["crop_reason"],
                     "cropped": process_info["cropped"],
@@ -995,6 +1016,7 @@ def _processing_options_fingerprint(options: ProcessingOptions) -> str:
         "auto_crop": options.auto_crop,
         "deskew": options.deskew,
         "trim_dark_border": options.trim_dark_border,
+        "scanner_gutter_trim": options.scanner_gutter_trim,
         "despeckle": options.despeckle,
         "normalize_tones": options.normalize_tones,
         "lighten_edge_shadow": options.lighten_edge_shadow,
@@ -1085,6 +1107,11 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
         record.get("dark_border_reason")
         for record in processed_records
         if isinstance(record.get("dark_border_reason"), str)
+    ]
+    scanner_gutter_reasons = [
+        record.get("scanner_gutter_reason")
+        for record in processed_records
+        if isinstance(record.get("scanner_gutter_reason"), str)
     ]
     deskew_reasons = [
         record.get("deskew_reason")
@@ -1255,6 +1282,7 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "auto_crop": options.auto_crop,
             "deskew": options.deskew,
             "trim_dark_border": options.trim_dark_border,
+            "scanner_gutter_trim": options.scanner_gutter_trim,
             "despeckle": options.despeckle,
             "normalize_tones": options.normalize_tones,
             "lighten_edge_shadow": options.lighten_edge_shadow,
@@ -1344,6 +1372,15 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             ),
             "dark_border_trimmed_files": sum(
                 1 for record in processed_records if record.get("dark_border_trimmed") is True
+            ),
+            "scanner_gutter_trimmed_files": sum(
+                1 for record in processed_records if record.get("scanner_gutter_trimmed") is True
+            ),
+            "scanner_gutter_skipped_files": sum(
+                1
+                for record in processed_records
+                if record.get("scanner_gutter_trimmed") is False
+                and record.get("scanner_gutter_reason") not in {None, "scanner gutter trim disabled"}
             ),
             "auto_crop_applied_files": sum(1 for record in processed_records if record.get("cropped") is True),
             "auto_crop_skipped_files": sum(
@@ -1446,6 +1483,9 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "contrast_delta": _aggregate_metric(audit_records, "contrast_delta"),
             "crop_ratio": _aggregate_metric(audit_records, "crop_ratio"),
             "max_trim_margin_ratio": _aggregate_metric(audit_records, "max_trim_margin_ratio"),
+            "scanner_gutter_max_trim_margin_ratio": _aggregate_metric(
+                audit_records, "scanner_gutter_max_trim_margin_ratio"
+            ),
             "deskew_abs_angle_degrees": _aggregate_metric(audit_records, "deskew_abs_angle_degrees"),
             "despeckle_pixel_ratio": _aggregate_metric(audit_records, "despeckle_pixel_ratio"),
             "tone_background_delta": _aggregate_metric(audit_records, "tone_background_delta"),
@@ -1596,6 +1636,20 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                     and record.get("dark_border_reason") not in {None, "dark border trim disabled"}
                 ),
                 "reason_distribution": _reason_counts(reason for reason in dark_border_reasons if isinstance(reason, str)),
+            },
+            "scanner_gutter_trim": {
+                "trimmed_files": sum(
+                    1 for record in processed_records if record.get("scanner_gutter_trimmed") is True
+                ),
+                "skipped_files": sum(
+                    1
+                    for record in processed_records
+                    if record.get("scanner_gutter_trimmed") is False
+                    and record.get("scanner_gutter_reason") not in {None, "scanner gutter trim disabled"}
+                ),
+                "reason_distribution": _reason_counts(
+                    reason for reason in scanner_gutter_reasons if isinstance(reason, str)
+                ),
             },
             "auto_crop": _auto_crop_audit_summary(processed_records, audit_records, auto_crop_reasons),
             "deskew": {
@@ -1962,6 +2016,7 @@ def _aggregate_operation_timings(records: list[dict[str, Any]], options: Process
         "auto_crop": options.auto_crop,
         "deskew": options.deskew,
         "trim_dark_border": options.trim_dark_border,
+        "scanner_gutter_trim": options.scanner_gutter_trim,
         "despeckle": options.despeckle,
         "normalize_tones": options.normalize_tones,
         "lighten_edge_shadow": options.lighten_edge_shadow,
@@ -2371,6 +2426,24 @@ def _process_image(
         else:
             operations.append("dark_border_trim_disabled")
 
+    scanner_gutter = ScannerGutterTrimDetection(
+        None,
+        "scanner gutter trim disabled",
+        {"left": 0.0, "top": 0.0, "right": 0.0, "bottom": 0.0},
+    )
+    scanner_gutter_trimmed = False
+    with _operation_timer(operation_timings, "scanner_gutter_trim", enabled=options.scanner_gutter_trim):
+        if options.scanner_gutter_trim:
+            scanner_gutter = _detect_light_scanner_gutter_bbox(processed)
+            if scanner_gutter.bbox:
+                processed = processed.crop(scanner_gutter.bbox)
+                operations.append("scanner_gutter_trim_conservative")
+                scanner_gutter_trimmed = True
+            else:
+                operations.append("scanner_gutter_trim_noop")
+        else:
+            operations.append("scanner_gutter_trim_disabled")
+
     crop_bbox: tuple[int, int, int, int] | None = None
     crop_reason = "auto crop disabled"
     with _operation_timer(operation_timings, "auto_crop", enabled=options.auto_crop):
@@ -2521,6 +2594,7 @@ def _process_image(
         options,
         crop_bbox,
         dark_border.bbox,
+        scanner_gutter.bbox,
         skew.angle_degrees,
         despeckle_pixels_changed,
         tone.applied,
@@ -2578,6 +2652,7 @@ def _process_image(
             applied_flags=(
                 deskewed,
                 dark_border_trimmed,
+                scanner_gutter_trimmed,
                 crop_bbox is not None,
                 despeckled,
                 tone.applied,
@@ -2592,6 +2667,7 @@ def _process_image(
             reasons=(
                 deskew_reason,
                 dark_border.reason,
+                scanner_gutter.reason,
                 crop_reason,
                 despeckle_reason,
                 tone.reason,
@@ -2621,6 +2697,7 @@ def _process_image(
             audit_source,
             processed,
             options,
+            None,
             None,
             None,
             None,
@@ -2664,6 +2741,14 @@ def _process_image(
         "dark_border_trimmed": False if guard_reverted else dark_border_trimmed,
         "dark_border_bbox": None if guard_reverted else (list(dark_border.bbox) if dark_border.bbox else None),
         "dark_border_reason": guard_reason if guard_reverted else dark_border.reason,
+        "scanner_gutter_trimmed": False if guard_reverted else scanner_gutter_trimmed,
+        "scanner_gutter_bbox": None if guard_reverted else (list(scanner_gutter.bbox) if scanner_gutter.bbox else None),
+        "scanner_gutter_reason": guard_reason if guard_reverted else scanner_gutter.reason,
+        "scanner_gutter_trim_margins": (
+            {"left": 0.0, "top": 0.0, "right": 0.0, "bottom": 0.0}
+            if guard_reverted
+            else scanner_gutter.margins
+        ),
         "crop_bbox": None if guard_reverted else (list(crop_bbox) if crop_bbox else None),
         "crop_reason": guard_reason if guard_reverted else crop_reason,
         "cropped": False if guard_reverted else crop_bbox is not None,
@@ -5071,6 +5156,7 @@ def _processing_audit(
     options: ProcessingOptions,
     crop_bbox: tuple[int, int, int, int] | None,
     dark_border_bbox: tuple[int, int, int, int] | None,
+    scanner_gutter_bbox: tuple[int, int, int, int] | None,
     skew_angle_degrees: float | None,
     despeckle_pixels_changed: int,
     tone_normalized: bool = False,
@@ -5119,8 +5205,16 @@ def _processing_audit(
     crop_ratio = 0.0
     if crop_bbox:
         crop_ratio = 1.0 - (((crop_bbox[2] - crop_bbox[0]) * (crop_bbox[3] - crop_bbox[1])) / source_area)
-    trim_margins = _trim_margins(source.size, dark_border_bbox)
+    dark_trim_margins = _trim_margins(source.size, dark_border_bbox)
+    scanner_gutter_trim_margins = _trim_margins(source.size, scanner_gutter_bbox)
+    trim_margins = {
+        side: max(dark_trim_margins.get(side, 0.0), scanner_gutter_trim_margins.get(side, 0.0))
+        for side in ("left", "top", "right", "bottom")
+    }
     max_trim_margin_ratio = max(trim_margins.values()) if trim_margins else 0.0
+    scanner_gutter_max_trim_margin_ratio = (
+        max(scanner_gutter_trim_margins.values()) if scanner_gutter_trim_margins else 0.0
+    )
     source_l = source.convert("L")
     processed_l = processed.convert("L")
     brightness_delta, contrast_delta = _tonal_deltas(source_l, processed_l)
@@ -5190,9 +5284,12 @@ def _processing_audit(
         "text_edges_delta": round(text_edges_delta, 6),
         "text_edges_changed_pixel_ratio": round(text_edges_changed_pixel_ratio, 6),
         "text_edges_candidate_pixel_ratio": round(text_edges_candidate_pixel_ratio, 6),
+        "scanner_gutter_trimmed": scanner_gutter_bbox is not None,
         "crop_ratio": round(max(0.0, crop_ratio), 6),
         "trim_margins": trim_margins,
         "max_trim_margin_ratio": round(max_trim_margin_ratio, 6),
+        "scanner_gutter_trim_margins": scanner_gutter_trim_margins,
+        "scanner_gutter_max_trim_margin_ratio": round(scanner_gutter_max_trim_margin_ratio, 6),
         "deskew_abs_angle_degrees": deskew_abs_angle,
         "despeckle_pixel_ratio": round(despeckle_pixel_ratio, 6),
     }
@@ -6549,6 +6646,138 @@ def _crop_boundary_has_consistent_evidence(image: Image.Image, bbox: tuple[int, 
             return False
 
     return True
+
+
+def _detect_light_scanner_gutter_bbox(image: Image.Image) -> ScannerGutterTrimDetection:
+    width, height = image.size
+    empty_margins = {"left": 0.0, "top": 0.0, "right": 0.0, "bottom": 0.0}
+    if width < 80 or height < 80:
+        return ScannerGutterTrimDetection(None, "image too small", empty_margins)
+
+    grayscale = image.convert("L")
+    if _light_page_background_mean(grayscale) < 220:
+        return ScannerGutterTrimDetection(None, "scanner gutter skipped: page background not light", empty_margins)
+
+    max_x = max(3, min(24, int(width * 0.06)))
+    max_y = max(3, min(24, int(height * 0.06)))
+    left = _light_scanner_gutter_run(grayscale, "left", max_x)
+    right = _light_scanner_gutter_run(grayscale, "right", max_x)
+    top = _light_scanner_gutter_run(grayscale, "top", max_y)
+    bottom = _light_scanner_gutter_run(grayscale, "bottom", max_y)
+
+    if max(left, right, top, bottom) < 3:
+        return ScannerGutterTrimDetection(None, "scanner gutter skipped: no narrow uniform light band", empty_margins)
+
+    bbox = (left, top, width - right, height - bottom)
+    if bbox[2] <= bbox[0] or bbox[3] <= bbox[1]:
+        return ScannerGutterTrimDetection(None, "scanner gutter skipped: invalid trim candidate", empty_margins)
+    retained_area_ratio = ((bbox[2] - bbox[0]) * (bbox[3] - bbox[1])) / max(1, width * height)
+    if retained_area_ratio < 0.88:
+        return ScannerGutterTrimDetection(None, "scanner gutter skipped: trim exceeds narrow margin limit", empty_margins)
+    if _light_scanner_gutter_trimmed_area_has_marks(grayscale, (left, top, right, bottom)):
+        return ScannerGutterTrimDetection(None, "scanner gutter skipped: protected edge content", empty_margins)
+    if _has_protected_dark_content_near_active_trim_boundary(grayscale, bbox, (left, top, right, bottom)):
+        return ScannerGutterTrimDetection(None, "scanner gutter skipped: protected edge content", empty_margins)
+
+    margins = _trim_margins((width, height), bbox)
+    return ScannerGutterTrimDetection(bbox, "scanner gutter trim applied", margins)
+
+
+def _light_scanner_gutter_run(image: Image.Image, side: str, max_pixels: int) -> int:
+    width, height = image.size
+    if side == "left":
+        reference = image.crop((min(width - 1, max_pixels + 2), 0, min(width, max_pixels + 8), height))
+    elif side == "right":
+        reference = image.crop((max(0, width - max_pixels - 8), 0, max(1, width - max_pixels - 2), height))
+    elif side == "top":
+        reference = image.crop((0, min(height - 1, max_pixels + 2), width, min(height, max_pixels + 8)))
+    else:
+        reference = image.crop((0, max(0, height - max_pixels - 8), width, max(1, height - max_pixels - 2)))
+    run = 0
+    for offset in range(max_pixels):
+        if side == "left":
+            box = (offset, 0, offset + 1, height)
+        elif side == "right":
+            box = (width - 1 - offset, 0, width - offset, height)
+        elif side == "top":
+            box = (0, offset, width, offset + 1)
+        else:
+            box = (0, height - 1 - offset, width, height - offset)
+        if not _is_uniform_light_scanner_gutter_band(image.crop(box), reference):
+            break
+        run = offset + 1
+    return run if run >= 3 else 0
+
+
+def _is_uniform_light_scanner_gutter_band(band: Image.Image, inner: Image.Image) -> bool:
+    stat = ImageStat.Stat(band)
+    mean = stat.mean[0]
+    if mean < 215 or mean > 246 or stat.stddev[0] > 5.5:
+        return False
+    values = band.tobytes()
+    if not values:
+        return False
+    dark_or_marked = sum(1 for value in values if value <= 180)
+    if dark_or_marked / len(values) > 0.001:
+        return False
+    inner_mean = ImageStat.Stat(inner).mean[0] if inner.size[0] and inner.size[1] else 255
+    return inner_mean >= 235 and inner_mean - mean >= 4.0
+
+
+def _light_scanner_gutter_trimmed_area_has_marks(
+    image: Image.Image,
+    active_margins: tuple[int, int, int, int],
+) -> bool:
+    width, height = image.size
+    left, top, right, bottom = active_margins
+    boxes = []
+    if left:
+        boxes.append((0, 0, left, height))
+    if right:
+        boxes.append((width - right, 0, width, height))
+    if top:
+        boxes.append((left, 0, width - right, top))
+    if bottom:
+        boxes.append((left, height - bottom, width - right, height))
+    for box in boxes:
+        if box[2] <= box[0] or box[3] <= box[1]:
+            continue
+        values = image.crop(box).tobytes()
+        marked_pixels = sum(1 for value in values if value <= 185)
+        if marked_pixels >= 3:
+            return True
+    return False
+
+
+def _has_protected_dark_content_near_active_trim_boundary(
+    image: Image.Image,
+    bbox: tuple[int, int, int, int],
+    active_margins: tuple[int, int, int, int],
+) -> bool:
+    width, height = image.size
+    left, top, right, bottom = bbox
+    left_margin, top_margin, right_margin, bottom_margin = active_margins
+    protect_depth = max(3, min(10, int(min(width, height) * 0.04)))
+    corner_pad_x = max(2, int(width * 0.04))
+    corner_pad_y = max(2, int(height * 0.04))
+    bands: list[tuple[int, int, int, int]] = []
+    if left_margin:
+        bands.append((left, top + corner_pad_y, min(right, left + protect_depth), bottom - corner_pad_y))
+    if right_margin:
+        bands.append((max(left, right - protect_depth), top + corner_pad_y, right, bottom - corner_pad_y))
+    if top_margin:
+        bands.append((left + corner_pad_x, top, right - corner_pad_x, min(bottom, top + protect_depth)))
+    if bottom_margin:
+        bands.append((left + corner_pad_x, max(top, bottom - protect_depth), right - corner_pad_x, bottom))
+    for band in bands:
+        x0, y0, x1, y1 = band
+        if x1 <= x0 or y1 <= y0:
+            continue
+        values = image.crop(band).tobytes()
+        dark_pixels = sum(1 for value in values if value <= 90)
+        if dark_pixels >= 8 and dark_pixels / max(1, len(values)) >= 0.01:
+            return True
+    return False
 
 
 def _detect_dark_border_bbox(image: Image.Image) -> DarkBorderDetection:
