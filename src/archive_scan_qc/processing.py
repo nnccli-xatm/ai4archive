@@ -5176,7 +5176,7 @@ def _fold_shadow_axis_plan(
         )
 
     groups = _contiguous_groups(candidate_indexes)
-    min_width = max(3, int(round(axis_length * 0.012)))
+    min_width = max(2, int(axis_length * 0.012))
     max_width = max(min_width, int(round(axis_length * 0.08)))
     selected_groups: list[list[int]] = []
     selected: set[tuple[int, int]] = set()
