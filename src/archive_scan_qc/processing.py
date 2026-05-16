@@ -2989,7 +2989,7 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
     edge_cleared_candidate = _clear_mask_edges(candidate, edge_margin)
     edge_candidate_ratio = _mask_ratio(candidate) - _mask_ratio(edge_cleared_candidate)
     raw_candidate_ratio = _mask_ratio(edge_cleared_candidate)
-    if raw_candidate_ratio > 0.09:
+    if raw_candidate_ratio > 0.10:
         return _background_stains_noop(
             image,
             "background stain lightening skipped: broad uneven lighting is outside conservative scope",
@@ -3013,7 +3013,7 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
     candidate_ratio = _mask_ratio(candidate)
     if candidate_ratio < 0.00008:
         return _background_stains_noop(image, "background stain lightening skipped: no confident light background stains")
-    if candidate_ratio > 0.09:
+    if candidate_ratio > 0.10:
         return _background_stains_noop(
             image,
             "background stain lightening skipped: broad uneven lighting is outside conservative scope",
@@ -3039,15 +3039,25 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
         if area < 6:
             continue
         area_ratio = area / total
+        component_box = (min(xs), min(ys), max(xs) + 1, max(ys) + 1)
+        edge_density = _background_stain_component_edge_density(grayscale, component_box, background)
+        color_shift = _background_stain_component_color_shift(image, component)
         low_frequency_shape = (
-            area_ratio <= 0.08
+            area_ratio <= 0.085
             and width <= image.width * 0.62
             and height <= image.height * 0.62
             and width >= image.width * 0.24
             and height >= image.height * 0.22
             and area_ratio >= 0.004
+            and edge_density <= 0.12
+            and color_shift <= 44
         )
-        small_speckle_shape = area_ratio <= 0.012 and width <= image.width * 0.18 and height <= image.height * 0.18
+        small_speckle_shape = (
+            area_ratio <= 0.012
+            and width <= image.width * 0.18
+            and height <= image.height * 0.18
+            and color_shift <= 36
+        )
         if not (small_speckle_shape or low_frequency_shape):
             return _background_stains_noop(
                 image,
@@ -3059,7 +3069,7 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
     changed_ratio = len(selected) / max(1, total)
     if changed_ratio < 0.00008:
         return _background_stains_noop(image, "background stain lightening skipped: no confident light background stains")
-    if changed_ratio > 0.08:
+    if changed_ratio > 0.085:
         return _background_stains_noop(
             image,
             "background stain lightening skipped: changed area exceeds conservative background scope",
@@ -3083,17 +3093,19 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
         output = source.copy()
         output_pixels = output.load()
         gray_pixels = grayscale.load()
+        background_rgb = _background_stain_reference_rgb(source, grayscale, background)
         for x, y in selected:
             gray_value = gray_pixels[x, y]
             delta = min(22, max(4, int(round((background - gray_value) * 0.78))))
             red_value, green_value, blue_value = output_pixels[x, y]
-            output_pixels[x, y] = (
-                min(255, red_value + delta),
-                min(255, green_value + delta),
-                min(255, blue_value + delta),
+            new_red, new_green, new_blue = _lighten_background_stain_pixel(
+                (red_value, green_value, blue_value),
+                background_rgb,
+                delta,
             )
+            output_pixels[x, y] = (new_red, new_green, new_blue)
             before_values.append(gray_value)
-            after_values.append(min(255, gray_value + delta))
+            after_values.append(int(round((new_red + new_green + new_blue) / 3)))
         result_image = output
 
     before_mean = round(sum(before_values) / len(before_values), 6)
@@ -3114,6 +3126,69 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
         round(changed_ratio, 6),
         round(candidate_ratio, 6),
     )
+
+
+def _background_stain_component_edge_density(grayscale: Image.Image, box: tuple[int, int, int, int], background: int) -> float:
+    crop = grayscale.crop(box)
+    if crop.width <= 1 or crop.height <= 1:
+        return 1.0
+    edge_threshold = max(10, int(round((255 - min(background, 252)) * 0.5 + 8)))
+    edges = crop.filter(ImageFilter.FIND_EDGES)
+    histogram = edges.histogram()
+    return sum(histogram[edge_threshold:]) / max(1, crop.width * crop.height)
+
+
+def _background_stain_component_color_shift(image: Image.Image, component: list[tuple[int, int]]) -> float:
+    if image.mode == "L":
+        return 0.0
+    pixels = image.convert("RGB").load()
+    shifts: list[int] = []
+    step = max(1, len(component) // 1800)
+    for x, y in component[::step]:
+        red_value, green_value, blue_value = pixels[x, y]
+        shifts.append(max(red_value, green_value, blue_value) - min(red_value, green_value, blue_value))
+    if not shifts:
+        return 0.0
+    return sum(shifts) / len(shifts)
+
+
+def _background_stain_reference_rgb(source: Image.Image, grayscale: Image.Image, background: int) -> tuple[int, int, int]:
+    threshold = max(205, min(252, background - 2))
+    source_pixels = source.load()
+    gray_pixels = grayscale.load()
+    totals = [0, 0, 0]
+    count = 0
+    for y in range(source.height):
+        for x in range(source.width):
+            if gray_pixels[x, y] < threshold:
+                continue
+            red_value, green_value, blue_value = source_pixels[x, y]
+            high = max(red_value, green_value, blue_value)
+            low = min(red_value, green_value, blue_value)
+            if high - low > 28:
+                continue
+            totals[0] += red_value
+            totals[1] += green_value
+            totals[2] += blue_value
+            count += 1
+    if count == 0:
+        return (background, background, background)
+    return tuple(min(255, max(0, int(round(value / count)))) for value in totals)  # type: ignore[return-value]
+
+
+def _lighten_background_stain_pixel(
+    pixel: tuple[int, int, int],
+    background_rgb: tuple[int, int, int],
+    delta: int,
+) -> tuple[int, int, int]:
+    red_value, green_value, blue_value = pixel
+    values = (red_value, green_value, blue_value)
+    output: list[int] = []
+    for value, background_value in zip(values, background_rgb):
+        tonal_lift = min(delta, max(0, background_value - value))
+        neutral_lift = max(0, int(round((background_value - value) * 0.55)))
+        output.append(min(255, value + max(tonal_lift, neutral_lift)))
+    return (output[0], output[1], output[2])
 
 
 def _background_stain_color_risk_reason(image: Image.Image) -> str | None:

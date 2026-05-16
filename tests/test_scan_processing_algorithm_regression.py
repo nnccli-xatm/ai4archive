@@ -256,6 +256,44 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in ("private_segmented_scanline.png", str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_safe_cloud_background_stain_stays_bounded_and_private(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-cloud-stain-combo-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "private_cloud_stain_combo.png"
+            _safe_cloud_stain_combination_page().save(source, dpi=(300, 300))
+            source_bytes = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "cloud-stain-combo", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+            audit = record["processing_audit"]
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(record["status"], "processed")
+            self.assertTrue(record["despeckled"])
+            self.assertTrue(record["background_stains_lightened"])
+            self.assertIn("lighten_background_stains_conservative", record["operations"])
+            self.assertEqual(audit["guardrail_failures"], [])
+            self.assertEqual(audit["cumulative_change_guard_action"], "passed")
+            self.assertEqual(audit["combination_quality_guard_action"], "passed")
+            self.assertEqual(audit["combination_quality_guard_reason_code"], "safe_combination_passed")
+            self.assertLessEqual(audit["background_stains_changed_pixel_ratio"], 0.085)
+            self.assertLessEqual(audit["cumulative_change_pixel_ratio"], 0.09)
+            self.assertLessEqual(audit["cumulative_change_score"], 0.20)
+            self.assertEqual(audit_summary["counts"]["background_stains_lightened_files"], 1)
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in ("private_cloud_stain_combo.png", str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_low_confidence_combination_preserves_original_with_public_reason_code(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-low-confidence-combo-") as temp_dir:
             root = Path(temp_dir)
@@ -880,6 +918,20 @@ def _safe_full_chain_combination_page() -> Image.Image:
         draw.line((58, y, 174, y), fill=(202, 202, 202), width=2)
     draw.ellipse((165, 28, 210, 58), fill=(222, 222, 222))
     image.putpixel((24, 24), (0, 0, 0))
+    return image
+
+
+def _safe_cloud_stain_combination_page() -> Image.Image:
+    image = Image.new("RGB", (320, 220), (242, 242, 236))
+    draw = ImageDraw.Draw(image)
+    for y in (48, 74, 100):
+        draw.rectangle((72, y, 220, y + 5), fill=(36, 36, 36))
+    mask = Image.new("L", image.size, 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.ellipse((170, 125, 260, 185), fill=180)
+    mask = mask.filter(ImageFilter.GaussianBlur(9))
+    image = Image.composite(Image.new("RGB", image.size, (224, 218, 178)), image, mask)
+    image.putpixel((28, 28), (10, 10, 10))
     return image
 
 
