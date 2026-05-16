@@ -25,6 +25,7 @@ REGRESSION_SIGNAL_OPERATIONS = (
     "normalize_tones",
     "lighten_edge_shadow",
     "lighten_background_stains",
+    "clean_bleed_through",
     "lighten_scanlines",
     "enhance_faded_text",
     "sharpen_text_edges",

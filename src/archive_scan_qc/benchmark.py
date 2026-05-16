@@ -33,6 +33,7 @@ PROCESSING_OPERATION_TIMING_NAMES = (
     "normalize_tones",
     "lighten_edge_shadow",
     "lighten_background_stains",
+    "clean_bleed_through",
     "lighten_scanlines",
     "enhance_faded_text",
     "sharpen_text_edges",
@@ -52,6 +53,7 @@ PROCESSING_OPERATION_TIMING_DIAGNOSTIC_SECONDS_PER_FILE = {
     "normalize_tones": 0.25,
     "lighten_edge_shadow": 0.25,
     "lighten_background_stains": 0.35,
+    "clean_bleed_through": 0.35,
     "lighten_scanlines": 0.35,
     "enhance_faded_text": 0.35,
     "sharpen_text_edges": 0.35,
@@ -100,6 +102,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--normalize-tones", action="store_true", help="Enable conservative gray/dark page tone normalization.")
     parser.add_argument("--lighten-edge-shadow", action="store_true", help="Enable conservative narrow edge-shadow lightening.")
     parser.add_argument("--lighten-background-stains", action="store_true", help="Enable conservative light background stain lightening.")
+    parser.add_argument("--clean-bleed-through", action="store_true", help="Enable conservative faint reverse-side ghost cleanup.")
     parser.add_argument("--lighten-scanlines", action="store_true", help="Enable conservative low-contrast scanline lightening.")
     parser.add_argument("--enhance-faded-text", action="store_true", help="Enable conservative low-contrast faded text enhancement.")
     parser.add_argument("--sharpen-text-edges", action="store_true", help="Enable conservative blurred text edge sharpening.")
@@ -181,6 +184,7 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
                         normalize_tones=args.normalize_tones,
                         lighten_edge_shadow=args.lighten_edge_shadow,
                         lighten_background_stains=args.lighten_background_stains,
+                        clean_bleed_through=args.clean_bleed_through,
                         lighten_scanlines=args.lighten_scanlines,
                         enhance_faded_text=args.enhance_faded_text,
                         sharpen_text_edges=getattr(args, "sharpen_text_edges", False),
@@ -884,6 +888,8 @@ def _processing_quality_thresholds() -> dict[str, float]:
         "max_edge_shadow_changed_pixel_ratio": 0.08,
         "max_background_stains_changed_pixel_ratio": 0.08,
         "max_background_stains_candidate_pixel_ratio": 1.0,
+        "max_bleed_through_changed_pixel_ratio": 0.045,
+        "max_bleed_through_candidate_pixel_ratio": 0.065,
         "max_scanlines_changed_pixel_ratio": 0.08,
         "max_scanlines_candidate_pixel_ratio": 1.0,
         "max_faded_text_changed_pixel_ratio": 0.10,
@@ -952,6 +958,17 @@ def _repair_algorithm_metrics(
                 "delta": "background_stains_delta",
                 "changed_pixel_ratio": "background_stains_changed_pixel_ratio",
                 "candidate_pixel_ratio": "background_stains_candidate_pixel_ratio",
+            },
+        ),
+        "clean_bleed_through": _algorithm_summary(
+            audit_records,
+            operation_timings,
+            operation="clean_bleed_through",
+            changed_flag="bleed_through_cleaned",
+            metrics={
+                "delta": "bleed_through_delta",
+                "changed_pixel_ratio": "bleed_through_changed_pixel_ratio",
+                "candidate_pixel_ratio": "bleed_through_candidate_pixel_ratio",
             },
         ),
         "lighten_scanlines": _algorithm_summary(
@@ -1025,6 +1042,8 @@ def _quality_threshold_violations(
         ("lighten_edge_shadow", "changed_pixel_ratio"): "max_edge_shadow_changed_pixel_ratio",
         ("lighten_background_stains", "changed_pixel_ratio"): "max_background_stains_changed_pixel_ratio",
         ("lighten_background_stains", "candidate_pixel_ratio"): "max_background_stains_candidate_pixel_ratio",
+        ("clean_bleed_through", "changed_pixel_ratio"): "max_bleed_through_changed_pixel_ratio",
+        ("clean_bleed_through", "candidate_pixel_ratio"): "max_bleed_through_candidate_pixel_ratio",
         ("lighten_scanlines", "changed_pixel_ratio"): "max_scanlines_changed_pixel_ratio",
         ("lighten_scanlines", "candidate_pixel_ratio"): "max_scanlines_candidate_pixel_ratio",
         ("enhance_faded_text", "changed_pixel_ratio"): "max_faded_text_changed_pixel_ratio",
@@ -1054,6 +1073,7 @@ def _enhancement_changed_files(audit_records: list[dict[str, Any]]) -> int:
         "tone_normalized",
         "edge_shadow_lightened",
         "background_stains_lightened",
+        "bleed_through_cleaned",
         "scanlines_lightened",
         "faded_text_enhanced",
         "text_edges_sharpened",
@@ -1098,6 +1118,7 @@ def _operations(args: argparse.Namespace) -> dict[str, bool | str]:
         "normalize_tones": getattr(args, "normalize_tones", False),
         "lighten_edge_shadow": getattr(args, "lighten_edge_shadow", False),
         "lighten_background_stains": getattr(args, "lighten_background_stains", False),
+        "clean_bleed_through": getattr(args, "clean_bleed_through", False),
         "lighten_scanlines": getattr(args, "lighten_scanlines", False),
         "enhance_faded_text": getattr(args, "enhance_faded_text", False),
         "sharpen_text_edges": getattr(args, "sharpen_text_edges", False),
@@ -1138,6 +1159,7 @@ def _csv_fields() -> list[str]:
         "normalize_tones",
         "lighten_edge_shadow",
         "lighten_background_stains",
+        "clean_bleed_through",
         "lighten_scanlines",
         "enhance_faded_text",
         "sharpen_text_edges",
@@ -1190,6 +1212,7 @@ def _csv_row(run: dict[str, Any], environment: dict[str, Any]) -> dict[str, Any]
         "normalize_tones": operations["normalize_tones"],
         "lighten_edge_shadow": operations.get("lighten_edge_shadow", False),
         "lighten_background_stains": operations.get("lighten_background_stains", False),
+        "clean_bleed_through": operations.get("clean_bleed_through", False),
         "lighten_scanlines": operations.get("lighten_scanlines", False),
         "enhance_faded_text": operations.get("enhance_faded_text", False),
         "sharpen_text_edges": operations.get("sharpen_text_edges", False),
