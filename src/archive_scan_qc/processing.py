@@ -2897,8 +2897,13 @@ def _edge_shadow_candidate_profile(edge: Image.Image, side: str, inner_mean: flo
 def _edge_shadow_near_edge_color_risk(image: Image.Image, margin: int) -> bool:
     if image.mode == "L":
         return False
-    width, height = image.size
-    margin = max(1, min(margin, width // 2, height // 2))
+    source_width, source_height = image.size
+    source_min_dimension = max(1, min(source_width, source_height))
+    sample = image.convert("RGB")
+    sample.thumbnail((600, 600), Image.Resampling.BILINEAR)
+    width, height = sample.size
+    scaled_margin = int(round(margin * (min(width, height) / source_min_dimension)))
+    margin = max(1, min(scaled_margin, width // 2, height // 2))
     boxes = (
         (0, 0, margin, height),
         (width - margin, 0, width, height),
@@ -2906,7 +2911,7 @@ def _edge_shadow_near_edge_color_risk(image: Image.Image, margin: int) -> bool:
         (0, height - margin, width, height),
     )
     for box in boxes:
-        crop = image.crop(box).convert("RGB")
+        crop = sample.crop(box)
         total = max(1, crop.width * crop.height)
         red = 0
         colored = 0
