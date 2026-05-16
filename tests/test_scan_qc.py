@@ -10326,6 +10326,44 @@ class ScanQcTest(unittest.TestCase):
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertNotIn("A001_broken_glare_edge", json.dumps(audit_summary, ensure_ascii=False))
 
+    def test_trim_dark_border_trims_deep_gray_edge_with_multiple_small_glare_gaps(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "A001_multi_gap_deep_gray_edge.png"
+            image = Image.new("RGB", (160, 120), (244, 244, 240))
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((0, 0, 159, 119), outline=(88, 88, 88), width=4)
+            for y0, y1 in ((18, 26), (52, 60), (88, 96)):
+                draw.rectangle((0, y0, 3, y1), fill=(244, 244, 240))
+            draw.rectangle((52, 50, 108, 55), fill=(25, 25, 25))
+            image.save(source)
+            source_bytes = source.read_bytes()
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(trim_dark_border=True))
+            audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
+
+            record = manifest["files"][0]
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertTrue(record["dark_border_trimmed"])
+            self.assertEqual(record["dark_border_bbox"], [4, 4, 156, 116])
+            self.assertEqual(record["output_size"], [152, 112])
+            self.assertLessEqual(record["processing_audit"]["max_trim_margin_ratio"], 0.034)
+            self.assertEqual(record["dark_border_reason"], "broken dark edge border trimmed")
+            self.assertEqual(record["dark_border_reason_code"], "trimmed_broken_edge")
+            self.assertEqual(record["dark_border_edge_sides"], ["left", "right", "top", "bottom"])
+            self.assertEqual(record["dark_border_band_width_bucket"], "3-4px")
+            self.assertEqual(
+                audit_summary["guardrails"]["dark_border_trim"]["guardrail_reason_code_distribution"],
+                {"trimmed_broken_edge": 1},
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("A001_multi_gap_deep_gray_edge", json.dumps(audit_summary, ensure_ascii=False))
+
     def test_trim_dark_border_keeps_edge_content_inside_narrow_deep_gray_scan_edge(self) -> None:
         image = Image.new("RGB", (120, 90), (242, 242, 238))
         draw = ImageDraw.Draw(image)

@@ -9356,16 +9356,24 @@ def _is_broken_dark_edge_line(values: list[int]) -> bool:
         return False
     total_light_gap = sum(end - start for start, end in light_runs)
     longest_light_gap = max(end - start for start, end in light_runs)
+    total_light_gap_ratio = total_light_gap / length
+    longest_light_gap_ratio = longest_light_gap / length
     if len(light_runs) > 2:
+        if len(light_runs) > 4:
+            return False
+        if total_light_gap_ratio > 0.28 or longest_light_gap_ratio > 0.10:
+            return False
+        min_longest_dark_run_ratio = 0.18
+    elif total_light_gap_ratio > 0.34 or longest_light_gap_ratio > 0.34:
         return False
-    if total_light_gap / length > 0.34 or longest_light_gap / length > 0.34:
-        return False
+    else:
+        min_longest_dark_run_ratio = 0.35
 
     dark_runs = _boolean_runs(deep_gray_pixels)
     if not dark_runs:
         return False
     longest_dark_run = max(end - start for start, end in dark_runs)
-    return longest_dark_run / length >= 0.35
+    return longest_dark_run / length >= min_longest_dark_run_ratio
 
 
 def _boolean_runs(flags: list[bool]) -> list[tuple[int, int]]:
