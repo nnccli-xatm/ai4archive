@@ -5190,14 +5190,13 @@ def _lighten_fold_shadows_conservative(image: Image.Image) -> FoldShadowCleanupR
     grayscale = image.convert("L")
     histogram = grayscale.histogram()
     total = image.width * image.height
-    p01 = _histogram_percentile(histogram, total, 0.01)
     p05 = _histogram_percentile(histogram, total, 0.05)
     p50 = _histogram_percentile(histogram, total, 0.50)
     p90 = _histogram_percentile(histogram, total, 0.90)
     p95 = _histogram_percentile(histogram, total, 0.95)
     if p95 < 218 or p50 < 205 or p90 < 214:
         return _fold_shadows_noop(image, "fold shadow cleanup skipped: page is not a light clean background")
-    if p95 - p01 > 120:
+    if p95 - p05 > 120:
         return _fold_shadows_noop(image, "fold shadow cleanup skipped: high-contrast foreground or mixed content risk")
 
     foreground_threshold = min(168, max(92, p50 - 42))
@@ -5349,7 +5348,7 @@ def _fold_shadow_axis_plan(
         )
 
     groups = _contiguous_groups(candidate_indexes)
-    min_width = max(2, int(axis_length * 0.012))
+    min_width = max(1, int(axis_length * 0.006))
     max_width = max(min_width, int(round(axis_length * 0.08)))
     selected_groups: list[list[int]] = []
     selected: set[tuple[int, int]] = set()
