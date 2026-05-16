@@ -8852,6 +8852,52 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn("A001_shallow_text", audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
 
+    def test_deskew_corrects_faint_segmented_text_on_light_paper(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            image = _synthetic_faint_segmented_text_page().rotate(
+                -0.8,
+                resample=Image.Resampling.BICUBIC,
+                expand=True,
+                fillcolor=(248, 248, 244),
+            )
+            source = input_dir / "A001_faint_segmented_text.png"
+            image.save(source, dpi=(300, 300))
+            source_sha_before = _sha256_for_test(source)
+            alignment_before = _faint_text_horizontal_alignment_score(image)
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            disabled_manifest = process_images(report, input_dir, root / "disabled", ProcessingOptions(deskew=False))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(deskew=True, workers=1))
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            disabled_record = disabled_manifest["files"][0]
+            self.assertFalse(disabled_record["deskewed"])
+            self.assertEqual(disabled_record["deskew_reason"], "deskew disabled")
+
+            record = manifest["files"][0]
+            self.assertEqual(record["status"], "processed")
+            self.assertTrue(record["deskewed"])
+            self.assertAlmostEqual(record["skew_angle_degrees"], -0.8, delta=0.25)
+            self.assertGreaterEqual(record["skew_confidence"], 0.08)
+            self.assertLessEqual(abs(record["skew_angle_degrees"]), 1.25)
+            self.assertEqual(record["deskew_reason"], "deskew applied")
+            self.assertEqual(source_sha_before, _sha256_for_test(source))
+            self.assertIn("deskew_conservative", record["operations"])
+            with Image.open(process_dir / "images" / "A001_faint_segmented_text.png") as processed:
+                alignment_after = _faint_text_horizontal_alignment_score(processed)
+            self.assertGreater(alignment_after, alignment_before * 1.5)
+            self.assertEqual(audit_summary["counts"]["deskewed_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["deskew"]["reason_distribution"]["deskew applied"], 1)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("A001_faint_segmented_text", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
     def test_deskew_does_not_rotate_blank_or_low_contrast_pages(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -8938,6 +8984,24 @@ class ScanQcTest(unittest.TestCase):
             self.assertFalse(records["A001_inconsistent.png"]["deskewed"])
             self.assertEqual(records["A001_inconsistent.png"]["deskew_reason"], "low confidence")
             self.assertIn("deskew_noop", records["A001_inconsistent.png"]["operations"])
+
+    def test_deskew_noops_for_faint_ambiguous_multi_angle_text(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            _synthetic_faint_ambiguous_text_page().save(input_dir / "A001_faint_ambiguous.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(deskew=True, workers=1))
+
+            record = manifest["files"][0]
+            self.assertEqual(record["status"], "processed")
+            self.assertFalse(record["deskewed"])
+            self.assertEqual(record["deskew_reason"], "low contrast")
+            self.assertIn("deskew_noop", record["operations"])
 
     def test_deskew_noops_when_edge_content_would_expand_crop_risk(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -13917,6 +13981,59 @@ def _synthetic_shallow_stable_text_page(*, red_mark: bool = False) -> Image.Imag
         draw.ellipse((164, 42, 210, 88), outline=(180, 38, 32), width=3)
         draw.line((176, 66, 198, 66), fill=(180, 38, 32), width=2)
     return image
+
+
+def _synthetic_faint_segmented_text_page() -> Image.Image:
+    image = Image.new("RGB", (420, 520), (248, 248, 244))
+    draw = ImageDraw.Draw(image)
+    ink = (232, 232, 232)
+    for y in range(80, 390, 26):
+        x = 60
+        while x < 350:
+            width = 4 + ((x + y) // 13) % 10
+            draw.rectangle((x, y, min(350, x + width), y + 2), fill=ink)
+            x += width + 8
+    return image
+
+
+def _synthetic_faint_ambiguous_text_page() -> Image.Image:
+    base = Image.new("RGB", (420, 520), (248, 248, 244))
+    upper = _synthetic_faint_segmented_text_page().crop((0, 0, 420, 250)).rotate(
+        -0.8,
+        resample=Image.Resampling.BICUBIC,
+        expand=False,
+        fillcolor=(248, 248, 244),
+    )
+    lower = _synthetic_faint_segmented_text_page().crop((0, 250, 420, 520)).rotate(
+        1.0,
+        resample=Image.Resampling.BICUBIC,
+        expand=False,
+        fillcolor=(248, 248, 244),
+    )
+    base.paste(upper, (0, 0))
+    base.paste(lower, (0, 250))
+    return base
+
+
+def _faint_text_horizontal_alignment_score(image: Image.Image) -> float:
+    grayscale = image.convert("L")
+    histogram = grayscale.histogram()
+    total_pixels = image.width * image.height
+    raw_low = _histogram_percentile_for_test(histogram, total_pixels, 0.005)
+    raw_high = _histogram_percentile_for_test(histogram, total_pixels, 0.995)
+    threshold = max(0, raw_high - max(6, min(24, int(round((raw_high - raw_low) * 0.75)))))
+    ink = grayscale.point(lambda value: 255 if value <= threshold else 0, mode="L")
+    return _horizontal_projection_variance(ink)
+
+
+def _histogram_percentile_for_test(histogram: list[int], total: int, percentile: float) -> int:
+    target = total * percentile
+    running = 0
+    for value, count in enumerate(histogram):
+        running += count
+        if running >= target:
+            return value
+    return 255
 
 
 def _synthetic_shallow_table_page() -> Image.Image:

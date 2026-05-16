@@ -7840,6 +7840,9 @@ def _detect_skew(image: Image.Image) -> SkewDetection:
     raw_high = _histogram_percentile(raw_histogram, total_pixels, 0.995)
     if high - low < 35:
         if raw_high - raw_low < 35:
+            faint = _detect_faint_stable_text_skew(raw_grayscale, raw_low, raw_high)
+            if faint.angle_degrees is not None:
+                return faint
             return SkewDetection(None, 0.0, "low contrast")
         sparse_threshold = max(0, raw_high - 35)
         sparse_foreground = sum(raw_histogram[: sparse_threshold + 1]) / total_pixels
@@ -7991,6 +7994,38 @@ def _detect_shallow_stable_text_skew(
         return SkewDetection(None, 0.0, "low confidence")
     confidence = max(0.0, min(1.0, 0.24 + len(line_angles) * 0.045 - spread * 0.35))
     return SkewDetection(round(-average_angle, 2), round(confidence, 3), "shallow stable text skew detected")
+
+
+def _detect_faint_stable_text_skew(
+    raw_grayscale: Image.Image,
+    raw_low: int,
+    raw_high: int,
+) -> SkewDetection:
+    if raw_high < 220:
+        return SkewDetection(None, 0.0, "low contrast")
+
+    raw_span = raw_high - raw_low
+    if raw_span < 8:
+        return SkewDetection(None, 0.0, "low contrast")
+
+    # Low-contrast scanner text can sit far above the normal foreground threshold.
+    # Use a narrow paper-relative threshold, then require stable text-line geometry.
+    threshold = max(0, raw_high - max(6, min(24, int(round(raw_span * 0.75)))))
+    ink = raw_grayscale.point(lambda value: 255 if value <= threshold else 0, mode="L")
+    bbox = ink.getbbox()
+    if not bbox:
+        return SkewDetection(None, 0.0, "low contrast")
+
+    ink_ratio = _nonzero_ratio(ink, bbox)
+    if ink_ratio < 0.003 or ink_ratio > 0.25:
+        return SkewDetection(None, 0.0, "low contrast")
+
+    shallow = _detect_shallow_stable_text_skew(raw_grayscale, ink, bbox, raw_high=raw_high)
+    if shallow.angle_degrees is None:
+        return SkewDetection(None, 0.0, "low contrast")
+
+    confidence = max(shallow.confidence, 0.14)
+    return SkewDetection(shallow.angle_degrees, round(confidence, 3), "faint stable text skew detected")
 
 
 def _merge_close_row_groups(groups: list[tuple[int, int]], *, max_gap: int) -> list[tuple[int, int]]:
