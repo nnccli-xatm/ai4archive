@@ -3326,6 +3326,10 @@ def _scanline_axis_lightening_plan(
         protected_ratio = protected_count / max(1, cross_length)
         candidate_ratio = len(selected) / max(1, cross_length)
         candidate_available_ratio = len(selected) / max(1, len(values))
+        candidate_runs = _scanline_candidate_runs(selected, horizontal=horizontal)
+        long_run_floor = max(10, int(round(cross_length * 0.055)))
+        long_runs = [run for run in candidate_runs if run >= long_run_floor]
+        longest_run_ratio = (max(candidate_runs) if candidate_runs else 0) / max(1, cross_length)
         dark_ratio = dark / max(1, len(values)) if values else 1.0
         max_dark_ratio = max(max_dark_ratio, dark_ratio)
         mean = sum(values) / len(values) if values else 0.0
@@ -3336,6 +3340,8 @@ def _scanline_axis_lightening_plan(
                 "protected_ratio": protected_ratio,
                 "candidate_ratio": candidate_ratio,
                 "candidate_available_ratio": candidate_available_ratio,
+                "segment_count": len(long_runs),
+                "longest_segment_ratio": longest_run_ratio,
                 "dark_ratio": dark_ratio,
                 "selected": selected,
             }
@@ -3365,7 +3371,14 @@ def _scanline_axis_lightening_plan(
             continue
         if stat["available_ratio"] < 0.72:
             continue
-        if stat["candidate_ratio"] < 0.38 or stat["candidate_available_ratio"] < 0.54:
+        continuous_candidate = stat["candidate_ratio"] >= 0.38 and stat["candidate_available_ratio"] >= 0.54
+        segmented_candidate = (
+            stat["candidate_ratio"] >= 0.24
+            and stat["candidate_available_ratio"] >= 0.32
+            and 3 <= stat["segment_count"] <= 8
+            and stat["longest_segment_ratio"] >= 0.07
+        )
+        if not (continuous_candidate or segmented_candidate):
             continue
         neighbor_means = [
             line_stats[neighbor]["mean"]
@@ -3379,6 +3392,8 @@ def _scanline_axis_lightening_plan(
         local_mean = sum(neighbor_means) / len(neighbor_means)
         local_delta = local_mean - stat["mean"]
         if not (3.0 <= local_delta <= 22.0):
+            continue
+        if segmented_candidate and not continuous_candidate and (local_delta < 4.5 or stat["dark_ratio"] > 0.002):
             continue
         if local_delta < 4.5 and (
             stat["candidate_ratio"] < 0.68
@@ -3436,6 +3451,22 @@ def _contiguous_groups(values: list[int]) -> list[list[int]]:
         else:
             groups[-1].append(value)
     return groups
+
+
+def _scanline_candidate_runs(points: list[tuple[int, int]], *, horizontal: bool) -> list[int]:
+    if not points:
+        return []
+    coordinates = sorted(x if horizontal else y for x, y in points)
+    runs: list[int] = []
+    run_length = 1
+    for previous, current in zip(coordinates, coordinates[1:]):
+        if current == previous + 1:
+            run_length += 1
+        elif current != previous:
+            runs.append(run_length)
+            run_length = 1
+    runs.append(run_length)
+    return runs
 
 
 def _scanlines_noop(
