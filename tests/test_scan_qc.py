@@ -6541,6 +6541,109 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn("private_sparse_multi_spot_stains", audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
 
+    def test_lighten_background_stains_improves_localized_sparse_tonal_stains(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "private_localized_gray_stain.png": _synthetic_localized_sparse_background_stain_page("gray"),
+                "private_localized_yellow_stain.png": _synthetic_localized_sparse_background_stain_page("yellow"),
+                "private_localized_multi_stains.png": _synthetic_localized_sparse_background_stain_page("multi"),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                path = input_dir / name
+                image.save(path, dpi=(300, 300))
+                source_bytes[name] = path.read_bytes()
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(lighten_background_stains=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for record in manifest["files"]:
+                source_name = record["source_relative_path"]
+                self.assertEqual((input_dir / source_name).read_bytes(), source_bytes[source_name])
+                self.assertTrue(record["background_stains_lightened"], source_name)
+                self.assertIn("localized low-contrast stains", record["background_stains_reason"])
+                audit = record["processing_audit"]
+                self.assertGreater(audit["background_stains_delta"], 3.9)
+                self.assertGreater(audit["background_stains_changed_pixel_ratio"], 0.0)
+                self.assertLessEqual(audit["background_stains_changed_pixel_ratio"], 0.032)
+                self.assertLessEqual(audit["background_stains_candidate_pixel_ratio"], 0.032)
+                self.assertLessEqual(audit["cumulative_change_candidate_pixel_ratio"], 0.04)
+                self.assertEqual(audit["guardrail_failures"], [])
+
+                original = pages[source_name].convert("RGB")
+                processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+                for protected_box in ((24, 40, 100, 134), (112, 22, 128, 38)):
+                    diff = ImageChops.difference(original.crop(protected_box), processed.crop(protected_box))
+                    self.assertIsNone(diff.getbbox(), f"{source_name} changed protected content {protected_box}")
+
+            self.assertEqual(audit_summary["counts"]["background_stains_lightened_files"], 3)
+            self.assertEqual(audit_summary["guardrails"]["background_stains"]["localized_applied_files"], 3)
+            self.assertGreaterEqual(
+                audit_summary["guardrails"]["background_stains"]["reason_distribution"][
+                    "background stain lightening applied: conservative localized low-contrast stains on light background"
+                ],
+                3,
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            for private_name in ("private_localized_gray_stain", "private_localized_yellow_stain", "private_localized_multi_stains"):
+                self.assertNotIn(private_name, audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
+    def test_lighten_background_stains_skips_localized_protected_sparse_tonal_cases(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "private_localized_text_touching.png": _synthetic_localized_sparse_background_stain_page("text_touching"),
+                "private_localized_edge_mark.png": _synthetic_localized_sparse_background_stain_page("edge"),
+                "private_localized_color_stamp.png": _synthetic_localized_sparse_background_stain_page("color_stamp"),
+                "private_localized_photo_patch.png": _synthetic_localized_sparse_background_stain_page("photo"),
+                "private_localized_page_number.png": _synthetic_localized_sparse_background_stain_page("page_number"),
+                "private_localized_broad_gradient.png": _synthetic_localized_sparse_background_stain_page("broad_gradient"),
+            }
+            for name, image in pages.items():
+                image.save(input_dir / name, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(lighten_background_stains=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for record in manifest["files"]:
+                source_name = record["source_relative_path"]
+                self.assertFalse(record["background_stains_lightened"], source_name)
+                self.assertIn("lighten_background_stains_noop", record["operations"])
+                self.assertEqual(record["processing_audit"]["background_stains_changed_pixel_ratio"], 0.0)
+                processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+                self.assertIsNone(ImageChops.difference(pages[source_name].convert("RGB"), processed).getbbox(), source_name)
+
+            self.assertEqual(audit_summary["counts"]["background_stains_lightened_files"], 0)
+            self.assertEqual(audit_summary["counts"]["background_stains_skipped_files"], 6)
+            self.assertGreaterEqual(len(audit_summary["guardrails"]["background_stains"]["skip_reason_distribution"]), 3)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_localized_", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
     def test_lighten_background_stains_skips_component_guard_risks_with_public_reasons(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -15003,6 +15106,57 @@ def _synthetic_background_multi_stain_page(*, variant: str = "safe") -> Image.Im
 
     for box, color in spots:
         draw.ellipse(box, fill=color)
+    return image
+
+
+def _synthetic_localized_sparse_background_stain_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (260, 190), (242, 242, 240))
+    draw = ImageDraw.Draw(image)
+    for y in range(42, 132, 24):
+        draw.rectangle((28, y, 96, y + 4), fill=(35, 35, 35))
+    draw.text((116, 24), "12", fill=(30, 30, 30))
+
+    def paste_soft_ellipse(box: tuple[int, int, int, int], color: tuple[int, int, int], blur: float = 0.0) -> None:
+        nonlocal image
+        mask = Image.new("L", image.size, 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.ellipse(box, fill=255)
+        if blur:
+            mask = mask.filter(ImageFilter.GaussianBlur(blur))
+        image = Image.composite(Image.new("RGB", image.size, color), image, mask)
+
+    if variant == "gray":
+        paste_soft_ellipse((170, 70, 186, 84), (232, 232, 232))
+    elif variant == "yellow":
+        paste_soft_ellipse((170, 70, 188, 86), (236, 232, 210))
+    elif variant == "multi":
+        paste_soft_ellipse((138, 46, 154, 60), (232, 232, 232), 2.0)
+        paste_soft_ellipse((178, 78, 194, 92), (236, 232, 210), 2.0)
+        paste_soft_ellipse((150, 112, 166, 126), (233, 233, 233), 2.0)
+    elif variant == "text_touching":
+        paste_soft_ellipse((86, 74, 112, 96), (232, 232, 232), 1.0)
+    elif variant == "edge":
+        paste_soft_ellipse((170, 70, 188, 86), (232, 232, 232))
+        ImageDraw.Draw(image).rectangle((0, 76, 14, 104), fill=(58, 58, 58))
+    elif variant == "color_stamp":
+        paste_soft_ellipse((170, 70, 188, 86), (232, 232, 232))
+        ImageDraw.Draw(image).ellipse((148, 48, 214, 106), outline=(180, 42, 34), width=3)
+    elif variant == "photo":
+        for x in range(150, 222, 4):
+            for y in range(58, 122, 4):
+                shade = 88 + ((x * 7 + y * 11) % 96)
+                draw.rectangle((x, y, x + 2, y + 2), fill=(shade, shade + 4, shade + 8))
+    elif variant == "page_number":
+        draw.text((174, 74), "36", fill=(188, 188, 184))
+    elif variant == "broad_gradient":
+        overlay = Image.new("RGB", image.size, (224, 224, 218))
+        mask = Image.new("L", image.size, 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.rectangle((118, 36, 244, 154), fill=150)
+        mask = mask.filter(ImageFilter.GaussianBlur(18))
+        image = Image.composite(overlay, image, mask)
+    else:
+        raise ValueError(f"unknown localized stain variant: {variant}")
     return image
 
 

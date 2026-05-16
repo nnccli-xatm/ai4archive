@@ -2317,6 +2317,11 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                     reason for reason in background_stains_reasons if isinstance(reason, str)
                 ),
                 "skip_reason_distribution": _reason_counts(background_stains_skipped_reasons),
+                "localized_applied_files": sum(
+                    1
+                    for reason in background_stains_reasons
+                    if isinstance(reason, str) and "localized low-contrast stains" in reason
+                ),
                 "protection_triggered_files": sum(1 for reason in background_stains_skipped_reasons if "risk" in reason),
                 "conservative_scope_skip_files": sum(
                     1 for reason in background_stains_skipped_reasons if "conservative scope" in reason
@@ -4753,13 +4758,14 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
     p99 = _histogram_percentile(histogram, total, 0.99)
     if p95 < 210 or p50 < 195:
         return _background_stains_noop(image, "background stain lightening skipped: page is too dark")
-    if p99 - p05 < 14:
-        return _background_stains_noop(image, "background stain lightening skipped: low-confidence tonal evidence")
+    low_global_tonal_evidence = p99 - p05 < 14
 
     foreground_threshold = min(150, max(80, p50 - 46))
     foreground = grayscale.point(lambda value: 255 if value <= foreground_threshold else 0, mode="L")
     foreground_ratio = _mask_ratio(foreground)
     if foreground_ratio < 0.002:
+        if low_global_tonal_evidence:
+            return _background_stains_noop(image, "background stain lightening skipped: low-confidence tonal evidence")
         return _background_stains_noop(image, "background stain lightening skipped: foreground evidence too sparse")
     if foreground_ratio > 0.24:
         return _background_stains_noop(image, "background stain lightening skipped: foreground too dense")
@@ -4808,11 +4814,22 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
     protected = foreground.filter(ImageFilter.MaxFilter(13))
     protected_overlap_ratio = _mask_ratio(ImageChops.multiply(candidate, protected))
     if protected_overlap_ratio > 0.001 or protected_overlap_ratio / max(raw_candidate_ratio, 0.000001) > 0.02:
-        return _background_stains_noop(
-            image,
-            "background stain lightening skipped: stain candidate near text, stamp, annotation, or original mark risk",
-        )
-    candidate = ImageChops.multiply(candidate, ImageChops.invert(protected))
+        if not low_global_tonal_evidence:
+            return _background_stains_noop(
+                image,
+                "background stain lightening skipped: stain candidate near text, stamp, annotation, or original mark risk",
+            )
+        protected_pixels = protected.load()
+        filtered_candidate = Image.new("L", candidate.size, 0)
+        filtered_pixels = filtered_candidate.load()
+        for component in _mask_components(candidate):
+            if any(protected_pixels[x, y] for x, y in component):
+                continue
+            for x, y in component:
+                filtered_pixels[x, y] = 255
+        candidate = filtered_candidate
+    else:
+        candidate = ImageChops.multiply(candidate, ImageChops.invert(protected))
     candidate_ratio = _mask_ratio(candidate)
     if candidate_ratio < 0.00008:
         return _background_stains_noop(image, "background stain lightening skipped: no confident light background stains")
@@ -4859,9 +4876,22 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
             area_ratio <= 0.012
             and width <= image.width * 0.18
             and height <= image.height * 0.18
+            and width >= 4
+            and height >= 4
+            and max(width, height) / max(1, min(width, height)) <= 4.5
             and color_shift <= 36
         )
-        if not (small_speckle_shape or low_frequency_shape):
+        localized_soft_shape = (
+            low_global_tonal_evidence
+            and area_ratio <= 0.032
+            and width <= image.width * 0.24
+            and height <= image.height * 0.24
+            and width >= 8
+            and height >= 8
+            and edge_density <= 0.10
+            and color_shift <= 36
+        )
+        if not (small_speckle_shape or low_frequency_shape or localized_soft_shape):
             return _background_stains_noop(
                 image,
                 "background stain lightening skipped: large stain or historical damage risk",
@@ -4872,6 +4902,12 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
     changed_ratio = len(selected) / max(1, total)
     if changed_ratio < 0.00008:
         return _background_stains_noop(image, "background stain lightening skipped: no confident light background stains")
+    if low_global_tonal_evidence and changed_ratio > 0.032:
+        return _background_stains_noop(
+            image,
+            "background stain lightening skipped: low-confidence tonal evidence",
+            candidate_ratio,
+        )
     if changed_ratio > 0.085:
         return _background_stains_noop(
             image,
@@ -4922,7 +4958,11 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
     return BackgroundStainLighteningResult(
         result_image,
         True,
-        "background stain lightening applied: conservative low-contrast stains on light background",
+        (
+            "background stain lightening applied: conservative localized low-contrast stains on light background"
+            if low_global_tonal_evidence
+            else "background stain lightening applied: conservative low-contrast stains on light background"
+        ),
         before_mean,
         after_mean,
         round(after_mean - before_mean, 6),
