@@ -2600,6 +2600,7 @@ class ScanQcTest(unittest.TestCase):
                     "--benchmark-workers-list",
                     "1",
                     "--no-process-images",
+                    "--clean-bleed-through",
                 ]
             )
             payload = module.run_aggregate_baseline(args)
@@ -2610,6 +2611,7 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(payload["target_environment"]["validation_target"], "puersai-hpc")
             self.assertFalse(payload["target_environment"]["gpu_acceleration_used"])
             self.assertEqual(payload["worker_settings"]["requested_workers"], 1)
+            self.assertTrue(payload["operations"]["clean_bleed_through"])
             self.assertEqual(payload["aggregate_counts"]["total_files"], 1)
             self.assertEqual(payload["aggregate_counts"]["openable_files"], 1)
             self.assertIn("environment", payload)
@@ -2693,6 +2695,33 @@ class ScanQcTest(unittest.TestCase):
         self.assertEqual(hardware["gpu_memory_total_gb"], 0.0)
         self.assertFalse(hardware["gpu_acceleration_used"])
         self.assertTrue(any("nvidia-smi unavailable" in warning for warning in hardware["warnings"]))
+
+    def test_private_integration_parser_reports_clean_bleed_through_option(self) -> None:
+        module = _load_private_integration_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-input"
+            output_dir = root / "private-output"
+            input_dir.mkdir()
+            Image.new("RGB", (32, 24), "white").save(input_dir / "private_page_001.png", dpi=(300, 300))
+
+            args = module.build_parser().parse_args(
+                [
+                    "--input",
+                    str(input_dir),
+                    "--out",
+                    str(output_dir),
+                    "--workers",
+                    "1",
+                    "--clean-bleed-through",
+                    "--skip-benchmark",
+                ]
+            )
+            payload = module.run_private_integration(args).summary
+
+        self.assertTrue(args.clean_bleed_through)
+        self.assertTrue(payload["configuration"]["clean_bleed_through"])
+        self.assertTrue(payload["privacy_self_check"]["passed"])
 
     def test_private_integration_reports_numpy_despeckle_backend_available(self) -> None:
         module = _load_private_integration_module()
@@ -3334,6 +3363,7 @@ class ScanQcTest(unittest.TestCase):
                 "--normalize-tones",
                 "--lighten-edge-shadow",
                 "--lighten-background-stains",
+                "--clean-bleed-through",
                 "--lighten-scanlines",
                 "--enhance-faded-text",
                 "--sharpen-text-edges",
@@ -3352,6 +3382,7 @@ class ScanQcTest(unittest.TestCase):
         self.assertTrue(baseline_args.normalize_tones)
         self.assertTrue(baseline_args.lighten_edge_shadow)
         self.assertTrue(baseline_args.lighten_background_stains)
+        self.assertTrue(baseline_args.clean_bleed_through)
         self.assertTrue(baseline_args.lighten_scanlines)
         self.assertTrue(baseline_args.enhance_faded_text)
         self.assertTrue(baseline_args.sharpen_text_edges)
