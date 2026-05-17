@@ -2429,6 +2429,15 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                 "candidate_coverage_bucket_distribution": _reason_counts(fold_shadows_coverage_buckets),
                 "changed_pixel_ratio": _aggregate_metric(audit_records, "fold_shadows_changed_pixel_ratio"),
                 "candidate_pixel_ratio": _aggregate_metric(audit_records, "fold_shadows_candidate_pixel_ratio"),
+                "changed_pixel_ratio_bucket_distribution": _ratio_distribution(
+                    audit_records, "fold_shadows_changed_pixel_ratio"
+                ),
+                "candidate_pixel_ratio_bucket_distribution": _ratio_distribution(
+                    audit_records, "fold_shadows_candidate_pixel_ratio"
+                ),
+                "correction_delta_bucket_distribution": _metric_bucket_distribution(
+                    audit_records, "fold_shadows_delta", (0, 3, 4, 8, 12, 18)
+                ),
                 "reason_distribution": _reason_counts(
                     reason for reason in fold_shadows_reasons if isinstance(reason, str)
                 ),
@@ -5987,7 +5996,7 @@ def _fold_shadow_axis_plan(
             values.append(value)
             if value <= 150:
                 dark_count += 1
-            if 4 <= background - value <= 48 and value >= 188:
+            if 3 <= background - value <= 48 and value >= 188:
                 selected.append((x, y))
                 selected_crosses.add(cross)
         available_ratio = len(values) / max(1, cross_length)
@@ -6051,7 +6060,7 @@ def _fold_shadow_axis_plan(
         local_mean = sum(neighbor_means) / len(neighbor_means)
         band_mean = sum(stats[index]["mean"] for index in group) / len(group)
         local_delta = local_mean - band_mean
-        if not (4.0 <= local_delta <= 42.0):
+        if not (2.25 <= local_delta <= 42.0):
             continue
         if any(stats[index]["protected_ratio"] > 0.004 for index in group):
             return _empty_fold_shadow_plan(
