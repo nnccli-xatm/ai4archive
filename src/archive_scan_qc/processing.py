@@ -2385,6 +2385,15 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                 ),
                 "changed_pixel_ratio": _aggregate_metric(audit_records, "background_stains_changed_pixel_ratio"),
                 "candidate_pixel_ratio": _aggregate_metric(audit_records, "background_stains_candidate_pixel_ratio"),
+                "changed_pixel_ratio_bucket_distribution": _ratio_distribution(
+                    audit_records, "background_stains_changed_pixel_ratio"
+                ),
+                "candidate_pixel_ratio_bucket_distribution": _ratio_distribution(
+                    audit_records, "background_stains_candidate_pixel_ratio"
+                ),
+                "correction_delta_bucket_distribution": _metric_bucket_distribution(
+                    audit_records, "background_stains_delta", (0, 2, 4, 6, 10, 16)
+                ),
                 "reason_distribution": _reason_counts(
                     reason for reason in background_stains_reasons if isinstance(reason, str)
                 ),
@@ -5035,6 +5044,7 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
             candidate_ratio,
         )
     selected: set[tuple[int, int]] = set()
+    localized_component_selected = False
     for component in components:
         area = len(component)
         xs = [point[0] for point in component]
@@ -5047,6 +5057,14 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
         component_box = (min(xs), min(ys), max(xs) + 1, max(ys) + 1)
         edge_density = _background_stain_component_edge_density(grayscale, component_box, background)
         color_shift = _background_stain_component_color_shift(image, component)
+        local_background, local_contrast = _background_stain_component_local_context(
+            grayscale,
+            candidate,
+            protected,
+            component,
+            component_box,
+            background,
+        )
         low_frequency_shape = (
             area_ratio <= 0.085
             and width <= image.width * 0.62
@@ -5076,12 +5094,27 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
             and edge_density <= 0.10
             and color_shift <= 36
         )
-        if not (small_speckle_shape or low_frequency_shape or localized_soft_shape):
+        medium_soft_shape = (
+            area_ratio <= 0.035
+            and width <= image.width * 0.26
+            and height <= image.height * 0.26
+            and width >= 10
+            and height >= 10
+            and max(width, height) / max(1, min(width, height)) <= 2.8
+            and edge_density <= 0.16
+            and color_shift <= 26
+            and local_background is not None
+            and local_background >= background - 3
+            and 4.5 <= local_contrast <= 14.0
+        )
+        if not (small_speckle_shape or low_frequency_shape or localized_soft_shape or medium_soft_shape):
             return _background_stains_noop(
                 image,
                 "background stain lightening skipped: large stain or historical damage risk",
                 candidate_ratio,
             )
+        if localized_soft_shape or medium_soft_shape:
+            localized_component_selected = True
         selected.update(component)
 
     changed_ratio = len(selected) / max(1, total)
@@ -5145,7 +5178,7 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
         True,
         (
             "background stain lightening applied: conservative localized low-contrast stains on light background"
-            if low_global_tonal_evidence
+            if localized_component_selected or changed_ratio <= 0.035
             else "background stain lightening applied: conservative low-contrast stains on light background"
         ),
         before_mean,
@@ -5178,6 +5211,45 @@ def _background_stain_component_color_shift(image: Image.Image, component: list[
     if not shifts:
         return 0.0
     return sum(shifts) / len(shifts)
+
+
+def _background_stain_component_local_context(
+    grayscale: Image.Image,
+    candidate: Image.Image,
+    protected: Image.Image,
+    component: list[tuple[int, int]],
+    box: tuple[int, int, int, int],
+    background: int,
+) -> tuple[float | None, float]:
+    component_values = [grayscale.getpixel(point) for point in component]
+    if not component_values:
+        return None, 0.0
+    component_mean = sum(component_values) / len(component_values)
+    left, top, right, bottom = box
+    pad = max(8, int(round(min(grayscale.width, grayscale.height) * 0.045)))
+    sample_box = (
+        max(0, left - pad),
+        max(0, top - pad),
+        min(grayscale.width, right + pad),
+        min(grayscale.height, bottom + pad),
+    )
+    gray_pixels = grayscale.load()
+    candidate_pixels = candidate.load()
+    protected_pixels = protected.load()
+    samples: list[int] = []
+    for y in range(sample_box[1], sample_box[3]):
+        for x in range(sample_box[0], sample_box[2]):
+            if left <= x < right and top <= y < bottom:
+                continue
+            if candidate_pixels[x, y] or protected_pixels[x, y]:
+                continue
+            value = gray_pixels[x, y]
+            if value >= background - 4:
+                samples.append(value)
+    if len(samples) < max(24, len(component) // 3):
+        return None, 0.0
+    local_background = sum(samples) / len(samples)
+    return local_background, local_background - component_mean
 
 
 def _background_stain_reference_rgb(source: Image.Image, grayscale: Image.Image, background: int) -> tuple[int, int, int]:
