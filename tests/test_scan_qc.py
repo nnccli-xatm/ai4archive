@@ -6708,6 +6708,7 @@ class ScanQcTest(unittest.TestCase):
                 "private_localized_gray_stain.png": _synthetic_localized_sparse_background_stain_page("gray"),
                 "private_localized_yellow_stain.png": _synthetic_localized_sparse_background_stain_page("yellow"),
                 "private_localized_multi_stains.png": _synthetic_localized_sparse_background_stain_page("multi"),
+                "private_localized_faint_smudge.png": _synthetic_localized_sparse_background_stain_page("faint_smudge"),
             }
             source_bytes: dict[str, bytes] = {}
             for name, image in pages.items():
@@ -6744,16 +6745,29 @@ class ScanQcTest(unittest.TestCase):
                     diff = ImageChops.difference(original.crop(protected_box), processed.crop(protected_box))
                     self.assertIsNone(diff.getbbox(), f"{source_name} changed protected content {protected_box}")
 
-            self.assertEqual(audit_summary["counts"]["background_stains_lightened_files"], 3)
-            self.assertEqual(audit_summary["guardrails"]["background_stains"]["localized_applied_files"], 3)
+            self.assertEqual(audit_summary["counts"]["background_stains_lightened_files"], 4)
+            self.assertEqual(audit_summary["guardrails"]["background_stains"]["localized_applied_files"], 4)
             self.assertGreaterEqual(
                 audit_summary["guardrails"]["background_stains"]["reason_distribution"][
                     "background stain lightening applied: conservative localized low-contrast stains on light background"
                 ],
-                3,
+                4,
+            )
+            self.assertIn(
+                "correction_delta_bucket_distribution",
+                audit_summary["guardrails"]["background_stains"],
+            )
+            self.assertIn(
+                "candidate_pixel_ratio_bucket_distribution",
+                audit_summary["guardrails"]["background_stains"],
             )
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
-            for private_name in ("private_localized_gray_stain", "private_localized_yellow_stain", "private_localized_multi_stains"):
+            for private_name in (
+                "private_localized_gray_stain",
+                "private_localized_yellow_stain",
+                "private_localized_multi_stains",
+                "private_localized_faint_smudge",
+            ):
                 self.assertNotIn(private_name, audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
 
@@ -6771,6 +6785,7 @@ class ScanQcTest(unittest.TestCase):
                 "private_localized_photo_patch.png": _synthetic_localized_sparse_background_stain_page("photo"),
                 "private_localized_page_number.png": _synthetic_localized_sparse_background_stain_page("page_number"),
                 "private_localized_broad_gradient.png": _synthetic_localized_sparse_background_stain_page("broad_gradient"),
+                "private_localized_faint_ruled_lines.png": _synthetic_localized_sparse_background_stain_page("faint_ruled"),
             }
             for name, image in pages.items():
                 image.save(input_dir / name, dpi=(300, 300))
@@ -6794,7 +6809,7 @@ class ScanQcTest(unittest.TestCase):
                 self.assertIsNone(ImageChops.difference(pages[source_name].convert("RGB"), processed).getbbox(), source_name)
 
             self.assertEqual(audit_summary["counts"]["background_stains_lightened_files"], 0)
-            self.assertEqual(audit_summary["counts"]["background_stains_skipped_files"], 6)
+            self.assertEqual(audit_summary["counts"]["background_stains_skipped_files"], 7)
             self.assertGreaterEqual(len(audit_summary["guardrails"]["background_stains"]["skip_reason_distribution"]), 3)
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertNotIn("private_localized_", audit_summary_text)
@@ -16386,6 +16401,8 @@ def _synthetic_localized_sparse_background_stain_page(variant: str) -> Image.Ima
         paste_soft_ellipse((138, 46, 154, 60), (232, 232, 232), 2.0)
         paste_soft_ellipse((178, 78, 194, 92), (236, 232, 210), 2.0)
         paste_soft_ellipse((150, 112, 166, 126), (233, 233, 233), 2.0)
+    elif variant == "faint_smudge":
+        paste_soft_ellipse((162, 70, 206, 104), (236, 236, 234), 2.0)
     elif variant == "text_touching":
         paste_soft_ellipse((86, 74, 112, 96), (232, 232, 232), 1.0)
     elif variant == "edge":
@@ -16408,6 +16425,9 @@ def _synthetic_localized_sparse_background_stain_page(variant: str) -> Image.Ima
         mask_draw.rectangle((118, 36, 244, 154), fill=150)
         mask = mask.filter(ImageFilter.GaussianBlur(18))
         image = Image.composite(overlay, image, mask)
+    elif variant == "faint_ruled":
+        for y in range(62, 132, 18):
+            draw.line((136, y, 224, y), fill=(236, 236, 232), width=2)
     else:
         raise ValueError(f"unknown localized stain variant: {variant}")
     return image
