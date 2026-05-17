@@ -16,6 +16,18 @@ from archive_scan_qc.processing import ProcessingOptions, _combination_quality_g
 from archive_scan_qc.scanner import ScanConfig, scan_batch
 
 
+def _mean_luma(image: Image.Image, box: tuple[int, int, int, int]) -> float:
+    return ImageStat.Stat(image.crop(box).convert("L")).mean[0]
+
+
+def _changed_ratio(before: Image.Image, after: Image.Image, box: tuple[int, int, int, int]) -> float:
+    before_luma = before.crop(box).convert("L")
+    after_luma = after.crop(box).convert("L")
+    diff = ImageChops.difference(before_luma, after_luma)
+    changed = sum(diff.point(lambda value: 255 if value > 8 else 0).histogram()[1:])
+    return changed / max(1, before_luma.width * before_luma.height)
+
+
 class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
     def test_combination_quality_guard_classifies_public_reason_codes(self) -> None:
         options = ProcessingOptions()
@@ -438,6 +450,78 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertFalse(audit_summary["privacy"]["contains_paths"])
             self.assertFalse(audit_summary["privacy"]["contains_hashes"])
             for forbidden in ("private_segmented_scanline.png", str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
+    def test_subtle_continuous_scanline_cleanup_stays_conservative_and_aggregate(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-subtle-scanline-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            safe_source = input_dir / "private_subtle_vertical_scanline.png"
+            ruled_source = input_dir / "private_subtle_ruled_table.png"
+            safe_page = _subtle_vertical_scanline_page()
+            ruled_page = _subtle_ruled_table_page()
+            safe_page.save(safe_source, dpi=(300, 300))
+            ruled_page.save(ruled_source, dpi=(300, 300))
+            safe_source_bytes = safe_source.read_bytes()
+            ruled_source_bytes = ruled_source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "subtle-scanline", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(lighten_scanlines=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            safe_record = records["private_subtle_vertical_scanline.png"]
+            ruled_record = records["private_subtle_ruled_table.png"]
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_processed:
+                processed_safe = safe_processed.convert("RGB")
+            with Image.open(process_dir / ruled_record["output_relative_path"]) as ruled_processed:
+                processed_ruled = ruled_processed.convert("RGB")
+
+            self.assertEqual(safe_source.read_bytes(), safe_source_bytes)
+            self.assertEqual(ruled_source.read_bytes(), ruled_source_bytes)
+            self.assertTrue(safe_record["scanlines_lightened"])
+            self.assertEqual(safe_record["scanlines_orientation"], "vertical")
+            self.assertIn("lighten_scanlines_conservative", safe_record["operations"])
+            self.assertGreater(
+                _mean_luma(processed_safe, (210, 18, 211, 202)),
+                _mean_luma(safe_page, (210, 18, 211, 202)) + 2.0,
+            )
+            self.assertEqual(safe_record["processing_audit"]["guardrail_failures"], [])
+            self.assertEqual(safe_record["processing_audit"]["local_content_change_guard_action"], "passed")
+            self.assertEqual(safe_record["processing_audit"]["cumulative_change_guard_action"], "passed")
+            self.assertEqual(safe_record["processing_audit"]["processed_output_safety_guard_action"], "passed")
+            self.assertGreater(safe_record["scanlines_changed_pixel_ratio"], 0.0007)
+            self.assertLess(safe_record["scanlines_changed_pixel_ratio"], 0.035)
+
+            self.assertFalse(ruled_record["scanlines_lightened"])
+            self.assertIn("lighten_scanlines_noop", ruled_record["operations"])
+            self.assertIn("SCANLINE_SCOPE_RISK", ruled_record["scanlines_reason"])
+            self.assertLess(
+                _changed_ratio(ruled_page, processed_ruled, (0, 0, ruled_page.width, ruled_page.height)),
+                0.001,
+            )
+            self.assertEqual(audit_summary["counts"]["scanlines_lightened_files"], 1)
+            self.assertEqual(audit_summary["counts"]["scanlines_skipped_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["scanlines"]["applied_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["scanlines"]["skipped_files"], 1)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (
+                "private_subtle_vertical_scanline",
+                "private_subtle_ruled_table",
+                str(input_dir),
+                "source_relative_path",
+                "source_sha256",
+            ):
                 self.assertNotIn(forbidden, audit_summary_text)
 
     def test_full_chain_safe_cloud_background_stain_stays_bounded_and_private(self) -> None:
@@ -2010,6 +2094,27 @@ def _segmented_scanline_page() -> Image.Image:
         draw.rectangle((42, y, 158, y + 5), fill=(36, 36, 36))
     for x0, x1 in ((16, 48), (96, 128), (196, 228)):
         draw.rectangle((x0, 132, x1, 133), fill=(226, 226, 222))
+    return image
+
+
+def _subtle_vertical_scanline_page() -> Image.Image:
+    image = Image.new("RGB", (300, 220), (240, 240, 236))
+    draw = ImageDraw.Draw(image)
+    for y in (44, 68):
+        draw.rectangle((46, y, 115, y + 4), fill=(42, 42, 42))
+    draw.rectangle((210, 18, 210, 202), fill=(237, 237, 233))
+    return image
+
+
+def _subtle_ruled_table_page() -> Image.Image:
+    image = Image.new("RGB", (300, 220), (240, 240, 236))
+    draw = ImageDraw.Draw(image)
+    for y in (44, 68):
+        draw.rectangle((46, y, 115, y + 4), fill=(42, 42, 42))
+    for x in range(42, 236, 38):
+        draw.rectangle((x, 18, x, 202), fill=(237, 237, 233))
+    for y in range(34, 178, 28):
+        draw.rectangle((30, y, 254, y), fill=(237, 237, 233))
     return image
 
 
