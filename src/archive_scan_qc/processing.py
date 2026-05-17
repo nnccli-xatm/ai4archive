@@ -6768,6 +6768,16 @@ def _clean_bleed_through_conservative(image: Image.Image) -> BleedThroughCleanup
             if width <= 1 or height <= 1:
                 continue
             selected.update(component)
+        if very_stable_light_paper:
+            selected = _bleed_through_expand_diffuse_halo(
+                selected,
+                candidate,
+                grayscale,
+                edge_signal,
+                protected,
+                background,
+                edge_margin,
+            )
 
     changed_ratio = len(selected) / max(1, total)
     if changed_ratio < min_candidate_ratio:
@@ -6993,6 +7003,59 @@ def _bleed_through_small_diffuse_selection(
     if len(selected) / max(1, total) > 0.0035:
         return set()
     return selected
+
+
+def _bleed_through_expand_diffuse_halo(
+    selected: set[tuple[int, int]],
+    candidate: Image.Image,
+    grayscale: Image.Image,
+    edge_signal: Image.Image,
+    protected: Image.Image,
+    background: int,
+    edge_margin: int,
+) -> set[tuple[int, int]]:
+    if not selected:
+        return selected
+    total = candidate.width * candidate.height
+    if len(selected) / max(1, total) > 0.014:
+        return selected
+    xs = [point[0] for point in selected]
+    ys = [point[1] for point in selected]
+    left = min(xs)
+    top = min(ys)
+    right = max(xs)
+    bottom = max(ys)
+    if (
+        left < edge_margin * 3
+        or top < max(edge_margin * 3, int(round(candidate.height * 0.18)))
+        or right >= candidate.width - edge_margin * 3
+        or bottom >= candidate.height - max(edge_margin * 3, int(round(candidate.height * 0.18)))
+    ):
+        return selected
+    width = right - left + 1
+    height = bottom - top + 1
+    if width > candidate.width * 0.34 or height > candidate.height * 0.26:
+        return selected
+    aspect = max(width / max(1, height), height / max(1, width))
+    if aspect > 9:
+        return selected
+
+    halo = candidate.filter(ImageFilter.MaxFilter(7))
+    halo_pixels = halo.load()
+    source_pixels = grayscale.load()
+    edge_pixels = edge_signal.load()
+    protected_pixels = protected.load()
+    expanded = set(selected)
+    for y in range(max(edge_margin, top - 4), min(candidate.height - edge_margin, bottom + 5)):
+        for x in range(max(edge_margin, left - 4), min(candidate.width - edge_margin, right + 5)):
+            if not halo_pixels[x, y] or protected_pixels[x, y]:
+                continue
+            value = int(source_pixels[x, y])
+            if background - 4 <= value <= background and int(edge_pixels[x, y]) < 18:
+                expanded.add((x, y))
+    if len(expanded) / max(1, total) > 0.018:
+        return selected
+    return expanded
 
 
 def _bleed_through_sparse_real_mark_risk(

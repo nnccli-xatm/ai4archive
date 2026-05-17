@@ -981,6 +981,88 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in ("private_open_sparse_reverse_ghost", str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_pale_diffuse_bleed_through_cleanup_expands_safe_ghost_and_preserves_content(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-pale-diffuse-bleed-through-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_safe_pale_diffuse_reverse_ghost.png": _pale_diffuse_bleed_through_page(),
+                **_protected_sparse_bleed_through_mark_pages(),
+            }
+            source_bytes = {}
+            for name, page in pages.items():
+                source = input_dir / name
+                page.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "pale-diffuse-bleed-through", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(clean_bleed_through=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_name = "synthetic_safe_pale_diffuse_reverse_ghost.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            safe_processed = Image.open(process_dir / safe_record["output_relative_path"]).convert("RGB")
+            self.assertTrue(safe_record["bleed_through_cleaned"])
+            self.assertEqual(safe_record["bleed_through_reason_code"], "applied_faint_reverse_ghost")
+            self.assertGreater(safe_audit["bleed_through_delta"], 3.0)
+            self.assertGreater(safe_audit["bleed_through_changed_pixel_ratio"], 0.002)
+            self.assertLessEqual(safe_audit["bleed_through_changed_pixel_ratio"], 0.045)
+            self.assertLessEqual(safe_audit["bleed_through_candidate_pixel_ratio"], 0.065)
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertEqual(safe_audit["local_content_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["combination_quality_guard_reason_code"], "safe_combination_passed")
+            self.assertEqual(safe_audit["processed_output_safety_guard_action"], "passed")
+            self.assertGreater(
+                _mean_luma(safe_processed, (108, 66, 152, 130)),
+                _mean_luma(pages[safe_name], (108, 66, 152, 130)) + 0.03,
+            )
+            self.assertIsNone(
+                ImageChops.difference(
+                    pages[safe_name].crop((30, 34, 72, 50)),
+                    safe_processed.crop((30, 34, 72, 50)),
+                ).getbbox()
+            )
+
+            for name in set(pages) - {safe_name}:
+                record = records[name]
+                audit = record["processing_audit"]
+                processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+                self.assertFalse(record["bleed_through_cleaned"], name)
+                self.assertNotEqual(record["bleed_through_reason_code"], "applied_faint_reverse_ghost", name)
+                self.assertEqual(audit["bleed_through_changed_pixel_ratio"], 0.0, name)
+                self.assertIsNone(ImageChops.difference(pages[name].convert("RGB"), processed).getbbox(), name)
+
+            bleed_guard = audit_summary["guardrails"]["bleed_through"]
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 1)
+            self.assertEqual(bleed_guard["applied_files"], 1)
+            self.assertEqual(bleed_guard["skipped_files"], len(pages) - 1)
+            self.assertEqual(bleed_guard["reason_code_distribution"]["applied_faint_reverse_ghost"], 1)
+            self.assertIn("protected_line_or_annotation", bleed_guard["skip_reason_code_distribution"])
+            self.assertIn("protected_edge_content", bleed_guard["skip_reason_code_distribution"])
+            self.assertIn("protected_color_content", bleed_guard["skip_reason_code_distribution"])
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_cool_gray_mild_bleed_through_is_cleaned_without_private_audit_rows(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-cool-gray-bleed-through-") as temp_dir:
             root = Path(temp_dir)
@@ -3646,6 +3728,21 @@ def _open_sparse_faint_bleed_through_page() -> Image.Image:
     mask_draw.text((126, 82), "321", fill=255)
     mask_draw.text((126, 104), "654", fill=255)
     mask = mask.filter(ImageFilter.GaussianBlur(3.0))
+    ghost = Image.new("RGB", image.size, (236, 236, 232))
+    image.paste(ghost, (0, 0), mask.point(lambda value: int(value * 0.30)))
+    return image
+
+
+def _pale_diffuse_bleed_through_page() -> Image.Image:
+    image = Image.new("RGB", (260, 180), (244, 244, 239))
+    draw = ImageDraw.Draw(image)
+    draw.text((34, 36), "REAL", fill=(70, 70, 70))
+    mask = Image.new("L", image.size, 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.text((110, 66), "189", fill=255)
+    mask_draw.text((112, 90), "432", fill=255)
+    mask_draw.text((112, 114), "765", fill=255)
+    mask = mask.filter(ImageFilter.GaussianBlur(3.2))
     ghost = Image.new("RGB", image.size, (236, 236, 232))
     image.paste(ghost, (0, 0), mask.point(lambda value: int(value * 0.30)))
     return image
