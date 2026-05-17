@@ -11782,6 +11782,7 @@ _DESPECKLE_MAX_LIGHT_SOIL_PREFILTER_RATIO = _DESPECKLE_MAX_CANDIDATE_RATIO
 _DESPECKLE_MAX_CHANGED_RATIO = 0.01
 _DESPECKLE_MAX_COMPONENT_PIXELS = 4
 _DESPECKLE_MAX_TINY_DUST_CLUSTER_PIXELS = 9
+_DESPECKLE_MAX_TINY_DARK_DUST_CLUSTER_PIXELS = 6
 _DESPECKLE_TINY_DUST_CLUSTER_MIN_VALUE = 35
 _DESPECKLE_MAX_COMPONENT_SPAN = 3
 _DESPECKLE_DENSE_PREFILTER_MIN_DARK_PIXELS = 512
@@ -11793,6 +11794,7 @@ _DESPECKLE_SPARSE_TEXT_CLEARANCE_RADIUS = 5
 _DESPECKLE_SPARSE_TEXT_MIN_BACKGROUND_MEDIAN = 220
 _DESPECKLE_SPARSE_TEXT_MAX_NEARBY_CONTENT_PIXELS = 64
 _DESPECKLE_PALE_MARK_MIN_VALUE = 220
+_DESPECKLE_TINY_DARK_CLUSTER_MIN_BACKGROUND_MEDIAN = 220
 _DESPECKLE_NEIGHBOR_OFFSETS = tuple(
     (offset_x, offset_y)
     for offset_y in (-1, 0, 1)
@@ -12196,10 +12198,6 @@ def _despeckle_replacements_fallback(
     }
     for x, y in candidates:
         component = component_cache[(x, y)]
-        if len(component) > _DESPECKLE_MAX_COMPONENT_PIXELS and any(
-            gray_pixels[cx, cy] < _DESPECKLE_TINY_DUST_CLUSTER_MIN_VALUE for cx, cy in component
-        ):
-            continue
         if _despeckle_has_pale_mark_protected_context(gray_pixels, candidate_set, width, height, x, y):
             continue
         protection_candidate_set = candidate_set if len(component) > 4 else conservative_candidate_set
@@ -12244,6 +12242,14 @@ def _despeckle_replacements_fallback(
             )
             if component_gray_values:
                 median_gray = sorted(component_gray_values)[len(component_gray_values) // 2]
+            contains_very_dark_pixel = any(
+                gray_pixels[cx, cy] < _DESPECKLE_TINY_DUST_CLUSTER_MIN_VALUE for cx, cy in component
+            )
+            if contains_very_dark_pixel:
+                if len(component) > _DESPECKLE_MAX_TINY_DARK_DUST_CLUSTER_PIXELS:
+                    continue
+                if median_gray < _DESPECKLE_TINY_DARK_CLUSTER_MIN_BACKGROUND_MEDIAN:
+                    continue
         if median_gray < _DESPECKLE_MIN_BACKGROUND_MEDIAN:
             continue
 
