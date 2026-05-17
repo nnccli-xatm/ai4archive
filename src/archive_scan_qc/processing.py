@@ -6360,6 +6360,11 @@ def _fold_shadow_axis_plan(
         dark_ratio = dark_count / max(1, len(values)) if values else 1.0
         mean = sum(values) / len(values) if values else 0.0
         continuity = _fold_shadow_cross_continuity(selected_crosses, cross_length)
+        centered_horizontal_continuity = (
+            _fold_shadow_centered_cross_continuity(selected_crosses, cross_length)
+            if not vertical
+            else {"usable": False}
+        )
         sparse_foreground_crossings = (
             available_ratio >= 0.76
             and protected_ratio <= 0.24
@@ -6386,6 +6391,11 @@ def _fold_shadow_axis_plan(
             and (
                 candidate_ratio >= 0.55
                 or (candidate_ratio >= 0.42 and continuity["usable"])
+                or (
+                    not vertical
+                    and candidate_ratio >= 0.46
+                    and centered_horizontal_continuity["usable"]
+                )
             )
             and dark_ratio <= 0.0015
         ):
@@ -6448,7 +6458,12 @@ def _fold_shadow_axis_plan(
         for index in group:
             group_crosses.update(stats[index]["selected_crosses"])
         group_continuity = _fold_shadow_cross_continuity(group_crosses, cross_length)
-        if not group_continuity["usable"]:
+        centered_horizontal_continuity = (
+            _fold_shadow_centered_cross_continuity(group_crosses, cross_length)
+            if not vertical and local_delta <= 16.0
+            else {"usable": False}
+        )
+        if not group_continuity["usable"] and not centered_horizontal_continuity["usable"]:
             continue
         selected_groups.append(group)
         for index in group:
@@ -6662,6 +6677,35 @@ def _fold_shadow_cross_continuity(selected_crosses: set[int], cross_length: int)
         "usable": usable,
         "span_ratio": round(span_ratio, 6),
         "coverage_ratio": round(coverage_ratio, 6),
+        "max_gap": max_gap,
+    }
+
+
+def _fold_shadow_centered_cross_continuity(selected_crosses: set[int], cross_length: int) -> dict[str, Any]:
+    if cross_length <= 0 or not selected_crosses:
+        return {"usable": False, "span_ratio": 0.0, "coverage_ratio": 0.0, "max_gap": cross_length}
+    ordered = sorted(selected_crosses)
+    span = ordered[-1] - ordered[0] + 1
+    span_ratio = span / max(1, cross_length)
+    coverage_ratio = len(ordered) / max(1, span)
+    midpoint = (ordered[0] + ordered[-1]) / 2
+    center_offset_ratio = abs(midpoint - ((cross_length - 1) / 2)) / max(1, cross_length)
+    max_gap = 0
+    previous = ordered[0]
+    for current in ordered[1:]:
+        max_gap = max(max_gap, current - previous - 1)
+        previous = current
+    usable = (
+        0.45 <= span_ratio < 0.62
+        and coverage_ratio >= 0.58
+        and center_offset_ratio <= 0.16
+        and max_gap <= max(8, int(round(cross_length * 0.08)))
+    )
+    return {
+        "usable": usable,
+        "span_ratio": round(span_ratio, 6),
+        "coverage_ratio": round(coverage_ratio, 6),
+        "center_offset_ratio": round(center_offset_ratio, 6),
         "max_gap": max_gap,
     }
 
