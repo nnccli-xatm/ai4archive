@@ -2755,6 +2755,49 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_sharpen_text_edges_skips_mildly_blurred_ruled_table_background(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-text-edge-ruled-table-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = _mildly_blurred_ruled_table_background_page()
+            source.save(input_dir / "synthetic_ruled_table_background.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "text-edge-ruled-table", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(sharpen_text_edges=True, workers=1))
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+            audit = record["processing_audit"]
+
+            with Image.open(process_dir / record["output_relative_path"]) as output:
+                self.assertFalse(record["text_edges_sharpened"])
+                self.assertIn("sharpen_text_edges_noop", record["operations"])
+                self.assertLess(_changed_ratio(source, output, (42, 84, 378, 480)), 0.001)
+            self.assertEqual(record["text_edges_reason_code"], "protected_scanline_or_ruled_background")
+            self.assertEqual(record["text_edges_reason_zh"], "检测到扫描线或格线背景风险，跳过正文边缘锐化。")
+            self.assertEqual(audit["text_edges_changed_pixel_ratio"], 0.0)
+            self.assertEqual(audit["guardrail_failures"], [])
+
+            text_edge_guard = audit_summary["guardrails"]["text_edges"]
+            self.assertEqual(audit_summary["counts"]["text_edges_sharpened_files"], 0)
+            self.assertEqual(audit_summary["counts"]["text_edges_skipped_files"], 1)
+            self.assertEqual(text_edge_guard["applied_files"], 0)
+            self.assertEqual(text_edge_guard["skipped_files"], 1)
+            self.assertEqual(text_edge_guard["skip_reason_code_distribution"]["protected_scanline_or_ruled_background"], 1)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (
+                "synthetic_ruled_table_background.png",
+                str(input_dir),
+                "source_relative_path",
+                "source_sha256",
+            ):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_diffuse_background_stain_lightens_while_protected_marks_stay_noop(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-diffuse-stain-") as temp_dir:
             root = Path(temp_dir)
@@ -4476,6 +4519,20 @@ def _mildly_blurred_typed_body_text_page(*, page_number: bool = False) -> Image.
         draw.text((64, 100 + index * 34), line, fill=(72, 72, 72), font=font)
     if page_number:
         draw.text((358, 22), "12", fill=(65, 65, 65), font=font)
+    return image.filter(ImageFilter.GaussianBlur(radius=0.75))
+
+
+def _mildly_blurred_ruled_table_background_page() -> Image.Image:
+    image = Image.new("RGB", (420, 560), (245, 245, 242))
+    draw = ImageDraw.Draw(image)
+    for y in range(96, 472, 32):
+        draw.line((50, y, 370, y), fill=(118, 118, 118), width=1)
+    for x in range(50, 371, 64):
+        draw.line((x, 96, x, 472), fill=(118, 118, 118), width=1)
+    for y in range(112, 440, 64):
+        for x in (68, 150, 236, 310):
+            draw.rectangle((x, y, x + 26, y + 3), fill=(86, 86, 86))
+            draw.rectangle((x, y + 10, x + 16, y + 12), fill=(96, 96, 96))
     return image.filter(ImageFilter.GaussianBlur(radius=0.75))
 
 
