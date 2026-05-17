@@ -3183,6 +3183,16 @@ def _process_image(
                 if deskewed
                 else CropDetection(None, "post-deskew crop skipped: deskew not applied")
             )
+            if (
+                crop_detection.bbox is None
+                and deskewed
+                and crop_detection.reason != "post-deskew crop skipped: edge content protection"
+            ):
+                crop_detection = _detect_post_deskew_expansion_crop_bbox(
+                    processed,
+                    tuple(pre_deskew_size),
+                    skew_angle_degrees=skew.angle_degrees,
+                )
             if crop_detection.bbox is None and crop_detection.reason != "post-deskew crop skipped: edge content protection":
                 crop_detection = _detect_conservative_crop_bbox(processed)
             crop_bbox = crop_detection.bbox
@@ -9227,6 +9237,82 @@ def _detect_post_deskew_corner_wedge_crop_bbox(
     if not _has_inset_document_content_for_scanner_gutter(grayscale, bbox, active):
         return CropDetection(None, "post-deskew crop skipped: edge content protection")
     return CropDetection(bbox, "post-deskew safe canvas crop applied")
+
+
+def _detect_post_deskew_expansion_crop_bbox(
+    image: Image.Image,
+    pre_deskew_size: tuple[int, int],
+    *,
+    skew_angle_degrees: float | None,
+) -> CropDetection:
+    width, height = image.size
+    if width < 40 or height < 40:
+        return CropDetection(None, "post-deskew crop skipped: low-confidence canvas edge")
+    if not isinstance(skew_angle_degrees, int | float) or abs(skew_angle_degrees) > 1.25:
+        return CropDetection(None, "post-deskew crop skipped: low-confidence canvas edge")
+    if len(pre_deskew_size) != 2:
+        return CropDetection(None, "post-deskew crop skipped: low-confidence canvas edge")
+
+    pre_width, pre_height = pre_deskew_size
+    if pre_width <= 0 or pre_height <= 0 or pre_width > width or pre_height > height:
+        return CropDetection(None, "post-deskew crop skipped: low-confidence canvas edge")
+
+    excess_x = width - pre_width
+    excess_y = height - pre_height
+    if excess_x <= 0 and excess_y <= 0:
+        return CropDetection(None, "post-deskew crop skipped: low-confidence canvas edge")
+
+    max_margin = max(excess_x, excess_y)
+    if max_margin < 2:
+        return CropDetection(None, "post-deskew crop skipped: low-confidence canvas edge")
+    if max(excess_x / width, excess_y / height) > 0.035:
+        return CropDetection(None, "post-deskew crop skipped: crop risk too large")
+
+    left = excess_x // 2
+    top = excess_y // 2
+    right = left + pre_width
+    bottom = top + pre_height
+    bbox = (left, top, right, bottom)
+    crop_area_ratio = (pre_width * pre_height) / max(1, width * height)
+    if crop_area_ratio < 0.94:
+        return CropDetection(None, "post-deskew crop skipped: crop risk too large")
+
+    grayscale = image.convert("L")
+    canvas = float(_corner_background_value(grayscale))
+    page_background = _post_deskew_inner_light_background(grayscale)
+    if page_background < 135:
+        return CropDetection(None, "post-deskew crop skipped: low-confidence canvas edge")
+    if image.mode == "RGB" and _tone_color_risk_reason(image):
+        return CropDetection(None, "post-deskew crop skipped: edge content protection")
+    if _post_deskew_expansion_trimmed_area_has_marks(grayscale, bbox, canvas):
+        return CropDetection(None, "post-deskew crop skipped: edge content protection")
+    if _has_protected_dark_content_near_trim_boundary(grayscale, bbox):
+        return CropDetection(None, "post-deskew crop skipped: edge content protection")
+
+    return CropDetection(bbox, "post-deskew safe canvas crop applied")
+
+
+def _post_deskew_expansion_trimmed_area_has_marks(
+    image: Image.Image,
+    bbox: tuple[int, int, int, int],
+    canvas: float,
+) -> bool:
+    width, height = image.size
+    left, top, right, bottom = bbox
+    boxes = (
+        (0, 0, left, height),
+        (right, 0, width, height),
+        (left, 0, right, top),
+        (left, bottom, right, height),
+    )
+    for box in boxes:
+        if box[2] <= box[0] or box[3] <= box[1]:
+            continue
+        values = image.crop(box).tobytes()
+        marked_pixels = sum(1 for value in values if abs(value - canvas) >= 12.0)
+        if marked_pixels >= 6 and marked_pixels / max(1, len(values)) >= 0.003:
+            return True
+    return False
 
 
 def _first_post_deskew_corner_wedge_edge(

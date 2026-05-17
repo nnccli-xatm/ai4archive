@@ -584,15 +584,27 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertTrue(record["deskewed"])
             self.assertAlmostEqual(record["skew_angle_degrees"], -0.45, delta=0.25)
             self.assertFalse(record["dark_border_trimmed"])
-            self.assertFalse(record["cropped"])
-            self.assertLessEqual(audit["size_change_ratio"], 0.04)
+            self.assertTrue(record["cropped"])
+            self.assertEqual(record["crop_reason"], "post-deskew safe canvas crop applied")
+            self.assertEqual(record["crop_bbox"], [2, 1, 246, 323])
+            self.assertEqual(record["output_size"], record["pre_deskew_size"])
+            self.assertLessEqual(audit["size_change_ratio"], 0.01)
             self.assertEqual(audit["max_trim_margin_ratio"], 0.0)
             self.assertEqual(audit["crop_ratio"], 0.0)
             self.assertEqual(audit["cumulative_change_guard_action"], "passed")
             self.assertEqual(audit["guardrail_failures"], [])
             self.assertEqual(audit_summary["counts"]["deskewed_files"], 1)
-            self.assertEqual(audit_summary["counts"]["auto_crop_applied_files"], 0)
+            self.assertEqual(audit_summary["counts"]["auto_crop_applied_files"], 1)
             self.assertEqual(audit_summary["counts"]["dark_border_trimmed_files"], 0)
+            self.assertEqual(audit_summary["guardrails"]["auto_crop"]["post_deskew_safe_crop_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["auto_crop"]["cropped_side_distribution"],
+                {"left": 1, "top": 1, "right": 1, "bottom": 1},
+            )
+            self.assertEqual(
+                audit_summary["guardrails"]["auto_crop"]["reason_distribution"],
+                {"post-deskew safe canvas crop applied": 1},
+            )
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             for forbidden in ("synthetic_shallow_deskew_combo.png", str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
