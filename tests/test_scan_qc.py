@@ -6331,6 +6331,51 @@ class ScanQcTest(unittest.TestCase):
             self.assertTrue(audit_summary["timing"]["operation_timings"]["sharpen_text_edges"]["enabled"])
             self.assertNotIn("private_blurred_text", audit_summary_text)
 
+    def test_sharpen_text_edges_improves_mildly_blurred_typed_glyphs_with_edge_energy_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "private_typed_glyphs.png"
+            _synthetic_mildly_blurred_typed_glyph_page().save(source, dpi=(300, 300))
+            source_bytes = source.read_bytes()
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(sharpen_text_edges=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+            audit = record["processing_audit"]
+            processed = Image.open(process_dir / record["output_relative_path"])
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertTrue(record["text_edges_sharpened"])
+            self.assertIn("sharpen_text_edges_conservative", record["operations"])
+            self.assertGreater(_edge_energy(processed), _edge_energy(Image.open(source)))
+            self.assertGreater(audit["text_edges_delta"], 3.0)
+            self.assertGreater(audit["text_edges_edge_energy_after"], audit["text_edges_edge_energy_before"])
+            self.assertEqual(record["text_edges_edge_energy_after"], audit["text_edges_edge_energy_after"])
+            self.assertGreater(audit["text_edges_changed_pixel_ratio"], 0.0)
+            self.assertLessEqual(audit["text_edges_changed_pixel_ratio"], 0.08)
+            self.assertLessEqual(audit["text_edges_candidate_pixel_ratio"], 0.12)
+            self.assertEqual(record["text_edges_reason_code"], "applied_stable_blurred_text_edges")
+            self.assertEqual(audit["guardrail_failures"], [])
+            self.assertEqual(audit_summary["counts"]["text_edges_sharpened_files"], 1)
+            self.assertIn("text_edges_edge_energy_before", audit_summary["metrics"])
+            self.assertIn("text_edges_edge_energy_after", audit_summary["metrics"])
+            self.assertGreater(
+                audit_summary["metrics"]["text_edges_edge_energy_after"]["max"],
+                audit_summary["metrics"]["text_edges_edge_energy_before"]["max"],
+            )
+            self.assertNotIn("private_typed_glyphs", audit_summary_text)
+
     def test_sharpen_text_edges_noops_for_clear_color_photo_texture_and_default_off(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -6351,6 +6396,7 @@ class ScanQcTest(unittest.TestCase):
                 "A009_page_number.png": _synthetic_blurred_text_page(page_number=True),
                 "A010_header_footer.png": _synthetic_blurred_text_page(header_footer=True),
                 "A011_dark_page.png": _synthetic_dark_blurred_text_page(),
+                "A012_handwriting.png": _synthetic_blurred_handwriting_text_edge_page(),
             }
             for name, image in pages.items():
                 image.save(input_dir / name, dpi=(300, 300))
@@ -15466,6 +15512,35 @@ def _synthetic_blurred_text_page(
     if header_footer:
         draw.rectangle((48, 18, 170, 20), fill=(64, 64, 64))
         draw.rectangle((54, 158, 154, 160), fill=(64, 64, 64))
+    return image.filter(ImageFilter.GaussianBlur(radius=0.8))
+
+
+def _synthetic_mildly_blurred_typed_glyph_page() -> Image.Image:
+    image = Image.new("RGB", (360, 240), (244, 244, 242))
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default()
+    lines = (
+        "ARCHIVE QUALITY CONTROL PAGE",
+        "TYPED TEXT EDGES ARE SOFT",
+        "REVIEW SHOULD STAY SAFE",
+        "PRINTED STROKES ONLY",
+        "LOCAL BATCH SAMPLE",
+    )
+    for index, line in enumerate(lines):
+        draw.text((46, 42 + index * 24), line, fill=(45, 45, 45), font=font)
+    return image.filter(ImageFilter.GaussianBlur(radius=0.8))
+
+
+def _synthetic_blurred_handwriting_text_edge_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), (244, 244, 242))
+    draw = ImageDraw.Draw(image)
+    for y in (48, 74, 100, 126):
+        draw.line(
+            [(42, y), (66, y - 7), (96, y + 4), (128, y - 5), (160, y + 2), (194, y - 3)],
+            fill=(58, 58, 58),
+            width=2,
+            joint="curve",
+        )
     return image.filter(ImageFilter.GaussianBlur(radius=0.8))
 
 
