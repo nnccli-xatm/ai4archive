@@ -202,6 +202,8 @@ class FoldShadowCleanupResult:
     band_delta: float
     changed_pixel_ratio: float
     candidate_pixel_ratio: float
+    band_width_bucket: str | None = None
+    coverage_bucket: str | None = None
 
 
 @dataclass(frozen=True)
@@ -794,6 +796,8 @@ def _process_record(
         "fold_shadows_reason_code": None,
         "fold_shadows_orientation": None,
         "fold_shadows_count": 0,
+        "fold_shadows_width_bucket": None,
+        "fold_shadows_coverage_bucket": None,
         "fold_shadows_mean_before": None,
         "fold_shadows_mean_after": None,
         "fold_shadows_delta": 0.0,
@@ -948,6 +952,8 @@ def _process_record(
                 "fold_shadows_reason_code": process_info["fold_shadows_reason_code"],
                 "fold_shadows_orientation": process_info["fold_shadows_orientation"],
                 "fold_shadows_count": process_info["fold_shadows_count"],
+                "fold_shadows_width_bucket": process_info["fold_shadows_width_bucket"],
+                "fold_shadows_coverage_bucket": process_info["fold_shadows_coverage_bucket"],
                 "fold_shadows_mean_before": process_info["fold_shadows_mean_before"],
                 "fold_shadows_mean_after": process_info["fold_shadows_mean_after"],
                 "fold_shadows_delta": process_info["fold_shadows_delta"],
@@ -1081,6 +1087,8 @@ def _process_record(
                     "fold_shadows_reason_code": process_info["fold_shadows_reason_code"],
                     "fold_shadows_orientation": process_info["fold_shadows_orientation"],
                     "fold_shadows_count": process_info["fold_shadows_count"],
+                    "fold_shadows_width_bucket": process_info["fold_shadows_width_bucket"],
+                    "fold_shadows_coverage_bucket": process_info["fold_shadows_coverage_bucket"],
                     "fold_shadows_mean_before": process_info["fold_shadows_mean_before"],
                     "fold_shadows_mean_after": process_info["fold_shadows_mean_after"],
                     "fold_shadows_delta": process_info["fold_shadows_delta"],
@@ -1365,6 +1373,16 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
         if record.get("fold_shadows_lightened") is False
         and isinstance(reason, str)
         and reason != "fold shadow cleanup disabled"
+    ]
+    fold_shadows_width_buckets = [
+        record.get("fold_shadows_width_bucket")
+        for record in processed_records
+        if isinstance(record.get("fold_shadows_width_bucket"), str)
+    ]
+    fold_shadows_coverage_buckets = [
+        record.get("fold_shadows_coverage_bucket")
+        for record in processed_records
+        if isinstance(record.get("fold_shadows_coverage_bucket"), str)
     ]
     illumination_gradient_reasons = [
         record.get("illumination_gradient_reason")
@@ -2380,6 +2398,8 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                     if record.get("fold_shadows_lightened") is True
                     and isinstance(record.get("fold_shadows_orientation"), str)
                 ),
+                "candidate_width_bucket_distribution": _reason_counts(fold_shadows_width_buckets),
+                "candidate_coverage_bucket_distribution": _reason_counts(fold_shadows_coverage_buckets),
                 "changed_pixel_ratio": _aggregate_metric(audit_records, "fold_shadows_changed_pixel_ratio"),
                 "candidate_pixel_ratio": _aggregate_metric(audit_records, "fold_shadows_candidate_pixel_ratio"),
                 "reason_distribution": _reason_counts(
@@ -3667,6 +3687,8 @@ def _process_image(
         "fold_shadows_reason_code": _fold_shadows_reason_code(guard_reason if guard_reverted else fold_shadows.reason),
         "fold_shadows_orientation": fold_shadows.orientation,
         "fold_shadows_count": 0 if guard_reverted else fold_shadows.band_count,
+        "fold_shadows_width_bucket": None if guard_reverted else fold_shadows.band_width_bucket,
+        "fold_shadows_coverage_bucket": None if guard_reverted else fold_shadows.coverage_bucket,
         "fold_shadows_mean_before": None if guard_reverted else fold_shadows.band_mean_before,
         "fold_shadows_mean_after": None if guard_reverted else fold_shadows.band_mean_after,
         "fold_shadows_delta": 0.0 if guard_reverted else fold_shadows.band_delta,
@@ -5747,6 +5769,8 @@ def _lighten_fold_shadows_conservative(image: Image.Image) -> FoldShadowCleanupR
         round(after_mean - before_mean, 6),
         round(changed_ratio, 6),
         candidate_ratio,
+        plan["width_bucket"],
+        plan["coverage_bucket"],
     )
 
 
@@ -5785,7 +5809,7 @@ def _fold_shadow_axis_plan(
             values.append(value)
             if value <= 150:
                 dark_count += 1
-            if 4 <= background - value <= 32 and value >= 172:
+            if 4 <= background - value <= 48 and value >= 188:
                 selected.append((x, y))
                 selected_crosses.add(cross)
         available_ratio = len(values) / max(1, cross_length)
@@ -5849,7 +5873,7 @@ def _fold_shadow_axis_plan(
         local_mean = sum(neighbor_means) / len(neighbor_means)
         band_mean = sum(stats[index]["mean"] for index in group) / len(group)
         local_delta = local_mean - band_mean
-        if not (4.0 <= local_delta <= 28.0):
+        if not (4.0 <= local_delta <= 42.0):
             continue
         if any(stats[index]["protected_ratio"] > 0.004 for index in group):
             return _empty_fold_shadow_plan(
@@ -5886,6 +5910,8 @@ def _fold_shadow_axis_plan(
         "bands": selected_groups,
         "selected": selected,
         "candidate_ratio": candidate_total_ratio,
+        "width_bucket": _fold_shadow_width_bucket(max(len(group) for group in selected_groups)),
+        "coverage_bucket": _fold_shadow_coverage_bucket(candidate_total_ratio),
         "reason": None,
     }
 
@@ -5926,8 +5952,38 @@ def _empty_fold_shadow_plan(
         "bands": [],
         "selected": set(),
         "candidate_ratio": round(candidate_ratio, 6),
+        "width_bucket": None,
+        "coverage_bucket": _fold_shadow_coverage_bucket(candidate_ratio),
         "reason": reason,
     }
+
+
+def _fold_shadow_width_bucket(width: int) -> str:
+    if width <= 0:
+        return "0px"
+    if width <= 2:
+        return "1-2px"
+    if width <= 4:
+        return "3-4px"
+    if width <= 8:
+        return "5-8px"
+    if width <= 16:
+        return "9-16px"
+    return "17px+"
+
+
+def _fold_shadow_coverage_bucket(ratio: float) -> str:
+    if ratio <= 0:
+        return "0"
+    if ratio < 0.01:
+        return "0-0.01"
+    if ratio < 0.05:
+        return "0.01-0.05"
+    if ratio < 0.10:
+        return "0.05-0.10"
+    if ratio < 0.25:
+        return "0.10-0.25"
+    return "0.25+"
 
 
 _FOLD_SHADOW_REASON_CODES: dict[str, str] = {
