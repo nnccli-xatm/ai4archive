@@ -4199,14 +4199,23 @@ def _normalize_paper_color_cast_conservative(image: Image.Image) -> PaperColorCa
 
     channel_spread = max(means) - min(means)
     cool_cast_evidence = means[0] == min(means) and max(means[1], means[2]) - means[0] >= 2.5
-    min_cast_spread = 2.5 if cool_cast_evidence and brightness_mean >= 240 else 4.0
+    mild_blue_gray_scanner_cast = (
+        cool_cast_evidence
+        and means[0] <= means[1] <= means[2]
+        and brightness_mean >= 235
+        and min(means) >= 232
+        and channel_spread <= 10
+    )
+    min_cast_spread = (
+        2.5 if (cool_cast_evidence and brightness_mean >= 240) or mild_blue_gray_scanner_cast else 4.0
+    )
     if channel_spread < min_cast_spread:
         return _paper_color_cast_noop(
             image,
             "paper color cast normalization skipped: already near neutral",
             "already_neutral",
         )
-    if cool_cast_evidence and brightness_mean < 240 and channel_spread >= 8.0:
+    if cool_cast_evidence and brightness_mean < 240 and channel_spread >= 8.0 and not mild_blue_gray_scanner_cast:
         return _paper_color_cast_noop(
             image,
             "paper color cast normalization skipped: colored paper or strong color evidence",

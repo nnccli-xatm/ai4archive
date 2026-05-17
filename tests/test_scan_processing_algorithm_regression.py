@@ -229,6 +229,55 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in ("synthetic_safe_combination.png", str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_mild_blue_gray_cast_stays_guarded_and_private(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-blue-gray-cast-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "private_full_chain_blue_gray_cast.png"
+            image = Image.new("RGB", (240, 180), (235, 239, 243))
+            draw = ImageDraw.Draw(image)
+            for y in (42, 66, 90):
+                draw.rectangle((36, y, 128, y + 3), fill=(58, 58, 58))
+            image.save(source, dpi=(300, 300))
+            source_bytes = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "blue-gray-cast", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+            audit = record["processing_audit"]
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(record["status"], "processed")
+            self.assertTrue(record["paper_color_cast_normalized"])
+            self.assertEqual(record["paper_color_cast_reason_code"], "applied_mild_uniform_scanner_cast")
+            self.assertIn("normalize_paper_color_cast_conservative", record["operations"])
+            self.assertEqual(audit["guardrail_failures"], [])
+            self.assertEqual(audit["local_content_change_guard_action"], "passed")
+            self.assertEqual(audit["cumulative_change_guard_action"], "passed")
+            self.assertEqual(audit["combination_quality_guard_action"], "passed")
+            self.assertEqual(audit["processed_output_safety_guard_action"], "passed")
+            self.assertLessEqual(audit["paper_color_cast_delta"], 10.0)
+            self.assertLessEqual(audit["paper_color_cast_brightness_delta"], 3.0)
+            self.assertLessEqual(audit["cumulative_change_pixel_ratio"], 0.10)
+            self.assertEqual(audit_summary["counts"]["paper_color_cast_normalized_files"], 1)
+            self.assertEqual(audit_summary["counts"]["combination_quality_guard_reverted_files"], 0)
+            self.assertEqual(audit_summary["counts"]["processed_output_safety_guard_reverted_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (
+                "private_full_chain_blue_gray_cast.png",
+                str(input_dir),
+                "source_relative_path",
+                "source_sha256",
+            ):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_segmented_scanline_chain_stays_aggregate_and_guarded(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-segmented-scanline-") as temp_dir:
             root = Path(temp_dir)
