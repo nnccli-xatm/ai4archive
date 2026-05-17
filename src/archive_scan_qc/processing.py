@@ -2460,13 +2460,31 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                     and isinstance(record.get("illumination_gradient_orientation"), str)
                 ),
                 "correction_delta": _aggregate_metric(audit_records, "illumination_gradient_correction_delta"),
+                "correction_delta_bucket_distribution": _metric_bucket_distribution(
+                    audit_records,
+                    "illumination_gradient_correction_delta",
+                    (0.0, 2.0, 4.0, 8.0, 10.0),
+                ),
                 "changed_pixel_ratio": _aggregate_metric(
+                    audit_records,
+                    "illumination_gradient_changed_pixel_ratio",
+                ),
+                "changed_pixel_ratio_bucket_distribution": _ratio_distribution(
                     audit_records,
                     "illumination_gradient_changed_pixel_ratio",
                 ),
                 "candidate_pixel_ratio": _aggregate_metric(
                     audit_records,
                     "illumination_gradient_candidate_pixel_ratio",
+                ),
+                "candidate_pixel_ratio_bucket_distribution": _ratio_distribution(
+                    audit_records,
+                    "illumination_gradient_candidate_pixel_ratio",
+                ),
+                "gradient_delta_before_bucket_distribution": _metric_bucket_distribution(
+                    processed_records,
+                    "illumination_gradient_delta_before",
+                    (0.0, 4.0, 6.0, 12.0, 24.0),
                 ),
                 "reason_distribution": _reason_counts(
                     reason for reason in illumination_gradient_reasons if isinstance(reason, str)
@@ -2973,6 +2991,39 @@ def _ratio_distribution(records: list[dict[str, Any]], key: str) -> dict[str, in
             buckets["0.10-0.25"] += 1
         else:
             buckets["0.25+"] += 1
+    return buckets
+
+
+def _metric_bucket_distribution(
+    records: list[dict[str, Any]],
+    key: str,
+    limits: tuple[float, ...],
+) -> dict[str, int]:
+    labels = ["0"]
+    previous = limits[0]
+    for limit in limits[1:]:
+        labels.append(f"{previous:g}-{limit:g}")
+        previous = limit
+    labels.append(f"{limits[-1]:g}+")
+    buckets = {label: 0 for label in labels}
+    for record in records:
+        value = record.get(key)
+        if not isinstance(value, int | float):
+            continue
+        metric = float(value)
+        if metric == 0:
+            buckets["0"] += 1
+            continue
+        previous = limits[0]
+        placed = False
+        for limit in limits[1:]:
+            if metric <= limit:
+                buckets[f"{previous:g}-{limit:g}"] += 1
+                placed = True
+                break
+            previous = limit
+        if not placed:
+            buckets[f"{limits[-1]:g}+"] += 1
     return buckets
 
 
@@ -5436,11 +5487,28 @@ def _illumination_gradient_axis_plan(grayscale: Image.Image, *, vertical: bool) 
     two_edge_mean_residual = sum(two_edge_residuals) / len(two_edge_residuals)
     one_edge_shape = _illumination_gradient_one_edge_shape(profile)
 
+    subtle_linear_confident = (
+        linear_delta >= 4.0
+        and candidate_ratio >= 0.985
+        and linear_mean_residual <= 0.85
+    )
+    subtle_two_edge_confident = (
+        two_edge_delta >= 4.5
+        and candidate_ratio >= 0.985
+        and side_delta_balance <= 2.0
+        and two_edge_mean_residual <= 0.85
+    )
+    subtle_one_edge_confident = (
+        one_edge_shape is not None
+        and one_edge_shape["delta"] >= 4.5
+        and candidate_ratio >= 0.985
+        and one_edge_shape["mean_residual"] <= 0.85
+    )
     if linear_delta < 6.0 and two_edge_delta < 6.0:
-        if one_edge_shape is None or one_edge_shape["delta"] < 6.0:
+        if not (subtle_linear_confident or subtle_two_edge_confident or subtle_one_edge_confident):
             return _empty_illumination_gradient_plan(
                 orientation,
-                "gradient below conservative threshold",
+                "gradient below conservative threshold or too uncertain for subtle leveling",
                 "low_confidence",
             )
     if linear_delta > 28.0 or two_edge_delta > 24.0:
@@ -5456,9 +5524,9 @@ def _illumination_gradient_axis_plan(grayscale: Image.Image, *, vertical: bool) 
     mean_residual = linear_mean_residual
     score = linear_delta - linear_mean_residual
     if (
-        two_edge_delta >= 6.0
-        and side_delta_balance <= 4.0
-        and two_edge_mean_residual <= 2.4
+        (two_edge_delta >= 6.0 or subtle_two_edge_confident)
+        and side_delta_balance <= (2.0 if subtle_two_edge_confident and two_edge_delta < 6.0 else 4.0)
+        and two_edge_mean_residual <= (0.85 if subtle_two_edge_confident and two_edge_delta < 6.0 else 2.4)
         and two_edge_delta - two_edge_mean_residual > score
     ):
         plan_shape = "two_edge"
