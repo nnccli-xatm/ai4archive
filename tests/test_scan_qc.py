@@ -9299,6 +9299,51 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn("A001_faint_segmented_text", audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
 
+    def test_deskew_corrects_faint_handwriting_baselines_on_light_paper(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            image = _synthetic_faint_handwriting_baseline_page().rotate(
+                -0.55,
+                resample=Image.Resampling.BICUBIC,
+                expand=True,
+                fillcolor=(249, 249, 246),
+            )
+            source = input_dir / "A001_faint_handwriting_baselines.png"
+            image.save(source, dpi=(300, 300))
+            source_sha_before = _sha256_for_test(source)
+            alignment_before = _faint_text_horizontal_alignment_score(image)
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(deskew=True, workers=1))
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            record = manifest["files"][0]
+            self.assertEqual(record["status"], "processed")
+            self.assertTrue(record["deskewed"])
+            self.assertAlmostEqual(record["skew_angle_degrees"], -0.55, delta=0.25)
+            self.assertGreaterEqual(record["skew_confidence"], 0.08)
+            self.assertLessEqual(abs(record["skew_angle_degrees"]), 1.25)
+            self.assertEqual(record["deskew_reason"], "deskew applied")
+            self.assertEqual(source_sha_before, _sha256_for_test(source))
+            self.assertIn("deskew_conservative", record["operations"])
+            with Image.open(process_dir / "images" / "A001_faint_handwriting_baselines.png") as processed:
+                alignment_after = _faint_text_horizontal_alignment_score(processed)
+            self.assertGreater(alignment_after, alignment_before * 1.2)
+            self.assertEqual(audit_summary["counts"]["deskewed_files"], 1)
+            self.assertEqual(audit_summary["counts"]["deskew_projection_detection_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["deskew"]["corrected_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["deskew"]["reason_distribution"]["deskew applied"], 1)
+            self.assertTrue(manifest["performance"]["operation_timings"]["deskew"]["enabled"])
+            self.assertGreaterEqual(manifest["performance"]["operation_timings"]["deskew"]["file_count"], 1)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("A001_faint_handwriting_baselines", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
     def test_deskew_does_not_rotate_blank_or_low_contrast_pages(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -9427,6 +9472,49 @@ class ScanQcTest(unittest.TestCase):
             self.assertFalse(record["deskewed"])
             self.assertEqual(record["deskew_reason"], "low contrast")
             self.assertIn("deskew_noop", record["operations"])
+
+    def test_deskew_noops_for_faint_ruled_lines_or_scanlines(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            ruled = _synthetic_faint_ruled_line_page().rotate(
+                -0.55,
+                resample=Image.Resampling.BICUBIC,
+                expand=True,
+                fillcolor=(249, 249, 246),
+            )
+            scanline = _synthetic_faint_single_scanline_page().rotate(
+                -0.55,
+                resample=Image.Resampling.BICUBIC,
+                expand=True,
+                fillcolor=(249, 249, 246),
+            )
+            ruled.save(input_dir / "A001_faint_ruled.png", dpi=(300, 300))
+            scanline.save(input_dir / "A002_faint_scanline.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(deskew=True, workers=1))
+            audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
+
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            self.assertFalse(records["A001_faint_ruled.png"]["deskewed"])
+            self.assertEqual(records["A001_faint_ruled.png"]["deskew_reason"], "faint ruled line rotation risk")
+            self.assertIn("deskew_noop", records["A001_faint_ruled.png"]["operations"])
+            self.assertFalse(records["A002_faint_scanline.png"]["deskewed"])
+            self.assertIn(records["A002_faint_scanline.png"]["deskew_reason"], {"low contrast", "low confidence"})
+            self.assertIn("deskew_noop", records["A002_faint_scanline.png"]["operations"])
+            for name in ("A001_faint_ruled.png", "A002_faint_scanline.png"):
+                with Image.open(input_dir / name) as source_image, Image.open(process_dir / "images" / name) as output_image:
+                    self.assertIsNone(ImageChops.difference(source_image, output_image).getbbox())
+            self.assertEqual(audit_summary["counts"]["deskewed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["deskew_skipped_files"], 2)
+            self.assertEqual(
+                audit_summary["guardrails"]["deskew"]["reason_distribution"]["faint ruled line rotation risk"],
+                1,
+            )
 
     def test_deskew_noops_when_edge_content_would_expand_crop_risk(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -15334,6 +15422,38 @@ def _synthetic_faint_segmented_text_page() -> Image.Image:
             width = 4 + ((x + y) // 13) % 10
             draw.rectangle((x, y, min(350, x + width), y + 2), fill=ink)
             x += width + 8
+    return image
+
+
+def _synthetic_faint_handwriting_baseline_page() -> Image.Image:
+    image = Image.new("RGB", (520, 680), (249, 249, 246))
+    draw = ImageDraw.Draw(image)
+    ink = (239, 239, 237)
+    for y in range(90, 520, 34):
+        x = 70
+        segment = 0
+        while x < 440:
+            width = 5 + ((x + y) // 17) % 9
+            draw.arc((x, y - 5, x + width + 8, y + 7), 180, 355, fill=ink, width=2)
+            if segment % 3 == 0:
+                draw.line((x + 2, y + 2, x + width + 10, y + 1), fill=ink, width=1)
+            x += width + 17
+            segment += 1
+    return image
+
+
+def _synthetic_faint_ruled_line_page() -> Image.Image:
+    image = Image.new("RGB", (520, 680), (249, 249, 246))
+    draw = ImageDraw.Draw(image)
+    for y in range(90, 540, 34):
+        draw.line((54, y, 466, y), fill=(239, 239, 237), width=2)
+    return image
+
+
+def _synthetic_faint_single_scanline_page() -> Image.Image:
+    image = Image.new("RGB", (520, 680), (249, 249, 246))
+    draw = ImageDraw.Draw(image)
+    draw.line((40, 340, 480, 340), fill=(238, 238, 236), width=2)
     return image
 
 

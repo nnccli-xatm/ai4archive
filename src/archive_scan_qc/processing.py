@@ -8238,6 +8238,9 @@ def _safe_deskew_skip_from_page_evidence(image: Image.Image) -> SkewDetection | 
     low = _histogram_percentile(histogram, total_pixels, 0.05)
     high = _histogram_percentile(histogram, total_pixels, 0.95)
     if high - low < 35:
+        faint_ink, faint_bbox = _faint_low_contrast_ink(raw_grayscale, raw_low, raw_high)
+        if faint_bbox and _deskew_faint_row_group_count(faint_ink, faint_bbox) >= 8:
+            return None
         if raw_high < 220 or raw_span < 8:
             return SkewDetection(None, 0.0, "low contrast")
         if raw_span < 35:
@@ -8403,7 +8406,7 @@ def _detect_skew(image: Image.Image) -> SkewDetection:
     if high - low < 35:
         if raw_high - raw_low < 35:
             faint = _detect_faint_stable_text_skew(raw_grayscale, raw_low, raw_high)
-            if faint.angle_degrees is not None:
+            if faint.angle_degrees is not None or faint.reason == "faint ruled line rotation risk":
                 return faint
             return SkewDetection(None, 0.0, "low contrast")
         sparse_threshold = max(0, raw_high - 35)
@@ -8570,24 +8573,160 @@ def _detect_faint_stable_text_skew(
     if raw_span < 8:
         return SkewDetection(None, 0.0, "low contrast")
 
-    # Low-contrast scanner text can sit far above the normal foreground threshold.
-    # Use a narrow paper-relative threshold, then require stable text-line geometry.
-    threshold = max(0, raw_high - max(6, min(24, int(round(raw_span * 0.75)))))
-    ink = raw_grayscale.point(lambda value: 255 if value <= threshold else 0, mode="L")
-    bbox = ink.getbbox()
+    ink, bbox = _faint_low_contrast_ink(raw_grayscale, raw_low, raw_high)
     if not bbox:
         return SkewDetection(None, 0.0, "low contrast")
 
     ink_ratio = _nonzero_ratio(ink, bbox)
     if ink_ratio < 0.003 or ink_ratio > 0.25:
         return SkewDetection(None, 0.0, "low contrast")
+    if _deskew_has_faint_ruled_line_risk(ink, bbox):
+        return SkewDetection(None, 0.0, "faint ruled line rotation risk")
 
     shallow = _detect_shallow_stable_text_skew(raw_grayscale, ink, bbox, raw_high=raw_high)
     if shallow.angle_degrees is None:
         return SkewDetection(None, 0.0, "low contrast")
 
+    projection = _detect_faint_projection_text_skew(ink, bbox, shallow)
+    if projection.angle_degrees is not None or projection.reason == "faint ruled line rotation risk":
+        return projection
+
     confidence = max(shallow.confidence, 0.14)
     return SkewDetection(shallow.angle_degrees, round(confidence, 3), "faint stable text skew detected")
+
+
+def _detect_faint_projection_text_skew(
+    ink: Image.Image,
+    bbox: tuple[int, int, int, int],
+    shallow: SkewDetection,
+) -> SkewDetection:
+    if shallow.angle_degrees is None:
+        return SkewDetection(None, 0.0, "low contrast")
+
+    sample = ink.crop(bbox)
+    sample.thumbnail((700, 700), Image.Resampling.BILINEAR)
+    sample_width, sample_height = sample.size
+    if sample_width < 80 or sample_height < 60:
+        return SkewDetection(None, 0.0, "low contrast")
+
+    scores = _deskew_candidate_scores(sample)
+    best_angle, best_score = max(scores.items(), key=lambda item: item[1])
+    skew_angle = round(-best_angle, 2)
+    if abs(skew_angle) < 0.2 or abs(skew_angle) > 1.25:
+        return SkewDetection(None, 0.0, "low contrast")
+    if shallow.angle_degrees * skew_angle <= 0:
+        return SkewDetection(None, 0.0, "low contrast")
+    if abs(shallow.angle_degrees - skew_angle) > 0.55:
+        return SkewDetection(None, 0.0, "low contrast")
+
+    runner_candidates = [score for angle, score in scores.items() if abs(angle - best_angle) >= 0.5]
+    runner_up = max(runner_candidates) if runner_candidates else 0.0
+    confidence = 0.0 if best_score <= 0 else max(0.0, min(1.0, (best_score - runner_up) / best_score))
+    zero_score = scores.get(0.0, 0.0)
+    if confidence < 0.08 or best_score < zero_score * 1.08:
+        return SkewDetection(None, 0.0, "low contrast")
+    corrected = sample.rotate(
+        best_angle,
+        resample=Image.Resampling.BILINEAR,
+        expand=True,
+        fillcolor=0,
+    )
+    if _deskew_sample_has_faint_ruled_line_risk(corrected):
+        return SkewDetection(None, 0.0, "faint ruled line rotation risk")
+
+    confidence = max(confidence, min(shallow.confidence, 0.22), 0.14)
+    return SkewDetection(skew_angle, round(confidence, 3), "faint stable text skew detected")
+
+
+def _faint_low_contrast_ink(
+    raw_grayscale: Image.Image,
+    raw_low: int,
+    raw_high: int,
+) -> tuple[Image.Image, tuple[int, int, int, int] | None]:
+    raw_span = raw_high - raw_low
+    # Low-contrast scanner text can sit far above the normal foreground threshold.
+    # Use a narrow paper-relative threshold, then require stable text-line geometry.
+    threshold = max(0, raw_high - max(6, min(24, int(round(raw_span * 0.75)))))
+    ink = raw_grayscale.point(lambda value: 255 if value <= threshold else 0, mode="L")
+    return ink, ink.getbbox()
+
+
+def _deskew_faint_row_group_count(ink: Image.Image, bbox: tuple[int, int, int, int]) -> int:
+    sample = ink.crop(bbox)
+    sample.thumbnail((700, 700), Image.Resampling.BILINEAR)
+    width, height = sample.size
+    if width <= 0 or height <= 0:
+        return 0
+    pixels = sample.load()
+    active_threshold = max(8.0, width * 0.08)
+    groups: list[tuple[int, int]] = []
+    start: int | None = None
+    for y in range(height):
+        row_count = 0
+        for x in range(width):
+            if pixels[x, y]:
+                row_count += 1
+        if row_count >= active_threshold:
+            if start is None:
+                start = y
+        elif start is not None:
+            groups.append((start, y))
+            start = None
+    if start is not None:
+        groups.append((start, height))
+    return len(_merge_close_row_groups(groups, max_gap=2))
+
+
+def _deskew_has_faint_ruled_line_risk(ink: Image.Image, bbox: tuple[int, int, int, int]) -> bool:
+    sample = ink.crop(bbox)
+    sample.thumbnail((700, 700), Image.Resampling.BILINEAR)
+    return _deskew_sample_has_faint_ruled_line_risk(sample)
+
+
+def _deskew_sample_has_faint_ruled_line_risk(sample: Image.Image) -> bool:
+    width, height = sample.size
+    if width <= 0 or height <= 0:
+        return False
+
+    pixels = sample.load()
+    row_groups: list[tuple[int, int]] = []
+    start: int | None = None
+    active_threshold = max(8.0, width * 0.08)
+    for y in range(height):
+        row_count = 0
+        for x in range(width):
+            if pixels[x, y]:
+                row_count += 1
+        if row_count >= active_threshold:
+            if start is None:
+                start = y
+        elif start is not None:
+            row_groups.append((start, y))
+            start = None
+    if start is not None:
+        row_groups.append((start, height))
+    row_groups = _merge_close_row_groups(row_groups, max_gap=2)
+
+    long_rule_groups = 0
+    max_band_height = max(8, int(round(height * 0.04)))
+    long_run_threshold = max(80, int(round(width * 0.72)))
+    for top, bottom in row_groups:
+        if bottom - top > max_band_height:
+            continue
+        group_has_long_run = False
+        for y in range(top, bottom):
+            run = 0
+            for x in range(width):
+                run = run + 1 if pixels[x, y] else 0
+                if run >= long_run_threshold:
+                    group_has_long_run = True
+                    break
+            if group_has_long_run:
+                break
+        if group_has_long_run:
+            long_rule_groups += 1
+
+    return long_rule_groups >= 8
 
 
 def _merge_close_row_groups(groups: list[tuple[int, int]], *, max_gap: int) -> list[tuple[int, int]]:
