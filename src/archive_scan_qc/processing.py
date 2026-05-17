@@ -810,6 +810,7 @@ def _process_record(
         "illumination_gradient_candidate_pixel_ratio": 0.0,
         "bleed_through_cleaned": False,
         "bleed_through_reason": None,
+        "bleed_through_reason_code": None,
         "bleed_through_mean_before": None,
         "bleed_through_mean_after": None,
         "bleed_through_delta": 0.0,
@@ -967,6 +968,7 @@ def _process_record(
                 ],
                 "bleed_through_cleaned": process_info["bleed_through_cleaned"],
                 "bleed_through_reason": process_info["bleed_through_reason"],
+                "bleed_through_reason_code": process_info["bleed_through_reason_code"],
                 "bleed_through_mean_before": process_info["bleed_through_mean_before"],
                 "bleed_through_mean_after": process_info["bleed_through_mean_after"],
                 "bleed_through_delta": process_info["bleed_through_delta"],
@@ -1101,6 +1103,7 @@ def _process_record(
                     ],
                     "bleed_through_cleaned": process_info["bleed_through_cleaned"],
                     "bleed_through_reason": process_info["bleed_through_reason"],
+                    "bleed_through_reason_code": process_info["bleed_through_reason_code"],
                     "bleed_through_mean_before": process_info["bleed_through_mean_before"],
                     "bleed_through_mean_after": process_info["bleed_through_mean_after"],
                     "bleed_through_delta": process_info["bleed_through_delta"],
@@ -1386,6 +1389,30 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
         if record.get("illumination_gradient_levelled") is False
         and isinstance(reason, str)
         and reason != "illumination gradient leveling disabled"
+    ]
+    bleed_through_reasons = [
+        record.get("bleed_through_reason")
+        for record in processed_records
+        if isinstance(record.get("bleed_through_reason"), str)
+    ]
+    bleed_through_reason_codes = [
+        record.get("bleed_through_reason_code")
+        for record in processed_records
+        if isinstance(record.get("bleed_through_reason_code"), str)
+    ]
+    bleed_through_skipped_reason_codes = [
+        code
+        for record in processed_records
+        for code in [record.get("bleed_through_reason_code")]
+        if record.get("bleed_through_cleaned") is False and isinstance(code, str) and code != "disabled"
+    ]
+    bleed_through_skipped_reasons = [
+        reason
+        for record in processed_records
+        for reason in [record.get("bleed_through_reason")]
+        if record.get("bleed_through_cleaned") is False
+        and isinstance(reason, str)
+        and reason != "bleed-through cleanup disabled"
     ]
     scanlines_reasons = [
         record.get("scanlines_reason")
@@ -2436,23 +2463,21 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                 "changed_pixel_ratio": _aggregate_metric(audit_records, "bleed_through_changed_pixel_ratio"),
                 "candidate_pixel_ratio": _aggregate_metric(audit_records, "bleed_through_candidate_pixel_ratio"),
                 "reason_distribution": _reason_counts(
-                    record.get("bleed_through_reason")
-                    for record in processed_records
-                    if isinstance(record.get("bleed_through_reason"), str)
+                    reason for reason in bleed_through_reasons if isinstance(reason, str)
                 ),
-                "skip_reason_distribution": _reason_counts(
-                    record.get("bleed_through_reason")
-                    for record in processed_records
-                    if record.get("bleed_through_cleaned") is False
-                    and isinstance(record.get("bleed_through_reason"), str)
-                    and record.get("bleed_through_reason") != "bleed-through cleanup disabled"
-                ),
+                "skip_reason_distribution": _reason_counts(bleed_through_skipped_reasons),
+                "reason_code_distribution": _reason_counts(bleed_through_reason_codes),
+                "skip_reason_code_distribution": _reason_counts(bleed_through_skipped_reason_codes),
                 "protection_triggered_files": sum(
                     1
-                    for record in processed_records
-                    if record.get("bleed_through_cleaned") is False
-                    and isinstance(record.get("bleed_through_reason"), str)
-                    and "risk" in record.get("bleed_through_reason", "")
+                    for code in bleed_through_skipped_reason_codes
+                    if code.startswith("protected_") or code == "conservative_scope_risk"
+                ),
+                "low_confidence_skip_files": sum(
+                    1 for code in bleed_through_skipped_reason_codes if code == "low_confidence"
+                ),
+                "guardrail_reverted_files": sum(
+                    1 for code in bleed_through_skipped_reason_codes if code == "guardrail_reverted"
                 ),
             },
             "scanlines": {
@@ -3430,6 +3455,7 @@ def _process_image(
         text_edges.changed_pixel_ratio,
         text_edges.candidate_pixel_ratio,
     )
+    attempted_audit["bleed_through_reason_code"] = _bleed_through_reason_code(bleed_through.reason)
     cumulative_guard = _cumulative_change_guard(attempted_audit, options)
     local_content_guard = {
         "checked": attempted_audit.get("local_content_change_guard_checked") is True,
@@ -3520,6 +3546,7 @@ def _process_image(
             combination_quality_guard=combination_guard,
             processed_output_safety_guard=processed_output_guard,
         )
+        processing_audit["bleed_through_reason_code"] = "guardrail_reverted"
     else:
         processing_audit = {
             **attempted_audit,
@@ -3654,6 +3681,9 @@ def _process_image(
         else illumination_gradient.candidate_pixel_ratio,
         "bleed_through_cleaned": False if guard_reverted else bleed_through.applied,
         "bleed_through_reason": guard_reason if guard_reverted else bleed_through.reason,
+        "bleed_through_reason_code": (
+            "guardrail_reverted" if guard_reverted else _bleed_through_reason_code(bleed_through.reason)
+        ),
         "bleed_through_mean_before": None if guard_reverted else bleed_through.ghost_mean_before,
         "bleed_through_mean_after": None if guard_reverted else bleed_through.ghost_mean_after,
         "bleed_through_delta": 0.0 if guard_reverted else bleed_through.ghost_delta,
@@ -5829,6 +5859,9 @@ def _clean_bleed_through_conservative(image: Image.Image) -> BleedThroughCleanup
     p95 = _histogram_percentile(histogram, total, 0.95)
     if p95 < 222 or p50 < 216:
         return _bleed_through_noop(image, "bleed-through cleanup skipped: page is not a light background")
+    very_stable_light_paper = p50 >= 236 and p90 >= 240 and p95 - p50 <= 6
+    if very_stable_light_paper and _illumination_gradient_texture_ratio(grayscale) > 0.16:
+        return _bleed_through_noop(image, "bleed-through cleanup skipped: dense texture or archival trace risk")
 
     foreground = grayscale.point(lambda value: 255 if value <= max(150, min(196, p50 - 28)) else 0, mode="L")
     foreground_ratio = _mask_ratio(foreground)
@@ -5838,7 +5871,8 @@ def _clean_bleed_through_conservative(image: Image.Image) -> BleedThroughCleanup
         return _bleed_through_noop(image, "bleed-through cleanup skipped: edge content or binding risk")
 
     background = max(p90, p95 - 1)
-    min_ghost_signal = 2 if p50 >= 230 and p95 >= 238 else 4
+    min_ghost_signal = 1 if very_stable_light_paper else 2 if p50 >= 230 and p95 >= 238 else 4
+    max_ghost_signal = 18 if very_stable_light_paper else 32
     edge_signal = grayscale.filter(ImageFilter.FIND_EDGES)
     protected = foreground.filter(ImageFilter.MaxFilter(17))
     edge_margin = max(5, int(round(min(image.width, image.height) * 0.045)))
@@ -5851,7 +5885,7 @@ def _clean_bleed_through_conservative(image: Image.Image) -> BleedThroughCleanup
             value = int(source_pixels[x, y])
             if not (
                 190 <= value <= background - min_ghost_signal
-                and min_ghost_signal <= background - value <= 32
+                and min_ghost_signal <= background - value <= max_ghost_signal
             ):
                 continue
             if int(edge_pixels[x, y]) >= 22:
@@ -5867,7 +5901,8 @@ def _clean_bleed_through_conservative(image: Image.Image) -> BleedThroughCleanup
         )
     candidate = ImageChops.multiply(edge_cleared_candidate, ImageChops.invert(protected))
     candidate_ratio = _mask_ratio(candidate)
-    if candidate_ratio < 0.0003:
+    min_candidate_ratio = 0.00018 if min_ghost_signal == 1 else 0.0003
+    if candidate_ratio < min_candidate_ratio:
         return _bleed_through_noop(image, "bleed-through cleanup skipped: no confident faint reverse-side ghosts")
     if candidate_ratio > 0.065:
         return _bleed_through_noop(
@@ -5885,6 +5920,12 @@ def _clean_bleed_through_conservative(image: Image.Image) -> BleedThroughCleanup
     components = [component for component in _mask_components(candidate) if len(component) >= 4]
     if not components:
         return _bleed_through_noop(image, "bleed-through cleanup skipped: no confident faint reverse-side ghosts")
+    if very_stable_light_paper and max(len(component) for component in components) < 16:
+        return _bleed_through_noop(
+            image,
+            "bleed-through cleanup skipped: dense texture or archival trace risk",
+            candidate_ratio,
+        )
     if len(components) > 28:
         return _bleed_through_noop(
             image,
@@ -5928,7 +5969,7 @@ def _clean_bleed_through_conservative(image: Image.Image) -> BleedThroughCleanup
         selected.update(component)
 
     changed_ratio = len(selected) / max(1, total)
-    if changed_ratio < 0.0003:
+    if changed_ratio < min_candidate_ratio:
         return _bleed_through_noop(image, "bleed-through cleanup skipped: no confident faint reverse-side ghosts", candidate_ratio)
     if changed_ratio > 0.045:
         return _bleed_through_noop(
@@ -5993,6 +6034,38 @@ def _bleed_through_noop(
     candidate_pixel_ratio: float = 0.0,
 ) -> BleedThroughCleanupResult:
     return BleedThroughCleanupResult(image, False, reason, None, None, 0.0, 0.0, round(candidate_pixel_ratio, 6))
+
+
+def _bleed_through_reason_code(reason: str | None) -> str:
+    if reason == "bleed-through cleanup disabled":
+        return "disabled"
+    if reason == "bleed-through cleanup applied: faint reverse-side ghost on light background":
+        return "applied_faint_reverse_ghost"
+    if reason == "reverted by local content change guard":
+        return "guardrail_reverted"
+    if reason and reason.startswith("reverted by "):
+        return "guardrail_reverted"
+    if not reason:
+        return "unknown"
+    if "image too small" in reason:
+        return "unsupported_image_size"
+    if "not a light background" in reason:
+        return "unsupported_background"
+    if "color content" in reason or "stamp" in reason:
+        return "protected_color_content"
+    if "foreground too dense" in reason:
+        return "protected_foreground_too_dense"
+    if "edge content" in reason or "binding" in reason:
+        return "protected_edge_content"
+    if "table line" in reason or "page number" in reason or "annotation" in reason:
+        return "protected_line_or_annotation"
+    if "dense texture" in reason or "archival trace" in reason:
+        return "protected_texture_or_archival_trace"
+    if "large candidate" in reason or "broad uneven" in reason or "too many ghost candidates" in reason:
+        return "conservative_scope_risk"
+    if "improvement below" in reason or "no confident" in reason:
+        return "low_confidence"
+    return "protected_ambiguous_content"
 
 
 def _bleed_through_line_risk(candidate: Image.Image) -> bool:
