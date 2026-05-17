@@ -6616,7 +6616,7 @@ def _clean_bleed_through_conservative(image: Image.Image) -> BleedThroughCleanup
         )
     candidate = ImageChops.multiply(edge_cleared_candidate, ImageChops.invert(protected))
     candidate_ratio = _mask_ratio(candidate)
-    min_candidate_ratio = 0.00018 if min_ghost_signal == 1 else 0.0003
+    min_candidate_ratio = 0.00012 if very_stable_light_paper else 0.0003
     if candidate_ratio < min_candidate_ratio:
         return _bleed_through_noop(image, "bleed-through cleanup skipped: no confident faint reverse-side ghosts")
     if candidate_ratio > 0.065:
@@ -6880,7 +6880,7 @@ def _bleed_through_small_diffuse_selection(
         return set()
     total = candidate.width * candidate.height
     all_points = [point for component in components for point in component]
-    if len(all_points) < 8 or len(all_points) / max(1, total) > 0.0015:
+    if len(all_points) < 6 or len(all_points) / max(1, total) > 0.0015:
         return set()
     xs = [point[0] for point in all_points]
     ys = [point[1] for point in all_points]
