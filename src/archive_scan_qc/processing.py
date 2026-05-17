@@ -5364,11 +5364,22 @@ def _illumination_gradient_axis_plan(grayscale: Image.Image, *, vertical: bool) 
             two_edge_expected.append(center + (end - center) * ((idx - center_index) / denominator))
     two_edge_residuals = [abs(value - want) for value, want in zip(profile, two_edge_expected)]
     two_edge_mean_residual = sum(two_edge_residuals) / len(two_edge_residuals)
+    one_edge_shape = _illumination_gradient_one_edge_shape(profile)
 
     if linear_delta < 6.0 and two_edge_delta < 6.0:
-        return _empty_illumination_gradient_plan(orientation, "gradient below conservative threshold", "low_confidence")
+        if one_edge_shape is None or one_edge_shape["delta"] < 6.0:
+            return _empty_illumination_gradient_plan(
+                orientation,
+                "gradient below conservative threshold",
+                "low_confidence",
+            )
     if linear_delta > 28.0 or two_edge_delta > 24.0:
-        return _empty_illumination_gradient_plan(orientation, "gradient too strong for conservative leveling", "too_strong")
+        if one_edge_shape is None or one_edge_shape["delta"] > 22.0:
+            return _empty_illumination_gradient_plan(
+                orientation,
+                "gradient too strong for conservative leveling",
+                "too_strong",
+            )
 
     plan_shape = "linear"
     delta = linear_delta
@@ -5384,6 +5395,11 @@ def _illumination_gradient_axis_plan(grayscale: Image.Image, *, vertical: bool) 
         delta = two_edge_delta
         mean_residual = two_edge_mean_residual
         score = two_edge_delta - two_edge_mean_residual
+    if one_edge_shape is not None and one_edge_shape["score"] > score:
+        plan_shape = "one_edge"
+        delta = one_edge_shape["delta"]
+        mean_residual = one_edge_shape["mean_residual"]
+        score = one_edge_shape["score"]
     if mean_residual > 2.7:
         return _empty_illumination_gradient_plan(orientation, "gradient is not smooth", "not_uniform")
 
@@ -5396,7 +5412,12 @@ def _illumination_gradient_axis_plan(grayscale: Image.Image, *, vertical: bool) 
             direction_changes += 1
         if sign:
             last_sign = sign
-    max_direction_changes = max(2, axis_length // 80) if plan_shape == "linear" else max(3, axis_length // 90)
+    if plan_shape == "linear":
+        max_direction_changes = max(2, axis_length // 80)
+    elif plan_shape == "one_edge":
+        max_direction_changes = max(2, axis_length // 120)
+    else:
+        max_direction_changes = max(3, axis_length // 90)
     if direction_changes > max_direction_changes:
         return _empty_illumination_gradient_plan(orientation, "gradient is not smooth", "not_uniform")
     return {
@@ -5409,6 +5430,66 @@ def _illumination_gradient_axis_plan(grayscale: Image.Image, *, vertical: bool) 
         "candidate_threshold": candidate_threshold,
         "profile": profile,
     }
+
+
+def _illumination_gradient_one_edge_shape(profile: list[float]) -> dict[str, float] | None:
+    axis_length = len(profile)
+    if axis_length < 80:
+        return None
+    edge_width = max(4, axis_length // 10)
+    plateau_width = max(12, axis_length // 3)
+    min_falloff_width = max(12, int(round(axis_length * 0.12)))
+    max_falloff_width = max(min_falloff_width, int(round(axis_length * 0.45)))
+    best: dict[str, float] | None = None
+    for side in ("start", "end"):
+        values = profile if side == "start" else list(reversed(profile))
+        edge_mean = sum(values[:edge_width]) / edge_width
+        plateau_values = values[-plateau_width:]
+        plateau_mean = sum(plateau_values) / plateau_width
+        plateau_variance = sum((value - plateau_mean) ** 2 for value in plateau_values) / plateau_width
+        plateau_stddev = math.sqrt(plateau_variance)
+        delta = plateau_mean - edge_mean
+        if delta < 6.0 or delta > 22.0 or plateau_stddev > 1.25:
+            continue
+
+        best_stable: tuple[int, float] | None = None
+        stable_tolerance = 1.3
+        for index in range(min_falloff_width, min(max_falloff_width, axis_length - edge_width) + 1):
+            tail = values[index:]
+            if len(tail) < plateau_width // 2:
+                break
+            near_plateau = sum(1 for value in tail if abs(value - plateau_mean) <= stable_tolerance)
+            if near_plateau / len(tail) < 0.92:
+                continue
+            expected: list[float] = []
+            for expected_index in range(axis_length):
+                if expected_index <= index:
+                    expected.append(edge_mean + delta * (expected_index / max(1, index)))
+                else:
+                    expected.append(plateau_mean)
+            residuals = [abs(value - want) for value, want in zip(values, expected)]
+            mean_residual = sum(residuals) / axis_length
+            if best_stable is None or mean_residual < best_stable[1]:
+                best_stable = (index, mean_residual)
+        if best_stable is None:
+            continue
+        stable_from, mean_residual = best_stable
+        if mean_residual > 2.2:
+            continue
+        transition = values[: stable_from + 1]
+        backward_steps = sum(1 for left, right in zip(transition, transition[1:]) if right < left - 0.45)
+        plateau_dips = sum(1 for value in values[stable_from:] if value < plateau_mean - 2.2)
+        if backward_steps > max(1, stable_from // 80) or plateau_dips > max(1, len(values[stable_from:]) // 50):
+            continue
+        score = delta - mean_residual - 0.6
+        candidate = {
+            "delta": round(delta, 6),
+            "mean_residual": round(mean_residual, 6),
+            "score": round(score, 6),
+        }
+        if best is None or candidate["score"] > best["score"]:
+            best = candidate
+    return best
 
 
 def _illumination_gradient_diagonal_plan(
