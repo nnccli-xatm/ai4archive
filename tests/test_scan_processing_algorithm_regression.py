@@ -650,6 +650,65 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in ("private_cool_gray_reverse_ghost", str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_sparse_bleed_through_cleanup_preserves_real_marks_with_public_skip_codes(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-protected-bleed-through-marks-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = _protected_sparse_bleed_through_mark_pages()
+            for name, page in pages.items():
+                page.save(input_dir / name, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "protected-bleed-through-marks", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(clean_bleed_through=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            expected_reason_codes = {
+                "A001_page_number.png": "protected_line_or_annotation",
+                "A002_dotted_leaders.png": "protected_line_or_annotation",
+                "A003_punctuation_i_dot.png": "protected_line_or_annotation",
+                "A004_marginal_annotation.png": "protected_edge_content",
+                "A005_color_stamp_mark.png": "protected_color_content",
+                "A006_table_ruled_lines.png": "protected_line_or_annotation",
+                "A007_archival_dirt_marks.png": "protected_texture_or_archival_trace",
+            }
+
+            self.assertEqual(set(records), set(expected_reason_codes))
+            for name, expected_code in expected_reason_codes.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+                original = pages[name].convert("RGB")
+
+                self.assertFalse(record["bleed_through_cleaned"], name)
+                self.assertEqual(record["bleed_through_reason_code"], expected_code, name)
+                self.assertEqual(audit["bleed_through_reason_code"], expected_code, name)
+                self.assertEqual(audit["bleed_through_changed_pixel_ratio"], 0.0, name)
+                self.assertLessEqual(audit["bleed_through_candidate_pixel_ratio"], 0.065, name)
+                self.assertIsNone(ImageChops.difference(original, processed).getbbox(), name)
+
+            bleed_guard = audit_summary["guardrails"]["bleed_through"]
+            self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 0)
+            self.assertEqual(bleed_guard["applied_files"], 0)
+            self.assertEqual(bleed_guard["skipped_files"], len(expected_reason_codes))
+            self.assertIn("protected_line_or_annotation", bleed_guard["skip_reason_code_distribution"])
+            self.assertIn("protected_edge_content", bleed_guard["skip_reason_code_distribution"])
+            self.assertIn("protected_color_content", bleed_guard["skip_reason_code_distribution"])
+            self.assertIn("protected_texture_or_archival_trace", bleed_guard["skip_reason_code_distribution"])
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*expected_reason_codes, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_mild_blue_gray_cast_stays_guarded_and_private(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-blue-gray-cast-") as temp_dir:
             root = Path(temp_dir)
@@ -2623,6 +2682,52 @@ def _cool_gray_mild_bleed_through_page() -> Image.Image:
     ghost = Image.new("RGB", image.size, (214, 222, 232))
     image.paste(ghost, (0, 0), mask.point(lambda value: int(value * 0.62)))
     return image
+
+
+def _protected_sparse_bleed_through_mark_pages() -> dict[str, Image.Image]:
+    paper = (244, 244, 239)
+    pale_mark = (228, 228, 224)
+    pages: dict[str, Image.Image] = {}
+
+    image = Image.new("RGB", (260, 180), paper)
+    ImageDraw.Draw(image).text((126, 82), "12", fill=pale_mark)
+    pages["A001_page_number.png"] = image
+
+    image = Image.new("RGB", (260, 180), paper)
+    draw = ImageDraw.Draw(image)
+    for x in range(72, 180, 12):
+        draw.ellipse((x, 92, x + 2, 94), fill=pale_mark)
+    pages["A002_dotted_leaders.png"] = image
+
+    image = Image.new("RGB", (260, 180), paper)
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((132, 86, 134, 88), fill=pale_mark)
+    draw.rectangle((142, 102, 143, 104), fill=pale_mark)
+    pages["A003_punctuation_i_dot.png"] = image
+
+    image = Image.new("RGB", (260, 180), paper)
+    ImageDraw.Draw(image).text((22, 82), "note", fill=(226, 226, 222))
+    pages["A004_marginal_annotation.png"] = image
+
+    image = Image.new("RGB", (260, 180), paper)
+    ImageDraw.Draw(image).ellipse((110, 70, 152, 112), outline=(186, 24, 24), width=2)
+    pages["A005_color_stamp_mark.png"] = image
+
+    image = Image.new("RGB", (260, 180), paper)
+    draw = ImageDraw.Draw(image)
+    for y in (70, 104, 138):
+        draw.line((60, y, 210, y), fill=pale_mark, width=1)
+    for x in (92, 152, 206):
+        draw.line((x, 58, x, 150), fill=pale_mark, width=1)
+    pages["A006_table_ruled_lines.png"] = image
+
+    image = Image.new("RGB", (260, 180), paper)
+    draw = ImageDraw.Draw(image)
+    for x, y in ((68, 50), (74, 120), (164, 40), (190, 126), (126, 96), (132, 99), (138, 102), (144, 105)):
+        draw.rectangle((x, y, x + 1, y + 1), fill=(225, 225, 221))
+    pages["A007_archival_dirt_marks.png"] = image
+
+    return pages
 
 
 def _safe_cloud_stain_combination_page() -> Image.Image:
