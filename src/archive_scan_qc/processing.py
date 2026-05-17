@@ -10397,7 +10397,44 @@ def _light_scanner_gutter_run(image: Image.Image, side: str, max_pixels: int) ->
         if not _is_uniform_light_scanner_gutter_band(image.crop(box), reference):
             break
         run = offset + 1
+    blank_run = _light_scanner_gutter_blank_band_run(image, side, max_pixels)
+    run = max(run, blank_run)
     return run if run >= 3 else 0
+
+
+def _light_scanner_gutter_blank_band_run(image: Image.Image, side: str, max_pixels: int) -> int:
+    width, height = image.size
+    best = 0
+    for candidate in range(3, max_pixels + 1):
+        inner_depth = max(4, min(10, candidate))
+        gap = 2
+        if side == "left":
+            band_box = (0, 0, candidate, height)
+            inner_box = (min(width, candidate + gap), 0, min(width, candidate + gap + inner_depth), height)
+        elif side == "right":
+            band_box = (width - candidate, 0, width, height)
+            inner_box = (
+                max(0, width - candidate - gap - inner_depth),
+                0,
+                max(0, width - candidate - gap),
+                height,
+            )
+        elif side == "top":
+            band_box = (0, 0, width, candidate)
+            inner_box = (0, min(height, candidate + gap), width, min(height, candidate + gap + inner_depth))
+        else:
+            band_box = (0, height - candidate, width, height)
+            inner_box = (
+                0,
+                max(0, height - candidate - gap - inner_depth),
+                width,
+                max(0, height - candidate - gap),
+            )
+        if inner_box[2] <= inner_box[0] or inner_box[3] <= inner_box[1]:
+            continue
+        if _is_consistent_blank_light_scanner_gutter_band(image.crop(band_box), image.crop(inner_box)):
+            best = candidate
+    return best
 
 
 def _is_uniform_light_scanner_gutter_band(band: Image.Image, inner: Image.Image) -> bool:
@@ -10414,6 +10451,53 @@ def _is_uniform_light_scanner_gutter_band(band: Image.Image, inner: Image.Image)
     inner_mean = ImageStat.Stat(inner).mean[0] if inner.size[0] and inner.size[1] else 255
     contrast = abs(inner_mean - mean)
     return inner_mean >= 225 and 4.0 <= contrast <= 18.0
+
+
+def _is_consistent_blank_light_scanner_gutter_band(band: Image.Image, inner: Image.Image) -> bool:
+    stat = ImageStat.Stat(band)
+    mean = stat.mean[0]
+    if mean < 218 or mean > 252 or stat.stddev[0] < 5.8 or stat.stddev[0] > 9.0:
+        return False
+    values = band.tobytes()
+    if not values:
+        return False
+    protected_foreground = sum(1 for value in values if value <= 185)
+    if protected_foreground >= 3 or protected_foreground / len(values) > 0.0005:
+        return False
+    if min(values) < 222:
+        return False
+    inner_mean = ImageStat.Stat(inner).mean[0] if inner.size[0] and inner.size[1] else 255
+    contrast = abs(inner_mean - mean)
+    if inner_mean < 220 or not (2.0 <= contrast <= 20.0):
+        return False
+    return _light_gutter_band_has_consistent_blank_evidence(band)
+
+
+def _light_gutter_band_has_consistent_blank_evidence(band: Image.Image) -> bool:
+    if band.width <= 0 or band.height <= 0:
+        return False
+    values = band.tobytes()
+    if not values:
+        return False
+    if band.width <= band.height:
+        line_count = band.height
+        line_length = band.width
+    else:
+        line_count = band.width
+        line_length = band.height
+    if line_count <= 1 or line_length <= 0:
+        return True
+    means = []
+    for index in range(line_count):
+        if band.width <= band.height:
+            start = index * line_length
+            line = values[start : start + line_length]
+        else:
+            line = values[index::band.width]
+        means.append(sum(line) / max(1, len(line)))
+    average = sum(means) / len(means)
+    variance = sum((value - average) ** 2 for value in means) / len(means)
+    return math.sqrt(variance) <= 3.5
 
 
 def _has_colored_scanner_gutter_risk(image: Image.Image) -> bool:
