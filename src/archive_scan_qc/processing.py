@@ -11631,26 +11631,57 @@ def _is_broken_dark_edge_line(values: list[int]) -> bool:
     light_runs = _boolean_runs(light_pixels)
     if not light_runs:
         return False
+    dark_runs = _boolean_runs(deep_gray_pixels)
+    if not dark_runs:
+        return False
     total_light_gap = sum(end - start for start, end in light_runs)
     longest_light_gap = max(end - start for start, end in light_runs)
     total_light_gap_ratio = total_light_gap / length
     longest_light_gap_ratio = longest_light_gap / length
     if len(light_runs) > 2:
         if len(light_runs) > 4:
-            return False
+            return _is_segmented_dark_scanner_edge_line(values, dark_runs, light_runs, mean)
         if total_light_gap_ratio > 0.28 or longest_light_gap_ratio > 0.10:
-            return False
+            return _is_segmented_dark_scanner_edge_line(values, dark_runs, light_runs, mean)
         min_longest_dark_run_ratio = 0.18
     elif total_light_gap_ratio > 0.34 or longest_light_gap_ratio > 0.34:
-        return False
+        return _is_segmented_dark_scanner_edge_line(values, dark_runs, light_runs, mean)
     else:
         min_longest_dark_run_ratio = 0.35
 
-    dark_runs = _boolean_runs(deep_gray_pixels)
-    if not dark_runs:
-        return False
     longest_dark_run = max(end - start for start, end in dark_runs)
-    return longest_dark_run / length >= min_longest_dark_run_ratio
+    if longest_dark_run / length >= min_longest_dark_run_ratio:
+        return True
+
+    return _is_segmented_dark_scanner_edge_line(values, dark_runs, light_runs, mean)
+
+
+def _is_segmented_dark_scanner_edge_line(
+    values: list[int],
+    dark_runs: list[tuple[int, int]],
+    light_runs: list[tuple[int, int]],
+    mean: float,
+) -> bool:
+    length = len(values)
+    if len(dark_runs) < 3 or len(dark_runs) > 7:
+        return False
+    if not dark_runs or dark_runs[0][0] > max(2, int(length * 0.025)):
+        return False
+    if length - dark_runs[-1][1] > max(2, int(length * 0.14)):
+        return False
+
+    dark_coverage = sum(end - start for start, end in dark_runs) / length
+    longest_dark_run = max(end - start for start, end in dark_runs) / length
+    longest_light_gap = max((end - start for start, end in light_runs), default=0) / length
+    substantial_dark_runs = sum(1 for start, end in dark_runs if (end - start) / length >= 0.08)
+
+    if dark_coverage < 0.42 or dark_coverage > 0.72:
+        return False
+    if longest_dark_run < 0.08 or longest_light_gap > 0.18:
+        return False
+    if substantial_dark_runs < 3:
+        return False
+    return mean <= 165
 
 
 def _boolean_runs(flags: list[bool]) -> list[tuple[int, int]]:
