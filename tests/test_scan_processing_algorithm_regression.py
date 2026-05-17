@@ -1665,6 +1665,99 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_diffuse_background_stain_lightens_while_protected_marks_stay_noop(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-diffuse-stain-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "S001_safe_diffuse_background_stain.png": _diffuse_background_stain_page(),
+                "S002_marginal_handwriting_note.png": _diffuse_background_stain_page("handwriting"),
+                "S003_punctuation_i_dot.png": _diffuse_background_stain_page("punctuation"),
+                "S004_page_number.png": _diffuse_background_stain_page("page_number"),
+                "S005_ruled_table_lines.png": _diffuse_background_stain_page("ruled_table"),
+                "S006_color_stamp.png": _diffuse_background_stain_page("stamp"),
+                "S007_archival_texture_marks.png": _diffuse_background_stain_page("texture"),
+            }
+            for name, image in pages.items():
+                image.save(input_dir / name, dpi=(300, 300))
+
+            safe_original = pages["S001_safe_diffuse_background_stain.png"].convert("L")
+            original_stain_mean = _mean_luma(safe_original, (178, 58, 223, 103))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "diffuse-background-stain", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(lighten_background_stains=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_record = records["S001_safe_diffuse_background_stain.png"]
+            safe_audit = safe_record["processing_audit"]
+            with Image.open(process_dir / safe_record["output_relative_path"]) as processed_image:
+                processed_safe = processed_image.convert("L")
+                processed_stain_mean = _mean_luma(processed_safe, (178, 58, 223, 103))
+
+            self.assertTrue(safe_record["background_stains_lightened"])
+            self.assertIn("lighten_background_stains_conservative", safe_record["operations"])
+            self.assertGreaterEqual(safe_audit["background_stains_delta"], 4.0)
+            self.assertGreater(processed_stain_mean - original_stain_mean, 2.5)
+            self.assertGreater(safe_audit["background_stains_changed_pixel_ratio"], 0.02)
+            self.assertLessEqual(safe_audit["background_stains_changed_pixel_ratio"], 0.05)
+            self.assertLessEqual(safe_audit["background_stains_candidate_pixel_ratio"], 0.05)
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertEqual(safe_audit["local_content_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["combination_quality_guard_reason_code"], "safe_combination_passed")
+            self.assertEqual(safe_audit["processed_output_safety_guard_reason_code"], "safe_processed_output_passed")
+
+            protected_names = set(pages) - {"S001_safe_diffuse_background_stain.png"}
+            for name in protected_names:
+                record = records[name]
+                self.assertFalse(record["background_stains_lightened"], name)
+                self.assertIn("lighten_background_stains_noop", record["operations"], name)
+                self.assertEqual(record["processing_audit"]["background_stains_changed_pixel_ratio"], 0.0, name)
+                self.assertEqual(record["processing_audit"]["guardrail_failures"], [], name)
+                with Image.open(process_dir / record["output_relative_path"]) as processed_image:
+                    self.assertLessEqual(
+                        _changed_ratio(pages[name], processed_image, (0, 0, pages[name].width, pages[name].height)),
+                        0.001,
+                        name,
+                    )
+
+            background_guard = audit_summary["guardrails"]["background_stains"]
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["background_stains_lightened_files"], 1)
+            self.assertEqual(audit_summary["counts"]["background_stains_skipped_files"], len(protected_names))
+            self.assertEqual(background_guard["applied_files"], 1)
+            self.assertEqual(background_guard["skipped_files"], len(protected_names))
+            self.assertEqual(
+                background_guard["reason_distribution"][
+                    "background stain lightening applied: conservative localized low-contrast stains on light background"
+                ],
+                1,
+            )
+            self.assertIn(
+                "background stain lightening skipped: color content, stamp, or annotation risk",
+                background_guard["skip_reason_distribution"],
+            )
+            self.assertIn(
+                "background stain lightening skipped: large stain or historical damage risk",
+                background_guard["skip_reason_distribution"],
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_sparse_pale_typed_text_enhances_while_protected_pages_noop(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-sparse-pale-typed-") as temp_dir:
             root = Path(temp_dir)
@@ -2868,6 +2961,42 @@ def _risk_table_page_number_annotation_page() -> Image.Image:
         draw.line((x, 42, x, 132), fill=(190, 190, 190), width=2)
     draw.text((180, 18), "12", fill=(60, 60, 60))
     draw.line((48, 150, 116, 158), fill=(120, 120, 120), width=2)
+    return image
+
+
+def _diffuse_background_stain_page(variant: str = "safe") -> Image.Image:
+    image = Image.new("RGB", (260, 190), (242, 242, 236))
+    draw = ImageDraw.Draw(image)
+    for y in (54, 82, 110):
+        draw.rectangle((42, y, 142, y + 4), fill=(42, 42, 42))
+
+    mask = Image.new("L", image.size, 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.ellipse((178, 58, 222, 102), fill=150)
+    mask = mask.filter(ImageFilter.GaussianBlur(7))
+    image = Image.composite(Image.new("RGB", image.size, (224, 220, 196)), image, mask)
+    draw = ImageDraw.Draw(image)
+
+    if variant == "safe":
+        return image
+    if variant == "handwriting":
+        draw.line((180, 78, 192, 70, 206, 84, 222, 74), fill=(96, 92, 86), width=2)
+    elif variant == "punctuation":
+        draw.ellipse((200, 80, 202, 82), fill=(52, 52, 48))
+    elif variant == "page_number":
+        draw.text((194, 74), "12", fill=(54, 54, 50))
+    elif variant == "ruled_table":
+        for y in (68, 84, 100):
+            draw.line((176, y, 236, y), fill=(170, 170, 166), width=1)
+        for x in (184, 208, 232):
+            draw.line((x, 62, x, 110), fill=(170, 170, 166), width=1)
+    elif variant == "stamp":
+        draw.ellipse((176, 58, 232, 110), outline=(176, 40, 34), width=3)
+    elif variant == "texture":
+        for x, y in ((182, 70), (190, 84), (206, 92), (218, 78), (212, 100)):
+            draw.rectangle((x, y, x + 2, y + 1), fill=(206, 202, 186))
+    else:
+        raise ValueError(f"unsupported diffuse stain variant: {variant}")
     return image
 
 
