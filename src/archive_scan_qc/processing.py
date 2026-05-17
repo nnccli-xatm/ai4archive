@@ -8119,6 +8119,13 @@ def _sharpen_text_edges_conservative(image: Image.Image) -> TextEdgeSharpeningRe
         return _text_edges_noop(image, "text edge sharpening skipped: edge mark or binding risk")
 
     sample_candidate_ratio = _text_edge_sample_candidate_ratio(grayscale)
+    if _text_edge_sample_ruled_table_background_risk(grayscale):
+        return _text_edges_noop(
+            image,
+            "text edge sharpening skipped: scanline or ruled background risk",
+            sample_candidate_ratio,
+            preflight_skipped=True,
+        )
     if sample_candidate_ratio < 0.003 or (
         sample_candidate_ratio < 0.02 and _text_edge_sample_candidate_sparse_block_risk(grayscale)
     ):
@@ -8476,6 +8483,61 @@ def _text_edge_sample_candidate_sparse_block_risk(grayscale: Image.Image) -> boo
     return max_area > 12
 
 
+def _text_edge_sample_ruled_table_background_risk(grayscale: Image.Image) -> bool:
+    for resampling in (Image.Resampling.NEAREST, Image.Resampling.BILINEAR):
+        sample = grayscale.copy()
+        sample.thumbnail((96, 96), resampling)
+        if sample.width < 30 or sample.height < 30:
+            continue
+        histogram = sample.histogram()
+        total = sample.width * sample.height
+        p95 = _histogram_percentile(histogram, total, 0.95)
+        if _text_edge_light_rule_projection_risk(sample, p95):
+            return True
+        candidate = _text_edge_candidate_mask(sample, p95)
+        candidate = _clear_mask_edges(candidate, max(2, int(round(min(sample.width, sample.height) * 0.025))))
+        if _text_edge_ruled_table_background_risk(candidate):
+            return True
+    return False
+
+
+def _text_edge_light_rule_projection_risk(grayscale: Image.Image, paper_highlight: int) -> bool:
+    width, height = grayscale.size
+    if width < 30 or height < 30:
+        return False
+    threshold = max(0, paper_highlight - 25)
+    pixels = grayscale.load()
+    horizontal_bands = 0
+    vertical_bands = 0
+    in_horizontal_band = False
+    in_vertical_band = False
+    horizontal_threshold = max(12, int(round(width * 0.25)))
+    vertical_threshold = max(12, int(round(height * 0.18)))
+    for y in range(height):
+        row_hits = 0
+        for x in range(width):
+            if int(pixels[x, y]) <= threshold:
+                row_hits += 1
+        if row_hits >= horizontal_threshold:
+            if not in_horizontal_band:
+                horizontal_bands += 1
+                in_horizontal_band = True
+        else:
+            in_horizontal_band = False
+    for x in range(width):
+        column_hits = 0
+        for y in range(height):
+            if int(pixels[x, y]) <= threshold:
+                column_hits += 1
+        if column_hits >= vertical_threshold:
+            if not in_vertical_band:
+                vertical_bands += 1
+                in_vertical_band = True
+        else:
+            in_vertical_band = False
+    return horizontal_bands >= 6 and vertical_bands >= 3
+
+
 def _text_edge_component_touches_page_edge(candidate: Image.Image) -> bool:
     margin = max(5, int(round(min(candidate.width, candidate.height) * 0.06)))
     for component in _mask_components(candidate):
@@ -8494,6 +8556,42 @@ def _text_edge_component_touches_page_edge(candidate: Image.Image) -> bool:
         if touches_edge and (width >= 8 or height >= 8):
             return True
     return False
+
+
+def _text_edge_ruled_table_background_risk(candidate: Image.Image) -> bool:
+    width, height = candidate.size
+    if width < 80 or height < 80:
+        return False
+    pixels = candidate.load()
+    horizontal_bands = 0
+    vertical_bands = 0
+    in_horizontal_band = False
+    in_vertical_band = False
+    horizontal_threshold = max(24, int(round(width * 0.32)))
+    vertical_threshold = max(24, int(round(height * 0.24)))
+    for y in range(height):
+        row_hits = 0
+        for x in range(width):
+            if pixels[x, y]:
+                row_hits += 1
+        if row_hits >= horizontal_threshold:
+            if not in_horizontal_band:
+                horizontal_bands += 1
+                in_horizontal_band = True
+        else:
+            in_horizontal_band = False
+    for x in range(width):
+        column_hits = 0
+        for y in range(height):
+            if pixels[x, y]:
+                column_hits += 1
+        if column_hits >= vertical_threshold:
+            if not in_vertical_band:
+                vertical_bands += 1
+                in_vertical_band = True
+        else:
+            in_vertical_band = False
+    return horizontal_bands >= 3 and vertical_bands >= 2
 
 
 def _text_edge_source_edge_mark_risk(grayscale: Image.Image) -> bool:
