@@ -6145,12 +6145,6 @@ def _clean_bleed_through_conservative(image: Image.Image) -> BleedThroughCleanup
     components = [component for component in _mask_components(candidate) if len(component) >= 4]
     if not components:
         return _bleed_through_noop(image, "bleed-through cleanup skipped: no confident faint reverse-side ghosts")
-    if very_stable_light_paper and max(len(component) for component in components) < 16:
-        return _bleed_through_noop(
-            image,
-            "bleed-through cleanup skipped: dense texture or archival trace risk",
-            candidate_ratio,
-        )
     if len(components) > 28:
         return _bleed_through_noop(
             image,
@@ -6159,39 +6153,57 @@ def _clean_bleed_through_conservative(image: Image.Image) -> BleedThroughCleanup
         )
 
     selected: set[tuple[int, int]] = set()
-    for component in components:
-        area = len(component)
-        xs = [point[0] for point in component]
-        ys = [point[1] for point in component]
-        width = max(xs) - min(xs) + 1
-        height = max(ys) - min(ys) + 1
-        if (
-            min(xs) < edge_margin * 3
-            or min(ys) < max(edge_margin * 3, int(round(image.height * 0.18)))
-            or max(xs) >= image.width - edge_margin * 3
-            or max(ys) >= image.height - max(edge_margin * 3, int(round(image.height * 0.18)))
-        ):
+    small_core_components = very_stable_light_paper and max(len(component) for component in components) < 16
+    if small_core_components:
+        selected = _bleed_through_small_diffuse_selection(
+            candidate,
+            components,
+            grayscale,
+            edge_signal,
+            protected,
+            background,
+            edge_margin,
+        )
+        if not selected:
             return _bleed_through_noop(
                 image,
-                "bleed-through cleanup skipped: edge content or binding risk",
+                "bleed-through cleanup skipped: dense texture or archival trace risk",
                 candidate_ratio,
             )
-        if area / total > 0.018 or width > image.width * 0.42 or height > image.height * 0.28:
-            return _bleed_through_noop(
-                image,
-                "bleed-through cleanup skipped: large candidate or archival mark risk",
-                candidate_ratio,
-            )
-        aspect = max(width / max(1, height), height / max(1, width))
-        if aspect > 18 and (width > image.width * 0.18 or height > image.height * 0.18):
-            return _bleed_through_noop(
-                image,
-                "bleed-through cleanup skipped: table line, page number, or annotation risk",
-                candidate_ratio,
-            )
-        if width <= 1 or height <= 1:
-            continue
-        selected.update(component)
+    else:
+        for component in components:
+            area = len(component)
+            xs = [point[0] for point in component]
+            ys = [point[1] for point in component]
+            width = max(xs) - min(xs) + 1
+            height = max(ys) - min(ys) + 1
+            if (
+                min(xs) < edge_margin * 3
+                or min(ys) < max(edge_margin * 3, int(round(image.height * 0.18)))
+                or max(xs) >= image.width - edge_margin * 3
+                or max(ys) >= image.height - max(edge_margin * 3, int(round(image.height * 0.18)))
+            ):
+                return _bleed_through_noop(
+                    image,
+                    "bleed-through cleanup skipped: edge content or binding risk",
+                    candidate_ratio,
+                )
+            if area / total > 0.018 or width > image.width * 0.42 or height > image.height * 0.28:
+                return _bleed_through_noop(
+                    image,
+                    "bleed-through cleanup skipped: large candidate or archival mark risk",
+                    candidate_ratio,
+                )
+            aspect = max(width / max(1, height), height / max(1, width))
+            if aspect > 18 and (width > image.width * 0.18 or height > image.height * 0.18):
+                return _bleed_through_noop(
+                    image,
+                    "bleed-through cleanup skipped: table line, page number, or annotation risk",
+                    candidate_ratio,
+                )
+            if width <= 1 or height <= 1:
+                continue
+            selected.update(component)
 
     changed_ratio = len(selected) / max(1, total)
     if changed_ratio < min_candidate_ratio:
@@ -6251,6 +6263,60 @@ def _clean_bleed_through_conservative(image: Image.Image) -> BleedThroughCleanup
         round(changed_ratio, 6),
         round(candidate_ratio, 6),
     )
+
+
+def _bleed_through_small_diffuse_selection(
+    candidate: Image.Image,
+    components: list[set[tuple[int, int]]],
+    grayscale: Image.Image,
+    edge_signal: Image.Image,
+    protected: Image.Image,
+    background: int,
+    edge_margin: int,
+) -> set[tuple[int, int]]:
+    if len(components) > 6:
+        return set()
+    total = candidate.width * candidate.height
+    all_points = [point for component in components for point in component]
+    if len(all_points) < 8 or len(all_points) / max(1, total) > 0.0015:
+        return set()
+    xs = [point[0] for point in all_points]
+    ys = [point[1] for point in all_points]
+    left = min(xs)
+    top = min(ys)
+    right = max(xs)
+    bottom = max(ys)
+    if (
+        left < edge_margin * 3
+        or top < max(edge_margin * 3, int(round(candidate.height * 0.18)))
+        or right >= candidate.width - edge_margin * 3
+        or bottom >= candidate.height - max(edge_margin * 3, int(round(candidate.height * 0.18)))
+    ):
+        return set()
+    width = right - left + 1
+    height = bottom - top + 1
+    if width > candidate.width * 0.26 or height > candidate.height * 0.18:
+        return set()
+    aspect = max(width / max(1, height), height / max(1, width))
+    if aspect > 8:
+        return set()
+
+    halo = candidate.filter(ImageFilter.MaxFilter(5))
+    halo_pixels = halo.load()
+    source_pixels = grayscale.load()
+    edge_pixels = edge_signal.load()
+    protected_pixels = protected.load()
+    selected: set[tuple[int, int]] = set()
+    for y in range(max(edge_margin, top - 3), min(candidate.height - edge_margin, bottom + 4)):
+        for x in range(max(edge_margin, left - 3), min(candidate.width - edge_margin, right + 4)):
+            if not halo_pixels[x, y] or protected_pixels[x, y]:
+                continue
+            value = int(source_pixels[x, y])
+            if background - 1 <= value <= background and int(edge_pixels[x, y]) < 22:
+                selected.add((x, y))
+    if len(selected) / max(1, total) > 0.0035:
+        return set()
+    return selected
 
 
 def _bleed_through_noop(
