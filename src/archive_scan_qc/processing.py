@@ -8777,10 +8777,29 @@ def _safe_deskew_skip_from_scan_record(
     if not isinstance(skew, SkewDetection):
         return None
     if skew.angle_degrees is None:
+        if skew.reason == "low contrast" and _has_faint_deskew_candidate_evidence(image):
+            return None
         return skew if skew.reason in _SAFE_DESKEW_NO_CANDIDATE_REASONS else None
     if skew.confidence >= options.deskew_min_confidence and abs(skew.angle_degrees) < 0.2:
         return skew
     return None
+
+
+def _has_faint_deskew_candidate_evidence(image: Image.Image) -> bool:
+    width, height = image.size
+    if width < 30 or height < 30:
+        return False
+
+    raw_grayscale = image.convert("L")
+    raw_histogram = raw_grayscale.histogram()
+    total_pixels = width * height
+    raw_low = _histogram_percentile(raw_histogram, total_pixels, 0.005)
+    raw_high = _histogram_percentile(raw_histogram, total_pixels, 0.995)
+    if raw_high < 220 or raw_high - raw_low < 6:
+        return False
+
+    faint_ink, faint_bbox = _faint_low_contrast_ink(raw_grayscale, raw_low, raw_high)
+    return bool(faint_bbox and _deskew_faint_row_group_count(faint_ink, faint_bbox) >= 6)
 
 
 def _safe_deskew_skip_from_page_evidence(image: Image.Image) -> SkewDetection | None:
@@ -8794,7 +8813,7 @@ def _safe_deskew_skip_from_page_evidence(image: Image.Image) -> SkewDetection | 
     raw_low = _histogram_percentile(raw_histogram, total_pixels, 0.005)
     raw_high = _histogram_percentile(raw_histogram, total_pixels, 0.995)
     raw_span = raw_high - raw_low
-    if raw_span < 8:
+    if raw_span < 6:
         return SkewDetection(None, 0.0, "low contrast")
 
     grayscale = ImageOps.autocontrast(raw_grayscale, cutoff=1)
@@ -8803,9 +8822,9 @@ def _safe_deskew_skip_from_page_evidence(image: Image.Image) -> SkewDetection | 
     high = _histogram_percentile(histogram, total_pixels, 0.95)
     if high - low < 35:
         faint_ink, faint_bbox = _faint_low_contrast_ink(raw_grayscale, raw_low, raw_high)
-        if faint_bbox and _deskew_faint_row_group_count(faint_ink, faint_bbox) >= 8:
+        if faint_bbox and _deskew_faint_row_group_count(faint_ink, faint_bbox) >= 6:
             return None
-        if raw_high < 220 or raw_span < 8:
+        if raw_high < 220 or raw_span < 6:
             return SkewDetection(None, 0.0, "low contrast")
         if raw_span < 35:
             return None
@@ -9134,7 +9153,7 @@ def _detect_faint_stable_text_skew(
         return SkewDetection(None, 0.0, "low contrast")
 
     raw_span = raw_high - raw_low
-    if raw_span < 8:
+    if raw_span < 6:
         return SkewDetection(None, 0.0, "low contrast")
 
     ink, bbox = _faint_low_contrast_ink(raw_grayscale, raw_low, raw_high)
@@ -9146,13 +9165,20 @@ def _detect_faint_stable_text_skew(
         return SkewDetection(None, 0.0, "low contrast")
     if _deskew_has_faint_ruled_line_risk(ink, bbox):
         return SkewDetection(None, 0.0, "faint ruled line rotation risk")
+    faint_handwriting_or_sparse_mark_risk = _deskew_has_faint_handwriting_or_sparse_mark_risk(ink, bbox, ink_ratio)
 
     shallow = _detect_shallow_stable_text_skew(raw_grayscale, ink, bbox, raw_high=raw_high)
     if shallow.angle_degrees is None:
-        return SkewDetection(None, 0.0, "low contrast")
+        shallow = _detect_faint_glyph_text_skew(ink, bbox)
+        if shallow.angle_degrees is None:
+            return SkewDetection(None, 0.0, "low contrast")
 
     projection = _detect_faint_projection_text_skew(ink, bbox, shallow)
-    if projection.angle_degrees is not None or projection.reason == "faint ruled line rotation risk":
+    if projection.reason == "faint ruled line rotation risk":
+        return projection
+    if faint_handwriting_or_sparse_mark_risk:
+        return SkewDetection(None, 0.0, "low contrast")
+    if projection.angle_degrees is not None:
         return projection
 
     confidence = max(shallow.confidence, 0.14)
@@ -9200,6 +9226,81 @@ def _detect_faint_projection_text_skew(
 
     confidence = max(confidence, min(shallow.confidence, 0.22), 0.14)
     return SkewDetection(skew_angle, round(confidence, 3), "faint stable text skew detected")
+
+
+def _detect_faint_glyph_text_skew(
+    ink: Image.Image,
+    bbox: tuple[int, int, int, int],
+) -> SkewDetection:
+    sample = ink.crop(bbox)
+    sample.thumbnail((700, 700), Image.Resampling.BILINEAR)
+    sample_width, sample_height = sample.size
+    if sample_width < 80 or sample_height < 60:
+        return SkewDetection(None, 0.0, "low contrast")
+
+    pixels = sample.load()
+    row_counts: list[int] = []
+    for y in range(sample_height):
+        row_counts.append(sum(1 for x in range(sample_width) if pixels[x, y]))
+
+    active_threshold = max(3.0, sample_width * 0.015)
+    groups: list[tuple[int, int]] = []
+    start: int | None = None
+    for row, count in enumerate(row_counts):
+        if count >= active_threshold:
+            if start is None:
+                start = row
+        elif start is not None:
+            groups.append((start, row))
+            start = None
+    if start is not None:
+        groups.append((start, sample_height))
+    groups = _merge_close_row_groups(groups, max_gap=4)
+
+    line_angles: list[float] = []
+    max_band_height = max(12, int(round(sample_height * 0.045)))
+    min_line_width = max(55, int(round(sample_width * 0.55)))
+    for top, bottom in groups:
+        if bottom - top > max_band_height:
+            continue
+        points: list[tuple[int, int]] = []
+        min_x: int | None = None
+        max_x: int | None = None
+        for y in range(top, bottom):
+            for x in range(sample_width):
+                if pixels[x, y]:
+                    points.append((x, y))
+                    min_x = x if min_x is None else min(min_x, x)
+                    max_x = x if max_x is None else max(max_x, x)
+        if min_x is None or max_x is None or max_x - min_x < min_line_width:
+            continue
+        angle = _least_squares_line_angle(points)
+        if angle is not None and 0.18 <= abs(angle) <= 1.25:
+            line_angles.append(angle)
+
+    if len(line_angles) < 5:
+        return SkewDetection(None, 0.0, "low contrast")
+    average_angle = sum(line_angles) / len(line_angles)
+    spread = max(abs(angle - average_angle) for angle in line_angles)
+    if spread > 0.35:
+        return SkewDetection(None, 0.0, "low contrast")
+    confidence = max(0.0, min(1.0, 0.18 + len(line_angles) * 0.04 - spread * 0.35))
+    return SkewDetection(round(-average_angle, 2), round(confidence, 3), "faint stable text skew detected")
+
+
+def _deskew_has_faint_handwriting_or_sparse_mark_risk(
+    ink: Image.Image,
+    bbox: tuple[int, int, int, int],
+    ink_ratio: float,
+) -> bool:
+    if ink_ratio >= 0.045:
+        return False
+    sample = ink.crop(bbox)
+    sample.thumbnail((700, 700), Image.Resampling.BILINEAR)
+    width, height = sample.size
+    if width < 120 or height < 120:
+        return False
+    return _deskew_faint_row_group_count(ink, bbox) >= 6
 
 
 def _faint_low_contrast_ink(
