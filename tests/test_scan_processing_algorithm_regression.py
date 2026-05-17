@@ -1080,6 +1080,98 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             ):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_mixed_tone_binding_gutter_trim_stays_bounded_and_private(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-mixed-tone-gutter-full-chain-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            image = _mixed_tone_binding_gutter_page()
+            image.save(input_dir / "private_full_chain_mixed_tone_gutter.png", dpi=(300, 300))
+
+            report = scan_batch(
+                ScanConfig("synthetic-regression", "mixed-tone-gutter-full-chain", input_dir, output_dir)
+            )
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+            audit = record["processing_audit"]
+
+            self.assertEqual(record["status"], "processed")
+            self.assertTrue(record["scanner_gutter_trimmed"])
+            self.assertEqual(record["scanner_gutter_reason"], "scanner gutter trim applied")
+            self.assertEqual(record["output_size"], [245, 190])
+            self.assertEqual(audit["guardrail_failures"], [])
+            self.assertEqual(audit["cumulative_change_guard_action"], "passed")
+            self.assertEqual(audit["combination_quality_guard_reason_code"], "safe_combination_passed")
+            self.assertLessEqual(audit["scanner_gutter_max_trim_margin_ratio"], 0.06)
+            self.assertLessEqual(audit["max_trim_margin_ratio"], 0.06)
+            self.assertLessEqual(audit["cumulative_change_crop_ratio"], 0.06)
+            self.assertLessEqual(audit["cumulative_change_pixel_ratio"], 0.08)
+            self.assertEqual(audit_summary["counts"]["scanner_gutter_trimmed_files"], 1)
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (
+                "private_full_chain_mixed_tone_gutter.png",
+                str(input_dir),
+                "source_relative_path",
+                "source_sha256",
+            ):
+                self.assertNotIn(forbidden, audit_summary_text)
+
+    def test_full_chain_mixed_tone_gutter_protected_content_cases_stay_noop(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-mixed-tone-gutter-guards-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "private_mixed_tone_edge_handwriting.png": _mixed_tone_binding_gutter_page(
+                    variant="edge_handwriting"
+                ),
+                "private_mixed_tone_page_number.png": _mixed_tone_binding_gutter_page(variant="page_number"),
+                "private_mixed_tone_ruled_table.png": _mixed_tone_binding_gutter_page(variant="ruled_table"),
+                "private_broad_archival_shadow.png": _mixed_tone_binding_gutter_page(variant="broad_shadow"),
+            }
+            for filename, page in pages.items():
+                page.save(input_dir / filename, dpi=(300, 300))
+
+            report = scan_batch(
+                ScanConfig("synthetic-regression", "mixed-tone-gutter-guard-cases", input_dir, output_dir)
+            )
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(scanner_gutter_trim=True, workers=1))
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            self.assertEqual(len(manifest["files"]), 4)
+            for record in manifest["files"]:
+                self.assertEqual(record["status"], "processed")
+                self.assertFalse(record["scanner_gutter_trimmed"], record["source_relative_path"])
+                self.assertEqual(record["output_size"], [260, 190])
+                self.assertIn("scanner_gutter_trim_noop", record["operations"])
+                self.assertIn(
+                    record["scanner_gutter_reason"],
+                    {
+                        "scanner gutter skipped: no narrow uniform light band",
+                        "scanner gutter skipped: protected edge content",
+                        "scanner gutter skipped: no inset content evidence",
+                    },
+                )
+                self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
+                self.assertEqual(record["processing_audit"]["cumulative_change_guard_action"], "passed")
+            self.assertEqual(audit_summary["counts"]["scanner_gutter_trimmed_files"], 0)
+            self.assertGreaterEqual(audit_summary["counts"]["scanner_gutter_skipped_files"], 1)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages.keys(), str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_risk_combination_pages_skip_or_stay_low_change(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-risk-") as temp_dir:
             root = Path(temp_dir)
@@ -2246,6 +2338,36 @@ def _risk_dark_photo_edge_trace_page() -> Image.Image:
         draw.line((x, 26, min(216, x + 42), 154), fill=(shade, shade, shade), width=2)
     draw.rectangle((0, 74, 14, 102), fill=(45, 45, 45))
     draw.text((184, 12), "9", fill=(42, 42, 42))
+    return image
+
+
+def _mixed_tone_binding_gutter_page(variant: str = "safe") -> Image.Image:
+    image = Image.new("RGB", (260, 190), (240, 240, 240))
+    draw = ImageDraw.Draw(image)
+    gutter_width = 34 if variant == "broad_shadow" else 15
+    for y in range(190):
+        for x in range(gutter_width):
+            if variant == "broad_shadow":
+                value = 186 + min(48, int(x * 1.8))
+            elif x < 5:
+                value = 250 if (x + y) % 2 == 0 else 236
+            elif x < 9:
+                value = 178 if y % 3 else 190
+            else:
+                value = 247 if (x + y) % 2 else 238
+            image.putpixel((x, y), (value, value, value))
+    draw.rectangle((54, 38, 222, 154), outline=(80, 80, 80), width=2)
+    for y in range(68, 130, 24):
+        draw.rectangle((70, y, 180, y + 2), fill=(70, 70, 70))
+    if variant == "edge_handwriting":
+        draw.line((3, 42, 12, 54, 5, 68, 13, 83, 4, 98), fill=(60, 60, 60), width=2)
+    elif variant == "page_number":
+        draw.text((4, 18), "12", fill=(62, 62, 62))
+    elif variant == "ruled_table":
+        for y in (44, 72, 100, 128):
+            draw.line((0, y, 90, y), fill=(80, 80, 80), width=2)
+        for x in (8, 38, 68):
+            draw.line((x, 38, x, 136), fill=(85, 85, 85), width=2)
     return image
 
 

@@ -10640,6 +10640,13 @@ def _detect_light_scanner_gutter_bbox(image: Image.Image) -> ScannerGutterTrimDe
     right = _light_scanner_gutter_run(grayscale, "right", max_x)
     top = _light_scanner_gutter_run(grayscale, "top", max_y)
     bottom = _light_scanner_gutter_run(grayscale, "bottom", max_y)
+    mixed_tone_binding_gutter = False
+    if max(left, right, top, bottom) < 3:
+        left = _mixed_tone_scanner_gutter_run(grayscale, "left", max_x)
+        right = _mixed_tone_scanner_gutter_run(grayscale, "right", max_x)
+        top = _mixed_tone_scanner_gutter_run(grayscale, "top", max_y)
+        bottom = _mixed_tone_scanner_gutter_run(grayscale, "bottom", max_y)
+        mixed_tone_binding_gutter = max(left, right, top, bottom) >= 3
 
     if max(left, right, top, bottom) < 3:
         return ScannerGutterTrimDetection(None, "scanner gutter skipped: no narrow uniform light band", empty_margins)
@@ -10652,7 +10659,10 @@ def _detect_light_scanner_gutter_bbox(image: Image.Image) -> ScannerGutterTrimDe
     retained_area_ratio = ((bbox[2] - bbox[0]) * (bbox[3] - bbox[1])) / max(1, width * height)
     if retained_area_ratio < 0.88:
         return ScannerGutterTrimDetection(None, "scanner gutter skipped: trim exceeds narrow margin limit", empty_margins)
-    if _light_scanner_gutter_trimmed_area_has_marks(grayscale, (left, top, right, bottom)):
+    if mixed_tone_binding_gutter:
+        if _mixed_tone_scanner_gutter_trimmed_area_has_marks(grayscale, (left, top, right, bottom)):
+            return ScannerGutterTrimDetection(None, "scanner gutter skipped: protected edge content", empty_margins)
+    elif _light_scanner_gutter_trimmed_area_has_marks(grayscale, (left, top, right, bottom)):
         return ScannerGutterTrimDetection(None, "scanner gutter skipped: protected edge content", empty_margins)
     if _has_protected_dark_content_near_active_trim_boundary(grayscale, bbox, (left, top, right, bottom)):
         return ScannerGutterTrimDetection(None, "scanner gutter skipped: protected edge content", empty_margins)
@@ -10724,6 +10734,70 @@ def _light_scanner_gutter_blank_band_run(image: Image.Image, side: str, max_pixe
         if _is_consistent_blank_light_scanner_gutter_band(image.crop(band_box), image.crop(inner_box)):
             best = candidate
     return best
+
+
+def _mixed_tone_scanner_gutter_run(image: Image.Image, side: str, max_pixels: int) -> int:
+    width, height = image.size
+    best = 0
+    for candidate in range(3, max_pixels + 1):
+        inner_depth = max(5, min(12, candidate))
+        gap = 2
+        if side == "left":
+            band_box = (0, 0, candidate, height)
+            inner_box = (min(width, candidate + gap), 0, min(width, candidate + gap + inner_depth), height)
+        elif side == "right":
+            band_box = (width - candidate, 0, width, height)
+            inner_box = (
+                max(0, width - candidate - gap - inner_depth),
+                0,
+                max(0, width - candidate - gap),
+                height,
+            )
+        elif side == "top":
+            band_box = (0, 0, width, candidate)
+            inner_box = (0, min(height, candidate + gap), width, min(height, candidate + gap + inner_depth))
+        else:
+            band_box = (0, height - candidate, width, height)
+            inner_box = (
+                0,
+                max(0, height - candidate - gap - inner_depth),
+                width,
+                max(0, height - candidate - gap),
+            )
+        if inner_box[2] <= inner_box[0] or inner_box[3] <= inner_box[1]:
+            continue
+        if _is_mixed_tone_scanner_gutter_band(image.crop(band_box), image.crop(inner_box)):
+            best = candidate
+    return best
+
+
+def _is_mixed_tone_scanner_gutter_band(band: Image.Image, inner: Image.Image) -> bool:
+    stat = ImageStat.Stat(band)
+    mean = stat.mean[0]
+    stddev = stat.stddev[0]
+    if mean < 205 or mean > 246 or stddev < 8.0 or stddev > 34.0:
+        return False
+    values = band.tobytes()
+    if not values:
+        return False
+    total = len(values)
+    very_dark = sum(1 for value in values if value <= 135)
+    shadow = sum(1 for value in values if 145 <= value <= 212)
+    pale = sum(1 for value in values if value >= 225)
+    if very_dark >= 3 or very_dark / total > 0.0005:
+        return False
+    if shadow / total < 0.08 or shadow / total > 0.46:
+        return False
+    if pale / total < 0.38:
+        return False
+    inner_stat = ImageStat.Stat(inner)
+    inner_mean = inner_stat.mean[0] if inner.size[0] and inner.size[1] else 255
+    if inner_mean < 225 or inner_stat.stddev[0] > 10.0:
+        return False
+    contrast = inner_mean - mean
+    if not (4.0 <= contrast <= 34.0):
+        return False
+    return _light_gutter_band_has_consistent_blank_evidence(band)
 
 
 def _is_uniform_light_scanner_gutter_band(band: Image.Image, inner: Image.Image) -> bool:
@@ -10832,6 +10906,36 @@ def _light_scanner_gutter_trimmed_area_has_marks(
         values = image.crop(box).tobytes()
         marked_pixels = sum(1 for value in values if value <= 185)
         if marked_pixels >= 3:
+            return True
+    return False
+
+
+def _mixed_tone_scanner_gutter_trimmed_area_has_marks(
+    image: Image.Image,
+    active_margins: tuple[int, int, int, int],
+) -> bool:
+    width, height = image.size
+    left, top, right, bottom = active_margins
+    boxes = []
+    if left:
+        boxes.append((0, 0, left, height))
+    if right:
+        boxes.append((width - right, 0, width, height))
+    if top:
+        boxes.append((left, 0, width - right, top))
+    if bottom:
+        boxes.append((left, height - bottom, width - right, height))
+    for box in boxes:
+        if box[2] <= box[0] or box[3] <= box[1]:
+            continue
+        band = image.crop(box)
+        values = band.tobytes()
+        if not values:
+            continue
+        very_dark = sum(1 for value in values if value <= 135)
+        if very_dark >= 3 or very_dark / len(values) > 0.0005:
+            return True
+        if not _light_gutter_band_has_consistent_blank_evidence(band):
             return True
     return False
 
