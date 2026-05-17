@@ -290,11 +290,18 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     distance = math.hypot(x, y)
                     if distance < 135:
                         shade = int(round(244 - 12 * (1 - distance / 135) ** 1.15))
+                        if variant == "photo_texture" and x < 75 and y < 75:
+                            shade = max(
+                                0,
+                                min(255, shade + int(round(3 * math.sin(x * 0.7) + 2 * math.cos(y * 0.9)))),
+                            )
                         pixels[x, y] = (shade, shade, shade - 4)
             draw = ImageDraw.Draw(image)
             for y in (78, 104, 130, 156):
                 draw.rectangle((112, y, 248, y + 5), fill=(40, 40, 40))
             if variant == "safe":
+                return image
+            if variant == "photo_texture":
                 return image
             if variant == "page_mark":
                 draw.text((18, 16), "12", fill=(34, 34, 34))
@@ -309,6 +316,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             input_dir.mkdir()
             pages = {
                 "synthetic_safe_mild_broad_corner_vignette.png": mild_broad_corner_vignette_page("safe"),
+                "synthetic_mild_corner_photo_texture.png": mild_broad_corner_vignette_page("photo_texture"),
                 "synthetic_mild_corner_page_mark.png": mild_broad_corner_vignette_page("page_mark"),
             }
             source_bytes = {}
@@ -369,13 +377,37 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     0.5,
                 )
 
+            texture_name = "synthetic_mild_corner_photo_texture.png"
+            texture_record = records[texture_name]
+            with Image.open(process_dir / texture_record["output_relative_path"]) as texture_output:
+                self.assertEqual((input_dir / texture_name).read_bytes(), source_bytes[texture_name])
+                self.assertFalse(texture_record["corner_shadows_lightened"])
+                self.assertEqual(texture_record["corner_shadows_reason_code"], "texture_or_photo")
+                self.assertEqual(texture_record["processing_audit"]["corner_shadows_changed_pixel_ratio"], 0.0)
+                self.assertLess(
+                    _changed_ratio(
+                        pages[texture_name],
+                        texture_output,
+                        (0, 0, 75, 75),
+                    ),
+                    0.001,
+                )
+                self.assertLess(
+                    abs(
+                        _mean_luma(texture_output, (0, 0, 75, 75))
+                        - _mean_luma(pages[texture_name], (0, 0, 75, 75))
+                    ),
+                    0.5,
+                )
+
             corner_guard = audit_summary["guardrails"]["corner_shadows"]
             self.assertEqual(audit_summary["counts"]["corner_shadows_lightened_files"], 1)
-            self.assertEqual(audit_summary["counts"]["corner_shadows_skipped_files"], 1)
+            self.assertEqual(audit_summary["counts"]["corner_shadows_skipped_files"], 2)
             self.assertEqual(corner_guard["applied_files"], 1)
-            self.assertEqual(corner_guard["skipped_files"], 1)
+            self.assertEqual(corner_guard["skipped_files"], 2)
             self.assertEqual(corner_guard["reason_code_distribution"]["applied"], 1)
             self.assertEqual(corner_guard["skip_reason_code_distribution"]["protected_content"], 1)
+            self.assertEqual(corner_guard["skip_reason_code_distribution"]["texture_or_photo"], 1)
             self.assertIn("changed_pixel_ratio", corner_guard)
             self.assertIn("candidate_pixel_ratio", corner_guard)
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])

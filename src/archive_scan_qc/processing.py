@@ -4975,6 +4975,12 @@ def _lighten_corner_shadows_conservative(image: Image.Image) -> CornerShadowClea
                 f"corner shadow cleanup skipped: texture or photo detail near {corner} corner",
                 "texture_or_photo",
             )
+        if _corner_shadow_texture_detail_risk(corner_crop):
+            return _corner_shadows_noop(
+                image,
+                f"corner shadow cleanup skipped: texture or photo detail near {corner} corner",
+                "texture_or_photo",
+            )
         candidate_pixels, continuity = _corner_shadow_candidate_profile(corner_crop, inner_mean, x_direction, y_direction)
         faint_candidate_pixels, faint_continuity = _corner_shadow_candidate_profile(
             corner_crop,
@@ -5176,6 +5182,19 @@ def _corner_shadow_candidate_profile(
                 distance = math.sqrt(dx * dx + dy * dy)
                 covered_rings.add(min(7, int((distance / max(1.0, max_distance)) * 8)))
     return candidate_pixels, len(covered_rings) / 8
+
+
+def _corner_shadow_texture_detail_risk(corner: Image.Image) -> bool:
+    grayscale = corner.convert("L")
+    corner_std = ImageStat.Stat(grayscale).stddev[0]
+    if corner_std < 2.4:
+        return False
+    residual = ImageChops.difference(grayscale, grayscale.filter(ImageFilter.GaussianBlur(radius=3)))
+    residual_histogram = residual.histogram()
+    total = max(1, grayscale.width * grayscale.height)
+    residual_ratio = sum(residual_histogram[3:]) / total
+    residual_mean = ImageStat.Stat(residual).mean[0]
+    return residual_mean >= 1.25 and residual_ratio >= 0.18
 
 
 def _corner_shadow_color_risk(image: Image.Image, radius: int) -> bool:
