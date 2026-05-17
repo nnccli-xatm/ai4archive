@@ -6712,6 +6712,9 @@ def _enhance_faded_text_conservative(image: Image.Image) -> FadedTextEnhancement
     selected: set[tuple[int, int]] = set()
     component_boxes: list[tuple[int, int, int, int, int]] = []
     text_like_components = 0
+    narrow_print_components = 0
+    line_like_components = 0
+    flowing_stroke_components = 0
     rejected_large_components = 0
     for component in components:
         area = len(component)
@@ -6724,6 +6727,7 @@ def _enhance_faded_text_conservative(image: Image.Image) -> FadedTextEnhancement
         line_like = height <= 8 and width <= image.width * 0.70
         fill_ratio = area / max(1, width * height)
         flowing_stroke_like = height <= 24 and width <= image.width * 0.65 and fill_ratio <= 0.46
+        narrow_print_like = width <= 4 and 3 <= height <= 18 and area >= 4
         if (
             area / total > 0.018
             or (not line_like and width > image.width * 0.42 and not flowing_stroke_like)
@@ -6737,12 +6741,32 @@ def _enhance_faded_text_conservative(image: Image.Image) -> FadedTextEnhancement
             continue
         if width >= 5 and height >= 1 and aspect <= 60:
             text_like_components += 1
+            if line_like:
+                line_like_components += 1
+            if flowing_stroke_like and not line_like:
+                flowing_stroke_components += 1
+            component_boxes.append((min(xs), min(ys), width, height, area))
+            selected.update(component)
+        elif narrow_print_like and aspect <= 24:
+            text_like_components += 1
+            narrow_print_components += 1
             component_boxes.append((min(xs), min(ys), width, height, area))
             selected.update(component)
     if rejected_large_components:
         return _faded_text_noop(
             image,
             "faded text enhancement skipped: broad stain, texture, illustration, or table-region risk",
+            candidate_ratio,
+        )
+    if (
+        flowing_stroke_components >= 3
+        and flowing_stroke_components >= max(3, int(math.ceil(text_like_components * 0.55)))
+        and narrow_print_components < 8
+        and line_like_components < 3
+    ):
+        return _faded_text_noop(
+            image,
+            "faded text enhancement skipped: handwriting, marginalia, or annotation risk",
             candidate_ratio,
         )
     selected_ratio = len(selected) / max(1, total)
@@ -6929,6 +6953,10 @@ _FADED_TEXT_REASON_DETAILS: dict[str, tuple[str, str]] = {
     "faded text enhancement skipped: color content, stamp, or annotation risk": (
         "protected_color_stamp_annotation",
         "检测到彩色内容、印章或批注风险，跳过褪色正文加深。",
+    ),
+    "faded text enhancement skipped: handwriting, marginalia, or annotation risk": (
+        "protected_handwriting_marginalia_annotation",
+        "检测到手写、边注或批注风险，跳过褪色正文加深。",
     ),
     "faded text enhancement skipped: page is not a light paper background": (
         "not_light_paper_background",
