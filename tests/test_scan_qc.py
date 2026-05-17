@@ -11504,6 +11504,48 @@ class ScanQcTest(unittest.TestCase):
             self.assertIn("scanner_gutter_trim_disabled", disabled_record["operations"])
             self.assertEqual(source_path.read_bytes(), source_bytes_before)
 
+    def test_scanner_gutter_trim_removes_safe_variable_pale_binding_band(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-variable-pale-gutter-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source_path = input_dir / "A001_variable_pale_binding_band.png"
+
+            image = Image.new("RGB", (260, 190), (239, 239, 239))
+            draw = ImageDraw.Draw(image)
+            for y in range(190):
+                for x in range(15):
+                    value = 237 if (x + y) % 2 == 0 else 251
+                    image.putpixel((x, y), (value, value, value))
+            draw.rectangle((52, 36, 222, 156), outline=(70, 70, 70), width=2)
+            image.save(source_path)
+            source_bytes_before = source_path.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic", "variable-pale-gutter", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(scanner_gutter_trim=True, workers=1))
+            record = manifest["files"][0]
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            self.assertEqual(source_path.read_bytes(), source_bytes_before)
+            self.assertEqual(record["output_size"], [245, 190])
+            self.assertTrue(record["scanner_gutter_trimmed"])
+            self.assertEqual(record["scanner_gutter_reason"], "scanner gutter trim applied")
+            self.assertLessEqual(record["scanner_gutter_trim_margins"]["left"], 0.06)
+            self.assertLessEqual(record["processing_audit"]["scanner_gutter_max_trim_margin_ratio"], 0.06)
+            self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
+            self.assertEqual(audit_summary["counts"]["scanner_gutter_trimmed_files"], 1)
+            self.assertEqual(audit_summary["counts"]["scanner_gutter_skipped_files"], 0)
+            self.assertEqual(
+                audit_summary["guardrails"]["scanner_gutter_trim"]["reason_distribution"],
+                {"scanner gutter trim applied": 1},
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("A001_variable_pale_binding_band", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
     def test_scanner_gutter_trim_preserves_edge_content_and_archival_marks(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-light-gutter-protection-") as temp_dir:
             root = Path(temp_dir)
@@ -11517,6 +11559,11 @@ class ScanQcTest(unittest.TestCase):
                 "A003_stamp_mark.png": lambda draw: draw.rectangle((3, 20, 8, 28), fill=(160, 30, 30)),
                 "A004_handwritten_mark.png": lambda draw: draw.line((2, 120, 8, 126), fill=(30, 30, 30), width=2),
                 "A005_archival_edge.png": lambda draw: draw.rectangle((0, 0, 6, 179), fill=(70, 70, 70)),
+                "A006_table_page_number_near_gutter.png": lambda draw: (
+                    draw.text((14, 76), "12", fill=(40, 40, 40)),
+                    draw.rectangle((15, 34, 112, 126), outline=(42, 42, 42), width=2),
+                ),
+                "A007_blue_annotation_edge.png": lambda draw: draw.line((2, 142, 18, 152), fill=(30, 70, 180), width=3),
             }
             for filename, mark in cases.items():
                 image = Image.new("RGB", (240, 180), (236, 236, 236))

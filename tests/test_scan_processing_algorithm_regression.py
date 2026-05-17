@@ -689,6 +689,61 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             ):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_variable_pale_gutter_trim_stays_bounded_and_private(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-variable-gutter-full-chain-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            image = Image.new("RGB", (260, 190), (239, 239, 239))
+            draw = ImageDraw.Draw(image)
+            for y in range(190):
+                for x in range(15):
+                    value = 237 if (x + y) % 2 == 0 else 251
+                    image.putpixel((x, y), (value, value, value))
+            draw.rectangle((54, 38, 222, 154), outline=(80, 80, 80), width=2)
+            for y in range(68, 130, 24):
+                draw.rectangle((70, y, 180, y + 2), fill=(70, 70, 70))
+            image.save(input_dir / "private_full_chain_variable_pale_gutter.png", dpi=(300, 300))
+
+            report = scan_batch(
+                ScanConfig("synthetic-regression", "variable-gutter-full-chain", input_dir, output_dir)
+            )
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+            audit = record["processing_audit"]
+
+            self.assertEqual(record["status"], "processed")
+            self.assertTrue(record["scanner_gutter_trimmed"])
+            self.assertEqual(record["scanner_gutter_reason"], "scanner gutter trim applied")
+            self.assertEqual(record["output_size"], [245, 190])
+            self.assertEqual(audit["guardrail_failures"], [])
+            self.assertEqual(audit["cumulative_change_guard_action"], "passed")
+            self.assertEqual(audit["combination_quality_guard_reason_code"], "safe_combination_passed")
+            self.assertLessEqual(audit["scanner_gutter_max_trim_margin_ratio"], 0.06)
+            self.assertLessEqual(audit["max_trim_margin_ratio"], 0.06)
+            self.assertLessEqual(audit["cumulative_change_crop_ratio"], 0.06)
+            self.assertLessEqual(audit["cumulative_change_pixel_ratio"], 0.08)
+            self.assertTrue(audit_summary["operations"]["deskew"])
+            self.assertTrue(audit_summary["operations"]["scanner_gutter_trim"])
+            self.assertTrue(audit_summary["operations"]["auto_crop"])
+            self.assertTrue(audit_summary["operations"]["lighten_scanlines"])
+            self.assertEqual(audit_summary["counts"]["scanner_gutter_trimmed_files"], 1)
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (
+                "private_full_chain_variable_pale_gutter.png",
+                str(input_dir),
+                "source_relative_path",
+                "source_sha256",
+            ):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_risk_combination_pages_skip_or_stay_low_change(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-risk-") as temp_dir:
             root = Path(temp_dir)
