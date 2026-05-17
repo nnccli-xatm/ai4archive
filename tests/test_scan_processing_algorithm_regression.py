@@ -512,6 +512,98 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_mild_vertical_fold_shadow_cleanup_allows_sparse_text_and_preserves_rules(self) -> None:
+        def mild_fold_page(variant: str) -> Image.Image:
+            image = Image.new("RGB", (320, 240), (244, 244, 240))
+            draw = ImageDraw.Draw(image)
+            for x in range(152, 169):
+                distance = abs(x - 160) / 8
+                shade = int(round(244 - 10 * (1 - distance) ** 1.2))
+                draw.line((x, 12, x, image.height - 12), fill=(shade, shade, shade - 4))
+            for y in (70, 120):
+                draw.rectangle((72, y, 248, y + 2), fill=(50, 50, 50))
+            if variant == "safe":
+                return image
+            if variant == "vertical_rule":
+                draw.line((160, 28, 160, 214), fill=(35, 35, 35), width=2)
+                return image
+            if variant == "dense_foreground":
+                for y in range(35, 205, 10):
+                    draw.rectangle((45, y, 275, y + 3), fill=(45, 45, 45))
+                return image
+            raise ValueError(f"unsupported variant: {variant}")
+
+        with tempfile.TemporaryDirectory(prefix="scan-processing-mild-fold-shadow-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_safe_mild_vertical_fold_sparse_text.png": mild_fold_page("safe"),
+                "synthetic_vertical_fold_rule_protected.png": mild_fold_page("vertical_rule"),
+                "synthetic_vertical_fold_dense_foreground.png": mild_fold_page("dense_foreground"),
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "mild-fold-shadow", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(lighten_fold_shadows=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_name = "synthetic_safe_mild_vertical_fold_sparse_text.png"
+            safe_record = records[safe_name]
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertTrue(safe_record["fold_shadows_lightened"])
+            self.assertEqual(safe_record["fold_shadows_reason_code"], "applied_narrow_neutral_background_band")
+            self.assertEqual(safe_record["fold_shadows_orientation"], "vertical")
+            self.assertGreater(safe_record["fold_shadows_delta"], 1.5)
+            self.assertGreater(safe_record["fold_shadows_changed_pixel_ratio"], 0.01)
+            self.assertLessEqual(safe_record["fold_shadows_changed_pixel_ratio"], 0.075)
+            self.assertLessEqual(safe_record["fold_shadows_candidate_pixel_ratio"], 0.12)
+            with Image.open(process_dir / safe_record["output_relative_path"]) as output:
+                self.assertGreater(
+                    _mean_luma(output, (152, 12, 169, 228)),
+                    _mean_luma(pages[safe_name], (152, 12, 169, 228)) + 1.0,
+                )
+                self.assertLess(_changed_ratio(pages[safe_name], output, (72, 66, 248, 126)), 0.01)
+
+            protected_names = set(pages) - {safe_name}
+            for name in protected_names:
+                record = records[name]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name])
+                self.assertFalse(record["fold_shadows_lightened"], name)
+                self.assertNotEqual(record["fold_shadows_reason_code"], "applied_narrow_neutral_background_band")
+                self.assertEqual(record["fold_shadows_changed_pixel_ratio"], 0.0, name)
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    self.assertEqual(output.convert("RGB").tobytes(), pages[name].tobytes(), name)
+
+            fold_guard = audit_summary["guardrails"]["fold_shadows"]
+            self.assertEqual(audit_summary["counts"]["fold_shadows_lightened_files"], 1)
+            self.assertEqual(audit_summary["counts"]["fold_shadows_skipped_files"], len(protected_names))
+            self.assertEqual(fold_guard["applied_files"], 1)
+            self.assertEqual(fold_guard["skipped_files"], len(protected_names))
+            self.assertEqual(fold_guard["reason_code_distribution"]["applied_narrow_neutral_background_band"], 1)
+            self.assertIn("changed_pixel_ratio", fold_guard)
+            self.assertIn("candidate_pixel_ratio", fold_guard)
+            self.assertIn("candidate_width_bucket_distribution", fold_guard)
+            self.assertIn("candidate_coverage_bucket_distribution", fold_guard)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_illumination_gradient_levels_safe_public_gradient_and_preserves_content_edges(self) -> None:
         def gradient_page(variant: str) -> Image.Image:
             width, height = 260, 180
