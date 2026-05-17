@@ -6320,7 +6320,7 @@ def _fold_shadows_noop(
 def _clean_bleed_through_conservative(image: Image.Image) -> BleedThroughCleanupResult:
     if image.width < 80 or image.height < 80:
         return _bleed_through_noop(image, "bleed-through cleanup skipped: image too small")
-    color_risk = _tone_color_risk_reason(image)
+    color_risk = _bleed_through_color_risk_reason(image)
     if color_risk:
         return _bleed_through_noop(image, "bleed-through cleanup skipped: color content, stamp, or annotation risk")
 
@@ -6605,6 +6605,42 @@ def _bleed_through_reason_code(reason: str | None) -> str:
     if "improvement below" in reason or "no confident" in reason:
         return "low_confidence"
     return "protected_ambiguous_content"
+
+
+def _bleed_through_color_risk_reason(image: Image.Image) -> str | None:
+    if image.mode == "L":
+        return None
+    sample = image.convert("RGB")
+    sample.thumbnail((600, 600), Image.Resampling.BILINEAR)
+    total = max(1, sample.width * sample.height)
+    red = 0
+    cool_or_purple = 0
+    saturated = 0
+    strong_color = 0
+    pixel_data = sample.get_flattened_data() if hasattr(sample, "get_flattened_data") else sample.getdata()
+    for red_value, green_value, blue_value in pixel_data:
+        high = max(red_value, green_value, blue_value)
+        low = min(red_value, green_value, blue_value)
+        spread = high - low
+        brightness = (red_value + green_value + blue_value) / 3
+        if red_value >= 110 and red_value - green_value >= 35 and red_value - blue_value >= 35:
+            red += 1
+        if spread <= 26 or not 80 < brightness < 248:
+            continue
+        strong_color += 1
+        if blue_value - red_value >= 22 or green_value - red_value >= 22 or (
+            red_value - green_value >= 22 and blue_value - green_value >= 22
+        ):
+            cool_or_purple += 1
+        if spread > 58:
+            saturated += 1
+    if red / total >= 0.0004:
+        return "bleed-through cleanup skipped: red stamp or red annotation risk"
+    if cool_or_purple / total >= 0.0005 or saturated / total >= 0.0008:
+        return "bleed-through cleanup skipped: color annotation risk"
+    if strong_color / total >= 0.025:
+        return "bleed-through cleanup skipped: obvious color content"
+    return None
 
 
 def _bleed_through_line_risk(candidate: Image.Image) -> bool:
