@@ -8,7 +8,7 @@ import unittest
 from unittest import mock
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageStat
 
 from archive_scan_qc import processing as processing_module
 from archive_scan_qc.benchmark import _processing_quality_regression, run_benchmark
@@ -227,6 +227,68 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertFalse(audit_summary["privacy"]["contains_paths"])
             self.assertFalse(audit_summary["privacy"]["contains_hashes"])
             for forbidden in ("synthetic_safe_combination.png", str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
+    def test_warm_mild_bleed_through_is_cleaned_without_private_audit_rows(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-warm-bleed-through-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "private_warm_reverse_ghost.png"
+            page = _warm_mild_bleed_through_page()
+            page.save(source, dpi=(300, 300))
+            source_bytes = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "warm-bleed-through", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(clean_bleed_through=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+            audit = record["processing_audit"]
+            processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertTrue(record["bleed_through_cleaned"])
+            self.assertEqual(record["bleed_through_reason_code"], "applied_faint_reverse_ghost")
+            self.assertEqual(audit["bleed_through_reason_code"], "applied_faint_reverse_ghost")
+            self.assertGreater(audit["bleed_through_delta"], 3.0)
+            self.assertGreater(audit["bleed_through_changed_pixel_ratio"], 0.0)
+            self.assertLessEqual(audit["bleed_through_changed_pixel_ratio"], 0.045)
+            self.assertLessEqual(audit["bleed_through_candidate_pixel_ratio"], 0.065)
+            self.assertEqual(audit["guardrail_failures"], [])
+            self.assertEqual(audit["local_content_change_guard_action"], "passed")
+            self.assertEqual(audit["combination_quality_guard_reason_code"], "safe_combination_passed")
+            self.assertEqual(audit["processed_output_safety_guard_action"], "passed")
+
+            original = page.convert("RGB")
+            ghost_box = (118, 80, 176, 122)
+            before = ImageStat.Stat(original.crop(ghost_box).convert("L")).mean[0]
+            after = ImageStat.Stat(processed.crop(ghost_box).convert("L")).mean[0]
+            self.assertGreater(after - before, 0.08)
+            protected_box = (30, 34, 72, 50)
+            self.assertIsNone(
+                ImageChops.difference(original.crop(protected_box), processed.crop(protected_box)).getbbox()
+            )
+
+            self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["bleed_through"]["applied_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["bleed_through"]["reason_code_distribution"][
+                    "applied_faint_reverse_ghost"
+                ],
+                1,
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in ("private_warm_reverse_ghost", str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
     def test_full_chain_mild_blue_gray_cast_stays_guarded_and_private(self) -> None:
@@ -1755,6 +1817,20 @@ def _safe_full_chain_combination_page() -> Image.Image:
         draw.line((58, y, 174, y), fill=(202, 202, 202), width=2)
     draw.ellipse((165, 28, 210, 58), fill=(222, 222, 222))
     image.putpixel((24, 24), (0, 0, 0))
+    return image
+
+
+def _warm_mild_bleed_through_page() -> Image.Image:
+    image = Image.new("RGB", (260, 180), (244, 244, 239))
+    draw = ImageDraw.Draw(image)
+    draw.text((34, 36), "REAL", fill=(70, 70, 70))
+    mask = Image.new("L", image.size, 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.text((124, 82), "321", fill=255)
+    mask_draw.text((124, 104), "654", fill=255)
+    mask = mask.filter(ImageFilter.GaussianBlur(2.6))
+    ghost = Image.new("RGB", image.size, (222, 198, 154))
+    image.paste(ghost, (0, 0), mask.point(lambda value: int(value * 0.60)))
     return image
 
 
