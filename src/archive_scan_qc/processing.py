@@ -5567,6 +5567,8 @@ def _level_illumination_gradient_conservative(image: Image.Image) -> Illuminatio
         return _illumination_gradient_noop(image, "protected dark or mixed foreground content", "protected_content")
     foreground = grayscale.point(lambda value: 255 if value <= max(150, min(190, p50 - 36)) else 0, mode="L")
     foreground_ratio = _mask_ratio(foreground)
+    if _illumination_gradient_tiny_foreground_content_risk(foreground, grayscale):
+        return _illumination_gradient_noop(image, "protected tiny foreground content", "protected_content")
     if foreground_ratio > 0.0015:
         return _illumination_gradient_noop(image, "protected foreground content", "protected_content")
     if _source_protected_edge_dark_ratio(grayscale) > 0.0018:
@@ -5683,6 +5685,27 @@ def _level_illumination_gradient_conservative(image: Image.Image) -> Illuminatio
         round(changed_ratio, 6),
         round(candidate_ratio, 6),
     )
+
+
+def _illumination_gradient_tiny_foreground_content_risk(foreground: Image.Image, grayscale: Image.Image) -> bool:
+    total = foreground.width * foreground.height
+    if total <= 0:
+        return False
+    max_component_area = max(4, int(total * 0.0009))
+    for component in _mask_components(foreground):
+        area = len(component)
+        if area < 4 or area > max_component_area:
+            continue
+        xs = [point[0] for point in component]
+        ys = [point[1] for point in component]
+        width = max(xs) - min(xs) + 1
+        height = max(ys) - min(ys) + 1
+        if width > foreground.width * 0.08 or height > foreground.height * 0.08:
+            continue
+        values = [int(grayscale.getpixel(point)) for point in component]
+        if values and min(values) <= 120:
+            return True
+    return False
 
 
 def _illumination_gradient_profile_index(
