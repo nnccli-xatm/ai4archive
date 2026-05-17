@@ -1086,6 +1086,81 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             ):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_very_subtle_scanline_cleanup_preserves_real_document_lines(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-very-subtle-scanline-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_safe_very_subtle_scanline.png": _very_subtle_scanline_page(),
+                "synthetic_protected_table_scanline.png": _very_subtle_scanline_page("table"),
+                "synthetic_protected_ruled_scanline.png": _very_subtle_scanline_page("ruled"),
+                "synthetic_protected_underline_scanline.png": _very_subtle_scanline_page("underline"),
+                "synthetic_protected_stamp_scanline.png": _very_subtle_scanline_page("stamp"),
+                "synthetic_protected_marginal_mark_scanline.png": _very_subtle_scanline_page("marginal_mark"),
+                "synthetic_protected_edge_line_scanline.png": _very_subtle_scanline_page("edge_line"),
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "very-subtle-scanline", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(lighten_scanlines=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            safe_name = "synthetic_safe_very_subtle_scanline.png"
+            safe_record = records[safe_name]
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_processed:
+                processed_safe = safe_processed.convert("RGB")
+
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertTrue(safe_record["scanlines_lightened"])
+            self.assertEqual(safe_record["scanlines_orientation"], "vertical")
+            self.assertIn("lighten_scanlines_conservative", safe_record["operations"])
+            self.assertGreater(
+                _mean_luma(processed_safe, (210, 18, 211, 202)),
+                _mean_luma(pages[safe_name], (210, 18, 211, 202)) + 2.0,
+            )
+            self.assertEqual(safe_record["processing_audit"]["guardrail_failures"], [])
+            self.assertGreater(safe_record["scanlines_changed_pixel_ratio"], 0.0007)
+            self.assertLess(safe_record["scanlines_changed_pixel_ratio"], 0.01)
+            self.assertLessEqual(safe_record["scanlines_candidate_pixel_ratio"], 0.01)
+
+            protected_names = set(pages) - {safe_name}
+            for name in protected_names:
+                record = records[name]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
+                self.assertFalse(record["scanlines_lightened"], name)
+                self.assertIn("lighten_scanlines_noop", record["operations"], name)
+                self.assertEqual(record["scanlines_changed_pixel_ratio"], 0.0, name)
+                self.assertIsInstance(record["scanlines_reason"], str, name)
+                with Image.open(process_dir / record["output_relative_path"]) as processed:
+                    self.assertEqual(processed.convert("RGB").tobytes(), pages[name].tobytes(), name)
+
+            self.assertEqual(audit_summary["counts"]["scanlines_lightened_files"], 1)
+            self.assertEqual(audit_summary["counts"]["scanlines_skipped_files"], len(protected_names))
+            scanline_guard = audit_summary["guardrails"]["scanlines"]
+            self.assertEqual(scanline_guard["applied_files"], 1)
+            self.assertEqual(scanline_guard["skipped_files"], len(protected_names))
+            self.assertGreaterEqual(scanline_guard["protection_triggered_files"], 2)
+            self.assertGreaterEqual(len(scanline_guard["skip_reason_distribution"]), 3)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_safe_cloud_background_stain_stays_bounded_and_private(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-cloud-stain-combo-") as temp_dir:
             root = Path(temp_dir)
@@ -3642,6 +3717,35 @@ def _subtle_ruled_table_page() -> Image.Image:
         draw.rectangle((x, 18, x, 202), fill=(237, 237, 233))
     for y in range(34, 178, 28):
         draw.rectangle((30, y, 254, y), fill=(237, 237, 233))
+    return image
+
+
+def _very_subtle_scanline_page(variant: str = "safe") -> Image.Image:
+    image = Image.new("RGB", (300, 220), (242, 242, 238))
+    draw = ImageDraw.Draw(image)
+    for y in (44, 68):
+        draw.rectangle((46, y, 115, y + 4), fill=(42, 42, 42))
+    draw.rectangle((210, 18, 210, 202), fill=(240, 240, 236))
+    if variant == "safe":
+        return image
+    if variant == "table":
+        for x in (42, 104, 166, 228):
+            draw.line((x, 28, x, 176), fill=(45, 45, 45), width=2)
+        for y in (92, 126, 160):
+            draw.line((32, y, 254, y), fill=(45, 45, 45), width=2)
+    elif variant == "ruled":
+        for y in range(32, 184, 16):
+            draw.line((30, y, 254, y), fill=(237, 237, 233), width=1)
+    elif variant == "underline":
+        draw.line((152, 152, 236, 152), fill=(42, 42, 42), width=2)
+    elif variant == "stamp":
+        draw.ellipse((166, 84, 232, 146), outline=(184, 24, 24), width=4)
+    elif variant == "marginal_mark":
+        draw.line((18, 92, 88, 112, 142, 134, 214, 152), fill=(50, 50, 50), width=2)
+    elif variant == "edge_line":
+        draw.rectangle((4, 32, 14, 182), fill=(58, 58, 58))
+    else:
+        raise ValueError(f"unsupported variant: {variant}")
     return image
 
 

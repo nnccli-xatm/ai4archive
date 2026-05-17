@@ -7394,7 +7394,19 @@ def _scanline_axis_lightening_plan(
                 and stat["longest_segment_ratio"] >= 0.65
                 and stat["dark_ratio"] == 0.0
             )
-            min_local_delta = 2.4 if subtle_continuous_candidate else 3.0
+            very_subtle_continuous_candidate = (
+                subtle_continuous_candidate
+                and stat["candidate_ratio"] >= 0.82
+                and stat["candidate_available_ratio"] >= 0.82
+                and stat["longest_segment_ratio"] >= 0.78
+                and stat["protected_ratio"] == 0.0
+            )
+            if very_subtle_continuous_candidate:
+                min_local_delta = 1.6
+            elif subtle_continuous_candidate:
+                min_local_delta = 2.4
+            else:
+                min_local_delta = 3.0
             if not (min_local_delta <= local_delta <= 22.0):
                 continue
             score_delta = local_delta
