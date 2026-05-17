@@ -7214,6 +7214,7 @@ class ScanQcTest(unittest.TestCase):
                 "private_light_foreground_text.png": _synthetic_bleed_through_page("text"),
                 "private_page_number.png": _synthetic_bleed_through_page("page_number"),
                 "private_table_lines.png": _synthetic_bleed_through_page("table"),
+                "private_cool_gray_table_lines.png": _synthetic_bleed_through_page("cool_gray_table"),
                 "private_red_stamp.png": _synthetic_bleed_through_page("stamp"),
                 "private_edge_mark.png": _synthetic_bleed_through_page("edge"),
                 "private_dense_background.png": _synthetic_bleed_through_page("dense"),
@@ -7282,6 +7283,7 @@ class ScanQcTest(unittest.TestCase):
                 "private_light_foreground_text",
                 "private_page_number",
                 "private_table_lines",
+                "private_cool_gray_table_lines",
                 "private_red_stamp",
                 "private_edge_mark",
                 "private_dense_background",
@@ -16623,6 +16625,11 @@ def _synthetic_bleed_through_page(variant: str) -> Image.Image:
             draw.line((x, 80, x, 125), fill=(214, 214, 210), width=1)
         for y in range(80, 126, 15):
             draw.line((120, y, 210, y), fill=(214, 214, 210), width=1)
+    elif variant == "cool_gray_table":
+        for x in range(120, 210, 20):
+            draw.line((x, 80, x, 125), fill=(214, 224, 236), width=1)
+        for y in range(80, 126, 15):
+            draw.line((120, y, 210, y), fill=(214, 224, 236), width=1)
     elif variant == "stamp":
         draw.ellipse((120, 80, 188, 134), outline=(190, 80, 80), width=2)
     elif variant == "colored_mark":

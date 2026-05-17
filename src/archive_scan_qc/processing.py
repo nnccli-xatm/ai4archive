@@ -6344,6 +6344,7 @@ def _clean_bleed_through_conservative(image: Image.Image) -> BleedThroughCleanup
         return _bleed_through_noop(image, "bleed-through cleanup skipped: edge content or binding risk")
 
     background = max(p90, p95 - 1)
+    paper_rgb = _bleed_through_light_paper_rgb(image, grayscale, foreground, background)
     min_ghost_signal = 1 if very_stable_light_paper else 2 if p50 >= 230 and p95 >= 238 else 4
     max_ghost_signal = 18 if very_stable_light_paper else 32
     edge_signal = grayscale.filter(ImageFilter.FIND_EDGES)
@@ -6353,13 +6354,25 @@ def _clean_bleed_through_conservative(image: Image.Image) -> BleedThroughCleanup
     candidate_pixels = raw_candidate.load()
     source_pixels = grayscale.load()
     edge_pixels = edge_signal.load()
+    rgb_pixels = image.convert("RGB").load() if paper_rgb is not None else None
     for y in range(edge_margin, image.height - edge_margin):
         for x in range(edge_margin, image.width - edge_margin):
             value = int(source_pixels[x, y])
-            if not (
+            gray_ghost_candidate = (
                 190 <= value <= background - min_ghost_signal
                 and min_ghost_signal <= background - value <= max_ghost_signal
-            ):
+            )
+            cool_gray_ghost_candidate = (
+                rgb_pixels is not None
+                and _bleed_through_cool_gray_ghost_pixel(
+                    rgb_pixels[x, y],
+                    paper_rgb,
+                    value,
+                    background,
+                    max_ghost_signal,
+                )
+            )
+            if not (gray_ghost_candidate or cool_gray_ghost_candidate):
                 continue
             if int(edge_pixels[x, y]) >= 22:
                 continue
@@ -6482,15 +6495,51 @@ def _clean_bleed_through_conservative(image: Image.Image) -> BleedThroughCleanup
         gray_pixels = grayscale.load()
         for x, y in selected:
             gray_value = int(gray_pixels[x, y])
-            delta = min(18, max(4, int(round((background - gray_value) * 0.62))))
             red_value, green_value, blue_value = output_pixels[x, y]
-            output_pixels[x, y] = (
-                min(255, red_value + delta),
-                min(255, green_value + delta),
-                min(255, blue_value + delta),
-            )
+            if paper_rgb is None:
+                delta = min(18, max(4, int(round((background - gray_value) * 0.62))))
+                new_pixel = (
+                    min(255, red_value + delta),
+                    min(255, green_value + delta),
+                    min(255, blue_value + delta),
+                )
+            else:
+                paper_red, paper_green, paper_blue = paper_rgb
+                gray_delta = min(18, max(4, int(round((background - gray_value) * 0.62))))
+                red_cool_extra = max(0, (blue_value - red_value) - (paper_blue - paper_red))
+                green_cool_extra = max(0, (blue_value - green_value) - (paper_blue - paper_green))
+                new_pixel = (
+                    min(
+                        255,
+                        max(
+                            red_value + gray_delta,
+                            red_value + int(round((paper_red - red_value) * 0.68)),
+                        )
+                        + min(4, red_cool_extra // 2),
+                    ),
+                    min(
+                        255,
+                        max(
+                            green_value + gray_delta,
+                            green_value + int(round((paper_green - green_value) * 0.68)),
+                        )
+                        + min(3, green_cool_extra // 2),
+                    ),
+                    min(
+                        255,
+                        blue_value
+                        + max(0, min(gray_delta, int(round((paper_blue - blue_value) * 0.68)))),
+                    ),
+                )
+                if new_pixel == (red_value, green_value, blue_value):
+                    new_pixel = (
+                        min(255, red_value + gray_delta),
+                        min(255, green_value + gray_delta),
+                        min(255, blue_value + gray_delta),
+                    )
+            output_pixels[x, y] = new_pixel
             before_values.append(gray_value)
-            after_values.append(min(255, gray_value + delta))
+            after_values.append(_rgb_luminance(new_pixel))
         result_image = output
 
     before_mean = round(sum(before_values) / len(before_values), 6)
@@ -6511,6 +6560,82 @@ def _clean_bleed_through_conservative(image: Image.Image) -> BleedThroughCleanup
         round(changed_ratio, 6),
         round(candidate_ratio, 6),
     )
+
+
+def _bleed_through_light_paper_rgb(
+    image: Image.Image,
+    grayscale: Image.Image,
+    foreground: Image.Image,
+    background: int,
+) -> tuple[int, int, int] | None:
+    if image.mode == "L":
+        return None
+    rgb = image.convert("RGB")
+    sample = rgb.copy()
+    sample.thumbnail((360, 360), Image.Resampling.BILINEAR)
+    gray_sample = grayscale.copy()
+    gray_sample.thumbnail(sample.size, Image.Resampling.BILINEAR)
+    foreground_sample = foreground.copy()
+    foreground_sample.thumbnail(sample.size, Image.Resampling.NEAREST)
+    gray_pixels = gray_sample.load()
+    foreground_pixels = foreground_sample.load()
+    reds: list[int] = []
+    greens: list[int] = []
+    blues: list[int] = []
+    for y in range(sample.height):
+        for x in range(sample.width):
+            if foreground_pixels[x, y]:
+                continue
+            gray_value = int(gray_pixels[x, y])
+            if gray_value < max(220, background - 8):
+                continue
+            red_value, green_value, blue_value = sample.getpixel((x, y))
+            if max(red_value, green_value, blue_value) - min(red_value, green_value, blue_value) > 22:
+                continue
+            reds.append(red_value)
+            greens.append(green_value)
+            blues.append(blue_value)
+    if len(reds) < max(24, int(round(sample.width * sample.height * 0.08))):
+        return None
+    return (
+        int(round(_median_int(reds))),
+        int(round(_median_int(greens))),
+        int(round(_median_int(blues))),
+    )
+
+
+def _rgb_luminance(pixel: tuple[int, int, int]) -> int:
+    return int(round((pixel[0] * 299 + pixel[1] * 587 + pixel[2] * 114) / 1000))
+
+
+def _median_int(values: list[int]) -> float:
+    ordered = sorted(values)
+    midpoint = len(ordered) // 2
+    if len(ordered) % 2:
+        return float(ordered[midpoint])
+    return (ordered[midpoint - 1] + ordered[midpoint]) / 2
+
+
+def _bleed_through_cool_gray_ghost_pixel(
+    pixel: tuple[int, int, int],
+    paper_rgb: tuple[int, int, int],
+    gray_value: int,
+    background: int,
+    max_ghost_signal: int,
+) -> bool:
+    red_value, green_value, blue_value = pixel
+    paper_red, paper_green, paper_blue = paper_rgb
+    spread = max(pixel) - min(pixel)
+    if spread > 24:
+        return False
+    if gray_value < max(226, background - max_ghost_signal) or gray_value > min(252, background + 2):
+        return False
+    red_loss = paper_red - red_value
+    cool_blue_shift = (blue_value - red_value) - (paper_blue - paper_red)
+    cool_green_shift = (green_value - red_value) - (paper_green - paper_red)
+    if red_loss < 2:
+        return False
+    return cool_blue_shift >= 4 and cool_green_shift >= 2
 
 
 def _bleed_through_small_diffuse_selection(
