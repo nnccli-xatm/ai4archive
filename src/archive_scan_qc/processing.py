@@ -10016,6 +10016,10 @@ _DESPECKLE_DARK_THRESHOLD = 60
 _DESPECKLE_LIGHT_SOIL_MIN_BACKGROUND = 205
 _DESPECKLE_LIGHT_SOIL_MIN_DELTA = 18
 _DESPECKLE_LIGHT_SOIL_MAX_VALUE = 226
+_DESPECKLE_FAINT_DUST_MIN_BACKGROUND = 232
+_DESPECKLE_FAINT_DUST_MIN_DELTA = 12
+_DESPECKLE_FAINT_DUST_MAX_VALUE = 236
+_DESPECKLE_MAX_FAINT_DUST_PREFILTER_RATIO = 0.0015
 _DESPECKLE_NEAR_DARK_THRESHOLD = 90
 _DESPECKLE_MIN_BACKGROUND_MEDIAN = 120
 _DESPECKLE_MAX_CANDIDATE_RATIO = 0.02
@@ -10536,6 +10540,11 @@ def _despeckle_candidate_mask(image: Image.Image, grayscale: Image.Image) -> tup
     p95 = _histogram_percentile(histogram, total, 0.95)
     light_soil_threshold = min(_DESPECKLE_LIGHT_SOIL_MAX_VALUE, p95 - _DESPECKLE_LIGHT_SOIL_MIN_DELTA)
     include_light_soil = p50 >= _DESPECKLE_LIGHT_SOIL_MIN_BACKGROUND and light_soil_threshold > _DESPECKLE_DARK_THRESHOLD
+    faint_dust_threshold = min(_DESPECKLE_FAINT_DUST_MAX_VALUE, p95 - _DESPECKLE_FAINT_DUST_MIN_DELTA)
+    include_faint_dust = (
+        p50 >= _DESPECKLE_FAINT_DUST_MIN_BACKGROUND
+        and faint_dust_threshold > max(_DESPECKLE_DARK_THRESHOLD, light_soil_threshold)
+    )
     dark_mask = grayscale.point(lambda value: 255 if value <= _DESPECKLE_DARK_THRESHOLD else 0, mode="L")
     if include_light_soil:
         light_soil_ratio = sum(histogram[_DESPECKLE_DARK_THRESHOLD + 1 : light_soil_threshold + 1]) / max(1, total)
@@ -10543,11 +10552,19 @@ def _despeckle_candidate_mask(image: Image.Image, grayscale: Image.Image) -> tup
             if dark_mask.getbbox():
                 return dark_mask, None
             return Image.new("L", grayscale.size, 0), "despeckle skipped: candidate density exceeds safety threshold"
-    if include_light_soil:
+    if include_faint_dust:
+        faint_dust_ratio = sum(histogram[light_soil_threshold + 1 : faint_dust_threshold + 1]) / max(1, total)
+        if faint_dust_ratio > _DESPECKLE_MAX_FAINT_DUST_PREFILTER_RATIO:
+            include_faint_dust = False
+            if not include_light_soil and not dark_mask.getbbox():
+                return Image.new("L", grayscale.size, 0), "despeckle skipped: candidate density exceeds safety threshold"
+    if include_light_soil or include_faint_dust:
+        candidate_threshold = faint_dust_threshold if include_faint_dust else light_soil_threshold
         mask = grayscale.point(
             lambda value: 255
             if value <= _DESPECKLE_DARK_THRESHOLD
-            or (value <= light_soil_threshold and p95 - value >= _DESPECKLE_LIGHT_SOIL_MIN_DELTA)
+            or (include_light_soil and value <= light_soil_threshold and p95 - value >= _DESPECKLE_LIGHT_SOIL_MIN_DELTA)
+            or (include_faint_dust and value <= candidate_threshold and p95 - value >= _DESPECKLE_FAINT_DUST_MIN_DELTA)
             else 0,
             mode="L",
         )

@@ -11570,6 +11570,81 @@ class ScanQcTest(unittest.TestCase):
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertNotIn("private_sparse_text_gap_dust", audit_summary_text)
 
+    def test_despeckle_cleans_faint_tiny_scanner_specks_on_stable_light_paper(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "private_faint_scanner_specks.png"
+            image = Image.new("RGB", (120, 90), (248, 248, 244))
+            speck_points = [(35, 30), (70, 42), (92, 61)]
+            for point in speck_points:
+                image.putpixel(point, (230, 230, 226))
+            image.save(source)
+            source_bytes = source.read_bytes()
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+            timing = audit_summary["timing"]["operation_timings"]["despeckle"]
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            with Image.open(process_dir / "images" / "private_faint_scanner_specks.png") as processed:
+                rgb = processed.convert("RGB")
+                for point in speck_points:
+                    self.assertGreaterEqual(min(rgb.getpixel(point)), 244)
+            self.assertTrue(record["despeckled"])
+            self.assertEqual(record["despeckle_pixels_changed"], 3)
+            self.assertEqual(record["despeckle_reason"], "isolated dark pixels replaced")
+            self.assertEqual(record["processing_audit"]["despeckle_pixel_ratio"], round(3 / (120 * 90), 6))
+            self.assertEqual(timing["reason_code_distribution"]["applied_isolated_pixels"], 1)
+            self.assertEqual(timing["candidate_pixels"]["total"], 3)
+            self.assertEqual(timing["candidate_count"]["total"], 3)
+            self.assertEqual(timing["candidate_count_bucket_distribution"]["1-4"], 1)
+            self.assertEqual(audit_summary["counts"]["despeckled_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["despeckle"]["reason_distribution"]["isolated dark pixels replaced"],
+                1,
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_faint_scanner_specks", audit_summary_text)
+
+    def test_despeckle_preserves_faint_dotted_leader_as_low_confidence_content(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "private_faint_dotted_leader.png"
+            image = Image.new("RGB", (140, 90), (248, 248, 244))
+            leader_points = [(x, 44) for x in range(28, 112, 3)]
+            for point in leader_points:
+                image.putpixel(point, (230, 230, 226))
+            image.save(source)
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+            audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
+            record = manifest["files"][0]
+
+            with Image.open(process_dir / "images" / "private_faint_dotted_leader.png") as processed:
+                rgb = processed.convert("RGB")
+                for point in leader_points:
+                    self.assertEqual(rgb.getpixel(point), (230, 230, 226))
+            self.assertFalse(record["despeckled"])
+            self.assertEqual(record["despeckle_pixels_changed"], 0)
+            self.assertEqual(record["despeckle_reason"], "no isolated dark pixels found")
+            self.assertEqual(audit_summary["counts"]["despeckle_skipped_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["despeckle"]["reason_distribution"]["no isolated dark pixels found"],
+                1,
+            )
+
     def test_despeckle_preserves_i_dot_aligned_with_sparse_text_stem(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
