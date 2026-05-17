@@ -3253,7 +3253,10 @@ def _process_image(
         elif skew_from_projection and _deskew_has_edge_content_risk(processed):
             operations.append("deskew_noop")
             deskew_reason = "edge content near rotation boundary"
-        elif abs(skew.angle_degrees) <= 1.25 and _deskew_has_color_or_table_risk(processed):
+        elif _deskew_has_color_or_table_risk(
+            processed,
+            correction_angle=-skew.angle_degrees if skew_from_projection else None,
+        ):
             operations.append("deskew_noop")
             deskew_reason = "table or color mark rotation risk"
         elif abs(skew.angle_degrees) < 0.2:
@@ -9899,24 +9902,52 @@ def _deskew_has_edge_content_risk(image: Image.Image) -> bool:
     )
 
 
-def _deskew_has_color_or_table_risk(image: Image.Image) -> bool:
+def _deskew_has_color_or_table_risk(image: Image.Image, *, correction_angle: float | None = None) -> bool:
     if image.mode == "RGB" and _tone_color_risk_reason(image):
         return True
 
     width, height = image.size
     if width < 30 or height < 30:
         return False
-    grayscale = ImageOps.autocontrast(image.convert("L"), cutoff=1)
+    raw_grayscale = image.convert("L")
+    grayscale = ImageOps.autocontrast(raw_grayscale, cutoff=1)
     histogram = grayscale.histogram()
+    raw_histogram = raw_grayscale.histogram()
     total_pixels = width * height
     low = _histogram_percentile(histogram, total_pixels, 0.05)
     high = _histogram_percentile(histogram, total_pixels, 0.95)
     if high - low < 35:
-        return False
-    threshold = max(0, min(255, low + int((high - low) * 0.35)))
-    ink = grayscale.point(lambda value: 255 if value <= threshold else 0, mode="L")
+        raw_high = _histogram_percentile(raw_histogram, total_pixels, 0.995)
+        sparse_threshold = max(0, raw_high - 35)
+        sparse_foreground = sum(raw_histogram[: sparse_threshold + 1]) / total_pixels
+        if sparse_foreground < 0.002:
+            return False
+        threshold = sparse_threshold
+        threshold_source = raw_grayscale
+    else:
+        threshold = max(0, min(255, low + int((high - low) * 0.35)))
+        threshold_source = grayscale
+    ink = threshold_source.point(lambda value: 255 if value <= threshold else 0, mode="L")
     bbox = ink.getbbox()
-    return bool(bbox and _deskew_has_table_line_risk(ink, bbox))
+    if not bbox:
+        return False
+    if _deskew_has_table_line_risk(ink, bbox) and (
+        not isinstance(correction_angle, int | float) or abs(correction_angle) <= 1.25
+    ):
+        return True
+    if not isinstance(correction_angle, int | float) or abs(correction_angle) < 0.2:
+        return False
+    aligned = ink.rotate(
+        float(correction_angle),
+        resample=Image.Resampling.BILINEAR,
+        expand=True,
+        fillcolor=0,
+    )
+    aligned_bbox = aligned.getbbox()
+    return bool(
+        aligned_bbox
+        and _deskew_has_table_line_risk(aligned, aligned_bbox, include_fragment_projection=True)
+    )
 
 
 def _detect_shallow_stable_text_skew(
@@ -10261,7 +10292,12 @@ def _least_squares_line_angle(points: list[tuple[int, int]]) -> float | None:
     return math.degrees(math.atan(slope))
 
 
-def _deskew_has_table_line_risk(ink: Image.Image, bbox: tuple[int, int, int, int]) -> bool:
+def _deskew_has_table_line_risk(
+    ink: Image.Image,
+    bbox: tuple[int, int, int, int],
+    *,
+    include_fragment_projection: bool = False,
+) -> bool:
     sample = ink.crop(bbox)
     sample.thumbnail((700, 700), Image.Resampling.BILINEAR)
     width, height = sample.size
@@ -10278,6 +10314,21 @@ def _deskew_has_table_line_risk(ink: Image.Image, bbox: tuple[int, int, int, int
                 long_vertical_runs += 1
                 break
     if long_vertical_runs >= max(16, int(round(width * 0.05))):
+        return True
+
+    if not include_fragment_projection:
+        return False
+
+    vertical_projection = sample.resize((width, 1), Image.Resampling.BOX)
+    column_counts = [value * height / 255 for value in vertical_projection.tobytes()]
+    long_vertical_columns = sum(1 for count in column_counts if count >= height * 0.55)
+    if long_vertical_columns < max(6, int(round(width * 0.025))):
+        return False
+
+    horizontal_projection = sample.resize((1, height), Image.Resampling.BOX)
+    row_counts = [value * width / 255 for value in horizontal_projection.tobytes()]
+    long_horizontal_rows = sum(1 for count in row_counts if count >= width * 0.35)
+    if long_horizontal_rows >= max(8, int(round(height * 0.025))):
         return True
 
     return False
