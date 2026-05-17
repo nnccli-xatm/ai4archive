@@ -67,6 +67,8 @@ class ProcessingOptions:
     audit_max_cumulative_contrast_delta: float = 50.0
     audit_max_cumulative_crop_ratio: float = 0.55
     audit_max_cumulative_candidate_pixel_ratio: float = 1.0
+    audit_max_cumulative_foreground_weakened_ratio: float = 0.08
+    audit_max_cumulative_edge_foreground_weakened_ratio: float = 0.10
     audit_max_local_content_changed_ratio: float = 0.20
     audit_max_local_content_tile_changed_ratio: float = 0.45
     audit_max_edge_content_changed_ratio: float = 0.18
@@ -1250,6 +1252,10 @@ def _processing_options_fingerprint(options: ProcessingOptions) -> str:
         "audit_max_cumulative_contrast_delta": options.audit_max_cumulative_contrast_delta,
         "audit_max_cumulative_crop_ratio": options.audit_max_cumulative_crop_ratio,
         "audit_max_cumulative_candidate_pixel_ratio": options.audit_max_cumulative_candidate_pixel_ratio,
+        "audit_max_cumulative_foreground_weakened_ratio": options.audit_max_cumulative_foreground_weakened_ratio,
+        "audit_max_cumulative_edge_foreground_weakened_ratio": (
+            options.audit_max_cumulative_edge_foreground_weakened_ratio
+        ),
         "audit_max_local_content_changed_ratio": options.audit_max_local_content_changed_ratio,
         "audit_max_local_content_tile_changed_ratio": options.audit_max_local_content_tile_changed_ratio,
         "audit_max_edge_content_changed_ratio": options.audit_max_edge_content_changed_ratio,
@@ -2971,6 +2977,10 @@ def _audit_thresholds(options: ProcessingOptions) -> dict[str, float]:
         "max_cumulative_contrast_delta": options.audit_max_cumulative_contrast_delta,
         "max_cumulative_crop_ratio": options.audit_max_cumulative_crop_ratio,
         "max_cumulative_candidate_pixel_ratio": options.audit_max_cumulative_candidate_pixel_ratio,
+        "max_cumulative_foreground_weakened_ratio": options.audit_max_cumulative_foreground_weakened_ratio,
+        "max_cumulative_edge_foreground_weakened_ratio": (
+            options.audit_max_cumulative_edge_foreground_weakened_ratio
+        ),
         "max_local_content_changed_ratio": options.audit_max_local_content_changed_ratio,
         "max_local_content_tile_changed_ratio": options.audit_max_local_content_tile_changed_ratio,
         "max_edge_content_changed_ratio": options.audit_max_edge_content_changed_ratio,
@@ -8970,6 +8980,28 @@ def _cumulative_change_guard(metrics: dict[str, Any], options: ProcessingOptions
     ]
     if score > options.audit_max_cumulative_change_score:
         reasons.append("cumulative_change_score")
+    if _processed_output_foreground_risk_operation_count(metrics) >= 2:
+        foreground_weakened_ratio = _float_metric(metrics, "cumulative_foreground_weakened_ratio")
+        edge_foreground_weakened_ratio = _float_metric(metrics, "cumulative_edge_foreground_weakened_ratio")
+        dark_foreground_loss_signal = (
+            _float_metric(metrics, "processed_output_source_dark_pixel_ratio") >= 0.003
+            and _float_metric(metrics, "processed_output_dark_pixel_loss_ratio") > 0.20
+        )
+        edge_content_weakening_signal = (
+            edge_foreground_weakened_ratio > options.audit_max_cumulative_edge_foreground_weakened_ratio
+            and (_float_metric(metrics, "edge_content_changed_ratio") > 0.02 or dark_foreground_loss_signal)
+        )
+        if (
+            foreground_weakened_ratio > options.audit_max_cumulative_foreground_weakened_ratio
+            and (
+                _float_metric(metrics, "local_content_changed_ratio") > 0.04
+                or dark_foreground_loss_signal
+                or edge_content_weakening_signal
+            )
+        ):
+            reasons.append("cumulative_foreground_weakening")
+        if edge_content_weakening_signal:
+            reasons.append("cumulative_edge_content_weakening")
 
     existing_failures = _audit_guardrail_failures(metrics, options)
     hard_failures = {
@@ -8995,6 +9027,11 @@ def _cumulative_change_guard(metrics: dict[str, Any], options: ProcessingOptions
         "contrast_delta": round(contrast_delta, 6),
         "crop_ratio": round(crop_ratio, 6),
         "candidate_pixel_ratio": round(candidate_ratio, 6),
+        "foreground_weakened_ratio": round(_float_metric(metrics, "cumulative_foreground_weakened_ratio"), 6),
+        "edge_foreground_weakened_ratio": round(
+            _float_metric(metrics, "cumulative_edge_foreground_weakened_ratio"),
+            6,
+        ),
     }
 
 
@@ -9164,6 +9201,11 @@ def _processed_output_safety_metrics(source_l: Image.Image, processed_l: Image.I
     processed_dark_mask = comparable.point(lambda value: 255 if value <= dark_threshold else 0)
     source_dark_pixels = _mask_pixel_count(source_dark_mask)
     processed_dark_pixels = _mask_pixel_count(processed_dark_mask)
+    foreground_weakened_ratio, edge_foreground_weakened_ratio = _cumulative_foreground_weakening_ratios(
+        source_l,
+        comparable,
+        source_histogram,
+    )
     dark_pixel_loss_ratio = (
         max(0, source_dark_pixels - processed_dark_pixels) / source_dark_pixels
         if source_dark_pixels
@@ -9195,7 +9237,36 @@ def _processed_output_safety_metrics(source_l: Image.Image, processed_l: Image.I
         "processed_output_dark_pixel_ratio": round(processed_dark_pixels / area, 6),
         "processed_output_dark_pixel_loss_ratio": round(dark_pixel_loss_ratio, 6),
         "processed_output_dark_pixel_lift_ratio": round(dark_pixel_lift_ratio, 6),
+        "cumulative_foreground_weakened_ratio": round(foreground_weakened_ratio, 6),
+        "cumulative_edge_foreground_weakened_ratio": round(edge_foreground_weakened_ratio, 6),
     }
+
+
+def _cumulative_foreground_weakening_ratios(
+    source_l: Image.Image,
+    processed_l: Image.Image,
+    source_histogram: list[int],
+) -> tuple[float, float]:
+    width, height = source_l.size
+    area = max(1, width * height)
+    running = 0
+    background = 255
+    for value, count in enumerate(source_histogram):
+        running += count
+        if running >= area * 0.9:
+            background = value
+            break
+    foreground_threshold = max(90, min(235, background - 12))
+    foreground = source_l.point(lambda value: 255 if value <= foreground_threshold else 0)
+    weakened = ImageChops.subtract(processed_l, source_l).point(lambda value: 255 if value > 12 else 0)
+    weakened_foreground = ImageChops.multiply(foreground, weakened)
+    foreground_pixels = _mask_pixel_count(foreground)
+    if foreground_pixels < max(24, int(area * 0.001)):
+        return 0.0, 0.0
+    weakened_pixels = _mask_pixel_count(weakened_foreground)
+    foreground_ratio = weakened_pixels / foreground_pixels
+    edge_ratio = _edge_content_change_ratio(foreground, weakened_foreground, source_l.size)
+    return foreground_ratio, edge_ratio
 
 
 def _processed_output_safety_guard(metrics: dict[str, Any], options: ProcessingOptions) -> dict[str, Any]:
@@ -9545,6 +9616,8 @@ def _cumulative_change_guard_audit_fields(guard: dict[str, Any]) -> dict[str, An
         "cumulative_change_contrast_delta": _round_guard_metric(guard.get("contrast_delta")),
         "cumulative_change_crop_ratio": _round_guard_metric(guard.get("crop_ratio")),
         "cumulative_change_candidate_pixel_ratio": _round_guard_metric(guard.get("candidate_pixel_ratio")),
+        "cumulative_foreground_weakened_ratio": _round_guard_metric(guard.get("foreground_weakened_ratio")),
+        "cumulative_edge_foreground_weakened_ratio": _round_guard_metric(guard.get("edge_foreground_weakened_ratio")),
     }
 
 

@@ -100,6 +100,172 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
         self.assertEqual(low_confidence["action"], "kept_original")
         self.assertEqual(low_confidence["reason_code"], "low_confidence_original_preserved")
 
+        cumulative_weakening = _combination_quality_guard(
+            dict(
+                base_metrics,
+                background_stains_lightened=True,
+                background_stains_changed_pixel_ratio=0.04,
+                scanlines_lightened=True,
+                scanlines_changed_pixel_ratio=0.015,
+                local_content_changed_ratio=0.11,
+                edge_content_changed_ratio=0.13,
+                cumulative_foreground_weakened_ratio=0.11,
+                cumulative_edge_foreground_weakened_ratio=0.13,
+            ),
+            options,
+            cumulative_change_guard={
+                **_guard_reverted("cumulative_foreground_weakening", "cumulative_edge_content_weakening"),
+                "foreground_weakened_ratio": 0.11,
+                "edge_foreground_weakened_ratio": 0.13,
+            },
+            local_content_change_guard=_guard_passed(),
+        )
+        self.assertEqual(cumulative_weakening["action"], "reverted_to_source")
+        self.assertEqual(cumulative_weakening["reason_code"], "combined_change_too_large_reverted")
+        self.assertIn("cumulative_foreground_weakening", cumulative_weakening["reasons"])
+        self.assertIn("cumulative_edge_content_weakening", cumulative_weakening["reasons"])
+
+    def test_combined_retouch_guard_allows_safe_cleanup_and_reverts_content_weakening(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-combined-retouch-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_safe_combined_cleanup.png": _combined_retouch_guard_page("safe"),
+                "synthetic_protected_faint_text.png": _combined_retouch_guard_page("faint_text"),
+                "synthetic_protected_page_number.png": _combined_retouch_guard_page("page_number"),
+                "synthetic_protected_table_lines.png": _combined_retouch_guard_page("table_lines"),
+                "synthetic_protected_stamp.png": _combined_retouch_guard_page("stamp"),
+                "synthetic_protected_marginal_note.png": _combined_retouch_guard_page("marginal_note"),
+                "synthetic_protected_edge_mark.png": _combined_retouch_guard_page("edge_mark"),
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            def lift_background_and_center_marks(current: Image.Image) -> processing_module.BackgroundStainLighteningResult:
+                changed = current.copy()
+                draw = ImageDraw.Draw(changed)
+                draw.ellipse((132, 70, 184, 118), fill=(236, 236, 232))
+                for y in (42, 62, 82):
+                    draw.rectangle((40, y, 132, y + 4), fill=(236, 236, 232))
+                draw.rectangle((174, 12, 200, 24), fill=(236, 236, 232))
+                for y in (54, 76, 98):
+                    draw.line((40, y, 174, y), fill=(236, 236, 232), width=2)
+                for x in (76, 124, 172):
+                    draw.line((x, 44, x, 106), fill=(236, 236, 232), width=2)
+                draw.ellipse((86, 42, 142, 96), outline=(236, 236, 232), width=4)
+                return processing_module.BackgroundStainLighteningResult(
+                    changed,
+                    True,
+                    "background stains lightened: stable isolated stains on light paper",
+                    224.0,
+                    236.0,
+                    12.0,
+                    0.050,
+                    0.050,
+                )
+
+            def lift_lines_and_edge_marks(current: Image.Image) -> processing_module.ScanlineLighteningResult:
+                changed = current.copy()
+                draw = ImageDraw.Draw(changed)
+                draw.line((72, 124, 168, 124), fill=(242, 242, 238), width=2)
+                draw.line((6, 46, 30, 58, 10, 70, 34, 82), fill=(236, 236, 232), width=2)
+                draw.rectangle((4, 120, 24, 132), fill=(236, 236, 232))
+                return processing_module.ScanlineLighteningResult(
+                    changed,
+                    True,
+                    "scanlines lightened: stable horizontal scanline pattern",
+                    "horizontal",
+                    1,
+                    205.0,
+                    236.0,
+                    31.0,
+                    0.012,
+                    0.012,
+                )
+
+            report = scan_batch(ScanConfig("synthetic-regression", "combined-retouch-guard", input_dir, output_dir))
+            with mock.patch.object(
+                processing_module,
+                "_lighten_background_stains_conservative",
+                side_effect=lift_background_and_center_marks,
+            ), mock.patch.object(
+                processing_module,
+                "_lighten_scanlines_conservative",
+                side_effect=lift_lines_and_edge_marks,
+            ):
+                manifest = process_images(
+                    report,
+                    input_dir,
+                    process_dir,
+                    ProcessingOptions(lighten_background_stains=True, lighten_scanlines=True, workers=1),
+                )
+
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_record = records["synthetic_safe_combined_cleanup.png"]
+            safe_audit = safe_record["processing_audit"]
+            self.assertTrue(safe_record["background_stains_lightened"])
+            self.assertTrue(safe_record["scanlines_lightened"])
+            self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["combination_quality_guard_reason_code"], "safe_combination_passed")
+            self.assertLessEqual(safe_audit["cumulative_change_pixel_ratio"], 0.08)
+            self.assertLessEqual(safe_audit["cumulative_change_score"], 0.25)
+            with Image.open(process_dir / safe_record["output_relative_path"]) as output:
+                self.assertEqual(output.size, pages["synthetic_safe_combined_cleanup.png"].size)
+
+            protected_names = set(pages) - {"synthetic_safe_combined_cleanup.png"}
+            for name in protected_names:
+                record = records[name]
+                audit = record["processing_audit"]
+                self.assertFalse(record["background_stains_lightened"], name)
+                self.assertFalse(record["scanlines_lightened"], name)
+                self.assertEqual(audit["cumulative_change_guard_action"], "reverted_to_source", name)
+                self.assertEqual(audit["combination_quality_guard_action"], "reverted_to_source", name)
+                self.assertEqual(audit["combination_quality_guard_reason_code"], "combined_change_too_large_reverted", name)
+                self.assertTrue(
+                    {
+                        "cumulative_foreground_weakening",
+                        "cumulative_edge_content_weakening",
+                    }.intersection(audit["cumulative_change_guard_reasons"]),
+                    name,
+                )
+                self.assertIn("combination_quality_guard_reverted_to_source", record["operations"], name)
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    self.assertEqual(output.convert("RGB").tobytes(), pages[name].tobytes(), name)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["cumulative_change_guard_reverted_files"], len(protected_names))
+            self.assertEqual(audit_summary["counts"]["combination_quality_guard_reverted_files"], len(protected_names))
+            self.assertEqual(
+                audit_summary["guardrails"]["combination_quality_guard"]["reason_code_distribution"][
+                    "combined_change_too_large_reverted"
+                ],
+                len(protected_names),
+            )
+            cumulative_reasons = audit_summary["guardrails"]["cumulative_change_guard"]["reason_distribution"]
+            self.assertGreaterEqual(
+                cumulative_reasons.get("cumulative_foreground_weakening", 0)
+                + cumulative_reasons.get("cumulative_edge_content_weakening", 0),
+                len(protected_names),
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_illumination_gradient_levels_safe_public_gradient_and_preserves_content_edges(self) -> None:
         def gradient_page(variant: str) -> Image.Image:
             width, height = 260, 180
@@ -3206,6 +3372,35 @@ def _safe_full_chain_combination_page() -> Image.Image:
         draw.line((58, y, 174, y), fill=(202, 202, 202), width=2)
     draw.ellipse((165, 28, 210, 58), fill=(222, 222, 222))
     image.putpixel((24, 24), (0, 0, 0))
+    return image
+
+
+def _combined_retouch_guard_page(variant: str = "safe") -> Image.Image:
+    image = Image.new("RGB", (220, 160), (242, 242, 238))
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((132, 70, 184, 118), fill=(224, 224, 220))
+    draw.line((72, 124, 168, 124), fill=(234, 234, 230), width=2)
+
+    if variant == "safe":
+        return image
+    if variant == "faint_text":
+        for y in (42, 62, 82):
+            draw.rectangle((40, y, 132, y + 4), fill=(205, 205, 201))
+    elif variant == "page_number":
+        draw.rectangle((174, 12, 200, 24), fill=(205, 205, 201))
+    elif variant == "table_lines":
+        for y in (54, 76, 98):
+            draw.line((40, y, 174, y), fill=(205, 205, 201), width=2)
+        for x in (76, 124, 172):
+            draw.line((x, 44, x, 106), fill=(205, 205, 201), width=2)
+    elif variant == "stamp":
+        draw.ellipse((86, 42, 142, 96), outline=(180, 28, 28), width=4)
+    elif variant == "marginal_note":
+        draw.line((6, 46, 30, 58, 10, 70, 34, 82), fill=(205, 205, 201), width=2)
+    elif variant == "edge_mark":
+        draw.rectangle((4, 120, 24, 132), fill=(205, 205, 201))
+    else:
+        raise ValueError(f"unsupported variant: {variant}")
     return image
 
 
