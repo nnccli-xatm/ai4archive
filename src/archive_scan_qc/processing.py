@@ -5661,7 +5661,14 @@ def _level_illumination_gradient_conservative(image: Image.Image) -> Illuminatio
     candidate_threshold = plan["candidate_threshold"]
     target = min(246.0, max(profile))
     corrections = [max(0, min(10, int(round((target - value) * 0.62)))) for value in profile]
-    if max(corrections, default=0) < 3:
+    max_correction = max(corrections, default=0)
+    mild_two_edge_correction = (
+        plan.get("shape") == "two_edge"
+        and plan["delta"] >= 3.5
+        and plan["candidate_ratio"] >= 0.99
+        and max_correction >= 2
+    )
+    if max_correction < 3 and not mild_two_edge_correction:
         return _illumination_gradient_noop(image, "low confidence correction below threshold", "low_confidence")
 
     candidate = grayscale.point(lambda value: 255 if value >= candidate_threshold else 0, mode="L")
@@ -5754,7 +5761,7 @@ def _level_illumination_gradient_conservative(image: Image.Image) -> Illuminatio
         plan["orientation"],
         round(plan["delta"], 6),
         round(delta_after, 6),
-        round(max(corrections), 6),
+        round(max_correction, 6),
         round(changed_ratio, 6),
         round(candidate_ratio, 6),
     )
@@ -5862,10 +5869,10 @@ def _illumination_gradient_axis_plan(grayscale: Image.Image, *, vertical: bool) 
         and linear_mean_residual <= 0.85
     )
     subtle_two_edge_confident = (
-        two_edge_delta >= 4.5
-        and candidate_ratio >= 0.985
-        and side_delta_balance <= 2.0
-        and two_edge_mean_residual <= 0.85
+        two_edge_delta >= 3.5
+        and candidate_ratio >= 0.99
+        and side_delta_balance <= 1.2
+        and two_edge_mean_residual <= 0.65
     )
     subtle_one_edge_confident = (
         one_edge_shape is not None
@@ -5932,6 +5939,7 @@ def _illumination_gradient_axis_plan(grayscale: Image.Image, *, vertical: bool) 
         "reason": "",
         "reason_code": "applied",
         "score": score,
+        "shape": plan_shape,
         "delta": round(delta, 6),
         "candidate_ratio": round(candidate_ratio, 6),
         "candidate_threshold": candidate_threshold,
@@ -6120,6 +6128,7 @@ def _empty_illumination_gradient_plan(orientation: str, reason: str, reason_code
         "reason": reason,
         "reason_code": reason_code,
         "score": 0.0,
+        "shape": None,
         "delta": 0.0,
         "candidate_ratio": 0.0,
         "candidate_threshold": 206,
