@@ -8119,7 +8119,7 @@ def _sharpen_text_edges_conservative(image: Image.Image) -> TextEdgeSharpeningRe
         return _text_edges_noop(image, "text edge sharpening skipped: edge mark or binding risk")
 
     sample_candidate_ratio = _text_edge_sample_candidate_ratio(grayscale)
-    if sample_candidate_ratio < 0.006 or (
+    if sample_candidate_ratio < 0.003 or (
         sample_candidate_ratio < 0.02 and _text_edge_sample_candidate_sparse_block_risk(grayscale)
     ):
         return _text_edges_noop(
@@ -8442,21 +8442,26 @@ def _text_edges_reason_zh(reason_code: str | None) -> str | None:
 
 
 def _text_edge_sample_candidate_ratio(grayscale: Image.Image) -> float:
-    sample = grayscale.copy()
-    sample.thumbnail((96, 96), Image.Resampling.BILINEAR)
-    if sample.width < 30 or sample.height < 30:
+    nearest_sample = grayscale.copy()
+    nearest_sample.thumbnail((96, 96), Image.Resampling.NEAREST)
+    if nearest_sample.width < 30 or nearest_sample.height < 30:
         return 0.0
-    histogram = sample.histogram()
-    total = sample.width * sample.height
-    p95 = _histogram_percentile(histogram, total, 0.95)
-    candidate = _text_edge_candidate_mask(sample, p95)
-    candidate = _clear_mask_edges(candidate, max(2, int(round(min(sample.width, sample.height) * 0.025))))
-    return round(_mask_ratio(candidate), 6)
+    bilinear_sample = grayscale.copy()
+    bilinear_sample.thumbnail((96, 96), Image.Resampling.BILINEAR)
+    ratios: list[float] = []
+    for sample in (nearest_sample, bilinear_sample):
+        histogram = sample.histogram()
+        total = sample.width * sample.height
+        p95 = _histogram_percentile(histogram, total, 0.95)
+        candidate = _text_edge_candidate_mask(sample, p95)
+        candidate = _clear_mask_edges(candidate, max(2, int(round(min(sample.width, sample.height) * 0.025))))
+        ratios.append(_mask_ratio(candidate))
+    return round(max(ratios), 6)
 
 
 def _text_edge_sample_candidate_sparse_block_risk(grayscale: Image.Image) -> bool:
     sample = grayscale.copy()
-    sample.thumbnail((96, 96), Image.Resampling.BILINEAR)
+    sample.thumbnail((96, 96), Image.Resampling.NEAREST)
     if sample.width < 30 or sample.height < 30:
         return True
     histogram = sample.histogram()
@@ -8466,7 +8471,7 @@ def _text_edge_sample_candidate_sparse_block_risk(grayscale: Image.Image) -> boo
     candidate = _clear_mask_edges(candidate, max(2, int(round(min(sample.width, sample.height) * 0.025))))
     components = [component for component in _mask_components(candidate) if len(component) >= 3]
     if len(components) < 3:
-        return True
+        return max((len(component) for component in components), default=0) == 0
     max_area = max((len(component) for component in components), default=0)
     return max_area > 12
 

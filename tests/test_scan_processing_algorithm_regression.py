@@ -20,6 +20,11 @@ def _mean_luma(image: Image.Image, box: tuple[int, int, int, int]) -> float:
     return ImageStat.Stat(image.crop(box).convert("L")).mean[0]
 
 
+def _edge_energy(image: Image.Image) -> float:
+    edges = image.convert("L").filter(ImageFilter.FIND_EDGES)
+    return float(ImageStat.Stat(edges).mean[0])
+
+
 def _changed_ratio(before: Image.Image, after: Image.Image, box: tuple[int, int, int, int]) -> float:
     before_luma = before.crop(box).convert("L")
     after_luma = after.crop(box).convert("L")
@@ -2684,6 +2689,72 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_sharpen_text_edges_lifts_mildly_blurred_typed_body_text_but_skips_page_number(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-text-edge-body-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            safe_source = _mildly_blurred_typed_body_text_page()
+            protected_source = _mildly_blurred_typed_body_text_page(page_number=True)
+            pages = {
+                "private_safe_mild_typed_body.png": safe_source,
+                "private_protected_page_number.png": protected_source,
+            }
+            for name, image in pages.items():
+                image.save(input_dir / name, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "text-edge-body", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(sharpen_text_edges=True, workers=1))
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_record = records["private_safe_mild_typed_body.png"]
+            safe_audit = safe_record["processing_audit"]
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_output:
+                self.assertTrue(safe_record["text_edges_sharpened"])
+                self.assertIn("sharpen_text_edges_conservative", safe_record["operations"])
+                self.assertGreater(_edge_energy(safe_output), _edge_energy(safe_source))
+                self.assertGreater(safe_audit["text_edges_edge_energy_after"], safe_audit["text_edges_edge_energy_before"])
+                self.assertGreater(safe_audit["text_edges_changed_pixel_ratio"], 0.0)
+                self.assertLessEqual(safe_audit["text_edges_changed_pixel_ratio"], 0.08)
+                self.assertLessEqual(safe_audit["text_edges_candidate_pixel_ratio"], 0.12)
+            self.assertEqual(safe_record["text_edges_reason_code"], "applied_stable_blurred_text_edges")
+            self.assertEqual(safe_record["text_edges_reason_zh"], "检测到浅色纸面上的稳定模糊正文边缘，已保守锐化。")
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+
+            protected_record = records["private_protected_page_number.png"]
+            protected_audit = protected_record["processing_audit"]
+            with Image.open(process_dir / protected_record["output_relative_path"]) as protected_output:
+                self.assertFalse(protected_record["text_edges_sharpened"])
+                self.assertIn("sharpen_text_edges_noop", protected_record["operations"])
+                self.assertLess(_changed_ratio(protected_source, protected_output, (0, 0, 420, 90)), 0.001)
+            self.assertIn(
+                protected_record["text_edges_reason_code"],
+                {"protected_edge_mark_or_binding", "protected_header_footer_or_page_number"},
+            )
+            self.assertEqual(protected_audit["text_edges_changed_pixel_ratio"], 0.0)
+            self.assertEqual(protected_audit["guardrail_failures"], [])
+
+            self.assertEqual(audit_summary["counts"]["text_edges_sharpened_files"], 1)
+            self.assertEqual(audit_summary["counts"]["text_edges_skipped_files"], 1)
+            text_edge_guard = audit_summary["guardrails"]["text_edges"]
+            self.assertEqual(text_edge_guard["applied_files"], 1)
+            self.assertEqual(text_edge_guard["skipped_files"], 1)
+            self.assertEqual(text_edge_guard["reason_code_distribution"]["applied_stable_blurred_text_edges"], 1)
+            self.assertIn(protected_record["text_edges_reason_code"], text_edge_guard["skip_reason_code_distribution"])
+            self.assertIn("text_edges_changed_pixel_ratio", audit_summary["metrics"])
+            self.assertIn("text_edges_candidate_pixel_ratio", audit_summary["metrics"])
+            self.assertIn("text_edges_edge_energy_before", audit_summary["metrics"])
+            self.assertIn("text_edges_edge_energy_after", audit_summary["metrics"])
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_diffuse_background_stain_lightens_while_protected_marks_stay_noop(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-diffuse-stain-") as temp_dir:
             root = Path(temp_dir)
@@ -4384,6 +4455,28 @@ def _blurred_text_page() -> Image.Image:
         draw.line((24, y, 104, y), fill=(42, 42, 42), width=2)
         draw.line((28, y + 5, 92, y + 5), fill=(58, 58, 58), width=2)
     return image.filter(ImageFilter.GaussianBlur(radius=0.7))
+
+
+def _mildly_blurred_typed_body_text_page(*, page_number: bool = False) -> Image.Image:
+    image = Image.new("RGB", (420, 560), (245, 245, 242))
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default()
+    lines = (
+        "ARCHIVE QUALITY CONTROL PAGE",
+        "TYPED TEXT EDGES ARE SOFT",
+        "REVIEW SHOULD STAY SAFE",
+        "PRINTED STROKES ONLY",
+        "LOCAL BATCH SAMPLE",
+        "NEUTRAL LIGHT PAPER",
+        "MILD BLUR CASE",
+        "STABLE ROW STRUCTURE",
+        "FINAL TEXT LINE",
+    )
+    for index, line in enumerate(lines):
+        draw.text((64, 100 + index * 34), line, fill=(72, 72, 72), font=font)
+    if page_number:
+        draw.text((358, 22), "12", fill=(65, 65, 65), font=font)
+    return image.filter(ImageFilter.GaussianBlur(radius=0.75))
 
 
 def _combination_guard_metrics() -> dict[str, object]:
