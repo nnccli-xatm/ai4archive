@@ -4915,7 +4915,8 @@ def _lighten_corner_shadows_conservative(image: Image.Image) -> CornerShadowClea
     tonal_spread = p95 - p05
     soft_pair_mode = 14 <= tonal_spread < 24 and p95 >= 225
     faint_corner_mode = 10 <= tonal_spread < 24 and p95 >= 228
-    if tonal_spread < 24 and not soft_pair_mode and not faint_corner_mode:
+    mild_scanner_corner_mode = 7 <= tonal_spread < 24 and p95 >= 236
+    if tonal_spread < 24 and not soft_pair_mode and not faint_corner_mode and not mild_scanner_corner_mode:
         return _corner_shadows_noop(
             image,
             "corner shadow cleanup skipped: low tonal separation",
@@ -5012,7 +5013,21 @@ def _lighten_corner_shadows_conservative(image: Image.Image) -> CornerShadowClea
             and faint_candidate_ratio >= 0.010
             and faint_continuity >= 0.62
         )
-        if not (strict_candidate or soft_pair_candidate or faint_corner_candidate):
+        mild_scanner_corner_candidate = (
+            mild_scanner_corner_mode
+            and not strict_candidate
+            and not soft_pair_candidate
+            and not faint_corner_candidate
+            and 5.5 <= faint_delta <= 14
+            and corner_mean >= 232
+            and inner_mean >= 236
+            and corner_std <= 4.0
+            and inner_dark_ratio <= 0.025
+            and foreground_ratio <= 0.018
+            and 0.018 <= faint_candidate_ratio <= 0.075
+            and faint_continuity >= 0.75
+        )
+        if not (strict_candidate or soft_pair_candidate or faint_corner_candidate or mild_scanner_corner_candidate):
             continue
         plans.append(
             {
@@ -5023,14 +5038,19 @@ def _lighten_corner_shadows_conservative(image: Image.Image) -> CornerShadowClea
                 "y_direction": y_direction,
                 "max_delta": min(
                     32.0,
-                    faint_delta * 0.72
-                    if faint_corner_candidate
+                    faint_delta * (0.58 if mild_scanner_corner_candidate else 0.72)
+                    if faint_corner_candidate or mild_scanner_corner_candidate
                     else delta * (1.15 if soft_pair_candidate and not strict_candidate else 0.72),
                 ),
-                "candidate_pixels": faint_candidate_pixels if faint_corner_candidate else candidate_pixels,
-                "inner_mean": p95 + 3 if faint_corner_candidate else inner_mean,
+                "candidate_pixels": (
+                    faint_candidate_pixels
+                    if faint_corner_candidate or mild_scanner_corner_candidate
+                    else candidate_pixels
+                ),
+                "inner_mean": p95 + 3 if faint_corner_candidate or mild_scanner_corner_candidate else inner_mean,
                 "soft_pair_candidate": soft_pair_candidate and not strict_candidate,
                 "faint_corner_candidate": faint_corner_candidate,
+                "mild_scanner_corner_candidate": mild_scanner_corner_candidate,
             }
         )
 
@@ -5085,7 +5105,13 @@ def _lighten_corner_shadows_conservative(image: Image.Image) -> CornerShadowClea
                     continue
                 factor = max(0.0, 1.0 - (distance / max(1.0, max_distance)) * 0.75)
                 new_value = min(255, int(round(value + float(plan["max_delta"]) * factor)))
-                minimum_lift = 1 if bool(plan.get("soft_pair_candidate")) or bool(plan.get("faint_corner_candidate")) else 2
+                minimum_lift = (
+                    1
+                    if bool(plan.get("soft_pair_candidate"))
+                    or bool(plan.get("faint_corner_candidate"))
+                    or bool(plan.get("mild_scanner_corner_candidate"))
+                    else 2
+                )
                 if new_value - value > minimum_lift:
                     changed_pixels += 1
                     pixels[x, y] = new_value
