@@ -12258,6 +12258,63 @@ class ScanQcTest(unittest.TestCase):
                 self.assertNotIn("private_safe_fold_shadow", audit_summary_text)
                 self.assertNotIn(str(input_dir), audit_summary_text)
 
+    def test_fold_shadow_cleanup_lightens_safe_uneven_narrow_background_band(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "private_safe_uneven_fold_shadow.png"
+            image = Image.new("RGB", (240, 180), (242, 242, 238))
+            pixels = image.load()
+            for y in range(10, 170):
+                value = 229 + ((y * 7) % 6) if y % 8 < 4 else 239
+                for x, offset in ((118, 0), (119, 2)):
+                    channel = value + offset
+                    pixels[x, y] = (channel, channel, channel - 4)
+            image.save(source)
+            source_bytes = source.read_bytes()
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(lighten_fold_shadows=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertTrue(record["fold_shadows_lightened"])
+            self.assertEqual(record["fold_shadows_reason_code"], "applied_narrow_neutral_background_band")
+            self.assertEqual(record["fold_shadows_orientation"], "vertical")
+            self.assertEqual(record["fold_shadows_count"], 1)
+            self.assertGreaterEqual(record["fold_shadows_delta"], 4.0)
+            self.assertGreater(record["fold_shadows_candidate_pixel_ratio"], 0.002)
+            self.assertLessEqual(record["fold_shadows_candidate_pixel_ratio"], 0.12)
+            self.assertGreater(record["fold_shadows_changed_pixel_ratio"], 0.002)
+            self.assertLessEqual(record["fold_shadows_changed_pixel_ratio"], 0.075)
+            self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
+            with Image.open(process_dir / "images" / source.name) as processed:
+                grayscale = processed.convert("L")
+                original_grayscale = image.convert("L")
+                self.assertGreater(grayscale.getpixel((118, 32)), original_grayscale.getpixel((118, 32)))
+                self.assertEqual(grayscale.getpixel((30, 32)), original_grayscale.getpixel((30, 32)))
+            self.assertEqual(audit_summary["counts"]["fold_shadows_lightened_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["fold_shadows"]["applied_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["fold_shadows"]["reason_code_distribution"][
+                    "applied_narrow_neutral_background_band"
+                ],
+                1,
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_safe_uneven_fold_shadow", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
     def test_fold_shadow_cleanup_lightens_subtle_single_pixel_band_with_sparse_text(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
