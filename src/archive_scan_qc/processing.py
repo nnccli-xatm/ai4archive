@@ -6359,7 +6359,7 @@ def _scanline_axis_lightening_plan(
             values.append(value)
             if value <= 125:
                 dark += 1
-            if 4 <= background - value <= 24 and value >= 170:
+            if 2 <= background - value <= 24 and value >= 170:
                 selected.append((x, y))
         available_ratio = len(values) / max(1, cross_length)
         protected_ratio = protected_count / max(1, cross_length)
@@ -6404,6 +6404,7 @@ def _scanline_axis_lightening_plan(
         )
 
     candidate_lines: list[int] = []
+    faint_candidate_lines: list[int] = []
     selected: set[tuple[int, int]] = set()
     score = 0.0
     for index in range(margin, axis_length - margin):
@@ -6425,7 +6426,15 @@ def _scanline_axis_lightening_plan(
             and 4 <= stat["segment_count"] <= 10
             and stat["longest_segment_ratio"] >= 0.045
         )
-        if not (continuous_candidate or segmented_candidate or broken_segmented_candidate):
+        faint_segmented_candidate = (
+            stat["candidate_ratio"] >= 0.16
+            and stat["candidate_ratio"] <= 0.56
+            and stat["candidate_available_ratio"] >= 0.22
+            and 4 <= stat["segment_count"] <= 10
+            and 0.04 <= stat["longest_segment_ratio"] <= 0.14
+            and stat["dark_ratio"] == 0.0
+        )
+        if not (continuous_candidate or segmented_candidate or broken_segmented_candidate or faint_segmented_candidate):
             continue
         neighbor_means = [
             line_stats[neighbor]["mean"]
@@ -6439,15 +6448,24 @@ def _scanline_axis_lightening_plan(
         local_mean = sum(neighbor_means) / len(neighbor_means)
         local_delta = local_mean - stat["mean"]
         broken_only = broken_segmented_candidate and not (continuous_candidate or segmented_candidate)
-        if broken_only:
+        faint_only = faint_segmented_candidate and not (
+            continuous_candidate or segmented_candidate or broken_segmented_candidate
+        )
+        if broken_only or faint_only:
             candidate_mean = stat["candidate_mean"]
             if candidate_mean is None:
                 continue
             candidate_delta = local_mean - candidate_mean
-            if not (1.2 <= local_delta <= 12.0 and 5.0 <= candidate_delta <= 24.0):
-                continue
-            if stat["dark_ratio"] > 0.001:
-                continue
+            if faint_only:
+                if not (0.6 <= local_delta <= 5.5 and 2.0 <= candidate_delta <= 7.0):
+                    continue
+            elif faint_segmented_candidate and 0.6 <= local_delta <= 5.5 and 2.0 <= candidate_delta < 5.0:
+                faint_only = True
+            else:
+                if not (1.2 <= local_delta <= 12.0 and 5.0 <= candidate_delta <= 24.0):
+                    continue
+                if stat["dark_ratio"] > 0.001:
+                    continue
             score_delta = candidate_delta
         else:
             if not (3.0 <= local_delta <= 22.0):
@@ -6467,6 +6485,8 @@ def _scanline_axis_lightening_plan(
         ):
             continue
         candidate_lines.append(index)
+        if faint_only:
+            faint_candidate_lines.append(index)
         selected.update(stat["selected"])
         score += min(1.0, stat["candidate_available_ratio"] / 0.8) * min(1.0, score_delta / 12.0)
 
@@ -6477,7 +6497,19 @@ def _scanline_axis_lightening_plan(
             candidate_total_ratio,
         )
     groups = _contiguous_groups(candidate_lines)
-    if len(groups) > 6 or any(len(group) > 4 for group in groups):
+    if len(faint_candidate_lines) == len(candidate_lines):
+        faint_groups = _contiguous_groups(faint_candidate_lines)
+        if len(faint_groups) < 2 or len(faint_candidate_lines) < 3:
+            return _empty_scanline_lightening_plan(
+                orientation,
+                "SCANLINE_LOW_CONFIDENCE low-confidence 低置信轻微扫描线证据不足",
+                candidate_total_ratio,
+            )
+    if (
+        len(groups) > 6
+        or any(len(group) > 4 for group in groups)
+        or (len(groups) >= 6 and candidate_total_ratio > 0.025)
+    ):
         return _empty_scanline_lightening_plan(
             orientation,
             "SCANLINE_SCOPE_RISK risk 大范围不均匀明暗或档案原有条痕风险",

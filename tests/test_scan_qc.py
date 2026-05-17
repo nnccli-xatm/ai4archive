@@ -8028,6 +8028,7 @@ class ScanQcTest(unittest.TestCase):
                 "private_broken_horizontal_scanline.png": _synthetic_broken_repair_scanline_page("horizontal"),
                 "private_broken_vertical_scanline.png": _synthetic_broken_repair_scanline_page("vertical"),
                 "private_faint_broken_sparse_scanline.png": _synthetic_faint_broken_sparse_scanline_page(),
+                "private_faint_intermittent_scanline.png": _synthetic_faint_intermittent_scanline_page(),
             }
             for name, image in pages.items():
                 image.save(input_dir / name, dpi=(300, 300))
@@ -8053,6 +8054,7 @@ class ScanQcTest(unittest.TestCase):
                 ("private_broken_horizontal_scanline.png", "horizontal"),
                 ("private_broken_vertical_scanline.png", "vertical"),
                 ("private_faint_broken_sparse_scanline.png", "horizontal"),
+                ("private_faint_intermittent_scanline.png", "horizontal"),
             ):
                 record = records[source_name]
                 processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
@@ -8061,7 +8063,7 @@ class ScanQcTest(unittest.TestCase):
                 self.assertTrue(record["scanlines_lightened"], source_name)
                 self.assertEqual(record["scanlines_orientation"], orientation)
                 self.assertIn("lighten_scanlines_conservative", record["operations"])
-                min_line_delta = 0.4 if "broken" in source_name else 3.0
+                min_line_delta = 0.4 if "broken" in source_name or "intermittent" in source_name else 3.0
                 self.assertGreater(
                     _box_luma(processed, line_box),
                     _box_luma(pages[source_name], line_box) + min_line_delta,
@@ -8075,12 +8077,12 @@ class ScanQcTest(unittest.TestCase):
                 self.assertEqual(record["processing_audit"]["guardrail_failures"], [], source_name)
                 self.assertEqual(source_hashes_before[source_name], _sha256_for_test(input_dir / source_name))
 
-            self.assertEqual(audit_summary["counts"]["scanlines_lightened_files"], 5)
+            self.assertEqual(audit_summary["counts"]["scanlines_lightened_files"], 6)
             self.assertEqual(audit_summary["counts"]["scanlines_skipped_files"], 0)
             scanline_guard = audit_summary["guardrails"]["scanlines"]
-            self.assertEqual(scanline_guard["applied_files"], 5)
+            self.assertEqual(scanline_guard["applied_files"], 6)
             self.assertEqual(scanline_guard["skipped_files"], 0)
-            self.assertEqual(scanline_guard["direction_distribution"]["horizontal"], 3)
+            self.assertEqual(scanline_guard["direction_distribution"]["horizontal"], 4)
             self.assertEqual(scanline_guard["direction_distribution"]["vertical"], 2)
             self.assertIn("scanlines_changed_pixel_ratio", audit_summary["metrics"])
             self.assertIn("changed_pixel_ratio", scanline_guard)
@@ -8091,6 +8093,7 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn("private_broken_horizontal_scanline", audit_summary_text)
             self.assertNotIn("private_broken_vertical_scanline", audit_summary_text)
             self.assertNotIn("private_faint_broken_sparse_scanline", audit_summary_text)
+            self.assertNotIn("private_faint_intermittent_scanline", audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
 
     def test_lighten_scanlines_skips_protected_content_and_uncertain_pages(self) -> None:
@@ -8115,6 +8118,7 @@ class ScanQcTest(unittest.TestCase):
                 ),
                 "private_photo_texture.png": _synthetic_photo_like_page(),
                 "private_dense_table.png": _synthetic_dense_table_scanline_page(),
+                "private_faint_ruled_background.png": _synthetic_faint_ruled_background_page(),
                 "private_low_confidence.png": _synthetic_scanline_low_confidence_page(),
                 "private_edge_archive_line.png": _synthetic_repair_scanline_page("horizontal", edge_archive_line=True),
             }
@@ -8151,6 +8155,7 @@ class ScanQcTest(unittest.TestCase):
                 "private_header_footer.png": "SCANLINE_LOW_CONFIDENCE",
                 "private_photo_texture.png": "texture risk",
                 "private_dense_table.png": "foreground too dense",
+                "private_faint_ruled_background.png": "SCANLINE_SCOPE_RISK",
                 "private_low_confidence.png": "low-confidence",
                 "private_edge_archive_line.png": "SCANLINE_EDGE_CONTENT_RISK",
             }
@@ -15935,6 +15940,24 @@ def _synthetic_faint_broken_sparse_scanline_page() -> Image.Image:
     draw = ImageDraw.Draw(image)
     for x0 in (18, 54, 92, 132, 172, 212):
         draw.rectangle((x0, 132, x0 + 14, 133), fill=(235, 235, 231))
+    return image
+
+
+def _synthetic_faint_intermittent_scanline_page() -> Image.Image:
+    image = _synthetic_repair_scanline_page("horizontal", scanline=False)
+    draw = ImageDraw.Draw(image)
+    for y in (122, 132, 144):
+        for x0 in (18, 54, 92, 132, 172, 212):
+            draw.rectangle((x0, y, x0 + 14, y + 1), fill=(237, 237, 233))
+    return image
+
+
+def _synthetic_faint_ruled_background_page() -> Image.Image:
+    image = _synthetic_repair_scanline_page("horizontal", scanline=False)
+    draw = ImageDraw.Draw(image)
+    for y in range(24, 160, 12):
+        for x0 in (18, 54, 92, 132, 172, 212):
+            draw.rectangle((x0, y, x0 + 14, y + 1), fill=(237, 237, 233))
     return image
 
 
