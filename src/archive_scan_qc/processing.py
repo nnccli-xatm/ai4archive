@@ -6215,14 +6215,13 @@ def _lighten_fold_shadows_conservative(image: Image.Image) -> FoldShadowCleanupR
     p50 = _histogram_percentile(histogram, total, 0.50)
     p90 = _histogram_percentile(histogram, total, 0.90)
     p95 = _histogram_percentile(histogram, total, 0.95)
-    if p95 < 218 or p50 < 205 or p90 < 214:
-        return _fold_shadows_noop(image, "fold shadow cleanup skipped: page is not a light clean background")
-    if p95 - p05 > 120:
-        return _fold_shadows_noop(image, "fold shadow cleanup skipped: high-contrast foreground or mixed content risk")
-
     foreground_threshold = min(168, max(92, p50 - 42))
     foreground = grayscale.point(lambda value: 255 if value <= foreground_threshold else 0, mode="L")
     foreground_ratio = _mask_ratio(foreground)
+    if p95 < 218 or p50 < 205 or p90 < 214:
+        return _fold_shadows_noop(image, "fold shadow cleanup skipped: page is not a light clean background")
+    if p95 - p05 > 120 and foreground_ratio > 0.055:
+        return _fold_shadows_noop(image, "fold shadow cleanup skipped: high-contrast foreground or mixed content risk")
     if foreground_ratio > 0.16:
         return _fold_shadows_noop(image, "fold shadow cleanup skipped: foreground too dense")
     if _protected_edge_dark_ratio(foreground) > 0.0015:
@@ -6339,12 +6338,14 @@ def _fold_shadow_axis_plan(
         values: list[int] = []
         selected: list[tuple[int, int]] = []
         selected_crosses: set[int] = set()
+        protected_crosses: set[int] = set()
         protected_count = 0
         dark_count = 0
         for cross in range(cross_length):
             x, y = (index, cross) if vertical else (cross, index)
             if protected_pixels[x, y]:
                 protected_count += 1
+                protected_crosses.add(cross)
                 continue
             value = int(pixels[x, y])
             values.append(value)
@@ -6354,29 +6355,37 @@ def _fold_shadow_axis_plan(
                 selected.append((x, y))
                 selected_crosses.add(cross)
         available_ratio = len(values) / max(1, cross_length)
+        protected_ratio = protected_count / max(1, cross_length)
         candidate_ratio = len(selected) / max(1, cross_length)
         dark_ratio = dark_count / max(1, len(values)) if values else 1.0
         mean = sum(values) / len(values) if values else 0.0
+        continuity = _fold_shadow_cross_continuity(selected_crosses, cross_length)
+        sparse_foreground_crossings = (
+            available_ratio >= 0.76
+            and protected_ratio <= 0.24
+            and _fold_shadow_protected_crossings_are_sparse(protected_crosses, cross_length)
+        )
+        sparse_text_bridge = sparse_foreground_crossings and continuity["usable"]
         stats.append(
             {
                 "mean": mean,
                 "available_ratio": available_ratio,
-                "protected_ratio": protected_count / max(1, cross_length),
+                "protected_ratio": protected_ratio,
                 "candidate_ratio": candidate_ratio,
                 "dark_ratio": dark_ratio,
                 "selected": selected,
                 "selected_crosses": selected_crosses,
+                "protected_crosses": protected_crosses,
+                "sparse_foreground_crossings": sparse_foreground_crossings,
+                "sparse_text_bridge": sparse_text_bridge,
             }
         )
         if (
             edge_margin <= index < axis_length - edge_margin
-            and available_ratio >= 0.92
+            and (available_ratio >= 0.92 or sparse_text_bridge)
             and (
                 candidate_ratio >= 0.55
-                or (
-                    candidate_ratio >= 0.42
-                    and _fold_shadow_cross_continuity(selected_crosses, cross_length)["usable"]
-                )
+                or (candidate_ratio >= 0.42 and continuity["usable"])
             )
             and dark_ratio <= 0.0015
         ):
@@ -6407,7 +6416,11 @@ def _fold_shadow_axis_plan(
             for offset in range(-(max_width * 2), max_width * 2 + 1)
             if abs(offset) >= max(min_width, band_width + 2)
             for neighbor in [center + offset]
-            if 0 <= neighbor < axis_length and stats[neighbor]["available_ratio"] >= 0.92
+            if 0 <= neighbor < axis_length
+            and (
+                stats[neighbor]["available_ratio"] >= 0.92
+                or stats[neighbor]["sparse_foreground_crossings"]
+            )
         ]
         if not neighbor_means:
             continue
@@ -6416,7 +6429,10 @@ def _fold_shadow_axis_plan(
         local_delta = local_mean - band_mean
         if not (2.25 <= local_delta <= 42.0):
             continue
-        if any(stats[index]["protected_ratio"] > 0.004 for index in group):
+        if any(
+            stats[index]["protected_ratio"] > 0.004 and not stats[index]["sparse_text_bridge"]
+            for index in group
+        ):
             return _empty_fold_shadow_plan(
                 orientation,
                 "foreground intersects candidate fold band",
@@ -6636,6 +6652,24 @@ def _fold_shadow_cross_continuity(selected_crosses: set[int], cross_length: int)
         "coverage_ratio": round(coverage_ratio, 6),
         "max_gap": max_gap,
     }
+
+
+def _fold_shadow_protected_crossings_are_sparse(protected_crosses: set[int], cross_length: int) -> bool:
+    if cross_length <= 0 or not protected_crosses:
+        return True
+    ordered = sorted(protected_crosses)
+    longest_run = 1
+    current_run = 1
+    previous = ordered[0]
+    for current in ordered[1:]:
+        if current == previous + 1:
+            current_run += 1
+        else:
+            longest_run = max(longest_run, current_run)
+            current_run = 1
+        previous = current
+    longest_run = max(longest_run, current_run)
+    return longest_run <= max(18, int(round(cross_length * 0.09)))
 
 
 def _empty_fold_shadow_plan(
