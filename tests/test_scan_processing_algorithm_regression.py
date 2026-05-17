@@ -1025,6 +1025,90 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             ):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_faint_post_deskew_corner_wedge_crop_removes_safe_canvas_fill(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-faint-post-deskew-wedge-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            _faint_post_deskew_corner_wedge_page().save(
+                input_dir / "private_faint_post_deskew_wedge.png", dpi=(300, 300)
+            )
+
+            report = scan_batch(ScanConfig("synthetic-regression", "faint-post-deskew-wedge", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, deskew=True, workers=1))
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+            audit = record["processing_audit"]
+
+            self.assertTrue(record["deskewed"])
+            self.assertTrue(record["cropped"])
+            self.assertEqual(record["crop_reason"], "post-deskew safe canvas crop applied")
+            self.assertEqual(record["crop_bbox"], [3, 5, 321, 243])
+            self.assertEqual(record["output_size"], [318, 238])
+            self.assertLess(record["output_size"][0], record["pre_deskew_size"][0])
+            self.assertLess(record["output_size"][1], record["pre_deskew_size"][1])
+            self.assertEqual(audit["guardrail_failures"], [])
+            self.assertEqual(audit["cumulative_change_guard_action"], "passed")
+            self.assertEqual(audit_summary["counts"]["auto_crop_applied_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["auto_crop"]["post_deskew_safe_crop_files"], 1)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            for forbidden in (
+                "private_faint_post_deskew_wedge.png",
+                str(input_dir),
+                "source_relative_path",
+                "source_sha256",
+            ):
+                self.assertNotIn(forbidden, audit_summary_text)
+
+    def test_faint_post_deskew_corner_wedge_protected_content_cases_stay_noop(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-faint-post-deskew-wedge-guards-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "private_faint_wedge_edge_handwriting.png": _faint_post_deskew_corner_wedge_page(
+                    variant="edge_handwriting"
+                ),
+                "private_faint_wedge_page_number.png": _faint_post_deskew_corner_wedge_page(variant="page_number"),
+                "private_faint_wedge_ruled_table.png": _faint_post_deskew_corner_wedge_page(variant="ruled_table"),
+                "private_faint_wedge_color_stamp.png": _faint_post_deskew_corner_wedge_page(variant="color_stamp"),
+                "private_faint_wedge_archival_corner.png": _faint_post_deskew_corner_wedge_page(
+                    variant="archival_corner"
+                ),
+            }
+            for filename, page in pages.items():
+                page.save(input_dir / filename, dpi=(300, 300))
+
+            report = scan_batch(
+                ScanConfig("synthetic-regression", "faint-post-deskew-wedge-guard-cases", input_dir, output_dir)
+            )
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, deskew=True, workers=1))
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            self.assertEqual(len(manifest["files"]), len(pages))
+            for record in manifest["files"]:
+                self.assertEqual(record["status"], "processed")
+                self.assertFalse(record["deskewed"], record["source_relative_path"])
+                self.assertEqual(record["deskew_reason"], "edge content near rotation boundary")
+                self.assertFalse(record["cropped"], record["source_relative_path"])
+                self.assertIn("auto_crop_noop", record["operations"])
+                self.assertEqual(record["output_size"], [322, 244])
+                self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
+                self.assertEqual(record["processing_audit"]["cumulative_change_guard_action"], "passed")
+            self.assertEqual(audit_summary["counts"]["auto_crop_applied_files"], 0)
+            self.assertGreaterEqual(audit_summary["counts"]["auto_crop_skipped_files"], 1)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages.keys(), str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_variable_pale_gutter_trim_stays_bounded_and_private(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-variable-gutter-full-chain-") as temp_dir:
             root = Path(temp_dir)
@@ -2339,6 +2423,35 @@ def _risk_dark_photo_edge_trace_page() -> Image.Image:
     draw.rectangle((0, 74, 14, 102), fill=(45, 45, 45))
     draw.text((184, 12), "9", fill=(42, 42, 42))
     return image
+
+
+def _faint_post_deskew_corner_wedge_page(variant: str = "safe") -> Image.Image:
+    image = Image.new("RGB", (320, 240), (248, 248, 248))
+    draw = ImageDraw.Draw(image)
+    for y in (70, 92, 114, 136, 158):
+        draw.rectangle((72, y, 248, y + 3), fill=(45, 45, 45))
+    if variant == "edge_handwriting":
+        draw.line((2, 38, 18, 50, 7, 70, 20, 88, 4, 116), fill=(55, 55, 55), width=2)
+    elif variant == "page_number":
+        draw.text((6, 10), "12", fill=(55, 55, 55))
+    elif variant == "ruled_table":
+        for y in (22, 46, 70, 94):
+            draw.line((0, y, 100, y), fill=(78, 78, 78), width=2)
+        for x in (8, 42, 76):
+            draw.line((x, 16, x, 106), fill=(82, 82, 82), width=2)
+    elif variant == "color_stamp":
+        draw.ellipse((4, 10, 48, 54), outline=(180, 30, 30), width=3)
+    elif variant == "archival_corner":
+        draw.line((0, 0, 38, 0), fill=(80, 80, 80), width=3)
+        draw.line((0, 0, 0, 38), fill=(80, 80, 80), width=3)
+    elif variant != "safe":
+        raise ValueError(f"unsupported variant: {variant}")
+    return image.rotate(
+        0.45,
+        resample=Image.Resampling.BICUBIC,
+        expand=True,
+        fillcolor=(246, 246, 246),
+    )
 
 
 def _mixed_tone_binding_gutter_page(variant: str = "safe") -> Image.Image:
