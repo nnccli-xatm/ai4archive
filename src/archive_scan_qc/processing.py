@@ -124,6 +124,10 @@ class DespeckleResult:
     candidate_pixels: int
     candidate_count: int
     candidate_count_bucket: str
+    component_count: int
+    component_count_bucket: str
+    max_component_size: int
+    max_component_size_bucket: str
     replacement_work_performed: bool
 
 
@@ -2784,8 +2788,20 @@ def _aggregate_despeckle_candidate_counts(records: list[dict[str, Any]]) -> dict
             "despeckle",
             "candidate_count_bucket",
         ),
+        "component_count_bucket_distribution": _operation_value_distribution(
+            records,
+            "despeckle",
+            "component_count_bucket",
+        ),
+        "max_component_size_bucket_distribution": _operation_value_distribution(
+            records,
+            "despeckle",
+            "max_component_size_bucket",
+        ),
         "candidate_pixels": _operation_numeric_summary(records, "despeckle", "candidate_pixels"),
         "candidate_count": _operation_numeric_summary(records, "despeckle", "candidate_count"),
+        "component_count": _operation_numeric_summary(records, "despeckle", "component_count"),
+        "max_component_size": _operation_numeric_summary(records, "despeckle", "max_component_size"),
     }
 
 
@@ -3258,6 +3274,10 @@ def _process_image(
             despeckle_timing["candidate_pixels"] = despeckle_result.candidate_pixels
             despeckle_timing["candidate_count"] = despeckle_result.candidate_count
             despeckle_timing["candidate_count_bucket"] = despeckle_result.candidate_count_bucket
+            despeckle_timing["component_count"] = despeckle_result.component_count
+            despeckle_timing["component_count_bucket"] = despeckle_result.component_count_bucket
+            despeckle_timing["max_component_size"] = despeckle_result.max_component_size
+            despeckle_timing["max_component_size_bucket"] = despeckle_result.max_component_size_bucket
             despeckle_timing["replacement_work_performed"] = despeckle_result.replacement_work_performed
             despeckle_timing["safe_skip"] = despeckle_result.changed_pixels == 0
             if despeckle_pixels_changed:
@@ -10613,7 +10633,8 @@ _DESPECKLE_MAX_CANDIDATE_RATIO = 0.02
 _DESPECKLE_MAX_LIGHT_SOIL_PREFILTER_RATIO = _DESPECKLE_MAX_CANDIDATE_RATIO
 _DESPECKLE_MAX_CHANGED_RATIO = 0.01
 _DESPECKLE_MAX_COMPONENT_PIXELS = 4
-_DESPECKLE_MAX_TINY_DUST_CLUSTER_PIXELS = 6
+_DESPECKLE_MAX_TINY_DUST_CLUSTER_PIXELS = 9
+_DESPECKLE_TINY_DUST_CLUSTER_MIN_VALUE = 35
 _DESPECKLE_MAX_COMPONENT_SPAN = 3
 _DESPECKLE_DENSE_PREFILTER_MIN_DARK_PIXELS = 512
 _DESPECKLE_DENSE_PREFILTER_MAX_LOW_CONNECTIVITY_RATIO = 0.01
@@ -10685,6 +10706,7 @@ def _despeckle_isolated_pixels_with_reason(image: Image.Image, *, backend: str =
             replacement_work_performed=False,
         )
     candidates, backend_mode = _despeckle_candidate_points_with_backend(candidate_mask, backend=backend)
+    component_sizes = _despeckle_candidate_component_sizes(candidates)
     if not candidates:
         reason = (
             "protected edge dark marks preserved"
@@ -10698,6 +10720,8 @@ def _despeckle_isolated_pixels_with_reason(image: Image.Image, *, backend: str =
             reason=reason,
             candidate_pixels=candidate_pixels,
             candidate_count=0,
+            component_count=0,
+            max_component_size=0,
             replacement_work_performed=False,
         )
 
@@ -10710,6 +10734,8 @@ def _despeckle_isolated_pixels_with_reason(image: Image.Image, *, backend: str =
             reason="despeckle skipped: candidate density exceeds safety threshold",
             candidate_pixels=candidate_pixels,
             candidate_count=len(candidates),
+            component_count=len(component_sizes),
+            max_component_size=max(component_sizes, default=0),
             replacement_work_performed=False,
         )
 
@@ -10731,6 +10757,8 @@ def _despeckle_isolated_pixels_with_reason(image: Image.Image, *, backend: str =
             reason="no isolated dark pixels found",
             candidate_pixels=candidate_pixels,
             candidate_count=len(candidates),
+            component_count=len(component_sizes),
+            max_component_size=max(component_sizes, default=0),
             replacement_work_performed=replacement_work_performed,
         )
     if changed / source_area > _DESPECKLE_MAX_CHANGED_RATIO:
@@ -10741,6 +10769,8 @@ def _despeckle_isolated_pixels_with_reason(image: Image.Image, *, backend: str =
             reason="despeckle skipped: pixel change ratio exceeds safety threshold",
             candidate_pixels=candidate_pixels,
             candidate_count=len(candidates),
+            component_count=len(component_sizes),
+            max_component_size=max(component_sizes, default=0),
             replacement_work_performed=replacement_work_performed,
         )
 
@@ -10763,6 +10793,8 @@ def _despeckle_isolated_pixels_with_reason(image: Image.Image, *, backend: str =
         reason="isolated dark pixels replaced",
         candidate_pixels=candidate_pixels,
         candidate_count=len(candidates),
+        component_count=len(component_sizes),
+        max_component_size=max(component_sizes, default=0),
         replacement_work_performed=replacement_work_performed,
     )
 
@@ -10776,6 +10808,8 @@ def _despeckle_result(
     candidate_pixels: int,
     candidate_count: int,
     replacement_work_performed: bool,
+    component_count: int = 0,
+    max_component_size: int = 0,
 ) -> DespeckleResult:
     return DespeckleResult(
         image=image.copy() if changed_pixels == 0 else image,
@@ -10786,6 +10820,10 @@ def _despeckle_result(
         candidate_pixels=candidate_pixels,
         candidate_count=candidate_count,
         candidate_count_bucket=_despeckle_count_bucket(candidate_count),
+        component_count=component_count,
+        component_count_bucket=_despeckle_count_bucket(component_count),
+        max_component_size=max_component_size,
+        max_component_size_bucket=_despeckle_count_bucket(max_component_size),
         replacement_work_performed=replacement_work_performed,
     )
 
@@ -10998,6 +11036,10 @@ def _despeckle_replacements_fallback(
     }
     for x, y in candidates:
         component = component_cache[(x, y)]
+        if len(component) > _DESPECKLE_MAX_COMPONENT_PIXELS and any(
+            gray_pixels[cx, cy] < _DESPECKLE_TINY_DUST_CLUSTER_MIN_VALUE for cx, cy in component
+        ):
+            continue
         protection_candidate_set = candidate_set if len(component) > 4 else conservative_candidate_set
         dark_neighbors = 0
         neighbor_values: list[int] = []
@@ -11369,6 +11411,19 @@ def _despeckle_candidate_component(
             if neighbor not in visited and neighbor in candidate_set:
                 stack.append(neighbor)
     return component
+
+
+def _despeckle_candidate_component_sizes(candidates: list[tuple[int, int]]) -> list[int]:
+    candidate_set = set(candidates)
+    sizes: list[int] = []
+    visited: set[tuple[int, int]] = set()
+    for x, y in candidates:
+        if (x, y) in visited:
+            continue
+        component = _despeckle_candidate_component(candidate_set, x, y)
+        visited.update(component)
+        sizes.append(len(component))
+    return sizes
 
 
 def _despeckle_has_candidate_texture_context(
