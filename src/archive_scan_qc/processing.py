@@ -5222,6 +5222,7 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
         )
     selected: set[tuple[int, int]] = set()
     localized_component_selected = False
+    diffuse_component_selected = False
     for component in components:
         area = len(component)
         xs = [point[0] for point in component]
@@ -5284,7 +5285,27 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
             and local_background >= background - 3
             and 4.5 <= local_contrast <= 14.0
         )
-        if not (small_speckle_shape or low_frequency_shape or localized_soft_shape or medium_soft_shape):
+        diffuse_soft_shape = (
+            low_global_tonal_evidence
+            and area_ratio <= 0.045
+            and width <= image.width * 0.28
+            and height <= image.height * 0.28
+            and width >= 12
+            and height >= 12
+            and max(width, height) / max(1, min(width, height)) <= 2.2
+            and edge_density <= 0.09
+            and color_shift <= 24
+            and local_background is not None
+            and local_background >= background - 3
+            and 5.0 <= local_contrast <= 12.0
+        )
+        if not (
+            small_speckle_shape
+            or low_frequency_shape
+            or localized_soft_shape
+            or medium_soft_shape
+            or diffuse_soft_shape
+        ):
             return _background_stains_noop(
                 image,
                 "background stain lightening skipped: large stain or historical damage risk",
@@ -5292,12 +5313,15 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
             )
         if localized_soft_shape or medium_soft_shape:
             localized_component_selected = True
+        if diffuse_soft_shape:
+            diffuse_component_selected = True
         selected.update(component)
 
     changed_ratio = len(selected) / max(1, total)
     if changed_ratio < 0.00008:
         return _background_stains_noop(image, "background stain lightening skipped: no confident light background stains")
-    if low_global_tonal_evidence and changed_ratio > 0.032:
+    low_global_change_limit = 0.045 if diffuse_component_selected else 0.032
+    if low_global_tonal_evidence and changed_ratio > low_global_change_limit:
         return _background_stains_noop(
             image,
             "background stain lightening skipped: low-confidence tonal evidence",
@@ -5355,7 +5379,7 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
         True,
         (
             "background stain lightening applied: conservative localized low-contrast stains on light background"
-            if localized_component_selected or changed_ratio <= 0.035
+            if localized_component_selected or diffuse_component_selected or changed_ratio <= 0.035
             else "background stain lightening applied: conservative low-contrast stains on light background"
         ),
         before_mean,
