@@ -7212,8 +7212,6 @@ def _enhance_faded_text_conservative(image: Image.Image) -> FadedTextEnhancement
         return _faded_text_noop(image, "faded text enhancement skipped: page is not a light paper background")
     if p05 < 105:
         return _faded_text_noop(image, "faded text enhancement skipped: dark foreground already present")
-    if p99 - p01 < 12:
-        return _faded_text_noop(image, "faded text enhancement skipped: text evidence too weak")
     if p95 - p05 > 92:
         return _faded_text_noop(image, "faded text enhancement skipped: contrast already normal or mixed content risk")
 
@@ -7221,6 +7219,8 @@ def _enhance_faded_text_conservative(image: Image.Image) -> FadedTextEnhancement
     if threshold < 125:
         return _faded_text_noop(image, "faded text enhancement skipped: outside conservative faded ink range")
     sampled_candidate_ratio = _faded_text_sample_candidate_ratio(grayscale, threshold, p95)
+    if p99 - p01 < 12 and sampled_candidate_ratio < 0.002:
+        return _faded_text_noop(image, "faded text enhancement skipped: text evidence too weak")
     if sampled_candidate_ratio < 0.0015:
         return _faded_text_noop(
             image,
