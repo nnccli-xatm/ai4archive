@@ -131,6 +131,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             _assert_required_metrics_present(self, full_quality)
             _assert_operation_timing_signal(self, full_quality)
             _assert_local_content_guard_signal(self, full_quality)
+            _assert_full_chain_quality_guard_signal(self, full_payload)
 
             self.assertGreater(base_run["processing"]["processed_files_per_minute"], 0)
             self.assertGreater(full_run["processing"]["processed_files_per_minute"], 0)
@@ -390,6 +391,8 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 ],
                 1,
             )
+            quality = _processing_quality_regression(manifest)
+            self.assertEqual(quality["counts"]["processed_output_foreground_weakening_guard_reverted_files"], 1)
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             for forbidden in ("private_faint_foreground_guard", str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
@@ -801,6 +804,13 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                             "local_content_change_guard_reverted": False,
                             "local_content_change_guard_action": "passed",
                             "local_content_change_guard_reasons": [],
+                            "combination_quality_guard_checked": False,
+                            "combination_quality_guard_reverted": False,
+                            "combination_quality_guard_action": "passed",
+                            "combination_quality_guard_reason_code": "safe_combination_passed",
+                            "combination_quality_guard_risk_tier": "low_risk_background",
+                            "cumulative_change_score": 0.03,
+                            "local_content_changed_ratio": 0.0,
                         },
                     },
                     {
@@ -815,6 +825,19 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                                 "edge_content_changed_ratio",
                                 "local_content_changed_ratio",
                             ],
+                            "combination_quality_guard_checked": True,
+                            "combination_quality_guard_reverted": True,
+                            "combination_quality_guard_action": "reverted_to_source",
+                            "combination_quality_guard_reason_code": "combined_change_too_large_reverted",
+                            "combination_quality_guard_risk_tier": "high_risk_content",
+                            "combination_quality_guard_reasons": ["cumulative_change_score"],
+                            "processed_output_safety_guard_checked": True,
+                            "processed_output_safety_guard_reverted": True,
+                            "processed_output_safety_guard_action": "reverted_to_source",
+                            "processed_output_safety_guard_reason_code": "processed_output_quality_reverted",
+                            "processed_output_safety_guard_reasons": ["protected_foreground_weakening"],
+                            "cumulative_change_score": 0.22,
+                            "local_content_changed_ratio": 0.19,
                         },
                     },
                     {
@@ -826,6 +849,18 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                             "local_content_change_guard_reverted": False,
                             "local_content_change_guard_action": "passed",
                             "local_content_change_guard_reasons": [],
+                            "combination_quality_guard_checked": True,
+                            "combination_quality_guard_reverted": False,
+                            "combination_quality_guard_action": "passed",
+                            "combination_quality_guard_reason_code": "safe_combination_passed",
+                            "combination_quality_guard_risk_tier": "low_risk_background",
+                            "processed_output_safety_guard_checked": True,
+                            "processed_output_safety_guard_reverted": False,
+                            "processed_output_safety_guard_action": "passed",
+                            "processed_output_safety_guard_reason_code": "safe_processed_output_passed",
+                            "processed_output_safety_guard_reasons": [],
+                            "cumulative_change_score": 0.05,
+                            "local_content_changed_ratio": 0.02,
                         },
                     },
                 ],
@@ -837,6 +872,9 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
         self.assertEqual(quality["counts"]["local_content_change_guard_checked_files"], 2)
         self.assertEqual(quality["counts"]["local_content_change_guard_skipped_files"], 1)
         self.assertEqual(quality["counts"]["local_content_change_guard_reverted_files"], 1)
+        self.assertEqual(quality["counts"]["combination_quality_guard_checked_files"], 2)
+        self.assertEqual(quality["counts"]["combination_quality_guard_reverted_files"], 1)
+        self.assertEqual(quality["counts"]["processed_output_foreground_weakening_guard_reverted_files"], 1)
         local_guard = quality["local_content_change_guard"]
         self.assertTrue(local_guard["aggregate_only"])
         self.assertEqual(local_guard["checked_files"], 2)
@@ -844,6 +882,21 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
         self.assertEqual(local_guard["reverted_files"], 1)
         self.assertEqual(local_guard["reason_distribution"]["local_content_changed_ratio"], 1)
         self.assertEqual(local_guard["reason_distribution"]["edge_content_changed_ratio"], 1)
+        combination_guard = quality["combination_quality_guard"]
+        self.assertTrue(combination_guard["aggregate_only"])
+        self.assertEqual(combination_guard["checked_files"], 2)
+        self.assertEqual(combination_guard["reverted_files"], 1)
+        self.assertEqual(combination_guard["reason_code_distribution"]["combined_change_too_large_reverted"], 1)
+        processed_output_guard = quality["processed_output_safety_guard"]
+        self.assertEqual(processed_output_guard["foreground_weakening_reverted_files"], 1)
+        self.assertEqual(
+            processed_output_guard["reason_distribution"]["protected_foreground_weakening"],
+            1,
+        )
+        metric_signal = quality["guardrail_metric_signal"]
+        self.assertTrue(metric_signal["aggregate_only"])
+        self.assertEqual(metric_signal["metrics"]["cumulative_change_score"]["count"], 3)
+        self.assertEqual(metric_signal["metrics"]["local_content_changed_ratio"]["max"], 0.19)
         self.assertEqual(quality["operation_timing_budget"]["status"], "pass")
         for forbidden in (
             "private_safe_stain_cleanup.png",
@@ -1012,6 +1065,9 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     "full_chain_budget_signal": comparison._full_chain_budget_signal(
                         {"id": comparison.FULL_CHAIN_VARIANT_ID}, benchmark
                     ),
+                    "full_chain_quality_guard_signal": comparison._full_chain_quality_guard_signal(
+                        {"id": comparison.FULL_CHAIN_VARIANT_ID}, benchmark
+                    ),
                     "private_path": "/private/archive/private_full_chain_page.png",
                     "source_sha256": "g" * 64,
                 }
@@ -1046,6 +1102,9 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     "id": comparison.FULL_CHAIN_VARIANT_ID,
                     "operation_timing_regression_signal": comparison._operation_timing_regression_signal(benchmark),
                     "full_chain_budget_signal": budget_signal,
+                    "full_chain_quality_guard_signal": comparison._full_chain_quality_guard_signal(
+                        {"id": comparison.FULL_CHAIN_VARIANT_ID}, benchmark
+                    ),
                 }
             ]
         )
@@ -1079,12 +1138,69 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     "full_chain_budget_signal": comparison._full_chain_budget_signal(
                         {"id": comparison.FULL_CHAIN_VARIANT_ID}, passing_benchmark
                     ),
+                    "full_chain_quality_guard_signal": comparison._full_chain_quality_guard_signal(
+                        {"id": comparison.FULL_CHAIN_VARIANT_ID}, passing_benchmark
+                    ),
                 }
             ]
         )
 
         self.assertEqual(passing_guard["status"], "pass")
         self.assertEqual(passing_guard["budget_signal"]["status"], "pass")
+
+    def test_synthetic_full_chain_guard_requires_quality_guard_signal_without_private_rows(self) -> None:
+        comparison = _synthetic_performance_comparison_module()
+        benchmark = _full_chain_benchmark_fixture(
+            _operation_timings_fixture(),
+            elapsed_seconds=0.8,
+            processed_files=4,
+        )
+        quality_signal = comparison._full_chain_quality_guard_signal(
+            {"id": comparison.FULL_CHAIN_VARIANT_ID}, benchmark
+        )
+        guard = comparison._full_chain_regression_guard(
+            [
+                {
+                    "id": comparison.FULL_CHAIN_VARIANT_ID,
+                    "operation_timing_regression_signal": comparison._operation_timing_regression_signal(benchmark),
+                    "full_chain_budget_signal": comparison._full_chain_budget_signal(
+                        {"id": comparison.FULL_CHAIN_VARIANT_ID}, benchmark
+                    ),
+                    "full_chain_quality_guard_signal": quality_signal,
+                    "private_path": "/private/archive/private_guard_quality_page.png",
+                    "source_sha256": "i" * 64,
+                }
+            ]
+        )
+        raw = json.dumps(guard, ensure_ascii=False, sort_keys=True)
+
+        self.assertEqual(quality_signal["status"], "pass")
+        self.assertEqual(quality_signal["runs"][0]["counts"]["combination_quality_guard_checked_files"], 4)
+        self.assertIn("guardrail_metric_signal", quality_signal["runs"][0])
+        self.assertIn("algorithm_metrics", quality_signal["runs"][0])
+        self.assertEqual(guard["status"], "pass")
+        self.assertEqual(guard["quality_guard_signal"]["status"], "pass")
+        for forbidden in (
+            "/private/archive",
+            "private_guard_quality_page.png",
+            "source_sha256",
+            "i" * 64,
+        ):
+            self.assertNotIn(forbidden, raw)
+
+        missing_quality_guard = comparison._full_chain_regression_guard(
+            [
+                {
+                    "id": comparison.FULL_CHAIN_VARIANT_ID,
+                    "operation_timing_regression_signal": comparison._operation_timing_regression_signal(benchmark),
+                    "full_chain_budget_signal": comparison._full_chain_budget_signal(
+                        {"id": comparison.FULL_CHAIN_VARIANT_ID}, benchmark
+                    ),
+                }
+            ]
+        )
+        self.assertEqual(missing_quality_guard["status"], "failed")
+        self.assertEqual(missing_quality_guard["code"], "missing_full_chain_quality_guard_signal")
 
 
 BASE_FLAGS = ("--deskew", "--trim-dark-border", "--scanner-gutter-trim", "--auto-crop", "--despeckle")
@@ -1284,6 +1400,42 @@ def _assert_local_content_guard_signal(testcase: unittest.TestCase, quality: dic
     testcase.assertEqual(local_guard["reason_distribution"], {})
 
 
+def _assert_full_chain_quality_guard_signal(testcase: unittest.TestCase, payload: dict[str, object]) -> None:
+    quality = _single_quality(payload)
+    counts = quality["counts"]
+    testcase.assertEqual(counts["combination_quality_guard_checked_files"], 6)
+    testcase.assertEqual(counts["processed_output_safety_guard_checked_files"], 6)
+    testcase.assertIn("processed_output_foreground_weakening_guard_reverted_files", counts)
+    combination_guard = quality["combination_quality_guard"]
+    testcase.assertTrue(combination_guard["aggregate_only"])
+    testcase.assertEqual(combination_guard["checked_files"], 6)
+    testcase.assertEqual(combination_guard["reverted_files"], 0)
+    testcase.assertEqual(sum(combination_guard["reason_code_distribution"].values()), 6)
+    testcase.assertGreaterEqual(
+        combination_guard["reason_code_distribution"].get("safe_combination_passed", 0),
+        3,
+    )
+    processed_output_guard = quality["processed_output_safety_guard"]
+    testcase.assertTrue(processed_output_guard["aggregate_only"])
+    testcase.assertEqual(processed_output_guard["checked_files"], 6)
+    testcase.assertEqual(processed_output_guard["reverted_files"], 0)
+    testcase.assertEqual(
+        processed_output_guard["reason_code_distribution"]["safe_processed_output_passed"],
+        6,
+    )
+    metric_signal = quality["guardrail_metric_signal"]
+    testcase.assertTrue(metric_signal["aggregate_only"])
+    for metric_name in (
+        "cumulative_change_score",
+        "cumulative_change_pixel_ratio",
+        "local_content_changed_ratio",
+        "edge_content_changed_ratio",
+        "processed_output_dark_pixel_lift_ratio",
+    ):
+        testcase.assertIn(metric_name, metric_signal["metrics"])
+        testcase.assertEqual(metric_signal["metrics"][metric_name]["count"], 6, metric_name)
+
+
 def _assert_algorithm_thresholds(testcase: unittest.TestCase, quality: dict[str, object]) -> None:
     testcase.assertEqual(quality["threshold_violations"], [])
     thresholds = quality["thresholds"]
@@ -1350,11 +1502,87 @@ def _full_chain_benchmark_fixture(
                     "processed_files": processed_files,
                     "elapsed_seconds": elapsed_seconds,
                     "operation_timings": operation_timings,
+                    "quality_regression": _full_chain_quality_regression_fixture(processed_files),
                     "private_path": "/private/archive/private_full_chain_page.png",
                     "source_sha256": "h" * 64,
                 },
             }
         ]
+    }
+
+
+def _full_chain_quality_regression_fixture(processed_files: int) -> dict[str, object]:
+    return {
+        "aggregate_only": True,
+        "status": "pass",
+        "counts": {
+            "processed_files": processed_files,
+            "failed_files": 0,
+            "guardrail_failed_files": 0,
+            "cumulative_change_guard_checked_files": processed_files,
+            "cumulative_change_guard_reverted_files": 0,
+            "local_content_change_guard_checked_files": processed_files,
+            "local_content_change_guard_reverted_files": 0,
+            "combination_quality_guard_checked_files": processed_files,
+            "combination_quality_guard_reverted_files": 0,
+            "processed_output_safety_guard_checked_files": processed_files,
+            "processed_output_safety_guard_reverted_files": 0,
+            "processed_output_foreground_weakening_guard_reverted_files": 0,
+        },
+        "local_content_change_guard": {
+            "aggregate_only": True,
+            "checked_files": processed_files,
+            "skipped_files": 0,
+            "reverted_files": 0,
+            "warning_files": 0,
+            "reason_distribution": {},
+        },
+        "combination_quality_guard": {
+            "aggregate_only": True,
+            "checked_files": processed_files,
+            "skipped_files": 0,
+            "reverted_files": 0,
+            "warning_files": 0,
+            "low_confidence_original_files": 0,
+            "reason_code_distribution": {"safe_combination_passed": processed_files},
+            "risk_tier_distribution": {"low_risk_background": processed_files},
+            "reason_distribution": {},
+        },
+        "processed_output_safety_guard": {
+            "aggregate_only": True,
+            "checked_files": processed_files,
+            "skipped_files": 0,
+            "reverted_files": 0,
+            "warning_files": 0,
+            "washout_reverted_files": 0,
+            "clipping_reverted_files": 0,
+            "foreground_loss_reverted_files": 0,
+            "foreground_weakening_reverted_files": 0,
+            "reason_code_distribution": {"safe_processed_output_passed": processed_files},
+            "reason_distribution": {},
+        },
+        "guardrail_metric_signal": {
+            "aggregate_only": True,
+            "metrics": {
+                "cumulative_change_score": {"count": processed_files, "max": 0.04},
+                "cumulative_change_pixel_ratio": {"count": processed_files, "max": 0.01},
+                "local_content_changed_ratio": {"count": processed_files, "max": 0.0},
+                "edge_content_changed_ratio": {"count": processed_files, "max": 0.0},
+                "processed_output_dark_pixel_lift_ratio": {"count": processed_files, "max": 0.0},
+            },
+        },
+        "algorithm_metrics": {
+            operation: {
+                "enabled": True,
+                "changed_files": 0,
+                "file_count": processed_files,
+                "elapsed_seconds": 0.01,
+                "files_per_minute": 6000.0,
+                "metrics": {},
+            }
+            for operation in REQUIRED_OPERATIONS
+        },
+        "threshold_violations": [],
     }
 
 

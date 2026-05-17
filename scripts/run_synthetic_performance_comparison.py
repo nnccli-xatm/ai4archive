@@ -234,6 +234,7 @@ def _variant_summary(variant: dict[str, Any], benchmark: dict[str, Any]) -> dict
         "review_needed_counts": latest_run.get("finding_severity_counts", {}),
         "operation_timing_regression_signal": _operation_timing_regression_signal(benchmark),
         "full_chain_budget_signal": _full_chain_budget_signal(variant, benchmark),
+        "full_chain_quality_guard_signal": _full_chain_quality_guard_signal(variant, benchmark),
         "quality_difference_summary": (
             "Synthetic aggregate comparison only; inspect deltas in failures and review-needed counts before "
             "using private orchestrator evidence."
@@ -288,13 +289,24 @@ def _full_chain_regression_guard(variants: list[dict[str, Any]]) -> dict[str, An
             budget_signal=budget_signal,
         )
 
+    quality_signal = full_chain.get("full_chain_quality_guard_signal")
+    if not isinstance(quality_signal, dict):
+        return _failed_guard("missing_full_chain_quality_guard_signal", "Full-chain aggregate quality signal is missing.")
+    if quality_signal.get("status") == "failed":
+        return _failed_guard(
+            quality_signal.get("code", "full_chain_quality_guard_signal_failed"),
+            "Full-chain aggregate quality evidence failed synthetic guard requirements.",
+            quality_guard_signal=quality_signal,
+        )
+
     return {
         "schema_version": "scan-qc.synthetic-full-chain-regression-guard.v1",
         "aggregate_only": True,
         "status": "pass",
-        "message": "Full conservative chain timing and synthetic budget signals are present.",
+        "message": "Full conservative chain timing, quality evidence, and synthetic budget signals are present.",
         "required_operations": list(REGRESSION_SIGNAL_OPERATIONS),
         "budget_signal": budget_signal,
+        "quality_guard_signal": quality_signal,
         "privacy": _privacy_flags(),
     }
 
@@ -364,6 +376,105 @@ def _full_chain_budget_signal(variant: dict[str, Any], benchmark: dict[str, Any]
         "over_budget_runs": over_budget_runs,
         "privacy": _privacy_flags(),
     }
+
+
+def _full_chain_quality_guard_signal(variant: dict[str, Any], benchmark: dict[str, Any]) -> dict[str, Any] | None:
+    if variant.get("id") != FULL_CHAIN_VARIANT_ID:
+        return None
+    runs = benchmark.get("runs")
+    if not isinstance(runs, list):
+        runs = []
+
+    required_guard_sections = (
+        "local_content_change_guard",
+        "combination_quality_guard",
+        "processed_output_safety_guard",
+        "guardrail_metric_signal",
+        "algorithm_metrics",
+    )
+    run_summaries: list[dict[str, Any]] = []
+    failed_quality_runs: list[dict[str, Any]] = []
+    missing_sections: dict[str, int] = {section: 0 for section in required_guard_sections}
+    for run in runs:
+        if not isinstance(run, dict):
+            continue
+        processing = run.get("processing")
+        if not isinstance(processing, dict):
+            continue
+        quality = processing.get("quality_regression")
+        if not isinstance(quality, dict):
+            continue
+
+        missing = [section for section in required_guard_sections if not isinstance(quality.get(section), dict)]
+        for section in missing:
+            missing_sections[section] += 1
+        run_summary = {
+            "run_index": _coerce_int(run.get("run_index")),
+            "requested_workers": _coerce_int(run.get("requested_workers")),
+            "status": quality.get("status"),
+            "counts": _quality_guard_counts(quality.get("counts")),
+            "local_content_change_guard": quality.get("local_content_change_guard", {}),
+            "combination_quality_guard": quality.get("combination_quality_guard", {}),
+            "processed_output_safety_guard": quality.get("processed_output_safety_guard", {}),
+            "guardrail_metric_signal": quality.get("guardrail_metric_signal", {}),
+            "algorithm_metrics": quality.get("algorithm_metrics", {}),
+            "threshold_violations": quality.get("threshold_violations", []),
+        }
+        run_summaries.append(run_summary)
+        if quality.get("status") != "pass" or missing:
+            failed_quality_runs.append(
+                {
+                    "run_index": run_summary["run_index"],
+                    "status": quality.get("status"),
+                    "missing_sections": missing,
+                    "threshold_violation_count": len(quality.get("threshold_violations", []))
+                    if isinstance(quality.get("threshold_violations"), list)
+                    else 0,
+                }
+            )
+
+    missing_signal = not run_summaries
+    active_missing_sections = {section: count for section, count in missing_sections.items() if count}
+    status = "failed" if missing_signal or active_missing_sections or failed_quality_runs else "pass"
+    return {
+        "schema_version": "scan-qc.synthetic-full-chain-quality-guard-signal.v1",
+        "aggregate_only": True,
+        "status": status,
+        "code": (
+            "missing_full_chain_quality_guard_signal"
+            if missing_signal
+            else "missing_full_chain_quality_guard_sections"
+            if active_missing_sections
+            else "full_chain_quality_regression_failed"
+            if failed_quality_runs
+            else None
+        ),
+        "run_count": len(run_summaries),
+        "failed_quality_runs": failed_quality_runs,
+        "missing_sections": active_missing_sections,
+        "runs": run_summaries,
+        "privacy": _privacy_flags(),
+    }
+
+
+def _quality_guard_counts(counts: Any) -> dict[str, int]:
+    if not isinstance(counts, dict):
+        counts = {}
+    keys = (
+        "processed_files",
+        "failed_files",
+        "guardrail_failed_files",
+        "cumulative_change_guard_checked_files",
+        "cumulative_change_guard_reverted_files",
+        "local_content_change_guard_checked_files",
+        "local_content_change_guard_reverted_files",
+        "combination_quality_guard_checked_files",
+        "combination_quality_guard_reverted_files",
+        "processed_output_safety_guard_checked_files",
+        "processed_output_safety_guard_reverted_files",
+        "processed_output_foreground_weakening_guard_reverted_files",
+    )
+    return {key: _coerce_int(counts.get(key)) for key in keys}
 
 
 def _operation_timing_regression_signal(benchmark: dict[str, Any]) -> dict[str, Any]:
