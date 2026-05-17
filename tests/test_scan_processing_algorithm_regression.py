@@ -241,6 +241,66 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in ("synthetic_safe_combination.png", str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_subtle_diagonal_edge_shadow_cleanup_preserves_protected_edges(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-diagonal-edge-shadow-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "private_safe_diagonal_edge_shadow.png": _subtle_diagonal_edge_shadow_page(),
+                "private_diagonal_edge_handwriting.png": _subtle_diagonal_edge_shadow_page("edge_handwriting"),
+                "private_diagonal_page_number.png": _subtle_diagonal_edge_shadow_page("page_number"),
+                "private_diagonal_ruled_table.png": _subtle_diagonal_edge_shadow_page("ruled_table"),
+                "private_diagonal_stamp.png": _subtle_diagonal_edge_shadow_page("stamp"),
+                "private_diagonal_texture.png": _subtle_diagonal_edge_shadow_page("texture"),
+                "private_diagonal_archival_edge_mark.png": _subtle_diagonal_edge_shadow_page("archival_edge_mark"),
+            }
+            for name, image in pages.items():
+                image.save(input_dir / name, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "diagonal-edge-shadow", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(lighten_edge_shadow=True, workers=1))
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_record = records["private_safe_diagonal_edge_shadow.png"]
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_output:
+                processed_safe = safe_output.convert("RGB")
+            self.assertTrue(safe_record["edge_shadow_lightened"])
+            self.assertEqual(safe_record["edge_shadow_reason_code"], "applied_narrow_neutral_edge_shadow")
+            self.assertEqual(safe_record["edge_shadow_edges"], ["left"])
+            self.assertGreater(
+                _mean_luma(processed_safe, (0, 0, 24, 180)),
+                _mean_luma(pages["private_safe_diagonal_edge_shadow.png"], (0, 0, 24, 180)) + 2.5,
+            )
+            self.assertLess(_changed_ratio(pages["private_safe_diagonal_edge_shadow.png"], processed_safe, (58, 34, 200, 110)), 0.002)
+            self.assertGreater(safe_record["edge_shadow_candidate_pixel_ratio"], 0.04)
+            self.assertLessEqual(safe_record["edge_shadow_changed_pixel_ratio"], 0.08)
+            self.assertEqual(safe_record["processing_audit"]["guardrail_failures"], [])
+
+            protected_names = set(pages) - {"private_safe_diagonal_edge_shadow.png"}
+            for name in protected_names:
+                record = records[name]
+                with Image.open(process_dir / record["output_relative_path"]) as protected_output:
+                    processed = protected_output.convert("RGB")
+                self.assertFalse(record["edge_shadow_lightened"], name)
+                self.assertIn("lighten_edge_shadow_noop", record["operations"], name)
+                self.assertEqual(record["processing_audit"]["edge_shadow_changed_pixel_ratio"], 0.0, name)
+                self.assertLess(_changed_ratio(pages[name], processed, (0, 0, processed.width, processed.height)), 0.001, name)
+
+            edge_guard = audit_summary["guardrails"]["edge_shadow"]
+            self.assertEqual(audit_summary["counts"]["edge_shadow_lightened_files"], 1)
+            self.assertEqual(audit_summary["counts"]["edge_shadow_skipped_files"], len(protected_names))
+            self.assertEqual(edge_guard["applied_files"], 1)
+            self.assertEqual(edge_guard["skipped_files"], len(protected_names))
+            self.assertGreaterEqual(edge_guard["protection_triggered_files"], 3)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_despeckle_cleans_compact_dust_clusters_but_preserves_content_marks(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-despeckle-clusters-") as temp_dir:
             root = Path(temp_dir)
@@ -2301,6 +2361,38 @@ def _safe_full_chain_combination_page() -> Image.Image:
         draw.line((58, y, 174, y), fill=(202, 202, 202), width=2)
     draw.ellipse((165, 28, 210, 58), fill=(222, 222, 222))
     image.putpixel((24, 24), (0, 0, 0))
+    return image
+
+
+def _subtle_diagonal_edge_shadow_page(variant: str = "safe") -> Image.Image:
+    image = Image.new("RGB", (260, 180), (242, 242, 238))
+    draw = ImageDraw.Draw(image)
+    for y in range(image.height):
+        band_width = 12 + int(round(y * 0.10))
+        for x in range(band_width):
+            shade = min(239, 222 + int(x * 0.6) + int(y / image.height * 2))
+            image.putpixel((x, y), (shade, shade, shade - 2))
+    for y in (46, 68, 90):
+        draw.rectangle((76, y, 184, y + 5), fill=(35, 35, 35))
+
+    if variant == "edge_handwriting":
+        draw.line((2, 120, 20, 132, 8, 148, 30, 158), fill=(55, 55, 55), width=2)
+    elif variant == "page_number":
+        draw.rectangle((116, 160, 144, 169), fill=(42, 42, 42))
+    elif variant == "ruled_table":
+        draw.line((0, 126, 238, 126), fill=(55, 55, 55), width=2)
+        draw.line((12, 112, 12, 150), fill=(55, 55, 55), width=2)
+    elif variant == "stamp":
+        draw.ellipse((3, 30, 42, 70), outline=(180, 30, 30), width=3)
+    elif variant == "texture":
+        for x in range(24, 246, 6):
+            for y in range(12, 168, 6):
+                shade = 112 + ((x * 5 + y * 7) % 72)
+                draw.rectangle((x, y, x + 2, y + 2), fill=(shade, shade, shade))
+    elif variant == "archival_edge_mark":
+        draw.rectangle((2, 104, 16, 154), fill=(58, 58, 58))
+    elif variant != "safe":
+        raise ValueError(f"unsupported variant: {variant}")
     return image
 
 
