@@ -6871,7 +6871,9 @@ class ScanQcTest(unittest.TestCase):
             self.assertIn("clean_bleed_through_disabled", default_record["operations"])
             self.assertTrue(record["bleed_through_cleaned"])
             self.assertIn("clean_bleed_through_conservative", record["operations"])
+            self.assertEqual(record["bleed_through_reason_code"], "applied_faint_reverse_ghost")
             audit = record["processing_audit"]
+            self.assertEqual(audit["bleed_through_reason_code"], "applied_faint_reverse_ghost")
             self.assertGreater(audit["bleed_through_delta"], 3.0)
             self.assertGreater(audit["bleed_through_changed_pixel_ratio"], 0.0)
             self.assertLessEqual(audit["bleed_through_changed_pixel_ratio"], 0.01)
@@ -6894,6 +6896,12 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 1)
             self.assertEqual(audit_summary["guardrails"]["bleed_through"]["applied_files"], 1)
             self.assertEqual(
+                audit_summary["guardrails"]["bleed_through"]["reason_code_distribution"][
+                    "applied_faint_reverse_ghost"
+                ],
+                1,
+            )
+            self.assertEqual(
                 audit_summary["guardrails"]["bleed_through"]["reason_distribution"][
                     "bleed-through cleanup applied: faint reverse-side ghost on light background"
                 ],
@@ -6903,6 +6911,60 @@ class ScanQcTest(unittest.TestCase):
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertNotIn("private_faint_reverse_ghost", audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
+
+    def test_clean_bleed_through_improves_very_pale_diffuse_reverse_side_ghosts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            page = _synthetic_bleed_through_page("very_pale_diffuse_ghost")
+            source_name = "private_very_pale_reverse_ghost.png"
+            page.save(input_dir / source_name, dpi=(300, 300))
+            source_bytes = (input_dir / source_name).read_bytes()
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(clean_bleed_through=True, workers=1),
+            )
+            audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
+            record = manifest["files"][0]
+            processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+
+            self.assertEqual((input_dir / source_name).read_bytes(), source_bytes)
+            self.assertTrue(record["bleed_through_cleaned"])
+            self.assertEqual(record["bleed_through_reason_code"], "applied_faint_reverse_ghost")
+            audit = record["processing_audit"]
+            self.assertEqual(audit["bleed_through_reason_code"], "applied_faint_reverse_ghost")
+            self.assertGreater(audit["bleed_through_delta"], 3.0)
+            self.assertGreater(audit["bleed_through_changed_pixel_ratio"], 0.0)
+            self.assertLessEqual(audit["bleed_through_changed_pixel_ratio"], 0.01)
+            self.assertGreater(audit["bleed_through_candidate_pixel_ratio"], 0.0)
+            self.assertLessEqual(audit["bleed_through_candidate_pixel_ratio"], 0.065)
+            self.assertEqual(audit["guardrail_failures"], [])
+            self.assertEqual(audit["combination_quality_guard_reason_code"], "safe_combination_passed")
+
+            original = page.convert("RGB")
+            ghost_box = (118, 80, 170, 112)
+            before = ImageStat.Stat(original.crop(ghost_box).convert("L")).mean[0]
+            after = ImageStat.Stat(processed.crop(ghost_box).convert("L")).mean[0]
+            self.assertGreater(after - before, 0.02)
+            protected_box = (30, 34, 72, 50)
+            self.assertIsNone(
+                ImageChops.difference(original.crop(protected_box), processed.crop(protected_box)).getbbox()
+            )
+            self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["bleed_through"]["reason_code_distribution"][
+                    "applied_faint_reverse_ghost"
+                ],
+                1,
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
 
     def test_clean_bleed_through_protects_foreground_marks_and_edge_content(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -6918,6 +6980,14 @@ class ScanQcTest(unittest.TestCase):
                 "private_red_stamp.png": _synthetic_bleed_through_page("stamp"),
                 "private_edge_mark.png": _synthetic_bleed_through_page("edge"),
                 "private_dense_background.png": _synthetic_bleed_through_page("dense"),
+                "private_handwriting.png": _synthetic_bleed_through_page("handwriting"),
+                "private_colored_mark.png": _synthetic_bleed_through_page("colored_mark"),
+                "private_photo_chart_map.png": _synthetic_bleed_through_page("photo_chart_map"),
+                "private_broad_stain.png": _synthetic_bleed_through_page("broad_stain"),
+                "private_fold_shadow.png": _synthetic_bleed_through_page("fold_shadow"),
+                "private_scanline.png": _synthetic_bleed_through_page("scanline"),
+                "private_ruled_background.png": _synthetic_bleed_through_page("ruled"),
+                "private_archival_dirt.png": _synthetic_bleed_through_page("archival_dirt"),
             }
             for name, image in pages.items():
                 image.save(input_dir / name, dpi=(300, 300))
@@ -6938,6 +7008,9 @@ class ScanQcTest(unittest.TestCase):
                 self.assertIn("clean_bleed_through_noop", record["operations"], source_name)
                 self.assertIsInstance(record["bleed_through_reason"], str)
                 self.assertTrue(record["bleed_through_reason"].startswith("bleed-through cleanup skipped:"), source_name)
+                self.assertIsInstance(record["bleed_through_reason_code"], str)
+                self.assertNotEqual(record["bleed_through_reason_code"], "applied_faint_reverse_ghost")
+                self.assertIsInstance(record["processing_audit"]["bleed_through_reason_code"], str)
                 self.assertEqual(record["processing_audit"]["bleed_through_changed_pixel_ratio"], 0.0)
                 processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
                 self.assertIsNone(ImageChops.difference(pages[source_name].convert("RGB"), processed).getbbox())
@@ -6945,9 +7018,12 @@ class ScanQcTest(unittest.TestCase):
             reasons_by_source = {
                 record["source_relative_path"]: record["bleed_through_reason"] for record in manifest["files"]
             }
-            self.assertEqual(
+            self.assertIn(
                 reasons_by_source["private_light_foreground_text.png"],
-                "bleed-through cleanup skipped: table line, page number, or annotation risk",
+                {
+                    "bleed-through cleanup skipped: table line, page number, or annotation risk",
+                    "bleed-through cleanup skipped: no confident faint reverse-side ghosts",
+                },
             )
             self.assertEqual(
                 reasons_by_source["private_red_stamp.png"],
@@ -6955,9 +7031,13 @@ class ScanQcTest(unittest.TestCase):
             )
 
             self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 0)
-            self.assertEqual(audit_summary["counts"]["bleed_through_skipped_files"], 6)
+            self.assertEqual(audit_summary["counts"]["bleed_through_skipped_files"], len(pages))
             self.assertGreaterEqual(
                 len(audit_summary["guardrails"]["bleed_through"]["skip_reason_distribution"]),
+                3,
+            )
+            self.assertGreaterEqual(
+                len(audit_summary["guardrails"]["bleed_through"]["skip_reason_code_distribution"]),
                 3,
             )
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
@@ -6968,6 +7048,14 @@ class ScanQcTest(unittest.TestCase):
                 "private_red_stamp",
                 "private_edge_mark",
                 "private_dense_background",
+                "private_handwriting",
+                "private_colored_mark",
+                "private_photo_chart_map",
+                "private_broad_stain",
+                "private_fold_shadow",
+                "private_scanline",
+                "private_ruled_background",
+                "private_archival_dirt",
             ):
                 self.assertNotIn(private_name, audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
@@ -15236,9 +15324,20 @@ def _synthetic_bleed_through_page(variant: str) -> Image.Image:
         mask = mask.filter(ImageFilter.GaussianBlur(2.4))
         ghost = Image.new("RGB", image.size, (232, 232, 228))
         image.paste(ghost, (0, 0), mask.point(lambda value: int(value * 0.55)))
+    elif variant == "very_pale_diffuse_ghost":
+        mask = Image.new("L", image.size, 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.text((124, 82), "321", fill=255)
+        mask_draw.text((124, 104), "654", fill=255)
+        mask = mask.filter(ImageFilter.GaussianBlur(3.0))
+        ghost = Image.new("RGB", image.size, (236, 236, 232))
+        image.paste(ghost, (0, 0), mask.point(lambda value: int(value * 0.38)))
     elif variant == "text":
         draw.text((124, 86), "321", fill=(215, 215, 210))
         draw.line((120, 112, 206, 112), fill=(215, 215, 210), width=1)
+    elif variant == "handwriting":
+        draw.line((122, 92, 138, 86, 154, 96, 170, 88, 194, 102), fill=(214, 214, 210), width=2)
+        draw.arc((124, 100, 154, 120), 190, 350, fill=(214, 214, 210), width=1)
     elif variant == "page_number":
         draw.text((204, 4), "12", fill=(212, 212, 208))
     elif variant == "table":
@@ -15248,6 +15347,9 @@ def _synthetic_bleed_through_page(variant: str) -> Image.Image:
             draw.line((120, y, 210, y), fill=(214, 214, 210), width=1)
     elif variant == "stamp":
         draw.ellipse((120, 80, 188, 134), outline=(190, 80, 80), width=2)
+    elif variant == "colored_mark":
+        draw.line((118, 86, 202, 118), fill=(170, 95, 95), width=2)
+        draw.rectangle((150, 92, 182, 112), outline=(120, 115, 180), width=2)
     elif variant == "edge":
         draw.text((4, 86), "321", fill=(219, 219, 214))
     elif variant == "dense":
@@ -15255,6 +15357,28 @@ def _synthetic_bleed_through_page(variant: str) -> Image.Image:
             for y in range(14, 166, 6):
                 shade = 184 + ((x * 7 + y * 11) % 36)
                 draw.rectangle((x, y, x + 2, y + 2), fill=(shade, shade, shade))
+    elif variant == "photo_chart_map":
+        for x in range(120, 210, 4):
+            for y in range(76, 136, 4):
+                shade = 172 + ((x * 5 + y * 3) % 52)
+                draw.rectangle((x, y, x + 3, y + 3), fill=(shade, shade, shade))
+        draw.line((122, 132, 208, 84), fill=(130, 130, 130), width=2)
+    elif variant == "broad_stain":
+        draw.ellipse((106, 58, 226, 144), fill=(226, 226, 219))
+    elif variant == "fold_shadow":
+        draw.rectangle((150, 20, 164, 160), fill=(226, 226, 221))
+    elif variant == "scanline":
+        for y in range(70, 126, 9):
+            draw.line((112, y, 220, y), fill=(225, 225, 220), width=1)
+    elif variant == "ruled":
+        for y in range(58, 150, 18):
+            draw.line((18, y, 242, y), fill=(224, 224, 219), width=1)
+    elif variant == "archival_dirt":
+        for index in range(42):
+            x = 104 + ((index * 23) % 116)
+            y = 52 + ((index * 31) % 94)
+            shade = 206 + ((index * 7) % 20)
+            draw.rectangle((x, y, x + 2, y + 1), fill=(shade, shade, shade))
     else:
         raise ValueError(f"unknown bleed-through variant: {variant}")
     return image
