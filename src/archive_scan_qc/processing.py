@@ -4606,8 +4606,60 @@ def _lighten_edge_shadow_conservative(image: Image.Image) -> EdgeShadowLightenin
             and edge_dark_ratio == 0
             and inner_dark_ratio == 0
         )
-        if strong_shadow or mild_side_shadow:
-            candidate_pixels, continuity_ratio = _edge_shadow_candidate_profile(edge, side, inner_mean)
+        signal_edge = edge
+        signal_edge_box = edge_box
+        signal_inner_mean = inner_mean
+        signal_delta = delta
+        partial_vertical_shadow = False
+        if side in {"left", "right"} and not strong_shadow and not mild_side_shadow:
+            vertical_inset = max(strip, int(round(image.height * 0.065)))
+            if vertical_inset * 2 < image.height - max(24, strip * 2):
+                if side == "left":
+                    partial_edge_box = (0, vertical_inset, strip, image.height - vertical_inset)
+                    partial_inner_box = (strip, vertical_inset, strip * 3, image.height - vertical_inset)
+                else:
+                    partial_edge_box = (
+                        image.width - strip,
+                        vertical_inset,
+                        image.width,
+                        image.height - vertical_inset,
+                    )
+                    partial_inner_box = (
+                        image.width - strip * 3,
+                        vertical_inset,
+                        image.width - strip,
+                        image.height - vertical_inset,
+                    )
+                partial_edge = grayscale.crop(partial_edge_box)
+                partial_inner = grayscale.crop(partial_inner_box)
+                partial_edge_mean = ImageStat.Stat(partial_edge).mean[0]
+                partial_inner_mean = ImageStat.Stat(partial_inner).mean[0]
+                partial_edge_std = ImageStat.Stat(partial_edge).stddev[0]
+                partial_inner_std = ImageStat.Stat(partial_inner).stddev[0]
+                partial_edge_foreground_ratio = _dark_pixel_ratio(partial_edge, 164)
+                partial_inner_foreground_ratio = _dark_pixel_ratio(partial_inner, 164)
+                partial_edge_dark_ratio = _dark_pixel_ratio(partial_edge, 125)
+                partial_inner_dark_ratio = _dark_pixel_ratio(partial_inner, 125)
+                partial_delta = partial_inner_mean - partial_edge_mean
+                partial_vertical_shadow = (
+                    5.5 <= partial_delta < 10
+                    and partial_edge_mean >= 210
+                    and partial_inner_mean >= 228
+                    and p95 >= 230
+                    and partial_edge_std <= 8.5
+                    and partial_inner_std <= 14.0
+                    and partial_edge_foreground_ratio <= 0.012
+                    and partial_inner_foreground_ratio <= 0.018
+                    and partial_edge_dark_ratio == 0
+                    and partial_inner_dark_ratio == 0
+                )
+                if partial_vertical_shadow:
+                    signal_edge = partial_edge
+                    signal_edge_box = partial_edge_box
+                    signal_inner_mean = partial_inner_mean
+                    signal_delta = partial_delta
+        if strong_shadow or mild_side_shadow or partial_vertical_shadow:
+            candidate_pixels, continuity_ratio = _edge_shadow_candidate_profile(signal_edge, side, signal_inner_mean)
             candidate_ratio = candidate_pixels / max(1, total)
             min_candidate_ratio = 0.008 if strong_shadow else 0.018
             min_continuity_ratio = 0.72 if strong_shadow else 0.92
@@ -4616,21 +4668,28 @@ def _lighten_edge_shadow_conservative(image: Image.Image) -> EdgeShadowLightenin
                     image,
                     f"edge shadow lightening skipped: low-confidence narrow shadow near {side} edge",
                 )
-            max_delta = min(30.0, delta * (0.68 if strong_shadow else 0.82))
-            plan_edge_box = edge_box
+            max_delta = min(30.0, signal_delta * (0.68 if strong_shadow else 0.82))
+            plan_edge_box = signal_edge_box
             plan_candidate_pixels = candidate_pixels
             diagonal_side_shadow = side in {"left", "right"} and (
-                mild_side_shadow or (low_tonal_separation and strong_shadow and delta <= 24)
+                mild_side_shadow
+                or partial_vertical_shadow
+                or (low_tonal_separation and strong_shadow and signal_delta <= 24)
             )
             if diagonal_side_shadow:
                 expanded_width = min(strip * 2, image.width)
                 if side == "left":
-                    expanded_edge_box = (0, 0, expanded_width, image.height)
+                    expanded_edge_box = (0, signal_edge_box[1], expanded_width, signal_edge_box[3])
                 else:
-                    expanded_edge_box = (image.width - expanded_width, 0, image.width, image.height)
+                    expanded_edge_box = (
+                        image.width - expanded_width,
+                        signal_edge_box[1],
+                        image.width,
+                        signal_edge_box[3],
+                    )
                 expanded_edge = grayscale.crop(expanded_edge_box)
                 expanded_candidate_pixels, expanded_continuity_ratio = _edge_shadow_candidate_profile(
-                    expanded_edge, side, inner_mean
+                    expanded_edge, side, signal_inner_mean
                 )
                 expanded_candidate_ratio = expanded_candidate_pixels / max(1, total)
                 if (
@@ -4640,8 +4699,9 @@ def _lighten_edge_shadow_conservative(image: Image.Image) -> EdgeShadowLightenin
                 ):
                     plan_edge_box = expanded_edge_box
                     plan_candidate_pixels = expanded_candidate_pixels
-                    max_delta = min(max_delta, delta * (0.72 if mild_side_shadow else 0.62))
-            edge_plans.append((side, plan_edge_box, inner_box, max_delta, plan_candidate_pixels, inner_mean))
+                    expansion_factor = 0.72 if (mild_side_shadow or partial_vertical_shadow) else 0.62
+                    max_delta = min(max_delta, signal_delta * expansion_factor)
+            edge_plans.append((side, plan_edge_box, inner_box, max_delta, plan_candidate_pixels, signal_inner_mean))
 
     if not edge_plans:
         return _edge_shadow_noop(image, "edge shadow lightening skipped: no confident page-edge shadow")

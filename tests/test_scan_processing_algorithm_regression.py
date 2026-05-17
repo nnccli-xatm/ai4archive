@@ -275,6 +275,102 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_mild_partial_edge_shadow_cleanup_preserves_edge_content(self) -> None:
+        def mild_partial_edge_shadow_page(variant: str) -> Image.Image:
+            image = Image.new("RGB", (240, 180), (244, 244, 240))
+            draw = ImageDraw.Draw(image)
+            for x in range(14):
+                shade = 235 + min(7, x // 2)
+                draw.line((x, 12, x, image.height - 13), fill=(shade, shade, shade))
+            for y in range(35, 145, 14):
+                draw.rectangle((62, y, 190, y + 4), fill=(45, 45, 45))
+            if variant == "safe":
+                return image
+            if variant == "table_lines":
+                for y in (54, 82, 110):
+                    draw.line((6, y, 220, y), fill=(58, 58, 58), width=2)
+                for x in (18, 92, 166, 222):
+                    draw.line((x, 54, x, 110), fill=(58, 58, 58), width=2)
+            elif variant == "stamp":
+                draw.ellipse((8, 74, 50, 116), outline=(180, 35, 35), width=4)
+            elif variant == "edge_mark":
+                draw.rectangle((4, 78, 22, 92), fill=(45, 45, 45))
+            else:
+                raise ValueError(f"unsupported variant: {variant}")
+            return image
+
+        with tempfile.TemporaryDirectory(prefix="scan-processing-mild-edge-shadow-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_safe_mild_partial_edge_shadow.png": mild_partial_edge_shadow_page("safe"),
+                "synthetic_mild_edge_table_lines.png": mild_partial_edge_shadow_page("table_lines"),
+                "synthetic_mild_edge_stamp.png": mild_partial_edge_shadow_page("stamp"),
+                "synthetic_mild_edge_mark.png": mild_partial_edge_shadow_page("edge_mark"),
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "mild-edge-shadow", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(lighten_edge_shadow=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_name = "synthetic_safe_mild_partial_edge_shadow.png"
+            safe_record = records[safe_name]
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertTrue(safe_record["edge_shadow_lightened"])
+            self.assertEqual(safe_record["edge_shadow_reason_code"], "applied_narrow_neutral_edge_shadow")
+            self.assertEqual(safe_record["edge_shadow_edges"], ["left"])
+            self.assertGreater(safe_record["edge_shadow_changed_pixel_ratio"], 0.01)
+            self.assertLess(safe_record["edge_shadow_changed_pixel_ratio"], 0.08)
+            with Image.open(process_dir / safe_record["output_relative_path"]) as output:
+                self.assertGreater(
+                    _mean_luma(output, (0, 12, 14, 168)),
+                    _mean_luma(pages[safe_name], (0, 12, 14, 168)) + 2.0,
+                )
+                self.assertLess(_changed_ratio(pages[safe_name], output, (54, 28, 200, 154)), 0.002)
+
+            protected_names = set(pages) - {safe_name}
+            for name in protected_names:
+                record = records[name]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name])
+                self.assertFalse(record["edge_shadow_lightened"], name)
+                self.assertIn(
+                    record["edge_shadow_reason_code"],
+                    {"protected_edge_mark", "protected_color_content"},
+                    name,
+                )
+                self.assertEqual(record["edge_shadow_changed_pixel_ratio"], 0.0, name)
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    self.assertEqual(output.convert("RGB").tobytes(), pages[name].tobytes(), name)
+
+            edge_shadow_summary = audit_summary["guardrails"]["edge_shadow"]
+            self.assertEqual(audit_summary["counts"]["edge_shadow_lightened_files"], 1)
+            self.assertEqual(edge_shadow_summary["reason_code_distribution"]["applied_narrow_neutral_edge_shadow"], 1)
+            self.assertEqual(
+                edge_shadow_summary["skip_reason_code_distribution"]["protected_edge_mark"]
+                + edge_shadow_summary["skip_reason_code_distribution"]["protected_color_content"],
+                len(protected_names),
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_illumination_gradient_levels_safe_public_gradient_and_preserves_content_edges(self) -> None:
         def gradient_page(variant: str) -> Image.Image:
             width, height = 260, 180
