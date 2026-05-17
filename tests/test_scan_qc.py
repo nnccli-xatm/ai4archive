@@ -10762,6 +10762,50 @@ class ScanQcTest(unittest.TestCase):
             )
             self.assertNotIn("A001_narrow_gray_edge", json.dumps(audit_summary, ensure_ascii=False))
 
+    def test_trim_dark_border_trims_single_scanner_shadow_band_without_touching_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "A001_single_shadow_band.png"
+            image = Image.new("RGB", (180, 120), (244, 244, 240))
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((0, 0, 4, 119), fill=(92, 92, 92))
+            for y in (42, 58, 74):
+                draw.rectangle((42, y, 132, y + 4), fill=(30, 30, 30))
+            image.save(source, dpi=(300, 300))
+            source_bytes = source.read_bytes()
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(trim_dark_border=True, workers=1))
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            record = manifest["files"][0]
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertTrue(record["dark_border_trimmed"])
+            self.assertEqual(record["dark_border_bbox"], [5, 0, 180, 120])
+            self.assertEqual(record["output_size"], [175, 120])
+            self.assertLessEqual(record["processing_audit"]["max_trim_margin_ratio"], 0.028)
+            self.assertEqual(record["dark_border_reason"], "single dark edge shadow trimmed")
+            self.assertEqual(record["dark_border_reason_code"], "trimmed_single_edge_shadow")
+            self.assertEqual(record["dark_border_edge_sides"], ["left"])
+            self.assertEqual(record["dark_border_band_width_bucket"], "5-8px")
+            self.assertEqual(audit_summary["counts"]["dark_border_trimmed_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["dark_border_trim"]["guardrail_reason_code_distribution"],
+                {"trimmed_single_edge_shadow": 1},
+            )
+            self.assertEqual(
+                audit_summary["guardrails"]["dark_border_trim"]["edge_side_distribution"],
+                {"left": 1},
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("A001_single_shadow_band", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
     def test_trim_dark_border_trims_broken_scan_edge_with_light_glare_gap(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -10991,6 +11035,102 @@ class ScanQcTest(unittest.TestCase):
                 self.assertIsNone(record["dark_border_bbox"])
                 self.assertEqual(record["output_size"], [100, 80])
                 self.assertIn("dark_border_trim_noop", record["operations"])
+
+    def test_trim_dark_border_single_edge_shadow_noops_for_protected_and_uncertain_content(self) -> None:
+        def make_case(mark: str) -> Image.Image:
+            image = Image.new("RGB", (180, 120), (244, 244, 240))
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((0, 0, 4, 119), fill=(92, 92, 92))
+            for y in (42, 58, 74):
+                draw.rectangle((52, y, 132, y + 4), fill=(30, 30, 30))
+            if mark == "page_border":
+                draw.line((10, 8, 10, 112), fill=(25, 25, 25), width=2)
+            elif mark == "edge_text":
+                draw.rectangle((7, 38, 22, 44), fill=(20, 20, 20))
+            elif mark == "page_number":
+                draw.rectangle((7, 102, 24, 110), fill=(20, 20, 20))
+            elif mark == "handwriting":
+                draw.line((6, 28, 24, 46), fill=(45, 45, 45), width=2)
+            elif mark == "stamp":
+                draw.ellipse((6, 48, 32, 74), outline=(155, 20, 20), width=4)
+            elif mark == "annotation":
+                draw.line((6, 84, 34, 76), fill=(45, 45, 45), width=2)
+            elif mark == "ruled_table":
+                draw.line((6, 64, 104, 64), fill=(30, 30, 30), width=2)
+            elif mark == "photo_map_chart":
+                for x in range(6, 34, 4):
+                    draw.line((x, 28, x, 92), fill=(80, 80, 80), width=1)
+                for y in range(28, 92, 5):
+                    draw.line((6, y, 34, y), fill=(80, 80, 80), width=1)
+            elif mark == "binding_fold":
+                draw.line((8, 0, 8, 119), fill=(45, 45, 45), width=2)
+            elif mark == "archival_dirt":
+                for point in [(7, 25), (9, 26), (10, 47), (8, 71), (11, 94), (13, 95)]:
+                    draw.rectangle((point[0], point[1], point[0] + 1, point[1] + 1), fill=(50, 50, 50))
+            elif mark == "dark_paper":
+                image = Image.new("RGB", (180, 120), (132, 128, 122))
+                draw = ImageDraw.Draw(image)
+                draw.rectangle((0, 0, 4, 119), fill=(70, 70, 70))
+                draw.rectangle((52, 58, 132, 62), fill=(20, 20, 20))
+            elif mark == "uncertain_edge":
+                draw.rectangle((0, 22, 4, 44), fill=(244, 244, 240))
+            else:
+                raise ValueError(mark)
+            return image
+
+        cases = [
+            "page_border",
+            "edge_text",
+            "page_number",
+            "handwriting",
+            "stamp",
+            "annotation",
+            "ruled_table",
+            "photo_map_chart",
+            "binding_fold",
+            "archival_dirt",
+            "dark_paper",
+            "uncertain_edge",
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            originals: dict[str, Image.Image] = {}
+            for case in cases:
+                image = make_case(case)
+                originals[f"A001_{case}.png"] = image.copy()
+                image.save(input_dir / f"A001_{case}.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(trim_dark_border=True, workers=1))
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            for name, record in records.items():
+                self.assertFalse(record["dark_border_trimmed"], name)
+                self.assertIsNone(record["dark_border_bbox"], name)
+                self.assertIn("dark_border_trim_noop", record["operations"], name)
+                self.assertIn(
+                    record["dark_border_reason"],
+                    {
+                        "incomplete dark edge border evidence",
+                        "no light page background for dark border trim",
+                        "protected edge content near dark border",
+                    },
+                    name,
+                )
+                with Image.open(process_dir / "images" / name) as processed:
+                    self.assertEqual(processed.size, originals[name].size, name)
+                    self.assertIsNone(ImageChops.difference(originals[name], processed.convert("RGB")).getbbox(), name)
+            self.assertEqual(audit_summary["counts"]["dark_border_trimmed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["dark_border_skipped_files"], len(cases))
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            for case in cases:
+                self.assertNotIn(case, audit_summary_text)
 
     def test_trim_dark_border_noops_for_archival_dark_edge_with_auditable_reason(self) -> None:
         image = Image.new("RGB", (100, 80), (238, 238, 232))

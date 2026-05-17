@@ -10333,6 +10333,18 @@ def _detect_dark_border_bbox(image: Image.Image) -> DarkBorderDetection:
         reason = "no confident dark edge border"
         return DarkBorderDetection(None, reason, _dark_border_reason_code(reason), edge_sides, band_width_bucket)
     if min(runs) < 2:
+        single_edge_shadow = _single_dark_edge_shadow_trim(
+            grayscale,
+            runs,
+            (left_broken, right_broken, top_broken, bottom_broken),
+        )
+        if single_edge_shadow is not None:
+            bbox, edge_sides, band_width_bucket = single_edge_shadow
+            if _has_protected_dark_content_near_trim_boundary(grayscale, bbox):
+                reason = "protected edge content near dark border"
+                return DarkBorderDetection(None, reason, _dark_border_reason_code(reason), edge_sides, band_width_bucket)
+            reason = "single dark edge shadow trimmed"
+            return DarkBorderDetection(bbox, reason, _dark_border_reason_code(reason), edge_sides, band_width_bucket)
         reason = "incomplete dark edge border evidence"
         return DarkBorderDetection(None, reason, _dark_border_reason_code(reason), edge_sides, band_width_bucket)
     if max(runs) > max(min(runs) * 3, min(runs) + max(2, int(min(width, height) * 0.04))):
@@ -10384,6 +10396,7 @@ def _dark_border_reason_code(reason: str | None) -> str | None:
     return {
         "dark edge border trimmed": "trimmed_continuous_edge",
         "broken dark edge border trimmed": "trimmed_broken_edge",
+        "single dark edge shadow trimmed": "trimmed_single_edge_shadow",
         "dark border trim disabled": "disabled",
         "image too small": "image_too_small",
         "no light page background for dark border trim": "no_light_page_background",
@@ -10400,6 +10413,65 @@ def _dark_border_reason_code(reason: str | None) -> str | None:
         "reverted by combined change guard": "reverted_by_combined_change_guard",
         "reverted by cumulative change guard": "reverted_by_cumulative_change_guard",
     }.get(reason, "guardrail_reverted_or_unknown")
+
+
+def _single_dark_edge_shadow_trim(
+    image: Image.Image,
+    runs: tuple[int, int, int, int],
+    broken_edges: tuple[bool, bool, bool, bool],
+) -> tuple[tuple[int, int, int, int], tuple[str, ...], str | None] | None:
+    width, height = image.size
+    active = [(side, run) for side, run in zip(("left", "right", "top", "bottom"), runs) if run >= 2]
+    if len(active) != 1:
+        return None
+
+    side, run = active[0]
+    if broken_edges[("left", "right", "top", "bottom").index(side)]:
+        return None
+
+    max_single_edge_run = max(2, min(10, int(min(width, height) * 0.045)))
+    if run > max_single_edge_run:
+        return None
+
+    if not _has_light_stable_background_inside_dark_edge(image, side, run):
+        return None
+
+    bbox = {
+        "left": (run, 0, width, height),
+        "right": (0, 0, width - run, height),
+        "top": (0, run, width, height),
+        "bottom": (0, 0, width, height - run),
+    }[side]
+    return bbox, (side,), _dark_border_band_width_bucket(run)
+
+
+def _has_light_stable_background_inside_dark_edge(image: Image.Image, side: str, run: int) -> bool:
+    width, height = image.size
+    depth = max(6, min(14, int(min(width, height) * 0.06)))
+    corner_pad_x = max(3, int(width * 0.05))
+    corner_pad_y = max(3, int(height * 0.05))
+    if side == "left":
+        box = (run, corner_pad_y, min(width, run + depth), height - corner_pad_y)
+    elif side == "right":
+        box = (max(0, width - run - depth), corner_pad_y, width - run, height - corner_pad_y)
+    elif side == "top":
+        box = (corner_pad_x, run, width - corner_pad_x, min(height, run + depth))
+    else:
+        box = (corner_pad_x, max(0, height - run - depth), width - corner_pad_x, height - run)
+
+    if box[2] <= box[0] or box[3] <= box[1]:
+        return False
+
+    values = list(image.crop(box).tobytes())
+    if not values:
+        return False
+    area = len(values)
+    mean = sum(values) / area
+    variance = sum((value - mean) ** 2 for value in values) / area
+    stddev = variance**0.5
+    dark_ratio = sum(1 for value in values if value <= 115) / area
+    foreground_ratio = sum(1 for value in values if value <= 155) / area
+    return mean >= 178 and stddev <= 22 and dark_ratio <= 0.0025 and foreground_ratio <= 0.01
 
 
 def _dark_edge_run(image: Image.Image, side: str, max_pixels: int) -> tuple[int, bool]:
