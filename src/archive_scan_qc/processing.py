@@ -1301,6 +1301,9 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
     deskew_timing = operation_timings.get("deskew") if isinstance(operation_timings, dict) else {}
     if not isinstance(deskew_timing, dict):
         deskew_timing = {}
+    despeckle_timing = operation_timings.get("despeckle") if isinstance(operation_timings, dict) else {}
+    if not isinstance(despeckle_timing, dict):
+        despeckle_timing = {}
     sharpen_text_edges_timing = operation_timings.get("sharpen_text_edges") if isinstance(operation_timings, dict) else {}
     if not isinstance(sharpen_text_edges_timing, dict):
         sharpen_text_edges_timing = {}
@@ -2199,6 +2202,11 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                 ),
                 "backend_mode": _aggregate_despeckle_backend(processed_records, options.despeckle)["backend_mode"],
                 "reason_distribution": _reason_counts(reason for reason in despeckle_reasons if isinstance(reason, str)),
+                "reason_code_distribution": (
+                    despeckle_timing.get("reason_code_distribution")
+                    if isinstance(despeckle_timing.get("reason_code_distribution"), dict)
+                    else {}
+                ),
             },
             "tone_normalization": {
                 "applied_files": sum(1 for audit in audit_records if audit.get("tone_normalized") is True),
@@ -11623,6 +11631,7 @@ _DESPECKLE_CONTENT_CONTEXT_MIN_DARK_PIXELS = 6
 _DESPECKLE_SPARSE_TEXT_CLEARANCE_RADIUS = 5
 _DESPECKLE_SPARSE_TEXT_MIN_BACKGROUND_MEDIAN = 220
 _DESPECKLE_SPARSE_TEXT_MAX_NEARBY_CONTENT_PIXELS = 64
+_DESPECKLE_PALE_MARK_MIN_VALUE = 220
 _DESPECKLE_NEIGHBOR_OFFSETS = tuple(
     (offset_x, offset_y)
     for offset_y in (-1, 0, 1)
@@ -11906,14 +11915,24 @@ def _despeckle_replacements_numpy(
 
     protected_context = np.asarray(
         [
-            _despeckle_has_sparse_text_protected_context(
-                lambda nx, ny: int(gray[ny, nx]),
-                lambda nx, ny: (int(rgb[ny, nx, 0]), int(rgb[ny, nx, 1]), int(rgb[ny, nx, 2])),
-                candidate_set=candidate_set,
-                width=width,
-                height=height,
-                x=int(x_value),
-                y=int(y_value),
+            (
+                _despeckle_has_pale_mark_protected_context(
+                    lambda nx, ny: int(gray[ny, nx]),
+                    candidate_set,
+                    width,
+                    height,
+                    int(x_value),
+                    int(y_value),
+                )
+                or _despeckle_has_sparse_text_protected_context(
+                    lambda nx, ny: int(gray[ny, nx]),
+                    lambda nx, ny: (int(rgb[ny, nx, 0]), int(rgb[ny, nx, 1]), int(rgb[ny, nx, 2])),
+                    candidate_set=candidate_set,
+                    width=width,
+                    height=height,
+                    x=int(x_value),
+                    y=int(y_value),
+                )
             )
             for x_value, y_value in zip(candidate_x.tolist(), candidate_y.tolist())
         ],
@@ -12019,6 +12038,8 @@ def _despeckle_replacements_fallback(
         if len(component) > _DESPECKLE_MAX_COMPONENT_PIXELS and any(
             gray_pixels[cx, cy] < _DESPECKLE_TINY_DUST_CLUSTER_MIN_VALUE for cx, cy in component
         ):
+            continue
+        if _despeckle_has_pale_mark_protected_context(gray_pixels, candidate_set, width, height, x, y):
             continue
         protection_candidate_set = candidate_set if len(component) > 4 else conservative_candidate_set
         dark_neighbors = 0
@@ -12361,6 +12382,38 @@ def _despeckle_has_sparse_text_protected_context(
             if rgb_pixels is not None and _despeckle_pixel_color_protected(_despeckle_pixel_at(rgb_pixels, nx, ny)):
                 return True
             if any(abs(nx - cx) <= 1 and abs(ny - cy) > 2 for cx, cy in component):
+                return True
+    return False
+
+
+def _despeckle_has_pale_mark_protected_context(
+    gray_pixels: Any,
+    candidate_set: set[tuple[int, int]],
+    width: int,
+    height: int,
+    x: int,
+    y: int,
+) -> bool:
+    if _despeckle_pixel_at(gray_pixels, x, y) < _DESPECKLE_PALE_MARK_MIN_VALUE:
+        return False
+    component = _despeckle_candidate_component(candidate_set, x, y)
+    if any(_despeckle_pixel_at(gray_pixels, cx, cy) < _DESPECKLE_PALE_MARK_MIN_VALUE for cx, cy in component):
+        return False
+    if len(component) > 1:
+        return True
+
+    nearby_candidates = 0
+    radius = _DESPECKLE_CONTENT_CONTEXT_RADIUS
+    for ny in range(max(0, y - radius), min(height, y + radius + 1)):
+        for nx in range(max(0, x - radius), min(width, x + radius + 1)):
+            if (nx, ny) == (x, y):
+                continue
+            if (nx, ny) not in candidate_set:
+                continue
+            if _despeckle_pixel_at(gray_pixels, nx, ny) <= _DESPECKLE_DARK_THRESHOLD:
+                continue
+            nearby_candidates += 1
+            if nearby_candidates >= 2:
                 return True
     return False
 
