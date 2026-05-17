@@ -241,6 +241,84 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in ("synthetic_safe_combination.png", str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_despeckle_cleans_compact_dust_clusters_but_preserves_content_marks(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-despeckle-clusters-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_safe_cluster.png": _safe_compact_dust_cluster_page(),
+                "synthetic_protected_table_annotation.png": _risk_table_page_number_annotation_page(),
+                "synthetic_protected_stamp.png": _risk_stamp_header_footer_page(),
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "despeckle-clusters", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_record = records["synthetic_safe_cluster.png"]
+            safe_audit = safe_record["processing_audit"]
+            self.assertEqual((input_dir / "synthetic_safe_cluster.png").read_bytes(), source_bytes["synthetic_safe_cluster.png"])
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertTrue(safe_record["despeckled"])
+            self.assertEqual(safe_record["despeckle_pixels_changed"], 6)
+            self.assertIn("despeckle_isolated_pixels", safe_record["operations"])
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertEqual(safe_audit["local_content_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["processed_output_safety_guard_action"], "passed")
+            self.assertEqual(safe_audit["combination_quality_guard_reason_code"], "safe_combination_passed")
+            self.assertLessEqual(safe_audit["despeckle_pixel_ratio"], 0.001)
+
+            with Image.open(process_dir / safe_record["output_relative_path"]) as output:
+                for point in _safe_compact_dust_cluster_points():
+                    self.assertGreaterEqual(output.convert("L").getpixel(point), 240)
+
+            for name in ("synthetic_protected_table_annotation.png", "synthetic_protected_stamp.png"):
+                record = records[name]
+                audit = record["processing_audit"]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name])
+                self.assertEqual(record["status"], "processed")
+                self.assertFalse(record["despeckled"], name)
+                self.assertEqual(record["despeckle_pixels_changed"], 0, name)
+                self.assertIn("despeckle_noop", record["operations"], name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertEqual(audit["local_content_change_guard_action"], "passed", name)
+                self.assertEqual(audit["cumulative_change_guard_action"], "passed", name)
+                self.assertEqual(audit["processed_output_safety_guard_action"], "passed", name)
+                self.assertEqual(audit["despeckle_pixel_ratio"], 0.0, name)
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    self.assertIsNone(ImageChops.difference(pages[name], output.convert("RGB")).getbbox(), name)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["guardrails"]["despeckle"]["applied_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["despeckle"]["pixels_changed"], 6)
+            self.assertEqual(
+                audit_summary["timing"]["operation_timings"]["despeckle"]["reason_code_distribution"][
+                    "applied_isolated_pixels"
+                ],
+                1,
+            )
+            self.assertEqual(
+                audit_summary["timing"]["operation_timings"]["despeckle"]["max_component_size"]["max"],
+                6,
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_warm_mild_bleed_through_is_cleaned_without_private_audit_rows(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-warm-bleed-through-") as temp_dir:
             root = Path(temp_dir)
@@ -1964,6 +2042,20 @@ def _safe_full_chain_combination_page() -> Image.Image:
         draw.line((58, y, 174, y), fill=(202, 202, 202), width=2)
     draw.ellipse((165, 28, 210, 58), fill=(222, 222, 222))
     image.putpixel((24, 24), (0, 0, 0))
+    return image
+
+
+def _safe_compact_dust_cluster_points() -> tuple[tuple[int, int], ...]:
+    return ((128, 82), (129, 82), (130, 82), (128, 83), (129, 83), (130, 83))
+
+
+def _safe_compact_dust_cluster_page() -> Image.Image:
+    image = Image.new("RGB", (260, 180), (246, 246, 244))
+    draw = ImageDraw.Draw(image)
+    for y in (42, 68, 94):
+        draw.rectangle((44, y, 112, y + 3), fill=(58, 58, 58))
+    for point in _safe_compact_dust_cluster_points():
+        image.putpixel(point, (52, 52, 52))
     return image
 
 
