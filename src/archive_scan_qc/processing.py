@@ -11225,6 +11225,7 @@ _DESPECKLE_MAX_TINY_DUST_CLUSTER_PIXELS = 9
 _DESPECKLE_TINY_DUST_CLUSTER_MIN_VALUE = 35
 _DESPECKLE_MAX_COMPONENT_SPAN = 3
 _DESPECKLE_DENSE_PREFILTER_MIN_DARK_PIXELS = 512
+_DESPECKLE_DENSE_FULL_COMPONENT_MAX_DARK_PIXELS = 50000
 _DESPECKLE_DENSE_PREFILTER_MAX_LOW_CONNECTIVITY_RATIO = 0.01
 _DESPECKLE_CONTENT_CONTEXT_RADIUS = 8
 _DESPECKLE_CONTENT_CONTEXT_MIN_DARK_PIXELS = 6
@@ -12152,6 +12153,20 @@ def _despeckle_dense_connected_content_candidates(
 ) -> list[tuple[int, int]] | None:
     if dark_pixel_count < _DESPECKLE_DENSE_PREFILTER_MIN_DARK_PIXELS:
         return None
+
+    if dark_pixel_count <= _DESPECKLE_DENSE_FULL_COMPONENT_MAX_DARK_PIXELS:
+        dark_points = {
+            (index % crop_width, index // crop_width)
+            for index, mask_value in enumerate(crop_values)
+            if mask_value
+        }
+        return _despeckle_candidate_points_from_dark_points(
+            dark_points,
+            width=width,
+            height=height,
+            left=left,
+            top=top,
+        )
 
     crop = Image.frombytes("L", (crop_width, crop_height), crop_values)
     neighbor_counts = crop.filter(ImageFilter.Kernel((3, 3), [1] * 9, scale=255))
