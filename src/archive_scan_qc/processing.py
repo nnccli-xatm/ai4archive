@@ -10841,6 +10841,9 @@ def _detect_conservative_crop_bbox(image: Image.Image) -> CropDetection:
 
     bbox = light_bbox
     left, top, right, bottom = bbox
+    if _light_crop_trimmed_area_has_faint_edge_content(grayscale, light_bbox, background):
+        return CropDetection(None, "faint edge content protection")
+
     if not _light_crop_has_safe_inner_evidence(grayscale, diff, light_bbox, background):
         return strong_result or CropDetection(None, "low-confidence subtle page edge evidence")
 
@@ -10902,6 +10905,35 @@ def _detect_light_outer_margin_bbox(image: Image.Image, background: float) -> tu
     if crop_area_ratio < 0.45 or crop_area_ratio > 0.98:
         return None
     return (left, top, right, bottom)
+
+
+def _light_crop_trimmed_area_has_faint_edge_content(
+    image: Image.Image,
+    bbox: tuple[int, int, int, int],
+    background: float,
+) -> bool:
+    width, height = image.size
+    left, top, right, bottom = bbox
+    boxes = (
+        (0, 0, left, height),
+        (right, 0, width, height),
+        (left, 0, right, top),
+        (left, bottom, right, height),
+    )
+    min_mark_pixels = max(3, int(min(width, height) * 0.015))
+    for box in boxes:
+        if box[2] <= box[0] or box[3] <= box[1]:
+            continue
+        sample = image.crop(box)
+        area = max(1, sample.width * sample.height)
+        faint_pixels = 0
+        for value in sample.tobytes():
+            delta = abs(value - background)
+            if 6.0 <= delta < 18.0:
+                faint_pixels += 1
+        if faint_pixels >= min_mark_pixels and (faint_pixels / area) <= 0.20:
+            return True
+    return False
 
 
 def _first_consistent_light_edge(
