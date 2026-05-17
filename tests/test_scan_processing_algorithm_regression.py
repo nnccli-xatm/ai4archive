@@ -1770,6 +1770,71 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages.keys(), str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_conservative_auto_crop_preserves_faint_edge_content(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-faint-edge-auto-crop-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_safe_blank_light_margin.png": _light_margin_auto_crop_page(),
+                "synthetic_faint_edge_page_number.png": _light_margin_auto_crop_page(variant="page_number"),
+                "synthetic_faint_edge_marginal_note.png": _light_margin_auto_crop_page(variant="marginal_note"),
+                "synthetic_faint_edge_table_border.png": _light_margin_auto_crop_page(variant="table_border"),
+                "synthetic_faint_edge_archival_texture.png": _light_margin_auto_crop_page(
+                    variant="archival_texture"
+                ),
+            }
+            for filename, page in pages.items():
+                page.save(input_dir / filename, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "faint-edge-auto-crop", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, workers=1))
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            safe_record = records["synthetic_safe_blank_light_margin.png"]
+
+            self.assertTrue(safe_record["cropped"])
+            self.assertEqual(safe_record["crop_reason"], "conservative crop applied")
+            self.assertEqual(safe_record["crop_bbox"], [10, 10, 231, 171])
+            self.assertLessEqual(safe_record["processing_audit"]["crop_ratio"], 0.2)
+            self.assertEqual(safe_record["processing_audit"]["guardrail_failures"], [])
+
+            protected_names = set(pages) - {"synthetic_safe_blank_light_margin.png"}
+            for name in protected_names:
+                record = records[name]
+                self.assertEqual(record["status"], "processed")
+                self.assertFalse(record["cropped"], name)
+                self.assertEqual(record["crop_reason"], "faint edge content protection", name)
+                self.assertEqual(record["output_size"], [240, 180], name)
+                with Image.open(input_dir / name) as source, Image.open(
+                    process_dir / record["output_relative_path"]
+                ) as processed:
+                    self.assertIsNone(ImageChops.difference(source, processed).getbbox(), name)
+                self.assertEqual(record["processing_audit"]["crop_ratio"], 0.0, name)
+                self.assertEqual(record["processing_audit"]["cumulative_change_crop_ratio"], 0.0, name)
+                self.assertEqual(record["processing_audit"]["guardrail_failures"], [], name)
+
+            self.assertEqual(audit_summary["counts"]["auto_crop_applied_files"], 1)
+            self.assertEqual(audit_summary["counts"]["auto_crop_skipped_files"], len(protected_names))
+            self.assertEqual(
+                audit_summary["guardrails"]["auto_crop"]["skip_reason_distribution"][
+                    "faint edge content protection"
+                ],
+                len(protected_names),
+            )
+            self.assertEqual(
+                audit_summary["guardrails"]["auto_crop"]["protection_triggered_files"],
+                len(protected_names),
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages.keys(), str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_variable_pale_gutter_trim_stays_bounded_and_private(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-variable-gutter-full-chain-") as temp_dir:
             root = Path(temp_dir)
@@ -3388,6 +3453,31 @@ def _faint_post_deskew_corner_wedge_page(variant: str = "safe") -> Image.Image:
         expand=True,
         fillcolor=(246, 246, 246),
     )
+
+
+def _light_margin_auto_crop_page(variant: str = "safe") -> Image.Image:
+    image = Image.new("RGB", (240, 180), (248, 248, 248))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((10, 10, 230, 170), fill=(240, 240, 240))
+    for y in (62, 86, 110):
+        draw.rectangle((72, y, 168, y + 3), fill=(48, 48, 48))
+
+    faint = (233, 233, 233)
+    if variant == "page_number":
+        draw.text((3, 22), "12", fill=faint)
+    elif variant == "marginal_note":
+        draw.line((3, 56, 8, 52, 13, 58, 18, 55), fill=faint, width=1)
+    elif variant == "table_border":
+        for y in (26, 38, 50):
+            draw.line((0, y, 24, y), fill=faint, width=1)
+        for x in (4, 14, 23):
+            draw.line((x, 20, x, 56), fill=faint, width=1)
+    elif variant == "archival_texture":
+        for x, y in ((2, 30), (5, 88), (8, 120), (16, 42), (20, 136)):
+            draw.point((x, y), fill=(232, 232, 232))
+    elif variant != "safe":
+        raise ValueError(f"unsupported variant: {variant}")
+    return image
 
 
 def _mixed_tone_binding_gutter_page(variant: str = "safe") -> Image.Image:
