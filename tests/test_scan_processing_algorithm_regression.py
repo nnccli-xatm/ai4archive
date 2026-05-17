@@ -8,7 +8,7 @@ import unittest
 from unittest import mock
 from pathlib import Path
 
-from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageStat
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, ImageStat
 
 from archive_scan_qc import processing as processing_module
 from archive_scan_qc.benchmark import _processing_quality_regression, run_benchmark
@@ -1136,6 +1136,89 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_sparse_pale_typed_text_enhances_while_protected_pages_noop(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-sparse-pale-typed-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "A001_sparse_pale_typed.png": _sparse_pale_typed_page(),
+                "A002_low_contrast_handwriting.png": _low_contrast_handwriting_page(),
+                "A003_ruled_table_marks.png": _risk_table_page_number_annotation_page(),
+                "A004_clear_text.png": _clear_text_page(),
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            safe_original = pages["A001_sparse_pale_typed.png"].convert("L")
+            original_text_mean = _mean_luma(safe_original, (46, 48, 210, 94))
+            original_background_mean = _mean_luma(safe_original, (248, 48, 330, 94))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "sparse-pale-typed", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(enhance_faded_text=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_record = records["A001_sparse_pale_typed.png"]
+            safe_audit = safe_record["processing_audit"]
+            with Image.open(process_dir / safe_record["output_relative_path"]) as processed_image:
+                processed = processed_image.convert("L")
+                processed_text_mean = _mean_luma(processed, (46, 48, 210, 94))
+                processed_background_mean = _mean_luma(processed, (248, 48, 330, 94))
+            self.assertTrue(safe_record["faded_text_enhanced"])
+            self.assertEqual(safe_record["faded_text_reason_code"], "applied_stable_low_contrast_text")
+            self.assertGreaterEqual(safe_audit["faded_text_delta"], 8.0)
+            self.assertGreater(safe_audit["faded_text_changed_pixel_ratio"], 0.0)
+            self.assertLessEqual(safe_audit["faded_text_changed_pixel_ratio"], 0.10)
+            self.assertLessEqual(safe_audit["faded_text_candidate_pixel_ratio"], 0.16)
+            self.assertGreater(original_text_mean - processed_text_mean, 0.25)
+            self.assertLess(abs(original_background_mean - processed_background_mean), 0.5)
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertEqual(safe_audit["local_content_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["combination_quality_guard_reason_code"], "safe_combination_passed")
+            self.assertEqual(safe_audit["processed_output_safety_guard_reason_code"], "safe_processed_output_passed")
+
+            expected_noop_codes = {
+                "A002_low_contrast_handwriting.png": "protected_handwriting_marginalia_annotation",
+                "A003_ruled_table_marks.png": "protected_texture_table_or_photo_region",
+                "A004_clear_text.png": "protected_dark_foreground",
+            }
+            for name, expected_code in expected_noop_codes.items():
+                record = records[name]
+                self.assertFalse(record["faded_text_enhanced"], name)
+                self.assertEqual(record["faded_text_reason_code"], expected_code, name)
+                self.assertEqual(record["processing_audit"]["faded_text_changed_pixel_ratio"], 0.0, name)
+                self.assertEqual(record["processing_audit"]["guardrail_failures"], [], name)
+
+            faded_guard = audit_summary["guardrails"]["faded_text"]
+            self.assertEqual(faded_guard["applied_files"], 1)
+            self.assertEqual(faded_guard["skipped_files"], 3)
+            self.assertEqual(
+                faded_guard["reason_code_distribution"]["applied_stable_low_contrast_text"],
+                1,
+            )
+            self.assertIn("protected_handwriting_marginalia_annotation", faded_guard["skip_reason_code_distribution"])
+            self.assertIn("protected_texture_table_or_photo_region", faded_guard["skip_reason_code_distribution"])
+            self.assertIn("protected_dark_foreground", faded_guard["skip_reason_code_distribution"])
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_quality_regression_reports_missing_operation_timing_code_without_private_rows(self) -> None:
         quality = _processing_quality_regression(
             {
@@ -2110,6 +2193,33 @@ def _risk_table_page_number_annotation_page() -> Image.Image:
         draw.line((x, 42, x, 132), fill=(190, 190, 190), width=2)
     draw.text((180, 18), "12", fill=(60, 60, 60))
     draw.line((48, 150, 116, 158), fill=(120, 120, 120), width=2)
+    return image
+
+
+def _sparse_pale_typed_page() -> Image.Image:
+    image = Image.new("RGB", (360, 240), (244, 244, 244))
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default()
+    for index, line in enumerate(("ARCHIVE REGISTER 1948", "PALE PRINT LINE")):
+        draw.text((48, 52 + index * 32), line, fill=(228, 228, 228), font=font)
+    return image
+
+
+def _low_contrast_handwriting_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), (244, 244, 240))
+    draw = ImageDraw.Draw(image)
+    for y in (48, 72, 98, 124):
+        points = [(44, y), (58, y - 6), (76, y + 2), (94, y - 4), (112, y + 3), (132, y - 2)]
+        draw.line(points, fill=(222, 222, 218), width=2, joint="curve")
+    return image
+
+
+def _clear_text_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((24, 20, 215, 159), outline=(30, 30, 30), width=2)
+    for y in range(42, 132, 18):
+        draw.rectangle((48, y, 190, y + 4), fill=(20, 20, 20))
     return image
 
 
