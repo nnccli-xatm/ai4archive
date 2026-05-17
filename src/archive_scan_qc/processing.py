@@ -264,6 +264,8 @@ class TextEdgeSharpeningResult:
     edge_delta: float
     changed_pixel_ratio: float
     candidate_pixel_ratio: float
+    edge_energy_before: float = 0.0
+    edge_energy_after: float = 0.0
     preflight_skipped: bool = False
 
 
@@ -843,6 +845,8 @@ def _process_record(
         "text_edges_delta": 0.0,
         "text_edges_changed_pixel_ratio": 0.0,
         "text_edges_candidate_pixel_ratio": 0.0,
+        "text_edges_edge_energy_before": 0.0,
+        "text_edges_edge_energy_after": 0.0,
         "processing_audit": None,
         "processing_warnings": [],
         "operation_timings": {},
@@ -1003,6 +1007,8 @@ def _process_record(
                 "text_edges_delta": process_info["text_edges_delta"],
                 "text_edges_changed_pixel_ratio": process_info["text_edges_changed_pixel_ratio"],
                 "text_edges_candidate_pixel_ratio": process_info["text_edges_candidate_pixel_ratio"],
+                "text_edges_edge_energy_before": process_info["text_edges_edge_energy_before"],
+                "text_edges_edge_energy_after": process_info["text_edges_edge_energy_after"],
                 "processing_audit": process_info["processing_audit"],
                 "processing_warnings": process_info["processing_warnings"],
                 "operation_timings": process_info["operation_timings"],
@@ -1140,6 +1146,8 @@ def _process_record(
                     "text_edges_delta": process_info["text_edges_delta"],
                     "text_edges_changed_pixel_ratio": process_info["text_edges_changed_pixel_ratio"],
                     "text_edges_candidate_pixel_ratio": process_info["text_edges_candidate_pixel_ratio"],
+                    "text_edges_edge_energy_before": process_info["text_edges_edge_energy_before"],
+                    "text_edges_edge_energy_after": process_info["text_edges_edge_energy_after"],
                     "processing_audit": process_info["processing_audit"],
                     "processing_warnings": process_info["processing_warnings"],
                     "operation_timings": process_info["operation_timings"],
@@ -1960,6 +1968,12 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             ),
             "text_edges_candidate_pixel_ratio": _aggregate_metric(
                 audit_records, "text_edges_candidate_pixel_ratio"
+            ),
+            "text_edges_edge_energy_before": _aggregate_metric(
+                audit_records, "text_edges_edge_energy_before"
+            ),
+            "text_edges_edge_energy_after": _aggregate_metric(
+                audit_records, "text_edges_edge_energy_after"
             ),
             "cumulative_change_score": _aggregate_metric(audit_records, "cumulative_change_score"),
             "cumulative_change_pixel_ratio": _aggregate_metric(audit_records, "cumulative_change_pixel_ratio"),
@@ -3484,6 +3498,8 @@ def _process_image(
         text_edges.edge_delta,
         text_edges.changed_pixel_ratio,
         text_edges.candidate_pixel_ratio,
+        text_edges.edge_energy_before,
+        text_edges.edge_energy_after,
     )
     attempted_audit["bleed_through_reason_code"] = _bleed_through_reason_code(bleed_through.reason)
     cumulative_guard = _cumulative_change_guard(attempted_audit, options)
@@ -3744,6 +3760,8 @@ def _process_image(
         "text_edges_delta": 0.0 if guard_reverted else text_edges.edge_delta,
         "text_edges_changed_pixel_ratio": 0.0 if guard_reverted else text_edges.changed_pixel_ratio,
         "text_edges_candidate_pixel_ratio": 0.0 if guard_reverted else text_edges.candidate_pixel_ratio,
+        "text_edges_edge_energy_before": 0.0 if guard_reverted else text_edges.edge_energy_before,
+        "text_edges_edge_energy_after": 0.0 if guard_reverted else text_edges.edge_energy_after,
         "processing_audit": processing_audit,
         "processing_warnings": processing_warnings,
         "operation_timings": operation_timings,
@@ -7099,11 +7117,13 @@ def _sharpen_text_edges_conservative(image: Image.Image) -> TextEdgeSharpeningRe
         return _text_edges_noop(image, "text edge sharpening skipped: text edge evidence too weak")
     if p05 < 35 and _dark_pixel_ratio(grayscale, 64) > 0.09:
         return _text_edges_noop(image, "text edge sharpening skipped: dense dark foreground or illustration risk")
-    if _source_protected_edge_dark_ratio(grayscale) > 0.002:
+    if _source_protected_edge_dark_ratio(grayscale) > 0.002 or _text_edge_source_edge_mark_risk(grayscale):
         return _text_edges_noop(image, "text edge sharpening skipped: edge mark or binding risk")
 
     sample_candidate_ratio = _text_edge_sample_candidate_ratio(grayscale)
-    if sample_candidate_ratio < 0.02:
+    if sample_candidate_ratio < 0.006 or (
+        sample_candidate_ratio < 0.02 and _text_edge_sample_candidate_sparse_block_risk(grayscale)
+    ):
         return _text_edges_noop(
             image,
             "text edge sharpening skipped: cheap candidate preflight found too little blurred text edge evidence",
@@ -7111,8 +7131,12 @@ def _sharpen_text_edges_conservative(image: Image.Image) -> TextEdgeSharpeningRe
             preflight_skipped=True,
         )
 
-    candidate = _text_edge_candidate_mask(grayscale, p95)
-    candidate = _clear_mask_edges(candidate, max(3, int(round(min(image.width, image.height) * 0.025))))
+    raw_candidate = _text_edge_candidate_mask(grayscale, p95)
+    raw_candidate_ratio = _mask_ratio(raw_candidate)
+    if _protected_edge_dark_ratio(raw_candidate) > 0.001 or _text_edge_component_touches_page_edge(raw_candidate):
+        return _text_edges_noop(image, "text edge sharpening skipped: edge mark or binding risk", raw_candidate_ratio)
+
+    candidate = _clear_mask_edges(raw_candidate, max(3, int(round(min(image.width, image.height) * 0.025))))
     candidate_ratio = _mask_ratio(candidate)
     if candidate_ratio < 0.0015:
         return _text_edges_noop(image, "text edge sharpening skipped: blurred text edge evidence too sparse", candidate_ratio)
@@ -7129,7 +7153,11 @@ def _sharpen_text_edges_conservative(image: Image.Image) -> TextEdgeSharpeningRe
             candidate_ratio,
         )
     selected: set[tuple[int, int]] = set()
+    component_boxes: list[tuple[int, int, int, int, int]] = []
     text_like_components = 0
+    narrow_print_components = 0
+    line_like_components = 0
+    flowing_stroke_components = 0
     rejected_large_components = 0
     for component in components:
         area = len(component)
@@ -7140,16 +7168,26 @@ def _sharpen_text_edges_conservative(image: Image.Image) -> TextEdgeSharpeningRe
         width = max(xs) - min(xs) + 1
         height = max(ys) - min(ys) + 1
         line_like = height <= 10 and width <= image.width * 0.72
+        flowing_stroke_like = height <= 24 and width <= image.width * 0.65
         if area / total > 0.018 or height > image.height * 0.20 or (not line_like and width > image.width * 0.36):
             rejected_large_components += 1
             continue
         fill_ratio = area / max(1, width * height)
         aspect = max(width / max(1, height), height / max(1, width))
+        flowing_stroke_like = flowing_stroke_like and fill_ratio <= 0.48
+        narrow_print_like = width <= 4 and 3 <= height <= 18 and area >= 4
         if fill_ratio > 0.90 and area > 36 and not line_like:
             rejected_large_components += 1
             continue
         if width >= 2 and height >= 1 and aspect <= 80:
             text_like_components += 1
+            if line_like:
+                line_like_components += 1
+            if flowing_stroke_like and not line_like:
+                flowing_stroke_components += 1
+            if narrow_print_like:
+                narrow_print_components += 1
+            component_boxes.append((min(xs), min(ys), width, height, area))
             selected.update(component)
     selected_ratio = len(selected) / max(1, total)
     if rejected_large_components:
@@ -7164,6 +7202,17 @@ def _sharpen_text_edges_conservative(image: Image.Image) -> TextEdgeSharpeningRe
             "text edge sharpening skipped: header, footer, or page number risk",
             candidate_ratio,
         )
+    if (
+        flowing_stroke_components >= 3
+        and flowing_stroke_components >= max(3, int(math.ceil(text_like_components * 0.55)))
+        and narrow_print_components < 8
+        and line_like_components < 3
+    ):
+        return _text_edges_noop(
+            image,
+            "text edge sharpening skipped: handwriting, marginalia, or annotation risk",
+            candidate_ratio,
+        )
     if text_like_components < 3 or selected_ratio < 0.0015:
         return _text_edges_noop(
             image,
@@ -7176,6 +7225,12 @@ def _sharpen_text_edges_conservative(image: Image.Image) -> TextEdgeSharpeningRe
             "text edge sharpening skipped: changed area exceeds conservative text edge scope",
             candidate_ratio,
         )
+    structure = _text_edge_structure_evidence(component_boxes, image.size, selected_ratio)
+    if not structure["safe"]:
+        return _text_edges_noop(image, structure["reason"], candidate_ratio)
+    background = _text_edge_background_is_stable(grayscale, candidate, p95)
+    if not background["safe"]:
+        return _text_edges_noop(image, background["reason"], candidate_ratio)
 
     sharpened = grayscale.filter(ImageFilter.UnsharpMask(radius=1.0, percent=90, threshold=2))
     source_pixels = grayscale.load()
@@ -7223,10 +7278,17 @@ def _sharpen_text_edges_conservative(image: Image.Image) -> TextEdgeSharpeningRe
             candidate_ratio,
         )
     edge_delta = sum(deltas) / max(1, len(deltas))
+    edge_energy_before, edge_energy_after = _text_edge_energy_pair(grayscale, result_image.convert("L"), selected)
     if edge_delta < 3 or edge_delta > 24:
         return _text_edges_noop(
             image,
             "text edge sharpening skipped: edge delta outside conservative threshold",
+            candidate_ratio,
+        )
+    if edge_energy_after <= edge_energy_before:
+        return _text_edges_noop(
+            image,
+            "text edge sharpening skipped: edge energy did not improve",
             candidate_ratio,
         )
     brightness_delta, contrast_delta = _tonal_deltas(grayscale, result_image.convert("L"))
@@ -7244,6 +7306,8 @@ def _sharpen_text_edges_conservative(image: Image.Image) -> TextEdgeSharpeningRe
         round(edge_delta, 6),
         round(changed_ratio, 6),
         round(candidate_ratio, 6),
+        round(edge_energy_before, 6),
+        round(edge_energy_after, 6),
     )
 
 
@@ -7282,6 +7346,10 @@ _TEXT_EDGES_REASON_DETAILS: dict[str, tuple[str, str]] = {
         "protected_header_footer_or_page_number",
         "检测到页眉页脚或页码风险，跳过正文边缘锐化。",
     ),
+    "text edge sharpening skipped: handwriting, marginalia, or annotation risk": (
+        "protected_handwriting_marginalia_annotation",
+        "检测到手写、边注或批注风险，跳过正文边缘锐化。",
+    ),
     "text edge sharpening skipped: blurred text edge evidence too sparse": (
         "low_confidence_text_edge_too_sparse",
         "模糊正文边缘证据过少，跳过正文边缘锐化。",
@@ -7297,6 +7365,14 @@ _TEXT_EDGES_REASON_DETAILS: dict[str, tuple[str, str]] = {
     "text edge sharpening skipped: broad texture, illustration, or table-region risk": (
         "protected_texture_table_or_photo_region",
         "检测到大块纹理、插图、照片或表格区域风险，跳过正文边缘锐化。",
+    ),
+    "text edge sharpening skipped: unstable background texture or stain risk": (
+        "protected_unstable_background_texture_or_stain",
+        "检测到背景纹理或污渍不稳定风险，跳过正文边缘锐化。",
+    ),
+    "text edge sharpening skipped: scanline or ruled background risk": (
+        "protected_scanline_or_ruled_background",
+        "检测到扫描线或格线背景风险，跳过正文边缘锐化。",
     ),
     "text edge sharpening skipped: stable text edge evidence insufficient": (
         "low_confidence_stable_text_edge_insufficient",
@@ -7317,6 +7393,10 @@ _TEXT_EDGES_REASON_DETAILS: dict[str, tuple[str, str]] = {
     "text edge sharpening skipped: edge delta outside conservative threshold": (
         "outside_conservative_edge_delta",
         "正文边缘锐化幅度不在保守范围内，跳过正文边缘锐化。",
+    ),
+    "text edge sharpening skipped: edge energy did not improve": (
+        "low_confidence_edge_energy_not_improved",
+        "正文边缘能量没有改善，跳过正文边缘锐化。",
     ),
     "text edge sharpening skipped: brightness or contrast delta exceeds conservative threshold": (
         "outside_conservative_tonal_delta",
@@ -7374,6 +7454,158 @@ def _text_edge_sample_candidate_ratio(grayscale: Image.Image) -> float:
     candidate = _text_edge_candidate_mask(sample, p95)
     candidate = _clear_mask_edges(candidate, max(2, int(round(min(sample.width, sample.height) * 0.025))))
     return round(_mask_ratio(candidate), 6)
+
+
+def _text_edge_sample_candidate_sparse_block_risk(grayscale: Image.Image) -> bool:
+    sample = grayscale.copy()
+    sample.thumbnail((96, 96), Image.Resampling.BILINEAR)
+    if sample.width < 30 or sample.height < 30:
+        return True
+    histogram = sample.histogram()
+    total = sample.width * sample.height
+    p95 = _histogram_percentile(histogram, total, 0.95)
+    candidate = _text_edge_candidate_mask(sample, p95)
+    candidate = _clear_mask_edges(candidate, max(2, int(round(min(sample.width, sample.height) * 0.025))))
+    components = [component for component in _mask_components(candidate) if len(component) >= 3]
+    if len(components) < 3:
+        return True
+    max_area = max((len(component) for component in components), default=0)
+    return max_area > 12
+
+
+def _text_edge_component_touches_page_edge(candidate: Image.Image) -> bool:
+    margin = max(5, int(round(min(candidate.width, candidate.height) * 0.06)))
+    for component in _mask_components(candidate):
+        if len(component) < 4:
+            continue
+        xs = [point[0] for point in component]
+        ys = [point[1] for point in component]
+        width = max(xs) - min(xs) + 1
+        height = max(ys) - min(ys) + 1
+        touches_edge = (
+            min(xs) < margin
+            or min(ys) < margin
+            or max(xs) >= candidate.width - margin
+            or max(ys) >= candidate.height - margin
+        )
+        if touches_edge and (width >= 8 or height >= 8):
+            return True
+    return False
+
+
+def _text_edge_source_edge_mark_risk(grayscale: Image.Image) -> bool:
+    margin = max(5, int(round(min(grayscale.width, grayscale.height) * 0.06)))
+    dark_mask = grayscale.point(lambda value: 255 if value <= 110 else 0, mode="L")
+    for component in _mask_components(dark_mask):
+        if len(component) < 6:
+            continue
+        xs = [point[0] for point in component]
+        ys = [point[1] for point in component]
+        width = max(xs) - min(xs) + 1
+        height = max(ys) - min(ys) + 1
+        touches_edge = (
+            min(xs) < margin
+            or min(ys) < margin
+            or max(xs) >= grayscale.width - margin
+            or max(ys) >= grayscale.height - margin
+        )
+        if touches_edge and (width >= 8 or height >= 8):
+            return True
+    return False
+
+
+def _text_edge_structure_evidence(
+    component_boxes: list[tuple[int, int, int, int, int]],
+    image_size: tuple[int, int],
+    selected_ratio: float,
+) -> dict[str, Any]:
+    if len(component_boxes) < 3:
+        return {
+            "safe": False,
+            "reason": "text edge sharpening skipped: stable text edge evidence insufficient",
+        }
+    image_width, image_height = image_size
+    thin_or_medium = 0
+    long_rule_like = 0
+    y_bands: set[int] = set()
+    x_bands: set[int] = set()
+    for left, top, width, height, area in component_boxes:
+        fill_ratio = area / max(1, width * height)
+        if height <= 12 and width <= image_width * 0.58:
+            thin_or_medium += 1
+        elif height <= 24 and width <= image_width * 0.40 and fill_ratio <= 0.50:
+            thin_or_medium += 1
+        if height <= 3 and width >= image_width * 0.36:
+            long_rule_like += 1
+        y_bands.add(min(15, int((top + height / 2) / max(1, image_height) * 16)))
+        x_bands.add(min(11, int((left + width / 2) / max(1, image_width) * 12)))
+    if long_rule_like >= max(2, int(math.ceil(len(component_boxes) * 0.45))):
+        return {"safe": False, "reason": "text edge sharpening skipped: scanline or ruled background risk"}
+    if thin_or_medium < max(3, int(math.ceil(len(component_boxes) * 0.55))):
+        return {
+            "safe": False,
+            "reason": "text edge sharpening skipped: stable text edge evidence insufficient",
+        }
+    if len(y_bands) < 2 or len(x_bands) < 1 or selected_ratio > 0.08:
+        return {
+            "safe": False,
+            "reason": "text edge sharpening skipped: stable text edge evidence insufficient",
+        }
+    return {"safe": True, "reason": ""}
+
+
+def _text_edge_background_is_stable(
+    grayscale: Image.Image,
+    candidate: Image.Image,
+    paper_highlight: int,
+) -> dict[str, Any]:
+    protected = candidate.filter(ImageFilter.MaxFilter(7))
+    gray_pixels = grayscale.load()
+    protected_pixels = protected.load()
+    step = max(1, int(round(math.sqrt(max(1, grayscale.width * grayscale.height) / 45000))))
+    values: list[int] = []
+    texture_hits = 0
+    checked = 0
+    for y in range(0, grayscale.height, step):
+        for x in range(0, grayscale.width, step):
+            if protected_pixels[x, y]:
+                continue
+            value = int(gray_pixels[x, y])
+            values.append(value)
+            checked += 1
+            if abs(value - paper_highlight) > 30:
+                texture_hits += 1
+    if len(values) < 200:
+        return {
+            "safe": False,
+            "reason": "text edge sharpening skipped: stable text edge evidence insufficient",
+        }
+    values.sort()
+    low = values[int(len(values) * 0.05)]
+    high = values[min(len(values) - 1, int(len(values) * 0.95))]
+    texture_ratio = texture_hits / max(1, checked)
+    if high - low > 24 or texture_ratio > 0.035:
+        return {
+            "safe": False,
+            "reason": "text edge sharpening skipped: unstable background texture or stain risk",
+        }
+    return {"safe": True, "reason": ""}
+
+
+def _text_edge_energy_pair(
+    before: Image.Image,
+    after: Image.Image,
+    selected: set[tuple[int, int]],
+) -> tuple[float, float]:
+    before_edges = before.filter(ImageFilter.FIND_EDGES).load()
+    after_edges = after.filter(ImageFilter.FIND_EDGES).load()
+    before_total = 0
+    after_total = 0
+    for x, y in selected:
+        before_total += int(before_edges[x, y])
+        after_total += int(after_edges[x, y])
+    count = max(1, len(selected))
+    return before_total / count, after_total / count
 
 
 def _text_edge_margin_annotation_risk(grayscale: Image.Image, candidate: Image.Image) -> bool:
@@ -7434,7 +7666,15 @@ def _text_edges_noop(
     *,
     preflight_skipped: bool = False,
 ) -> TextEdgeSharpeningResult:
-    return TextEdgeSharpeningResult(image, False, reason, 0.0, 0.0, round(candidate_pixel_ratio, 6), preflight_skipped)
+    return TextEdgeSharpeningResult(
+        image,
+        False,
+        reason,
+        0.0,
+        0.0,
+        round(candidate_pixel_ratio, 6),
+        preflight_skipped=preflight_skipped,
+    )
 
 
 def _mask_ratio(mask: Image.Image) -> float:
@@ -7604,6 +7844,8 @@ def _processing_audit(
     text_edges_delta: float = 0.0,
     text_edges_changed_pixel_ratio: float = 0.0,
     text_edges_candidate_pixel_ratio: float = 0.0,
+    text_edges_edge_energy_before: float = 0.0,
+    text_edges_edge_energy_after: float = 0.0,
     cumulative_change_guard: dict[str, Any] | None = None,
     local_content_change_guard: dict[str, Any] | None = None,
     combination_quality_guard: dict[str, Any] | None = None,
@@ -7716,6 +7958,8 @@ def _processing_audit(
         "text_edges_delta": round(text_edges_delta, 6),
         "text_edges_changed_pixel_ratio": round(text_edges_changed_pixel_ratio, 6),
         "text_edges_candidate_pixel_ratio": round(text_edges_candidate_pixel_ratio, 6),
+        "text_edges_edge_energy_before": round(text_edges_edge_energy_before, 6),
+        "text_edges_edge_energy_after": round(text_edges_edge_energy_after, 6),
         "scanner_gutter_trimmed": scanner_gutter_bbox is not None,
         "crop_ratio": round(max(0.0, crop_ratio), 6),
         "trim_margins": trim_margins,
