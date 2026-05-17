@@ -5682,6 +5682,7 @@ def _fold_shadow_axis_plan(
     for index in range(axis_length):
         values: list[int] = []
         selected: list[tuple[int, int]] = []
+        selected_crosses: set[int] = set()
         protected_count = 0
         dark_count = 0
         for cross in range(cross_length):
@@ -5695,6 +5696,7 @@ def _fold_shadow_axis_plan(
                 dark_count += 1
             if 4 <= background - value <= 32 and value >= 172:
                 selected.append((x, y))
+                selected_crosses.add(cross)
         available_ratio = len(values) / max(1, cross_length)
         candidate_ratio = len(selected) / max(1, cross_length)
         dark_ratio = dark_count / max(1, len(values)) if values else 1.0
@@ -5707,12 +5709,19 @@ def _fold_shadow_axis_plan(
                 "candidate_ratio": candidate_ratio,
                 "dark_ratio": dark_ratio,
                 "selected": selected,
+                "selected_crosses": selected_crosses,
             }
         )
         if (
             edge_margin <= index < axis_length - edge_margin
             and available_ratio >= 0.92
-            and candidate_ratio >= 0.55
+            and (
+                candidate_ratio >= 0.55
+                or (
+                    candidate_ratio >= 0.42
+                    and _fold_shadow_cross_continuity(selected_crosses, cross_length)["usable"]
+                )
+            )
             and dark_ratio <= 0.0015
         ):
             candidate_indexes.append(index)
@@ -5757,6 +5766,12 @@ def _fold_shadow_axis_plan(
                 "foreground intersects candidate fold band",
                 candidate_total_ratio,
             )
+        group_crosses: set[int] = set()
+        for index in group:
+            group_crosses.update(stats[index]["selected_crosses"])
+        group_continuity = _fold_shadow_cross_continuity(group_crosses, cross_length)
+        if not group_continuity["usable"]:
+            continue
         selected_groups.append(group)
         for index in group:
             selected.update(stats[index]["selected"])
@@ -5781,6 +5796,31 @@ def _fold_shadow_axis_plan(
         "selected": selected,
         "candidate_ratio": candidate_total_ratio,
         "reason": None,
+    }
+
+
+def _fold_shadow_cross_continuity(selected_crosses: set[int], cross_length: int) -> dict[str, Any]:
+    if cross_length <= 0 or not selected_crosses:
+        return {"usable": False, "span_ratio": 0.0, "coverage_ratio": 0.0, "max_gap": cross_length}
+    ordered = sorted(selected_crosses)
+    span = ordered[-1] - ordered[0] + 1
+    span_ratio = span / max(1, cross_length)
+    coverage_ratio = len(ordered) / max(1, span)
+    max_gap = 0
+    previous = ordered[0]
+    for current in ordered[1:]:
+        max_gap = max(max_gap, current - previous - 1)
+        previous = current
+    usable = (
+        span_ratio >= 0.62
+        and coverage_ratio >= 0.42
+        and max_gap <= max(8, int(round(cross_length * 0.08)))
+    )
+    return {
+        "usable": usable,
+        "span_ratio": round(span_ratio, 6),
+        "coverage_ratio": round(coverage_ratio, 6),
+        "max_gap": max_gap,
     }
 
 
