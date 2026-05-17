@@ -6635,6 +6635,12 @@ def _clean_bleed_through_conservative(image: Image.Image) -> BleedThroughCleanup
     components = [component for component in _mask_components(candidate) if len(component) >= 4]
     if not components:
         return _bleed_through_noop(image, "bleed-through cleanup skipped: no confident faint reverse-side ghosts")
+    if _bleed_through_sparse_real_mark_risk(components, image.width, image.height):
+        return _bleed_through_noop(
+            image,
+            "bleed-through cleanup skipped: table line, page number, or annotation risk",
+            candidate_ratio,
+        )
     if len(components) > 28:
         return _bleed_through_noop(
             image,
@@ -6919,6 +6925,33 @@ def _bleed_through_small_diffuse_selection(
     if len(selected) / max(1, total) > 0.0035:
         return set()
     return selected
+
+
+def _bleed_through_sparse_real_mark_risk(
+    components: list[set[tuple[int, int]]],
+    image_width: int,
+    image_height: int,
+) -> bool:
+    if len(components) < 2:
+        return False
+    boxes: list[tuple[int, int, int, int, int]] = []
+    for component in components:
+        xs = [point[0] for point in component]
+        ys = [point[1] for point in component]
+        boxes.append((len(component), min(xs), min(ys), max(xs), max(ys)))
+    if any(area > 48 for area, _left, _top, _right, _bottom in boxes):
+        return False
+    left = min(box[1] for box in boxes)
+    top = min(box[2] for box in boxes)
+    right = max(box[3] for box in boxes)
+    bottom = max(box[4] for box in boxes)
+    width = right - left + 1
+    height = bottom - top + 1
+    if height <= max(10, image_height * 0.12) and width <= max(10, image_width * 0.18):
+        return True
+    if len(components) >= 5 and height <= max(6, image_height * 0.08) and width <= image_width * 0.55:
+        return True
+    return False
 
 
 def _bleed_through_noop(
