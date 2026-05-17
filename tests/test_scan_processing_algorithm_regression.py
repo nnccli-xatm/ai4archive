@@ -207,6 +207,9 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertLessEqual(audit["cumulative_change_pixel_ratio"], 0.05)
             self.assertLessEqual(audit["cumulative_change_score"], 0.25)
             self.assertLessEqual(audit["local_content_changed_ratio"], 0.02)
+            despeckle_timing = audit_summary["timing"]["operation_timings"]["despeckle"]
+            self.assertIn("component_count_bucket_distribution", despeckle_timing)
+            self.assertIn("max_component_size_bucket_distribution", despeckle_timing)
             self.assertEqual(audit_summary["counts"]["processed_files"], 1)
             self.assertEqual(audit_summary["counts"]["failed_files"], 0)
             self.assertEqual(audit_summary["counts"]["scanlines_lightened_files"], 1)
