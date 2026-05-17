@@ -514,6 +514,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "synthetic_safe_cluster.png": _safe_compact_dust_cluster_page(),
                 "synthetic_protected_table_annotation.png": _risk_table_page_number_annotation_page(),
                 "synthetic_protected_stamp.png": _risk_stamp_header_footer_page(),
+                "synthetic_protected_edge_mark.png": _risk_edge_content_mark_page(),
             }
             source_bytes = {}
             for name, image in pages.items():
@@ -545,7 +546,11 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 for point in _safe_compact_dust_cluster_points():
                     self.assertGreaterEqual(output.convert("L").getpixel(point), 240)
 
-            for name in ("synthetic_protected_table_annotation.png", "synthetic_protected_stamp.png"):
+            for name in (
+                "synthetic_protected_table_annotation.png",
+                "synthetic_protected_stamp.png",
+                "synthetic_protected_edge_mark.png",
+            ):
                 record = records[name]
                 audit = record["processing_audit"]
                 self.assertEqual((input_dir / name).read_bytes(), source_bytes[name])
@@ -568,6 +573,12 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertEqual(
                 audit_summary["timing"]["operation_timings"]["despeckle"]["reason_code_distribution"][
                     "applied_isolated_pixels"
+                ],
+                1,
+            )
+            self.assertEqual(
+                audit_summary["guardrails"]["despeckle"]["reason_code_distribution"][
+                    "protected_edge_dark_marks"
                 ],
                 1,
             )
@@ -3194,7 +3205,7 @@ def _safe_compact_dust_cluster_page() -> Image.Image:
     for y in (42, 68, 94):
         draw.rectangle((44, y, 112, y + 3), fill=(58, 58, 58))
     for point in _safe_compact_dust_cluster_points():
-        image.putpixel(point, (52, 52, 52))
+        image.putpixel(point, (18, 18, 18))
     return image
 
 
@@ -3410,6 +3421,13 @@ def _risk_stamp_header_footer_page() -> Image.Image:
     draw.rectangle((48, 18, 170, 20), fill=(64, 64, 64))
     draw.rectangle((54, 158, 154, 160), fill=(64, 64, 64))
     return image.filter(ImageFilter.GaussianBlur(radius=0.6))
+
+
+def _risk_edge_content_mark_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), (244, 244, 244))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((2, 78, 4, 82), fill=(28, 28, 28))
+    return image
 
 
 def _risk_dark_photo_edge_trace_page() -> Image.Image:
