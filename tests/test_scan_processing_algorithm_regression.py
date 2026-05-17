@@ -28,6 +28,15 @@ def _changed_ratio(before: Image.Image, after: Image.Image, box: tuple[int, int,
     return changed / max(1, before_luma.width * before_luma.height)
 
 
+def _mean_channel_spread(image: Image.Image) -> float:
+    means = ImageStat.Stat(image.convert("RGB")).mean
+    return max(means) - min(means)
+
+
+def _mean_luma_delta(before: Image.Image, after: Image.Image) -> float:
+    return abs(ImageStat.Stat(after.convert("L")).mean[0] - ImageStat.Stat(before.convert("L")).mean[0])
+
+
 class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
     def test_combination_quality_guard_classifies_public_reason_codes(self) -> None:
         options = ProcessingOptions()
@@ -1137,6 +1146,101 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertFalse(audit_summary["privacy"]["contains_hashes"])
             for forbidden in (
                 "private_full_chain_blue_gray_cast.png",
+                str(input_dir),
+                "source_relative_path",
+                "source_sha256",
+            ):
+                self.assertNotIn(forbidden, audit_summary_text)
+
+    def test_mild_warm_paper_cast_cleans_up_while_protected_color_content_noops(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-warm-cast-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_safe_mild_warm_cast.png": _mild_warm_scanner_cast_page("safe"),
+                "synthetic_protected_red_stamp_cast.png": _mild_warm_scanner_cast_page("stamp"),
+                "synthetic_protected_blue_annotation_cast.png": _mild_warm_scanner_cast_page("annotation"),
+                "synthetic_protected_colored_paper_cast.png": Image.new("RGB", (240, 180), (230, 214, 178)),
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "warm-cast", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(normalize_paper_color_cast=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_record = records["synthetic_safe_mild_warm_cast.png"]
+            safe_output = Image.open(process_dir / safe_record["output_relative_path"]).convert("RGB")
+            safe_source = pages["synthetic_safe_mild_warm_cast.png"]
+            safe_audit = safe_record["processing_audit"]
+            self.assertTrue(safe_record["paper_color_cast_normalized"])
+            self.assertEqual(safe_record["paper_color_cast_reason_code"], "applied_mild_uniform_scanner_cast")
+            self.assertIn("normalize_paper_color_cast_conservative", safe_record["operations"])
+            self.assertGreater(safe_audit["paper_color_cast_delta"], 8.0)
+            self.assertLessEqual(safe_audit["paper_color_cast_delta"], 12.0)
+            self.assertLessEqual(safe_audit["paper_color_cast_brightness_delta"], 4.0)
+            self.assertGreater(safe_audit["paper_color_cast_changed_pixel_ratio"], 0.90)
+            self.assertLessEqual(safe_audit["paper_color_cast_candidate_pixel_ratio"], 0.95)
+            self.assertLess(_mean_channel_spread(safe_output), _mean_channel_spread(safe_source) - 8.0)
+            self.assertLess(_mean_luma_delta(safe_source, safe_output), 4.0)
+            self.assertLess(_changed_ratio(safe_source, safe_output, (34, 40, 130, 95)), 0.001)
+            self.assertLess(_changed_ratio(safe_source, safe_output, (178, 22, 200, 34)), 0.001)
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+
+            protected_expected_codes = {
+                "synthetic_protected_red_stamp_cast.png": "protected_color_content",
+                "synthetic_protected_blue_annotation_cast.png": "protected_color_content",
+            }
+            for name, expected_code in protected_expected_codes.items():
+                record = records[name]
+                processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+                self.assertFalse(record["paper_color_cast_normalized"], name)
+                self.assertEqual(record["paper_color_cast_reason_code"], expected_code, name)
+                self.assertIn("normalize_paper_color_cast_noop", record["operations"], name)
+                self.assertLess(_changed_ratio(pages[name], processed, (0, 0, processed.width, processed.height)), 0.001)
+
+            colored_record = records["synthetic_protected_colored_paper_cast.png"]
+            colored_output = Image.open(process_dir / colored_record["output_relative_path"]).convert("RGB")
+            self.assertFalse(colored_record["paper_color_cast_normalized"])
+            self.assertIn(colored_record["paper_color_cast_reason_code"], {"colored_paper", "too_dark"})
+            self.assertLess(
+                _changed_ratio(
+                    pages["synthetic_protected_colored_paper_cast.png"],
+                    colored_output,
+                    (0, 0, colored_output.width, colored_output.height),
+                ),
+                0.001,
+            )
+
+            cast_guard = audit_summary["guardrails"]["paper_color_cast"]
+            self.assertEqual(audit_summary["counts"]["paper_color_cast_normalized_files"], 1)
+            self.assertEqual(audit_summary["counts"]["paper_color_cast_skipped_files"], 3)
+            self.assertEqual(cast_guard["applied_files"], 1)
+            self.assertEqual(cast_guard["skipped_files"], 3)
+            self.assertEqual(cast_guard["reason_code_distribution"]["applied_mild_uniform_scanner_cast"], 1)
+            self.assertEqual(cast_guard["skip_reason_code_distribution"]["protected_color_content"], 2)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (
+                "synthetic_safe_mild_warm_cast.png",
+                "synthetic_protected_red_stamp_cast.png",
                 str(input_dir),
                 "source_relative_path",
                 "source_sha256",
@@ -2993,6 +3097,21 @@ def _full_chain_options() -> ProcessingOptions:
         despeckle_backend="fallback",
         workers=1,
     )
+
+
+def _mild_warm_scanner_cast_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (240, 180), (246, 243, 232))
+    draw = ImageDraw.Draw(image)
+    for y in (42, 66, 90):
+        draw.rectangle((36, y, 128, y + 3), fill=(58, 58, 58))
+    draw.rectangle((182, 24, 196, 30), fill=(72, 72, 72))
+    if variant == "stamp":
+        draw.ellipse((142, 96, 202, 154), outline=(190, 28, 28), width=4)
+    elif variant == "annotation":
+        draw.line((28, 128, 150, 138), fill=(42, 84, 190), width=3)
+    elif variant != "safe":
+        raise ValueError(f"unknown mild warm scanner cast variant: {variant}")
+    return image
 
 
 def _benchmark_combo(root: Path, input_dir: Path, label: str, *flags: str) -> dict[str, object]:

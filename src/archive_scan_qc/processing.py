@@ -4266,7 +4266,7 @@ def _normalize_paper_color_cast_conservative(image: Image.Image) -> PaperColorCa
         )
 
     target = sum(means) / 3
-    offsets = [max(-9.0, min(9.0, target - mean)) for mean in means]
+    offsets = [max(-6.0, min(6.0, target - mean)) for mean in means]
     min_offset = 1.25 if cool_cast_evidence and channel_spread < 4.0 else 2.0
     if max(abs(offset) for offset in offsets) < min_offset:
         return _paper_color_cast_noop(
