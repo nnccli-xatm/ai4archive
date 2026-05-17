@@ -6833,6 +6833,26 @@ def _lighten_scanlines_conservative(image: Image.Image) -> ScanlineLighteningRes
     protected = foreground.filter(ImageFilter.MaxFilter(13))
     horizontal = _scanline_axis_lightening_plan(grayscale, protected, horizontal=True, background=p90)
     vertical = _scanline_axis_lightening_plan(grayscale, protected, horizontal=False, background=p90)
+    if horizontal["score"] > 0 and vertical["score"] > 0:
+        candidate_ratio = max(horizontal["candidate_ratio"], vertical["candidate_ratio"])
+        return _scanlines_noop(
+            image,
+            "scanline lightening skipped: SCANLINE_SCOPE_RISK risk 双向细线或表格/格线内容超出保守处理范围",
+            candidate_ratio,
+        )
+    if horizontal["score"] == 0 and vertical["score"] == 0:
+        risk_plans = [
+            candidate
+            for candidate in (horizontal, vertical)
+            if isinstance(candidate["reason"], str) and "SCANLINE_SCOPE_RISK" in candidate["reason"]
+        ]
+        if risk_plans:
+            risk_plan = max(risk_plans, key=lambda candidate: candidate["candidate_ratio"])
+            return _scanlines_noop(
+                image,
+                f"scanline lightening skipped: {risk_plan['reason']}",
+                risk_plan["candidate_ratio"],
+            )
     plan = horizontal if horizontal["score"] >= vertical["score"] else vertical
     if plan["reason"]:
         return _scanlines_noop(image, f"scanline lightening skipped: {plan['reason']}", plan["candidate_ratio"])
@@ -7047,7 +7067,15 @@ def _scanline_axis_lightening_plan(
                     continue
             score_delta = candidate_delta
         else:
-            if not (3.0 <= local_delta <= 22.0):
+            subtle_continuous_candidate = (
+                continuous_candidate
+                and stat["candidate_ratio"] >= 0.70
+                and stat["candidate_available_ratio"] >= 0.78
+                and stat["longest_segment_ratio"] >= 0.65
+                and stat["dark_ratio"] == 0.0
+            )
+            min_local_delta = 2.4 if subtle_continuous_candidate else 3.0
+            if not (min_local_delta <= local_delta <= 22.0):
                 continue
             score_delta = local_delta
         if (
@@ -7087,6 +7115,7 @@ def _scanline_axis_lightening_plan(
     if (
         len(groups) > 6
         or any(len(group) > 4 for group in groups)
+        or (len(groups) >= 3 and candidate_total_ratio > 0.03)
         or (len(groups) >= 6 and candidate_total_ratio > 0.025)
     ):
         return _empty_scanline_lightening_plan(
