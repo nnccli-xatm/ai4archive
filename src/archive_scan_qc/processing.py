@@ -10138,11 +10138,12 @@ def _detect_post_deskew_corner_wedge_crop_bbox(
         return CropDetection(None, "post-deskew crop skipped: edge content protection")
 
     width, height = grayscale.size
+    canvas = _post_deskew_corner_wedge_canvas_value(grayscale, page_background, canvas)
     contrast = abs(page_background - canvas)
-    if contrast < 0.75:
+    if contrast < 0.45:
         return CropDetection(None, "post-deskew crop skipped: low-confidence canvas edge")
 
-    threshold = max(0.75, min(5.0, contrast * 0.75))
+    threshold = max(0.45, min(5.0, contrast * 0.75))
     max_x = min(width // 10, max(3, int(width * 0.08)))
     max_y = min(height // 10, max(3, int(height * 0.08)))
     left = _first_post_deskew_corner_wedge_edge(grayscale, canvas, "left", max_x, threshold)
@@ -10190,6 +10191,29 @@ def _detect_post_deskew_corner_wedge_crop_bbox(
     if not _has_inset_document_content_for_scanner_gutter(grayscale, bbox, active):
         return CropDetection(None, "post-deskew crop skipped: edge content protection")
     return CropDetection(bbox, "post-deskew safe canvas crop applied")
+
+
+def _post_deskew_corner_wedge_canvas_value(
+    image: Image.Image,
+    page_background: float,
+    fallback: float,
+) -> float:
+    width, height = image.size
+    sample = max(3, min(width, height) // 20)
+    corner_boxes = (
+        (0, 0, sample, sample),
+        (width - sample, 0, width, sample),
+        (0, height - sample, sample, height),
+        (width - sample, height - sample, width, height),
+    )
+    corner_means = [ImageStat.Stat(image.crop(box)).mean[0] for box in corner_boxes]
+    darker_corners = [mean for mean in corner_means if page_background - mean >= 0.45]
+    if len(darker_corners) < 2:
+        return fallback
+    darker_corners.sort()
+    if len(darker_corners) >= 3 and darker_corners[-1] - darker_corners[0] > 3.5:
+        return fallback
+    return sum(darker_corners[:2]) / 2.0
 
 
 def _detect_post_deskew_expansion_crop_bbox(
@@ -10279,6 +10303,7 @@ def _first_post_deskew_corner_wedge_edge(
     required_run = 2
     run_start: int | None = None
     run_length = 0
+    candidate: int | None = None
     for offset in range(1, max_margin + 1):
         if side == "left":
             box = (offset, 0, min(width, offset + 1), height)
@@ -10297,11 +10322,11 @@ def _first_post_deskew_corner_wedge_edge(
                 run_start = offset
             run_length += 1
             if run_length >= required_run:
-                return run_start
+                candidate = run_start
         else:
             run_start = None
             run_length = 0
-    return None
+    return candidate
 
 
 def _post_deskew_corner_wedge_has_boundary_evidence(
