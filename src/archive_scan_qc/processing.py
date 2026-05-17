@@ -4525,7 +4525,8 @@ def _lighten_edge_shadow_conservative(image: Image.Image) -> EdgeShadowLightenin
     p95 = _histogram_percentile(histogram, total, 0.95)
     if p95 < 170:
         return _edge_shadow_noop(image, "edge shadow lightening skipped: page is too dark")
-    if p95 - p05 < 28:
+    low_tonal_separation = p95 - p05 < 28
+    if low_tonal_separation and not _edge_shadow_light_paper_edge_signal(grayscale):
         return _edge_shadow_noop(image, "edge shadow lightening skipped: low tonal separation")
 
     strip = max(6, min(24, int(round(min(image.width, image.height) * 0.055))))
@@ -4595,7 +4596,31 @@ def _lighten_edge_shadow_conservative(image: Image.Image) -> EdgeShadowLightenin
                     f"edge shadow lightening skipped: low-confidence narrow shadow near {side} edge",
                 )
             max_delta = min(30.0, delta * (0.68 if strong_shadow else 0.82))
-            edge_plans.append((side, edge_box, inner_box, max_delta, candidate_pixels, inner_mean))
+            plan_edge_box = edge_box
+            plan_candidate_pixels = candidate_pixels
+            diagonal_side_shadow = side in {"left", "right"} and (
+                mild_side_shadow or (low_tonal_separation and strong_shadow and delta <= 24)
+            )
+            if diagonal_side_shadow:
+                expanded_width = min(strip * 2, image.width)
+                if side == "left":
+                    expanded_edge_box = (0, 0, expanded_width, image.height)
+                else:
+                    expanded_edge_box = (image.width - expanded_width, 0, image.width, image.height)
+                expanded_edge = grayscale.crop(expanded_edge_box)
+                expanded_candidate_pixels, expanded_continuity_ratio = _edge_shadow_candidate_profile(
+                    expanded_edge, side, inner_mean
+                )
+                expanded_candidate_ratio = expanded_candidate_pixels / max(1, total)
+                if (
+                    expanded_candidate_ratio <= 0.09
+                    and expanded_candidate_pixels >= int(candidate_pixels * 1.18)
+                    and expanded_continuity_ratio >= 0.82
+                ):
+                    plan_edge_box = expanded_edge_box
+                    plan_candidate_pixels = expanded_candidate_pixels
+                    max_delta = min(max_delta, delta * (0.72 if mild_side_shadow else 0.62))
+            edge_plans.append((side, plan_edge_box, inner_box, max_delta, plan_candidate_pixels, inner_mean))
 
     if not edge_plans:
         return _edge_shadow_noop(image, "edge shadow lightening skipped: no confident page-edge shadow")
@@ -4662,6 +4687,42 @@ def _lighten_edge_shadow_conservative(image: Image.Image) -> EdgeShadowLightenin
 
 def _edge_shadow_noop(image: Image.Image, reason: str) -> EdgeShadowLighteningResult:
     return EdgeShadowLighteningResult(image, False, reason, _edge_shadow_reason_code(reason), (), None, None, 0.0, 0.0, 0.0)
+
+
+def _edge_shadow_light_paper_edge_signal(grayscale: Image.Image) -> bool:
+    width, height = grayscale.size
+    if width < 80 or height < 80:
+        return False
+    strip = max(6, min(24, int(round(min(width, height) * 0.055))))
+    probe = min(max(strip * 2, 8), max(1, min(width, height) // 4))
+    candidates = (
+        ((0, 0, strip, height), (probe, 0, min(width, probe + strip * 2), height)),
+        ((width - strip, 0, width, height), (max(0, width - probe - strip * 2), 0, width - probe, height)),
+        ((0, 0, width, strip), (0, probe, width, min(height, probe + strip * 2))),
+        ((0, height - strip, width, height), (0, max(0, height - probe - strip * 2), width, height - probe)),
+    )
+    for edge_box, paper_box in candidates:
+        if edge_box[2] <= edge_box[0] or edge_box[3] <= edge_box[1]:
+            continue
+        if paper_box[2] <= paper_box[0] or paper_box[3] <= paper_box[1]:
+            continue
+        edge = grayscale.crop(edge_box)
+        paper = grayscale.crop(paper_box)
+        edge_mean = ImageStat.Stat(edge).mean[0]
+        paper_mean = ImageStat.Stat(paper).mean[0]
+        edge_std = ImageStat.Stat(edge).stddev[0]
+        paper_std = ImageStat.Stat(paper).stddev[0]
+        if (
+            edge_mean >= 210
+            and paper_mean >= 228
+            and 4.5 <= paper_mean - edge_mean <= 24
+            and edge_std <= 10.0
+            and paper_std <= 14.0
+            and _dark_pixel_ratio(edge, 164) <= 0.012
+            and _dark_pixel_ratio(paper, 164) <= 0.018
+        ):
+            return True
+    return False
 
 
 _EDGE_SHADOW_REASON_CODES: dict[str, str] = {
