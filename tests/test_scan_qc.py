@@ -7806,6 +7806,7 @@ class ScanQcTest(unittest.TestCase):
             processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
 
             self.assertTrue(record["edge_shadow_lightened"])
+            self.assertEqual(record["edge_shadow_reason_code"], "applied_narrow_neutral_edge_shadow")
             self.assertEqual(record["edge_shadow_edges"], ["left"])
             self.assertIn("lighten_edge_shadow_conservative", record["operations"])
             self.assertGreater(_box_luma(processed, (0, 0, 14, 180)), _box_luma(source_image, (0, 0, 14, 180)) + 6.0)
@@ -7822,6 +7823,7 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(edge_guard["applied_files"], 1)
             self.assertEqual(edge_guard["skipped_files"], 0)
             self.assertEqual(edge_guard["edge_distribution"]["left"], 1)
+            self.assertEqual(edge_guard["reason_code_distribution"]["applied_narrow_neutral_edge_shadow"], 1)
             self.assertIn("edge_shadow_candidate_pixel_ratio", audit_summary["metrics"])
             self.assertIn("candidate_pixel_ratio", edge_guard)
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
@@ -7907,6 +7909,7 @@ class ScanQcTest(unittest.TestCase):
                 self.assertFalse(record["edge_shadow_lightened"], source_name)
                 self.assertIn("lighten_edge_shadow_noop", record["operations"], source_name)
                 self.assertIn(reason_fragment, record["edge_shadow_reason"], source_name)
+                self.assertIsInstance(record["edge_shadow_reason_code"], str, source_name)
                 self.assertEqual(record["processing_audit"]["edge_shadow_changed_pixel_ratio"], 0.0, source_name)
                 self.assertLess(
                     _changed_ratio_for_test(pages[source_name], processed, (0, 0, processed.width, processed.height)),
@@ -7922,6 +7925,7 @@ class ScanQcTest(unittest.TestCase):
             self.assertGreaterEqual(edge_guard["protection_triggered_files"], 8)
             self.assertGreaterEqual(edge_guard["low_confidence_skip_files"], 2)
             self.assertGreaterEqual(len(edge_guard["skip_reason_distribution"]), 4)
+            self.assertGreaterEqual(len(edge_guard["skip_reason_code_distribution"]), 4)
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertNotIn("private_default_compatible_edge_shadow", audit_summary_text)
             self.assertNotIn("private_red_stamp", audit_summary_text)

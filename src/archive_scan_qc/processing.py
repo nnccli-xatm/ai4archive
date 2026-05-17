@@ -13,6 +13,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
+import re
 import shutil
 import time
 from typing import Any
@@ -160,6 +161,7 @@ class EdgeShadowLighteningResult:
     image: Image.Image
     applied: bool
     reason: str
+    reason_code: str
     edges: tuple[str, ...]
     edge_mean_before: float | None
     edge_mean_after: float | None
@@ -775,6 +777,7 @@ def _process_record(
         "paper_color_cast_candidate_pixel_ratio": 0.0,
         "edge_shadow_lightened": False,
         "edge_shadow_reason": None,
+        "edge_shadow_reason_code": None,
         "edge_shadow_edges": [],
         "edge_shadow_mean_before": None,
         "edge_shadow_mean_after": None,
@@ -933,6 +936,7 @@ def _process_record(
                 "paper_color_cast_candidate_pixel_ratio": process_info["paper_color_cast_candidate_pixel_ratio"],
                 "edge_shadow_lightened": process_info["edge_shadow_lightened"],
                 "edge_shadow_reason": process_info["edge_shadow_reason"],
+                "edge_shadow_reason_code": process_info["edge_shadow_reason_code"],
                 "edge_shadow_edges": process_info["edge_shadow_edges"],
                 "edge_shadow_mean_before": process_info["edge_shadow_mean_before"],
                 "edge_shadow_mean_after": process_info["edge_shadow_mean_after"],
@@ -1070,6 +1074,7 @@ def _process_record(
                     "paper_color_cast_candidate_pixel_ratio": process_info["paper_color_cast_candidate_pixel_ratio"],
                     "edge_shadow_lightened": process_info["edge_shadow_lightened"],
                     "edge_shadow_reason": process_info["edge_shadow_reason"],
+                    "edge_shadow_reason_code": process_info["edge_shadow_reason_code"],
                     "edge_shadow_edges": process_info["edge_shadow_edges"],
                     "edge_shadow_mean_before": process_info["edge_shadow_mean_before"],
                     "edge_shadow_mean_after": process_info["edge_shadow_mean_after"],
@@ -1527,6 +1532,17 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
         record.get("edge_shadow_reason")
         for record in processed_records
         if isinstance(record.get("edge_shadow_reason"), str)
+    ]
+    edge_shadow_reason_codes = [
+        record.get("edge_shadow_reason_code")
+        for record in processed_records
+        if isinstance(record.get("edge_shadow_reason_code"), str)
+    ]
+    edge_shadow_skipped_reason_codes = [
+        code
+        for record in processed_records
+        for code in [record.get("edge_shadow_reason_code")]
+        if record.get("edge_shadow_lightened") is False and isinstance(code, str) and code != "disabled"
     ]
     edge_shadow_skipped_reasons = [
         reason
@@ -2303,29 +2319,27 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                     reason for reason in edge_shadow_reasons if isinstance(reason, str)
                 ),
                 "skip_reason_distribution": _reason_counts(edge_shadow_skipped_reasons),
+                "reason_code_distribution": _reason_counts(edge_shadow_reason_codes),
+                "skip_reason_code_distribution": _reason_counts(edge_shadow_skipped_reason_codes),
                 "protection_triggered_files": sum(
                     1
-                    for reason in edge_shadow_skipped_reasons
-                    if any(
-                        marker in reason
-                        for marker in (
-                            "risk",
-                            "foreground too dense",
-                            "texture",
-                            "archival",
-                            "正文",
-                        )
-                    )
+                    for code in edge_shadow_skipped_reason_codes
+                    if code
+                    in {
+                        "protected_edge_mark",
+                        "protected_margin_content",
+                        "protected_foreground_dense",
+                        "protected_texture",
+                        "protected_color_content",
+                    }
                 ),
                 "conservative_scope_skip_files": sum(
-                    1
-                    for reason in edge_shadow_skipped_reasons
-                    if "conservative" in reason or "broad uneven lighting" in reason
+                    1 for code in edge_shadow_skipped_reason_codes if code in {"broad_uneven_lighting", "changed_area_too_large"}
                 ),
                 "low_confidence_skip_files": sum(
                     1
-                    for reason in edge_shadow_skipped_reasons
-                    if "low-confidence" in reason or "no confident" in reason or "low tonal separation" in reason
+                    for code in edge_shadow_skipped_reason_codes
+                    if code in {"low_confidence_narrow_shadow", "no_confident_shadow", "low_tonal_separation"}
                 ),
             },
             "corner_shadows": {
@@ -3396,7 +3410,7 @@ def _process_image(
             operations.append("normalize_paper_color_cast_disabled")
 
     edge_shadow = EdgeShadowLighteningResult(
-        processed, False, "edge shadow lightening disabled", (), None, None, 0.0, 0.0, 0.0
+        processed, False, "edge shadow lightening disabled", "disabled", (), None, None, 0.0, 0.0, 0.0
     )
     with _operation_timer(operation_timings, "lighten_edge_shadow", enabled=options.lighten_edge_shadow):
         if options.lighten_edge_shadow:
@@ -3761,6 +3775,7 @@ def _process_image(
         ),
         "edge_shadow_lightened": False if guard_reverted else edge_shadow.applied,
         "edge_shadow_reason": guard_reason if guard_reverted else edge_shadow.reason,
+        "edge_shadow_reason_code": "guardrail_reverted" if guard_reverted else edge_shadow.reason_code,
         "edge_shadow_edges": list(edge_shadow.edges),
         "edge_shadow_mean_before": None if guard_reverted else edge_shadow.edge_mean_before,
         "edge_shadow_mean_after": None if guard_reverted else edge_shadow.edge_mean_after,
@@ -4546,15 +4561,32 @@ def _lighten_edge_shadow_conservative(image: Image.Image) -> EdgeShadowLightenin
             )
         if edge_std > 24 or inner_std > 32:
             return _edge_shadow_noop(image, f"edge shadow lightening skipped: texture risk near {side} edge")
-        if 10 <= delta <= 62 and edge_mean >= 132 and inner_mean >= 168:
+        strong_shadow = 10 <= delta <= 62 and edge_mean >= 132 and inner_mean >= 168
+        mild_side_shadow = (
+            side in {"left", "right"}
+            and 5.5 <= delta < 10
+            and edge_mean >= 210
+            and inner_mean >= 228
+            and p95 >= 230
+            and edge_std <= 8.5
+            and inner_std <= 14.0
+            and edge_foreground_ratio <= 0.012
+            and inner_foreground_ratio <= 0.018
+            and edge_dark_ratio == 0
+            and inner_dark_ratio == 0
+        )
+        if strong_shadow or mild_side_shadow:
             candidate_pixels, continuity_ratio = _edge_shadow_candidate_profile(edge, side, inner_mean)
             candidate_ratio = candidate_pixels / max(1, total)
-            if candidate_ratio < 0.008 or continuity_ratio < 0.72:
+            min_candidate_ratio = 0.008 if strong_shadow else 0.018
+            min_continuity_ratio = 0.72 if strong_shadow else 0.92
+            if candidate_ratio < min_candidate_ratio or continuity_ratio < min_continuity_ratio:
                 return _edge_shadow_noop(
                     image,
                     f"edge shadow lightening skipped: low-confidence narrow shadow near {side} edge",
                 )
-            edge_plans.append((side, edge_box, inner_box, min(30.0, delta * 0.68), candidate_pixels, inner_mean))
+            max_delta = min(30.0, delta * (0.68 if strong_shadow else 0.82))
+            edge_plans.append((side, edge_box, inner_box, max_delta, candidate_pixels, inner_mean))
 
     if not edge_plans:
         return _edge_shadow_noop(image, "edge shadow lightening skipped: no confident page-edge shadow")
@@ -4609,6 +4641,7 @@ def _lighten_edge_shadow_conservative(image: Image.Image) -> EdgeShadowLightenin
         result_image,
         True,
         "edge shadow lightening applied: narrow neutral page-edge shadow",
+        "applied_narrow_neutral_edge_shadow",
         tuple(side for side, _edge_box, _inner_box, _delta, _candidate_pixels, _inner_mean in edge_plans),
         before_mean,
         after_mean,
@@ -4619,7 +4652,37 @@ def _lighten_edge_shadow_conservative(image: Image.Image) -> EdgeShadowLightenin
 
 
 def _edge_shadow_noop(image: Image.Image, reason: str) -> EdgeShadowLighteningResult:
-    return EdgeShadowLighteningResult(image, False, reason, (), None, None, 0.0, 0.0, 0.0)
+    return EdgeShadowLighteningResult(image, False, reason, _edge_shadow_reason_code(reason), (), None, None, 0.0, 0.0, 0.0)
+
+
+_EDGE_SHADOW_REASON_CODES: dict[str, str] = {
+    "edge shadow lightening disabled": "disabled",
+    "edge shadow lightening skipped: image too small": "too_small",
+    "edge shadow lightening skipped: page is too dark": "too_dark",
+    "edge shadow lightening skipped: low tonal separation": "low_tonal_separation",
+    "edge shadow lightening skipped: color content or annotation risk near page edge": "protected_color_content",
+    "edge shadow lightening skipped: no confident page-edge shadow": "no_confident_shadow",
+    "edge shadow lightening skipped: broad uneven lighting is outside conservative edge scope": "broad_uneven_lighting",
+    "edge shadow lightening skipped: changed area exceeds conservative edge scope": "changed_area_too_large",
+}
+
+
+def _edge_shadow_reason_code(reason: str) -> str:
+    if reason in _EDGE_SHADOW_REASON_CODES:
+        return _EDGE_SHADOW_REASON_CODES[reason]
+    if "archival mark or content risk" in reason:
+        return "protected_edge_mark"
+    if "正文 or margin content risk" in reason:
+        return "protected_margin_content"
+    if "foreground too dense" in reason:
+        return "protected_foreground_dense"
+    if "texture risk" in reason:
+        return "protected_texture"
+    if "low-confidence narrow shadow" in reason:
+        return "low_confidence_narrow_shadow"
+    if reason.startswith("edge shadow lightening skipped: "):
+        return "skipped_" + re.sub(r"[^a-z0-9]+", "_", reason.removeprefix("edge shadow lightening skipped: ").lower()).strip("_")
+    return "unknown"
 
 
 def _edge_shadow_candidate_profile(edge: Image.Image, side: str, inner_mean: float) -> tuple[int, float]:

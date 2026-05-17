@@ -32,6 +32,38 @@ def _edge_shadow_page() -> Image.Image:
     return image
 
 
+def _mild_edge_shadow_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), (244, 244, 240))
+    draw = ImageDraw.Draw(image)
+    for x in range(14):
+        shade = 235 + min(7, x // 2)
+        draw.line((x, 0, x, image.height - 1), fill=(shade, shade, shade))
+    for y in range(35, 145, 14):
+        draw.rectangle((62, y, 190, y + 4), fill=(45, 45, 45))
+    return image
+
+
+def _mild_edge_shadow_table_page() -> Image.Image:
+    image = _mild_edge_shadow_page()
+    draw = ImageDraw.Draw(image)
+    draw.text((18, 18), "12", fill=(50, 50, 50))
+    for y in (52, 82, 112):
+        draw.line((6, y, 222, y), fill=(58, 58, 58), width=2)
+    for x in (18, 92, 166, 222):
+        draw.line((x, 52, x, 112), fill=(58, 58, 58), width=2)
+    return image
+
+
+def _mild_edge_shadow_stamp_page() -> Image.Image:
+    image = _mild_edge_shadow_page()
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((8, 74, 50, 116), outline=(180, 35, 35), width=4)
+    draw.rectangle((174, 48, 218, 124), fill=(135, 118, 105))
+    for y in range(52, 122, 8):
+        draw.line((178, y, 214, y + 4), fill=(82 + (y % 30), 72, 68), width=2)
+    return image
+
+
 class EdgeShadowProcessingTest(unittest.TestCase):
     def _process_one(self, image: Image.Image, options: ProcessingOptions) -> tuple[dict, Image.Image, Image.Image, Path]:
         temp = tempfile.TemporaryDirectory()
@@ -68,6 +100,29 @@ class EdgeShadowProcessingTest(unittest.TestCase):
         self.assertGreater(audit["metrics"]["edge_shadow_delta"]["max"], 8)
         processed.verify()
 
+    def test_lighten_edge_shadow_improves_mild_vertical_shadow_with_public_audit(self) -> None:
+        manifest, source, processed, process_dir = self._process_one(
+            _mild_edge_shadow_page(),
+            ProcessingOptions(lighten_edge_shadow=True, workers=1),
+        )
+
+        record = manifest["files"][0]
+        audit = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
+        audit_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+        self.assertTrue(record["edge_shadow_lightened"])
+        self.assertEqual(record["edge_shadow_reason_code"], "applied_narrow_neutral_edge_shadow")
+        self.assertEqual(record["edge_shadow_edges"], ["left"])
+        self.assertGreater(_mean_luma(processed, (0, 0, 14, 180)), _mean_luma(source, (0, 0, 14, 180)) + 2.0)
+        self.assertGreater(record["edge_shadow_changed_pixel_ratio"], 0.01)
+        self.assertLess(record["edge_shadow_changed_pixel_ratio"], 0.08)
+        self.assertGreater(record["edge_shadow_candidate_pixel_ratio"], record["edge_shadow_changed_pixel_ratio"])
+        self.assertLess(_changed_ratio(source, processed, (54, 28, 200, 154)), 0.002)
+        edge_guard = audit["guardrails"]["edge_shadow"]
+        self.assertEqual(edge_guard["reason_code_distribution"]["applied_narrow_neutral_edge_shadow"], 1)
+        self.assertTrue(audit["privacy"]["aggregate_only"])
+        self.assertNotIn("A001_0001", audit_text)
+        processed.verify()
+
     def test_lighten_edge_shadow_noops_when_marks_or_body_are_near_edge(self) -> None:
         edge_mark = _edge_shadow_page()
         ImageDraw.Draw(edge_mark).ellipse((2, 66, 10, 74), fill=(30, 30, 30))
@@ -86,6 +141,23 @@ class EdgeShadowProcessingTest(unittest.TestCase):
             self.assertIn("lighten_edge_shadow_noop", record["operations"])
             self.assertLess(_changed_ratio(source, processed, (0, 0, source.width, source.height)), 0.001)
             self.assertIn("risk", record["edge_shadow_reason"])
+
+    def test_lighten_edge_shadow_preserves_mild_shadow_risky_edge_content(self) -> None:
+        risky_pages = [
+            (_mild_edge_shadow_table_page(), "protected_edge_mark"),
+            (_mild_edge_shadow_stamp_page(), "protected_color_content"),
+        ]
+
+        for image, reason_code in risky_pages:
+            manifest, source, processed, _process_dir = self._process_one(
+                image,
+                ProcessingOptions(lighten_edge_shadow=True, workers=1),
+            )
+            record = manifest["files"][0]
+            self.assertFalse(record["edge_shadow_lightened"])
+            self.assertEqual(record["edge_shadow_reason_code"], reason_code)
+            self.assertIn("lighten_edge_shadow_noop", record["operations"])
+            self.assertLess(_changed_ratio(source, processed, (0, 0, source.width, source.height)), 0.001)
 
     def test_lighten_edge_shadow_preserves_red_content_away_from_page_edge(self) -> None:
         image = _edge_shadow_page()
@@ -136,6 +208,9 @@ class EdgeShadowProcessingTest(unittest.TestCase):
         self.assertEqual(record["status"], "processed")
         self.assertTrue(record["processing_audit"]["guardrail_failures"] == [])
         self.assertIn("lighten_edge_shadow_conservative", record["operations"])
+        self.assertLessEqual(record["edge_shadow_changed_pixel_ratio"], 0.08)
+        self.assertEqual(record["processing_audit"]["cumulative_change_guard_action"], "passed")
+        self.assertLessEqual(record["processing_audit"]["cumulative_change_score"], 1.0)
         self.assertTrue(audit["guardrails"]["enabled"])
         self.assertEqual(audit["counts"]["guardrail_failed_files"], 0)
 
