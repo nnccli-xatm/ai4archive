@@ -6429,6 +6429,12 @@ def _fold_shadow_axis_plan(
         local_delta = local_mean - band_mean
         if not (2.25 <= local_delta <= 42.0):
             continue
+        if _fold_shadow_group_has_ruled_content(stats, group):
+            return _empty_fold_shadow_plan(
+                orientation,
+                "ruled content intersects candidate fold band",
+                candidate_total_ratio,
+            )
         if any(
             stats[index]["protected_ratio"] > 0.004 and not stats[index]["sparse_text_bridge"]
             for index in group
@@ -6586,6 +6592,12 @@ def _fold_shadow_diagonal_plan(
         local_delta = local_mean - band_mean
         if not (2.25 <= local_delta <= 42.0):
             continue
+        if _fold_shadow_group_has_ruled_content(stats, group):
+            return _empty_fold_shadow_plan(
+                orientation,
+                "ruled content intersects candidate fold band",
+                candidate_total_ratio,
+            )
         if any(stats[index]["protected_ratio"] > 0.004 for index in group):
             return _empty_fold_shadow_plan(
                 orientation,
@@ -6670,6 +6682,31 @@ def _fold_shadow_protected_crossings_are_sparse(protected_crosses: set[int], cro
         previous = current
     longest_run = max(longest_run, current_run)
     return longest_run <= max(18, int(round(cross_length * 0.09)))
+
+
+def _fold_shadow_group_has_ruled_content(stats: list[dict[str, Any]], group: list[int]) -> bool:
+    if len(group) < 3:
+        return False
+    group_means = [float(stats[index]["mean"]) for index in group]
+    sorted_means = sorted(group_means)
+    median = sorted_means[len(sorted_means) // 2]
+    outlier_indexes = [
+        index
+        for index, mean in zip(group, group_means)
+        if median - mean >= 18.0 and stats[index]["candidate_ratio"] >= 0.42
+    ]
+    if not outlier_indexes:
+        return False
+    longest_run = 1
+    current_run = 1
+    for previous, current in zip(outlier_indexes, outlier_indexes[1:]):
+        if current == previous + 1:
+            current_run += 1
+        else:
+            longest_run = max(longest_run, current_run)
+            current_run = 1
+    longest_run = max(longest_run, current_run)
+    return longest_run <= max(2, int(round(len(group) * 0.25)))
 
 
 def _empty_fold_shadow_plan(

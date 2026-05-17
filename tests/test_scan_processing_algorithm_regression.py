@@ -527,6 +527,9 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             if variant == "vertical_rule":
                 draw.line((160, 28, 160, 214), fill=(35, 35, 35), width=2)
                 return image
+            if variant == "light_form_divider":
+                draw.line((160, 28, 160, 214), fill=(202, 202, 198), width=1)
+                return image
             if variant == "dense_foreground":
                 for y in range(35, 205, 10):
                     draw.rectangle((45, y, 275, y + 3), fill=(45, 45, 45))
@@ -542,6 +545,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             pages = {
                 "synthetic_safe_mild_vertical_fold_sparse_text.png": mild_fold_page("safe"),
                 "synthetic_vertical_fold_rule_protected.png": mild_fold_page("vertical_rule"),
+                "synthetic_vertical_fold_light_form_divider_protected.png": mild_fold_page("light_form_divider"),
                 "synthetic_vertical_fold_dense_foreground.png": mild_fold_page("dense_foreground"),
             }
             source_bytes = {}
@@ -587,6 +591,10 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 self.assertEqual(record["fold_shadows_changed_pixel_ratio"], 0.0, name)
                 with Image.open(process_dir / record["output_relative_path"]) as output:
                     self.assertEqual(output.convert("RGB").tobytes(), pages[name].tobytes(), name)
+            self.assertEqual(
+                records["synthetic_vertical_fold_light_form_divider_protected.png"]["fold_shadows_reason_code"],
+                "ruled_content_intersects_candidate_fold_band",
+            )
 
             fold_guard = audit_summary["guardrails"]["fold_shadows"]
             self.assertEqual(audit_summary["counts"]["fold_shadows_lightened_files"], 1)
@@ -594,6 +602,10 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertEqual(fold_guard["applied_files"], 1)
             self.assertEqual(fold_guard["skipped_files"], len(protected_names))
             self.assertEqual(fold_guard["reason_code_distribution"]["applied_narrow_neutral_background_band"], 1)
+            self.assertEqual(
+                fold_guard["skip_reason_code_distribution"]["ruled_content_intersects_candidate_fold_band"],
+                1,
+            )
             self.assertIn("changed_pixel_ratio", fold_guard)
             self.assertIn("candidate_pixel_ratio", fold_guard)
             self.assertIn("candidate_width_bucket_distribution", fold_guard)
