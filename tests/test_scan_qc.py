@@ -6279,6 +6279,67 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn("private_combo_faded_text", audit_summary_text)
             self.assertNotIn("private_combo_edge_line", audit_summary_text)
 
+    def test_full_retouch_chain_lightens_safe_faint_corner_vignette_with_aggregate_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source_image = _synthetic_faint_corner_vignette_page()
+            source_image.save(input_dir / "private_full_chain_faint_corner_vignette.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(
+                    auto_crop=True,
+                    deskew=True,
+                    trim_dark_border=True,
+                    scanner_gutter_trim=True,
+                    despeckle=True,
+                    normalize_tones=True,
+                    normalize_paper_color_cast=True,
+                    lighten_edge_shadow=True,
+                    lighten_corner_shadows=True,
+                    lighten_background_stains=True,
+                    lighten_fold_shadows=True,
+                    level_illumination_gradient=True,
+                    clean_bleed_through=True,
+                    lighten_scanlines=True,
+                    enhance_faded_text=True,
+                    sharpen_text_edges=True,
+                    despeckle_backend="fallback",
+                    workers=1,
+                ),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+            processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+
+            self.assertEqual(record["status"], "processed")
+            self.assertTrue(record["corner_shadows_lightened"])
+            self.assertEqual(record["corner_shadows_reason_code"], "applied")
+            self.assertEqual(record["corner_shadows_corners"], ["top_left"])
+            self.assertGreater(
+                _box_luma(processed, (0, 0, 54, 54)),
+                _box_luma(source_image, (0, 0, 54, 54)) + 0.7,
+            )
+            self.assertLess(record["corner_shadows_changed_pixel_ratio"], 0.06)
+            self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
+            self.assertEqual(record["processing_audit"]["cumulative_change_guard_action"], "passed")
+            self.assertEqual(audit_summary["counts"]["processed_files"], 1)
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["corner_shadows_lightened_files"], 1)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            self.assertNotIn("private_full_chain_faint_corner_vignette", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
     def test_sharpen_text_edges_lightly_improves_blurred_text_and_records_aggregate_audit(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -8050,6 +8111,114 @@ class ScanQcTest(unittest.TestCase):
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertNotIn("private_safe_adjacent_soft_corner_vignettes", audit_summary_text)
             self.assertNotIn("private_safe_diagonal_soft_corner_vignettes", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
+    def test_lighten_corner_shadows_improves_safe_faint_single_corner_vignette(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            default_process_dir = root / "processed-default"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source_image = _synthetic_faint_corner_vignette_page()
+            source_image.save(input_dir / "private_safe_faint_corner_vignette.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            default_manifest = process_images(report, input_dir, default_process_dir, ProcessingOptions(workers=1))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(lighten_corner_shadows=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            default_record = default_manifest["files"][0]
+            record = manifest["files"][0]
+            processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+
+            self.assertFalse(default_record["corner_shadows_lightened"])
+            self.assertEqual(default_record["corner_shadows_reason_code"], "disabled")
+            self.assertEqual(
+                _sha256_for_test(input_dir / default_record["source_relative_path"]),
+                _sha256_for_test(default_process_dir / default_record["output_relative_path"]),
+            )
+            self.assertTrue(record["corner_shadows_lightened"])
+            self.assertEqual(record["corner_shadows_reason_code"], "applied")
+            self.assertEqual(record["corner_shadows_corners"], ["top_left"])
+            self.assertIn("lighten_corner_shadows_conservative", record["operations"])
+            self.assertGreater(
+                _box_luma(processed, (0, 0, 54, 54)),
+                _box_luma(source_image, (0, 0, 54, 54)) + 0.7,
+            )
+            self.assertLess(_changed_ratio_for_test(source_image, processed, (72, 58, 188, 104)), 0.002)
+            self.assertGreater(record["corner_shadows_changed_pixel_ratio"], 0.002)
+            self.assertLess(record["corner_shadows_changed_pixel_ratio"], 0.06)
+            self.assertGreater(
+                record["corner_shadows_candidate_pixel_ratio"],
+                record["corner_shadows_changed_pixel_ratio"],
+            )
+            self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
+            self.assertEqual(audit_summary["counts"]["corner_shadows_lightened_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["corner_shadows"]["corner_distribution"]["top_left"], 1)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_safe_faint_corner_vignette", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
+    def test_lighten_corner_shadows_preserves_content_on_faint_corner_vignettes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "private_faint_corner_page_number.png": _synthetic_faint_corner_vignette_page(page_number=True),
+                "private_faint_corner_stamp.png": _synthetic_faint_corner_vignette_page(red_stamp=True),
+                "private_faint_corner_table_line.png": _synthetic_faint_corner_vignette_page(table_line=True),
+                "private_faint_corner_blue_mark.png": _synthetic_faint_corner_vignette_page(color_mark=True),
+            }
+            for name, image in pages.items():
+                image.save(input_dir / name, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(lighten_corner_shadows=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            skipped_expectations = {
+                "private_faint_corner_page_number.png": "protected_content",
+                "private_faint_corner_stamp.png": "color_content",
+                "private_faint_corner_table_line.png": "protected_content",
+                "private_faint_corner_blue_mark.png": "color_content",
+            }
+            for source_name, reason_code in skipped_expectations.items():
+                record = records[source_name]
+                processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+                self.assertFalse(record["corner_shadows_lightened"], source_name)
+                self.assertIn("lighten_corner_shadows_noop", record["operations"], source_name)
+                self.assertEqual(record["corner_shadows_reason_code"], reason_code, source_name)
+                self.assertEqual(record["processing_audit"]["corner_shadows_changed_pixel_ratio"], 0.0, source_name)
+                self.assertLess(
+                    _changed_ratio_for_test(pages[source_name], processed, (0, 0, processed.width, processed.height)),
+                    0.001,
+                    source_name,
+                )
+
+            corner_guard = audit_summary["guardrails"]["corner_shadows"]
+            self.assertEqual(audit_summary["counts"]["corner_shadows_lightened_files"], 0)
+            self.assertEqual(audit_summary["counts"]["corner_shadows_skipped_files"], len(skipped_expectations))
+            self.assertEqual(corner_guard["applied_files"], 0)
+            self.assertEqual(corner_guard["skipped_files"], len(skipped_expectations))
+            self.assertGreaterEqual(corner_guard["protection_triggered_files"], 2)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_faint_corner_page_number", audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
 
     def test_lighten_corner_shadows_preserves_corner_content_and_skips_uncertain_pages(self) -> None:
@@ -16988,6 +17157,32 @@ def _synthetic_paired_soft_corner_vignette_page(
             draw.pieslice(box, *angles, fill=(shade, shade, shade))
     if page_number:
         draw.text((16, 14), "12", fill=(28, 28, 28))
+    return image
+
+
+def _synthetic_faint_corner_vignette_page(
+    *,
+    page_number: bool = False,
+    red_stamp: bool = False,
+    table_line: bool = False,
+    color_mark: bool = False,
+) -> Image.Image:
+    image = Image.new("RGB", (260, 180), (242, 242, 238))
+    draw = ImageDraw.Draw(image)
+    for radius in range(64, 2, -2):
+        shade = int(round(242 - (radius / 64) * 14))
+        draw.pieslice((0, 0, radius * 2, radius * 2), 180, 270, fill=(shade, shade, shade))
+    for y in (60, 82, 104):
+        draw.rectangle((84, y, 188, y + 5), fill=(35, 35, 35))
+    if page_number:
+        draw.text((16, 14), "12", fill=(28, 28, 28))
+    if red_stamp:
+        draw.ellipse((12, 12, 56, 56), outline=(178, 28, 28), width=4)
+    if table_line:
+        draw.line((0, 42, 72, 42), fill=(44, 44, 44), width=1)
+        draw.line((42, 0, 42, 72), fill=(44, 44, 44), width=1)
+    if color_mark:
+        draw.rectangle((16, 16, 42, 42), fill=(44, 116, 200))
     return image
 
 
