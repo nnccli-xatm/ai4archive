@@ -9496,7 +9496,53 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn("A001_faint_segmented_text", audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
 
-    def test_deskew_corrects_faint_handwriting_baselines_on_light_paper(self) -> None:
+    def test_deskew_corrects_faint_typed_glyphs_after_low_contrast_scan_record(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            image = _synthetic_faint_typed_glyph_text_page().rotate(
+                -0.75,
+                resample=Image.Resampling.BICUBIC,
+                expand=True,
+                fillcolor=(249, 249, 246),
+            )
+            source = input_dir / "A001_faint_typed_glyphs.png"
+            image.save(source, dpi=(300, 300))
+            source_sha_before = _sha256_for_test(source)
+            alignment_before = _faint_text_horizontal_alignment_score(image)
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(deskew=True, workers=1))
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            record = manifest["files"][0]
+            self.assertEqual(record["status"], "processed")
+            self.assertTrue(record["deskewed"])
+            self.assertAlmostEqual(record["skew_angle_degrees"], -0.75, delta=0.25)
+            self.assertGreaterEqual(record["skew_confidence"], 0.08)
+            self.assertLessEqual(abs(record["skew_angle_degrees"]), 1.25)
+            self.assertEqual(record["deskew_reason"], "deskew applied")
+            self.assertEqual(source_sha_before, _sha256_for_test(source))
+            self.assertIn("deskew_conservative", record["operations"])
+            self.assertIn("skew_detect_projection", record["operations"])
+            self.assertNotIn("deskew_safe_skip_scan_measurement", record["operations"])
+            with Image.open(process_dir / "images" / "A001_faint_typed_glyphs.png") as processed:
+                alignment_after = _faint_text_horizontal_alignment_score(processed)
+            self.assertGreater(alignment_after, alignment_before * 1.2)
+            self.assertEqual(audit_summary["counts"]["deskewed_files"], 1)
+            self.assertEqual(audit_summary["counts"]["deskew_projection_detection_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["deskew"]["corrected_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["deskew"]["reason_distribution"]["deskew applied"], 1)
+            self.assertTrue(manifest["performance"]["operation_timings"]["deskew"]["enabled"])
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("A001_faint_typed_glyphs", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
+    def test_deskew_noops_for_faint_handwriting_baselines_on_light_paper(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             input_dir = root / "input"
@@ -9521,20 +9567,20 @@ class ScanQcTest(unittest.TestCase):
 
             record = manifest["files"][0]
             self.assertEqual(record["status"], "processed")
-            self.assertTrue(record["deskewed"])
-            self.assertAlmostEqual(record["skew_angle_degrees"], -0.55, delta=0.25)
-            self.assertGreaterEqual(record["skew_confidence"], 0.08)
-            self.assertLessEqual(abs(record["skew_angle_degrees"]), 1.25)
-            self.assertEqual(record["deskew_reason"], "deskew applied")
+            self.assertFalse(record["deskewed"])
+            self.assertEqual(record["skew_angle_degrees"], None)
+            self.assertEqual(record["skew_confidence"], 0.0)
+            self.assertEqual(record["deskew_reason"], "low contrast")
             self.assertEqual(source_sha_before, _sha256_for_test(source))
-            self.assertIn("deskew_conservative", record["operations"])
+            self.assertIn("deskew_noop", record["operations"])
             with Image.open(process_dir / "images" / "A001_faint_handwriting_baselines.png") as processed:
                 alignment_after = _faint_text_horizontal_alignment_score(processed)
-            self.assertGreater(alignment_after, alignment_before * 1.2)
-            self.assertEqual(audit_summary["counts"]["deskewed_files"], 1)
+            self.assertEqual(alignment_after, alignment_before)
+            self.assertEqual(audit_summary["counts"]["deskewed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["deskew_skipped_files"], 1)
             self.assertEqual(audit_summary["counts"]["deskew_projection_detection_files"], 1)
-            self.assertEqual(audit_summary["guardrails"]["deskew"]["corrected_files"], 1)
-            self.assertEqual(audit_summary["guardrails"]["deskew"]["reason_distribution"]["deskew applied"], 1)
+            self.assertEqual(audit_summary["guardrails"]["deskew"]["corrected_files"], 0)
+            self.assertEqual(audit_summary["guardrails"]["deskew"]["reason_distribution"]["low contrast"], 1)
             self.assertTrue(manifest["performance"]["operation_timings"]["deskew"]["enabled"])
             self.assertGreaterEqual(manifest["performance"]["operation_timings"]["deskew"]["file_count"], 1)
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
@@ -16058,6 +16104,25 @@ def _synthetic_faint_segmented_text_page() -> Image.Image:
             width = 4 + ((x + y) // 13) % 10
             draw.rectangle((x, y, min(350, x + width), y + 2), fill=ink)
             x += width + 8
+    return image
+
+
+def _synthetic_faint_typed_glyph_text_page() -> Image.Image:
+    image = Image.new("RGB", (520, 680), (249, 249, 246))
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default()
+    ink = (238, 238, 238)
+    lines = [
+        "ARCHIVE TYPED PAGE 012345",
+        "THE QUICK BROWN FOX",
+        "STABLE PRINTED TEXT LINE",
+        "LOW CONTRAST PAPER COPY",
+        "REPEATED TEXT BASELINES",
+        "ANOTHER STABLE ROW",
+        "FINAL PRINTED LINE",
+    ]
+    for index, line in enumerate(lines):
+        draw.text((72, 92 + index * 42), line, fill=ink, font=font)
     return image
 
 
