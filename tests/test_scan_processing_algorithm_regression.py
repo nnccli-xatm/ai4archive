@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import math
 import tempfile
 import unittest
 from unittest import mock
@@ -274,6 +275,109 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 + cumulative_reasons.get("cumulative_edge_content_weakening", 0),
                 len(protected_names),
             )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
+    def test_mild_broad_corner_vignette_cleanup_preserves_corner_mark(self) -> None:
+        def mild_broad_corner_vignette_page(variant: str) -> Image.Image:
+            image = Image.new("RGB", (320, 240), (244, 244, 240))
+            pixels = image.load()
+            for y in range(image.height):
+                for x in range(image.width):
+                    distance = math.hypot(x, y)
+                    if distance < 135:
+                        shade = int(round(244 - 12 * (1 - distance / 135) ** 1.15))
+                        pixels[x, y] = (shade, shade, shade - 4)
+            draw = ImageDraw.Draw(image)
+            for y in (78, 104, 130, 156):
+                draw.rectangle((112, y, 248, y + 5), fill=(40, 40, 40))
+            if variant == "safe":
+                return image
+            if variant == "page_mark":
+                draw.text((18, 16), "12", fill=(34, 34, 34))
+                return image
+            raise ValueError(f"unsupported variant: {variant}")
+
+        with tempfile.TemporaryDirectory(prefix="scan-processing-mild-corner-vignette-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_safe_mild_broad_corner_vignette.png": mild_broad_corner_vignette_page("safe"),
+                "synthetic_mild_corner_page_mark.png": mild_broad_corner_vignette_page("page_mark"),
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "mild-corner-vignette", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(lighten_corner_shadows=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_name = "synthetic_safe_mild_broad_corner_vignette.png"
+            safe_record = records[safe_name]
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertTrue(safe_record["corner_shadows_lightened"])
+            self.assertEqual(safe_record["corner_shadows_reason_code"], "applied")
+            self.assertEqual(safe_record["corner_shadows_corners"], ["top_left"])
+            self.assertGreater(safe_record["corner_shadows_delta"], 2.0)
+            self.assertGreater(safe_record["corner_shadows_changed_pixel_ratio"], 0.01)
+            self.assertLessEqual(safe_record["corner_shadows_changed_pixel_ratio"], 0.06)
+            self.assertLessEqual(safe_record["corner_shadows_candidate_pixel_ratio"], 0.10)
+            with Image.open(process_dir / safe_record["output_relative_path"]) as output:
+                self.assertGreater(
+                    _mean_luma(output, (0, 0, 70, 70)),
+                    _mean_luma(pages[safe_name], (0, 0, 70, 70)) + 1.5,
+                )
+                self.assertLess(_changed_ratio(pages[safe_name], output, (104, 70, 260, 170)), 0.002)
+                self.assertLess(_changed_ratio(pages[safe_name], output, (190, 180, 320, 240)), 0.001)
+
+            protected_name = "synthetic_mild_corner_page_mark.png"
+            protected_record = records[protected_name]
+            with Image.open(process_dir / protected_record["output_relative_path"]) as protected_output:
+                self.assertEqual((input_dir / protected_name).read_bytes(), source_bytes[protected_name])
+                self.assertFalse(protected_record["corner_shadows_lightened"])
+                self.assertEqual(protected_record["corner_shadows_reason_code"], "protected_content")
+                self.assertEqual(protected_record["processing_audit"]["corner_shadows_changed_pixel_ratio"], 0.0)
+                self.assertLess(
+                    _changed_ratio(
+                        pages[protected_name],
+                        protected_output,
+                        (0, 0, protected_output.width, protected_output.height),
+                    ),
+                    0.001,
+                )
+                self.assertLess(
+                    abs(
+                        _mean_luma(protected_output, (12, 10, 52, 42))
+                        - _mean_luma(pages[protected_name], (12, 10, 52, 42))
+                    ),
+                    0.5,
+                )
+
+            corner_guard = audit_summary["guardrails"]["corner_shadows"]
+            self.assertEqual(audit_summary["counts"]["corner_shadows_lightened_files"], 1)
+            self.assertEqual(audit_summary["counts"]["corner_shadows_skipped_files"], 1)
+            self.assertEqual(corner_guard["applied_files"], 1)
+            self.assertEqual(corner_guard["skipped_files"], 1)
+            self.assertEqual(corner_guard["reason_code_distribution"]["applied"], 1)
+            self.assertEqual(corner_guard["skip_reason_code_distribution"]["protected_content"], 1)
+            self.assertIn("changed_pixel_ratio", corner_guard)
+            self.assertIn("candidate_pixel_ratio", corner_guard)
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertFalse(audit_summary["privacy"]["contains_paths"])
             self.assertFalse(audit_summary["privacy"]["contains_hashes"])
