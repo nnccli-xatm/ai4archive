@@ -5610,6 +5610,24 @@ def _protected_clean_page_faint_mark_pages() -> dict[str, Image.Image]:
         draw.rectangle((x, y, x + 1, y + 1), fill=(225, 225, 221))
     pages["A107_archival_texture.png"] = image
 
+    image = Image.new("RGB", (260, 180), paper)
+    for x, y in ((132, 48), (132, 88), (132, 128)):
+        for offset_x, offset_y in ((0, 0), (1, 0), (0, 1), (1, 1)):
+            image.putpixel((x + offset_x, y + offset_y), pale_mark)
+    pages["A108_clean_page_punctuation_column.png"] = image
+
+    image = Image.new("RGB", (260, 180), paper)
+    for x, y in ((72, 92), (112, 92), (152, 92), (192, 92)):
+        for offset_x, offset_y in ((0, 0), (1, 0), (0, 1), (1, 1)):
+            image.putpixel((x + offset_x, y + offset_y), pale_mark)
+    pages["A109_clean_page_ruled_or_leader_row.png"] = image
+
+    image = Image.new("RGB", (260, 180), paper)
+    for x, y in ((48, 40), (110, 122), (172, 64), (220, 140)):
+        for offset_x, offset_y in ((0, 0), (1, 0), (0, 1), (1, 1)):
+            image.putpixel((x + offset_x, y + offset_y), (225, 225, 221))
+    pages["A110_clean_page_sparse_paper_texture.png"] = image
+
     return pages
 
 

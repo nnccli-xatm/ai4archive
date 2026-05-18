@@ -13270,7 +13270,7 @@ _DESPECKLE_PALE_CLUSTER_MIN_DELTA = 10
 _DESPECKLE_PALE_CLUSTER_MAX_DELTA = 34
 _DESPECKLE_PALE_CLUSTER_MIN_FOREGROUND_PIXELS = 24
 _DESPECKLE_CLEAN_PAGE_PALE_CLUSTER_MAX_PIXELS = 16
-_DESPECKLE_CLEAN_PAGE_PALE_CLUSTER_MAX_COMPONENTS = 4
+_DESPECKLE_CLEAN_PAGE_PALE_CLUSTER_MAX_COMPONENTS = 3
 _DESPECKLE_CLEAN_PAGE_PALE_CLUSTER_MIN_SPACING = 24
 _DESPECKLE_PALE_PATTERN_MIN_CANDIDATES = 24
 _DESPECKLE_PALE_PATTERN_MIN_COMPONENTS = 16
@@ -14249,6 +14249,8 @@ def _despeckle_clean_page_pale_cluster_allows_cleanup(candidate_set: set[tuple[i
             return False
         if max(component_y) - min(component_y) + 1 != _DESPECKLE_PALE_CLUSTER_MAX_SPAN:
             return False
+    if _despeckle_clean_page_pale_components_are_aligned(components):
+        return False
     for index, component in enumerate(components):
         component_x = [point[0] for point in component]
         component_y = [point[1] for point in component]
@@ -14265,6 +14267,22 @@ def _despeckle_clean_page_pale_cluster_allows_cleanup(candidate_set: set[tuple[i
             ):
                 return False
     return True
+
+
+def _despeckle_clean_page_pale_components_are_aligned(components: list[list[tuple[int, int]]]) -> bool:
+    if len(components) < 2:
+        return False
+    centers = [
+        (
+            round(sum(point[0] for point in component) / len(component)),
+            round(sum(point[1] for point in component) / len(component)),
+        )
+        for component in components
+    ]
+    x_values = [point[0] for point in centers]
+    y_values = [point[1] for point in centers]
+    alignment_tolerance = _DESPECKLE_PALE_CLUSTER_MAX_SPAN * 2
+    return max(x_values) - min(x_values) <= alignment_tolerance or max(y_values) - min(y_values) <= alignment_tolerance
 
 
 def _despeckle_has_independent_dark_foreground_context(
