@@ -10216,6 +10216,8 @@ def _safe_deskew_skip_from_page_evidence(image: Image.Image) -> SkewDetection | 
         return SkewDetection(None, 0.0, "insufficient foreground")
     if ink_ratio > 0.65:
         return SkewDetection(None, 0.0, "foreground too dense")
+    if _deskew_has_sparse_layout_mark_risk(raw_grayscale, raw_low, raw_high):
+        return SkewDetection(None, 0.0, "low confidence")
     if not _has_deskew_line_evidence(ink, bbox):
         return SkewDetection(None, 0.0, "low confidence")
     return None
@@ -10382,6 +10384,8 @@ def _detect_skew(image: Image.Image) -> SkewDetection:
         return SkewDetection(None, 0.0, "insufficient foreground")
     if ink_ratio > 0.65:
         return SkewDetection(None, 0.0, "foreground too dense")
+    if _deskew_has_sparse_layout_mark_risk(raw_grayscale, raw_low, raw_high):
+        return SkewDetection(None, 0.0, "low confidence")
     if not _has_deskew_line_evidence(ink, bbox):
         return SkewDetection(None, 0.0, "low confidence")
 
@@ -10475,6 +10479,139 @@ def _deskew_has_color_or_table_risk(image: Image.Image, *, correction_angle: flo
         aligned_bbox
         and _deskew_has_table_line_risk(aligned, aligned_bbox, include_fragment_projection=True)
     )
+
+
+def _deskew_has_sparse_layout_mark_risk(raw_grayscale: Image.Image, raw_low: int, raw_high: int) -> bool:
+    if raw_low < 100 or raw_high < 220 or raw_high - raw_low < 6:
+        return False
+
+    ink, bbox = _faint_low_contrast_ink(raw_grayscale, raw_low, raw_high)
+    if not bbox:
+        return False
+    if _nonzero_ratio(ink, bbox) > 0.30:
+        return False
+    left, top, right, bottom = bbox
+    page_width, page_height = raw_grayscale.size
+    if right - left < max(80, int(round(page_width * 0.20))):
+        return False
+
+    sample = ink.crop(bbox)
+    sample.thumbnail((700, 700), Image.Resampling.BILINEAR)
+    sample_width, sample_height = sample.size
+    if sample_width < 80 or sample_height < 24:
+        return False
+
+    component_boxes: list[tuple[int, int, int, int, int]] = []
+    for component in _mask_components(sample):
+        area = len(component)
+        if area < 6:
+            continue
+        xs = [point[0] for point in component]
+        ys = [point[1] for point in component]
+        component_boxes.append((min(xs), min(ys), max(xs) + 1, max(ys) + 1, area))
+    if not component_boxes:
+        return False
+
+    if _deskew_sparse_components_are_handwriting_like(component_boxes, sample_width, sample_height):
+        return True
+    if _deskew_sparse_components_are_segmented_rules(component_boxes, sample_width):
+        return True
+
+    edge_margin_x = max(8, int(round(page_width * 0.045)))
+    edge_margin_y = max(8, int(round(page_height * 0.045)))
+    near_edge = left <= edge_margin_x or top <= edge_margin_y or page_width - right <= edge_margin_x or page_height - bottom <= edge_margin_y
+    if near_edge and _deskew_sparse_components_are_segmented_rules(component_boxes, sample_width, min_components=6):
+        return True
+    return False
+
+
+def _deskew_sparse_components_are_handwriting_like(
+    component_boxes: list[tuple[int, int, int, int, int]],
+    sample_width: int,
+    sample_height: int,
+) -> bool:
+    if len(component_boxes) > 8:
+        return False
+    long_strokes = 0
+    for left, top, right, bottom, area in component_boxes:
+        width = right - left
+        height = bottom - top
+        if width >= sample_width * 0.45 and height <= max(14, sample_height * 0.18):
+            fill_ratio = area / max(1, width * height)
+            if fill_ratio < 0.45:
+                long_strokes += 1
+    return long_strokes >= 2
+
+
+def _deskew_sparse_components_are_segmented_rules(
+    component_boxes: list[tuple[int, int, int, int, int]],
+    sample_width: int,
+    *,
+    min_components: int = 12,
+) -> bool:
+    if len(component_boxes) < min_components:
+        return False
+
+    widths = sorted(right - left for left, _top, right, _bottom, _area in component_boxes)
+    heights = sorted(bottom - top for _left, top, _right, bottom, _area in component_boxes)
+    median_width = widths[len(widths) // 2]
+    median_height = heights[len(heights) // 2]
+    if median_width <= 0 or median_height <= 0:
+        return False
+
+    uniform = 0
+    guide_like = 0
+    centers: list[tuple[float, float]] = []
+    for left, top, right, bottom, _area in component_boxes:
+        width = right - left
+        height = bottom - top
+        if abs(width - median_width) <= max(2, median_width * 0.25) and abs(height - median_height) <= max(2, median_height * 0.25):
+            uniform += 1
+        aspect = width / max(1, height)
+        if aspect >= 3.0 or aspect <= 0.72 or (height >= median_width * 1.25 and width <= median_width * 1.20):
+            guide_like += 1
+        centers.append(((left + right) / 2, (top + bottom) / 2))
+
+    if uniform < len(component_boxes) * 0.70 or guide_like < len(component_boxes) * 0.55:
+        return False
+    if _deskew_sparse_component_row_count(centers, tolerance=max(4.0, median_height * 1.5)) not in {1, 2, 3, 4}:
+        return False
+
+    centers_by_row: dict[int, list[float]] = {}
+    row_ids = _deskew_sparse_component_row_ids(centers, tolerance=max(4.0, median_height * 1.5))
+    for row_id, (center_x, _center_y) in zip(row_ids, centers, strict=False):
+        centers_by_row.setdefault(row_id, []).append(center_x)
+    if len(centers_by_row) >= 2:
+        aligned_pairs = 0
+        rows = [sorted(values) for values in centers_by_row.values() if len(values) >= 4]
+        for index, row in enumerate(rows):
+            for other in rows[index + 1 :]:
+                aligned_pairs += sum(1 for x in row if any(abs(x - candidate) <= max(4.0, median_width * 0.45) for candidate in other))
+        if aligned_pairs >= max(6, len(component_boxes) * 0.25):
+            return True
+
+    coverage = (max(center_x for center_x, _center_y in centers) - min(center_x for center_x, _center_y in centers)) / max(1, sample_width)
+    return coverage >= 0.55
+
+
+def _deskew_sparse_component_row_count(centers: list[tuple[float, float]], *, tolerance: float) -> int:
+    return len(set(_deskew_sparse_component_row_ids(centers, tolerance=tolerance)))
+
+
+def _deskew_sparse_component_row_ids(centers: list[tuple[float, float]], *, tolerance: float) -> list[int]:
+    rows: list[float] = []
+    row_ids = [0] * len(centers)
+    indexed_centers = sorted(enumerate(centers), key=lambda item: item[1][1])
+    for original_index, (_center_x, center_y) in indexed_centers:
+        for row_id, row_y in enumerate(rows):
+            if abs(center_y - row_y) <= tolerance:
+                rows[row_id] = (row_y + center_y) / 2
+                row_ids[original_index] = row_id
+                break
+        else:
+            rows.append(center_y)
+            row_ids[original_index] = len(rows) - 1
+    return row_ids
 
 
 def _detect_shallow_stable_text_skew(

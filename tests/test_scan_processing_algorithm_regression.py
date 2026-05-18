@@ -2791,6 +2791,20 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             elif variant == "ruled":
                 for y in (190, 236):
                     draw.line((120, y, 390, y), fill=(52, 52, 50), width=2)
+            elif variant == "segmented_guides":
+                for y in (185, 231):
+                    for x in range(130, 390, 16):
+                        draw.rectangle((x, y, x + 8, y + 2), fill=(140, 140, 138))
+                        draw.rectangle((x, y - 6, x + 2, y + 8), fill=(140, 140, 138))
+            elif variant == "edge_marks":
+                for y in (170, 216):
+                    for x in range(0, 78, 16):
+                        draw.rectangle((x, y, x + 8, y + 3), fill=(140, 140, 138))
+                    draw.line((24, y + 13, 68, y + 19), fill=(140, 140, 138), width=2)
+            elif variant == "handwriting_like":
+                for y in (175, 215, 255):
+                    points = [(x, y + (index % 4) - 2) for index, x in enumerate(range(110, 370, 10))]
+                    draw.line(points, fill=(140, 140, 138), width=2)
             elif variant == "table":
                 for y in (180, 226, 272):
                     draw.line((120, y, 390, y), fill=(52, 52, 50), width=2)
@@ -2812,7 +2826,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             output_dir = root / "reports"
             process_dir = root / "processed"
             input_dir.mkdir()
-            variants = ("safe_text", "one_line", "ruled", "table", "texture")
+            variants = ("safe_text", "one_line", "ruled", "segmented_guides", "edge_marks", "handwriting_like", "table", "texture")
             pages = {f"synthetic_mild_sparse_deskew_{variant}.png": mild_sparse_page(variant) for variant in variants}
             source_bytes = {}
             for name, image in pages.items():
@@ -2840,6 +2854,9 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             expected_reasons = {
                 "synthetic_mild_sparse_deskew_one_line.png": {"low contrast", "low confidence"},
                 "synthetic_mild_sparse_deskew_ruled.png": {"low contrast", "table or color mark rotation risk"},
+                "synthetic_mild_sparse_deskew_segmented_guides.png": {"low contrast", "low confidence"},
+                "synthetic_mild_sparse_deskew_edge_marks.png": {"low contrast", "low confidence"},
+                "synthetic_mild_sparse_deskew_handwriting_like.png": {"low contrast", "low confidence"},
                 "synthetic_mild_sparse_deskew_table.png": {"table or color mark rotation risk"},
                 "synthetic_mild_sparse_deskew_texture.png": {"low contrast", "low confidence"},
             }
