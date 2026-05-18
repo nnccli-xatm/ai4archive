@@ -5958,6 +5958,8 @@ def _level_illumination_gradient_conservative(image: Image.Image) -> Illuminatio
         return _illumination_gradient_noop(image, "protected dark or mixed foreground content", "protected_content")
     foreground = grayscale.point(lambda value: 255 if value <= max(150, min(190, p50 - 36)) else 0, mode="L")
     foreground_ratio = _mask_ratio(foreground)
+    if _illumination_gradient_structured_sparse_foreground_risk(foreground):
+        return _illumination_gradient_noop(image, "protected structured sparse foreground content", "protected_content")
     sparse_typed_foreground_safe = _illumination_gradient_sparse_typed_foreground_safe(foreground)
     if _illumination_gradient_tiny_foreground_content_risk(foreground, grayscale) and not sparse_typed_foreground_safe:
         return _illumination_gradient_noop(image, "protected tiny foreground content", "protected_content")
@@ -6115,6 +6117,55 @@ def _illumination_gradient_tiny_foreground_content_risk(foreground: Image.Image,
         values = [int(grayscale.getpixel(point)) for point in component]
         if values and min(values) <= 120:
             return True
+    return False
+
+
+def _illumination_gradient_structured_sparse_foreground_risk(foreground: Image.Image) -> bool:
+    total = foreground.width * foreground.height
+    if total <= 0:
+        return False
+
+    components = [component for component in _mask_components(foreground) if len(component) >= 3]
+    if len(components) < 6:
+        return False
+
+    line_like = 0
+    horizontal_ticks = 0
+    vertical_ticks = 0
+    row_bands: set[int] = set()
+    column_bands: set[int] = set()
+    for component in components:
+        xs = [point[0] for point in component]
+        ys = [point[1] for point in component]
+        left = min(xs)
+        right = max(xs) + 1
+        top = min(ys)
+        bottom = max(ys) + 1
+        width = right - left
+        height = bottom - top
+        aspect = max(width, height) / max(1, min(width, height))
+        horizontal = height <= 3 and width >= 7 and aspect >= 2.6
+        vertical = width <= 3 and height >= 7 and aspect >= 2.6
+        if not (horizontal or vertical):
+            continue
+        line_like += 1
+        if horizontal:
+            horizontal_ticks += 1
+            row_bands.add(int(round(((top + bottom) / 2) / max(1, foreground.height) * 24)))
+        if vertical:
+            vertical_ticks += 1
+            column_bands.add(int(round(((left + right) / 2) / max(1, foreground.width) * 24)))
+
+    if line_like < 8:
+        return False
+    if line_like / len(components) < 0.55:
+        return False
+    if horizontal_ticks >= 8 and len(row_bands) >= 2:
+        return True
+    if vertical_ticks >= 8 and len(column_bands) >= 2:
+        return True
+    if horizontal_ticks >= 4 and vertical_ticks >= 4 and (len(row_bands) >= 2 or len(column_bands) >= 2):
+        return True
     return False
 
 

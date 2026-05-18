@@ -872,8 +872,25 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     draw.line((36, row, 184, row), fill=(45, 45, 45), width=2)
                 for column in (72, 118, 164):
                     draw.line((column, 32, column, 118), fill=(45, 45, 45), width=2)
+            elif variant == "sparse_ruled_segments":
+                for row in (42, 62, 82):
+                    for x in range(54, 160, 20):
+                        draw.rectangle((x, row, x + 8, row + 2), fill=(45, 45, 45))
             elif variant == "stamp_color_mark":
                 draw.ellipse((82, 42, 138, 98), outline=(180, 25, 25), width=4)
+            elif variant == "handwriting_sparse_strokes":
+                for y_offset in (0, 22):
+                    points = (
+                        (56, 54 + y_offset),
+                        (68, 48 + y_offset),
+                        (82, 56 + y_offset),
+                        (96, 49 + y_offset),
+                        (110, 58 + y_offset),
+                        (126, 50 + y_offset),
+                        (140, 57 + y_offset),
+                    )
+                    for start, end in zip(points, points[1:]):
+                        draw.line((*start, *end), fill=(45, 45, 45), width=1)
             elif variant == "edge_page_number":
                 draw.rectangle((101, 132, 119, 139), fill=(35, 35, 35))
                 draw.rectangle((0, 56, 16, 92), fill=(35, 35, 35))
@@ -904,7 +921,11 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             pages = {
                 "synthetic_safe_mild_two_edge_illumination.png": two_edge_page("safe"),
                 "synthetic_mild_two_edge_table_grid.png": two_edge_page("table_grid"),
+                "synthetic_mild_two_edge_sparse_ruled_segments.png": two_edge_page("sparse_ruled_segments"),
                 "synthetic_mild_two_edge_stamp_color_mark.png": two_edge_page("stamp_color_mark"),
+                "synthetic_mild_two_edge_handwriting_sparse_strokes.png": two_edge_page(
+                    "handwriting_sparse_strokes"
+                ),
                 "synthetic_mild_two_edge_edge_page_number.png": two_edge_page("edge_page_number"),
                 "synthetic_mild_two_edge_dense_low_contrast_foreground.png": two_edge_page(
                     "dense_low_contrast_foreground"
