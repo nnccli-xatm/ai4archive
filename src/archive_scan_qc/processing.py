@@ -8391,10 +8391,9 @@ def _lighten_scanlines_conservative(image: Image.Image) -> ScanlineLighteningRes
     foreground_threshold = min(155, max(78, p50 - 44))
     foreground = grayscale.point(lambda value: 255 if value <= foreground_threshold else 0, mode="L")
     foreground_ratio = _mask_ratio(foreground)
+    clean_background_only = False
     if foreground_ratio < 0.0015:
-        if sparse_tonal_evidence:
-            return _scanlines_noop(image, "scanline lightening skipped: low-confidence tonal evidence")
-        return _scanlines_noop(image, "scanline lightening skipped: foreground evidence too sparse")
+        clean_background_only = True
     if foreground_ratio > 0.08 and p05 < 70:
         return _scanlines_noop(image, "scanline lightening skipped: foreground too dense")
     if foreground_ratio > 0.08 and p05 < 165 and p50 < 225:
@@ -8444,6 +8443,19 @@ def _lighten_scanlines_conservative(image: Image.Image) -> ScanlineLighteningRes
     if plan["reason"]:
         reason = "low-confidence tonal evidence" if sparse_tonal_evidence else plan["reason"]
         return _scanlines_noop(image, f"scanline lightening skipped: {reason}", plan["candidate_ratio"])
+    if clean_background_only and not _clean_background_scanline_candidate_is_safe(
+        grayscale,
+        plan,
+        background=p90,
+        median=p50,
+        high=p95,
+        sparse_tonal_evidence=sparse_tonal_evidence,
+    ):
+        return _scanlines_noop(
+            image,
+            "scanline lightening skipped: low-confidence tonal evidence",
+            plan["candidate_ratio"],
+        )
 
     selected = plan["selected"]
     if plan["candidate_ratio"] <= 0.025 and _scanline_low_contrast_protected_context_risk(
@@ -8907,6 +8919,34 @@ def _scanline_low_contrast_components(
         if len(components) > max_components:
             return components
     return components
+
+
+def _clean_background_scanline_candidate_is_safe(
+    grayscale: Image.Image,
+    plan: dict[str, Any],
+    *,
+    background: int,
+    median: int,
+    high: int,
+    sparse_tonal_evidence: bool,
+) -> bool:
+    if not sparse_tonal_evidence:
+        return False
+    if median < 220 or background < 225 or high - median > 8:
+        return False
+    candidate_ratio = plan["candidate_ratio"]
+    if not 0.0007 <= candidate_ratio <= 0.018:
+        return False
+    lines = plan["lines"]
+    groups = _contiguous_groups(lines)
+    if len(groups) != 1 or not 1 <= len(groups[0]) <= 3:
+        return False
+    selected = plan["selected"]
+    if not selected:
+        return False
+    pixels = grayscale.load()
+    candidate_mean = sum(int(pixels[x, y]) for x, y in selected) / len(selected)
+    return 2.0 <= background - candidate_mean <= 10.0
 
 
 def _foreground_component_boxes(foreground: Image.Image, *, max_components: int) -> list[tuple[int, int, int, int, int]]:
