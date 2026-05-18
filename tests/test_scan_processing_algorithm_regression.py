@@ -2317,6 +2317,87 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_despeckle_cleans_isolated_scanner_glass_speck_but_preserves_lookalikes(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-despeckle-isolated-glass-speck-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            protected_pages = _protected_isolated_scanner_glass_dust_lookalike_pages()
+            pages = {
+                "synthetic_isolated_scanner_glass_dust_speck.png": _safe_isolated_scanner_glass_dust_speck_page(),
+                **protected_pages,
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "despeckle-isolated-glass-speck", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, workers=1))
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_name = "synthetic_isolated_scanner_glass_dust_speck.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertTrue(safe_record["despeckled"])
+            self.assertEqual(
+                safe_record["despeckle_pixels_changed"],
+                len(_safe_isolated_scanner_glass_dust_speck_points()),
+            )
+            self.assertIn("despeckle_isolated_pixels", safe_record["operations"])
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertLessEqual(safe_audit["despeckle_pixel_ratio"], 0.001)
+            self.assertEqual(safe_audit["local_content_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["combination_quality_guard_reason_code"], "safe_combination_passed")
+            with Image.open(process_dir / safe_record["output_relative_path"]) as output:
+                output_luma = output.convert("L")
+                for point in _safe_isolated_scanner_glass_dust_speck_points():
+                    self.assertGreaterEqual(output_luma.getpixel(point), 240)
+
+            for name, source_image in protected_pages.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name])
+                self.assertEqual(record["status"], "processed", name)
+                self.assertFalse(record["despeckled"], name)
+                self.assertEqual(record["despeckle_pixels_changed"], 0, name)
+                self.assertIn("despeckle_noop", record["operations"], name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertEqual(audit["despeckle_pixel_ratio"], 0.0, name)
+                self.assertEqual(audit["local_content_change_guard_action"], "passed", name)
+                self.assertEqual(audit["cumulative_change_guard_action"], "passed", name)
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    self.assertIsNone(ImageChops.difference(source_image, output.convert("RGB")).getbbox(), name)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["guardrails"]["despeckle"]["applied_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["despeckle"]["pixels_changed"],
+                len(_safe_isolated_scanner_glass_dust_speck_points()),
+            )
+            self.assertEqual(
+                audit_summary["guardrails"]["despeckle"]["reason_code_distribution"]["applied_isolated_pixels"],
+                1,
+            )
+            self.assertGreaterEqual(
+                audit_summary["guardrails"]["despeckle"]["reason_code_distribution"]["no_isolated_candidates"],
+                3,
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_despeckle_cleans_short_lint_streaks_with_bounded_aggregate_audit(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-despeckle-short-lint-") as temp_dir:
             root = Path(temp_dir)
@@ -6722,6 +6803,51 @@ def _safe_clean_page_faint_dust_speck_page() -> Image.Image:
     for point in _safe_clean_page_faint_dust_speck_points():
         image.putpixel(point, (228, 228, 224))
     return image
+
+
+def _safe_isolated_scanner_glass_dust_speck_points() -> tuple[tuple[int, int], ...]:
+    return tuple((x, y) for y in range(88, 91) for x in range(154, 157))
+
+
+def _safe_isolated_scanner_glass_dust_speck_page() -> Image.Image:
+    image = Image.new("RGB", (260, 180), (246, 246, 244))
+    for point in _safe_isolated_scanner_glass_dust_speck_points():
+        image.putpixel(point, (228, 228, 224))
+    return image
+
+
+def _protected_isolated_scanner_glass_dust_lookalike_pages() -> dict[str, Image.Image]:
+    pages: dict[str, Image.Image] = {}
+
+    punctuation = Image.new("RGB", (260, 180), (246, 246, 244))
+    draw = ImageDraw.Draw(punctuation)
+    draw.rectangle((132, 82, 146, 86), fill=(42, 42, 42))
+    draw.rectangle((158, 82, 172, 86), fill=(42, 42, 42))
+    for y in range(91, 94):
+        for x in range(150, 153):
+            punctuation.putpixel((x, y), (228, 228, 224))
+    pages["synthetic_protected_decimal_like_dot.png"] = punctuation
+
+    annotation = Image.new("RGB", (260, 180), (246, 246, 244))
+    draw = ImageDraw.Draw(annotation)
+    draw.ellipse((122, 62, 174, 114), outline=(188, 28, 28), width=3)
+    draw.line((132, 88, 146, 82), fill=(188, 28, 28), width=2)
+    for y in range(91, 94):
+        for x in range(154, 157):
+            annotation.putpixel((x, y), (228, 228, 224))
+    pages["synthetic_protected_stamp_annotation_dot.png"] = annotation
+
+    ruled_form = Image.new("RGB", (260, 180), (246, 246, 244))
+    draw = ImageDraw.Draw(ruled_form)
+    for y in (74, 94, 114):
+        draw.line((68, y, 196, y), fill=(80, 80, 80), width=1)
+    for x in (108, 148, 188):
+        draw.line((x, 66, x, 122), fill=(80, 80, 80), width=1)
+    for y in range(87, 90):
+        for x in range(154, 157):
+            ruled_form.putpixel((x, y), (228, 228, 224))
+    pages["synthetic_protected_table_ruled_mark.png"] = ruled_form
+    return pages
 
 
 def _high_density_pale_texture_page() -> Image.Image:
