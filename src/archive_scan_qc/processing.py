@@ -7247,6 +7247,13 @@ def _fold_shadow_curved_axis_plan(
             if len(neighbor_values) < max(6, neighbor_radius // 2):
                 continue
             band_values = [int(pixels[index, cross] if vertical else pixels[cross, index]) for index in run]
+            band_value_range = max(band_values) - min(band_values)
+            band_roughness = (
+                sum(abs(current - previous) for previous, current in zip(band_values, band_values[1:]))
+                / max(1, len(band_values) - 1)
+            )
+            if band_value_range < 2.0 or band_roughness > 4.5:
+                continue
             band_mean = sum(band_values) / len(band_values)
             local_mean = sum(neighbor_values) / len(neighbor_values)
             local_delta = local_mean - band_mean
