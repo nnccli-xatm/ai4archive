@@ -7428,7 +7428,9 @@ def _clean_bleed_through_conservative(image: Image.Image) -> BleedThroughCleanup
     protected = foreground.filter(ImageFilter.MaxFilter(17))
     edge_margin = max(5, int(round(min(image.width, image.height) * 0.045)))
     raw_candidate = Image.new("L", image.size, 0)
+    warm_haze_candidate = Image.new("L", image.size, 0)
     candidate_pixels = raw_candidate.load()
+    warm_candidate_pixels = warm_haze_candidate.load()
     source_pixels = grayscale.load()
     edge_pixels = edge_signal.load()
     rgb_pixels = image.convert("RGB").load() if paper_rgb is not None else None
@@ -7449,11 +7451,24 @@ def _clean_bleed_through_conservative(image: Image.Image) -> BleedThroughCleanup
                     max_ghost_signal,
                 )
             )
-            if not (gray_ghost_candidate or cool_gray_ghost_candidate):
+            warm_haze_ghost_candidate = (
+                very_stable_light_paper
+                and rgb_pixels is not None
+                and _bleed_through_warm_haze_ghost_pixel(
+                    rgb_pixels[x, y],
+                    paper_rgb,
+                    value,
+                    background,
+                )
+            )
+            if not (gray_ghost_candidate or cool_gray_ghost_candidate or warm_haze_ghost_candidate):
                 continue
             if int(edge_pixels[x, y]) >= 22:
                 continue
-            candidate_pixels[x, y] = 255
+            if gray_ghost_candidate or cool_gray_ghost_candidate:
+                candidate_pixels[x, y] = 255
+            else:
+                warm_candidate_pixels[x, y] = 255
     edge_cleared_candidate = _clear_mask_edges(raw_candidate, edge_margin)
     edge_candidate_ratio = _mask_ratio(raw_candidate) - _mask_ratio(edge_cleared_candidate)
     if edge_candidate_ratio > 0.0002 or _protected_edge_dark_ratio(raw_candidate) > 0.00005:
@@ -7465,6 +7480,20 @@ def _clean_bleed_through_conservative(image: Image.Image) -> BleedThroughCleanup
     candidate = ImageChops.multiply(edge_cleared_candidate, ImageChops.invert(protected))
     candidate_ratio = _mask_ratio(candidate)
     min_candidate_ratio = 0.00012 if very_stable_light_paper else 0.0003
+    if candidate_ratio < min_candidate_ratio:
+        edge_cleared_warm_candidate = _clear_mask_edges(warm_haze_candidate, edge_margin)
+        warm_edge_candidate_ratio = _mask_ratio(warm_haze_candidate) - _mask_ratio(edge_cleared_warm_candidate)
+        if warm_edge_candidate_ratio > 0.0002 or _protected_edge_dark_ratio(warm_haze_candidate) > 0.00005:
+            return _bleed_through_noop(
+                image,
+                "bleed-through cleanup skipped: edge content or binding risk",
+                warm_edge_candidate_ratio,
+            )
+        candidate = ImageChops.multiply(
+            ImageChops.lighter(edge_cleared_candidate, edge_cleared_warm_candidate),
+            ImageChops.invert(protected),
+        )
+        candidate_ratio = _mask_ratio(candidate)
     if candidate_ratio < min_candidate_ratio:
         return _bleed_through_noop(image, "bleed-through cleanup skipped: no confident faint reverse-side ghosts")
     if candidate_ratio > 0.065:
@@ -7729,6 +7758,27 @@ def _bleed_through_cool_gray_ghost_pixel(
     if red_loss < 2:
         return False
     return cool_blue_shift >= 4 and cool_green_shift >= 2
+
+
+def _bleed_through_warm_haze_ghost_pixel(
+    pixel: tuple[int, int, int],
+    paper_rgb: tuple[int, int, int],
+    gray_value: int,
+    background: int,
+) -> bool:
+    red_value, green_value, blue_value = pixel
+    paper_red, paper_green, paper_blue = paper_rgb
+    if max(pixel) - min(pixel) > 18:
+        return False
+    if gray_value < background - 1 or gray_value > background + 1:
+        return False
+    red_loss = paper_red - red_value
+    green_loss = paper_green - green_value
+    blue_loss = paper_blue - blue_value
+    if blue_loss != 1 or red_loss != 0 or green_loss < 0 or green_loss > 1:
+        return False
+    warm_shift = (red_value - blue_value) - (paper_red - paper_blue)
+    return warm_shift >= 1 and green_loss <= blue_loss + 1
 
 
 def _bleed_through_small_diffuse_selection(

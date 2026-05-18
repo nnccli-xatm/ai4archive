@@ -2039,6 +2039,101 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_faint_warm_bleed_through_haze_cleanup_preserves_protected_content(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-faint-warm-haze-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_safe_faint_warm_reverse_haze.png": _faint_warm_bleed_through_haze_page("safe"),
+                "synthetic_protected_faint_real_text.png": _faint_warm_bleed_through_haze_page("faint_text"),
+                "synthetic_protected_ruled_structure.png": _faint_warm_bleed_through_haze_page("ruled"),
+                "synthetic_protected_stamp_mark.png": _faint_warm_bleed_through_haze_page("stamp"),
+                "synthetic_protected_dense_foreground.png": _faint_warm_bleed_through_haze_page("dense_foreground"),
+                "synthetic_protected_archival_edge_mark.png": _faint_warm_bleed_through_haze_page("edge_mark"),
+            }
+            source_bytes = {}
+            for name, page in pages.items():
+                source = input_dir / name
+                page.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "faint-warm-haze", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(clean_bleed_through=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_name = "synthetic_safe_faint_warm_reverse_haze.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            safe_processed = Image.open(process_dir / safe_record["output_relative_path"]).convert("RGB")
+            self.assertTrue(safe_record["bleed_through_cleaned"])
+            self.assertEqual(safe_record["bleed_through_reason_code"], "applied_faint_reverse_ghost")
+            self.assertGreater(safe_audit["bleed_through_delta"], 3.0)
+            self.assertGreater(safe_audit["bleed_through_changed_pixel_ratio"], 0.003)
+            self.assertLessEqual(safe_audit["bleed_through_changed_pixel_ratio"], 0.045)
+            self.assertLessEqual(safe_audit["bleed_through_candidate_pixel_ratio"], 0.065)
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertEqual(safe_audit["local_content_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["combination_quality_guard_reason_code"], "safe_combination_passed")
+            self.assertEqual(safe_audit["processed_output_safety_guard_action"], "passed")
+            self.assertGreater(
+                _mean_luma(safe_processed, (144, 66, 220, 148)),
+                _mean_luma(pages[safe_name], (144, 66, 220, 148)) + 0.02,
+            )
+            self.assertIsNone(
+                ImageChops.difference(
+                    pages[safe_name].crop((30, 32, 130, 88)),
+                    safe_processed.crop((30, 32, 130, 88)),
+                ).getbbox()
+            )
+
+            expected_codes = {
+                "synthetic_protected_faint_real_text.png": "protected_line_or_annotation",
+                "synthetic_protected_ruled_structure.png": "protected_line_or_annotation",
+                "synthetic_protected_stamp_mark.png": "protected_color_content",
+                "synthetic_protected_dense_foreground.png": "protected_foreground_too_dense",
+                "synthetic_protected_archival_edge_mark.png": "protected_edge_content",
+            }
+            for name, expected_code in expected_codes.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+                self.assertFalse(record["bleed_through_cleaned"], name)
+                self.assertEqual(record["bleed_through_reason_code"], expected_code, name)
+                self.assertEqual(audit["bleed_through_reason_code"], expected_code, name)
+                self.assertEqual(audit["bleed_through_changed_pixel_ratio"], 0.0, name)
+                self.assertIsNone(ImageChops.difference(pages[name].convert("RGB"), processed).getbbox(), name)
+
+            bleed_guard = audit_summary["guardrails"]["bleed_through"]
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 1)
+            self.assertEqual(bleed_guard["applied_files"], 1)
+            self.assertEqual(bleed_guard["skipped_files"], len(expected_codes))
+            self.assertEqual(bleed_guard["reason_code_distribution"]["applied_faint_reverse_ghost"], 1)
+            self.assertIn("protected_line_or_annotation", bleed_guard["skip_reason_code_distribution"])
+            self.assertIn("protected_color_content", bleed_guard["skip_reason_code_distribution"])
+            self.assertIn("protected_foreground_too_dense", bleed_guard["skip_reason_code_distribution"])
+            self.assertIn("protected_edge_content", bleed_guard["skip_reason_code_distribution"])
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_cool_gray_mild_bleed_through_is_cleaned_without_private_audit_rows(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-cool-gray-bleed-through-") as temp_dir:
             root = Path(temp_dir)
@@ -5599,6 +5694,39 @@ def _pale_diffuse_bleed_through_page() -> Image.Image:
     mask = mask.filter(ImageFilter.GaussianBlur(3.2))
     ghost = Image.new("RGB", image.size, (236, 236, 232))
     image.paste(ghost, (0, 0), mask.point(lambda value: int(value * 0.30)))
+    return image
+
+
+def _faint_warm_bleed_through_haze_page(variant: str) -> Image.Image:
+    paper = (244, 244, 239)
+    image = Image.new("RGB", (300, 210), paper)
+    draw = ImageDraw.Draw(image)
+    if variant == "safe":
+        for y in (34, 58, 82):
+            draw.rectangle((32, y, 124, y + 3), fill=(66, 66, 66))
+        mask = Image.new("L", image.size, 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.text((154, 72), "321", fill=255)
+        mask_draw.text((154, 98), "654", fill=255)
+        mask_draw.text((154, 124), "987", fill=255)
+        mask = mask.filter(ImageFilter.GaussianBlur(4.8))
+        ghost = Image.new("RGB", image.size, (238, 232, 218))
+        image.paste(ghost, (0, 0), mask.point(lambda value: int(value * 0.26)))
+    elif variant == "faint_text":
+        draw.text((154, 92), "12", fill=(244, 243, 238))
+    elif variant == "ruled":
+        for y in (70, 104, 138):
+            draw.line((60, y, 240, y), fill=(244, 243, 238), width=1)
+        for x in (92, 152, 206):
+            draw.line((x, 58, x, 150), fill=(244, 243, 238), width=1)
+    elif variant == "stamp":
+        draw.ellipse((130, 70, 190, 130), outline=(190, 30, 30), width=2)
+    elif variant == "dense_foreground":
+        draw.rectangle((35, 40, 265, 110), fill=(70, 70, 70))
+    elif variant == "edge_mark":
+        draw.rectangle((0, 82, 16, 112), fill=(70, 70, 70))
+    else:
+        raise ValueError(f"unknown faint warm bleed-through haze variant: {variant}")
     return image
 
 
