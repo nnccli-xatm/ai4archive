@@ -8340,6 +8340,19 @@ def _lighten_scanlines_conservative(image: Image.Image) -> ScanlineLighteningRes
         return _scanlines_noop(image, f"scanline lightening skipped: {reason}", plan["candidate_ratio"])
 
     selected = plan["selected"]
+    if plan["candidate_ratio"] <= 0.025 and _scanline_low_contrast_protected_context_risk(
+        grayscale,
+        selected,
+        plan["lines"],
+        horizontal=plan["orientation"] == "horizontal",
+        background=p90,
+    ):
+        return _scanlines_noop(
+            image,
+            "scanline lightening skipped: SCANLINE_CONTENT_RISK risk 正文、表格线、印章、批注或档案原痕风险",
+            plan["candidate_ratio"],
+        )
+
     selected_count = len(selected)
     changed_ratio = selected_count / max(1, total)
     candidate_ratio = round(plan["candidate_ratio"], 6)
@@ -8686,6 +8699,108 @@ def _scanline_handwriting_or_marginal_mark_risk(foreground: Image.Image) -> bool
             if margin_pixels >= 5:
                 return True
     return False
+
+
+def _scanline_low_contrast_protected_context_risk(
+    grayscale: Image.Image,
+    selected: set[tuple[int, int]],
+    candidate_lines: list[int],
+    *,
+    horizontal: bool,
+    background: int,
+) -> bool:
+    if not selected or not candidate_lines:
+        return False
+    width, height = grayscale.size
+    axis_length = height if horizontal else width
+    cross_length = width if horizontal else height
+    band_radius = max(6, int(round(axis_length * 0.045)))
+    line_exclusion = 2
+    line_set = set(candidate_lines)
+    min_axis = max(0, min(candidate_lines) - band_radius)
+    max_axis = min(axis_length - 1, max(candidate_lines) + band_radius)
+    band_axis_length = max_axis - min_axis + 1
+    if band_axis_length <= 0:
+        return False
+
+    pixels = grayscale.load()
+    off_axis_points: set[tuple[int, int]] = set()
+    by_cross: dict[int, int] = {}
+    by_axis: dict[int, int] = {}
+    for axis in range(min_axis, max_axis + 1):
+        if any(abs(axis - line) <= line_exclusion for line in line_set):
+            continue
+        for cross in range(cross_length):
+            x, y = (cross, axis) if horizontal else (axis, cross)
+            if (x, y) in selected:
+                continue
+            value = int(pixels[x, y])
+            if value < 170 or not 1 <= background - value <= 24:
+                continue
+            off_axis_points.add((x, y))
+            by_cross[cross] = by_cross.get(cross, 0) + 1
+            by_axis[axis] = by_axis.get(axis, 0) + 1
+
+    band_area = max(1, cross_length * band_axis_length)
+    off_axis_ratio = len(off_axis_points) / band_area
+    if off_axis_ratio < 0.003:
+        return False
+
+    structured_cross = sum(1 for count in by_cross.values() if count >= max(4, int(round(band_axis_length * 0.18))))
+    structured_axis = sum(1 for count in by_axis.values() if count >= max(10, int(round(cross_length * 0.055))))
+    components = _scanline_low_contrast_components(off_axis_points, max_components=48)
+    significant_components = 0
+    protected_shape_component = False
+    for component in components:
+        if len(component) < 4:
+            continue
+        significant_components += 1
+        xs = [point[0] for point in component]
+        ys = [point[1] for point in component]
+        component_width = max(xs) - min(xs) + 1
+        component_height = max(ys) - min(ys) + 1
+        min_crossing_span = max(10, int(round(axis_length * 0.04)))
+        if horizontal:
+            crosses_candidate_axis = component_height >= min_crossing_span
+        else:
+            crosses_candidate_axis = component_width >= min_crossing_span
+        broader_mark = component_width >= 8 and component_height >= 8
+        if crosses_candidate_axis or broader_mark:
+            protected_shape_component = True
+
+    return (
+        structured_cross >= 2
+        or structured_axis >= 2
+        or (off_axis_ratio >= 0.0045 and significant_components >= 3)
+        or (off_axis_ratio >= 0.0035 and protected_shape_component)
+    )
+
+
+def _scanline_low_contrast_components(
+    points: set[tuple[int, int]],
+    *,
+    max_components: int,
+) -> list[set[tuple[int, int]]]:
+    remaining = set(points)
+    components: list[set[tuple[int, int]]] = []
+    while remaining:
+        start = remaining.pop()
+        stack = [start]
+        component = {start}
+        while stack:
+            current_x, current_y = stack.pop()
+            for next_x in range(current_x - 1, current_x + 2):
+                for next_y in range(current_y - 1, current_y + 2):
+                    point = (next_x, next_y)
+                    if point not in remaining:
+                        continue
+                    remaining.remove(point)
+                    component.add(point)
+                    stack.append(point)
+        components.append(component)
+        if len(components) > max_components:
+            return components
+    return components
 
 
 def _foreground_component_boxes(foreground: Image.Image, *, max_components: int) -> list[tuple[int, int, int, int, int]]:
