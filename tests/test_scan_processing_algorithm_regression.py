@@ -1579,6 +1579,86 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_despeckle_cleans_clean_page_faint_dust_specks_but_preserves_marks(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-despeckle-clean-faint-dust-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            protected_pages = _protected_clean_page_faint_mark_pages()
+            pages = {
+                "synthetic_clean_page_faint_dust_specks.png": _safe_clean_page_faint_dust_speck_page(),
+                **protected_pages,
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "despeckle-clean-faint-dust", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, workers=1))
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_name = "synthetic_clean_page_faint_dust_specks.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertTrue(safe_record["despeckled"])
+            self.assertEqual(safe_record["despeckle_pixels_changed"], len(_safe_clean_page_faint_dust_speck_points()))
+            self.assertIn("despeckle_isolated_pixels", safe_record["operations"])
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertLessEqual(safe_audit["despeckle_pixel_ratio"], 0.001)
+            self.assertEqual(safe_audit["local_content_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["combination_quality_guard_reason_code"], "safe_combination_passed")
+            with Image.open(process_dir / safe_record["output_relative_path"]) as output:
+                output_luma = output.convert("L")
+                for point in _safe_clean_page_faint_dust_speck_points():
+                    self.assertGreaterEqual(output_luma.getpixel(point), 240)
+
+            for name, source_image in protected_pages.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name])
+                self.assertEqual(record["status"], "processed", name)
+                self.assertFalse(record["despeckled"], name)
+                self.assertEqual(record["despeckle_pixels_changed"], 0, name)
+                self.assertIn("despeckle_noop", record["operations"], name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertEqual(audit["despeckle_pixel_ratio"], 0.0, name)
+                self.assertEqual(audit["local_content_change_guard_action"], "passed", name)
+                self.assertEqual(audit["cumulative_change_guard_action"], "passed", name)
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    self.assertIsNone(ImageChops.difference(source_image, output.convert("RGB")).getbbox(), name)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["guardrails"]["despeckle"]["applied_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["despeckle"]["pixels_changed"],
+                len(_safe_clean_page_faint_dust_speck_points()),
+            )
+            self.assertEqual(
+                audit_summary["guardrails"]["despeckle"]["reason_code_distribution"]["applied_isolated_pixels"],
+                1,
+            )
+            self.assertEqual(
+                audit_summary["timing"]["operation_timings"]["despeckle"]["reason_code_distribution"][
+                    "applied_isolated_pixels"
+                ],
+                1,
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_despeckle_pale_cluster_guards_preserve_noisy_texture_and_micro_marks(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-despeckle-pale-guards-") as temp_dir:
             root = Path(temp_dir)
@@ -5323,6 +5403,20 @@ def _safe_compact_pale_dust_cluster_page() -> Image.Image:
     return image
 
 
+def _safe_clean_page_faint_dust_speck_points() -> tuple[tuple[int, int], ...]:
+    points = []
+    for x, y in ((80, 60), (150, 90), (210, 130)):
+        points.extend(((x, y), (x + 1, y), (x, y + 1), (x + 1, y + 1)))
+    return tuple(points)
+
+
+def _safe_clean_page_faint_dust_speck_page() -> Image.Image:
+    image = Image.new("RGB", (260, 180), (246, 246, 244))
+    for point in _safe_clean_page_faint_dust_speck_points():
+        image.putpixel(point, (228, 228, 224))
+    return image
+
+
 def _high_density_pale_texture_page() -> Image.Image:
     image = Image.new("RGB", (260, 180), (246, 246, 244))
     draw = ImageDraw.Draw(image)
@@ -5463,6 +5557,58 @@ def _protected_sparse_bleed_through_mark_pages() -> dict[str, Image.Image]:
     for x, y in ((68, 50), (74, 120), (164, 40), (190, 126), (126, 96), (132, 99), (138, 102), (144, 105)):
         draw.rectangle((x, y, x + 1, y + 1), fill=(225, 225, 221))
     pages["A007_archival_dirt_marks.png"] = image
+
+    return pages
+
+
+def _protected_clean_page_faint_mark_pages() -> dict[str, Image.Image]:
+    paper = (246, 246, 244)
+    pale_mark = (228, 228, 224)
+    pages: dict[str, Image.Image] = {}
+
+    image = Image.new("RGB", (260, 180), paper)
+    ImageDraw.Draw(image).text((122, 82), "12", fill=pale_mark)
+    pages["A101_page_number.png"] = image
+
+    image = _pale_punctuation_like_page()
+    pages["A102_punctuation_like_dots.png"] = image
+
+    image = Image.new("RGB", (260, 180), paper)
+    ImageDraw.Draw(image).text((18, 78), "thin note", fill=(226, 226, 222))
+    pages["A103_thin_marginal_note.png"] = image
+
+    image = Image.new("RGB", (260, 180), paper)
+    draw = ImageDraw.Draw(image)
+    for y in (62, 92, 122):
+        draw.line((54, y, 218, y), fill=pale_mark, width=1)
+    for x in (86, 146, 206):
+        draw.line((x, 48, x, 136), fill=pale_mark, width=1)
+    pages["A104_ruled_table_lines.png"] = image
+
+    image = Image.new("RGB", (260, 180), paper)
+    ImageDraw.Draw(image).ellipse((96, 62, 158, 124), outline=(186, 24, 24), width=2)
+    pages["A105_color_stamp.png"] = image
+
+    image = Image.new("RGB", (260, 180), paper)
+    draw = ImageDraw.Draw(image)
+    draw.line((62, 96, 84, 78, 108, 104, 136, 82, 164, 106), fill=(96, 92, 86), width=2)
+    pages["A106_handwriting.png"] = image
+
+    image = Image.new("RGB", (260, 180), paper)
+    draw = ImageDraw.Draw(image)
+    for x, y in (
+        (34, 28),
+        (72, 118),
+        (118, 52),
+        (168, 132),
+        (214, 76),
+        (126, 96),
+        (132, 99),
+        (138, 102),
+        (144, 105),
+    ):
+        draw.rectangle((x, y, x + 1, y + 1), fill=(225, 225, 221))
+    pages["A107_archival_texture.png"] = image
 
     return pages
 
