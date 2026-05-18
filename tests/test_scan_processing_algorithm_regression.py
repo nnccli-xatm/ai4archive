@@ -5435,7 +5435,7 @@ def _very_subtle_scanline_page(variant: str = "safe") -> Image.Image:
     draw = ImageDraw.Draw(image)
     for y in (44, 68):
         draw.rectangle((46, y, 115, y + 4), fill=(42, 42, 42))
-    draw.rectangle((210, 18, 210, 202), fill=(240, 240, 236))
+    draw.rectangle((210, 18, 210, 202), fill=(241, 241, 237))
     if variant == "safe":
         return image
     if variant == "table":

@@ -7623,7 +7623,7 @@ def _scanline_axis_lightening_plan(
             values.append(value)
             if value <= 125:
                 dark += 1
-            if 2 <= background - value <= 24 and value >= 170:
+            if 1 <= background - value <= 24 and value >= 170:
                 selected.append((x, y))
         available_ratio = len(values) / max(1, cross_length)
         protected_ratio = protected_count / max(1, cross_length)
@@ -7747,7 +7747,12 @@ def _scanline_axis_lightening_plan(
                 and stat["protected_ratio"] == 0.0
             )
             if very_subtle_continuous_candidate:
-                min_local_delta = 1.6
+                candidate_mean = stat["candidate_mean"]
+                candidate_delta = local_mean - candidate_mean if candidate_mean is not None else 0.0
+                if 0.85 <= candidate_delta < 1.6 and 0.80 <= local_delta <= 2.4:
+                    min_local_delta = 0.80
+                else:
+                    min_local_delta = 1.6
             elif subtle_continuous_candidate:
                 min_local_delta = 2.4
             else:
