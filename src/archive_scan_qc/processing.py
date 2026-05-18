@@ -5611,7 +5611,15 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
             and edge_density > 0.22
             and local_contrast >= 3.0
         )
-        if faint_detail_risk:
+        faint_stroke_detail_risk = (
+            low_global_tonal_evidence
+            and area_ratio <= 0.030
+            and max(width, height) >= max(20, int(round(min(image.width, image.height) * 0.10)))
+            and max(width, height) / max(1, min(width, height)) >= 1.35
+            and edge_density > 0.10
+            and local_contrast >= 9.0
+        )
+        if faint_detail_risk or faint_stroke_detail_risk:
             return _background_stains_noop(
                 image,
                 "background stain lightening skipped: pale mark, ruled line, texture, or detail risk",

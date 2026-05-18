@@ -4379,6 +4379,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "S006_photo_texture_in_cloud.png": _faint_cloud_background_stain_page("photo_texture"),
                 "S007_archival_edge_mark.png": _faint_cloud_background_stain_page("edge_mark"),
                 "S008_dense_foreground_cloud.png": _faint_cloud_background_stain_page("dense_foreground"),
+                "S009_soft_pencil_cluster.png": _faint_cloud_background_stain_page("soft_pencil_cluster"),
             }
             source_bytes = {}
             for name, image in pages.items():
@@ -6102,6 +6103,17 @@ def _faint_cloud_background_stain_page(variant: str = "safe") -> Image.Image:
     draw = ImageDraw.Draw(image)
 
     if variant == "safe":
+        return image
+    if variant == "soft_pencil_cluster":
+        image = Image.new("RGB", (320, 220), (244, 244, 240))
+        draw = ImageDraw.Draw(image)
+        for y in (44, 70, 96, 122):
+            draw.rectangle((42, y, 150, y + 4), fill=(42, 42, 40))
+        for points in (
+            ((190, 120), (210, 98), (232, 130), (260, 104)),
+            ((198, 140), (222, 120), (248, 146), (270, 128)),
+        ):
+            draw.line(points, fill=(235, 235, 228), width=8, joint="curve")
         return image
     if variant == "faint_content":
         draw.line((184, 124, 208, 108, 236, 138, 276, 114), fill=(226, 224, 218), width=2)
