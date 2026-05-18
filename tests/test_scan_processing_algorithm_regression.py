@@ -2625,6 +2625,21 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "synthetic_interrupted_dark_border_table_lines.png": _interrupted_dark_scanner_border_page(
                     "table_lines"
                 ),
+                "synthetic_interrupted_dark_border_marginal_text.png": _interrupted_dark_scanner_border_page(
+                    "marginal_text"
+                ),
+                "synthetic_interrupted_dark_border_stamp_block.png": _interrupted_dark_scanner_border_page(
+                    "stamp_block"
+                ),
+                "synthetic_interrupted_dark_border_handwritten_note.png": _interrupted_dark_scanner_border_page(
+                    "handwritten_note"
+                ),
+                "synthetic_interrupted_dark_border_punched_marks.png": _interrupted_dark_scanner_border_page(
+                    "punched_marks"
+                ),
+                "synthetic_interrupted_dark_border_broken_frame.png": _interrupted_dark_scanner_border_page(
+                    "broken_frame"
+                ),
                 "synthetic_interrupted_broad_dark_shadow.png": _interrupted_dark_scanner_border_page("broad_shadow"),
                 "synthetic_uncertain_single_interrupted_dark_edge.png": _interrupted_dark_scanner_border_page(
                     "single_edge"
@@ -2682,7 +2697,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 audit_summary["guardrails"]["dark_border_trim"]["guardrail_reason_code_distribution"][
                     "protected_edge_content_near_dark_border"
                 ],
-                2,
+                7,
             )
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertFalse(audit_summary["privacy"]["contains_paths"])
@@ -5325,6 +5340,20 @@ def _interrupted_dark_scanner_border_page(variant: str = "safe") -> Image.Image:
             draw.line((4, y, 92, y), fill=(55, 55, 55), width=2)
         for x in (12, 42, 72):
             draw.line((x, 36, x, 106), fill=(60, 60, 60), width=2)
+    elif variant == "marginal_text":
+        for y in (30, 40, 50, 70, 80, 90):
+            draw.rectangle((17, y, 20, y + 1), fill=(35, 35, 35))
+    elif variant == "stamp_block":
+        draw.rectangle((15, 22, 48, 52), outline=(45, 45, 45), width=2)
+        draw.line((18, 38, 45, 38), fill=(45, 45, 45), width=2)
+    elif variant == "handwritten_note":
+        draw.line((16, 42, 24, 48, 18, 58, 27, 67, 17, 78, 25, 88), fill=(45, 45, 45), width=2)
+    elif variant == "punched_marks":
+        for y in (24, 44, 64, 84, 104, 124):
+            draw.ellipse((16, y, 22, y + 6), fill=(40, 40, 40))
+    elif variant == "broken_frame":
+        for y0, y1 in ((18, 34), (54, 70), (90, 106), (126, 142)):
+            draw.rectangle((14, y0, 17, y1), fill=(30, 30, 30))
     elif variant not in {"safe", "single_edge"}:
         raise ValueError(f"unsupported variant: {variant}")
     return image
