@@ -12323,6 +12323,10 @@ _DESPECKLE_PALE_CLUSTER_MIN_BACKGROUND_MEDIAN = 238
 _DESPECKLE_PALE_CLUSTER_MIN_DELTA = 10
 _DESPECKLE_PALE_CLUSTER_MAX_DELTA = 34
 _DESPECKLE_PALE_CLUSTER_MIN_FOREGROUND_PIXELS = 24
+_DESPECKLE_PALE_PATTERN_MIN_CANDIDATES = 24
+_DESPECKLE_PALE_PATTERN_MIN_COMPONENTS = 16
+_DESPECKLE_PALE_PATTERN_MIN_ALIGNED_COMPONENTS = 8
+_DESPECKLE_MAX_PALE_PATTERN_RATIO = 0.0012
 _DESPECKLE_TINY_DARK_CLUSTER_MIN_BACKGROUND_MEDIAN = 220
 _DESPECKLE_NEIGHBOR_OFFSETS = tuple(
     (offset_x, offset_y)
@@ -12413,6 +12417,23 @@ def _despeckle_isolated_pixels_with_reason(image: Image.Image, *, backend: str =
             changed_pixels=0,
             backend_mode=backend_mode,
             reason="despeckle skipped: candidate density exceeds safety threshold",
+            candidate_pixels=candidate_pixels,
+            candidate_count=len(candidates),
+            component_count=len(component_sizes),
+            max_component_size=max(component_sizes, default=0),
+            replacement_work_performed=False,
+        )
+    pattern_skip_reason = _despeckle_pale_pattern_skip_reason(
+        grayscale,
+        candidates,
+        component_sizes,
+    )
+    if pattern_skip_reason is not None:
+        return _despeckle_result(
+            image,
+            changed_pixels=0,
+            backend_mode=backend_mode,
+            reason=pattern_skip_reason,
             candidate_pixels=candidate_pixels,
             candidate_count=len(candidates),
             component_count=len(component_sizes),
@@ -12514,6 +12535,10 @@ def _despeckle_reason_code(reason: str, changed_pixels: int) -> str:
         return "applied_isolated_pixels"
     if reason == "despeckle skipped: candidate density exceeds safety threshold":
         return "candidate_density_exceeds_safety_threshold"
+    if reason == "despeckle skipped: pale candidate density exceeds safety threshold":
+        return "pale_candidate_density_exceeds_safety_threshold"
+    if reason == "despeckle skipped: repeated pale micro-pattern risk":
+        return "repeated_pale_micro_pattern_risk"
     if reason == "despeckle skipped: pixel change ratio exceeds safety threshold":
         return "pixel_change_ratio_exceeds_safety_threshold"
     if reason == "protected edge dark marks preserved":
@@ -12681,6 +12706,52 @@ def _despeckle_replacements_numpy(
         (int(x), int(y), (int(rgb_value[0]), int(rgb_value[1]), int(rgb_value[2])))
         for x, y, rgb_value in zip(eligible_x, eligible_y, replacement_rgb)
     ]
+
+
+def _despeckle_pale_pattern_skip_reason(
+    grayscale: Image.Image,
+    candidates: list[tuple[int, int]],
+    component_sizes: list[int],
+) -> str | None:
+    width, height = grayscale.size
+    source_area = max(1, width * height)
+    gray_pixels = grayscale.load()
+    candidate_set = set(candidates)
+    pale_components: list[list[tuple[int, int]]] = []
+    visited: set[tuple[int, int]] = set()
+    for x, y in candidates:
+        if (x, y) in visited:
+            continue
+        component = _despeckle_candidate_component(candidate_set, x, y)
+        visited.update(component)
+        if all(_despeckle_pixel_at(gray_pixels, cx, cy) >= _DESPECKLE_PALE_MARK_MIN_VALUE for cx, cy in component):
+            pale_components.append(component)
+
+    pale_candidate_count = sum(len(component) for component in pale_components)
+    if pale_candidate_count < _DESPECKLE_PALE_PATTERN_MIN_ALIGNED_COMPONENTS:
+        return None
+    if pale_candidate_count / source_area > _DESPECKLE_MAX_PALE_PATTERN_RATIO:
+        return "despeckle skipped: pale candidate density exceeds safety threshold"
+    if len(pale_components) >= _DESPECKLE_PALE_PATTERN_MIN_COMPONENTS:
+        return "despeckle skipped: repeated pale micro-pattern risk"
+
+    row_counts: dict[int, int] = {}
+    column_counts: dict[int, int] = {}
+    for component in pale_components:
+        center_x = round(sum(point[0] for point in component) / len(component))
+        center_y = round(sum(point[1] for point in component) / len(component))
+        row_counts[center_y] = row_counts.get(center_y, 0) + 1
+        column_counts[center_x] = column_counts.get(center_x, 0) + 1
+    if max(row_counts.values(), default=0) >= _DESPECKLE_PALE_PATTERN_MIN_ALIGNED_COMPONENTS:
+        return "despeckle skipped: repeated pale micro-pattern risk"
+    if max(column_counts.values(), default=0) >= _DESPECKLE_PALE_PATTERN_MIN_ALIGNED_COMPONENTS:
+        return "despeckle skipped: repeated pale micro-pattern risk"
+
+    if pale_candidate_count < _DESPECKLE_PALE_PATTERN_MIN_CANDIDATES:
+        return None
+    if len(component_sizes) >= _DESPECKLE_PALE_PATTERN_MIN_COMPONENTS and max(component_sizes, default=0) <= 4:
+        return "despeckle skipped: repeated pale micro-pattern risk"
+    return None
 
 
 def _despeckle_numpy_rect_counts(
