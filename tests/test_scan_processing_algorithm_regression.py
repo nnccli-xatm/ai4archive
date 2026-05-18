@@ -39,6 +39,15 @@ def _changed_ratio(before: Image.Image, after: Image.Image, box: tuple[int, int,
     return changed / max(1, before_luma.width * before_luma.height)
 
 
+def _reason_code_distribution(reason_distribution: dict[str, int]) -> dict[str, int]:
+    reason_codes: dict[str, int] = {}
+    for reason, count in reason_distribution.items():
+        code = next((token.strip(":") for token in reason.split() if token.startswith("SCANLINE_")), "")
+        if code.startswith("SCANLINE_"):
+            reason_codes[code] = reason_codes.get(code, 0) + count
+    return reason_codes
+
+
 def _mean_channel_spread(image: Image.Image) -> float:
     means = ImageStat.Stat(image.convert("RGB")).mean
     return max(means) - min(means)
@@ -1611,6 +1620,74 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     ),
                     0.001,
                 )
+
+    def test_clean_background_scanner_glass_streak_aggregate_regression_stays_safe(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-clean-glass-streak-aggregate-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_safe_horizontal_scanner_glass_streak.png": _clean_background_scanner_glass_streak_page(
+                    "horizontal"
+                ),
+                "synthetic_safe_vertical_scanner_glass_streak.png": _clean_background_scanner_glass_streak_page(
+                    "vertical"
+                ),
+                "synthetic_protected_repeated_form_rows.png": _clean_background_scanner_glass_streak_page(
+                    "repeated_form_rows"
+                ),
+                "synthetic_protected_ruled_background.png": _clean_background_scanner_glass_streak_page(
+                    "ruled_background"
+                ),
+                "synthetic_protected_vertical_ruled_background.png": _clean_background_scanner_glass_streak_page(
+                    "vertical_ruled_background"
+                ),
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "clean-glass-streak-aggregate", input_dir, output_dir))
+            process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(lighten_scanlines=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            scanline_guard = audit_summary["guardrails"]["scanlines"]
+            reason_code_distribution = _reason_code_distribution(scanline_guard["skip_reason_distribution"])
+
+            for name, source_bytes_before in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes_before, name)
+
+            self.assertTrue(audit_summary["operations"]["lighten_scanlines"])
+            self.assertTrue(audit_summary["timing"]["operation_timings"]["lighten_scanlines"]["enabled"])
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["scanlines_lightened_files"], 2)
+            self.assertEqual(audit_summary["counts"]["scanlines_skipped_files"], 3)
+            self.assertEqual(scanline_guard["applied_files"], 2)
+            self.assertEqual(scanline_guard["skipped_files"], 3)
+            self.assertEqual(scanline_guard["direction_distribution"], {"horizontal": 1, "vertical": 1})
+            self.assertEqual(reason_code_distribution, {"SCANLINE_SCOPE_RISK": 3})
+            self.assertEqual(scanline_guard["changed_pixel_ratio"]["count"], len(pages))
+            self.assertGreater(scanline_guard["changed_pixel_ratio"]["max"], 0.0007)
+            self.assertLess(scanline_guard["changed_pixel_ratio"]["max"], 0.018)
+            self.assertEqual(scanline_guard["candidate_pixel_ratio"]["count"], len(pages))
+            self.assertEqual(scanline_guard["protection_triggered_files"], 3)
+            pass_fail_status = "passed" if audit_summary["counts"]["failed_files"] == 0 else "failed"
+            self.assertEqual(pass_fail_status, "passed")
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
 
     def test_full_chain_safe_combination_page_stays_conservative(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-safe-") as temp_dir:
