@@ -6747,6 +6747,7 @@ def _fold_shadow_axis_plan(
     cross_length = height if vertical else width
     orientation = "vertical" if vertical else "horizontal"
     edge_margin = max(10, int(round(axis_length * 0.07)))
+    gutter_margin = max(8, int(round(axis_length * 0.03))) if vertical else edge_margin
     if axis_length <= edge_margin * 2 or cross_length < 80:
         return _empty_fold_shadow_plan(orientation, "image too small")
 
@@ -6806,8 +6807,12 @@ def _fold_shadow_axis_plan(
                 "sparse_text_bridge": sparse_text_bridge,
             }
         )
-        if (
-            edge_margin <= index < axis_length - edge_margin
+        centered_fold_region = edge_margin <= index < axis_length - edge_margin
+        near_gutter_region = vertical and (
+            gutter_margin <= index < edge_margin or axis_length - edge_margin <= index < axis_length - gutter_margin
+        )
+        center_candidate = (
+            centered_fold_region
             and (available_ratio >= 0.92 or sparse_text_bridge)
             and (
                 candidate_ratio >= 0.55
@@ -6819,7 +6824,16 @@ def _fold_shadow_axis_plan(
                 )
             )
             and dark_ratio <= 0.0015
-        ):
+        )
+        gutter_candidate = (
+            near_gutter_region
+            and available_ratio >= 0.98
+            and protected_ratio == 0
+            and candidate_ratio >= 0.72
+            and continuity["usable"]
+            and dark_ratio == 0
+        )
+        if center_candidate or gutter_candidate:
             candidate_indexes.append(index)
             all_candidates.update(selected)
 
