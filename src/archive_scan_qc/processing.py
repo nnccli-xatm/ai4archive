@@ -5958,19 +5958,25 @@ def _level_illumination_gradient_conservative(image: Image.Image) -> Illuminatio
         return _illumination_gradient_noop(image, "protected dark or mixed foreground content", "protected_content")
     foreground = grayscale.point(lambda value: 255 if value <= max(150, min(190, p50 - 36)) else 0, mode="L")
     foreground_ratio = _mask_ratio(foreground)
-    if _illumination_gradient_tiny_foreground_content_risk(foreground, grayscale):
+    sparse_typed_foreground_safe = _illumination_gradient_sparse_typed_foreground_safe(foreground)
+    if _illumination_gradient_tiny_foreground_content_risk(foreground, grayscale) and not sparse_typed_foreground_safe:
         return _illumination_gradient_noop(image, "protected tiny foreground content", "protected_content")
-    if foreground_ratio > 0.0015:
+    if foreground_ratio > 0.0015 and not sparse_typed_foreground_safe:
         return _illumination_gradient_noop(image, "protected foreground content", "protected_content")
     if _source_protected_edge_dark_ratio(grayscale) > 0.0018:
         return _illumination_gradient_noop(image, "protected edge or border content", "protected_content")
-    if _illumination_gradient_texture_ratio(grayscale) > 0.055:
+    if _illumination_gradient_texture_ratio(grayscale) > 0.055 and not sparse_typed_foreground_safe:
         return _illumination_gradient_noop(image, "protected photo, chart, map, or textured content", "protected_content")
 
-    vertical = _illumination_gradient_axis_plan(grayscale, vertical=True)
-    horizontal = _illumination_gradient_axis_plan(grayscale, vertical=False)
-    diagonal_tl_br = _illumination_gradient_diagonal_plan(grayscale, top_left_to_bottom_right=True)
-    diagonal_tr_bl = _illumination_gradient_diagonal_plan(grayscale, top_left_to_bottom_right=False)
+    plan_grayscale = (
+        _illumination_gradient_fill_sparse_foreground(grayscale, foreground)
+        if sparse_typed_foreground_safe
+        else grayscale
+    )
+    vertical = _illumination_gradient_axis_plan(plan_grayscale, vertical=True)
+    horizontal = _illumination_gradient_axis_plan(plan_grayscale, vertical=False)
+    diagonal_tl_br = _illumination_gradient_diagonal_plan(plan_grayscale, top_left_to_bottom_right=True)
+    diagonal_tr_bl = _illumination_gradient_diagonal_plan(plan_grayscale, top_left_to_bottom_right=False)
     plan = max((vertical, horizontal, diagonal_tl_br, diagonal_tr_bl), key=lambda candidate_plan: candidate_plan["score"])
     if plan["reason_code"] != "applied":
         return _illumination_gradient_noop(image, plan["reason"], plan["reason_code"], plan["candidate_ratio"])
@@ -6059,13 +6065,19 @@ def _level_illumination_gradient_conservative(image: Image.Image) -> Illuminatio
     changed_ratio = changed / max(1, total)
     if changed_ratio < 0.05:
         return _illumination_gradient_noop(image, "low confidence changed area", "low_confidence", candidate_ratio)
+    result_grayscale = result_image.convert("L")
+    after_grayscale = (
+        _illumination_gradient_fill_sparse_foreground(result_grayscale, foreground)
+        if sparse_typed_foreground_safe
+        else result_grayscale
+    )
     if plan["orientation"] == "vertical":
-        after_plan = _illumination_gradient_axis_plan(result_image.convert("L"), vertical=True)
+        after_plan = _illumination_gradient_axis_plan(after_grayscale, vertical=True)
     elif plan["orientation"] == "horizontal":
-        after_plan = _illumination_gradient_axis_plan(result_image.convert("L"), vertical=False)
+        after_plan = _illumination_gradient_axis_plan(after_grayscale, vertical=False)
     else:
         after_plan = _illumination_gradient_diagonal_plan(
-            result_image.convert("L"),
+            after_grayscale,
             top_left_to_bottom_right=plan["orientation"] == "diagonal_tl_br",
         )
     delta_after = float(after_plan.get("delta", plan["delta"]))
@@ -6104,6 +6116,89 @@ def _illumination_gradient_tiny_foreground_content_risk(foreground: Image.Image,
         if values and min(values) <= 120:
             return True
     return False
+
+
+def _illumination_gradient_sparse_typed_foreground_safe(foreground: Image.Image) -> bool:
+    total = foreground.width * foreground.height
+    if total <= 0:
+        return False
+    components = [component for component in _mask_components(foreground) if len(component) >= 2]
+    if len(components) < 6:
+        return False
+    foreground_pixels = sum(len(component) for component in components)
+    foreground_ratio = foreground_pixels / total
+    if foreground_ratio > 0.022:
+        return False
+
+    margin_x = max(5, int(round(foreground.width * 0.08)))
+    margin_y = max(5, int(round(foreground.height * 0.08)))
+    text_like_components = 0
+    xs_all: list[int] = []
+    ys_all: list[int] = []
+    row_bands: set[int] = set()
+    for component in components:
+        xs = [point[0] for point in component]
+        ys = [point[1] for point in component]
+        left = min(xs)
+        right = max(xs) + 1
+        top = min(ys)
+        bottom = max(ys) + 1
+        width = right - left
+        height = bottom - top
+        area = len(component)
+        if left < margin_x or right > foreground.width - margin_x:
+            return False
+        if top < margin_y or bottom > foreground.height - margin_y:
+            return False
+        if width >= foreground.width * 0.22 or height >= foreground.height * 0.16:
+            return False
+        if area > total * 0.003:
+            return False
+        if (width >= foreground.width * 0.16 and height <= 5) or (height >= foreground.height * 0.16 and width <= 5):
+            return False
+        aspect = max(width, height) / max(1, min(width, height))
+        if aspect > 16:
+            return False
+        if 1 <= width <= 34 and 2 <= height <= 18:
+            text_like_components += 1
+        xs_all.extend((left, right))
+        ys_all.extend((top, bottom))
+        row_bands.add(int(round(((top + bottom) / 2) / max(1, foreground.height) * 18)))
+
+    if text_like_components < 6:
+        return False
+    if len(row_bands) < 2:
+        return False
+    if max(xs_all) - min(xs_all) > foreground.width * 0.74:
+        return False
+    if max(ys_all) - min(ys_all) > foreground.height * 0.50:
+        return False
+    return True
+
+
+def _illumination_gradient_fill_sparse_foreground(grayscale: Image.Image, foreground: Image.Image) -> Image.Image:
+    output = grayscale.copy()
+    output_pixels = output.load()
+    gray_pixels = grayscale.load()
+    foreground_pixels = foreground.load()
+    histogram = grayscale.histogram()
+    total = grayscale.width * grayscale.height
+    fallback = _histogram_percentile(histogram, total, 0.90)
+    radius = 3
+    for component in _mask_components(foreground):
+        if len(component) < 2:
+            continue
+        for x, y in component:
+            samples: list[int] = []
+            for ny in range(max(0, y - radius), min(grayscale.height, y + radius + 1)):
+                for nx in range(max(0, x - radius), min(grayscale.width, x + radius + 1)):
+                    if foreground_pixels[nx, ny]:
+                        continue
+                    value = int(gray_pixels[nx, ny])
+                    if value >= 206:
+                        samples.append(value)
+            output_pixels[x, y] = int(round(sum(samples) / len(samples))) if samples else fallback
+    return output
 
 
 def _illumination_gradient_profile_index(
