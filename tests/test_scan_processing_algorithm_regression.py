@@ -831,6 +831,131 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_mild_curved_fold_shadow_cleanup_preserves_crossing_content(self) -> None:
+        def mild_curved_fold_page(variant: str) -> Image.Image:
+            image = Image.new("RGB", (320, 240), (244, 244, 240))
+            draw = ImageDraw.Draw(image)
+            for y in range(16, 224):
+                phase = (y - 16) / (224 - 16)
+                center = 160 + int(round(12 * math.sin(phase * math.pi - math.pi / 2)))
+                for dx in range(-5, 6):
+                    distance = abs(dx) / 5
+                    shade = int(round(244 - 10 * (1 - distance) ** 1.2))
+                    draw.point((center + dx, y), fill=(shade, shade, shade - 4))
+            for y in (68, 170):
+                draw.rectangle((72, y, 128, y + 2), fill=(50, 50, 50))
+                draw.rectangle((196, y, 248, y + 2), fill=(50, 50, 50))
+            if variant == "safe":
+                return image
+            if variant == "faint_handwriting":
+                draw.line((142, 92, 168, 108, 150, 124, 180, 140), fill=(196, 196, 192), width=2)
+                return image
+            if variant == "table":
+                for y in (96, 120, 144):
+                    draw.line((128, y, 196, y), fill=(42, 42, 42), width=1)
+                for x in (132, 160, 190):
+                    draw.line((x, 92, x, 148), fill=(42, 42, 42), width=1)
+                return image
+            if variant == "stamp":
+                draw.ellipse((132, 82, 196, 146), outline=(180, 35, 35), width=4)
+                return image
+            if variant == "dense_foreground":
+                for y in range(30, 215, 9):
+                    draw.rectangle((44, y, 276, y + 3), fill=(45, 45, 45))
+                return image
+            if variant == "texture":
+                for y in range(58, 182, 4):
+                    for x in range(118, 206, 4):
+                        color = (176, 196, 212) if (x // 4 + y // 4) % 2 else (222, 228, 210)
+                        draw.rectangle((x, y, x + 3, y + 3), fill=color)
+                return image
+            raise ValueError(f"unsupported variant: {variant}")
+
+        with tempfile.TemporaryDirectory(prefix="scan-processing-mild-curved-fold-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_safe_mild_curved_fold_sparse_text.png": mild_curved_fold_page("safe"),
+                "synthetic_curved_fold_faint_handwriting_protected.png": mild_curved_fold_page(
+                    "faint_handwriting"
+                ),
+                "synthetic_curved_fold_table_protected.png": mild_curved_fold_page("table"),
+                "synthetic_curved_fold_stamp_protected.png": mild_curved_fold_page("stamp"),
+                "synthetic_curved_fold_dense_foreground.png": mild_curved_fold_page("dense_foreground"),
+                "synthetic_curved_fold_texture_protected.png": mild_curved_fold_page("texture"),
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "mild-curved-fold", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(lighten_fold_shadows=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_name = "synthetic_safe_mild_curved_fold_sparse_text.png"
+            safe_record = records[safe_name]
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertTrue(safe_record["fold_shadows_lightened"])
+            self.assertEqual(safe_record["fold_shadows_reason_code"], "applied_narrow_neutral_background_band")
+            self.assertEqual(safe_record["fold_shadows_orientation"], "curved_vertical")
+            self.assertGreater(safe_record["fold_shadows_delta"], 2.0)
+            self.assertGreater(safe_record["fold_shadows_changed_pixel_ratio"], 0.01)
+            self.assertLessEqual(safe_record["fold_shadows_changed_pixel_ratio"], 0.075)
+            self.assertLessEqual(safe_record["fold_shadows_candidate_pixel_ratio"], 0.12)
+            with Image.open(process_dir / safe_record["output_relative_path"]) as output:
+                grayscale = output.convert("L")
+                original_grayscale = pages[safe_name].convert("L")
+                self.assertGreater(grayscale.getpixel((160, 120)), original_grayscale.getpixel((160, 120)))
+                self.assertEqual(grayscale.getpixel((36, 120)), original_grayscale.getpixel((36, 120)))
+                self.assertLess(_changed_ratio(pages[safe_name], output, (72, 64, 248, 176)), 0.03)
+
+            protected_names = set(pages) - {safe_name}
+            for name in protected_names:
+                record = records[name]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name])
+                self.assertFalse(record["fold_shadows_lightened"], name)
+                self.assertNotEqual(record["fold_shadows_reason_code"], "applied_narrow_neutral_background_band")
+                self.assertEqual(record["fold_shadows_changed_pixel_ratio"], 0.0, name)
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    self.assertEqual(output.convert("RGB").tobytes(), pages[name].tobytes(), name)
+
+            self.assertEqual(audit_summary["counts"]["fold_shadows_lightened_files"], 1)
+            self.assertEqual(audit_summary["counts"]["fold_shadows_skipped_files"], len(protected_names))
+            fold_guard = audit_summary["guardrails"]["fold_shadows"]
+            self.assertEqual(fold_guard["applied_files"], 1)
+            self.assertEqual(fold_guard["skipped_files"], len(protected_names))
+            self.assertEqual(fold_guard["orientation_distribution"]["curved_vertical"], 1)
+            self.assertEqual(fold_guard["reason_code_distribution"]["applied_narrow_neutral_background_band"], 1)
+            self.assertGreaterEqual(
+                fold_guard["skip_reason_code_distribution"]["no_confident_narrow_background_fold_band"],
+                2,
+            )
+            self.assertGreaterEqual(
+                fold_guard["skip_reason_code_distribution"]["color_content_stamp_or_annotation_risk"],
+                2,
+            )
+            self.assertEqual(
+                fold_guard["skip_reason_code_distribution"]["high_contrast_foreground_or_mixed_content_risk"],
+                1,
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_illumination_gradient_levels_safe_public_gradient_and_preserves_content_edges(self) -> None:
         def gradient_page(variant: str) -> Image.Image:
             width, height = 260, 180
