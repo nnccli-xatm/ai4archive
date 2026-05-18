@@ -2398,6 +2398,75 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_isolated_dust_combined_retouch_guard_stays_bounded_and_public(self) -> None:
+        pages = _isolated_dust_combined_retouch_pages()
+        with tempfile.TemporaryDirectory(prefix="scan-processing-isolated-dust-combined-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            for name, image in pages.items():
+                image.save(input_dir / name, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "isolated-dust-combined", input_dir, output_dir))
+            with mock.patch.object(
+                processing_module,
+                "_lighten_background_stains_conservative",
+                side_effect=_mock_isolated_dust_combined_stain_cleanup,
+            ), mock.patch.object(
+                processing_module,
+                "_lighten_scanlines_conservative",
+                side_effect=_mock_isolated_dust_combined_scanline_cleanup,
+            ):
+                manifest = process_images(
+                    report,
+                    input_dir,
+                    process_dir,
+                    ProcessingOptions(
+                        despeckle=True,
+                        lighten_background_stains=True,
+                        lighten_scanlines=True,
+                        workers=1,
+                    ),
+                )
+
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            pass_fail_status = "passed" if audit_summary["counts"]["failed_files"] == 0 else "failed"
+
+            self.assertEqual(manifest["summary"]["processed_files"], 3)
+            self.assertEqual(pass_fail_status, "passed")
+            self.assertEqual(audit_summary["counts"]["processed_files"], 3)
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["guardrails"]["despeckle"]["applied_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["despeckle"]["pixels_changed"],
+                len(_safe_isolated_scanner_glass_dust_speck_points()),
+            )
+            self.assertEqual(audit_summary["counts"]["cumulative_change_guard_reverted_files"], 2)
+            self.assertEqual(audit_summary["counts"]["combination_quality_guard_reverted_files"], 2)
+            self.assertEqual(
+                audit_summary["guardrails"]["combination_quality_guard"]["reason_code_distribution"][
+                    "safe_combination_passed"
+                ],
+                1,
+            )
+            self.assertEqual(
+                audit_summary["guardrails"]["combination_quality_guard"]["reason_code_distribution"][
+                    "combined_change_too_large_reverted"
+                ],
+                2,
+            )
+            self.assertLessEqual(audit_summary["metrics"]["despeckle_pixel_ratio"]["max"], 0.001)
+            self.assertLessEqual(audit_summary["metrics"]["cumulative_change_score"]["max"], 1.0)
+            self.assertLessEqual(audit_summary["metrics"]["cumulative_change_pixel_ratio"]["max"], 0.10)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_despeckle_cleans_short_lint_streaks_with_bounded_aggregate_audit(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-despeckle-short-lint-") as temp_dir:
             root = Path(temp_dir)
@@ -6848,6 +6917,60 @@ def _protected_isolated_scanner_glass_dust_lookalike_pages() -> dict[str, Image.
             ruled_form.putpixel((x, y), (228, 228, 224))
     pages["synthetic_protected_table_ruled_mark.png"] = ruled_form
     return pages
+
+
+def _isolated_dust_combined_retouch_pages() -> dict[str, Image.Image]:
+    safe = _safe_isolated_scanner_glass_dust_speck_page()
+    safe_draw = ImageDraw.Draw(safe)
+    safe_draw.ellipse((186, 28, 228, 62), fill=(237, 237, 233))
+    safe_draw.line((36, 124, 224, 124), fill=(237, 237, 233), width=2)
+
+    protected = _protected_isolated_scanner_glass_dust_lookalike_pages()
+    return {
+        "synthetic_safe_isolated_dust_stain_scanline.png": safe,
+        "synthetic_protected_decimal_dot_combined.png": protected["synthetic_protected_decimal_like_dot.png"],
+        "synthetic_protected_ruled_dot_combined.png": protected["synthetic_protected_table_ruled_mark.png"],
+    }
+
+
+def _mock_isolated_dust_combined_stain_cleanup(
+    current: Image.Image,
+) -> processing_module.BackgroundStainLighteningResult:
+    changed = current.copy()
+    draw = ImageDraw.Draw(changed)
+    draw.ellipse((186, 28, 228, 62), fill=(246, 246, 244))
+    draw.rectangle((132, 82, 172, 86), fill=(246, 246, 244))
+    return processing_module.BackgroundStainLighteningResult(
+        changed,
+        True,
+        "background stains lightened: stable isolated stains on light paper",
+        222.0,
+        246.0,
+        9.0,
+        0.045,
+        0.055,
+    )
+
+
+def _mock_isolated_dust_combined_scanline_cleanup(
+    current: Image.Image,
+) -> processing_module.ScanlineLighteningResult:
+    changed = current.copy()
+    draw = ImageDraw.Draw(changed)
+    draw.line((36, 124, 224, 124), fill=(246, 246, 244), width=2)
+    draw.line((68, 94, 196, 94), fill=(246, 246, 244), width=1)
+    return processing_module.ScanlineLighteningResult(
+        changed,
+        True,
+        "scanlines lightened: stable horizontal scanline pattern",
+        "horizontal",
+        1,
+        238.0,
+        246.0,
+        9.0,
+        0.012,
+        0.012,
+    )
 
 
 def _high_density_pale_texture_page() -> Image.Image:
