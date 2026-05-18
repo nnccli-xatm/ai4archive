@@ -13816,7 +13816,8 @@ def _despeckle_isolated_pixels_with_reason(image: Image.Image, *, backend: str =
             replacement_work_performed=False,
         )
     candidates, backend_mode = _despeckle_candidate_points_with_backend(candidate_mask, backend=backend)
-    component_sizes = _despeckle_candidate_component_sizes(candidates)
+    components, component_by_point = _despeckle_candidate_components(candidates)
+    component_sizes = [len(component) for component in components]
     if not candidates:
         reason = (
             "protected edge dark marks preserved"
@@ -13850,7 +13851,7 @@ def _despeckle_isolated_pixels_with_reason(image: Image.Image, *, backend: str =
         )
     pattern_skip_reason = _despeckle_pale_pattern_skip_reason(
         grayscale,
-        candidates,
+        components,
         component_sizes,
     )
     if pattern_skip_reason is not None:
@@ -13869,11 +13870,17 @@ def _despeckle_isolated_pixels_with_reason(image: Image.Image, *, backend: str =
     replacements: list[tuple[int, int, tuple[int, int, int]]] | None = None
     replacement_work_performed = True
     if backend_mode == "numpy":
-        replacements = _despeckle_replacements_numpy(image, grayscale, candidates)
+        if max(component_sizes, default=0) <= 4:
+            replacements = _despeckle_replacements_numpy(image, grayscale, candidates)
         if replacements is None:
             backend_mode = "fallback"
     if replacements is None:
-        replacements = _despeckle_replacements_fallback(image, grayscale, candidates)
+        replacements = _despeckle_replacements_fallback(
+            image,
+            grayscale,
+            candidates,
+            component_by_point=component_by_point,
+        )
 
     changed = len(replacements)
     if not changed:
@@ -14135,20 +14142,14 @@ def _despeckle_replacements_numpy(
 
 def _despeckle_pale_pattern_skip_reason(
     grayscale: Image.Image,
-    candidates: list[tuple[int, int]],
+    components: list[list[tuple[int, int]]],
     component_sizes: list[int],
 ) -> str | None:
     width, height = grayscale.size
     source_area = max(1, width * height)
     gray_pixels = grayscale.load()
-    candidate_set = set(candidates)
     pale_components: list[list[tuple[int, int]]] = []
-    visited: set[tuple[int, int]] = set()
-    for x, y in candidates:
-        if (x, y) in visited:
-            continue
-        component = _despeckle_candidate_component(candidate_set, x, y)
-        visited.update(component)
+    for component in components:
         if all(_despeckle_pixel_at(gray_pixels, cx, cy) >= _DESPECKLE_PALE_MARK_MIN_VALUE for cx, cy in component):
             pale_components.append(component)
 
@@ -14207,6 +14208,8 @@ def _despeckle_replacements_fallback(
     image: Image.Image,
     grayscale: Image.Image,
     candidates: list[tuple[int, int]],
+    *,
+    component_by_point: dict[tuple[int, int], list[tuple[int, int]]] | None = None,
 ) -> list[tuple[int, int, tuple[int, int, int]]]:
     width, height = grayscale.size
     gray_pixels = grayscale.load()
@@ -14214,7 +14217,9 @@ def _despeckle_replacements_fallback(
     source_pixels: Any = None
     replacements: list[tuple[int, int, tuple[int, int, int]]] = []
     candidate_set = set(candidates)
-    component_cache = {point: _despeckle_candidate_component(candidate_set, point[0], point[1]) for point in candidates}
+    component_cache = component_by_point
+    if component_cache is None:
+        _, component_cache = _despeckle_candidate_components(candidates)
     conservative_candidate_set = {
         component_point
         for component in component_cache.values()
@@ -14223,7 +14228,15 @@ def _despeckle_replacements_fallback(
     }
     for x, y in candidates:
         component = component_cache[(x, y)]
-        if _despeckle_has_pale_mark_protected_context(gray_pixels, candidate_set, width, height, x, y):
+        if _despeckle_has_pale_mark_protected_context(
+            gray_pixels,
+            candidate_set,
+            width,
+            height,
+            x,
+            y,
+            component=component,
+        ):
             continue
         protection_candidate_set = candidate_set if len(component) > 4 else conservative_candidate_set
         dark_neighbors = 0
@@ -14289,6 +14302,7 @@ def _despeckle_replacements_fallback(
             height=height,
             x=x,
             y=y,
+            component=component,
             skip_component_only=len(component) > 4,
         ):
             continue
@@ -14557,9 +14571,11 @@ def _despeckle_has_sparse_text_protected_context(
     height: int,
     x: int,
     y: int,
+    component: list[tuple[int, int]] | None = None,
     skip_component_only: bool = False,
 ) -> bool:
-    component = _despeckle_candidate_component(candidate_set, x, y)
+    if component is None:
+        component = _despeckle_candidate_component(candidate_set, x, y)
     component_set = set(component)
     ignored_points = component_set if skip_component_only else candidate_set
     component_x = [point[0] for point in component]
@@ -14585,10 +14601,12 @@ def _despeckle_has_pale_mark_protected_context(
     height: int,
     x: int,
     y: int,
+    component: list[tuple[int, int]] | None = None,
 ) -> bool:
     if _despeckle_pixel_at(gray_pixels, x, y) < _DESPECKLE_PALE_MARK_MIN_VALUE:
         return False
-    component = _despeckle_candidate_component(candidate_set, x, y)
+    if component is None:
+        component = _despeckle_candidate_component(candidate_set, x, y)
     if any(_despeckle_pixel_at(gray_pixels, cx, cy) < _DESPECKLE_PALE_MARK_MIN_VALUE for cx, cy in component):
         return False
     if len(component) > 1:
@@ -14817,16 +14835,26 @@ def _despeckle_candidate_component(
 
 
 def _despeckle_candidate_component_sizes(candidates: list[tuple[int, int]]) -> list[int]:
+    components, _component_by_point = _despeckle_candidate_components(candidates)
+    return [len(component) for component in components]
+
+
+def _despeckle_candidate_components(
+    candidates: list[tuple[int, int]],
+) -> tuple[list[list[tuple[int, int]]], dict[tuple[int, int], list[tuple[int, int]]]]:
     candidate_set = set(candidates)
-    sizes: list[int] = []
+    components: list[list[tuple[int, int]]] = []
+    component_by_point: dict[tuple[int, int], list[tuple[int, int]]] = {}
     visited: set[tuple[int, int]] = set()
     for x, y in candidates:
         if (x, y) in visited:
             continue
         component = _despeckle_candidate_component(candidate_set, x, y)
         visited.update(component)
-        sizes.append(len(component))
-    return sizes
+        components.append(component)
+        for point in component:
+            component_by_point[point] = component
+    return components, component_by_point
 
 
 def _despeckle_has_candidate_texture_context(
