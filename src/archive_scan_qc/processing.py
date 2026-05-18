@@ -8451,6 +8451,13 @@ def _lighten_scanlines_conservative(image: Image.Image) -> ScanlineLighteningRes
         high=p95,
         sparse_tonal_evidence=sparse_tonal_evidence,
     ):
+        repeated_line_reason = _clean_background_scanline_repeated_line_risk_reason(plan)
+        if repeated_line_reason is not None:
+            return _scanlines_noop(
+                image,
+                f"scanline lightening skipped: {repeated_line_reason}",
+                plan["candidate_ratio"],
+            )
         return _scanlines_noop(
             image,
             "scanline lightening skipped: low-confidence tonal evidence",
@@ -8947,6 +8954,17 @@ def _clean_background_scanline_candidate_is_safe(
     pixels = grayscale.load()
     candidate_mean = sum(int(pixels[x, y]) for x, y in selected) / len(selected)
     return 2.0 <= background - candidate_mean <= 10.0
+
+
+def _clean_background_scanline_repeated_line_risk_reason(plan: dict[str, Any]) -> str | None:
+    lines = plan.get("lines")
+    if not isinstance(lines, list) or not lines:
+        return None
+    groups = _contiguous_groups([int(line) for line in lines])
+    candidate_ratio = float(plan.get("candidate_ratio", 0.0))
+    if len(groups) > 1 or any(len(group) > 3 for group in groups) or candidate_ratio > 0.018:
+        return "SCANLINE_SCOPE_RISK risk 重复浅色线条/表格或格线内容超出保守处理范围"
+    return None
 
 
 def _foreground_component_boxes(foreground: Image.Image, *, max_components: int) -> list[tuple[int, int, int, int, int]]:
