@@ -4378,7 +4378,11 @@ def _normalize_mixed_paper_color_cast_conservative(
     before_local_spread = (left_spread + right_spread) / 2
     if before_local_spread < 4.0 or before_local_spread > 14.0:
         return None
-    if abs(left_stats["brightness_mean"] - right_stats["brightness_mean"]) > 7.0:
+    if (
+        min(left_stats["brightness_mean"], right_stats["brightness_mean"]) < 238.0
+        or min(min(left_stats["means"]), min(right_stats["means"])) < 232.0
+        or abs(left_stats["brightness_mean"] - right_stats["brightness_mean"]) > 3.5
+    ):
         return None
 
     left_target = sum(left_stats["means"]) / 3
@@ -4548,20 +4552,84 @@ def _paper_color_cast_protection_reason(
                 "paper color cast normalization skipped: protected color content, stamp, seal, map, chart, or annotation risk",
                 "protected_color_content",
             )
-    if dark / total >= 0.004 and not _paper_color_cast_sparse_dark_content_is_safe(sample, background_means):
-        return (
-            "paper color cast normalization skipped: protected handwriting, text, photograph, or archival mark risk",
-            "protected_dark_content",
-        )
+    sparse_dark_content_is_safe = False
+    if dark / total >= 0.004:
+        sparse_dark_content_is_safe = _paper_color_cast_sparse_dark_content_is_safe(sample, background_means)
+        if not sparse_dark_content_is_safe:
+            return (
+                "paper color cast normalization skipped: protected handwriting, text, photograph, or archival mark risk",
+                "protected_dark_content",
+            )
     if texture / total >= 0.012:
         return (
             "paper color cast normalization skipped: photo, chart, map, texture, or colored record risk",
             "protected_photo_or_texture",
         )
+    faint_structure_reason = _paper_color_cast_faint_structure_reason(
+        sample,
+        background_means,
+    )
+    if faint_structure_reason:
+        return faint_structure_reason
     if _source_protected_edge_dark_ratio(sample.convert("L")) > 0.001:
         return (
             "paper color cast normalization skipped: protected edge or corner archival mark risk",
             "protected_edge_mark",
+        )
+    return None
+
+
+def _paper_color_cast_faint_structure_reason(
+    sample: Image.Image,
+    background_means: list[float],
+) -> tuple[str, str] | None:
+    pixels = list(sample.get_flattened_data() if hasattr(sample, "get_flattened_data") else sample.getdata())
+    total = max(1, len(pixels))
+    bright_pixels = [pixel for pixel in pixels if sum(pixel) / 3 >= 205]
+    if len(bright_pixels) / total >= 0.70:
+        background_means = [
+            sum(pixel[index] for pixel in bright_pixels) / max(1, len(bright_pixels)) for index in range(3)
+        ]
+    bg_brightness = sum(background_means) / 3
+    grayscale = sample.convert("L")
+    blurred = grayscale.filter(ImageFilter.GaussianBlur(3.0))
+    detail = ImageChops.difference(grayscale, blurred)
+    dark_neighborhood = grayscale.point(lambda value: 255 if value < bg_brightness - 45 else 0, mode="L").filter(
+        ImageFilter.MaxFilter(9)
+    )
+    detail_pixels = detail.load()
+    dark_pixels = dark_neighborhood.load()
+    sample_pixels = sample.load()
+    detail_count = 0
+    for y in range(sample.height):
+        for x in range(sample.width):
+            if dark_pixels[x, y]:
+                continue
+            red_value, green_value, blue_value = sample_pixels[x, y]
+            brightness = (red_value + green_value + blue_value) / 3
+            if brightness >= bg_brightness - 35 and detail_pixels[x, y] >= 5:
+                detail_count += 1
+    detail_ratio = detail_count / max(1, sample.width * sample.height)
+    if detail_ratio >= 0.05:
+        return (
+            "paper color cast normalization skipped: protected handwriting, text, photograph, or archival mark risk",
+            "protected_dark_content",
+        )
+
+    broad_pale_nonuniform = 0
+    for red_value, green_value, blue_value in pixels:
+        brightness = (red_value + green_value + blue_value) / 3
+        bg_distance = max(
+            abs(red_value - background_means[0]),
+            abs(green_value - background_means[1]),
+            abs(blue_value - background_means[2]),
+        )
+        if 5 < bg_distance <= 24 and bg_brightness - 35 <= brightness < bg_brightness - 2:
+            broad_pale_nonuniform += 1
+    if broad_pale_nonuniform / total >= 0.10:
+        return (
+            "paper color cast normalization skipped: background is not uniform enough",
+            "not_uniform",
         )
     return None
 

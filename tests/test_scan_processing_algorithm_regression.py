@@ -2071,6 +2071,14 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "synthetic_protected_mixed_cast_stamp.png": _mild_mixed_scanner_cast_page("stamp"),
                 "synthetic_protected_mixed_cast_photo_texture.png": _mild_mixed_scanner_cast_page("photo_texture"),
                 "synthetic_protected_mixed_cast_ruled_edge.png": _mild_mixed_scanner_cast_page("ruled_edge"),
+                "synthetic_protected_mixed_cast_colored_stationery.png": _mild_mixed_scanner_cast_page(
+                    "colored_stationery"
+                ),
+                "synthetic_protected_mixed_cast_aged_paper.png": _mild_mixed_scanner_cast_page("aged_paper"),
+                "synthetic_protected_mixed_cast_illumination.png": _mild_mixed_scanner_cast_page("illumination"),
+                "synthetic_protected_mixed_cast_large_stain.png": _mild_mixed_scanner_cast_page("large_stain"),
+                "synthetic_protected_mixed_cast_pale_ruled.png": _mild_mixed_scanner_cast_page("pale_ruled"),
+                "synthetic_protected_mixed_cast_pale_table.png": _mild_mixed_scanner_cast_page("pale_table"),
             }
             source_bytes = {}
             for name, image in pages.items():
@@ -2123,6 +2131,20 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     "protected_dark_content",
                     "protected_edge_mark",
                 },
+                "synthetic_protected_mixed_cast_colored_stationery.png": {
+                    "already_neutral",
+                    "colored_paper",
+                    "not_uniform",
+                },
+                "synthetic_protected_mixed_cast_aged_paper.png": {
+                    "colored_paper",
+                    "not_uniform",
+                    "too_dark",
+                },
+                "synthetic_protected_mixed_cast_illumination.png": {"already_neutral", "not_uniform"},
+                "synthetic_protected_mixed_cast_large_stain.png": {"not_uniform"},
+                "synthetic_protected_mixed_cast_pale_ruled.png": {"protected_dark_content"},
+                "synthetic_protected_mixed_cast_pale_table.png": {"protected_dark_content"},
             }
             observed_protected_codes = set()
             for name, expected_codes in protected_expected_codes.items():
@@ -2136,13 +2158,14 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
 
             cast_guard = audit_summary["guardrails"]["paper_color_cast"]
             self.assertEqual(audit_summary["counts"]["paper_color_cast_normalized_files"], 1)
-            self.assertEqual(audit_summary["counts"]["paper_color_cast_skipped_files"], 3)
+            self.assertEqual(audit_summary["counts"]["paper_color_cast_skipped_files"], 9)
             self.assertEqual(cast_guard["applied_files"], 1)
-            self.assertEqual(cast_guard["skipped_files"], 3)
+            self.assertEqual(cast_guard["skipped_files"], 9)
             self.assertEqual(cast_guard["reason_code_distribution"]["applied_mild_mixed_scanner_cast"], 1)
             self.assertGreaterEqual(cast_guard["skip_reason_code_distribution"]["protected_color_content"], 1)
             self.assertTrue({"protected_photo_or_texture", "protected_color_content"} & observed_protected_codes)
             self.assertTrue({"protected_dark_content", "protected_edge_mark"} & observed_protected_codes)
+            self.assertIn("not_uniform", cast_guard["skip_reason_code_distribution"])
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertFalse(audit_summary["privacy"]["contains_paths"])
             self.assertFalse(audit_summary["privacy"]["contains_hashes"])
@@ -4426,6 +4449,15 @@ def _mild_mixed_scanner_cast_page(variant: str) -> Image.Image:
     pixels = image.load()
     warm = (248, 243, 233)
     cool = (235, 241, 248)
+    if variant == "colored_stationery":
+        warm = (240, 236, 226)
+        cool = (228, 236, 242)
+    elif variant == "aged_paper":
+        warm = (242, 235, 220)
+        cool = (230, 235, 238)
+    elif variant == "illumination":
+        warm = (244, 239, 229)
+        cool = (236, 242, 249)
     for y in range(image.height):
         for x in range(image.width):
             position = x / max(1, image.width - 1)
@@ -4450,6 +4482,30 @@ def _mild_mixed_scanner_cast_page(variant: str) -> Image.Image:
         for x in range(28, 216, 38):
             draw.line((x, 24, x, 160), fill=(88, 88, 88), width=1)
         draw.line((2, 146, 20, 166), fill=(34, 34, 34), width=2)
+    elif variant == "large_stain":
+        overlay = Image.new("RGB", image.size, (238, 232, 214))
+        mask = Image.new("L", image.size, 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.ellipse((40, 30, 210, 150), fill=95)
+        mask = mask.filter(ImageFilter.GaussianBlur(14))
+        image = Image.composite(overlay, image, mask)
+    elif variant == "illumination":
+        overlay = Image.new("RGB", image.size, (228, 228, 222))
+        mask = Image.new("L", image.size, 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.rectangle((0, 0, 88, image.height), fill=110)
+        mask = mask.filter(ImageFilter.GaussianBlur(18))
+        image = Image.composite(overlay, image, mask)
+    elif variant == "pale_ruled":
+        for y in range(24, 164, 18):
+            draw.line((8, y, 232, y), fill=(232, 232, 226), width=1)
+    elif variant == "pale_table":
+        for x in range(30, 220, 32):
+            draw.line((x, 26, x, 154), fill=(232, 232, 226), width=1)
+        for y in range(26, 155, 22):
+            draw.line((26, y, 220, y), fill=(232, 232, 226), width=1)
+    elif variant in {"colored_stationery", "aged_paper", "illumination"}:
+        pass
     elif variant != "safe":
         raise ValueError(f"unknown mild mixed scanner cast variant: {variant}")
     return image
