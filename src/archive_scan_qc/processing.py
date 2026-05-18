@@ -4231,6 +4231,9 @@ def _normalize_paper_color_cast_conservative(image: Image.Image) -> PaperColorCa
         2.5 if (cool_cast_evidence and brightness_mean >= 240) or mild_blue_gray_scanner_cast else 4.0
     )
     if channel_spread < min_cast_spread:
+        mixed_result = _normalize_mixed_paper_color_cast_conservative(source, sample, means)
+        if mixed_result is not None:
+            return mixed_result
         return _paper_color_cast_noop(
             image,
             "paper color cast normalization skipped: already near neutral",
@@ -4259,6 +4262,9 @@ def _normalize_paper_color_cast_conservative(image: Image.Image) -> PaperColorCa
     spread_mean = sum(dominant_spreads) / len(dominant_spreads)
     spread_std = _mean_stddev(dominant_spreads, spread_mean)
     if spread_std > 4.8:
+        mixed_result = _normalize_mixed_paper_color_cast_conservative(source, sample, means)
+        if mixed_result is not None:
+            return mixed_result
         return _paper_color_cast_noop(
             image,
             "paper color cast normalization skipped: color cast is not uniform",
@@ -4353,6 +4359,162 @@ def _normalize_paper_color_cast_conservative(image: Image.Image) -> PaperColorCa
         round(changed_ratio, 6),
         round(candidate_ratio, 6),
     )
+
+
+def _normalize_mixed_paper_color_cast_conservative(
+    source: Image.Image,
+    sample: Image.Image,
+    background_means: list[float],
+) -> PaperColorCastNormalizationResult | None:
+    side_stats = _paper_color_cast_side_stats(sample)
+    if side_stats is None:
+        return None
+    left_stats, right_stats = side_stats
+    if not left_stats["safe"] or not right_stats["safe"]:
+        return None
+
+    left_spread = max(left_stats["means"]) - min(left_stats["means"])
+    right_spread = max(right_stats["means"]) - min(right_stats["means"])
+    before_local_spread = (left_spread + right_spread) / 2
+    if before_local_spread < 4.0 or before_local_spread > 14.0:
+        return None
+    if abs(left_stats["brightness_mean"] - right_stats["brightness_mean"]) > 7.0:
+        return None
+
+    left_target = sum(left_stats["means"]) / 3
+    right_target = sum(right_stats["means"]) / 3
+    left_offsets = [max(-6.0, min(6.0, left_target - mean)) for mean in left_stats["means"]]
+    right_offsets = [max(-6.0, min(6.0, right_target - mean)) for mean in right_stats["means"]]
+    left_min_channel = min(range(3), key=lambda index: left_stats["means"][index])
+    right_min_channel = min(range(3), key=lambda index: right_stats["means"][index])
+    left_max_channel = max(range(3), key=lambda index: left_stats["means"][index])
+    right_max_channel = max(range(3), key=lambda index: right_stats["means"][index])
+    if left_min_channel == right_min_channel or left_max_channel == right_max_channel:
+        return None
+    has_opposing_channel_shift = any(
+        abs(left_offsets[index]) >= 1.5
+        and abs(right_offsets[index]) >= 1.5
+        and left_offsets[index] * right_offsets[index] < 0
+        for index in range(3)
+    )
+    if not has_opposing_channel_shift:
+        return None
+    offset_gap = max(abs(left_offsets[index] - right_offsets[index]) for index in range(3))
+    max_offset = max(max(abs(offset) for offset in left_offsets), max(abs(offset) for offset in right_offsets))
+    if offset_gap < 3.5 or max_offset < 2.0:
+        return None
+
+    protected_mask = _paper_color_cast_protected_mask(source, background_means)
+    unprotected_count = source.width * source.height - _mask_pixel_count(protected_mask)
+    candidate_ratio = unprotected_count / max(1, source.width * source.height)
+    if candidate_ratio < 0.90:
+        return None
+
+    output = source.copy()
+    output_pixels = output.load()
+    protected_pixels = protected_mask.load()
+    changed = 0
+    width_scale = max(1, output.width - 1)
+    for y in range(output.height):
+        for x in range(output.width):
+            if protected_pixels[x, y]:
+                continue
+            position = x / width_scale
+            offsets = [
+                left_offsets[index] * (1.0 - position) + right_offsets[index] * position for index in range(3)
+            ]
+            values = output_pixels[x, y]
+            corrected = tuple(max(0, min(255, int(round(values[index] + offsets[index])))) for index in range(3))
+            if max(abs(corrected[index] - values[index]) for index in range(3)) > 1:
+                changed += 1
+            output_pixels[x, y] = corrected
+
+    changed_ratio = changed / max(1, source.width * source.height)
+    if changed_ratio < 0.65:
+        return None
+
+    before_l = source.convert("L")
+    after_l = output.convert("L")
+    brightness_delta, _contrast_delta = _tonal_deltas(before_l, after_l)
+    if brightness_delta > 4.0:
+        return None
+
+    after_sample = output.copy()
+    after_sample.thumbnail(sample.size, Image.Resampling.BILINEAR)
+    after_side_stats = _paper_color_cast_side_stats(after_sample, require_safe=False)
+    if after_side_stats is None:
+        return None
+    after_left_stats, after_right_stats = after_side_stats
+    after_left_spread = max(after_left_stats["means"]) - min(after_left_stats["means"])
+    after_right_spread = max(after_right_stats["means"]) - min(after_right_stats["means"])
+    after_local_spread = (after_left_spread + after_right_spread) / 2
+    color_delta = before_local_spread - after_local_spread
+    if color_delta < 3.5 or color_delta > 12.0:
+        return None
+
+    return PaperColorCastNormalizationResult(
+        output,
+        True,
+        "paper color cast normalization applied: mild mixed scanner cast on bright neutral paper",
+        "applied_mild_mixed_scanner_cast",
+        round(color_delta, 6),
+        round(brightness_delta, 6),
+        round(changed_ratio, 6),
+        round(candidate_ratio, 6),
+    )
+
+
+def _paper_color_cast_side_stats(
+    sample: Image.Image,
+    *,
+    require_safe: bool = True,
+) -> tuple[dict[str, object], dict[str, object]] | None:
+    width, height = sample.size
+    if width < 60 or height < 60:
+        return None
+    bands = ((0, max(1, width // 3)), (min(width - 1, width * 2 // 3), width))
+    stats: list[dict[str, object]] = []
+    pixels = sample.load()
+    for left, right in bands:
+        values: list[tuple[int, int, int]] = []
+        brightness_values: list[float] = []
+        for y in range(height):
+            for x in range(left, right):
+                pixel = pixels[x, y]
+                brightness = sum(pixel) / 3
+                if brightness < 205:
+                    continue
+                values.append(pixel)
+                brightness_values.append(brightness)
+        band_area = max(1, (right - left) * height)
+        if len(values) / band_area < 0.70:
+            return None
+        means = [sum(pixel[index] for pixel in values) / len(values) for index in range(3)]
+        brightness_mean = sum(brightness_values) / len(brightness_values)
+        brightness_sorted = sorted(brightness_values)
+        total = len(brightness_sorted)
+        p05 = brightness_sorted[min(total - 1, int(total * 0.05))]
+        p95 = brightness_sorted[min(total - 1, int(total * 0.95))]
+        brightness_std = _mean_stddev(brightness_values, brightness_mean)
+        channel_spread = max(means) - min(means)
+        safe = (
+            brightness_mean >= 225
+            and p05 >= 210
+            and brightness_std <= 11.5
+            and p95 - p05 <= 30
+            and min(means) >= 220
+            and channel_spread <= 16.0
+        )
+        if require_safe and not safe:
+            return None
+        stats.append(
+            {
+                "means": means,
+                "brightness_mean": brightness_mean,
+                "safe": safe,
+            }
+        )
+    return stats[0], stats[1]
 
 
 def _paper_color_cast_protection_reason(
