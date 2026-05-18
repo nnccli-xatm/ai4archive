@@ -67,6 +67,7 @@ class ProcessingOptions:
     audit_max_cumulative_contrast_delta: float = 50.0
     audit_max_cumulative_crop_ratio: float = 0.55
     audit_max_cumulative_candidate_pixel_ratio: float = 1.0
+    audit_max_cumulative_retouch_changed_pixel_ratio: float = 0.16
     audit_max_cumulative_foreground_weakened_ratio: float = 0.08
     audit_max_cumulative_edge_foreground_weakened_ratio: float = 0.10
     audit_max_local_content_changed_ratio: float = 0.20
@@ -1252,6 +1253,9 @@ def _processing_options_fingerprint(options: ProcessingOptions) -> str:
         "audit_max_cumulative_contrast_delta": options.audit_max_cumulative_contrast_delta,
         "audit_max_cumulative_crop_ratio": options.audit_max_cumulative_crop_ratio,
         "audit_max_cumulative_candidate_pixel_ratio": options.audit_max_cumulative_candidate_pixel_ratio,
+        "audit_max_cumulative_retouch_changed_pixel_ratio": (
+            options.audit_max_cumulative_retouch_changed_pixel_ratio
+        ),
         "audit_max_cumulative_foreground_weakened_ratio": options.audit_max_cumulative_foreground_weakened_ratio,
         "audit_max_cumulative_edge_foreground_weakened_ratio": (
             options.audit_max_cumulative_edge_foreground_weakened_ratio
@@ -2015,6 +2019,9 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "cumulative_change_crop_ratio": _aggregate_metric(audit_records, "cumulative_change_crop_ratio"),
             "cumulative_change_candidate_pixel_ratio": _aggregate_metric(
                 audit_records, "cumulative_change_candidate_pixel_ratio"
+            ),
+            "cumulative_retouch_changed_pixel_ratio": _aggregate_metric(
+                audit_records, "cumulative_retouch_changed_pixel_ratio"
             ),
             "local_content_pixel_ratio": _aggregate_metric(audit_records, "local_content_pixel_ratio"),
             "local_content_changed_ratio": _aggregate_metric(audit_records, "local_content_changed_ratio"),
@@ -2977,6 +2984,9 @@ def _audit_thresholds(options: ProcessingOptions) -> dict[str, float]:
         "max_cumulative_contrast_delta": options.audit_max_cumulative_contrast_delta,
         "max_cumulative_crop_ratio": options.audit_max_cumulative_crop_ratio,
         "max_cumulative_candidate_pixel_ratio": options.audit_max_cumulative_candidate_pixel_ratio,
+        "max_cumulative_retouch_changed_pixel_ratio": (
+            options.audit_max_cumulative_retouch_changed_pixel_ratio
+        ),
         "max_cumulative_foreground_weakened_ratio": options.audit_max_cumulative_foreground_weakened_ratio,
         "max_cumulative_edge_foreground_weakened_ratio": (
             options.audit_max_cumulative_edge_foreground_weakened_ratio
@@ -10532,6 +10542,8 @@ def _cumulative_change_guard(metrics: dict[str, Any], options: ProcessingOptions
         "crop_ratio": _safe_ratio(crop_ratio, options.audit_max_cumulative_crop_ratio),
         "candidate_pixel_ratio": _safe_ratio(candidate_ratio, options.audit_max_cumulative_candidate_pixel_ratio),
     }
+    retouch_operation_count = _processed_output_foreground_risk_operation_count(metrics)
+    retouch_changed_ratio = _cumulative_retouch_changed_pixel_ratio(metrics)
     score = round(max(score_components.values()), 6)
     reasons = [
         reason
@@ -10540,7 +10552,12 @@ def _cumulative_change_guard(metrics: dict[str, Any], options: ProcessingOptions
     ]
     if score > options.audit_max_cumulative_change_score:
         reasons.append("cumulative_change_score")
-    if _processed_output_foreground_risk_operation_count(metrics) >= 2:
+    if (
+        retouch_operation_count >= 2
+        and retouch_changed_ratio > options.audit_max_cumulative_retouch_changed_pixel_ratio
+    ):
+        reasons.append("retouch_changed_pixel_ratio")
+    if retouch_operation_count >= 2:
         foreground_weakened_ratio = _float_metric(metrics, "cumulative_foreground_weakened_ratio")
         edge_foreground_weakened_ratio = _float_metric(metrics, "cumulative_edge_foreground_weakened_ratio")
         dark_foreground_loss_signal = (
@@ -10587,6 +10604,7 @@ def _cumulative_change_guard(metrics: dict[str, Any], options: ProcessingOptions
         "contrast_delta": round(contrast_delta, 6),
         "crop_ratio": round(crop_ratio, 6),
         "candidate_pixel_ratio": round(candidate_ratio, 6),
+        "retouch_changed_pixel_ratio": round(retouch_changed_ratio, 6),
         "foreground_weakened_ratio": round(_float_metric(metrics, "cumulative_foreground_weakened_ratio"), 6),
         "edge_foreground_weakened_ratio": round(
             _float_metric(metrics, "cumulative_edge_foreground_weakened_ratio"),
@@ -10921,6 +10939,21 @@ def _processed_output_foreground_risk_operation_count(metrics: dict[str, Any]) -
     )
 
 
+def _cumulative_retouch_changed_pixel_ratio(metrics: dict[str, Any]) -> float:
+    changed_ratio_keys = (
+        "edge_shadow_changed_pixel_ratio",
+        "corner_shadows_changed_pixel_ratio",
+        "background_stains_changed_pixel_ratio",
+        "fold_shadows_changed_pixel_ratio",
+        "illumination_gradient_changed_pixel_ratio",
+        "bleed_through_changed_pixel_ratio",
+        "scanlines_changed_pixel_ratio",
+        "faded_text_changed_pixel_ratio",
+        "text_edges_changed_pixel_ratio",
+    )
+    return round(sum(max(0.0, _float_metric(metrics, key)) for key in changed_ratio_keys), 6)
+
+
 def _local_content_change_guard(source_l: Image.Image, processed_l: Image.Image, options: ProcessingOptions) -> dict[str, Any]:
     if processed_l.size != source_l.size:
         return _local_content_change_guard_passed(checked=False)
@@ -11176,6 +11209,7 @@ def _cumulative_change_guard_audit_fields(guard: dict[str, Any]) -> dict[str, An
         "cumulative_change_contrast_delta": _round_guard_metric(guard.get("contrast_delta")),
         "cumulative_change_crop_ratio": _round_guard_metric(guard.get("crop_ratio")),
         "cumulative_change_candidate_pixel_ratio": _round_guard_metric(guard.get("candidate_pixel_ratio")),
+        "cumulative_retouch_changed_pixel_ratio": _round_guard_metric(guard.get("retouch_changed_pixel_ratio")),
         "cumulative_foreground_weakened_ratio": _round_guard_metric(guard.get("foreground_weakened_ratio")),
         "cumulative_edge_foreground_weakened_ratio": _round_guard_metric(guard.get("edge_foreground_weakened_ratio")),
     }

@@ -13,7 +13,12 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, ImageStat
 
 from archive_scan_qc import processing as processing_module
 from archive_scan_qc.benchmark import _processing_quality_regression, run_benchmark
-from archive_scan_qc.processing import ProcessingOptions, _combination_quality_guard, process_images
+from archive_scan_qc.processing import (
+    ProcessingOptions,
+    _combination_quality_guard,
+    _cumulative_change_guard,
+    process_images,
+)
 from archive_scan_qc.scanner import ScanConfig, scan_batch
 
 
@@ -179,6 +184,24 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
         self.assertIn("cumulative_foreground_weakening", cumulative_weakening["reasons"])
         self.assertIn("cumulative_edge_content_weakening", cumulative_weakening["reasons"])
 
+        cumulative_retouch = _cumulative_change_guard(
+            dict(
+                base_metrics,
+                paper_color_cast_normalized=True,
+                paper_color_cast_changed_pixel_ratio=0.10,
+                edge_shadow_lightened=True,
+                edge_shadow_changed_pixel_ratio=0.07,
+                bleed_through_cleaned=True,
+                bleed_through_changed_pixel_ratio=0.04,
+                scanlines_lightened=True,
+                scanlines_changed_pixel_ratio=0.06,
+            ),
+            options,
+        )
+        self.assertEqual(cumulative_retouch["action"], "reverted_to_source")
+        self.assertIn("retouch_changed_pixel_ratio", cumulative_retouch["reasons"])
+        self.assertGreater(cumulative_retouch["retouch_changed_pixel_ratio"], 0.16)
+
     def test_combined_retouch_guard_allows_safe_cleanup_and_reverts_content_weakening(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-combined-retouch-guard-") as temp_dir:
             root = Path(temp_dir)
@@ -317,6 +340,160 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertFalse(audit_summary["privacy"]["contains_paths"])
             self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
+    def test_compound_retouch_guard_allows_mild_pairs_with_bounded_audit(self) -> None:
+        cases = {
+            "shadow_bleed": (
+                _compound_retouch_page("shadow_bleed"),
+                ProcessingOptions(lighten_edge_shadow=True, clean_bleed_through=True, workers=1),
+                (
+                    mock.patch.object(
+                        processing_module,
+                        "_lighten_edge_shadow_conservative",
+                        side_effect=_mock_mild_edge_shadow_cleanup,
+                    ),
+                    mock.patch.object(
+                        processing_module,
+                        "_clean_bleed_through_conservative",
+                        side_effect=_mock_mild_bleed_through_cleanup,
+                    ),
+                ),
+            ),
+            "stain_scanline": (
+                _compound_retouch_page("stain_scanline"),
+                ProcessingOptions(lighten_background_stains=True, lighten_scanlines=True, workers=1),
+                (
+                    mock.patch.object(
+                        processing_module,
+                        "_lighten_background_stains_conservative",
+                        side_effect=_mock_mild_stain_cleanup,
+                    ),
+                    mock.patch.object(
+                        processing_module,
+                        "_lighten_scanlines_conservative",
+                        side_effect=_mock_mild_scanline_cleanup,
+                    ),
+                ),
+            ),
+            "color_cast_sparse_text": (
+                _compound_retouch_page("color_cast_sparse_text"),
+                ProcessingOptions(normalize_paper_color_cast=True, lighten_background_stains=True, workers=1),
+                (
+                    mock.patch.object(
+                        processing_module,
+                        "_normalize_paper_color_cast_conservative",
+                        side_effect=_mock_mild_paper_cast_cleanup,
+                    ),
+                    mock.patch.object(
+                        processing_module,
+                        "_lighten_background_stains_conservative",
+                        side_effect=_mock_mild_stain_cleanup,
+                    ),
+                ),
+            ),
+        }
+        for name, (image, options, patches) in cases.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory(prefix="scan-processing-compound-safe-") as temp_dir:
+                root = Path(temp_dir)
+                input_dir = root / "input"
+                output_dir = root / "reports"
+                process_dir = root / "processed"
+                input_dir.mkdir()
+                source = input_dir / f"synthetic_safe_{name}.png"
+                image.save(source, dpi=(300, 300))
+                source_bytes = source.read_bytes()
+
+                report = scan_batch(ScanConfig("synthetic-regression", name, input_dir, output_dir))
+                with patches[0], patches[1]:
+                    manifest = process_images(report, input_dir, process_dir, options)
+
+                audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+                audit_summary = json.loads(audit_summary_text)
+                record = manifest["files"][0]
+                audit = record["processing_audit"]
+
+                self.assertEqual(source.read_bytes(), source_bytes)
+                self.assertEqual(audit["cumulative_change_guard_action"], "passed")
+                self.assertEqual(audit["combination_quality_guard_reason_code"], "safe_combination_passed")
+                self.assertLessEqual(audit["cumulative_retouch_changed_pixel_ratio"], 0.16)
+                self.assertLessEqual(audit["cumulative_change_score"], 1.0)
+                self.assertEqual(audit_summary["counts"]["cumulative_change_guard_reverted_files"], 0)
+                self.assertEqual(audit_summary["counts"]["combination_quality_guard_reverted_files"], 0)
+                self.assertIn("cumulative_retouch_changed_pixel_ratio", audit_summary["metrics"])
+                self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+                for forbidden in (source.name, str(input_dir), "source_relative_path", "source_sha256"):
+                    self.assertNotIn(forbidden, audit_summary_text)
+
+    def test_compound_retouch_guard_reverts_cumulative_protected_content_changes(self) -> None:
+        pages = {
+            "synthetic_protected_faint_handwriting.png": _compound_retouch_page("faint_handwriting"),
+            "synthetic_protected_page_number_stamp.png": _compound_retouch_page("page_number_stamp"),
+            "synthetic_protected_ruled_colored_record.png": _compound_retouch_page("ruled_colored_record"),
+        }
+        with tempfile.TemporaryDirectory(prefix="scan-processing-compound-protected-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "compound-protected", input_dir, output_dir))
+            with mock.patch.object(
+                processing_module,
+                "_normalize_paper_color_cast_conservative",
+                side_effect=_mock_broad_paper_cast_cleanup,
+            ), mock.patch.object(
+                processing_module,
+                "_lighten_background_stains_conservative",
+                side_effect=_mock_broad_stain_cleanup,
+            ), mock.patch.object(
+                processing_module,
+                "_lighten_scanlines_conservative",
+                side_effect=_mock_broad_scanline_cleanup,
+            ):
+                manifest = process_images(
+                    report,
+                    input_dir,
+                    process_dir,
+                    ProcessingOptions(
+                        normalize_paper_color_cast=True,
+                        lighten_background_stains=True,
+                        lighten_scanlines=True,
+                        workers=1,
+                    ),
+                )
+
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            for name, image in pages.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name])
+                self.assertEqual(audit["cumulative_change_guard_action"], "reverted_to_source", name)
+                self.assertEqual(audit["combination_quality_guard_action"], "reverted_to_source", name)
+                self.assertEqual(audit["combination_quality_guard_reason_code"], "combined_change_too_large_reverted", name)
+                self.assertIn("retouch_changed_pixel_ratio", audit["cumulative_change_guard_reasons"], name)
+                self.assertIn("combination_quality_guard_reverted_to_source", record["operations"], name)
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    self.assertEqual(output.convert("RGB").tobytes(), image.tobytes(), name)
+
+            self.assertEqual(audit_summary["counts"]["cumulative_change_guard_reverted_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["combination_quality_guard_reverted_files"], len(pages))
+            self.assertEqual(
+                audit_summary["guardrails"]["cumulative_change_guard"]["reason_distribution"][
+                    "retouch_changed_pixel_ratio"
+                ],
+                len(pages),
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
@@ -6056,6 +6233,113 @@ def _combined_retouch_guard_page(variant: str = "safe") -> Image.Image:
     else:
         raise ValueError(f"unsupported variant: {variant}")
     return image
+
+
+def _compound_retouch_page(variant: str) -> Image.Image:
+    base_color = (238, 238, 232) if variant == "color_cast_sparse_text" else (242, 242, 238)
+    image = Image.new("RGB", (240, 170), base_color)
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((46, 34, 170, 38), fill=(44, 44, 44))
+    draw.rectangle((50, 54, 164, 58), fill=(48, 48, 48))
+
+    if variant in {"shadow_bleed", "faint_handwriting"}:
+        for x in range(0, 42):
+            shade = 224 + min(15, x // 3)
+            draw.line((x, 0, x, image.height), fill=(shade, shade, shade - 2))
+        draw.rectangle((150, 90, 204, 93), fill=(226, 226, 222))
+        draw.rectangle((152, 106, 200, 109), fill=(226, 226, 222))
+    if variant in {"stain_scanline", "ruled_colored_record"}:
+        draw.ellipse((164, 28, 214, 58), fill=(224, 220, 210))
+        draw.line((32, 124, 210, 124), fill=(230, 230, 226), width=2)
+    if variant in {"color_cast_sparse_text", "page_number_stamp"}:
+        draw.ellipse((170, 112, 206, 138), fill=(222, 218, 208))
+        draw.rectangle((74, 92, 98, 96), fill=(96, 96, 92))
+
+    if variant == "faint_handwriting":
+        draw.line((16, 126, 42, 134, 22, 146, 54, 154), fill=(172, 172, 168), width=2)
+    elif variant == "page_number_stamp":
+        draw.rectangle((108, 150, 132, 158), fill=(168, 168, 164))
+        draw.ellipse((150, 42, 204, 92), outline=(178, 24, 24), width=3)
+    elif variant == "ruled_colored_record":
+        for y in (78, 98, 118, 138):
+            draw.line((28, y, 220, y), fill=(92, 132, 164), width=1)
+        for x in (74, 128, 184):
+            draw.line((x, 72, x, 146), fill=(92, 132, 164), width=1)
+        for x in range(36, 210, 10):
+            for y in range(22, 150, 14):
+                shade = 130 + ((x * 7 + y * 3) % 32)
+                draw.point((x, y), fill=(shade, shade - 6, shade - 12))
+    elif variant not in {"shadow_bleed", "stain_scanline", "color_cast_sparse_text"}:
+        raise ValueError(f"unsupported compound retouch variant: {variant}")
+    return image
+
+
+def _mock_mild_edge_shadow_cleanup(current: Image.Image) -> processing_module.EdgeShadowLighteningResult:
+    changed = current.copy()
+    ImageDraw.Draw(changed).rectangle((0, 0, 38, current.height), fill=(240, 240, 236))
+    return processing_module.EdgeShadowLighteningResult(
+        changed, True, "edge shadow lightened: narrow neutral edge shadow", "applied_narrow_neutral_edge_shadow",
+        ("left",), 225.0, 240.0, 15.0, 0.055, 0.070
+    )
+
+
+def _mock_mild_bleed_through_cleanup(current: Image.Image) -> processing_module.BleedThroughCleanupResult:
+    changed = current.copy()
+    draw = ImageDraw.Draw(changed)
+    draw.rectangle((148, 88, 206, 112), fill=(242, 242, 238))
+    return processing_module.BleedThroughCleanupResult(
+        changed, True, "bleed-through cleaned: pale reverse-side marks on light paper", 226.0, 240.0, 14.0, 0.035, 0.050
+    )
+
+
+def _mock_mild_stain_cleanup(current: Image.Image) -> processing_module.BackgroundStainLighteningResult:
+    changed = current.copy()
+    ImageDraw.Draw(changed).ellipse((162, 26, 216, 60), fill=(238, 238, 234))
+    return processing_module.BackgroundStainLighteningResult(
+        changed, True, "background stains lightened: stable isolated stains on light paper", 222.0, 238.0, 16.0, 0.045, 0.055
+    )
+
+
+def _mock_mild_scanline_cleanup(current: Image.Image) -> processing_module.ScanlineLighteningResult:
+    changed = current.copy()
+    ImageDraw.Draw(changed).line((32, 124, 210, 124), fill=(240, 240, 236), width=2)
+    return processing_module.ScanlineLighteningResult(
+        changed, True, "scanlines lightened: stable horizontal scanline pattern", "horizontal", 1, 230.0, 240.0, 10.0, 0.030, 0.035
+    )
+
+
+def _mock_mild_paper_cast_cleanup(current: Image.Image) -> processing_module.PaperColorCastNormalizationResult:
+    changed = current.copy()
+    ImageDraw.Draw(changed).rectangle((0, 0, current.width, 24), fill=(242, 242, 238))
+    return processing_module.PaperColorCastNormalizationResult(
+        changed, True, "paper color cast normalized: mild neutral cast", "applied_mild_neutral_cast", 4.0, 2.0, 0.050, 0.060
+    )
+
+
+def _mock_broad_paper_cast_cleanup(current: Image.Image) -> processing_module.PaperColorCastNormalizationResult:
+    changed = current.copy()
+    ImageDraw.Draw(changed).rectangle((0, 0, current.width, 54), fill=(246, 246, 242))
+    return processing_module.PaperColorCastNormalizationResult(
+        changed, True, "paper color cast normalized: mild neutral cast", "applied_mild_neutral_cast", 5.0, 3.0, 0.110, 0.120
+    )
+
+
+def _mock_broad_stain_cleanup(current: Image.Image) -> processing_module.BackgroundStainLighteningResult:
+    changed = current.copy()
+    ImageDraw.Draw(changed).rectangle((0, 62, current.width, 116), fill=(244, 244, 240))
+    return processing_module.BackgroundStainLighteningResult(
+        changed, True, "background stains lightened: stable isolated stains on light paper", 222.0, 244.0, 22.0, 0.170, 0.180
+    )
+
+
+def _mock_broad_scanline_cleanup(current: Image.Image) -> processing_module.ScanlineLighteningResult:
+    changed = current.copy()
+    draw = ImageDraw.Draw(changed)
+    for y in (124, 138, 152):
+        draw.line((0, y, current.width, y), fill=(246, 246, 242), width=2)
+    return processing_module.ScanlineLighteningResult(
+        changed, True, "scanlines lightened: stable horizontal scanline pattern", "horizontal", 3, 230.0, 246.0, 16.0, 0.140, 0.150
+    )
 
 
 def _subtle_diagonal_edge_shadow_page(variant: str = "safe") -> Image.Image:
