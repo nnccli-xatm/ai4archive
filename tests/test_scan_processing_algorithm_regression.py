@@ -2053,6 +2053,9 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "synthetic_protected_stamp_mark.png": _faint_warm_bleed_through_haze_page("stamp"),
                 "synthetic_protected_dense_foreground.png": _faint_warm_bleed_through_haze_page("dense_foreground"),
                 "synthetic_protected_archival_edge_mark.png": _faint_warm_bleed_through_haze_page("edge_mark"),
+                "synthetic_protected_marginal_notes.png": _faint_warm_bleed_through_haze_page("marginal_notes"),
+                "synthetic_protected_small_seal_marks.png": _faint_warm_bleed_through_haze_page("small_seal_marks"),
+                "synthetic_protected_check_marks.png": _faint_warm_bleed_through_haze_page("check_marks"),
             }
             source_bytes = {}
             for name, page in pages.items():
@@ -2106,6 +2109,9 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "synthetic_protected_stamp_mark.png": "protected_color_content",
                 "synthetic_protected_dense_foreground.png": "protected_foreground_too_dense",
                 "synthetic_protected_archival_edge_mark.png": "protected_edge_content",
+                "synthetic_protected_marginal_notes.png": "protected_line_or_annotation",
+                "synthetic_protected_small_seal_marks.png": "protected_line_or_annotation",
+                "synthetic_protected_check_marks.png": "protected_line_or_annotation",
             }
             for name, expected_code in expected_codes.items():
                 record = records[name]
@@ -5725,6 +5731,16 @@ def _faint_warm_bleed_through_haze_page(variant: str) -> Image.Image:
         draw.rectangle((35, 40, 265, 110), fill=(70, 70, 70))
     elif variant == "edge_mark":
         draw.rectangle((0, 82, 16, 112), fill=(70, 70, 70))
+    elif variant == "marginal_notes":
+        for y, text in ((52, "ok"), (78, "m1"), (104, "x")):
+            draw.text((226, y), text, fill=(244, 243, 238))
+    elif variant == "small_seal_marks":
+        draw.text((140, 80), "A", fill=(244, 243, 238))
+        draw.text((160, 96), "B", fill=(244, 243, 238))
+        draw.text((150, 118), "C", fill=(244, 243, 238))
+    elif variant == "check_marks":
+        draw.line((150, 80, 154, 86, 164, 72), fill=(244, 243, 238), width=1)
+        draw.line((178, 96, 183, 103, 195, 88), fill=(244, 243, 238), width=1)
     else:
         raise ValueError(f"unknown faint warm bleed-through haze variant: {variant}")
     return image
