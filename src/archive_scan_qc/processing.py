@@ -6685,6 +6685,8 @@ def _lighten_fold_shadows_conservative(image: Image.Image) -> FoldShadowCleanupR
     protected = foreground.filter(ImageFilter.MaxFilter(17))
     vertical = _fold_shadow_axis_plan(grayscale, protected, vertical=True, background=p95)
     horizontal = _fold_shadow_axis_plan(grayscale, protected, vertical=False, background=p95)
+    curved_vertical = _fold_shadow_curved_axis_plan(grayscale, protected, vertical=True, background=p95)
+    curved_horizontal = _fold_shadow_curved_axis_plan(grayscale, protected, vertical=False, background=p95)
     diagonal_tl_br = _fold_shadow_diagonal_plan(
         grayscale,
         protected,
@@ -6699,7 +6701,10 @@ def _lighten_fold_shadows_conservative(image: Image.Image) -> FoldShadowCleanupR
         top_left_to_bottom_right=False,
         background=p95,
     )
-    plan = max((vertical, horizontal, diagonal_tl_br, diagonal_tr_bl), key=lambda candidate: candidate["score"])
+    plan = max(
+        (vertical, horizontal, curved_vertical, curved_horizontal, diagonal_tl_br, diagonal_tr_bl),
+        key=lambda candidate: candidate["score"],
+    )
     if plan["reason"]:
         return _fold_shadows_noop(image, f"fold shadow cleanup skipped: {plan['reason']}", plan["candidate_ratio"])
 
@@ -7180,6 +7185,194 @@ def _fold_shadow_diagonal_plan(
         "candidate_ratio": candidate_total_ratio,
         "width_bucket": _fold_shadow_width_bucket(max(len(group) for group in selected_groups)),
         "coverage_bucket": _fold_shadow_coverage_bucket(candidate_total_ratio),
+        "reason": None,
+    }
+
+
+def _fold_shadow_curved_axis_plan(
+    grayscale: Image.Image,
+    protected: Image.Image,
+    *,
+    vertical: bool,
+    background: int,
+) -> dict[str, Any]:
+    width, height = grayscale.size
+    axis_length = width if vertical else height
+    cross_length = height if vertical else width
+    orientation = "curved_vertical" if vertical else "curved_horizontal"
+    edge_margin = max(12, int(round(axis_length * 0.08)))
+    cross_margin = max(10, int(round(cross_length * 0.05)))
+    if axis_length <= edge_margin * 2 or cross_length <= cross_margin * 2:
+        return _empty_fold_shadow_plan(orientation, "image too small")
+
+    pixels = grayscale.load()
+    protected_pixels = protected.load()
+    min_width = max(2, int(round(axis_length * 0.006)))
+    max_width = max(min_width, int(round(axis_length * 0.045)))
+    neighbor_radius = max(max_width * 3, min_width + 4)
+    cross_candidates: list[dict[str, Any]] = []
+    all_candidates: set[tuple[int, int]] = set()
+
+    for cross in range(cross_margin, cross_length - cross_margin):
+        runs: list[list[int]] = []
+        current_run: list[int] = []
+        for index in range(edge_margin, axis_length - edge_margin):
+            x, y = (index, cross) if vertical else (cross, index)
+            value = int(pixels[x, y])
+            if not protected_pixels[x, y] and 3 <= background - value <= 24 and value >= 188:
+                current_run.append(index)
+            elif current_run:
+                runs.append(current_run)
+                current_run = []
+        if current_run:
+            runs.append(current_run)
+
+        best: dict[str, Any] | None = None
+        for run in runs:
+            band_width = len(run)
+            if band_width < min_width or band_width > max_width:
+                continue
+            center = run[len(run) // 2]
+            neighbor_values: list[int] = []
+            for offset in range(-neighbor_radius, neighbor_radius + 1):
+                if abs(offset) < band_width + 2:
+                    continue
+                neighbor = center + offset
+                if not (edge_margin <= neighbor < axis_length - edge_margin):
+                    continue
+                nx, ny = (neighbor, cross) if vertical else (cross, neighbor)
+                if protected_pixels[nx, ny]:
+                    continue
+                neighbor_values.append(int(pixels[nx, ny]))
+            if len(neighbor_values) < max(6, neighbor_radius // 2):
+                continue
+            band_values = [int(pixels[index, cross] if vertical else pixels[cross, index]) for index in run]
+            band_mean = sum(band_values) / len(band_values)
+            local_mean = sum(neighbor_values) / len(neighbor_values)
+            local_delta = local_mean - band_mean
+            if not (2.25 <= local_delta <= 42.0):
+                continue
+            selected = {(index, cross) if vertical else (cross, index) for index in run}
+            score = local_delta * min(1.0, band_width / max(1, min_width))
+            if best is None or score > best["score"]:
+                best = {
+                    "cross": cross,
+                    "center": center,
+                    "selected": selected,
+                    "local_delta": local_delta,
+                    "band_width": band_width,
+                    "score": score,
+                }
+        if best is not None:
+            cross_candidates.append(best)
+            all_candidates.update(best["selected"])
+
+    candidate_total_ratio = len(all_candidates) / max(1, width * height)
+    if candidate_total_ratio > 0.12:
+        return _empty_fold_shadow_plan(
+            orientation,
+            "broad uneven lighting is outside conservative fold scope",
+            candidate_total_ratio,
+        )
+
+    groups = _contiguous_groups([int(candidate["cross"]) for candidate in cross_candidates])
+    by_cross = {int(candidate["cross"]): candidate for candidate in cross_candidates}
+    selected_groups: list[list[int]] = []
+    selected: set[tuple[int, int]] = set()
+    score = 0.0
+    for group in groups:
+        if len(group) < max(36, int(round(cross_length * 0.42))):
+            continue
+        continuity = _fold_shadow_cross_continuity(set(group), cross_length)
+        if not continuity["usable"]:
+            continue
+        centers = [int(by_cross[cross]["center"]) for cross in group]
+        center_range = max(centers) - min(centers)
+        if center_range < 3:
+            continue
+        first_cross = group[0]
+        last_cross = group[-1]
+        if last_cross == first_cross:
+            continue
+        residuals = [
+            abs(
+                center
+                - (
+                    centers[0]
+                    + (centers[-1] - centers[0]) * ((cross - first_cross) / max(1, last_cross - first_cross))
+                )
+            )
+            for cross, center in zip(group, centers)
+        ]
+        if max(residuals) < 2.5 or (sum(residuals) / len(residuals)) < 1.2:
+            continue
+        max_step = max(abs(current - previous) for previous, current in zip(centers, centers[1:]))
+        if max_step > max(4, int(round(axis_length * 0.025))):
+            continue
+        protected_corridor_crosses = 0
+        dark_corridor_crosses = 0
+        for cross, center in zip(group, centers):
+            corridor_half_width = max((max_width // 2) + 4, 7)
+            has_protected = False
+            has_dark_content = False
+            for index in range(center - corridor_half_width, center + corridor_half_width + 1):
+                if not (0 <= index < axis_length):
+                    continue
+                x, y = (index, cross) if vertical else (cross, index)
+                if protected_pixels[x, y]:
+                    has_protected = True
+                if int(pixels[x, y]) <= background - 26:
+                    has_dark_content = True
+            if has_protected:
+                protected_corridor_crosses += 1
+            if has_dark_content:
+                dark_corridor_crosses += 1
+        if protected_corridor_crosses >= max(3, int(round(len(group) * 0.018))):
+            return _empty_fold_shadow_plan(
+                orientation,
+                "foreground intersects candidate fold band",
+                candidate_total_ratio,
+            )
+        if dark_corridor_crosses >= max(3, int(round(len(group) * 0.018))):
+            return _empty_fold_shadow_plan(
+                orientation,
+                "foreground intersects candidate fold band",
+                candidate_total_ratio,
+            )
+        group_selected: set[tuple[int, int]] = set()
+        local_deltas: list[float] = []
+        for cross in group:
+            candidate = by_cross[cross]
+            group_selected.update(candidate["selected"])
+            local_deltas.append(float(candidate["local_delta"]))
+        selected_groups.append(group)
+        selected.update(group_selected)
+        score += min(1.0, sum(local_deltas) / max(1, len(local_deltas)) / 12.0) * min(
+            1.0,
+            len(group) / max(1, int(round(cross_length * 0.70))),
+        )
+
+    if not selected_groups:
+        return _empty_fold_shadow_plan(
+            orientation,
+            "no confident narrow background fold band",
+            candidate_total_ratio,
+        )
+    if len(selected_groups) > 1:
+        return _empty_fold_shadow_plan(
+            orientation,
+            "too many fold candidates outside conservative scope",
+            candidate_total_ratio,
+        )
+    max_selected_width = max(int(by_cross[cross]["band_width"]) for group in selected_groups for cross in group)
+    return {
+        "orientation": orientation,
+        "score": score,
+        "bands": selected_groups,
+        "selected": selected,
+        "candidate_ratio": len(selected) / max(1, width * height),
+        "width_bucket": _fold_shadow_width_bucket(max_selected_width),
+        "coverage_bucket": _fold_shadow_coverage_bucket(len(selected) / max(1, width * height)),
         "reason": None,
     }
 
