@@ -7512,7 +7512,12 @@ def _clean_bleed_through_conservative(image: Image.Image) -> BleedThroughCleanup
     components = [component for component in _mask_components(candidate) if len(component) >= 4]
     if not components:
         return _bleed_through_noop(image, "bleed-through cleanup skipped: no confident faint reverse-side ghosts")
-    if _bleed_through_sparse_real_mark_risk(components, image.width, image.height):
+    if _bleed_through_sparse_real_mark_risk(
+        components,
+        image.width,
+        image.height,
+        warm_haze_only=_mask_ratio(edge_cleared_candidate) < min_candidate_ratio,
+    ):
         return _bleed_through_noop(
             image,
             "bleed-through cleanup skipped: table line, page number, or annotation risk",
@@ -7892,6 +7897,8 @@ def _bleed_through_sparse_real_mark_risk(
     components: list[set[tuple[int, int]]],
     image_width: int,
     image_height: int,
+    *,
+    warm_haze_only: bool = False,
 ) -> bool:
     if len(components) < 2:
         return False
@@ -7900,6 +7907,10 @@ def _bleed_through_sparse_real_mark_risk(
         xs = [point[0] for point in component]
         ys = [point[1] for point in component]
         boxes.append((len(component), min(xs), min(ys), max(xs), max(ys)))
+    if warm_haze_only and all(area <= 48 for area, _left, _top, _right, _bottom in boxes):
+        total_area = sum(area for area, _left, _top, _right, _bottom in boxes)
+        if total_area / max(1, image_width * image_height) <= 0.002:
+            return True
     if any(area > 48 for area, _left, _top, _right, _bottom in boxes):
         return False
     left = min(box[1] for box in boxes)
