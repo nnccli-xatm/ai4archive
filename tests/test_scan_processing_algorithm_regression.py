@@ -835,17 +835,26 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
         def mild_curved_fold_page(variant: str) -> Image.Image:
             image = Image.new("RGB", (320, 240), (244, 244, 240))
             draw = ImageDraw.Draw(image)
+            content_like_curve_only = variant in {"faint_following_fold", "photo_curve_texture"}
+            curved_centers: list[tuple[int, int]] = []
             for y in range(16, 224):
                 phase = (y - 16) / (224 - 16)
                 center = 160 + int(round(12 * math.sin(phase * math.pi - math.pi / 2)))
-                for dx in range(-5, 6):
-                    distance = abs(dx) / 5
-                    shade = int(round(244 - 10 * (1 - distance) ** 1.2))
-                    draw.point((center + dx, y), fill=(shade, shade, shade - 4))
+                curved_centers.append((y, center))
+                if not content_like_curve_only:
+                    for dx in range(-5, 6):
+                        distance = abs(dx) / 5
+                        shade = int(round(244 - 10 * (1 - distance) ** 1.2))
+                        draw.point((center + dx, y), fill=(shade, shade, shade - 4))
             for y in (68, 170):
                 draw.rectangle((72, y, 128, y + 2), fill=(50, 50, 50))
                 draw.rectangle((196, y, 248, y + 2), fill=(50, 50, 50))
             if variant == "safe":
+                return image
+            if variant == "faint_following_fold":
+                for y, center in curved_centers:
+                    draw.point((center, y), fill=(220, 220, 216))
+                    draw.point((center + 1, y), fill=(220, 220, 216))
                 return image
             if variant == "faint_handwriting":
                 draw.line((142, 92, 168, 108, 150, 124, 180, 140), fill=(196, 196, 192), width=2)
@@ -869,6 +878,12 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                         color = (176, 196, 212) if (x // 4 + y // 4) % 2 else (222, 228, 210)
                         draw.rectangle((x, y, x + 3, y + 3), fill=color)
                 return image
+            if variant == "photo_curve_texture":
+                for y, center in curved_centers:
+                    for dx in range(-6, 7):
+                        value = 220 + ((dx * 7 + y) % 11)
+                        draw.point((center + dx, y), fill=(value, value, value - 4))
+                return image
             raise ValueError(f"unsupported variant: {variant}")
 
         with tempfile.TemporaryDirectory(prefix="scan-processing-mild-curved-fold-") as temp_dir:
@@ -882,10 +897,14 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "synthetic_curved_fold_faint_handwriting_protected.png": mild_curved_fold_page(
                     "faint_handwriting"
                 ),
+                "synthetic_curved_fold_faint_following_fold_protected.png": mild_curved_fold_page(
+                    "faint_following_fold"
+                ),
                 "synthetic_curved_fold_table_protected.png": mild_curved_fold_page("table"),
                 "synthetic_curved_fold_stamp_protected.png": mild_curved_fold_page("stamp"),
                 "synthetic_curved_fold_dense_foreground.png": mild_curved_fold_page("dense_foreground"),
                 "synthetic_curved_fold_texture_protected.png": mild_curved_fold_page("texture"),
+                "synthetic_curved_fold_photo_texture_protected.png": mild_curved_fold_page("photo_curve_texture"),
             }
             source_bytes = {}
             for name, image in pages.items():
