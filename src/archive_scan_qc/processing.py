@@ -11208,6 +11208,7 @@ def _has_faint_deskew_candidate_evidence(image: Image.Image) -> bool:
     total_pixels = width * height
     raw_low = _histogram_percentile(raw_histogram, total_pixels, 0.005)
     raw_high = _histogram_percentile(raw_histogram, total_pixels, 0.995)
+    raw_low = _faint_sparse_raw_low(raw_histogram, total_pixels, raw_low, raw_high)
     if raw_high < 220 or raw_high - raw_low < 6:
         return False
 
@@ -11229,8 +11230,10 @@ def _safe_deskew_skip_from_page_evidence(image: Image.Image) -> SkewDetection | 
     total_pixels = width * height
     raw_low = _histogram_percentile(raw_histogram, total_pixels, 0.005)
     raw_high = _histogram_percentile(raw_histogram, total_pixels, 0.995)
+    faint_raw_low = _faint_sparse_raw_low(raw_histogram, total_pixels, raw_low, raw_high)
     raw_span = raw_high - raw_low
-    if raw_span < 6:
+    faint_raw_span = raw_high - faint_raw_low
+    if raw_span < 6 and faint_raw_span < 6:
         return SkewDetection(None, 0.0, "low contrast")
 
     grayscale = ImageOps.autocontrast(raw_grayscale, cutoff=1)
@@ -11238,10 +11241,10 @@ def _safe_deskew_skip_from_page_evidence(image: Image.Image) -> SkewDetection | 
     low = _histogram_percentile(histogram, total_pixels, 0.05)
     high = _histogram_percentile(histogram, total_pixels, 0.95)
     if high - low < 35:
-        faint_ink, faint_bbox = _faint_low_contrast_ink(raw_grayscale, raw_low, raw_high)
+        faint_ink, faint_bbox = _faint_low_contrast_ink(raw_grayscale, faint_raw_low, raw_high)
         if faint_bbox and _deskew_faint_row_group_count(faint_ink, faint_bbox) >= 6:
             return None
-        if raw_high < 220 or raw_span < 6:
+        if raw_high < 220 or faint_raw_span < 6:
             return SkewDetection(None, 0.0, "low contrast")
         if raw_span < 35:
             return None
@@ -11278,6 +11281,18 @@ def _deskew_safe_skip_reason_code(reason: str) -> str:
         "foreground too dense": "foreground_too_dense",
         "low confidence": "low_line_evidence",
     }.get(reason, "no_reliable_skew_candidate")
+
+
+def _faint_sparse_raw_low(
+    raw_histogram: list[int],
+    total_pixels: int,
+    raw_low: int,
+    raw_high: int,
+) -> int:
+    sparse_raw_low = _histogram_percentile(raw_histogram, total_pixels, 0.001)
+    if sparse_raw_low >= 220 and raw_high - raw_low < 6 and raw_high - sparse_raw_low >= 6:
+        return sparse_raw_low
+    return raw_low
 
 
 _SAFE_DESKEW_NO_CANDIDATE_REASONS = {
@@ -11407,7 +11422,8 @@ def _detect_skew(image: Image.Image) -> SkewDetection:
     raw_high = _histogram_percentile(raw_histogram, total_pixels, 0.995)
     if high - low < 35:
         if raw_high - raw_low < 35:
-            faint = _detect_faint_stable_text_skew(raw_grayscale, raw_low, raw_high)
+            faint_low = _faint_sparse_raw_low(raw_histogram, total_pixels, raw_low, raw_high)
+            faint = _detect_faint_stable_text_skew(raw_grayscale, faint_low, raw_high)
             if faint.angle_degrees is not None or faint.reason == "faint ruled line rotation risk":
                 return faint
             return SkewDetection(None, 0.0, "low contrast")
