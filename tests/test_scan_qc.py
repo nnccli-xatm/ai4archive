@@ -8570,8 +8570,14 @@ class ScanQcTest(unittest.TestCase):
                 "private_clean_vertical_glass_streak.png": _synthetic_clean_background_scanner_glass_streak_page(
                     "vertical"
                 ),
+                "private_clean_repeated_form_rows.png": _synthetic_clean_background_scanner_glass_streak_page(
+                    "repeated_form_rows"
+                ),
                 "private_clean_ruled_background.png": _synthetic_clean_background_scanner_glass_streak_page(
                     "ruled_background"
+                ),
+                "private_clean_vertical_ruled_background.png": _synthetic_clean_background_scanner_glass_streak_page(
+                    "vertical_ruled_background"
                 ),
                 "private_clean_underline.png": _synthetic_clean_background_scanner_glass_streak_page("underline"),
                 "private_clean_page_number.png": _synthetic_clean_background_scanner_glass_streak_page("page_number"),
@@ -8616,7 +8622,9 @@ class ScanQcTest(unittest.TestCase):
                 self.assertEqual(source_hashes_before[source_name], _sha256_for_test(input_dir / source_name))
 
             protected_expectations = {
+                "private_clean_repeated_form_rows.png": "SCANLINE_SCOPE_RISK",
                 "private_clean_ruled_background.png": "SCANLINE_SCOPE_RISK",
+                "private_clean_vertical_ruled_background.png": "SCANLINE_SCOPE_RISK",
                 "private_clean_underline.png": "SCANLINE_CONTENT_RISK",
                 "private_clean_page_number.png": "SCANLINE_EDGE_CONTENT_RISK",
             }
@@ -17715,6 +17723,12 @@ def _synthetic_clean_background_scanner_glass_streak_page(variant: str) -> Image
         draw.rectangle((24, 92, 236, 93), fill=(238, 238, 234))
     elif variant == "vertical":
         draw.rectangle((130, 22, 131, 158), fill=(238, 238, 234))
+    elif variant == "repeated_form_rows":
+        for y in (90, 94):
+            draw.rectangle((24, y, 236, y + 1), fill=(238, 238, 234))
+    elif variant == "vertical_ruled_background":
+        for x in (116, 130, 144):
+            draw.rectangle((x, 22, x + 1, 158), fill=(238, 238, 234))
     elif variant == "ruled_background":
         for y in range(30, 154, 18):
             draw.rectangle((24, y, 236, y + 1), fill=(238, 238, 234))

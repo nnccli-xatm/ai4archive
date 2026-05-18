@@ -94,6 +94,12 @@ def _clean_background_scanner_glass_streak_page(variant: str) -> Image.Image:
         draw.rectangle((24, 92, 236, 93), fill=(238, 238, 234))
     elif variant == "vertical":
         draw.rectangle((130, 22, 131, 158), fill=(238, 238, 234))
+    elif variant == "repeated_form_rows":
+        for y in (90, 94):
+            draw.rectangle((24, y, 236, y + 1), fill=(238, 238, 234))
+    elif variant == "vertical_ruled_background":
+        for x in (116, 130, 144):
+            draw.rectangle((x, 22, x + 1, 158), fill=(238, 238, 234))
     elif variant == "ruled_background":
         for y in range(30, 154, 18):
             draw.rectangle((24, y, 236, y + 1), fill=(238, 238, 234))
@@ -1584,7 +1590,9 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 self.assertEqual(safe_result.reason, "scanline lightening applied: low-contrast neutral background scanlines")
 
         protected_expectations = {
+            "repeated_form_rows": "SCANLINE_SCOPE_RISK",
             "ruled_background": "SCANLINE_SCOPE_RISK",
+            "vertical_ruled_background": "SCANLINE_SCOPE_RISK",
             "underline": "SCANLINE_CONTENT_RISK",
             "page_number": "SCANLINE_EDGE_CONTENT_RISK",
         }
