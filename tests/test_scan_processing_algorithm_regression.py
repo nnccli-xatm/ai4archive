@@ -778,11 +778,21 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             if variant == "page_number":
                 draw.rectangle((10, 26, 30, 42), fill=(45, 45, 45))
                 return image
+            if variant == "gutter_text":
+                for y in (42, 52, 62):
+                    draw.rectangle((9, y, 42, y + 3), fill=(45, 45, 45))
+                return image
             if variant == "marginal_note":
                 draw.line((8, 74, 28, 88, 12, 102, 32, 116), fill=(54, 54, 54), width=2)
                 return image
             if variant == "faint_handwriting":
                 draw.line((9, 78, 28, 90, 12, 104, 32, 118), fill=(196, 196, 192), width=2)
+                return image
+            if variant == "table_lines":
+                for y in (48, 76, 104):
+                    draw.line((6, y, 122, y), fill=(40, 40, 40), width=1)
+                for x in (18, 55, 96):
+                    draw.line((x, 40, x, 112), fill=(40, 40, 40), width=1)
                 return image
             if variant == "light_rule":
                 draw.line((18, 18, 18, 222), fill=(202, 202, 198), width=1)
@@ -797,6 +807,12 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             if variant == "faint_edge_mark":
                 draw.rectangle((7, 104, 18, 146), fill=(196, 196, 192))
                 return image
+            if variant == "uneven_non_fold_shadow":
+                for y in range(20, 220):
+                    shadow_width = 4 + (y // 20) % 8
+                    shade = 236 - ((y * 5) % 9)
+                    draw.line((12, y, 12 + shadow_width, y), fill=(shade, shade, shade - 4))
+                return image
             raise ValueError(f"unsupported variant: {variant}")
 
         with tempfile.TemporaryDirectory(prefix="scan-processing-mild-gutter-shadow-") as temp_dir:
@@ -808,12 +824,15 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             pages = {
                 "synthetic_safe_mild_near_gutter_shadow.png": mild_gutter_page("safe"),
                 "synthetic_gutter_page_number_protected.png": mild_gutter_page("page_number"),
+                "synthetic_gutter_text_protected.png": mild_gutter_page("gutter_text"),
                 "synthetic_gutter_marginal_note_protected.png": mild_gutter_page("marginal_note"),
                 "synthetic_gutter_faint_handwriting_protected.png": mild_gutter_page("faint_handwriting"),
+                "synthetic_gutter_table_lines_protected.png": mild_gutter_page("table_lines"),
                 "synthetic_gutter_light_rule_protected.png": mild_gutter_page("light_rule"),
                 "synthetic_gutter_stamp_protected.png": mild_gutter_page("stamp"),
                 "synthetic_gutter_dense_text_protected.png": mild_gutter_page("dense_text"),
                 "synthetic_gutter_faint_edge_mark_protected.png": mild_gutter_page("faint_edge_mark"),
+                "synthetic_gutter_uneven_non_fold_shadow.png": mild_gutter_page("uneven_non_fold_shadow"),
             }
             source_bytes = {}
             for name, image in pages.items():
@@ -828,6 +847,8 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 process_dir,
                 ProcessingOptions(lighten_fold_shadows=True, workers=1),
             )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
             records = {record["source_relative_path"]: record for record in manifest["files"]}
 
             safe_name = "synthetic_safe_mild_near_gutter_shadow.png"
@@ -839,6 +860,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertGreater(safe_record["fold_shadows_delta"], 1.0)
             self.assertGreater(safe_record["fold_shadows_changed_pixel_ratio"], 0.002)
             self.assertLessEqual(safe_record["fold_shadows_changed_pixel_ratio"], 0.075)
+            self.assertLessEqual(safe_record["fold_shadows_candidate_pixel_ratio"], 0.12)
             with Image.open(process_dir / safe_record["output_relative_path"]) as output:
                 self.assertGreater(
                     _mean_luma(output, (14, 12, 23, 228)),
@@ -863,6 +885,38 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 records["synthetic_gutter_faint_edge_mark_protected.png"]["fold_shadows_reason_code"],
                 "ambiguous_near_gutter_content_intersects_candidate_fold_band",
             )
+            self.assertEqual(
+                records["synthetic_gutter_uneven_non_fold_shadow.png"]["fold_shadows_reason_code"],
+                "uneven_near_gutter_shadow_outside_conservative_fold_scope",
+            )
+            protected_reason_codes = {
+                records[name]["fold_shadows_reason_code"]
+                for name in protected_names
+                if records[name]["fold_shadows_reason_code"]
+            }
+            self.assertGreaterEqual(len(protected_reason_codes), 4)
+
+            fold_guard = audit_summary["guardrails"]["fold_shadows"]
+            self.assertEqual(audit_summary["counts"]["fold_shadows_lightened_files"], 1)
+            self.assertEqual(audit_summary["counts"]["fold_shadows_skipped_files"], len(protected_names))
+            self.assertEqual(fold_guard["applied_files"], 1)
+            self.assertEqual(fold_guard["skipped_files"], len(protected_names))
+            self.assertEqual(fold_guard["reason_code_distribution"]["applied_narrow_neutral_background_band"], 1)
+            self.assertEqual(
+                fold_guard["skip_reason_code_distribution"][
+                    "uneven_near_gutter_shadow_outside_conservative_fold_scope"
+                ],
+                1,
+            )
+            self.assertIn("changed_pixel_ratio", fold_guard)
+            self.assertIn("candidate_pixel_ratio", fold_guard)
+            self.assertIn("candidate_width_bucket_distribution", fold_guard)
+            self.assertIn("candidate_coverage_bucket_distribution", fold_guard)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
 
     def test_mild_vertical_fold_shadow_cleanup_allows_sparse_text_and_preserves_rules(self) -> None:
         def mild_fold_page(variant: str) -> Image.Image:

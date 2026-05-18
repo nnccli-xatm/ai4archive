@@ -6931,6 +6931,13 @@ def _fold_shadow_axis_plan(
     score = 0.0
     for group in groups:
         band_width = len(group)
+        near_gutter_group = vertical and any(stats[index].get("near_gutter_region") for index in group)
+        if near_gutter_group and band_width > max(6, int(round(axis_length * 0.025))):
+            return _empty_fold_shadow_plan(
+                orientation,
+                "uneven near-gutter shadow outside conservative fold scope",
+                candidate_total_ratio,
+            )
         if band_width < min_width or band_width > max_width:
             continue
         center = group[len(group) // 2]
