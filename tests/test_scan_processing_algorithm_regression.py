@@ -4574,6 +4574,12 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "S009_subtle_ruled_table_adjacent_mark.png": _faint_thumbprint_stain_page("subtle_ruled_table"),
                 "S010_textured_paper_detail_region.png": _faint_thumbprint_stain_page("subtle_texture"),
                 "S011_safe_small_pale_handling_mark.png": _faint_thumbprint_stain_page("small_pale_handling_mark"),
+                "S012_pencil_strokes_near_whitespace.png": _faint_thumbprint_stain_page("pencil_strokes_near_whitespace"),
+                "S013_colored_archival_stamp_mark.png": _faint_thumbprint_stain_page("archival_stamp"),
+                "S014_ruled_line_intersection.png": _faint_thumbprint_stain_page("ruled_intersection"),
+                "S015_dense_punctuation_near_smudge.png": _faint_thumbprint_stain_page("dense_punctuation"),
+                "S016_small_margin_note_near_smudge.png": _faint_thumbprint_stain_page("small_margin_note"),
+                "S017_uneven_photo_like_background.png": _faint_thumbprint_stain_page("uneven_photo_like_background"),
             }
             for name, image in pages.items():
                 image.save(input_dir / name, dpi=(300, 300))
@@ -6369,6 +6375,35 @@ def _faint_thumbprint_stain_page(variant: str = "safe") -> Image.Image:
             for y in range(66, 118, 3):
                 shade = 224 + ((x * 7 + y * 11) % 9)
                 draw.point((x, y), fill=(shade, shade, shade - 4))
+    elif variant == "pencil_strokes_near_whitespace":
+        for points in (
+            ((154, 92), (172, 78), (190, 96), (214, 82)),
+            ((160, 104), (178, 92), (202, 108), (222, 98)),
+        ):
+            draw.line(points, fill=(118, 112, 104), width=2, joint="curve")
+    elif variant == "archival_stamp":
+        draw.ellipse((154, 64, 224, 116), outline=(170, 44, 36), width=3)
+        draw.line((166, 88, 212, 88), fill=(170, 44, 36), width=2)
+        draw.line((188, 72, 188, 108), fill=(170, 44, 36), width=2)
+    elif variant == "ruled_intersection":
+        for y in (78, 92, 106):
+            draw.line((150, y, 226, y), fill=(184, 184, 176), width=1)
+        for x in (174, 196, 218):
+            draw.line((x, 68, x, 116), fill=(184, 184, 176), width=1)
+    elif variant == "dense_punctuation":
+        for y in (76, 90, 104):
+            for x in range(154, 224, 10):
+                draw.text((x, y), ".", fill=(88, 88, 82))
+                draw.text((x + 4, y), ",", fill=(88, 88, 82))
+    elif variant == "small_margin_note":
+        draw.line((202, 72, 218, 86, 204, 100, 224, 108), fill=(92, 88, 82), width=2)
+        draw.line((212, 116, 236, 116), fill=(92, 88, 82), width=2)
+    elif variant == "uneven_photo_like_background":
+        for x in range(148, 226, 4):
+            for y in range(62, 122, 4):
+                shade = 202 + ((x * 7 + y * 13) % 32)
+                color = (shade, min(245, shade + ((x + y) % 7)), max(170, shade - 10))
+                draw.rectangle((x, y, x + 2, y + 2), fill=color)
     else:
         raise ValueError(f"unsupported faint thumbprint stain variant: {variant}")
     return image
