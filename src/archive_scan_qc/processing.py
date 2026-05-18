@@ -13269,6 +13269,9 @@ _DESPECKLE_PALE_CLUSTER_MIN_BACKGROUND_MEDIAN = 238
 _DESPECKLE_PALE_CLUSTER_MIN_DELTA = 10
 _DESPECKLE_PALE_CLUSTER_MAX_DELTA = 34
 _DESPECKLE_PALE_CLUSTER_MIN_FOREGROUND_PIXELS = 24
+_DESPECKLE_CLEAN_PAGE_PALE_CLUSTER_MAX_PIXELS = 16
+_DESPECKLE_CLEAN_PAGE_PALE_CLUSTER_MAX_COMPONENTS = 4
+_DESPECKLE_CLEAN_PAGE_PALE_CLUSTER_MIN_SPACING = 24
 _DESPECKLE_PALE_PATTERN_MIN_CANDIDATES = 24
 _DESPECKLE_PALE_PATTERN_MIN_COMPONENTS = 16
 _DESPECKLE_PALE_PATTERN_MIN_ALIGNED_COMPONENTS = 8
@@ -14120,6 +14123,8 @@ def _despeckle_has_pale_mark_protected_context(
             height,
             component,
         )
+    if _despeckle_has_nearby_pale_mark_context(gray_pixels, candidate_set, width, height, x, y):
+        return True
 
     nearby_candidates = 0
     radius = _DESPECKLE_CONTENT_CONTEXT_RADIUS
@@ -14133,6 +14138,25 @@ def _despeckle_has_pale_mark_protected_context(
                 continue
             nearby_candidates += 1
             if nearby_candidates >= 2:
+                return True
+    return False
+
+
+def _despeckle_has_nearby_pale_mark_context(
+    gray_pixels: Any,
+    candidate_set: set[tuple[int, int]],
+    width: int,
+    height: int,
+    x: int,
+    y: int,
+) -> bool:
+    radius = 3
+    for ny in range(max(0, y - radius), min(height, y + radius + 1)):
+        for nx in range(max(0, x - radius), min(width, x + radius + 1)):
+            if (nx, ny) in candidate_set:
+                continue
+            value = _despeckle_pixel_at(gray_pixels, nx, ny)
+            if _DESPECKLE_PALE_MARK_MIN_VALUE <= value <= _DESPECKLE_FAINT_DUST_MAX_VALUE:
                 return True
     return False
 
@@ -14189,13 +14213,58 @@ def _despeckle_pale_cluster_allows_cleanup(
     if local_delta > _DESPECKLE_PALE_CLUSTER_MAX_DELTA:
         return False
 
-    return _despeckle_has_independent_dark_foreground_context(
+    if _despeckle_has_independent_dark_foreground_context(
         gray_pixels,
         candidate_set,
         width,
         height,
         component,
-    )
+    ):
+        return True
+
+    return _despeckle_clean_page_pale_cluster_allows_cleanup(candidate_set)
+
+
+def _despeckle_clean_page_pale_cluster_allows_cleanup(candidate_set: set[tuple[int, int]]) -> bool:
+    if len(candidate_set) > _DESPECKLE_CLEAN_PAGE_PALE_CLUSTER_MAX_PIXELS:
+        return False
+
+    components: list[list[tuple[int, int]]] = []
+    visited: set[tuple[int, int]] = set()
+    for x, y in candidate_set:
+        if (x, y) in visited:
+            continue
+        component = _despeckle_candidate_component(candidate_set, x, y)
+        visited.update(component)
+        components.append(component)
+
+    if not components or len(components) > _DESPECKLE_CLEAN_PAGE_PALE_CLUSTER_MAX_COMPONENTS:
+        return False
+    for component in components:
+        if len(component) != _DESPECKLE_PALE_CLUSTER_MAX_PIXELS:
+            return False
+        component_x = [point[0] for point in component]
+        component_y = [point[1] for point in component]
+        if max(component_x) - min(component_x) + 1 != _DESPECKLE_PALE_CLUSTER_MAX_SPAN:
+            return False
+        if max(component_y) - min(component_y) + 1 != _DESPECKLE_PALE_CLUSTER_MAX_SPAN:
+            return False
+    for index, component in enumerate(components):
+        component_x = [point[0] for point in component]
+        component_y = [point[1] for point in component]
+        center_x = round(sum(component_x) / len(component))
+        center_y = round(sum(component_y) / len(component))
+        for other in components[index + 1 :]:
+            other_x = [point[0] for point in other]
+            other_y = [point[1] for point in other]
+            other_center_x = round(sum(other_x) / len(other))
+            other_center_y = round(sum(other_y) / len(other))
+            if (
+                abs(center_x - other_center_x) < _DESPECKLE_CLEAN_PAGE_PALE_CLUSTER_MIN_SPACING
+                and abs(center_y - other_center_y) < _DESPECKLE_CLEAN_PAGE_PALE_CLUSTER_MIN_SPACING
+            ):
+                return False
+    return True
 
 
 def _despeckle_has_independent_dark_foreground_context(
