@@ -3650,6 +3650,9 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             if variant == "safe_text":
                 for y in (185, 231):
                     draw_segmented_typed_line(draw, x=130, y=y)
+            elif variant == "safe_form_rows":
+                for y in (180, 225, 270, 315):
+                    draw.line((115, y, 405, y), fill=(235, 235, 233), width=1)
             elif variant == "one_line":
                 draw_segmented_typed_line(draw, x=130, y=205)
             elif variant == "ruled":
@@ -3669,6 +3672,12 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 for y in (175, 215, 255):
                     points = [(x, y + (index % 4) - 2) for index, x in enumerate(range(110, 370, 10))]
                     draw.line(points, fill=(140, 140, 138), width=2)
+            elif variant == "diagonal_annotation":
+                draw.line((122, 180, 388, 262), fill=(140, 140, 138), width=2)
+                draw.line((130, 245, 365, 300), fill=(140, 140, 138), width=2)
+            elif variant == "curved_fold":
+                draw.arc((115, 145, 415, 330), 8, 172, fill=(140, 140, 138), width=2)
+                draw.arc((125, 172, 395, 360), 12, 168, fill=(140, 140, 138), width=2)
             elif variant == "table":
                 for y in (180, 226, 272):
                     draw.line((120, y, 390, y), fill=(52, 52, 50), width=2)
@@ -3690,7 +3699,19 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             output_dir = root / "reports"
             process_dir = root / "processed"
             input_dir.mkdir()
-            variants = ("safe_text", "one_line", "ruled", "segmented_guides", "edge_marks", "handwriting_like", "table", "texture")
+            variants = (
+                "safe_text",
+                "safe_form_rows",
+                "one_line",
+                "ruled",
+                "segmented_guides",
+                "edge_marks",
+                "handwriting_like",
+                "diagonal_annotation",
+                "curved_fold",
+                "table",
+                "texture",
+            )
             pages = {f"synthetic_mild_sparse_deskew_{variant}.png": mild_sparse_page(variant) for variant in variants}
             source_bytes = {}
             for name, image in pages.items():
@@ -3715,12 +3736,25 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertLessEqual(safe_audit["size_change_ratio"], 0.03)
             self.assertLessEqual(safe_audit["cumulative_change_pixel_ratio"], 0.03)
 
+            form_name = "synthetic_mild_sparse_deskew_safe_form_rows.png"
+            form_record = records[form_name]
+            form_audit = form_record["processing_audit"]
+            self.assertEqual((input_dir / form_name).read_bytes(), source_bytes[form_name])
+            self.assertTrue(form_record["deskewed"])
+            self.assertAlmostEqual(form_record["skew_angle_degrees"], -0.45, delta=0.30)
+            self.assertEqual(form_record["deskew_reason"], "deskew applied")
+            self.assertIn("deskew_conservative", form_record["operations"])
+            self.assertLessEqual(form_audit["size_change_ratio"], 0.03)
+            self.assertLessEqual(form_audit["cumulative_change_pixel_ratio"], 0.03)
+
             expected_reasons = {
                 "synthetic_mild_sparse_deskew_one_line.png": {"low contrast", "low confidence"},
                 "synthetic_mild_sparse_deskew_ruled.png": {"low contrast", "table or color mark rotation risk"},
                 "synthetic_mild_sparse_deskew_segmented_guides.png": {"low contrast", "low confidence"},
                 "synthetic_mild_sparse_deskew_edge_marks.png": {"low contrast", "low confidence"},
                 "synthetic_mild_sparse_deskew_handwriting_like.png": {"low contrast", "low confidence"},
+                "synthetic_mild_sparse_deskew_diagonal_annotation.png": {"low contrast", "low confidence"},
+                "synthetic_mild_sparse_deskew_curved_fold.png": {"low contrast", "low confidence"},
                 "synthetic_mild_sparse_deskew_table.png": {"table or color mark rotation risk"},
                 "synthetic_mild_sparse_deskew_texture.png": {"low contrast", "low confidence"},
             }
@@ -3735,14 +3769,62 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
 
             deskew_summary = audit_summary["guardrails"]["deskew"]
             self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
-            self.assertEqual(audit_summary["counts"]["deskewed_files"], 1)
+            self.assertEqual(audit_summary["counts"]["deskewed_files"], 2)
             self.assertEqual(audit_summary["counts"]["deskew_skipped_files"], len(expected_reasons))
-            self.assertEqual(deskew_summary["corrected_files"], 1)
-            self.assertEqual(deskew_summary["reason_distribution"]["deskew applied"], 1)
+            self.assertEqual(deskew_summary["corrected_files"], 2)
+            self.assertEqual(deskew_summary["reason_distribution"]["deskew applied"], 2)
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertFalse(audit_summary["privacy"]["contains_paths"])
             self.assertFalse(audit_summary["privacy"]["contains_hashes"])
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
+    def test_deskew_auto_crop_bounds_faint_sparse_form_rows(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-faint-form-deskew-crop-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            image = Image.new("RGB", (520, 680), (248, 248, 246))
+            draw = ImageDraw.Draw(image)
+            for y in (180, 225, 270, 315):
+                draw.line((115, y, 405, y), fill=(235, 235, 233), width=1)
+            image.rotate(
+                -0.65,
+                resample=Image.Resampling.BICUBIC,
+                expand=True,
+                fillcolor=(248, 248, 246),
+            ).save(input_dir / "synthetic_faint_form_deskew_crop.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "faint-form-deskew-crop", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, deskew=True, workers=1))
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+            audit = record["processing_audit"]
+
+            self.assertEqual(record["status"], "processed")
+            self.assertTrue(record["deskewed"])
+            self.assertAlmostEqual(record["skew_angle_degrees"], -0.65, delta=0.30)
+            self.assertEqual(record["deskew_reason"], "deskew applied")
+            self.assertEqual(audit["guardrail_failures"], [])
+            self.assertEqual(audit["cumulative_change_guard_action"], "passed")
+            self.assertLessEqual(abs(record["skew_angle_degrees"]), 1.25)
+            self.assertLessEqual(audit["size_change_ratio"], 0.04)
+            self.assertLessEqual(audit["cumulative_change_crop_ratio"], 0.06)
+            self.assertTrue(audit_summary["operations"]["deskew"])
+            self.assertTrue(audit_summary["operations"]["auto_crop"])
+            self.assertEqual(audit_summary["counts"]["deskewed_files"], 1)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (
+                "synthetic_faint_form_deskew_crop.png",
+                str(input_dir),
+                "source_relative_path",
+                "source_sha256",
+            ):
                 self.assertNotIn(forbidden, audit_summary_text)
 
     def test_full_chain_post_deskew_corner_wedge_crop_stays_within_geometry_limits(self) -> None:
