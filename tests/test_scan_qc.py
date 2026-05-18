@@ -12291,6 +12291,35 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn("private_three_by_three_dust", audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
 
+    def test_despeckle_reuses_candidate_components_for_safe_cleanup_and_protected_noop(self) -> None:
+        safe = Image.new("RGB", (120, 90), (246, 246, 242))
+        for point in [(35, 30), (70, 42), (92, 61)]:
+            safe.putpixel(point, (52, 52, 52))
+
+        protected = Image.new("RGB", (120, 90), (246, 246, 242))
+        for y in range(20, 23):
+            for x in range(20, 23):
+                protected.putpixel((x, y), (20, 20, 20))
+        protected_bytes = protected.tobytes()
+
+        with mock.patch(
+            "archive_scan_qc.processing._despeckle_candidate_components",
+            wraps=processing_module._despeckle_candidate_components,
+        ) as component_pass:
+            safe_result = processing_module._despeckle_isolated_pixels_with_reason(safe, backend="fallback")
+            protected_result = processing_module._despeckle_isolated_pixels_with_reason(protected, backend="fallback")
+
+        self.assertEqual(component_pass.call_count, 2)
+        self.assertEqual(safe_result.changed_pixels, 3)
+        self.assertEqual(safe_result.reason, "isolated dark pixels replaced")
+        self.assertEqual(safe_result.candidate_count, 3)
+        self.assertEqual(safe_result.component_count, 3)
+        self.assertEqual(safe_result.max_component_size, 1)
+        self.assertTrue(safe_result.replacement_work_performed)
+        self.assertEqual(protected_result.changed_pixels, 0)
+        self.assertEqual(protected_result.reason, "no isolated dark pixels found")
+        self.assertEqual(protected_result.image.convert("RGB").tobytes(), protected_bytes)
+
     def test_despeckle_preserves_faint_dotted_leader_as_low_confidence_content(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
