@@ -12317,6 +12317,12 @@ _DESPECKLE_SPARSE_TEXT_CLEARANCE_RADIUS = 5
 _DESPECKLE_SPARSE_TEXT_MIN_BACKGROUND_MEDIAN = 220
 _DESPECKLE_SPARSE_TEXT_MAX_NEARBY_CONTENT_PIXELS = 64
 _DESPECKLE_PALE_MARK_MIN_VALUE = 220
+_DESPECKLE_PALE_CLUSTER_MAX_PIXELS = 4
+_DESPECKLE_PALE_CLUSTER_MAX_SPAN = 2
+_DESPECKLE_PALE_CLUSTER_MIN_BACKGROUND_MEDIAN = 238
+_DESPECKLE_PALE_CLUSTER_MIN_DELTA = 10
+_DESPECKLE_PALE_CLUSTER_MAX_DELTA = 34
+_DESPECKLE_PALE_CLUSTER_MIN_FOREGROUND_PIXELS = 24
 _DESPECKLE_TINY_DARK_CLUSTER_MIN_BACKGROUND_MEDIAN = 220
 _DESPECKLE_NEIGHBOR_OFFSETS = tuple(
     (offset_x, offset_y)
@@ -13090,7 +13096,13 @@ def _despeckle_has_pale_mark_protected_context(
     if any(_despeckle_pixel_at(gray_pixels, cx, cy) < _DESPECKLE_PALE_MARK_MIN_VALUE for cx, cy in component):
         return False
     if len(component) > 1:
-        return True
+        return not _despeckle_pale_cluster_allows_cleanup(
+            gray_pixels,
+            candidate_set,
+            width,
+            height,
+            component,
+        )
 
     nearby_candidates = 0
     radius = _DESPECKLE_CONTENT_CONTEXT_RADIUS
@@ -13105,6 +13117,94 @@ def _despeckle_has_pale_mark_protected_context(
             nearby_candidates += 1
             if nearby_candidates >= 2:
                 return True
+    return False
+
+
+def _despeckle_pale_cluster_allows_cleanup(
+    gray_pixels: Any,
+    candidate_set: set[tuple[int, int]],
+    width: int,
+    height: int,
+    component: list[tuple[int, int]],
+) -> bool:
+    if not (2 <= len(component) <= _DESPECKLE_PALE_CLUSTER_MAX_PIXELS):
+        return False
+
+    component_x = [point[0] for point in component]
+    component_y = [point[1] for point in component]
+    if max(component_x) - min(component_x) + 1 > _DESPECKLE_PALE_CLUSTER_MAX_SPAN:
+        return False
+    if max(component_y) - min(component_y) + 1 > _DESPECKLE_PALE_CLUSTER_MAX_SPAN:
+        return False
+
+    if any(
+        _despeckle_nearby_content_context_count(
+            gray_pixels,
+            width,
+            height,
+            cx,
+            cy,
+            stop_at=1,
+        )
+        for cx, cy in component
+    ):
+        return False
+
+    surrounding_values = _despeckle_component_surrounding_values(
+        gray_pixels,
+        candidate_set,
+        width,
+        height,
+        component,
+        radius=2,
+    )
+    if len(surrounding_values) < 8:
+        return False
+    local_background = sorted(surrounding_values)[len(surrounding_values) // 2]
+    if local_background < _DESPECKLE_PALE_CLUSTER_MIN_BACKGROUND_MEDIAN:
+        return False
+
+    component_values = [_despeckle_pixel_at(gray_pixels, cx, cy) for cx, cy in component]
+    component_mean = sum(component_values) / len(component_values)
+    local_delta = local_background - component_mean
+    if local_delta < _DESPECKLE_PALE_CLUSTER_MIN_DELTA:
+        return False
+    if local_delta > _DESPECKLE_PALE_CLUSTER_MAX_DELTA:
+        return False
+
+    return _despeckle_has_independent_dark_foreground_context(
+        gray_pixels,
+        candidate_set,
+        width,
+        height,
+        component,
+    )
+
+
+def _despeckle_has_independent_dark_foreground_context(
+    gray_pixels: Any,
+    candidate_set: set[tuple[int, int]],
+    width: int,
+    height: int,
+    component: list[tuple[int, int]],
+) -> bool:
+    component_x = [point[0] for point in component]
+    component_y = [point[1] for point in component]
+    left = min(component_x) - _DESPECKLE_CONTENT_CONTEXT_RADIUS
+    right = max(component_x) + _DESPECKLE_CONTENT_CONTEXT_RADIUS
+    top = min(component_y) - _DESPECKLE_CONTENT_CONTEXT_RADIUS
+    bottom = max(component_y) + _DESPECKLE_CONTENT_CONTEXT_RADIUS
+    dark_pixels = 0
+    for y in range(height):
+        for x in range(width):
+            if (x, y) in candidate_set:
+                continue
+            if left <= x <= right and top <= y <= bottom:
+                continue
+            if _despeckle_pixel_at(gray_pixels, x, y) <= _DESPECKLE_NEAR_DARK_THRESHOLD:
+                dark_pixels += 1
+                if dark_pixels >= _DESPECKLE_PALE_CLUSTER_MIN_FOREGROUND_PIXELS:
+                    return True
     return False
 
 
