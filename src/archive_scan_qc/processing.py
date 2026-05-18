@@ -5283,6 +5283,17 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
     )
     low_frequency_candidate = ImageChops.multiply(low_frequency_candidate, light_tonal_candidate)
     candidate = ImageChops.lighter(pixel_candidate, low_frequency_candidate)
+    if low_global_tonal_evidence and _mask_ratio(candidate) < 0.0005:
+        faint_tonal_candidate = grayscale.point(
+            lambda value: 255 if 165 <= value <= background - 3 and 3 <= background - value <= 35 else 0,
+            mode="L",
+        )
+        faint_low_frequency_candidate = low_frequency.point(
+            lambda value: 255 if 170 <= value <= background - 3 and 3 <= background - value <= 28 else 0,
+            mode="L",
+        )
+        faint_low_frequency_candidate = ImageChops.multiply(faint_low_frequency_candidate, faint_tonal_candidate)
+        candidate = ImageChops.lighter(candidate, faint_low_frequency_candidate)
     edge_margin = max(3, int(round(min(image.width, image.height) * 0.025)))
     edge_cleared_candidate = _clear_mask_edges(candidate, edge_margin)
     edge_candidate_ratio = _mask_ratio(candidate) - _mask_ratio(edge_cleared_candidate)
@@ -5340,6 +5351,7 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
         )
     selected: set[tuple[int, int]] = set()
     localized_component_selected = False
+    faint_thumbprint_component_selected = False
     diffuse_component_selected = False
     for component in components:
         area = len(component)
@@ -5403,6 +5415,20 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
             and local_background >= background - 3
             and 4.5 <= local_contrast <= 14.0
         )
+        faint_thumbprint_shape = (
+            low_global_tonal_evidence
+            and area_ratio <= 0.022
+            and width <= image.width * 0.24
+            and height <= image.height * 0.24
+            and width >= 14
+            and height >= 14
+            and max(width, height) / max(1, min(width, height)) <= 2.4
+            and edge_density <= 0.14
+            and color_shift <= 20
+            and local_background is not None
+            and local_background >= background - 2
+            and 1.7 <= local_contrast <= 9.0
+        )
         diffuse_soft_shape = (
             low_global_tonal_evidence
             and area_ratio <= 0.045
@@ -5422,6 +5448,7 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
             or low_frequency_shape
             or localized_soft_shape
             or medium_soft_shape
+            or faint_thumbprint_shape
             or diffuse_soft_shape
         ):
             return _background_stains_noop(
@@ -5429,8 +5456,10 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
                 "background stain lightening skipped: large stain or historical damage risk",
                 candidate_ratio,
             )
-        if localized_soft_shape or medium_soft_shape:
+        if localized_soft_shape or medium_soft_shape or faint_thumbprint_shape:
             localized_component_selected = True
+        if faint_thumbprint_shape:
+            faint_thumbprint_component_selected = True
         if diffuse_soft_shape:
             diffuse_component_selected = True
         selected.update(component)
@@ -5486,7 +5515,8 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
 
     before_mean = round(sum(before_values) / len(before_values), 6)
     after_mean = round(sum(after_values) / len(after_values), 6)
-    if after_mean - before_mean < 4:
+    minimum_improvement = 2.5 if faint_thumbprint_component_selected else 4.0
+    if after_mean - before_mean < minimum_improvement:
         return _background_stains_noop(
             image,
             "background stain lightening skipped: improvement below conservative threshold",
