@@ -14044,6 +14044,8 @@ _DESPECKLE_PALE_CLUSTER_MIN_BACKGROUND_MEDIAN = 238
 _DESPECKLE_PALE_CLUSTER_MIN_DELTA = 10
 _DESPECKLE_PALE_CLUSTER_MAX_DELTA = 34
 _DESPECKLE_PALE_CLUSTER_MIN_FOREGROUND_PIXELS = 24
+_DESPECKLE_CLEAN_PAGE_PALE_SPECK_MAX_PIXELS = 9
+_DESPECKLE_CLEAN_PAGE_PALE_SPECK_MAX_SPAN = 3
 _DESPECKLE_CLEAN_PAGE_PALE_CLUSTER_MAX_PIXELS = 16
 _DESPECKLE_CLEAN_PAGE_PALE_CLUSTER_MAX_COMPONENTS = 3
 _DESPECKLE_CLEAN_PAGE_PALE_CLUSTER_MIN_SPACING = 24
@@ -14976,6 +14978,14 @@ def _despeckle_pale_cluster_allows_cleanup(
         component,
     ):
         return True
+    if _despeckle_clean_page_pale_speck_allows_cleanup(
+        gray_pixels,
+        candidate_set,
+        width,
+        height,
+        component,
+    ):
+        return True
     if not (2 <= len(component) <= _DESPECKLE_PALE_CLUSTER_MAX_PIXELS):
         return False
 
@@ -15031,6 +15041,58 @@ def _despeckle_pale_cluster_allows_cleanup(
         return True
 
     return _despeckle_clean_page_pale_cluster_allows_cleanup(candidate_set)
+
+
+def _despeckle_clean_page_pale_speck_allows_cleanup(
+    gray_pixels: Any,
+    candidate_set: set[tuple[int, int]],
+    width: int,
+    height: int,
+    component: list[tuple[int, int]],
+) -> bool:
+    if not (_DESPECKLE_PALE_CLUSTER_MAX_PIXELS < len(component) <= _DESPECKLE_CLEAN_PAGE_PALE_SPECK_MAX_PIXELS):
+        return False
+    if len(candidate_set) != len(component):
+        return False
+
+    component_x = [point[0] for point in component]
+    component_y = [point[1] for point in component]
+    if max(component_x) - min(component_x) + 1 > _DESPECKLE_CLEAN_PAGE_PALE_SPECK_MAX_SPAN:
+        return False
+    if max(component_y) - min(component_y) + 1 > _DESPECKLE_CLEAN_PAGE_PALE_SPECK_MAX_SPAN:
+        return False
+
+    if any(
+        _despeckle_nearby_content_context_count(
+            gray_pixels,
+            width,
+            height,
+            cx,
+            cy,
+            stop_at=1,
+        )
+        for cx, cy in component
+    ):
+        return False
+
+    surrounding_values = _despeckle_component_surrounding_values(
+        gray_pixels,
+        candidate_set,
+        width,
+        height,
+        component,
+        radius=2,
+    )
+    if len(surrounding_values) < len(component) * 2:
+        return False
+    local_background = sorted(surrounding_values)[len(surrounding_values) // 2]
+    if local_background < _DESPECKLE_PALE_CLUSTER_MIN_BACKGROUND_MEDIAN:
+        return False
+
+    component_values = [_despeckle_pixel_at(gray_pixels, cx, cy) for cx, cy in component]
+    component_mean = sum(component_values) / len(component_values)
+    local_delta = local_background - component_mean
+    return _DESPECKLE_PALE_CLUSTER_MIN_DELTA <= local_delta <= _DESPECKLE_PALE_CLUSTER_MAX_DELTA
 
 
 def _despeckle_short_lint_streak_allows_cleanup(
