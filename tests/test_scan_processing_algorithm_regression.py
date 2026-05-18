@@ -1397,7 +1397,11 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 1,
             )
             self.assertEqual(
-                audit_summary["guardrails"]["despeckle"]["reason_code_distribution"]["no_isolated_candidates"],
+                audit_summary["guardrails"]["despeckle"]["reason_code_distribution"]["no_isolated_candidates"]
+                + audit_summary["guardrails"]["despeckle"]["reason_code_distribution"].get(
+                    "repeated_pale_micro_pattern_risk",
+                    0,
+                ),
                 len(protected_pages),
             )
             self.assertEqual(
@@ -1483,13 +1487,88 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 1,
             )
             self.assertEqual(
-                audit_summary["guardrails"]["despeckle"]["reason_code_distribution"]["no_isolated_candidates"],
+                audit_summary["guardrails"]["despeckle"]["reason_code_distribution"]["no_isolated_candidates"]
+                + audit_summary["guardrails"]["despeckle"]["reason_code_distribution"].get(
+                    "repeated_pale_micro_pattern_risk",
+                    0,
+                ),
                 len(protected_pages),
             )
             self.assertEqual(
                 audit_summary["timing"]["operation_timings"]["despeckle"]["max_component_size"]["max"],
                 6,
             )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
+    def test_despeckle_pale_cluster_guards_preserve_noisy_texture_and_micro_marks(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-despeckle-pale-guards-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            protected_pages = {
+                "synthetic_noisy_pale_texture.png": _high_density_pale_texture_page(),
+                "synthetic_dotted_leader_marks.png": _pale_dotted_leader_page(),
+                "synthetic_punctuation_like_marks.png": _pale_punctuation_like_page(),
+                "synthetic_halftone_low_contrast_texture.png": _low_contrast_halftone_texture_page(),
+            }
+            pages = {
+                "synthetic_compact_pale_dust_clusters.png": _safe_compact_pale_dust_cluster_page(),
+                **protected_pages,
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "despeckle-pale-guards", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, workers=1))
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_name = "synthetic_compact_pale_dust_clusters.png"
+            safe_record = records[safe_name]
+            self.assertTrue(safe_record["despeckled"])
+            self.assertEqual(safe_record["despeckle_pixels_changed"], len(_safe_compact_pale_dust_cluster_points()))
+            with Image.open(process_dir / safe_record["output_relative_path"]) as output:
+                output_luma = output.convert("L")
+                for point in _safe_compact_pale_dust_cluster_points():
+                    self.assertGreaterEqual(output_luma.getpixel(point), 240)
+
+            for name, source_image in protected_pages.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name])
+                self.assertEqual(record["status"], "processed", name)
+                self.assertFalse(record["despeckled"], name)
+                self.assertEqual(record["despeckle_pixels_changed"], 0, name)
+                self.assertIn("despeckle_noop", record["operations"], name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertEqual(audit["despeckle_pixel_ratio"], 0.0, name)
+                self.assertEqual(audit["local_content_change_guard_action"], "passed", name)
+                self.assertEqual(audit["cumulative_change_guard_action"], "passed", name)
+                self.assertEqual(audit["processed_output_safety_guard_reason_code"], "safe_processed_output_passed", name)
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    self.assertIsNone(ImageChops.difference(source_image, output.convert("RGB")).getbbox(), name)
+
+            despeckle_timing = audit_summary["timing"]["operation_timings"]["despeckle"]
+            reason_codes = despeckle_timing["reason_code_distribution"]
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["guardrails"]["despeckle"]["applied_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["despeckle"]["pixels_changed"], len(_safe_compact_pale_dust_cluster_points()))
+            self.assertEqual(reason_codes["applied_isolated_pixels"], 1)
+            self.assertGreaterEqual(reason_codes["repeated_pale_micro_pattern_risk"], 2)
+            self.assertGreaterEqual(reason_codes["pale_candidate_density_exceeds_safety_threshold"], 1)
+            self.assertEqual(despeckle_timing["replacement_work_files"], 1)
+            self.assertLess(despeckle_timing["average_seconds_per_file"], 0.2)
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertFalse(audit_summary["privacy"]["contains_paths"])
             self.assertFalse(audit_summary["privacy"]["contains_hashes"])
@@ -4557,6 +4636,49 @@ def _safe_compact_pale_dust_cluster_page() -> Image.Image:
         draw.rectangle((44, y, 112, y + 3), fill=(58, 58, 58))
     for point in _safe_compact_pale_dust_cluster_points():
         image.putpixel(point, (226, 224, 210))
+    return image
+
+
+def _high_density_pale_texture_page() -> Image.Image:
+    image = Image.new("RGB", (260, 180), (246, 246, 244))
+    draw = ImageDraw.Draw(image)
+    for y in (42, 68, 94):
+        draw.rectangle((44, y, 112, y + 3), fill=(58, 58, 58))
+    for y in range(24, 158, 24):
+        for x in range(132, 238, 24):
+            for offset_x, offset_y in ((0, 0), (1, 0), (0, 1), (1, 1)):
+                image.putpixel((x + offset_x, y + offset_y), (226, 224, 210))
+    return image
+
+
+def _pale_dotted_leader_page() -> Image.Image:
+    image = Image.new("RGB", (260, 180), (246, 246, 244))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((34, 62, 82, 65), fill=(58, 58, 58))
+    draw.rectangle((204, 62, 236, 65), fill=(58, 58, 58))
+    for x in range(90, 200, 10):
+        image.putpixel((x, 64), (226, 224, 210))
+    return image
+
+
+def _pale_punctuation_like_page() -> Image.Image:
+    image = Image.new("RGB", (260, 180), (246, 246, 244))
+    draw = ImageDraw.Draw(image)
+    for x in range(52, 212, 18):
+        draw.rectangle((x, 76, x + 1, 88), fill=(62, 62, 62))
+        image.putpixel((x, 70), (226, 224, 210))
+    return image
+
+
+def _low_contrast_halftone_texture_page() -> Image.Image:
+    image = Image.new("RGB", (260, 180), (246, 246, 244))
+    draw = ImageDraw.Draw(image)
+    for y in (42, 68, 94):
+        draw.rectangle((44, y, 112, y + 3), fill=(58, 58, 58))
+    for index in range(36):
+        x = 128 + ((index * 37) % 112)
+        y = 28 + ((index * 23) % 124)
+        image.putpixel((x, y), (226, 224, 210))
     return image
 
 
