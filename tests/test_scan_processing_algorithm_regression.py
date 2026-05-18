@@ -2180,6 +2180,98 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_despeckle_cleans_short_lint_streaks_with_bounded_aggregate_audit(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-despeckle-short-lint-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            safe_lint_points = tuple((x, 112) for x in range(168, 178))
+            safe_page = Image.new("RGB", (260, 180), (246, 246, 244))
+            draw = ImageDraw.Draw(safe_page)
+            for y in (42, 68, 94):
+                draw.rectangle((44, y, 112, y + 3), fill=(58, 58, 58))
+            for point in safe_lint_points:
+                safe_page.putpixel(point, (226, 226, 222))
+
+            handwriting = Image.new("RGB", (260, 180), (246, 246, 244))
+            ImageDraw.Draw(handwriting).line((164, 110, 176, 116), fill=(226, 226, 222), width=1)
+
+            ruled = Image.new("RGB", (260, 180), (246, 246, 244))
+            ImageDraw.Draw(ruled).line((50, 112, 218, 112), fill=(226, 226, 222), width=1)
+
+            colored = Image.new("RGB", (260, 180), (246, 242, 228))
+            for point in safe_lint_points:
+                colored.putpixel(point, (226, 220, 196))
+
+            pages = {
+                "synthetic_safe_short_lint_streak.png": safe_page,
+                "synthetic_protected_short_handwriting_stroke.png": handwriting,
+                "synthetic_protected_ruled_line.png": ruled,
+                "synthetic_protected_colored_record.png": colored,
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "despeckle-short-lint", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, workers=1))
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_record = records["synthetic_safe_short_lint_streak.png"]
+            safe_audit = safe_record["processing_audit"]
+            self.assertEqual((input_dir / "synthetic_safe_short_lint_streak.png").read_bytes(), source_bytes["synthetic_safe_short_lint_streak.png"])
+            self.assertTrue(safe_record["despeckled"])
+            self.assertEqual(safe_record["despeckle_pixels_changed"], len(safe_lint_points))
+            self.assertEqual(safe_record["despeckle_reason"], "isolated dark pixels replaced")
+            self.assertLessEqual(safe_audit["despeckle_pixel_ratio"], 0.001)
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["combination_quality_guard_reason_code"], "safe_combination_passed")
+            with Image.open(process_dir / safe_record["output_relative_path"]) as output:
+                output_luma = output.convert("L")
+                for point in safe_lint_points:
+                    self.assertGreaterEqual(output_luma.getpixel(point), 240)
+
+            for name in (
+                "synthetic_protected_short_handwriting_stroke.png",
+                "synthetic_protected_ruled_line.png",
+                "synthetic_protected_colored_record.png",
+            ):
+                record = records[name]
+                audit = record["processing_audit"]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name])
+                self.assertFalse(record["despeckled"], name)
+                self.assertEqual(record["despeckle_pixels_changed"], 0, name)
+                self.assertIn("despeckle_noop", record["operations"], name)
+                self.assertEqual(audit["despeckle_pixel_ratio"], 0.0, name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    self.assertIsNone(ImageChops.difference(pages[name], output.convert("RGB")).getbbox(), name)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["guardrails"]["despeckle"]["applied_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["despeckle"]["pixels_changed"], len(safe_lint_points))
+            self.assertEqual(
+                audit_summary["guardrails"]["despeckle"]["reason_code_distribution"]["applied_isolated_pixels"],
+                1,
+            )
+            self.assertEqual(
+                audit_summary["timing"]["operation_timings"]["despeckle"]["max_component_size"]["max"],
+                len(safe_lint_points),
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_despeckle_pale_cluster_guards_preserve_noisy_texture_and_micro_marks(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-despeckle-pale-guards-") as temp_dir:
             root = Path(temp_dir)

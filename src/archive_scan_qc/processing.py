@@ -13967,6 +13967,9 @@ _DESPECKLE_MAX_COMPONENT_PIXELS = 4
 _DESPECKLE_MAX_TINY_DUST_CLUSTER_PIXELS = 9
 _DESPECKLE_MAX_TINY_DARK_DUST_CLUSTER_PIXELS = 6
 _DESPECKLE_TINY_DUST_CLUSTER_MIN_VALUE = 35
+_DESPECKLE_MAX_SHORT_LINT_STREAK_PIXELS = 12
+_DESPECKLE_MIN_SHORT_LINT_STREAK_PIXELS = 5
+_DESPECKLE_MAX_SHORT_LINT_STREAK_MINOR_SPAN = 2
 _DESPECKLE_MAX_COMPONENT_SPAN = 3
 _DESPECKLE_DENSE_PREFILTER_MIN_DARK_PIXELS = 512
 _DESPECKLE_DENSE_FULL_COMPONENT_MAX_DARK_PIXELS = 50000
@@ -14498,12 +14501,17 @@ def _despeckle_replacements_fallback(
                     wider_dark += 1
         if wider_dark > 2:
             continue
-        if gray_pixels[x, y] > _DESPECKLE_DARK_THRESHOLD and _despeckle_has_candidate_texture_context(
-            candidate_set,
-            width,
-            height,
-            x,
-            y,
+        is_short_lint_streak = _despeckle_component_is_short_lint_streak(component)
+        if (
+            not is_short_lint_streak
+            and gray_pixels[x, y] > _DESPECKLE_DARK_THRESHOLD
+            and _despeckle_has_candidate_texture_context(
+                candidate_set,
+                width,
+                height,
+                x,
+                y,
+            )
         ):
             continue
         median_gray = sorted(neighbor_values)[len(neighbor_values) // 2]
@@ -14532,6 +14540,8 @@ def _despeckle_replacements_fallback(
         if source is None:
             source = image if image.mode == "RGB" else image.convert("RGB")
             source_pixels = source.load()
+        if is_short_lint_streak and _despeckle_short_lint_streak_color_protected(source_pixels, component):
+            continue
         if _despeckle_has_sparse_text_protected_context(
             gray_pixels,
             source_pixels,
@@ -14900,6 +14910,14 @@ def _despeckle_pale_cluster_allows_cleanup(
     height: int,
     component: list[tuple[int, int]],
 ) -> bool:
+    if _despeckle_short_lint_streak_allows_cleanup(
+        gray_pixels,
+        candidate_set,
+        width,
+        height,
+        component,
+    ):
+        return True
     if not (2 <= len(component) <= _DESPECKLE_PALE_CLUSTER_MAX_PIXELS):
         return False
 
@@ -14955,6 +14973,79 @@ def _despeckle_pale_cluster_allows_cleanup(
         return True
 
     return _despeckle_clean_page_pale_cluster_allows_cleanup(candidate_set)
+
+
+def _despeckle_short_lint_streak_allows_cleanup(
+    gray_pixels: Any,
+    candidate_set: set[tuple[int, int]],
+    width: int,
+    height: int,
+    component: list[tuple[int, int]],
+) -> bool:
+    if not _despeckle_component_is_short_lint_streak(component):
+        return False
+    if len(candidate_set) > _DESPECKLE_MAX_SHORT_LINT_STREAK_PIXELS:
+        return False
+    if any(_despeckle_pixel_at(gray_pixels, cx, cy) < _DESPECKLE_PALE_MARK_MIN_VALUE for cx, cy in component):
+        return False
+    if any(
+        _despeckle_nearby_content_context_count(
+            gray_pixels,
+            width,
+            height,
+            cx,
+            cy,
+            stop_at=1,
+        )
+        for cx, cy in component
+    ):
+        return False
+
+    surrounding_values = _despeckle_component_surrounding_values(
+        gray_pixels,
+        candidate_set,
+        width,
+        height,
+        component,
+        radius=2,
+    )
+    if len(surrounding_values) < len(component) * 2:
+        return False
+    local_background = sorted(surrounding_values)[len(surrounding_values) // 2]
+    if local_background < _DESPECKLE_PALE_CLUSTER_MIN_BACKGROUND_MEDIAN:
+        return False
+
+    component_values = [_despeckle_pixel_at(gray_pixels, cx, cy) for cx, cy in component]
+    component_mean = sum(component_values) / len(component_values)
+    local_delta = local_background - component_mean
+    return _DESPECKLE_PALE_CLUSTER_MIN_DELTA <= local_delta <= _DESPECKLE_PALE_CLUSTER_MAX_DELTA
+
+
+def _despeckle_component_is_short_lint_streak(component: list[tuple[int, int]]) -> bool:
+    if not (_DESPECKLE_MIN_SHORT_LINT_STREAK_PIXELS <= len(component) <= _DESPECKLE_MAX_SHORT_LINT_STREAK_PIXELS):
+        return False
+    component_x = [point[0] for point in component]
+    component_y = [point[1] for point in component]
+    span_x = max(component_x) - min(component_x) + 1
+    span_y = max(component_y) - min(component_y) + 1
+    major_span = max(span_x, span_y)
+    minor_span = min(span_x, span_y)
+    if major_span != len(component):
+        return False
+    if minor_span > _DESPECKLE_MAX_SHORT_LINT_STREAK_MINOR_SPAN:
+        return False
+    return span_x == 1 or span_y == 1
+
+
+def _despeckle_short_lint_streak_color_protected(
+    rgb_pixels: Any,
+    component: list[tuple[int, int]],
+) -> bool:
+    for x, y in component:
+        pixel = _despeckle_pixel_at(rgb_pixels, x, y)
+        if max(pixel) - min(pixel) > 12:
+            return True
+    return False
 
 
 def _despeckle_clean_page_pale_cluster_allows_cleanup(candidate_set: set[tuple[int, int]]) -> bool:
@@ -15380,13 +15471,19 @@ def _despeckle_candidate_points_from_dark_points(
         component_x = [point[0] for point in component]
         component_y = [point[1] for point in component]
         if len(component) > _DESPECKLE_MAX_COMPONENT_PIXELS:
-            if len(component) > _DESPECKLE_MAX_TINY_DUST_CLUSTER_PIXELS:
+            if _despeckle_component_is_short_lint_streak(component):
+                if _despeckle_component_has_mask_context(component, dark_points, radius=12):
+                    continue
+            elif len(component) > _DESPECKLE_MAX_TINY_DUST_CLUSTER_PIXELS:
                 continue
-            if max(component_x) - min(component_x) + 1 > _DESPECKLE_MAX_COMPONENT_SPAN:
+            elif max(component_x) - min(component_x) + 1 > _DESPECKLE_MAX_COMPONENT_SPAN:
                 continue
-            if max(component_y) - min(component_y) + 1 > _DESPECKLE_MAX_COMPONENT_SPAN:
+            elif max(component_y) - min(component_y) + 1 > _DESPECKLE_MAX_COMPONENT_SPAN:
                 continue
-            if _despeckle_component_has_mask_context(component, dark_points):
+            if (
+                not _despeckle_component_is_short_lint_streak(component)
+                and _despeckle_component_has_mask_context(component, dark_points)
+            ):
                 continue
         if len(component) <= _DESPECKLE_MAX_COMPONENT_PIXELS:
             if max(component_x) - min(component_x) + 1 > _DESPECKLE_MAX_COMPONENT_SPAN:
@@ -15416,12 +15513,14 @@ def _despeckle_candidate_points_from_dark_points(
 def _despeckle_component_has_mask_context(
     component: list[tuple[int, int]],
     dark_points: set[tuple[int, int]],
+    *,
+    radius: int = 2,
 ) -> bool:
     component_set = set(component)
     component_x = [point[0] for point in component]
     component_y = [point[1] for point in component]
-    for local_y in range(min(component_y) - 2, max(component_y) + 3):
-        for local_x in range(min(component_x) - 2, max(component_x) + 3):
+    for local_y in range(min(component_y) - radius, max(component_y) + radius + 1):
+        for local_x in range(min(component_x) - radius, max(component_x) + radius + 1):
             if (local_x, local_y) in component_set:
                 continue
             if (local_x, local_y) in dark_points:

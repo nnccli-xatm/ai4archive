@@ -12516,6 +12516,50 @@ class ScanQcTest(unittest.TestCase):
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertNotIn("private_faint_scanner_specks", audit_summary_text)
 
+    def test_despeckle_cleans_short_isolated_lint_streak_but_preserves_lookalikes(self) -> None:
+        safe = Image.new("RGB", (180, 120), (246, 246, 242))
+        lint_points = tuple((x, 58) for x in range(76, 86))
+        for point in lint_points:
+            safe.putpixel(point, (226, 226, 222))
+
+        protected_cases = []
+        handwriting = Image.new("RGB", (180, 120), (246, 246, 242))
+        draw = ImageDraw.Draw(handwriting)
+        draw.line((72, 64, 82, 70), fill=(226, 226, 222), width=1)
+        protected_cases.append(("handwriting_like_diagonal", handwriting))
+
+        underline = Image.new("RGB", (180, 120), (246, 246, 242))
+        draw = ImageDraw.Draw(underline)
+        draw.rectangle((48, 50, 92, 54), fill=(42, 42, 42))
+        draw.line((48, 58, 92, 58), fill=(226, 226, 222), width=1)
+        protected_cases.append(("underline_near_text", underline))
+
+        page_number = Image.new("RGB", (180, 120), (246, 246, 242))
+        ImageDraw.Draw(page_number).text((82, 55), "12", fill=(226, 226, 222))
+        protected_cases.append(("page_number", page_number))
+
+        colored = Image.new("RGB", (180, 120), (246, 242, 228))
+        for point in lint_points:
+            colored.putpixel(point, (226, 220, 196))
+        protected_cases.append(("colored_record", colored))
+
+        safe_result = processing_module._despeckle_isolated_pixels_with_reason(safe, backend="fallback")
+        self.assertEqual(safe_result.changed_pixels, len(lint_points))
+        self.assertEqual(safe_result.reason_code, "applied_isolated_pixels")
+        self.assertEqual(safe_result.candidate_count, len(lint_points))
+        self.assertEqual(safe_result.component_count, 1)
+        self.assertEqual(safe_result.max_component_size, len(lint_points))
+        safe_luma = safe_result.image.convert("L")
+        for point in lint_points:
+            self.assertGreaterEqual(safe_luma.getpixel(point), 240)
+
+        for name, image in protected_cases:
+            source_bytes = image.convert("RGB").tobytes()
+            result = processing_module._despeckle_isolated_pixels_with_reason(image, backend="fallback")
+            self.assertEqual(result.changed_pixels, 0, name)
+            self.assertEqual(result.reason_code, "no_isolated_candidates", name)
+            self.assertEqual(result.image.convert("RGB").tobytes(), source_bytes, name)
+
     def test_despeckle_cleans_isolated_three_by_three_dust_with_component_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
