@@ -3250,6 +3250,9 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "S005_photo_texture_in_smudge.png": _faint_thumbprint_stain_page("photo_texture"),
                 "S006_edge_content_with_smudge.png": _faint_thumbprint_stain_page("edge_content"),
                 "S007_dense_foreground_with_smudge.png": _faint_thumbprint_stain_page("dense_foreground"),
+                "S008_pale_annotation_like_stroke.png": _faint_thumbprint_stain_page("pale_annotation"),
+                "S009_subtle_ruled_table_adjacent_mark.png": _faint_thumbprint_stain_page("subtle_ruled_table"),
+                "S010_textured_paper_detail_region.png": _faint_thumbprint_stain_page("subtle_texture"),
             }
             for name, image in pages.items():
                 image.save(input_dir / name, dpi=(300, 300))
@@ -4648,6 +4651,18 @@ def _faint_thumbprint_stain_page(variant: str = "safe") -> Image.Image:
     elif variant == "dense_foreground":
         for y in range(24, 168, 12):
             draw.rectangle((18, y, 236, y + 5), fill=(48, 48, 46))
+    elif variant == "pale_annotation":
+        draw.line((166, 88, 178, 80, 192, 94, 208, 84), fill=(224, 222, 214), width=2)
+    elif variant == "subtle_ruled_table":
+        for y in (78, 94):
+            draw.line((156, y, 220, y), fill=(228, 228, 222), width=1)
+        for x in (176, 198, 218):
+            draw.line((x, 70, x, 106), fill=(228, 228, 222), width=1)
+    elif variant == "subtle_texture":
+        for x in range(156, 220, 3):
+            for y in range(66, 118, 3):
+                shade = 224 + ((x * 7 + y * 11) % 9)
+                draw.point((x, y), fill=(shade, shade, shade - 4))
     else:
         raise ValueError(f"unsupported faint thumbprint stain variant: {variant}")
     return image

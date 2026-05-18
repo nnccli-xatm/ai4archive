@@ -5373,6 +5373,19 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
             component_box,
             background,
         )
+        faint_detail_risk = (
+            low_global_tonal_evidence
+            and area_ratio <= 0.035
+            and max(width, height) >= max(20, int(round(min(image.width, image.height) * 0.10)))
+            and edge_density > 0.22
+            and local_contrast >= 3.0
+        )
+        if faint_detail_risk:
+            return _background_stains_noop(
+                image,
+                "background stain lightening skipped: pale mark, ruled line, texture, or detail risk",
+                candidate_ratio,
+            )
         low_frequency_shape = (
             area_ratio <= 0.085
             and width <= image.width * 0.62
