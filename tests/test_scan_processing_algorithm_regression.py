@@ -53,6 +53,35 @@ def _mean_luma_delta(before: Image.Image, after: Image.Image) -> float:
     return abs(ImageStat.Stat(after.convert("L")).mean[0] - ImageStat.Stat(before.convert("L")).mean[0])
 
 
+def _intermittent_scanline_guard_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (260, 180), (240, 240, 236))
+    draw = ImageDraw.Draw(image)
+    for y in (42, 64, 86):
+        draw.rectangle((42, y, 158, y + 5), fill=(36, 36, 36))
+    for y in (122, 132, 144):
+        for x0 in (18, 54, 92, 132, 172, 212):
+            draw.rectangle((x0, y, x0 + 14, y + 1), fill=(237, 237, 233))
+    if variant == "safe":
+        return image
+    if variant == "pale_table_grid":
+        for y in (122, 132, 144):
+            draw.line((18, y, 226, y), fill=(232, 232, 228), width=1)
+        for x in (54, 92, 132, 172, 212):
+            draw.line((x, 112, x, 154), fill=(232, 232, 228), width=1)
+        return image
+    if variant == "handwriting_like":
+        draw.arc((30, 118, 88, 150), 0, 180, fill=(238, 238, 234), width=2)
+        draw.arc((86, 118, 150, 150), 180, 360, fill=(238, 238, 234), width=2)
+        return image
+    if variant == "texture_marks":
+        for y in range(112, 155, 8):
+            for x in range(20, 230, 16):
+                shade = 235 + ((x * 3 + y * 5) % 4)
+                draw.point((x, y), fill=(shade, shade, shade))
+        return image
+    raise ValueError(f"unsupported intermittent scanline guard variant: {variant}")
+
+
 class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
     def test_combination_quality_guard_classifies_public_reason_codes(self) -> None:
         options = ProcessingOptions()
@@ -1321,6 +1350,30 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     '"findings": [',
                 ):
                     self.assertNotIn(forbidden, raw)
+
+    def test_intermittent_scanline_cleanup_preserves_low_contrast_protected_context(self) -> None:
+        safe_page = _intermittent_scanline_guard_page("safe")
+        safe_result = processing_module._lighten_scanlines_conservative(safe_page)
+        self.assertTrue(safe_result.applied)
+        self.assertEqual(safe_result.orientation, "horizontal")
+        self.assertGreater(safe_result.changed_pixel_ratio, 0.0007)
+        self.assertLess(safe_result.changed_pixel_ratio, 0.035)
+
+        for variant in ("pale_table_grid", "handwriting_like", "texture_marks"):
+            with self.subTest(variant=variant):
+                protected_page = _intermittent_scanline_guard_page(variant)
+                protected_result = processing_module._lighten_scanlines_conservative(protected_page)
+                self.assertFalse(protected_result.applied)
+                self.assertIn("SCANLINE_CONTENT_RISK", protected_result.reason)
+                self.assertEqual(protected_result.changed_pixel_ratio, 0.0)
+                self.assertLess(
+                    _changed_ratio(
+                        protected_page,
+                        protected_result.image,
+                        (0, 0, protected_page.width, protected_page.height),
+                    ),
+                    0.001,
+                )
 
     def test_full_chain_safe_combination_page_stays_conservative(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-safe-") as temp_dir:
