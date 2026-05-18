@@ -7203,6 +7203,63 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn("private_ultra_pale_reverse_ghost", audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
 
+    def test_clean_bleed_through_reduces_low_density_diffuse_background_ghosts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            page = _synthetic_bleed_through_page("low_density_diffuse_noise")
+            source_name = "private_low_density_reverse_ghost.png"
+            page.save(input_dir / source_name, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(clean_bleed_through=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+            audit = record["processing_audit"]
+            processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+
+            self.assertTrue(record["bleed_through_cleaned"])
+            self.assertEqual(record["bleed_through_reason_code"], "applied_faint_reverse_ghost")
+            self.assertGreater(audit["bleed_through_delta"], 3.0)
+            self.assertGreater(audit["bleed_through_changed_pixel_ratio"], 0.01)
+            self.assertLessEqual(audit["bleed_through_changed_pixel_ratio"], 0.045)
+            self.assertGreater(audit["bleed_through_candidate_pixel_ratio"], 0.0)
+            self.assertLessEqual(audit["bleed_through_candidate_pixel_ratio"], 0.065)
+            self.assertEqual(audit["guardrail_failures"], [])
+            self.assertEqual(audit["local_content_change_guard_action"], "passed")
+            self.assertEqual(audit["cumulative_change_guard_action"], "passed")
+            self.assertEqual(audit["combination_quality_guard_reason_code"], "safe_combination_passed")
+            self.assertEqual(audit["processed_output_safety_guard_action"], "passed")
+            self.assertGreater(
+                _box_luma(processed, (94, 56, 190, 130)),
+                _box_luma(page, (94, 56, 190, 130)) + 0.06,
+            )
+            self.assertIsNone(
+                ImageChops.difference(
+                    page.crop((30, 34, 72, 50)),
+                    processed.crop((30, 34, 72, 50)),
+                ).getbbox()
+            )
+            self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["bleed_through"]["reason_code_distribution"][
+                    "applied_faint_reverse_ghost"
+                ],
+                1,
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_low_density_reverse_ghost", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
     def test_clean_bleed_through_protects_foreground_marks_and_edge_content(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -17025,6 +17082,16 @@ def _synthetic_bleed_through_page(variant: str) -> Image.Image:
         mask = mask.filter(ImageFilter.GaussianBlur(3.4))
         ghost = Image.new("RGB", image.size, (236, 236, 232))
         image.paste(ghost, (0, 0), mask.point(lambda value: int(value * 0.34)))
+    elif variant == "low_density_diffuse_noise":
+        mask = Image.new("L", image.size, 0)
+        mask_draw = ImageDraw.Draw(mask)
+        for index in range(32):
+            x = 96 + ((index * 37 + index * index * 3) % 92)
+            y = 58 + ((index * 23 + index * index * 5) % 70)
+            mask_draw.ellipse((x, y, x + 2, y + 2), fill=190)
+        mask = mask.filter(ImageFilter.GaussianBlur(1.1))
+        ghost = Image.new("RGB", image.size, (236, 236, 232))
+        image.paste(ghost, (0, 0), mask.point(lambda value: int(value * 0.42)))
     elif variant == "text":
         draw.text((124, 86), "321", fill=(215, 215, 210))
         draw.line((120, 112, 206, 112), fill=(215, 215, 210), width=1)

@@ -7779,16 +7779,30 @@ def _clean_bleed_through_conservative(image: Image.Image) -> BleedThroughCleanup
             "bleed-through cleanup skipped: table line, page number, or annotation risk",
             candidate_ratio,
         )
-    if len(components) > 28:
-        return _bleed_through_noop(
-            image,
-            "bleed-through cleanup skipped: too many ghost candidates outside conservative scope",
-            candidate_ratio,
-        )
 
     selected: set[tuple[int, int]] = set()
+    if very_stable_light_paper:
+        selected = _bleed_through_low_density_diffuse_selection(
+            candidate,
+            components,
+            grayscale,
+            edge_signal,
+            protected,
+            background,
+            edge_margin,
+        )
+    if len(components) > 28:
+        if not selected:
+            return _bleed_through_noop(
+                image,
+                "bleed-through cleanup skipped: too many ghost candidates outside conservative scope",
+                candidate_ratio,
+            )
+
     small_core_components = very_stable_light_paper and max(len(component) for component in components) < 16
-    if small_core_components:
+    if selected:
+        pass
+    elif small_core_components:
         selected = _bleed_through_small_diffuse_selection(
             candidate,
             components,
@@ -8092,6 +8106,68 @@ def _bleed_through_small_diffuse_selection(
             if background - 1 <= value <= background and int(edge_pixels[x, y]) < 22:
                 selected.add((x, y))
     if len(selected) / max(1, total) > 0.0035:
+        return set()
+    return selected
+
+
+def _bleed_through_low_density_diffuse_selection(
+    candidate: Image.Image,
+    components: list[set[tuple[int, int]]],
+    grayscale: Image.Image,
+    edge_signal: Image.Image,
+    protected: Image.Image,
+    background: int,
+    edge_margin: int,
+) -> set[tuple[int, int]]:
+    if len(components) < 8:
+        return set()
+    total = candidate.width * candidate.height
+    all_points = [point for component in components for point in component]
+    candidate_ratio = len(all_points) / max(1, total)
+    if candidate_ratio < 0.001 or candidate_ratio > 0.012:
+        return set()
+    if max(len(component) for component in components) > 36:
+        return set()
+
+    xs = [point[0] for point in all_points]
+    ys = [point[1] for point in all_points]
+    left = min(xs)
+    top = min(ys)
+    right = max(xs)
+    bottom = max(ys)
+    if (
+        left < edge_margin * 3
+        or top < max(edge_margin * 3, int(round(candidate.height * 0.18)))
+        or right >= candidate.width - edge_margin * 3
+        or bottom >= candidate.height - max(edge_margin * 3, int(round(candidate.height * 0.18)))
+    ):
+        return set()
+    width = right - left + 1
+    height = bottom - top + 1
+    if width > candidate.width * 0.42 or height > candidate.height * 0.42:
+        return set()
+    aspect = max(width / max(1, height), height / max(1, width))
+    if aspect > 4.5:
+        return set()
+
+    source_pixels = grayscale.load()
+    if sum(1 for x, y in all_points if int(source_pixels[x, y]) < background - 4) / len(all_points) > 0.08:
+        return set()
+
+    halo = candidate.filter(ImageFilter.MaxFilter(5))
+    halo_pixels = halo.load()
+    edge_pixels = edge_signal.load()
+    protected_pixels = protected.load()
+    selected: set[tuple[int, int]] = set()
+    for y in range(max(edge_margin, top - 3), min(candidate.height - edge_margin, bottom + 4)):
+        for x in range(max(edge_margin, left - 3), min(candidate.width - edge_margin, right + 4)):
+            if not halo_pixels[x, y] or protected_pixels[x, y]:
+                continue
+            value = int(source_pixels[x, y])
+            if background - 4 <= value <= background and int(edge_pixels[x, y]) < 18:
+                selected.add((x, y))
+    changed_ratio = len(selected) / max(1, total)
+    if changed_ratio < 0.001 or changed_ratio > 0.035:
         return set()
     return selected
 
