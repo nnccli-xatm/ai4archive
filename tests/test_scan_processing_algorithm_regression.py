@@ -1215,6 +1215,13 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "private_safe_diagonal_fold_sparse_text_crossing.png": _subtle_diagonal_fold_shadow_page(
                     "sparse_text_crossing"
                 ),
+                "private_diagonal_fold_handwriting_bridge.png": _subtle_diagonal_fold_shadow_page(
+                    "handwriting_bridge"
+                ),
+                "private_diagonal_fold_repeated_ruled_segments.png": _subtle_diagonal_fold_shadow_page(
+                    "repeated_ruled_segments"
+                ),
+                "private_diagonal_fold_dense_typed_text.png": _subtle_diagonal_fold_shadow_page("dense_typed_text"),
                 "private_diagonal_fold_handwriting.png": _subtle_diagonal_fold_shadow_page("handwriting"),
                 "private_diagonal_fold_page_number.png": _subtle_diagonal_fold_shadow_page("page_number"),
                 "private_diagonal_fold_ruled_table.png": _subtle_diagonal_fold_shadow_page("ruled_table"),
@@ -5018,8 +5025,19 @@ def _subtle_diagonal_fold_shadow_page(variant: str = "safe") -> Image.Image:
     draw.rectangle((150, 42, 190, 46), fill=(42, 42, 42))
 
     if variant == "sparse_text_crossing":
+        font = ImageFont.load_default()
+        draw.text((112, 74), "REF", fill=(42, 42, 42), font=font)
+        draw.text((72, 114), "42", fill=(42, 42, 42), font=font)
+    elif variant == "handwriting_bridge":
+        draw.line((112, 78, 154, 82), fill=(45, 45, 45), width=3)
+        draw.line((72, 118, 104, 122), fill=(45, 45, 45), width=3)
+    elif variant == "repeated_ruled_segments":
         draw.rectangle((112, 78, 154, 82), fill=(42, 42, 42))
         draw.rectangle((72, 118, 104, 122), fill=(42, 42, 42))
+    elif variant == "dense_typed_text":
+        font = ImageFont.load_default()
+        for row, text in enumerate(("ARCHIVE", "SCAN", "INDEX", "COPY", "TOTAL")):
+            draw.text((78, 58 + row * 14), text, fill=(42, 42, 42), font=font)
     elif variant == "handwriting":
         draw.line((92, 44, 152, 104), fill=(45, 45, 45), width=2)
     elif variant == "page_number":

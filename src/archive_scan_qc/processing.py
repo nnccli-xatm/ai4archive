@@ -6652,12 +6652,14 @@ def _lighten_fold_shadows_conservative(image: Image.Image) -> FoldShadowCleanupR
     diagonal_tl_br = _fold_shadow_diagonal_plan(
         grayscale,
         protected,
+        raw_foreground=foreground,
         top_left_to_bottom_right=True,
         background=p95,
     )
     diagonal_tr_bl = _fold_shadow_diagonal_plan(
         grayscale,
         protected,
+        raw_foreground=foreground,
         top_left_to_bottom_right=False,
         background=p95,
     )
@@ -6917,6 +6919,7 @@ def _fold_shadow_diagonal_plan(
     grayscale: Image.Image,
     protected: Image.Image,
     *,
+    raw_foreground: Image.Image | None = None,
     top_left_to_bottom_right: bool,
     background: int,
 ) -> dict[str, Any]:
@@ -6930,6 +6933,7 @@ def _fold_shadow_diagonal_plan(
 
     pixels = grayscale.load()
     protected_pixels = protected.load()
+    raw_foreground_pixels = raw_foreground.load() if raw_foreground is not None else None
     stats: list[dict[str, Any]] = []
     candidate_indexes: list[int] = []
     all_candidates: set[tuple[int, int]] = set()
@@ -6951,9 +6955,12 @@ def _fold_shadow_diagonal_plan(
         selected: list[tuple[int, int]] = []
         selected_crosses: set[int] = set()
         protected_crosses: set[int] = set()
+        raw_foreground_crosses: set[int] = set()
         protected_count = 0
         dark_count = 0
         for cross, (x, y) in enumerate(coordinates):
+            if raw_foreground_pixels is not None and raw_foreground_pixels[x, y]:
+                raw_foreground_crosses.add(cross)
             if protected_pixels[x, y]:
                 protected_count += 1
                 protected_crosses.add(cross)
@@ -6988,6 +6995,7 @@ def _fold_shadow_diagonal_plan(
                 "selected": selected,
                 "selected_crosses": selected_crosses,
                 "protected_crosses": protected_crosses,
+                "raw_foreground_crosses": raw_foreground_crosses,
                 "bridge_continuity": bridge_continuity,
                 "sparse_foreground_crossings": sparse_foreground_crossings,
                 "sparse_text_bridge": sparse_text_bridge,
@@ -7054,6 +7062,12 @@ def _fold_shadow_diagonal_plan(
             return _empty_fold_shadow_plan(
                 orientation,
                 "ruled content intersects candidate fold band",
+                candidate_total_ratio,
+            )
+        if _fold_shadow_diagonal_sparse_bridge_has_structured_foreground_risk(stats, group):
+            return _empty_fold_shadow_plan(
+                orientation,
+                "foreground intersects candidate fold band",
                 candidate_total_ratio,
             )
         if any(
@@ -7197,6 +7211,30 @@ def _fold_shadow_diagonal_protected_crossings_are_sparse(protected_crosses: set[
         previous = current
     longest_run = max(longest_run, current_run)
     return longest_run <= max(22, int(round(cross_length * 0.12)))
+
+
+def _fold_shadow_diagonal_sparse_bridge_has_structured_foreground_risk(
+    stats: list[dict[str, Any]], group: list[int]
+) -> bool:
+    longest_raw_run = 0
+    bridge_rows_with_raw_foreground = 0
+    for index in group:
+        if not stats[index]["sparse_text_bridge"]:
+            continue
+        raw_crosses = stats[index].get("raw_foreground_crosses")
+        if not raw_crosses:
+            continue
+        bridge_rows_with_raw_foreground += 1
+        ordered = sorted(raw_crosses)
+        current_run = 1
+        for previous, current in zip(ordered, ordered[1:]):
+            if current == previous + 1:
+                current_run += 1
+            else:
+                longest_raw_run = max(longest_raw_run, current_run)
+                current_run = 1
+        longest_raw_run = max(longest_raw_run, current_run)
+    return bridge_rows_with_raw_foreground >= 3 and longest_raw_run >= 3
 
 
 def _fold_shadow_group_has_ruled_content(stats: list[dict[str, Any]], group: list[int]) -> bool:
