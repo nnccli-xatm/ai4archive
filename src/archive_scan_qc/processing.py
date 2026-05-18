@@ -6753,6 +6753,7 @@ def _fold_shadow_axis_plan(
 
     pixels = grayscale.load()
     protected_pixels = protected.load()
+    ambiguous_content_threshold = min(220, max(188, background - 24))
     stats: list[dict[str, Any]] = []
     candidate_indexes: list[int] = []
     all_candidates: set[tuple[int, int]] = set()
@@ -6762,7 +6763,11 @@ def _fold_shadow_axis_plan(
         selected_crosses: set[int] = set()
         protected_crosses: set[int] = set()
         protected_count = 0
+        ambiguous_content_count = 0
         dark_count = 0
+        near_gutter_region = vertical and (
+            gutter_margin <= index < edge_margin or axis_length - edge_margin <= index < axis_length - gutter_margin
+        )
         for cross in range(cross_length):
             x, y = (index, cross) if vertical else (cross, index)
             if protected_pixels[x, y]:
@@ -6773,11 +6778,14 @@ def _fold_shadow_axis_plan(
             values.append(value)
             if value <= 150:
                 dark_count += 1
+            if near_gutter_region and value <= ambiguous_content_threshold:
+                ambiguous_content_count += 1
             if 3 <= background - value <= 48 and value >= 188:
                 selected.append((x, y))
                 selected_crosses.add(cross)
         available_ratio = len(values) / max(1, cross_length)
         protected_ratio = protected_count / max(1, cross_length)
+        ambiguous_content_ratio = ambiguous_content_count / max(1, cross_length)
         candidate_ratio = len(selected) / max(1, cross_length)
         dark_ratio = dark_count / max(1, len(values)) if values else 1.0
         mean = sum(values) / len(values) if values else 0.0
@@ -6798,19 +6806,18 @@ def _fold_shadow_axis_plan(
                 "mean": mean,
                 "available_ratio": available_ratio,
                 "protected_ratio": protected_ratio,
+                "ambiguous_content_ratio": ambiguous_content_ratio,
                 "candidate_ratio": candidate_ratio,
                 "dark_ratio": dark_ratio,
                 "selected": selected,
                 "selected_crosses": selected_crosses,
                 "protected_crosses": protected_crosses,
+                "near_gutter_region": near_gutter_region,
                 "sparse_foreground_crossings": sparse_foreground_crossings,
                 "sparse_text_bridge": sparse_text_bridge,
             }
         )
         centered_fold_region = edge_margin <= index < axis_length - edge_margin
-        near_gutter_region = vertical and (
-            gutter_margin <= index < edge_margin or axis_length - edge_margin <= index < axis_length - gutter_margin
-        )
         center_candidate = (
             centered_fold_region
             and (available_ratio >= 0.92 or sparse_text_bridge)
@@ -6878,6 +6885,12 @@ def _fold_shadow_axis_plan(
             return _empty_fold_shadow_plan(
                 orientation,
                 "ruled content intersects candidate fold band",
+                candidate_total_ratio,
+            )
+        if _fold_shadow_near_gutter_group_has_ambiguous_content(stats, group):
+            return _empty_fold_shadow_plan(
+                orientation,
+                "ambiguous near-gutter content intersects candidate fold band",
                 candidate_total_ratio,
             )
         if any(
@@ -7274,6 +7287,21 @@ def _fold_shadow_group_has_ruled_content(stats: list[dict[str, Any]], group: lis
             current_run = 1
     longest_run = max(longest_run, current_run)
     return longest_run <= max(2, int(round(len(group) * 0.25)))
+
+
+def _fold_shadow_near_gutter_group_has_ambiguous_content(stats: list[dict[str, Any]], group: list[int]) -> bool:
+    near_gutter_indexes = [index for index in group if stats[index].get("near_gutter_region")]
+    if not near_gutter_indexes:
+        return False
+    content_indexes = [
+        index
+        for index in near_gutter_indexes
+        if float(stats[index].get("ambiguous_content_ratio", 0.0)) >= 0.006
+    ]
+    if len(content_indexes) >= 2:
+        return True
+    total_ratio = sum(float(stats[index].get("ambiguous_content_ratio", 0.0)) for index in near_gutter_indexes)
+    return total_ratio >= 0.018
 
 
 def _empty_fold_shadow_plan(

@@ -540,6 +540,9 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             if variant == "marginal_note":
                 draw.line((8, 74, 28, 88, 12, 102, 32, 116), fill=(54, 54, 54), width=2)
                 return image
+            if variant == "faint_handwriting":
+                draw.line((9, 78, 28, 90, 12, 104, 32, 118), fill=(196, 196, 192), width=2)
+                return image
             if variant == "light_rule":
                 draw.line((18, 18, 18, 222), fill=(202, 202, 198), width=1)
                 return image
@@ -549,6 +552,9 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             if variant == "dense_text":
                 for y in range(30, 210, 10):
                     draw.rectangle((36, y, 286, y + 3), fill=(45, 45, 45))
+                return image
+            if variant == "faint_edge_mark":
+                draw.rectangle((7, 104, 18, 146), fill=(196, 196, 192))
                 return image
             raise ValueError(f"unsupported variant: {variant}")
 
@@ -562,9 +568,11 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "synthetic_safe_mild_near_gutter_shadow.png": mild_gutter_page("safe"),
                 "synthetic_gutter_page_number_protected.png": mild_gutter_page("page_number"),
                 "synthetic_gutter_marginal_note_protected.png": mild_gutter_page("marginal_note"),
+                "synthetic_gutter_faint_handwriting_protected.png": mild_gutter_page("faint_handwriting"),
                 "synthetic_gutter_light_rule_protected.png": mild_gutter_page("light_rule"),
                 "synthetic_gutter_stamp_protected.png": mild_gutter_page("stamp"),
                 "synthetic_gutter_dense_text_protected.png": mild_gutter_page("dense_text"),
+                "synthetic_gutter_faint_edge_mark_protected.png": mild_gutter_page("faint_edge_mark"),
             }
             source_bytes = {}
             for name, image in pages.items():
@@ -606,6 +614,14 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 self.assertEqual(record["fold_shadows_changed_pixel_ratio"], 0.0, name)
                 with Image.open(process_dir / record["output_relative_path"]) as output:
                     self.assertEqual(output.convert("RGB").tobytes(), pages[name].tobytes(), name)
+            self.assertEqual(
+                records["synthetic_gutter_faint_handwriting_protected.png"]["fold_shadows_reason_code"],
+                "ambiguous_near_gutter_content_intersects_candidate_fold_band",
+            )
+            self.assertEqual(
+                records["synthetic_gutter_faint_edge_mark_protected.png"]["fold_shadows_reason_code"],
+                "ambiguous_near_gutter_content_intersects_candidate_fold_band",
+            )
 
     def test_mild_vertical_fold_shadow_cleanup_allows_sparse_text_and_preserves_rules(self) -> None:
         def mild_fold_page(variant: str) -> Image.Image:
