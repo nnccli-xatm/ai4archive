@@ -4573,12 +4573,18 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "S008_pale_annotation_like_stroke.png": _faint_thumbprint_stain_page("pale_annotation"),
                 "S009_subtle_ruled_table_adjacent_mark.png": _faint_thumbprint_stain_page("subtle_ruled_table"),
                 "S010_textured_paper_detail_region.png": _faint_thumbprint_stain_page("subtle_texture"),
+                "S011_safe_small_pale_handling_mark.png": _faint_thumbprint_stain_page("small_pale_handling_mark"),
             }
             for name, image in pages.items():
                 image.save(input_dir / name, dpi=(300, 300))
 
-            safe_original = pages["S001_safe_faint_thumbprint_stain.png"].convert("L")
-            original_stain_mean = _mean_luma(safe_original, (164, 68, 210, 108))
+            safe_specs = {
+                "S001_safe_faint_thumbprint_stain.png": ((164, 68, 210, 108), 2.5, 1.0, 0.022),
+                "S011_safe_small_pale_handling_mark.png": ((170, 75, 198, 96), 2.0, 0.8, 0.012),
+            }
+            original_stain_means = {
+                name: _mean_luma(pages[name].convert("L"), box) for name, (box, _, _, _) in safe_specs.items()
+            }
 
             report = scan_batch(ScanConfig("synthetic-regression", "faint-thumbprint-stain", input_dir, output_dir))
             manifest = process_images(
@@ -4591,25 +4597,26 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             audit_summary = json.loads(audit_summary_text)
             records = {record["source_relative_path"]: record for record in manifest["files"]}
 
-            safe_record = records["S001_safe_faint_thumbprint_stain.png"]
-            safe_audit = safe_record["processing_audit"]
-            with Image.open(process_dir / safe_record["output_relative_path"]) as processed_image:
-                processed_safe = processed_image.convert("L")
-                processed_stain_mean = _mean_luma(processed_safe, (164, 68, 210, 108))
+            for name, (box, min_delta, min_region_delta, max_ratio) in safe_specs.items():
+                safe_record = records[name]
+                safe_audit = safe_record["processing_audit"]
+                with Image.open(process_dir / safe_record["output_relative_path"]) as processed_image:
+                    processed_safe = processed_image.convert("L")
+                    processed_stain_mean = _mean_luma(processed_safe, box)
 
-            self.assertTrue(safe_record["background_stains_lightened"])
-            self.assertIn("lighten_background_stains_conservative", safe_record["operations"])
-            self.assertIn("localized low-contrast stains", safe_record["background_stains_reason"])
-            self.assertGreaterEqual(safe_audit["background_stains_delta"], 2.5)
-            self.assertGreater(processed_stain_mean - original_stain_mean, 1.0)
-            self.assertGreater(safe_audit["background_stains_changed_pixel_ratio"], 0.0)
-            self.assertLessEqual(safe_audit["background_stains_changed_pixel_ratio"], 0.022)
-            self.assertLessEqual(safe_audit["background_stains_candidate_pixel_ratio"], 0.022)
-            self.assertEqual(safe_audit["guardrail_failures"], [])
-            self.assertEqual(safe_audit["local_content_change_guard_action"], "passed")
-            self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed")
+                self.assertTrue(safe_record["background_stains_lightened"], name)
+                self.assertIn("lighten_background_stains_conservative", safe_record["operations"], name)
+                self.assertIn("localized low-contrast stains", safe_record["background_stains_reason"], name)
+                self.assertGreaterEqual(safe_audit["background_stains_delta"], min_delta, name)
+                self.assertGreater(processed_stain_mean - original_stain_means[name], min_region_delta, name)
+                self.assertGreater(safe_audit["background_stains_changed_pixel_ratio"], 0.0, name)
+                self.assertLessEqual(safe_audit["background_stains_changed_pixel_ratio"], max_ratio, name)
+                self.assertLessEqual(safe_audit["background_stains_candidate_pixel_ratio"], max_ratio, name)
+                self.assertEqual(safe_audit["guardrail_failures"], [], name)
+                self.assertEqual(safe_audit["local_content_change_guard_action"], "passed", name)
+                self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed", name)
 
-            protected_names = set(pages) - {"S001_safe_faint_thumbprint_stain.png"}
+            protected_names = set(pages) - set(safe_specs)
             for name in protected_names:
                 record = records[name]
                 self.assertFalse(record["background_stains_lightened"], name)
@@ -4624,9 +4631,9 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
 
             background_guard = audit_summary["guardrails"]["background_stains"]
             self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
-            self.assertEqual(audit_summary["counts"]["background_stains_lightened_files"], 1)
+            self.assertEqual(audit_summary["counts"]["background_stains_lightened_files"], len(safe_specs))
             self.assertEqual(audit_summary["counts"]["background_stains_skipped_files"], len(protected_names))
-            self.assertEqual(background_guard["applied_files"], 1)
+            self.assertEqual(background_guard["applied_files"], len(safe_specs))
             self.assertEqual(background_guard["skipped_files"], len(protected_names))
             self.assertGreaterEqual(len(background_guard["skip_reason_distribution"]), 3)
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
@@ -6320,6 +6327,17 @@ def _faint_thumbprint_stain_page(variant: str = "safe") -> Image.Image:
 
     if variant == "safe":
         return image
+    if variant == "small_pale_handling_mark":
+        image = Image.new("RGB", (260, 190), (242, 242, 240))
+        draw = ImageDraw.Draw(image)
+        for y in range(42, 132, 24):
+            draw.rectangle((28, y, 96, y + 4), fill=(35, 35, 35))
+        draw.text((116, 24), "12", fill=(30, 30, 30))
+        mask = Image.new("L", image.size, 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.ellipse((170, 75, 198, 96), fill=255)
+        mask = mask.filter(ImageFilter.GaussianBlur(3))
+        return Image.composite(Image.new("RGB", image.size, (237, 237, 233)), image, mask)
     if variant == "handwriting":
         draw.line((166, 88, 178, 80, 192, 94, 208, 84), fill=(102, 98, 90), width=2)
     elif variant == "ruled_table":

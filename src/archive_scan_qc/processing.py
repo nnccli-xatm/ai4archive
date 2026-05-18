@@ -5581,6 +5581,7 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
         )
     selected: set[tuple[int, int]] = set()
     localized_component_selected = False
+    pale_localized_component_selected = False
     faint_thumbprint_component_selected = False
     diffuse_component_selected = False
     faint_cloud_component_selected = False
@@ -5681,6 +5682,20 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
             and local_background >= background - 2
             and 1.7 <= local_contrast <= 9.0
         )
+        pale_localized_handling_shape = (
+            low_global_tonal_evidence
+            and area_ratio <= 0.012
+            and width <= image.width * 0.18
+            and height <= image.height * 0.18
+            and width >= 8
+            and height >= 8
+            and max(width, height) / max(1, min(width, height)) <= 2.8
+            and edge_density <= 0.21
+            and color_shift <= 18
+            and local_background is not None
+            and local_background >= background - 2
+            and 1.2 <= local_contrast <= 7.0
+        )
         diffuse_soft_shape = (
             low_global_tonal_evidence
             and area_ratio <= 0.045
@@ -5715,6 +5730,7 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
             or localized_soft_shape
             or medium_soft_shape
             or faint_thumbprint_shape
+            or pale_localized_handling_shape
             or diffuse_soft_shape
             or faint_cloud_shape
         ):
@@ -5723,8 +5739,10 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
                 "background stain lightening skipped: large stain or historical damage risk",
                 candidate_ratio,
             )
-        if localized_soft_shape or medium_soft_shape or faint_thumbprint_shape:
+        if localized_soft_shape or medium_soft_shape or faint_thumbprint_shape or pale_localized_handling_shape:
             localized_component_selected = True
+        if pale_localized_handling_shape:
+            pale_localized_component_selected = True
         if faint_thumbprint_shape:
             faint_thumbprint_component_selected = True
         if diffuse_soft_shape:
@@ -5793,6 +5811,8 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
         minimum_improvement = 1.0
     elif faint_thumbprint_component_selected:
         minimum_improvement = 2.5
+    elif pale_localized_component_selected:
+        minimum_improvement = 2.0
     else:
         minimum_improvement = 4.0
     if after_mean - before_mean < minimum_improvement:
