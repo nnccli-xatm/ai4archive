@@ -2172,7 +2172,11 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "synthetic_protected_underline_scanline.png": _very_subtle_scanline_page("underline"),
                 "synthetic_protected_stamp_scanline.png": _very_subtle_scanline_page("stamp"),
                 "synthetic_protected_marginal_mark_scanline.png": _very_subtle_scanline_page("marginal_mark"),
+                "synthetic_protected_faint_marginal_note_scanline.png": _very_subtle_scanline_page(
+                    "faint_marginal_note"
+                ),
                 "synthetic_protected_edge_line_scanline.png": _very_subtle_scanline_page("edge_line"),
+                "synthetic_protected_near_edge_rule_scanline.png": _very_subtle_scanline_page("near_edge_rule"),
             }
             source_bytes = {}
             for name, image in pages.items():
@@ -5452,8 +5456,16 @@ def _very_subtle_scanline_page(variant: str = "safe") -> Image.Image:
         draw.ellipse((166, 84, 232, 146), outline=(184, 24, 24), width=4)
     elif variant == "marginal_mark":
         draw.line((18, 92, 88, 112, 142, 134, 214, 152), fill=(50, 50, 50), width=2)
+    elif variant == "faint_marginal_note":
+        draw.line((10, 76, 64, 88, 104, 82, 142, 96), fill=(92, 92, 88), width=1)
     elif variant == "edge_line":
         draw.rectangle((4, 32, 14, 182), fill=(58, 58, 58))
+    elif variant == "near_edge_rule":
+        image = Image.new("RGB", (300, 220), (242, 242, 238))
+        draw = ImageDraw.Draw(image)
+        for y in (44, 68):
+            draw.rectangle((46, y, 115, y + 4), fill=(42, 42, 42))
+        draw.rectangle((12, 18, 12, 202), fill=(241, 241, 237))
     else:
         raise ValueError(f"unsupported variant: {variant}")
     return image

@@ -7494,6 +7494,16 @@ def _lighten_scanlines_conservative(image: Image.Image) -> ScanlineLighteningRes
             image,
             "scanline lightening skipped: SCANLINE_EDGE_CONTENT_RISK risk 装订边、边缘原痕或边距内容风险",
         )
+    if _scanline_sparse_edge_mark_risk(foreground):
+        return _scanlines_noop(
+            image,
+            "scanline lightening skipped: SCANLINE_EDGE_CONTENT_RISK risk 装订边、边缘原痕或边距内容风险",
+        )
+    if _scanline_handwriting_or_marginal_mark_risk(foreground):
+        return _scanlines_noop(
+            image,
+            "scanline lightening skipped: SCANLINE_CONTENT_RISK risk 正文、表格线、印章、批注或档案原痕风险",
+        )
 
     protected = foreground.filter(ImageFilter.MaxFilter(13))
     horizontal = _scanline_axis_lightening_plan(grayscale, protected, horizontal=True, background=p90)
@@ -7509,7 +7519,7 @@ def _lighten_scanlines_conservative(image: Image.Image) -> ScanlineLighteningRes
         risk_plans = [
             candidate
             for candidate in (horizontal, vertical)
-            if isinstance(candidate["reason"], str) and "SCANLINE_SCOPE_RISK" in candidate["reason"]
+            if isinstance(candidate["reason"], str) and "SCANLINE_" in candidate["reason"] and "RISK" in candidate["reason"]
         ]
         if risk_plans:
             risk_plan = max(risk_plans, key=lambda candidate: candidate["candidate_ratio"])
@@ -7785,6 +7795,13 @@ def _scanline_axis_lightening_plan(
             "SCANLINE_LOW_CONFIDENCE low-confidence 低置信轻微扫描线证据不足",
             candidate_total_ratio,
         )
+    edge_guard_margin = max(margin * 2, int(round(axis_length * 0.08)))
+    if any(index <= edge_guard_margin or index >= axis_length - edge_guard_margin - 1 for index in candidate_lines):
+        return _empty_scanline_lightening_plan(
+            orientation,
+            "SCANLINE_EDGE_CONTENT_RISK risk 装订边、边缘原痕或边距内容风险",
+            candidate_total_ratio,
+        )
     groups = _contiguous_groups(candidate_lines)
     if len(faint_candidate_lines) == len(candidate_lines):
         faint_groups = _contiguous_groups(faint_candidate_lines)
@@ -7813,6 +7830,88 @@ def _scanline_axis_lightening_plan(
         "candidate_ratio": candidate_total_ratio,
         "reason": None,
     }
+
+
+def _scanline_sparse_edge_mark_risk(foreground: Image.Image) -> bool:
+    width, height = foreground.size
+    total = max(1, width * height)
+    foreground_pixels = sum(foreground.histogram()[1:])
+    if foreground_pixels / total > 0.08:
+        return False
+    pixels = foreground.load()
+    edge_width = max(4, int(round(width * 0.08)))
+    edge_height = max(4, int(round(height * 0.08)))
+    edge_pixels = 0
+    for y in range(height):
+        for x in range(width):
+            if not pixels[x, y]:
+                continue
+            if x < edge_width or x >= width - edge_width or y < edge_height or y >= height - edge_height:
+                edge_pixels += 1
+    return edge_pixels / total >= 0.00012
+
+
+def _scanline_handwriting_or_marginal_mark_risk(foreground: Image.Image) -> bool:
+    width, height = foreground.size
+    total = max(1, width * height)
+    foreground_pixels = sum(foreground.histogram()[1:])
+    foreground_ratio = foreground_pixels / total
+    if not 0.0015 <= foreground_ratio <= 0.035:
+        return False
+    pixels = foreground.load()
+    margin_width = max(8, int(round(width * 0.14)))
+    component_boxes = _foreground_component_boxes(foreground, max_components=80)
+    for left, top, right, bottom, count in component_boxes:
+        box_width = right - left + 1
+        box_height = bottom - top + 1
+        if count < 6:
+            continue
+        touches_margin = left < margin_width or right >= width - margin_width
+        slender_stroke = max(box_width, box_height) >= 20 and min(box_width, box_height) <= 10
+        if touches_margin and slender_stroke:
+            return True
+        if box_width >= 42 and 6 <= box_height <= max(16, int(round(height * 0.12))):
+            margin_pixels = 0
+            for y in range(top, bottom + 1):
+                for x in range(left, right + 1):
+                    if pixels[x, y] and (x < margin_width or x >= width - margin_width):
+                        margin_pixels += 1
+            if margin_pixels >= 5:
+                return True
+    return False
+
+
+def _foreground_component_boxes(foreground: Image.Image, *, max_components: int) -> list[tuple[int, int, int, int, int]]:
+    width, height = foreground.size
+    pixels = foreground.load()
+    seen: set[tuple[int, int]] = set()
+    boxes: list[tuple[int, int, int, int, int]] = []
+    for y in range(height):
+        for x in range(width):
+            if not pixels[x, y] or (x, y) in seen:
+                continue
+            stack = [(x, y)]
+            seen.add((x, y))
+            left = right = x
+            top = bottom = y
+            count = 0
+            while stack:
+                current_x, current_y = stack.pop()
+                count += 1
+                left = min(left, current_x)
+                right = max(right, current_x)
+                top = min(top, current_y)
+                bottom = max(bottom, current_y)
+                for next_x in range(max(0, current_x - 1), min(width, current_x + 2)):
+                    for next_y in range(max(0, current_y - 1), min(height, current_y + 2)):
+                        if (next_x, next_y) in seen or not pixels[next_x, next_y]:
+                            continue
+                        seen.add((next_x, next_y))
+                        stack.append((next_x, next_y))
+            boxes.append((left, top, right, bottom, count))
+            if len(boxes) > max_components:
+                return boxes
+    return boxes
 
 
 def _empty_scanline_lightening_plan(
