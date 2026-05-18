@@ -1212,6 +1212,9 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             input_dir.mkdir()
             pages = {
                 "private_safe_diagonal_fold_shadow.png": _subtle_diagonal_fold_shadow_page(),
+                "private_safe_diagonal_fold_sparse_text_crossing.png": _subtle_diagonal_fold_shadow_page(
+                    "sparse_text_crossing"
+                ),
                 "private_diagonal_fold_handwriting.png": _subtle_diagonal_fold_shadow_page("handwriting"),
                 "private_diagonal_fold_page_number.png": _subtle_diagonal_fold_shadow_page("page_number"),
                 "private_diagonal_fold_ruled_table.png": _subtle_diagonal_fold_shadow_page("ruled_table"),
@@ -1235,29 +1238,46 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             audit_summary = json.loads(audit_summary_text)
             records = {record["source_relative_path"]: record for record in manifest["files"]}
 
-            safe_record = records["private_safe_diagonal_fold_shadow.png"]
-            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_output:
-                processed_safe = safe_output.convert("RGB")
-            self.assertTrue(safe_record["fold_shadows_lightened"])
-            self.assertEqual(safe_record["fold_shadows_reason_code"], "applied_narrow_neutral_background_band")
-            self.assertEqual(safe_record["fold_shadows_orientation"], "diagonal_tl_br")
-            self.assertEqual(safe_record["fold_shadows_count"], 1)
-            self.assertGreaterEqual(safe_record["fold_shadows_delta"], 3.0)
-            self.assertGreater(safe_record["fold_shadows_candidate_pixel_ratio"], 0.002)
-            self.assertLessEqual(safe_record["fold_shadows_candidate_pixel_ratio"], 0.12)
-            self.assertGreater(safe_record["fold_shadows_changed_pixel_ratio"], 0.002)
-            self.assertLessEqual(safe_record["fold_shadows_changed_pixel_ratio"], 0.075)
-            self.assertEqual(safe_record["processing_audit"]["guardrail_failures"], [])
-            self.assertGreater(
-                processed_safe.convert("L").getpixel((110, 60)),
-                pages["private_safe_diagonal_fold_shadow.png"].convert("L").getpixel((110, 60)),
-            )
-            self.assertEqual(
-                processed_safe.convert("L").getpixel((40, 122)),
-                pages["private_safe_diagonal_fold_shadow.png"].convert("L").getpixel((40, 122)),
-            )
+            safe_names = {
+                "private_safe_diagonal_fold_shadow.png",
+                "private_safe_diagonal_fold_sparse_text_crossing.png",
+            }
+            for safe_name in safe_names:
+                safe_record = records[safe_name]
+                with Image.open(process_dir / safe_record["output_relative_path"]) as safe_output:
+                    processed_safe = safe_output.convert("RGB")
+                self.assertTrue(safe_record["fold_shadows_lightened"], safe_name)
+                self.assertEqual(
+                    safe_record["fold_shadows_reason_code"],
+                    "applied_narrow_neutral_background_band",
+                    safe_name,
+                )
+                self.assertEqual(safe_record["fold_shadows_orientation"], "diagonal_tl_br", safe_name)
+                self.assertEqual(safe_record["fold_shadows_count"], 1, safe_name)
+                self.assertGreaterEqual(safe_record["fold_shadows_delta"], 3.0, safe_name)
+                self.assertGreater(safe_record["fold_shadows_candidate_pixel_ratio"], 0.002, safe_name)
+                self.assertLessEqual(safe_record["fold_shadows_candidate_pixel_ratio"], 0.12, safe_name)
+                self.assertGreater(safe_record["fold_shadows_changed_pixel_ratio"], 0.002, safe_name)
+                self.assertLessEqual(safe_record["fold_shadows_changed_pixel_ratio"], 0.075, safe_name)
+                self.assertEqual(safe_record["processing_audit"]["guardrail_failures"], [], safe_name)
+                self.assertGreater(
+                    processed_safe.convert("L").getpixel((110, 60)),
+                    pages[safe_name].convert("L").getpixel((110, 60)),
+                    safe_name,
+                )
+                self.assertEqual(
+                    processed_safe.convert("L").getpixel((40, 122)),
+                    pages[safe_name].convert("L").getpixel((40, 122)),
+                    safe_name,
+                )
+            sparse_safe = "private_safe_diagonal_fold_sparse_text_crossing.png"
+            with Image.open(process_dir / records[sparse_safe]["output_relative_path"]) as sparse_output:
+                self.assertEqual(
+                    sparse_output.convert("L").getpixel((120, 80)),
+                    pages[sparse_safe].convert("L").getpixel((120, 80)),
+                )
 
-            protected_names = set(pages) - {"private_safe_diagonal_fold_shadow.png"}
+            protected_names = set(pages) - safe_names
             for name in protected_names:
                 record = records[name]
                 with Image.open(process_dir / record["output_relative_path"]) as protected_output:
@@ -1268,13 +1288,13 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 self.assertEqual(processed.tobytes(), pages[name].tobytes(), name)
 
             fold_guard = audit_summary["guardrails"]["fold_shadows"]
-            self.assertEqual(audit_summary["counts"]["fold_shadows_lightened_files"], 1)
+            self.assertEqual(audit_summary["counts"]["fold_shadows_lightened_files"], len(safe_names))
             self.assertEqual(audit_summary["counts"]["fold_shadows_skipped_files"], len(protected_names))
-            self.assertEqual(fold_guard["applied_files"], 1)
+            self.assertEqual(fold_guard["applied_files"], len(safe_names))
             self.assertEqual(fold_guard["skipped_files"], len(protected_names))
             self.assertEqual(
                 fold_guard["reason_code_distribution"]["applied_narrow_neutral_background_band"],
-                1,
+                len(safe_names),
             )
             self.assertIn("no_confident_narrow_background_fold_band", fold_guard["skip_reason_code_distribution"])
             self.assertIn("color_content_stamp_or_annotation_risk", fold_guard["skip_reason_code_distribution"])
@@ -4997,7 +5017,10 @@ def _subtle_diagonal_fold_shadow_page(variant: str = "safe") -> Image.Image:
     draw.rectangle((28, 118, 68, 122), fill=(42, 42, 42))
     draw.rectangle((150, 42, 190, 46), fill=(42, 42, 42))
 
-    if variant == "handwriting":
+    if variant == "sparse_text_crossing":
+        draw.rectangle((112, 78, 154, 82), fill=(42, 42, 42))
+        draw.rectangle((72, 118, 104, 122), fill=(42, 42, 42))
+    elif variant == "handwriting":
         draw.line((92, 44, 152, 104), fill=(45, 45, 45), width=2)
     elif variant == "page_number":
         draw.rectangle((154, 104, 168, 112), fill=(35, 35, 35))

@@ -6950,11 +6950,13 @@ def _fold_shadow_diagonal_plan(
         values: list[int] = []
         selected: list[tuple[int, int]] = []
         selected_crosses: set[int] = set()
+        protected_crosses: set[int] = set()
         protected_count = 0
         dark_count = 0
         for cross, (x, y) in enumerate(coordinates):
             if protected_pixels[x, y]:
                 protected_count += 1
+                protected_crosses.add(cross)
                 continue
             value = int(pixels[x, y])
             values.append(value)
@@ -6969,6 +6971,13 @@ def _fold_shadow_diagonal_plan(
         dark_ratio = dark_count / max(1, len(values)) if values else 1.0
         mean = sum(values) / len(values) if values else 0.0
         continuity = _fold_shadow_cross_continuity(selected_crosses, cross_length)
+        sparse_foreground_crossings = (
+            available_ratio >= 0.76
+            and protected_count / max(1, cross_length) <= 0.24
+            and _fold_shadow_diagonal_protected_crossings_are_sparse(protected_crosses, cross_length)
+        )
+        bridge_continuity = _fold_shadow_cross_continuity(selected_crosses | protected_crosses, cross_length)
+        sparse_text_bridge = sparse_foreground_crossings and bridge_continuity["usable"]
         stats.append(
             {
                 "mean": mean,
@@ -6978,14 +6987,26 @@ def _fold_shadow_diagonal_plan(
                 "dark_ratio": dark_ratio,
                 "selected": selected,
                 "selected_crosses": selected_crosses,
+                "protected_crosses": protected_crosses,
+                "bridge_continuity": bridge_continuity,
+                "sparse_foreground_crossings": sparse_foreground_crossings,
+                "sparse_text_bridge": sparse_text_bridge,
                 "cross_length": cross_length,
             }
         )
         if (
             edge_margin <= index < axis_length - edge_margin
             and cross_length >= min_cross_length
-            and available_ratio >= 0.92
-            and (candidate_ratio >= 0.55 or (candidate_ratio >= 0.42 and continuity["usable"]))
+            and (available_ratio >= 0.92 or sparse_text_bridge)
+            and (
+                candidate_ratio >= 0.55
+                or (candidate_ratio >= 0.42 and continuity["usable"])
+                or (
+                    candidate_ratio >= 0.42
+                    and sparse_text_bridge
+                    and bridge_continuity["usable"]
+                )
+            )
             and dark_ratio <= 0.0015
         ):
             candidate_indexes.append(index)
@@ -7016,7 +7037,10 @@ def _fold_shadow_diagonal_plan(
             if abs(offset) >= max(min_width, band_width + 2)
             for neighbor in [center + offset]
             if 0 <= neighbor < axis_length
-            and stats[neighbor]["available_ratio"] >= 0.92
+            and (
+                stats[neighbor]["available_ratio"] >= 0.92
+                or stats[neighbor]["sparse_foreground_crossings"]
+            )
             and stats[neighbor]["cross_length"] >= min_cross_length
         ]
         if not neighbor_means:
@@ -7032,19 +7056,27 @@ def _fold_shadow_diagonal_plan(
                 "ruled content intersects candidate fold band",
                 candidate_total_ratio,
             )
-        if any(stats[index]["protected_ratio"] > 0.004 for index in group):
+        if any(
+            stats[index]["protected_ratio"] > 0.004 and not stats[index]["sparse_text_bridge"]
+            for index in group
+        ):
             return _empty_fold_shadow_plan(
                 orientation,
                 "foreground intersects candidate fold band",
                 candidate_total_ratio,
             )
         group_crosses: set[int] = set()
+        group_bridge_crosses: set[int] = set()
         group_cross_length = 0
         for index in group:
             group_crosses.update(stats[index]["selected_crosses"])
+            if stats[index]["sparse_text_bridge"]:
+                group_bridge_crosses.update(stats[index]["selected_crosses"])
+                group_bridge_crosses.update(stats[index]["protected_crosses"])
             group_cross_length = max(group_cross_length, stats[index]["cross_length"])
         group_continuity = _fold_shadow_cross_continuity(group_crosses, group_cross_length)
-        if not group_continuity["usable"]:
+        group_bridge_continuity = _fold_shadow_cross_continuity(group_bridge_crosses, group_cross_length)
+        if not group_continuity["usable"] and not group_bridge_continuity["usable"]:
             continue
         selected_groups.append(group)
         for index in group:
@@ -7145,6 +7177,26 @@ def _fold_shadow_protected_crossings_are_sparse(protected_crosses: set[int], cro
         previous = current
     longest_run = max(longest_run, current_run)
     return longest_run <= max(18, int(round(cross_length * 0.09)))
+
+
+def _fold_shadow_diagonal_protected_crossings_are_sparse(protected_crosses: set[int], cross_length: int) -> bool:
+    if _fold_shadow_protected_crossings_are_sparse(protected_crosses, cross_length):
+        return True
+    if cross_length <= 0 or not protected_crosses:
+        return True
+    ordered = sorted(protected_crosses)
+    longest_run = 1
+    current_run = 1
+    previous = ordered[0]
+    for current in ordered[1:]:
+        if current == previous + 1:
+            current_run += 1
+        else:
+            longest_run = max(longest_run, current_run)
+            current_run = 1
+        previous = current
+    longest_run = max(longest_run, current_run)
+    return longest_run <= max(22, int(round(cross_length * 0.12)))
 
 
 def _fold_shadow_group_has_ruled_content(stats: list[dict[str, Any]], group: list[int]) -> bool:
