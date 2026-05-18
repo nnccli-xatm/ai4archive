@@ -8280,13 +8280,14 @@ def _lighten_scanlines_conservative(image: Image.Image) -> ScanlineLighteningRes
     p99 = _histogram_percentile(histogram, total, 0.99)
     if p95 < 210 or p50 < 190:
         return _scanlines_noop(image, "scanline lightening skipped: page is too dark")
-    if p99 - p01 < 24:
-        return _scanlines_noop(image, "scanline lightening skipped: low-confidence tonal evidence")
+    sparse_tonal_evidence = p99 - p01 < 24
 
     foreground_threshold = min(155, max(78, p50 - 44))
     foreground = grayscale.point(lambda value: 255 if value <= foreground_threshold else 0, mode="L")
     foreground_ratio = _mask_ratio(foreground)
     if foreground_ratio < 0.0015:
+        if sparse_tonal_evidence:
+            return _scanlines_noop(image, "scanline lightening skipped: low-confidence tonal evidence")
         return _scanlines_noop(image, "scanline lightening skipped: foreground evidence too sparse")
     if foreground_ratio > 0.08 and p05 < 70:
         return _scanlines_noop(image, "scanline lightening skipped: foreground too dense")
@@ -8335,7 +8336,8 @@ def _lighten_scanlines_conservative(image: Image.Image) -> ScanlineLighteningRes
             )
     plan = horizontal if horizontal["score"] >= vertical["score"] else vertical
     if plan["reason"]:
-        return _scanlines_noop(image, f"scanline lightening skipped: {plan['reason']}", plan["candidate_ratio"])
+        reason = "low-confidence tonal evidence" if sparse_tonal_evidence else plan["reason"]
+        return _scanlines_noop(image, f"scanline lightening skipped: {reason}", plan["candidate_ratio"])
 
     selected = plan["selected"]
     selected_count = len(selected)

@@ -2857,6 +2857,81 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_sparse_intermittent_scanline_cleanup_preserves_protected_content(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-sparse-intermittent-scanline-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_safe_sparse_intermittent_scanline.png": _sparse_intermittent_scanline_page(),
+                "synthetic_protected_sparse_table_scanline.png": _sparse_intermittent_scanline_page("table"),
+                "synthetic_protected_sparse_handwriting_scanline.png": _sparse_intermittent_scanline_page("handwriting"),
+                "synthetic_protected_sparse_stamp_scanline.png": _sparse_intermittent_scanline_page("stamp"),
+                "synthetic_protected_sparse_dense_text_scanline.png": _sparse_intermittent_scanline_page("dense_text"),
+                "synthetic_protected_sparse_texture_scanline.png": _sparse_intermittent_scanline_page("texture"),
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "sparse-intermittent-scanline", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(lighten_scanlines=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            safe_name = "synthetic_safe_sparse_intermittent_scanline.png"
+            safe_record = records[safe_name]
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_output:
+                processed_safe = safe_output.convert("RGB")
+
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertTrue(safe_record["scanlines_lightened"])
+            self.assertEqual(safe_record["scanlines_orientation"], "horizontal")
+            self.assertIn("lighten_scanlines_conservative", safe_record["operations"])
+            self.assertGreater(
+                _mean_luma(processed_safe, (34, 124, 244, 150)),
+                _mean_luma(pages[safe_name], (34, 124, 244, 150)) + 0.2,
+            )
+            self.assertEqual(safe_record["processing_audit"]["guardrail_failures"], [])
+            self.assertEqual(safe_record["processing_audit"]["cumulative_change_guard_action"], "passed")
+            self.assertEqual(safe_record["processing_audit"]["combination_quality_guard_action"], "passed")
+            self.assertGreater(safe_record["scanlines_changed_pixel_ratio"], 0.0007)
+            self.assertLess(safe_record["scanlines_changed_pixel_ratio"], 0.02)
+            self.assertLessEqual(safe_record["scanlines_candidate_pixel_ratio"], 0.02)
+
+            protected_names = set(pages) - {safe_name}
+            for name in protected_names:
+                record = records[name]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
+                self.assertFalse(record["scanlines_lightened"], name)
+                self.assertIn("lighten_scanlines_noop", record["operations"], name)
+                self.assertEqual(record["scanlines_changed_pixel_ratio"], 0.0, name)
+                self.assertIsInstance(record["scanlines_reason"], str, name)
+                with Image.open(process_dir / record["output_relative_path"]) as processed:
+                    self.assertEqual(processed.convert("RGB").tobytes(), pages[name].tobytes(), name)
+
+            self.assertEqual(audit_summary["counts"]["scanlines_lightened_files"], 1)
+            self.assertEqual(audit_summary["counts"]["scanlines_skipped_files"], len(protected_names))
+            scanline_guard = audit_summary["guardrails"]["scanlines"]
+            self.assertEqual(scanline_guard["applied_files"], 1)
+            self.assertEqual(scanline_guard["skipped_files"], len(protected_names))
+            self.assertGreaterEqual(scanline_guard["protection_triggered_files"], 3)
+            self.assertGreaterEqual(len(scanline_guard["skip_reason_distribution"]), 4)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_safe_cloud_background_stain_stays_bounded_and_private(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-cloud-stain-combo-") as temp_dir:
             root = Path(temp_dir)
@@ -6696,6 +6771,38 @@ def _very_subtle_scanline_page(variant: str = "safe") -> Image.Image:
         for y in (44, 68):
             draw.rectangle((46, y, 115, y + 4), fill=(42, 42, 42))
         draw.rectangle((12, 18, 12, 202), fill=(241, 241, 237))
+    else:
+        raise ValueError(f"unsupported variant: {variant}")
+    return image
+
+
+def _sparse_intermittent_scanline_page(variant: str = "safe") -> Image.Image:
+    image = Image.new("RGB", (300, 220), (242, 242, 238))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((46, 44, 78, 47), fill=(42, 42, 42))
+    draw.rectangle((46, 68, 72, 71), fill=(42, 42, 42))
+    for y in (124, 136, 148):
+        for x0 in (34, 82, 130, 178, 226):
+            draw.rectangle((x0, y, x0 + 17, y + 1), fill=(238, 238, 234))
+    if variant == "safe":
+        return image
+    if variant == "table":
+        for x in (54, 104, 154, 204, 254):
+            draw.line((x, 30, x, 178), fill=(46, 46, 46), width=2)
+        for y in (88, 112, 160):
+            draw.line((34, y, 274, y), fill=(46, 46, 46), width=2)
+    elif variant == "handwriting":
+        draw.line((14, 94, 62, 106, 112, 96, 160, 118), fill=(70, 70, 66), width=2)
+    elif variant == "stamp":
+        draw.ellipse((184, 72, 258, 146), outline=(180, 20, 20), width=4)
+    elif variant == "dense_text":
+        for y in range(28, 178, 12):
+            draw.rectangle((34, y, 260, y + 5), fill=(48, 48, 48))
+    elif variant == "texture":
+        for y in range(20, 204, 5):
+            for x in range(20, 284, 7):
+                if (x * 3 + y * 5) % 4:
+                    draw.point((x, y), fill=(96, 96, 92))
     else:
         raise ValueError(f"unsupported variant: {variant}")
     return image
