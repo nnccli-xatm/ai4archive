@@ -14590,10 +14590,19 @@ class ScanQcTest(unittest.TestCase):
                 audit["combination_quality_guard_reason_code"],
                 "combined_change_too_large_reverted",
             )
+            self.assertIn("retouch_changed_pixel_ratio", audit["cumulative_change_guard_reasons"])
+            self.assertGreater(audit["cumulative_retouch_changed_pixel_ratio"], 0.16)
             self.assertIn("combination_quality_guard_reverted_to_source", record["operations"])
             with Image.open(process_dir / "images" / "private_high_risk_combo.png") as processed:
                 self.assertEqual(processed.convert("RGB").tobytes(), image.tobytes())
             self.assertEqual(audit_summary["counts"]["combination_quality_guard_reverted_files"], 1)
+            self.assertIn("cumulative_retouch_changed_pixel_ratio", audit_summary["metrics"])
+            self.assertEqual(
+                audit_summary["guardrails"]["cumulative_change_guard"]["reason_distribution"][
+                    "retouch_changed_pixel_ratio"
+                ],
+                1,
+            )
             self.assertEqual(
                 audit_summary["guardrails"]["combination_quality_guard"]["reason_code_distribution"][
                     "combined_change_too_large_reverted"
