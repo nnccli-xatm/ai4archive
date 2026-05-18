@@ -2770,6 +2770,100 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_deskew_corrects_mild_sparse_typed_text_and_preserves_protected_aggregates(self) -> None:
+        def draw_segmented_typed_line(draw: ImageDraw.ImageDraw, *, x: int, y: int) -> None:
+            index = 0
+            while x < 360:
+                width = 5 + (index % 5)
+                height = 8 + (index % 3)
+                draw.rectangle((x, y, x + width, y + height), fill=(140, 140, 138))
+                x += width + 4 + (index % 2)
+                index += 1
+
+        def mild_sparse_page(variant: str) -> Image.Image:
+            image = Image.new("RGB", (520, 680), (248, 248, 246))
+            draw = ImageDraw.Draw(image)
+            if variant == "safe_text":
+                for y in (185, 231):
+                    draw_segmented_typed_line(draw, x=130, y=y)
+            elif variant == "one_line":
+                draw_segmented_typed_line(draw, x=130, y=205)
+            elif variant == "ruled":
+                for y in (190, 236):
+                    draw.line((120, y, 390, y), fill=(52, 52, 50), width=2)
+            elif variant == "table":
+                for y in (180, 226, 272):
+                    draw.line((120, y, 390, y), fill=(52, 52, 50), width=2)
+                for x in (132, 164, 196, 228, 260, 292, 324, 356):
+                    draw.line((x, 165, x, 285), fill=(52, 52, 50), width=2)
+            elif variant == "texture":
+                for index in range(90):
+                    x = 80 + (index * 37) % 360
+                    y = 110 + (index * 53) % 430
+                    shade = 90 + (index % 20)
+                    draw.rectangle((x, y, x + 2 + (index % 3), y + 1 + (index % 2)), fill=(shade, shade, shade))
+            else:
+                raise ValueError(f"unsupported mild sparse deskew variant: {variant}")
+            return image.rotate(-0.45, resample=Image.Resampling.BICUBIC, expand=True, fillcolor=(248, 248, 246))
+
+        with tempfile.TemporaryDirectory(prefix="scan-processing-mild-sparse-deskew-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            variants = ("safe_text", "one_line", "ruled", "table", "texture")
+            pages = {f"synthetic_mild_sparse_deskew_{variant}.png": mild_sparse_page(variant) for variant in variants}
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "mild-sparse-deskew-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(deskew=True, workers=1))
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_name = "synthetic_mild_sparse_deskew_safe_text.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertTrue(safe_record["deskewed"])
+            self.assertAlmostEqual(safe_record["skew_angle_degrees"], -0.45, delta=0.20)
+            self.assertEqual(safe_record["deskew_reason"], "deskew applied")
+            self.assertIn("deskew_conservative", safe_record["operations"])
+            self.assertLessEqual(safe_audit["size_change_ratio"], 0.03)
+            self.assertLessEqual(safe_audit["cumulative_change_pixel_ratio"], 0.03)
+
+            expected_reasons = {
+                "synthetic_mild_sparse_deskew_one_line.png": {"low contrast", "low confidence"},
+                "synthetic_mild_sparse_deskew_ruled.png": {"low contrast", "table or color mark rotation risk"},
+                "synthetic_mild_sparse_deskew_table.png": {"table or color mark rotation risk"},
+                "synthetic_mild_sparse_deskew_texture.png": {"low contrast", "low confidence"},
+            }
+            for name, public_reasons in expected_reasons.items():
+                record = records[name]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name])
+                self.assertFalse(record["deskewed"], name)
+                self.assertIn(record["deskew_reason"], public_reasons, name)
+                self.assertIn("deskew_noop", record["operations"], name)
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    self.assertIsNone(ImageChops.difference(pages[name], output.convert("RGB")).getbbox(), name)
+
+            deskew_summary = audit_summary["guardrails"]["deskew"]
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["deskewed_files"], 1)
+            self.assertEqual(audit_summary["counts"]["deskew_skipped_files"], len(expected_reasons))
+            self.assertEqual(deskew_summary["corrected_files"], 1)
+            self.assertEqual(deskew_summary["reason_distribution"]["deskew applied"], 1)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_post_deskew_corner_wedge_crop_stays_within_geometry_limits(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-post-deskew-wedge-full-chain-") as temp_dir:
             root = Path(temp_dir)
