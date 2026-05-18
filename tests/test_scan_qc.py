@@ -11105,6 +11105,52 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn("A001_single_shadow_band", audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
 
+    def test_trim_dark_border_trims_interrupted_single_scanner_shadow_band(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "A001_interrupted_single_shadow_band.png"
+            image = Image.new("RGB", (180, 120), (244, 244, 240))
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((0, 0, 4, 119), fill=(92, 92, 92))
+            for y0, y1 in ((22, 30), (58, 66), (94, 102)):
+                draw.rectangle((0, y0, 4, y1), fill=(244, 244, 240))
+            for y in (42, 58, 74):
+                draw.rectangle((52, y, 132, y + 4), fill=(30, 30, 30))
+            image.save(source, dpi=(300, 300))
+            source_bytes = source.read_bytes()
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(trim_dark_border=True, workers=1))
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            record = manifest["files"][0]
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertTrue(record["dark_border_trimmed"])
+            self.assertEqual(record["dark_border_bbox"], [5, 0, 180, 120])
+            self.assertEqual(record["output_size"], [175, 120])
+            self.assertLessEqual(record["processing_audit"]["max_trim_margin_ratio"], 0.028)
+            self.assertEqual(record["dark_border_reason"], "broken single dark edge shadow trimmed")
+            self.assertEqual(record["dark_border_reason_code"], "trimmed_broken_single_edge_shadow")
+            self.assertEqual(record["dark_border_edge_sides"], ["left"])
+            self.assertEqual(record["dark_border_band_width_bucket"], "5-8px")
+            self.assertEqual(audit_summary["counts"]["dark_border_trimmed_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["dark_border_trim"]["guardrail_reason_code_distribution"],
+                {"trimmed_broken_single_edge_shadow": 1},
+            )
+            self.assertEqual(
+                audit_summary["guardrails"]["dark_border_trim"]["edge_side_distribution"],
+                {"left": 1},
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("A001_interrupted_single_shadow_band", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
     def test_trim_dark_border_trims_broken_scan_edge_with_light_glare_gap(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -11275,6 +11321,20 @@ class ScanQcTest(unittest.TestCase):
 
         self.assertIsNone(detection.bbox)
         self.assertEqual(detection.reason, "protected edge content near dark border")
+
+    def test_trim_dark_border_noops_for_broad_single_edge_interruption(self) -> None:
+        image = Image.new("RGB", (180, 120), (244, 244, 240))
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((0, 0, 4, 119), fill=(92, 92, 92))
+        draw.rectangle((0, 22, 4, 44), fill=(244, 244, 240))
+        draw.rectangle((52, 58, 132, 62), fill=(30, 30, 30))
+
+        detection = detect_dark_border_bbox(image)
+
+        self.assertIsNone(detection.bbox)
+        self.assertEqual(detection.reason, "incomplete dark edge border evidence")
+        self.assertEqual(detection.reason_code, "incomplete_dark_edge_border_evidence")
+        self.assertEqual(detection.edge_sides, ("left",))
 
     def test_trim_dark_border_noops_for_fragmented_broken_frame_blocks(self) -> None:
         image = Image.new("RGB", (120, 90), (244, 244, 240))
