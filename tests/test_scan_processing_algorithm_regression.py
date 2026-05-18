@@ -87,6 +87,26 @@ def _intermittent_scanline_guard_page(variant: str) -> Image.Image:
     raise ValueError(f"unsupported intermittent scanline guard variant: {variant}")
 
 
+def _clean_background_scanner_glass_streak_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (260, 180), (244, 244, 240))
+    draw = ImageDraw.Draw(image)
+    if variant == "horizontal":
+        draw.rectangle((24, 92, 236, 93), fill=(238, 238, 234))
+    elif variant == "vertical":
+        draw.rectangle((130, 22, 131, 158), fill=(238, 238, 234))
+    elif variant == "ruled_background":
+        for y in range(30, 154, 18):
+            draw.rectangle((24, y, 236, y + 1), fill=(238, 238, 234))
+    elif variant == "underline":
+        draw.line((24, 90, 236, 90), fill=(80, 80, 80), width=1)
+    elif variant == "page_number":
+        draw.rectangle((24, 92, 236, 93), fill=(238, 238, 234))
+        draw.rectangle((120, 160, 140, 170), fill=(60, 60, 60))
+    else:
+        raise ValueError(f"unsupported clean background streak variant: {variant}")
+    return image
+
+
 class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
     def test_combination_quality_guard_classifies_public_reason_codes(self) -> None:
         options = ProcessingOptions()
@@ -1542,6 +1562,38 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 protected_result = processing_module._lighten_scanlines_conservative(protected_page)
                 self.assertFalse(protected_result.applied)
                 self.assertIn("SCANLINE_CONTENT_RISK", protected_result.reason)
+                self.assertEqual(protected_result.changed_pixel_ratio, 0.0)
+                self.assertLess(
+                    _changed_ratio(
+                        protected_page,
+                        protected_result.image,
+                        (0, 0, protected_page.width, protected_page.height),
+                    ),
+                    0.001,
+                )
+
+    def test_clean_background_scanner_glass_streak_cleanup_stays_isolated(self) -> None:
+        for variant, orientation in (("horizontal", "horizontal"), ("vertical", "vertical")):
+            with self.subTest(variant=variant):
+                safe_page = _clean_background_scanner_glass_streak_page(variant)
+                safe_result = processing_module._lighten_scanlines_conservative(safe_page)
+                self.assertTrue(safe_result.applied)
+                self.assertEqual(safe_result.orientation, orientation)
+                self.assertGreater(safe_result.changed_pixel_ratio, 0.0007)
+                self.assertLess(safe_result.changed_pixel_ratio, 0.018)
+                self.assertEqual(safe_result.reason, "scanline lightening applied: low-contrast neutral background scanlines")
+
+        protected_expectations = {
+            "ruled_background": "SCANLINE_SCOPE_RISK",
+            "underline": "SCANLINE_CONTENT_RISK",
+            "page_number": "SCANLINE_EDGE_CONTENT_RISK",
+        }
+        for variant, reason_fragment in protected_expectations.items():
+            with self.subTest(variant=variant):
+                protected_page = _clean_background_scanner_glass_streak_page(variant)
+                protected_result = processing_module._lighten_scanlines_conservative(protected_page)
+                self.assertFalse(protected_result.applied)
+                self.assertIn(reason_fragment, protected_result.reason)
                 self.assertEqual(protected_result.changed_pixel_ratio, 0.0)
                 self.assertLess(
                     _changed_ratio(

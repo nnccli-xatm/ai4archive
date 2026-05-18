@@ -8556,6 +8556,99 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn("private_faint_intermittent_scanline", audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
 
+    def test_lighten_scanlines_repairs_clean_background_scanner_glass_streaks_with_aggregate_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "private_clean_horizontal_glass_streak.png": _synthetic_clean_background_scanner_glass_streak_page(
+                    "horizontal"
+                ),
+                "private_clean_vertical_glass_streak.png": _synthetic_clean_background_scanner_glass_streak_page(
+                    "vertical"
+                ),
+                "private_clean_ruled_background.png": _synthetic_clean_background_scanner_glass_streak_page(
+                    "ruled_background"
+                ),
+                "private_clean_underline.png": _synthetic_clean_background_scanner_glass_streak_page("underline"),
+                "private_clean_page_number.png": _synthetic_clean_background_scanner_glass_streak_page("page_number"),
+            }
+            source_hashes_before = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_hashes_before[name] = _sha256_for_test(source)
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(lighten_scanlines=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_expectations = {
+                "private_clean_horizontal_glass_streak.png": ("horizontal", (24, 92, 236, 94)),
+                "private_clean_vertical_glass_streak.png": ("vertical", (130, 22, 132, 158)),
+            }
+            for source_name, (orientation, line_box) in safe_expectations.items():
+                record = records[source_name]
+                processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+                self.assertTrue(record["scanlines_lightened"], source_name)
+                self.assertEqual(record["scanlines_orientation"], orientation)
+                self.assertIn("lighten_scanlines_conservative", record["operations"])
+                self.assertGreater(
+                    _box_luma(processed, line_box),
+                    _box_luma(pages[source_name], line_box) + 3.0,
+                    source_name,
+                )
+                self.assertGreater(record["scanlines_changed_pixel_ratio"], 0.0007, source_name)
+                self.assertLess(record["scanlines_changed_pixel_ratio"], 0.018, source_name)
+                self.assertLessEqual(record["scanlines_candidate_pixel_ratio"], 0.018, source_name)
+                self.assertEqual(record["processing_audit"]["guardrail_failures"], [], source_name)
+                self.assertEqual(record["processing_audit"]["cumulative_change_guard_action"], "passed", source_name)
+                self.assertEqual(source_hashes_before[source_name], _sha256_for_test(input_dir / source_name))
+
+            protected_expectations = {
+                "private_clean_ruled_background.png": "SCANLINE_SCOPE_RISK",
+                "private_clean_underline.png": "SCANLINE_CONTENT_RISK",
+                "private_clean_page_number.png": "SCANLINE_EDGE_CONTENT_RISK",
+            }
+            for source_name, reason_fragment in protected_expectations.items():
+                record = records[source_name]
+                processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+                self.assertFalse(record["scanlines_lightened"], source_name)
+                self.assertIn("lighten_scanlines_noop", record["operations"], source_name)
+                self.assertIn(reason_fragment, record["scanlines_reason"], source_name)
+                self.assertEqual(record["scanlines_changed_pixel_ratio"], 0.0, source_name)
+                self.assertLess(
+                    _changed_ratio_for_test(pages[source_name], processed, (0, 0, processed.width, processed.height)),
+                    0.001,
+                    source_name,
+                )
+                self.assertEqual(source_hashes_before[source_name], _sha256_for_test(input_dir / source_name))
+
+            scanline_guard = audit_summary["guardrails"]["scanlines"]
+            self.assertEqual(audit_summary["counts"]["scanlines_lightened_files"], 2)
+            self.assertEqual(audit_summary["counts"]["scanlines_skipped_files"], len(protected_expectations))
+            self.assertEqual(scanline_guard["applied_files"], 2)
+            self.assertEqual(scanline_guard["skipped_files"], len(protected_expectations))
+            self.assertEqual(scanline_guard["direction_distribution"]["horizontal"], 1)
+            self.assertEqual(scanline_guard["direction_distribution"]["vertical"], 1)
+            self.assertGreaterEqual(scanline_guard["protection_triggered_files"], 3)
+            self.assertIn("scanlines_changed_pixel_ratio", audit_summary["metrics"])
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_lighten_scanlines_skips_protected_content_and_uncertain_pages(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -17612,6 +17705,26 @@ def _synthetic_faint_intermittent_scanline_page() -> Image.Image:
     for y in (122, 132, 144):
         for x0 in (18, 54, 92, 132, 172, 212):
             draw.rectangle((x0, y, x0 + 14, y + 1), fill=(237, 237, 233))
+    return image
+
+
+def _synthetic_clean_background_scanner_glass_streak_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (260, 180), (244, 244, 240))
+    draw = ImageDraw.Draw(image)
+    if variant == "horizontal":
+        draw.rectangle((24, 92, 236, 93), fill=(238, 238, 234))
+    elif variant == "vertical":
+        draw.rectangle((130, 22, 131, 158), fill=(238, 238, 234))
+    elif variant == "ruled_background":
+        for y in range(30, 154, 18):
+            draw.rectangle((24, y, 236, y + 1), fill=(238, 238, 234))
+    elif variant == "underline":
+        draw.line((24, 90, 236, 90), fill=(80, 80, 80), width=1)
+    elif variant == "page_number":
+        draw.rectangle((24, 92, 236, 93), fill=(238, 238, 234))
+        draw.rectangle((120, 160, 140, 170), fill=(60, 60, 60))
+    else:
+        raise ValueError(f"unknown clean background scanner glass streak variant: {variant}")
     return image
 
 
