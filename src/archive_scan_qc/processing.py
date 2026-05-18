@@ -6048,6 +6048,17 @@ def _level_illumination_gradient_conservative(image: Image.Image) -> Illuminatio
     plan = max((vertical, horizontal, diagonal_tl_br, diagonal_tr_bl), key=lambda candidate_plan: candidate_plan["score"])
     if plan["reason_code"] != "applied":
         return _illumination_gradient_noop(image, plan["reason"], plan["reason_code"], plan["candidate_ratio"])
+    if (
+        foreground_ratio > 0.0002
+        and (plan.get("shape") == "one_edge" or plan.get("one_edge_side") in {"start", "end"})
+        and _illumination_gradient_foreground_on_one_edge_falloff(foreground, plan)
+    ):
+        return _illumination_gradient_noop(
+            image,
+            "protected sparse foreground content near one-edge falloff",
+            "protected_content",
+            plan["candidate_ratio"],
+        )
 
     profile: list[float] = plan["profile"]
     candidate_threshold = plan["candidate_threshold"]
@@ -6470,6 +6481,8 @@ def _illumination_gradient_axis_plan(grayscale: Image.Image, *, vertical: bool) 
         "reason_code": "applied",
         "score": score,
         "shape": plan_shape,
+        "side": one_edge_shape.get("side") if plan_shape == "one_edge" and one_edge_shape is not None else None,
+        "one_edge_side": one_edge_shape.get("side") if one_edge_shape is not None else None,
         "delta": round(delta, 6),
         "candidate_ratio": round(candidate_ratio, 6),
         "candidate_threshold": candidate_threshold,
@@ -6477,7 +6490,7 @@ def _illumination_gradient_axis_plan(grayscale: Image.Image, *, vertical: bool) 
     }
 
 
-def _illumination_gradient_one_edge_shape(profile: list[float]) -> dict[str, float] | None:
+def _illumination_gradient_one_edge_shape(profile: list[float]) -> dict[str, Any] | None:
     axis_length = len(profile)
     if axis_length < 80:
         return None
@@ -6494,7 +6507,7 @@ def _illumination_gradient_one_edge_shape(profile: list[float]) -> dict[str, flo
         plateau_variance = sum((value - plateau_mean) ** 2 for value in plateau_values) / plateau_width
         plateau_stddev = math.sqrt(plateau_variance)
         delta = plateau_mean - edge_mean
-        if delta < 6.0 or delta > 22.0 or plateau_stddev > 1.25:
+        if delta < 4.5 or delta > 22.0 or plateau_stddev > 1.25:
             continue
 
         best_stable: tuple[int, float] | None = None
@@ -6531,10 +6544,38 @@ def _illumination_gradient_one_edge_shape(profile: list[float]) -> dict[str, flo
             "delta": round(delta, 6),
             "mean_residual": round(mean_residual, 6),
             "score": round(score, 6),
+            "side": side,
         }
         if best is None or candidate["score"] > best["score"]:
             best = candidate
     return best
+
+
+def _illumination_gradient_foreground_on_one_edge_falloff(
+    foreground: Image.Image,
+    plan: dict[str, Any],
+) -> bool:
+    side = plan.get("side") or plan.get("one_edge_side")
+    orientation = plan.get("orientation")
+    if side not in {"start", "end"} or orientation not in {"vertical", "horizontal"}:
+        return False
+    total_foreground = _mask_pixel_count(foreground)
+    if total_foreground <= 0:
+        return False
+    pixels = foreground.load()
+    edge_limit = int(round((foreground.width if orientation == "vertical" else foreground.height) * 0.34))
+    edge_foreground = 0
+    for y in range(foreground.height):
+        for x in range(foreground.width):
+            if not pixels[x, y]:
+                continue
+            position = x if orientation == "vertical" else y
+            on_falloff_edge = position < edge_limit if side == "start" else position >= (
+                (foreground.width if orientation == "vertical" else foreground.height) - edge_limit
+            )
+            if on_falloff_edge:
+                edge_foreground += 1
+    return edge_foreground / max(1, total_foreground) >= 0.35
 
 
 def _illumination_gradient_diagonal_plan(

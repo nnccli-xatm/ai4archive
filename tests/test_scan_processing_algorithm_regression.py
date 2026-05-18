@@ -1540,6 +1540,148 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_illumination_gradient_levels_safe_public_mild_one_edge_falloff(self) -> None:
+        def one_edge_page(variant: str) -> Image.Image:
+            width, height = 240, 160
+            falloff_width = 72
+            page = Image.new("RGB", (width, height))
+            pixels = page.load()
+            for y in range(height):
+                for x in range(width):
+                    if x < falloff_width:
+                        value = int(round(236 + 6 * (x / max(1, falloff_width - 1))))
+                    else:
+                        value = 242
+                    pixels[x, y] = (value, value, value)
+            draw = ImageDraw.Draw(page)
+            font = ImageFont.load_default()
+            if variant == "safe":
+                return page
+            if variant == "low_contrast_edge_text":
+                for offset, text in enumerate(("INDEX", "COPY", "PAGE")):
+                    draw.text((14, 42 + offset * 18), text, fill=(188, 188, 188), font=font)
+            elif variant == "ruled_table":
+                for row in (42, 72, 102):
+                    draw.line((30, row, 214, row), fill=(58, 58, 58), width=2)
+                for column in (74, 130, 186):
+                    draw.line((column, 32, column, 116), fill=(58, 58, 58), width=2)
+            elif variant == "stamp_seal":
+                draw.ellipse((88, 44, 152, 108), outline=(178, 24, 24), width=4)
+                draw.line((104, 76, 136, 76), fill=(178, 24, 24), width=2)
+            elif variant == "handwriting_annotation":
+                points = ((28, 48), (42, 38), (58, 54), (76, 40), (96, 58), (114, 46))
+                for start, end in zip(points, points[1:]):
+                    draw.line((*start, *end), fill=(62, 62, 62), width=2)
+                draw.arc((28, 70, 116, 112), 195, 345, fill=(62, 62, 62), width=2)
+            elif variant == "photo_map_chart":
+                for y in range(28, 132):
+                    for x in range(62, 194):
+                        texture = 176 + ((x * 9 + y * 13 + (x // 7) * (y // 5)) % 46)
+                        pixels[x, y] = (texture, max(0, texture - 8), max(0, texture - 13))
+                draw.line((68, 118, 112, 82, 148, 104, 188, 52), fill=(78, 92, 120), width=2)
+            elif variant == "colored_record":
+                for y in range(height):
+                    for x in range(width):
+                        if x < falloff_width:
+                            base = int(round(236 + 6 * (x / max(1, falloff_width - 1))))
+                        else:
+                            base = 242
+                        pixels[x, y] = (base, max(0, base - 9), max(0, base - 17))
+            elif variant == "dense_foreground":
+                for row in range(24, 136, 8):
+                    draw.rectangle((24, row, 216, row + 3), fill=(88, 88, 88))
+            elif variant == "localized_stain_shadow":
+                draw.ellipse((18, 18, 138, 146), fill=(220, 218, 210))
+                draw.ellipse((38, 38, 116, 124), fill=(224, 222, 214))
+            else:
+                raise ValueError(f"unsupported variant: {variant}")
+            return page
+
+        with tempfile.TemporaryDirectory(prefix="scan-processing-mild-one-edge-illumination-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_safe_mild_one_edge_illumination.png": one_edge_page("safe"),
+                "synthetic_mild_one_edge_low_contrast_edge_text.png": one_edge_page("low_contrast_edge_text"),
+                "synthetic_mild_one_edge_ruled_table.png": one_edge_page("ruled_table"),
+                "synthetic_mild_one_edge_stamp_seal.png": one_edge_page("stamp_seal"),
+                "synthetic_mild_one_edge_handwriting_annotation.png": one_edge_page("handwriting_annotation"),
+                "synthetic_mild_one_edge_photo_map_chart.png": one_edge_page("photo_map_chart"),
+                "synthetic_mild_one_edge_colored_record.png": one_edge_page("colored_record"),
+                "synthetic_mild_one_edge_dense_foreground.png": one_edge_page("dense_foreground"),
+                "synthetic_mild_one_edge_localized_stain_shadow.png": one_edge_page("localized_stain_shadow"),
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "mild-one-edge-illumination", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(level_illumination_gradient=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_name = "synthetic_safe_mild_one_edge_illumination.png"
+            safe_record = records[safe_name]
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertTrue(safe_record["illumination_gradient_levelled"])
+            self.assertEqual(safe_record["illumination_gradient_reason_code"], "applied")
+            self.assertEqual(safe_record["illumination_gradient_orientation"], "vertical")
+            self.assertGreaterEqual(safe_record["illumination_gradient_delta_before"], 4.5)
+            self.assertLess(safe_record["illumination_gradient_delta_after"], safe_record["illumination_gradient_delta_before"])
+            self.assertLessEqual(safe_record["illumination_gradient_correction_delta"], 4.0)
+            self.assertGreater(safe_record["illumination_gradient_changed_pixel_ratio"], 0.05)
+            self.assertLessEqual(safe_record["illumination_gradient_changed_pixel_ratio"], 0.45)
+            self.assertGreaterEqual(safe_record["illumination_gradient_candidate_pixel_ratio"], 0.98)
+            self.assertEqual(safe_record["processing_audit"]["guardrail_failures"], [])
+            with Image.open(process_dir / safe_record["output_relative_path"]) as output:
+                original_edge = _mean_luma(pages[safe_name], (0, 0, 24, 160))
+                original_plateau = _mean_luma(pages[safe_name], (196, 0, 240, 160))
+                processed_edge = _mean_luma(output, (0, 0, 24, 160))
+                processed_plateau = _mean_luma(output, (196, 0, 240, 160))
+                self.assertLess(processed_plateau - processed_edge, original_plateau - original_edge - 1.0)
+
+            protected_names = set(pages) - {safe_name}
+            for name in protected_names:
+                record = records[name]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name])
+                self.assertFalse(record["illumination_gradient_levelled"], name)
+                self.assertIn(
+                    record["illumination_gradient_reason_code"],
+                    {"protected_content", "not_uniform", "low_confidence"},
+                    name,
+                )
+                self.assertEqual(record["illumination_gradient_changed_pixel_ratio"], 0.0, name)
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    self.assertEqual(output.convert("RGB").tobytes(), pages[name].tobytes(), name)
+
+            illumination_summary = audit_summary["guardrails"]["illumination_gradient"]
+            self.assertEqual(audit_summary["counts"]["illumination_gradient_levelled_files"], 1)
+            self.assertEqual(audit_summary["counts"]["illumination_gradient_skipped_files"], len(protected_names))
+            self.assertEqual(illumination_summary["applied_files"], 1)
+            self.assertEqual(illumination_summary["skipped_files"], len(protected_names))
+            self.assertEqual(illumination_summary["reason_code_distribution"]["applied"], 1)
+            self.assertEqual(
+                sum(illumination_summary["skip_reason_code_distribution"].values()),
+                len(protected_names),
+            )
+            self.assertGreaterEqual(illumination_summary["protection_triggered_files"], 4)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_synthetic_combinations_emit_aggregate_quality_and_performance_regression_fields(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-algorithm-regression-") as temp_dir:
             root = Path(temp_dir)
