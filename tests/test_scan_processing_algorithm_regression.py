@@ -3235,6 +3235,83 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_faint_localized_thumbprint_stain_lightens_only_in_whitespace(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-faint-thumbprint-stain-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "S001_safe_faint_thumbprint_stain.png": _faint_thumbprint_stain_page(),
+                "S002_handwriting_stroke_in_smudge.png": _faint_thumbprint_stain_page("handwriting"),
+                "S003_ruled_lines_in_smudge.png": _faint_thumbprint_stain_page("ruled_table"),
+                "S004_color_mark_in_smudge.png": _faint_thumbprint_stain_page("color_mark"),
+                "S005_photo_texture_in_smudge.png": _faint_thumbprint_stain_page("photo_texture"),
+                "S006_edge_content_with_smudge.png": _faint_thumbprint_stain_page("edge_content"),
+                "S007_dense_foreground_with_smudge.png": _faint_thumbprint_stain_page("dense_foreground"),
+            }
+            for name, image in pages.items():
+                image.save(input_dir / name, dpi=(300, 300))
+
+            safe_original = pages["S001_safe_faint_thumbprint_stain.png"].convert("L")
+            original_stain_mean = _mean_luma(safe_original, (164, 68, 210, 108))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "faint-thumbprint-stain", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(lighten_background_stains=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_record = records["S001_safe_faint_thumbprint_stain.png"]
+            safe_audit = safe_record["processing_audit"]
+            with Image.open(process_dir / safe_record["output_relative_path"]) as processed_image:
+                processed_safe = processed_image.convert("L")
+                processed_stain_mean = _mean_luma(processed_safe, (164, 68, 210, 108))
+
+            self.assertTrue(safe_record["background_stains_lightened"])
+            self.assertIn("lighten_background_stains_conservative", safe_record["operations"])
+            self.assertIn("localized low-contrast stains", safe_record["background_stains_reason"])
+            self.assertGreaterEqual(safe_audit["background_stains_delta"], 2.5)
+            self.assertGreater(processed_stain_mean - original_stain_mean, 1.0)
+            self.assertGreater(safe_audit["background_stains_changed_pixel_ratio"], 0.0)
+            self.assertLessEqual(safe_audit["background_stains_changed_pixel_ratio"], 0.022)
+            self.assertLessEqual(safe_audit["background_stains_candidate_pixel_ratio"], 0.022)
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertEqual(safe_audit["local_content_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed")
+
+            protected_names = set(pages) - {"S001_safe_faint_thumbprint_stain.png"}
+            for name in protected_names:
+                record = records[name]
+                self.assertFalse(record["background_stains_lightened"], name)
+                self.assertIn("lighten_background_stains_noop", record["operations"], name)
+                self.assertEqual(record["processing_audit"]["background_stains_changed_pixel_ratio"], 0.0, name)
+                with Image.open(process_dir / record["output_relative_path"]) as processed_image:
+                    self.assertLessEqual(
+                        _changed_ratio(pages[name], processed_image, (0, 0, pages[name].width, pages[name].height)),
+                        0.001,
+                        name,
+                    )
+
+            background_guard = audit_summary["guardrails"]["background_stains"]
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["background_stains_lightened_files"], 1)
+            self.assertEqual(audit_summary["counts"]["background_stains_skipped_files"], len(protected_names))
+            self.assertEqual(background_guard["applied_files"], 1)
+            self.assertEqual(background_guard["skipped_files"], len(protected_names))
+            self.assertGreaterEqual(len(background_guard["skip_reason_distribution"]), 3)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_sparse_pale_typed_text_enhances_while_protected_pages_noop(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-sparse-pale-typed-") as temp_dir:
             root = Path(temp_dir)
@@ -4533,6 +4610,46 @@ def _diffuse_background_stain_page(variant: str = "safe") -> Image.Image:
             draw.rectangle((x, y, x + 2, y + 1), fill=(206, 202, 186))
     else:
         raise ValueError(f"unsupported diffuse stain variant: {variant}")
+    return image
+
+
+def _faint_thumbprint_stain_page(variant: str = "safe") -> Image.Image:
+    image = Image.new("RGB", (260, 190), (242, 242, 240))
+    draw = ImageDraw.Draw(image)
+    for y in range(42, 132, 24):
+        draw.rectangle((28, y, 96, y + 4), fill=(35, 35, 35))
+    draw.text((116, 24), "12", fill=(30, 30, 30))
+
+    mask = Image.new("L", image.size, 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.ellipse((164, 68, 210, 108), fill=120)
+    mask = mask.filter(ImageFilter.GaussianBlur(5))
+    image = Image.composite(Image.new("RGB", image.size, (234, 234, 228)), image, mask)
+    draw = ImageDraw.Draw(image)
+
+    if variant == "safe":
+        return image
+    if variant == "handwriting":
+        draw.line((166, 88, 178, 80, 192, 94, 208, 84), fill=(102, 98, 90), width=2)
+    elif variant == "ruled_table":
+        for y in (78, 94):
+            draw.line((156, y, 220, y), fill=(176, 176, 170), width=1)
+        for x in (176, 198, 218):
+            draw.line((x, 70, x, 106), fill=(176, 176, 170), width=1)
+    elif variant == "color_mark":
+        draw.ellipse((178, 76, 204, 100), outline=(174, 42, 34), width=2)
+    elif variant == "photo_texture":
+        for x in range(156, 220, 4):
+            for y in range(66, 118, 4):
+                shade = 130 + ((x * 7 + y * 11) % 80)
+                draw.rectangle((x, y, x + 2, y + 2), fill=(shade, shade + 4, shade + 8))
+    elif variant == "edge_content":
+        draw.rectangle((0, 76, 16, 108), fill=(58, 58, 56))
+    elif variant == "dense_foreground":
+        for y in range(24, 168, 12):
+            draw.rectangle((18, y, 236, y + 5), fill=(48, 48, 46))
+    else:
+        raise ValueError(f"unsupported faint thumbprint stain variant: {variant}")
     return image
 
 
