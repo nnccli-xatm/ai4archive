@@ -4138,6 +4138,14 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 ],
                 7,
             )
+            self.assertEqual(
+                audit_summary["guardrails"]["dark_border_trim"]["edge_side_distribution"],
+                {"left": 10, "right": 9, "top": 9, "bottom": 9},
+            )
+            self.assertEqual(
+                audit_summary["guardrails"]["dark_border_trim"]["candidate_band_width_bucket_distribution"],
+                {"3-4px": 9, "5-8px": 1},
+            )
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertFalse(audit_summary["privacy"]["contains_paths"])
             self.assertFalse(audit_summary["privacy"]["contains_hashes"])
