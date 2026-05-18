@@ -13339,11 +13339,13 @@ def _detect_dark_border_bbox(image: Image.Image) -> DarkBorderDetection:
             (left_broken, right_broken, top_broken, bottom_broken),
         )
         if single_edge_shadow is not None:
-            bbox, edge_sides, band_width_bucket = single_edge_shadow
-            if _has_protected_dark_content_near_trim_boundary(grayscale, bbox):
+            bbox, edge_sides, band_width_bucket, broken_single_edge = single_edge_shadow
+            if _has_protected_dark_content_near_trim_boundary(grayscale, bbox) or (
+                broken_single_edge and _has_protected_marginal_dark_content_near_trim_boundary(grayscale, bbox)
+            ):
                 reason = "protected edge content near dark border"
                 return DarkBorderDetection(None, reason, _dark_border_reason_code(reason), edge_sides, band_width_bucket)
-            reason = "single dark edge shadow trimmed"
+            reason = "broken single dark edge shadow trimmed" if broken_single_edge else "single dark edge shadow trimmed"
             return DarkBorderDetection(bbox, reason, _dark_border_reason_code(reason), edge_sides, band_width_bucket)
         reason = "incomplete dark edge border evidence"
         return DarkBorderDetection(None, reason, _dark_border_reason_code(reason), edge_sides, band_width_bucket)
@@ -13399,6 +13401,7 @@ def _dark_border_reason_code(reason: str | None) -> str | None:
         "dark edge border trimmed": "trimmed_continuous_edge",
         "broken dark edge border trimmed": "trimmed_broken_edge",
         "single dark edge shadow trimmed": "trimmed_single_edge_shadow",
+        "broken single dark edge shadow trimmed": "trimmed_broken_single_edge_shadow",
         "dark border trim disabled": "disabled",
         "image too small": "image_too_small",
         "no light page background for dark border trim": "no_light_page_background",
@@ -13421,18 +13424,19 @@ def _single_dark_edge_shadow_trim(
     image: Image.Image,
     runs: tuple[int, int, int, int],
     broken_edges: tuple[bool, bool, bool, bool],
-) -> tuple[tuple[int, int, int, int], tuple[str, ...], str | None] | None:
+) -> tuple[tuple[int, int, int, int], tuple[str, ...], str | None, bool] | None:
     width, height = image.size
     active = [(side, run) for side, run in zip(("left", "right", "top", "bottom"), runs) if run >= 2]
     if len(active) != 1:
         return None
 
     side, run = active[0]
-    if broken_edges[("left", "right", "top", "bottom").index(side)]:
-        return None
+    broken_edge = broken_edges[("left", "right", "top", "bottom").index(side)]
 
     max_single_edge_run = max(2, min(10, int(min(width, height) * 0.045)))
     if run > max_single_edge_run:
+        return None
+    if broken_edge and not _single_dark_edge_has_safe_small_interruptions(image, side, run):
         return None
 
     if not _has_light_stable_background_inside_dark_edge(image, side, run):
@@ -13444,7 +13448,62 @@ def _single_dark_edge_shadow_trim(
         "top": (0, run, width, height),
         "bottom": (0, 0, width, height - run),
     }[side]
-    return bbox, (side,), _dark_border_band_width_bucket(run)
+    return bbox, (side,), _dark_border_band_width_bucket(run), broken_edge
+
+
+def _single_dark_edge_has_safe_small_interruptions(image: Image.Image, side: str, run: int) -> bool:
+    width, height = image.size
+    pixels = image.load()
+    safe_broken_lines = 0
+    for offset in range(run):
+        if side == "left":
+            values = [pixels[offset, y] for y in range(height)]
+        elif side == "right":
+            values = [pixels[width - 1 - offset, y] for y in range(height)]
+        elif side == "top":
+            values = [pixels[x, offset] for x in range(width)]
+        else:
+            values = [pixels[x, height - 1 - offset] for x in range(width)]
+        if _is_continuous_dark_edge_line(values):
+            continue
+        if not _is_small_gap_interrupted_single_dark_edge_line(values):
+            return False
+        safe_broken_lines += 1
+    return safe_broken_lines > 0
+
+
+def _is_small_gap_interrupted_single_dark_edge_line(values: list[int]) -> bool:
+    length = len(values)
+    if length < 40:
+        return False
+    deep_gray_pixels = [value <= 110 for value in values]
+    light_pixels = [value >= 170 for value in values]
+    dark_runs = _boolean_runs(deep_gray_pixels)
+    light_runs = _boolean_runs(light_pixels)
+    if len(dark_runs) < 4 or len(dark_runs) > 12:
+        return False
+    if len(light_runs) < 3 or len(light_runs) > 10:
+        return False
+    if dark_runs[0][0] > max(2, int(length * 0.025)):
+        return False
+    if length - dark_runs[-1][1] > max(2, int(length * 0.08)):
+        return False
+
+    light_gap_lengths = [end - start for start, end in light_runs]
+    dark_coverage = sum(end - start for start, end in dark_runs) / length
+    total_light_gap_ratio = sum(light_gap_lengths) / length
+    longest_light_gap_ratio = max(light_gap_lengths, default=0) / length
+    longest_dark_run_ratio = max(end - start for start, end in dark_runs) / length
+    substantial_dark_runs = sum(1 for start, end in dark_runs if (end - start) / length >= 0.045)
+    mean = sum(values) / length
+
+    if dark_coverage < 0.52 or dark_coverage > 0.84:
+        return False
+    if total_light_gap_ratio > 0.32 or longest_light_gap_ratio > 0.08:
+        return False
+    if longest_dark_run_ratio < 0.07 or substantial_dark_runs < 4:
+        return False
+    return mean <= 165
 
 
 def _has_light_stable_background_inside_dark_edge(image: Image.Image, side: str, run: int) -> bool:

@@ -3393,7 +3393,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     "broken_frame"
                 ),
                 "synthetic_interrupted_broad_dark_shadow.png": _interrupted_dark_scanner_border_page("broad_shadow"),
-                "synthetic_uncertain_single_interrupted_dark_edge.png": _interrupted_dark_scanner_border_page(
+                "synthetic_safe_single_interrupted_dark_edge.png": _interrupted_dark_scanner_border_page(
                     "single_edge"
                 ),
             }
@@ -3419,13 +3419,24 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertLessEqual(safe_record["processing_audit"]["max_trim_margin_ratio"], 0.025)
             self.assertEqual(safe_record["processing_audit"]["guardrail_failures"], [])
 
+            safe_single_name = "synthetic_safe_single_interrupted_dark_edge.png"
+            safe_single_record = records[safe_single_name]
+            self.assertEqual((input_dir / safe_single_name).read_bytes(), source_bytes[safe_single_name])
+            self.assertTrue(safe_single_record["dark_border_trimmed"])
+            self.assertEqual(safe_single_record["dark_border_reason_code"], "trimmed_broken_single_edge_shadow")
+            self.assertEqual(safe_single_record["dark_border_edge_sides"], ["left"])
+            self.assertEqual(safe_single_record["dark_border_bbox"], [4, 0, 240, 180])
+            self.assertEqual(safe_single_record["output_size"], [236, 180])
+            self.assertLessEqual(safe_single_record["processing_audit"]["max_trim_margin_ratio"], 0.017)
+            self.assertEqual(safe_single_record["processing_audit"]["guardrail_failures"], [])
+
             protected_reason_codes = {
                 "protected_edge_content_near_dark_border",
                 "candidate_trim_exceeds_conservative_retain_ratio",
                 "incomplete_dark_edge_border_evidence",
             }
             for name, source in source_bytes.items():
-                if name == safe_name:
+                if name in {safe_name, safe_single_name}:
                     continue
                 record = records[name]
                 self.assertEqual((input_dir / name).read_bytes(), source)
@@ -3437,11 +3448,17 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 with Image.open(process_dir / record["output_relative_path"]) as output:
                     self.assertEqual(output.convert("RGB").tobytes(), pages[name].tobytes(), name)
 
-            self.assertEqual(audit_summary["counts"]["dark_border_trimmed_files"], 1)
-            self.assertEqual(audit_summary["counts"]["dark_border_skipped_files"], len(pages) - 1)
+            self.assertEqual(audit_summary["counts"]["dark_border_trimmed_files"], 2)
+            self.assertEqual(audit_summary["counts"]["dark_border_skipped_files"], len(pages) - 2)
             self.assertEqual(
                 audit_summary["guardrails"]["dark_border_trim"]["guardrail_reason_code_distribution"][
                     "trimmed_broken_edge"
+                ],
+                1,
+            )
+            self.assertEqual(
+                audit_summary["guardrails"]["dark_border_trim"]["guardrail_reason_code_distribution"][
+                    "trimmed_broken_single_edge_shadow"
                 ],
                 1,
             )
