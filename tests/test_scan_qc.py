@@ -12320,6 +12320,180 @@ class ScanQcTest(unittest.TestCase):
         self.assertEqual(protected_result.reason, "no isolated dark pixels found")
         self.assertEqual(protected_result.image.convert("RGB").tobytes(), protected_bytes)
 
+    def test_despeckle_component_reuse_parity_matrix_preserves_conservative_metadata(self) -> None:
+        def clean_page() -> Image.Image:
+            return Image.new("RGB", (140, 100), (246, 246, 242))
+
+        def safe_scattered_dust() -> Image.Image:
+            image = clean_page()
+            for point in [(35, 30), (70, 42), (92, 61)]:
+                image.putpixel(point, (52, 52, 52))
+            return image
+
+        def safe_clustered_dust() -> Image.Image:
+            image = clean_page()
+            for y in range(40, 43):
+                for x in range(70, 73):
+                    image.putpixel((x, y), (52, 52, 52))
+            return image
+
+        def pale_protected_marks() -> Image.Image:
+            image = clean_page()
+            for point in [(60, 45), (64, 45), (68, 45)]:
+                image.putpixel(point, (230, 230, 226))
+            image.putpixel((62, 46), (232, 232, 228))
+            return image
+
+        def sparse_text_like_dots() -> Image.Image:
+            image = Image.new("RGB", (120, 90), (246, 246, 242))
+            draw = ImageDraw.Draw(image)
+            draw.line((70, 48, 70, 60), fill=(20, 20, 20), width=2)
+            for point in [(70, 39), (71, 39), (70, 40), (71, 40)]:
+                image.putpixel(point, (20, 20, 20))
+            return image
+
+        def repeated_pale_pattern() -> Image.Image:
+            image = Image.new("RGB", (180, 100), (246, 246, 242))
+            for x in range(30, 150, 4):
+                image.putpixel((x, 50), (224, 224, 220))
+            return image
+
+        cases = (
+            (
+                "clean_no_candidates",
+                clean_page(),
+                {
+                    "changed_pixels": 0,
+                    "reason": "no isolated dark pixels found",
+                    "reason_code": "no_isolated_candidates",
+                    "candidate_pixels": 0,
+                    "candidate_count": 0,
+                    "component_count": 0,
+                    "max_component_size": 0,
+                    "replacement_work_performed": False,
+                    "fallback_backend_mode": "not_applicable",
+                    "numpy_backend_mode": "not_applicable",
+                },
+            ),
+            (
+                "safe_scattered_dust",
+                safe_scattered_dust(),
+                {
+                    "changed_pixels": 3,
+                    "reason": "isolated dark pixels replaced",
+                    "reason_code": "applied_isolated_pixels",
+                    "candidate_pixels": 3,
+                    "candidate_count": 3,
+                    "component_count": 3,
+                    "max_component_size": 1,
+                    "replacement_work_performed": True,
+                    "fallback_backend_mode": "fallback",
+                    "numpy_backend_mode": "numpy",
+                },
+            ),
+            (
+                "safe_clustered_dust",
+                safe_clustered_dust(),
+                {
+                    "changed_pixels": 9,
+                    "reason": "isolated dark pixels replaced",
+                    "reason_code": "applied_isolated_pixels",
+                    "candidate_pixels": 9,
+                    "candidate_count": 9,
+                    "component_count": 1,
+                    "max_component_size": 9,
+                    "replacement_work_performed": True,
+                    "fallback_backend_mode": "fallback",
+                    "numpy_backend_mode": "fallback",
+                },
+            ),
+            (
+                "pale_protected_marks",
+                pale_protected_marks(),
+                {
+                    "changed_pixels": 0,
+                    "reason": "no isolated dark pixels found",
+                    "reason_code": "no_isolated_candidates",
+                    "candidate_pixels": 4,
+                    "candidate_count": 4,
+                    "component_count": 4,
+                    "max_component_size": 1,
+                    "replacement_work_performed": True,
+                    "fallback_backend_mode": "fallback",
+                    "numpy_backend_mode": "numpy",
+                },
+            ),
+            (
+                "sparse_text_like_dots",
+                sparse_text_like_dots(),
+                {
+                    "changed_pixels": 0,
+                    "reason": "no isolated dark pixels found",
+                    "reason_code": "no_isolated_candidates",
+                    "candidate_pixels": 30,
+                    "candidate_count": 4,
+                    "component_count": 1,
+                    "max_component_size": 4,
+                    "replacement_work_performed": True,
+                    "fallback_backend_mode": "fallback",
+                    "numpy_backend_mode": "numpy",
+                },
+            ),
+            (
+                "repeated_pale_pattern",
+                repeated_pale_pattern(),
+                {
+                    "changed_pixels": 0,
+                    "reason": "despeckle skipped: pale candidate density exceeds safety threshold",
+                    "reason_code": "pale_candidate_density_exceeds_safety_threshold",
+                    "candidate_pixels": 30,
+                    "candidate_count": 30,
+                    "component_count": 30,
+                    "max_component_size": 1,
+                    "replacement_work_performed": False,
+                    "fallback_backend_mode": "fallback",
+                    "numpy_backend_mode": "numpy",
+                },
+            ),
+        )
+
+        numpy_available = importlib.util.find_spec("numpy") is not None
+        for name, image, expected in cases:
+            source_bytes = image.convert("RGB").tobytes()
+            fallback = processing_module._despeckle_isolated_pixels_with_reason(image, backend="fallback")
+            self.assertEqual(image.convert("RGB").tobytes(), source_bytes, name)
+            self.assertEqual(fallback.changed_pixels, expected["changed_pixels"], name)
+            self.assertEqual(fallback.reason, expected["reason"], name)
+            self.assertEqual(fallback.reason_code, expected["reason_code"], name)
+            self.assertEqual(fallback.candidate_pixels, expected["candidate_pixels"], name)
+            self.assertEqual(fallback.candidate_count, expected["candidate_count"], name)
+            self.assertEqual(fallback.component_count, expected["component_count"], name)
+            self.assertEqual(fallback.max_component_size, expected["max_component_size"], name)
+            self.assertEqual(fallback.replacement_work_performed, expected["replacement_work_performed"], name)
+            self.assertEqual(fallback.backend_mode, expected["fallback_backend_mode"], name)
+            if expected["changed_pixels"] == 0:
+                self.assertEqual(fallback.image.convert("RGB").tobytes(), source_bytes, name)
+            else:
+                self.assertNotEqual(fallback.image.convert("RGB").tobytes(), source_bytes, name)
+
+            if not numpy_available:
+                continue
+            numpy_result = processing_module._despeckle_isolated_pixels_with_reason(image, backend="numpy")
+            self.assertEqual(numpy_result.changed_pixels, fallback.changed_pixels, name)
+            self.assertEqual(numpy_result.reason, fallback.reason, name)
+            self.assertEqual(numpy_result.reason_code, fallback.reason_code, name)
+            self.assertEqual(numpy_result.candidate_pixels, fallback.candidate_pixels, name)
+            self.assertEqual(numpy_result.candidate_count, fallback.candidate_count, name)
+            self.assertEqual(numpy_result.component_count, fallback.component_count, name)
+            self.assertEqual(numpy_result.max_component_size, fallback.max_component_size, name)
+            self.assertEqual(numpy_result.replacement_work_performed, fallback.replacement_work_performed, name)
+            self.assertEqual(numpy_result.backend_mode, expected["numpy_backend_mode"], name)
+            self.assertEqual(
+                numpy_result.image.convert("RGB").tobytes(),
+                fallback.image.convert("RGB").tobytes(),
+                name,
+            )
+
     def test_despeckle_preserves_faint_dotted_leader_as_low_confidence_content(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
