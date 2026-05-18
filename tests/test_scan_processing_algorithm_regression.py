@@ -863,6 +863,9 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     pixels[x, y] = (value, value, value)
             draw = ImageDraw.Draw(page)
             if variant == "safe":
+                font = ImageFont.load_default()
+                for offset, text in enumerate(("ARCHIVE PAGE", "REFERENCE COPY", "INDEX 42")):
+                    draw.text((74, 54 + offset * 18), text, fill=(45, 45, 45), font=font)
                 return page
             if variant == "table_grid":
                 for row in (42, 72, 102):
@@ -877,6 +880,17 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             elif variant == "dense_low_contrast_foreground":
                 for row in range(30, 123, 7):
                     draw.rectangle((30, row, 190, row + 2), fill=(210, 210, 210))
+            elif variant == "photo_texture":
+                for y in range(24, 126):
+                    for x in range(42, 178):
+                        texture = 186 + ((x * 11 + y * 7 + (x // 5) * (y // 3)) % 42)
+                        pixels[x, y] = (texture, texture - 5, texture - 9)
+            elif variant == "broad_stain":
+                draw.ellipse((36, 24, 186, 132), fill=(218, 216, 208))
+                draw.ellipse((56, 42, 166, 116), fill=(222, 220, 212))
+            elif variant == "archival_corner_mark":
+                draw.rectangle((6, 8, 30, 29), fill=(54, 50, 45))
+                draw.line((0, 38, 28, 58), fill=(64, 60, 52), width=3)
             else:
                 raise ValueError(f"unsupported variant: {variant}")
             return page
@@ -895,6 +909,9 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "synthetic_mild_two_edge_dense_low_contrast_foreground.png": two_edge_page(
                     "dense_low_contrast_foreground"
                 ),
+                "synthetic_mild_two_edge_photo_texture.png": two_edge_page("photo_texture"),
+                "synthetic_mild_two_edge_broad_stain.png": two_edge_page("broad_stain"),
+                "synthetic_mild_two_edge_archival_corner_mark.png": two_edge_page("archival_corner_mark"),
             }
             source_bytes = {}
             for name, image in pages.items():
