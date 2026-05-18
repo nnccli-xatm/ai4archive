@@ -8555,7 +8555,7 @@ class ScanQcTest(unittest.TestCase):
                 "private_red_stamp.png": "SCANLINE_COLOR_CONTENT_RISK",
                 "private_handwriting.png": "SCANLINE_LOW_CONFIDENCE",
                 "private_underlined_text.png": "SCANLINE_LOW_CONFIDENCE",
-                "private_header_footer.png": "SCANLINE_LOW_CONFIDENCE",
+                "private_header_footer.png": "SCANLINE_EDGE_CONTENT_RISK",
                 "private_photo_texture.png": "texture risk",
                 "private_dense_table.png": "foreground too dense",
                 "private_faint_ruled_background.png": "SCANLINE_SCOPE_RISK",
