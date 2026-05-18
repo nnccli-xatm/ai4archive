@@ -12239,7 +12239,9 @@ def _detect_dark_border_bbox(image: Image.Image) -> DarkBorderDetection:
     if retained_width <= 0 or retained_height <= 0:
         reason = "invalid trim candidate"
         return DarkBorderDetection(None, reason, _dark_border_reason_code(reason), edge_sides, band_width_bucket)
-    if _has_protected_dark_content_near_trim_boundary(grayscale, bbox):
+    if _has_protected_dark_content_near_trim_boundary(grayscale, bbox) or (
+        has_broken_edge and _has_protected_marginal_dark_content_near_trim_boundary(grayscale, bbox)
+    ):
         reason = "protected edge content near dark border"
         return DarkBorderDetection(None, reason, _dark_border_reason_code(reason), edge_sides, band_width_bucket)
 
@@ -12539,6 +12541,54 @@ def _has_protected_dark_content_near_trim_boundary(
         if dark_pixels >= 8 and dark_pixels / area >= 0.01:
             return True
     return False
+
+
+def _has_protected_marginal_dark_content_near_trim_boundary(
+    image: Image.Image,
+    bbox: tuple[int, int, int, int],
+) -> bool:
+    width, height = image.size
+    left, top, right, bottom = bbox
+    protect_depth = max(10, min(28, int(min(width, height) * 0.12)))
+    corner_pad_x = max(2, int(width * 0.04))
+    corner_pad_y = max(2, int(height * 0.04))
+    bands = [
+        (left, top + corner_pad_y, min(right, left + protect_depth), bottom - corner_pad_y),
+        (max(left, right - protect_depth), top + corner_pad_y, right, bottom - corner_pad_y),
+        (left + corner_pad_x, top, right - corner_pad_x, min(bottom, top + protect_depth)),
+        (left + corner_pad_x, max(top, bottom - protect_depth), right - corner_pad_x, bottom),
+    ]
+    for band in bands:
+        x0, y0, x1, y1 = band
+        if x1 <= x0 or y1 <= y0:
+            continue
+        crop = image.crop(band)
+        values = crop.tobytes()
+        area = max(1, len(values))
+        dark_pixels = sum(1 for value in values if value <= 90)
+        if dark_pixels < max(16, int(area * 0.004)):
+            continue
+        if dark_pixels / area >= 0.006:
+            return True
+        if _dark_marginal_mark_runs(crop) >= 3:
+            return True
+    return False
+
+
+def _dark_marginal_mark_runs(image: Image.Image) -> int:
+    width, height = image.size
+    pixels = image.load()
+    marked_rows = 0
+    for y in range(height):
+        row_dark_pixels = sum(1 for x in range(width) if pixels[x, y] <= 90)
+        if row_dark_pixels >= 2:
+            marked_rows += 1
+    marked_columns = 0
+    for x in range(width):
+        column_dark_pixels = sum(1 for y in range(height) if pixels[x, y] <= 90)
+        if column_dark_pixels >= 2:
+            marked_columns += 1
+    return max(marked_rows, marked_columns)
 
 
 _DESPECKLE_DARK_THRESHOLD = 60
