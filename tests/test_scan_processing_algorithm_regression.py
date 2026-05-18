@@ -2610,6 +2610,86 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages.keys(), str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_interrupted_dark_scanner_border_trim_preserves_protected_cases(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-interrupted-dark-border-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_safe_interrupted_dark_scanner_border.png": _interrupted_dark_scanner_border_page(),
+                "synthetic_interrupted_dark_border_near_edge_content.png": _interrupted_dark_scanner_border_page(
+                    "near_edge_content"
+                ),
+                "synthetic_interrupted_dark_border_table_lines.png": _interrupted_dark_scanner_border_page(
+                    "table_lines"
+                ),
+                "synthetic_interrupted_broad_dark_shadow.png": _interrupted_dark_scanner_border_page("broad_shadow"),
+                "synthetic_uncertain_single_interrupted_dark_edge.png": _interrupted_dark_scanner_border_page(
+                    "single_edge"
+                ),
+            }
+            source_bytes = {}
+            for filename, page in pages.items():
+                source = input_dir / filename
+                page.save(source, dpi=(300, 300))
+                source_bytes[filename] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "interrupted-dark-border", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(trim_dark_border=True, workers=1))
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_name = "synthetic_safe_interrupted_dark_scanner_border.png"
+            safe_record = records[safe_name]
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertTrue(safe_record["dark_border_trimmed"])
+            self.assertEqual(safe_record["dark_border_reason_code"], "trimmed_broken_edge")
+            self.assertEqual(safe_record["dark_border_bbox"], [4, 4, 236, 176])
+            self.assertEqual(safe_record["output_size"], [232, 172])
+            self.assertLessEqual(safe_record["processing_audit"]["max_trim_margin_ratio"], 0.025)
+            self.assertEqual(safe_record["processing_audit"]["guardrail_failures"], [])
+
+            protected_reason_codes = {
+                "protected_edge_content_near_dark_border",
+                "candidate_trim_exceeds_conservative_retain_ratio",
+                "incomplete_dark_edge_border_evidence",
+            }
+            for name, source in source_bytes.items():
+                if name == safe_name:
+                    continue
+                record = records[name]
+                self.assertEqual((input_dir / name).read_bytes(), source)
+                self.assertFalse(record["dark_border_trimmed"], name)
+                self.assertEqual(record["output_size"], [240, 180], name)
+                self.assertIn("dark_border_trim_noop", record["operations"], name)
+                self.assertIn(record["dark_border_reason_code"], protected_reason_codes, name)
+                self.assertEqual(record["processing_audit"]["guardrail_failures"], [], name)
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    self.assertEqual(output.convert("RGB").tobytes(), pages[name].tobytes(), name)
+
+            self.assertEqual(audit_summary["counts"]["dark_border_trimmed_files"], 1)
+            self.assertEqual(audit_summary["counts"]["dark_border_skipped_files"], len(pages) - 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["dark_border_trim"]["guardrail_reason_code_distribution"][
+                    "trimmed_broken_edge"
+                ],
+                1,
+            )
+            self.assertGreaterEqual(
+                audit_summary["guardrails"]["dark_border_trim"]["guardrail_reason_code_distribution"][
+                    "protected_edge_content_near_dark_border"
+                ],
+                2,
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages.keys(), str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_shallow_deskew_auto_crop_trim_combination_stays_controlled(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-shallow-deskew-combo-") as temp_dir:
             root = Path(temp_dir)
@@ -5194,6 +5274,58 @@ def _segmented_dark_scanner_border_page(variant: str = "safe") -> Image.Image:
         draw.line((4, 8, 4, 170), fill=(55, 55, 55), width=2)
         draw.line((4, 8, 52, 8), fill=(55, 55, 55), width=2)
     elif variant != "safe":
+        raise ValueError(f"unsupported variant: {variant}")
+    return image
+
+
+def _interrupted_dark_scanner_border_page(variant: str = "safe") -> Image.Image:
+    image = Image.new("RGB", (240, 180), (244, 244, 240))
+    draw = ImageDraw.Draw(image)
+    for y in (62, 88, 114):
+        draw.rectangle((74, y, 166, y + 3), fill=(35, 35, 35))
+
+    if variant == "broad_shadow":
+        for offset in range(20):
+            value = 28 + min(108, offset * 7)
+            draw.rectangle((offset, 0, offset, 179), fill=(value, value, value))
+            draw.rectangle((239 - offset, 0, 239 - offset, 179), fill=(value, value, value))
+            draw.rectangle((0, offset, 239, offset), fill=(value, value, value))
+            draw.rectangle((0, 179 - offset, 239, 179 - offset), fill=(value, value, value))
+        return image
+
+    sides = ("left",) if variant == "single_edge" else ("left", "right", "top", "bottom")
+    for offset in range(4):
+        if "left" in sides:
+            draw.line((offset, 0, offset, 179), fill=(20, 20, 20))
+        if "right" in sides:
+            draw.line((239 - offset, 0, 239 - offset, 179), fill=(20, 20, 20))
+        if "top" in sides:
+            draw.line((0, offset, 239, offset), fill=(20, 20, 20))
+        if "bottom" in sides:
+            draw.line((0, 179 - offset, 239, 179 - offset), fill=(20, 20, 20))
+
+    vertical_gaps = (10, 36, 62, 88, 114, 140, 166)
+    horizontal_gaps = (14, 49, 84, 119, 154, 189, 224)
+    for y0 in vertical_gaps:
+        if "left" in sides:
+            draw.rectangle((0, y0, 3, y0 + 7), fill=(244, 244, 240))
+        if "right" in sides:
+            draw.rectangle((236, y0, 239, y0 + 7), fill=(244, 244, 240))
+    for x0 in horizontal_gaps:
+        if "top" in sides:
+            draw.rectangle((x0, 0, x0 + 7, 3), fill=(244, 244, 240))
+        if "bottom" in sides:
+            draw.rectangle((x0, 176, x0 + 7, 179), fill=(244, 244, 240))
+
+    if variant == "near_edge_content":
+        draw.rectangle((5, 18, 15, 24), fill=(35, 35, 35))
+        draw.rectangle((8, 25, 18, 31), fill=(35, 35, 35))
+    elif variant == "table_lines":
+        for y in (42, 68, 94):
+            draw.line((4, y, 92, y), fill=(55, 55, 55), width=2)
+        for x in (12, 42, 72):
+            draw.line((x, 36, x, 106), fill=(60, 60, 60), width=2)
+    elif variant not in {"safe", "single_edge"}:
         raise ValueError(f"unsupported variant: {variant}")
     return image
 
