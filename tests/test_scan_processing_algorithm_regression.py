@@ -3416,18 +3416,36 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             process_dir = root / "processed"
             input_dir.mkdir()
             pages = {
-                "private_single_edge_handwriting.png": _single_edge_post_deskew_light_canvas_page(
+                "synthetic_single_edge_handwriting.png": _single_edge_post_deskew_light_canvas_page(
                     variant="edge_handwriting"
                 ),
-                "private_single_edge_page_number.png": _single_edge_post_deskew_light_canvas_page(
+                "synthetic_single_edge_page_number.png": _single_edge_post_deskew_light_canvas_page(
                     variant="page_number"
                 ),
-                "private_single_edge_ruled_table.png": _single_edge_post_deskew_light_canvas_page(
+                "synthetic_single_edge_ruled_table.png": _single_edge_post_deskew_light_canvas_page(
                     variant="ruled_table"
                 ),
-                "private_single_edge_stamp.png": _single_edge_post_deskew_light_canvas_page(variant="stamp"),
-                "private_single_edge_archival_mark.png": _single_edge_post_deskew_light_canvas_page(
+                "synthetic_single_edge_stamp.png": _single_edge_post_deskew_light_canvas_page(variant="stamp"),
+                "synthetic_single_edge_archival_mark.png": _single_edge_post_deskew_light_canvas_page(
                     variant="archival_mark"
+                ),
+                "synthetic_single_edge_pale_page_number.png": _single_edge_post_deskew_light_canvas_page(
+                    variant="pale_page_number"
+                ),
+                "synthetic_single_edge_pale_marginal_note.png": _single_edge_post_deskew_light_canvas_page(
+                    variant="pale_marginal_note"
+                ),
+                "synthetic_single_edge_pale_ruled_table.png": _single_edge_post_deskew_light_canvas_page(
+                    variant="pale_ruled_table"
+                ),
+                "synthetic_single_edge_pale_archival_texture.png": _single_edge_post_deskew_light_canvas_page(
+                    variant="pale_archival_texture"
+                ),
+                "synthetic_single_edge_uneven_pale_margin.png": _single_edge_post_deskew_light_canvas_page(
+                    variant="uneven_pale_margin"
+                ),
+                "synthetic_single_edge_near_edge_scanner_artifact.png": _single_edge_post_deskew_light_canvas_page(
+                    variant="near_edge_scanner_artifact"
                 ),
             }
             for filename, page in pages.items():
@@ -5662,17 +5680,42 @@ def _single_edge_post_deskew_light_canvas_page(variant: str = "safe") -> Image.I
         draw.line((2, 40, 11, 54, 4, 72, 12, 91, 5, 116), fill=(55, 55, 55), width=2)
     elif variant == "page_number":
         draw.text((2, 12), "12", fill=(55, 55, 55))
+    elif variant == "pale_page_number":
+        draw.text((2, 12), "12", fill=(232, 232, 232))
+    elif variant == "pale_marginal_note":
+        draw.line((3, 38, 10, 50, 5, 72, 11, 94, 4, 116), fill=(232, 232, 232), width=1)
     elif variant == "ruled_table":
         for y in (22, 46, 70, 94):
             draw.line((0, y, 58, y), fill=(78, 78, 78), width=2)
         for x in (5, 13, 38):
             draw.line((x, 16, x, 106), fill=(82, 82, 82), width=2)
+    elif variant == "pale_ruled_table":
+        for y in (22, 46, 70, 94):
+            draw.line((0, y, 56, y), fill=(232, 232, 232), width=1)
+        for x in (5, 12, 38):
+            draw.line((x, 16, x, 106), fill=(232, 232, 232), width=1)
     elif variant == "stamp":
         draw.ellipse((2, 10, 42, 50), outline=(180, 30, 30), width=3)
     elif variant == "archival_mark":
         draw.line((0, 0, 38, 0), fill=(80, 80, 80), width=3)
         draw.line((0, 0, 0, 38), fill=(80, 80, 80), width=3)
         draw.line((6, 60, 6, 104), fill=(80, 80, 80), width=2)
+    elif variant == "pale_archival_texture":
+        for index in range(34):
+            x = 1 + (index * 5) % 11
+            y = 8 + (index * 17) % 214
+            shade = 232 + (index % 9)
+            draw.point((x, y), fill=(shade, shade, shade))
+            if index % 3 == 0:
+                draw.point((min(12, x + 1), y), fill=(shade, shade, shade))
+    elif variant == "uneven_pale_margin":
+        for y in range(0, 240, 6):
+            shade = 243 if (y // 6) % 2 == 0 else 246
+            draw.line((0, y, 13, y + 2), fill=(shade, shade, shade), width=1)
+    elif variant == "near_edge_scanner_artifact":
+        draw.line((6, 18, 6, 216), fill=(233, 233, 233), width=1)
+        for y in range(34, 190, 31):
+            draw.line((3, y, 11, y + 3), fill=(230, 230, 230), width=1)
     elif variant != "safe":
         raise ValueError(f"unsupported variant: {variant}")
     return image

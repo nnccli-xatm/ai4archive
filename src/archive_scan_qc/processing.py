@@ -11803,6 +11803,8 @@ def _detect_post_deskew_canvas_crop_bbox(image: Image.Image) -> CropDetection:
     bbox = (left, top, right, bottom)
     if not _post_deskew_crop_has_page_boundary_evidence(grayscale, bbox, canvas, threshold):
         return CropDetection(None, "post-deskew crop skipped: low-confidence canvas edge")
+    if _post_deskew_trimmed_area_has_faint_marks(grayscale, bbox, canvas):
+        return CropDetection(None, "post-deskew crop skipped: edge content protection")
     if _has_protected_dark_content_near_trim_boundary(grayscale, bbox):
         return CropDetection(None, "post-deskew crop skipped: edge content protection")
     return CropDetection(bbox, "post-deskew safe canvas crop applied")
@@ -11878,6 +11880,8 @@ def _detect_post_deskew_corner_wedge_crop_bbox(
     if not _post_deskew_corner_wedge_has_boundary_evidence(grayscale, bbox, active, canvas, threshold):
         return CropDetection(None, "post-deskew crop skipped: low-confidence canvas edge")
     if _post_deskew_corner_wedge_trimmed_area_has_marks(grayscale, active, canvas, threshold):
+        return CropDetection(None, "post-deskew crop skipped: edge content protection")
+    if _post_deskew_trimmed_area_has_faint_marks(grayscale, bbox, canvas):
         return CropDetection(None, "post-deskew crop skipped: edge content protection")
     if _has_protected_dark_content_near_active_trim_boundary(grayscale, bbox, active):
         return CropDetection(None, "post-deskew crop skipped: edge content protection")
@@ -11956,10 +11960,68 @@ def _detect_post_deskew_expansion_crop_bbox(
         return CropDetection(None, "post-deskew crop skipped: edge content protection")
     if _post_deskew_expansion_trimmed_area_has_marks(grayscale, bbox, canvas):
         return CropDetection(None, "post-deskew crop skipped: edge content protection")
+    if _post_deskew_trimmed_area_has_faint_marks(grayscale, bbox, canvas):
+        return CropDetection(None, "post-deskew crop skipped: edge content protection")
     if _has_protected_dark_content_near_trim_boundary(grayscale, bbox):
         return CropDetection(None, "post-deskew crop skipped: edge content protection")
 
     return CropDetection(bbox, "post-deskew safe canvas crop applied")
+
+
+def _post_deskew_trimmed_area_has_faint_marks(
+    image: Image.Image,
+    bbox: tuple[int, int, int, int],
+    canvas: float,
+) -> bool:
+    width, height = image.size
+    left, top, right, bottom = bbox
+    boxes = (
+        (0, 0, left, height),
+        (right, 0, width, height),
+        (left, 0, right, top),
+        (left, bottom, right, height),
+    )
+    min_mark_pixels = max(4, int(min(width, height) * 0.018))
+    for box in boxes:
+        if box[2] <= box[0] or box[3] <= box[1]:
+            continue
+        sample = image.crop(box)
+        values = list(sample.tobytes())
+        if not values:
+            continue
+        area = len(values)
+        deltas = [abs(value - canvas) for value in values]
+        faint_pixels = sum(1 for delta in deltas if 4.0 <= delta < 24.0)
+        if faint_pixels < min_mark_pixels:
+            continue
+        faint_ratio = faint_pixels / area
+        if faint_ratio <= 0.18:
+            return True
+
+        mean = sum(values) / area
+        variance = sum((value - mean) ** 2 for value in values) / area
+        if 0.02 <= faint_ratio <= 0.70 and variance**0.5 >= 1.8:
+            return True
+
+        marked_rows = 0
+        for y in range(sample.height):
+            row = values[y * sample.width : (y + 1) * sample.width]
+            if sum(1 for value in row if 4.0 <= abs(value - canvas) < 24.0) >= 2:
+                marked_rows += 1
+        if marked_rows >= 3:
+            return True
+
+        marked_columns = 0
+        for x in range(sample.width):
+            column_marks = 0
+            for y in range(sample.height):
+                if 4.0 <= abs(values[y * sample.width + x] - canvas) < 24.0:
+                    column_marks += 1
+            if column_marks >= 2:
+                marked_columns += 1
+        if marked_columns >= 3:
+            return True
+    return False
 
 
 def _post_deskew_expansion_trimmed_area_has_marks(
