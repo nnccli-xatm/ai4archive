@@ -5583,6 +5583,7 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
     localized_component_selected = False
     faint_thumbprint_component_selected = False
     diffuse_component_selected = False
+    faint_cloud_component_selected = False
     for component in components:
         area = len(component)
         xs = [point[0] for point in component]
@@ -5686,6 +5687,20 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
             and local_background >= background - 3
             and 5.0 <= local_contrast <= 12.0
         )
+        faint_cloud_shape = (
+            low_global_tonal_evidence
+            and area_ratio <= 0.080
+            and width <= image.width * 0.46
+            and height <= image.height * 0.58
+            and width >= image.width * 0.26
+            and height >= image.height * 0.28
+            and max(width, height) / max(1, min(width, height)) <= 2.0
+            and edge_density <= 0.075
+            and color_shift <= 18
+            and local_background is not None
+            and local_background >= background - 2
+            and 1.4 <= local_contrast <= 10.0
+        )
         if not (
             small_speckle_shape
             or low_frequency_shape
@@ -5693,6 +5708,7 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
             or medium_soft_shape
             or faint_thumbprint_shape
             or diffuse_soft_shape
+            or faint_cloud_shape
         ):
             return _background_stains_noop(
                 image,
@@ -5705,12 +5721,19 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
             faint_thumbprint_component_selected = True
         if diffuse_soft_shape:
             diffuse_component_selected = True
+        if faint_cloud_shape:
+            faint_cloud_component_selected = True
         selected.update(component)
 
     changed_ratio = len(selected) / max(1, total)
     if changed_ratio < 0.00008:
         return _background_stains_noop(image, "background stain lightening skipped: no confident light background stains")
-    low_global_change_limit = 0.045 if diffuse_component_selected else 0.032
+    if faint_cloud_component_selected:
+        low_global_change_limit = 0.080
+    elif diffuse_component_selected:
+        low_global_change_limit = 0.045
+    else:
+        low_global_change_limit = 0.032
     if low_global_tonal_evidence and changed_ratio > low_global_change_limit:
         return _background_stains_noop(
             image,
@@ -5758,7 +5781,12 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
 
     before_mean = round(sum(before_values) / len(before_values), 6)
     after_mean = round(sum(after_values) / len(after_values), 6)
-    minimum_improvement = 2.5 if faint_thumbprint_component_selected else 4.0
+    if faint_cloud_component_selected:
+        minimum_improvement = 1.0
+    elif faint_thumbprint_component_selected:
+        minimum_improvement = 2.5
+    else:
+        minimum_improvement = 4.0
     if after_mean - before_mean < minimum_improvement:
         return _background_stains_noop(
             image,
@@ -5770,7 +5798,7 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
         True,
         (
             "background stain lightening applied: conservative localized low-contrast stains on light background"
-            if localized_component_selected or diffuse_component_selected or changed_ratio <= 0.035
+            if localized_component_selected or diffuse_component_selected or faint_cloud_component_selected or changed_ratio <= 0.035
             else "background stain lightening applied: conservative low-contrast stains on light background"
         ),
         before_mean,
