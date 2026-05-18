@@ -11789,7 +11789,7 @@ def _detect_post_deskew_canvas_crop_bbox(image: Image.Image) -> CropDetection:
 
     margins = (left, top, width - right, height - bottom)
     if min(margins) < 2:
-        return CropDetection(None, "post-deskew crop skipped: low-confidence canvas edge")
+        return _detect_post_deskew_corner_wedge_crop_bbox(image, grayscale, canvas, page_background)
     max_trim_ratio = max(left / width, (width - right) / width, top / height, (height - bottom) / height)
     if max_trim_ratio > 0.14:
         return CropDetection(None, "post-deskew crop skipped: crop risk too large")
@@ -11838,7 +11838,7 @@ def _detect_post_deskew_corner_wedge_crop_bbox(
         bottom_margin or 0,
     )
     active_margins = tuple(margin for margin in margins if margin >= 2)
-    if len(active_margins) < 2:
+    if not active_margins:
         return CropDetection(None, "post-deskew crop skipped: low-confidence canvas edge")
 
     left = left or 0
@@ -11860,8 +11860,21 @@ def _detect_post_deskew_corner_wedge_crop_bbox(
     if crop_area_ratio > 0.995:
         return CropDetection(None, "post-deskew crop skipped: low-confidence canvas edge")
 
-    bbox = (left, top, right, bottom)
     active = (left, top, right_margin, bottom_margin)
+    if len(active_margins) == 1:
+        active_side_count = sum(1 for margin in active if margin >= 2)
+        if active_side_count != 1 or max(active) < 3:
+            return CropDetection(None, "post-deskew crop skipped: low-confidence canvas edge")
+        if max_trim_ratio > 0.06:
+            return CropDetection(None, "post-deskew crop skipped: crop risk too large")
+        left = left if left >= 2 else 0
+        top = top if top >= 2 else 0
+        right_margin = right_margin if right_margin >= 2 else 0
+        bottom_margin = bottom_margin if bottom_margin >= 2 else 0
+        right = width - right_margin
+        bottom = height - bottom_margin
+        active = (left, top, right_margin, bottom_margin)
+    bbox = (left, top, right, bottom)
     if not _post_deskew_corner_wedge_has_boundary_evidence(grayscale, bbox, active, canvas, threshold):
         return CropDetection(None, "post-deskew crop skipped: low-confidence canvas edge")
     if _post_deskew_corner_wedge_trimmed_area_has_marks(grayscale, active, canvas, threshold):
