@@ -12700,12 +12700,22 @@ def _detect_conservative_crop_bbox(image: Image.Image) -> CropDetection:
 
     light_bbox = _detect_light_outer_margin_bbox(grayscale, background)
     if not light_bbox:
+        if (
+            strong_result
+            and strong_result.reason == "candidate crop exceeds conservative crop ratio"
+            and _light_crop_outer_background_stddev(grayscale) > 5.0
+        ):
+            return CropDetection(None, "low-confidence subtle page edge evidence")
         return strong_result or CropDetection(None, "no confident foreground outside background")
 
     bbox = light_bbox
     left, top, right, bottom = bbox
     if _light_crop_trimmed_area_has_faint_edge_content(grayscale, light_bbox, background):
         return CropDetection(None, "faint edge content protection")
+    if not _light_crop_trimmed_area_is_uniform_background(grayscale, light_bbox):
+        return CropDetection(None, "low-confidence subtle page edge evidence")
+    if _has_protected_dark_content_near_trim_boundary(grayscale, light_bbox):
+        return CropDetection(None, "edge content protection")
 
     if not _light_crop_has_safe_inner_evidence(grayscale, diff, light_bbox, background):
         return strong_result or CropDetection(None, "low-confidence subtle page edge evidence")
@@ -12747,27 +12757,28 @@ def _detect_light_outer_margin_bbox(image: Image.Image, background: float) -> tu
     width, height = image.size
     max_x = min(width // 4, max(4, int(width * 0.18)))
     max_y = min(height // 4, max(4, int(height * 0.18)))
-    threshold = 5.0
-    left = _first_consistent_light_edge(image, background, "left", max_x, threshold)
-    right_margin = _first_consistent_light_edge(image, background, "right", max_x, threshold)
-    top = _first_consistent_light_edge(image, background, "top", max_y, threshold)
-    bottom_margin = _first_consistent_light_edge(image, background, "bottom", max_y, threshold)
-    if None in {left, right_margin, top, bottom_margin}:
-        return None
-    assert left is not None and right_margin is not None and top is not None and bottom_margin is not None
-    right = width - right_margin
-    bottom = height - bottom_margin
-    if right <= left or bottom <= top:
-        return None
-    margins = (left, top, width - right, height - bottom)
-    if min(margins) < 2:
-        return None
-    if max(margins) > max(min(margins) * 3, min(margins) + max(4, int(min(width, height) * 0.08))):
-        return None
-    crop_area_ratio = ((right - left) * (bottom - top)) / max(1, width * height)
-    if crop_area_ratio < 0.45 or crop_area_ratio > 0.98:
-        return None
-    return (left, top, right, bottom)
+    for threshold in (5.0, 3.0):
+        left = _first_consistent_light_edge(image, background, "left", max_x, threshold)
+        right_margin = _first_consistent_light_edge(image, background, "right", max_x, threshold)
+        top = _first_consistent_light_edge(image, background, "top", max_y, threshold)
+        bottom_margin = _first_consistent_light_edge(image, background, "bottom", max_y, threshold)
+        if None in {left, right_margin, top, bottom_margin}:
+            continue
+        assert left is not None and right_margin is not None and top is not None and bottom_margin is not None
+        right = width - right_margin
+        bottom = height - bottom_margin
+        if right <= left or bottom <= top:
+            continue
+        margins = (left, top, width - right, height - bottom)
+        if min(margins) < 2:
+            continue
+        if max(margins) > max(min(margins) * 3, min(margins) + max(4, int(min(width, height) * 0.08))):
+            continue
+        crop_area_ratio = ((right - left) * (bottom - top)) / max(1, width * height)
+        if crop_area_ratio < 0.45 or crop_area_ratio > 0.98:
+            continue
+        return (left, top, right, bottom)
+    return None
 
 
 def _light_crop_trimmed_area_has_faint_edge_content(
@@ -12792,11 +12803,53 @@ def _light_crop_trimmed_area_has_faint_edge_content(
         faint_pixels = 0
         for value in sample.tobytes():
             delta = abs(value - background)
-            if 6.0 <= delta < 18.0:
+            if 3.0 <= delta < 18.0:
                 faint_pixels += 1
         if faint_pixels >= min_mark_pixels and (faint_pixels / area) <= 0.20:
             return True
     return False
+
+
+def _light_crop_trimmed_area_is_uniform_background(
+    image: Image.Image,
+    bbox: tuple[int, int, int, int],
+) -> bool:
+    width, height = image.size
+    left, top, right, bottom = bbox
+    boxes = (
+        (0, 0, left, height),
+        (right, 0, width, height),
+        (left, 0, right, top),
+        (left, bottom, right, height),
+    )
+    checked = 0
+    for box in boxes:
+        if box[2] <= box[0] or box[3] <= box[1]:
+            continue
+        sample = image.crop(box)
+        stat = ImageStat.Stat(sample)
+        checked += 1
+        if stat.stddev[0] > 6.0:
+            return False
+    return checked > 0
+
+
+def _light_crop_outer_background_stddev(image: Image.Image) -> float:
+    width, height = image.size
+    margin_x = max(2, min(width // 6, int(width * 0.12)))
+    margin_y = max(2, min(height // 6, int(height * 0.12)))
+    boxes = (
+        (0, 0, margin_x, height),
+        (width - margin_x, 0, width, height),
+        (0, 0, width, margin_y),
+        (0, height - margin_y, width, height),
+    )
+    stddevs = [
+        ImageStat.Stat(image.crop(box)).stddev[0]
+        for box in boxes
+        if box[2] > box[0] and box[3] > box[1]
+    ]
+    return max(stddevs, default=0.0)
 
 
 def _first_consistent_light_edge(
@@ -12888,7 +12941,7 @@ def _crop_boundary_has_consistent_light_evidence(
         image.crop((left, top, right, min(bottom, top + band))),
         image.crop((left, max(top, bottom - band), right, bottom)),
     )
-    return all(abs(ImageStat.Stat(boundary).mean[0] - background) >= 5.0 for boundary in boundaries)
+    return all(abs(ImageStat.Stat(boundary).mean[0] - background) >= 3.0 for boundary in boundaries)
 
 
 def _crop_boundary_has_consistent_evidence(image: Image.Image, bbox: tuple[int, int, int, int]) -> bool:
