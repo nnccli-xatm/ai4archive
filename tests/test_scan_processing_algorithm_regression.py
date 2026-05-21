@@ -4565,6 +4565,92 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_intermittent_scanline_cleanup_preserves_protected_content_classes(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-intermittent-scanline-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "private_full_chain_safe_intermittent_scanline.png": _full_chain_intermittent_scanline_page("safe"),
+                "private_full_chain_protected_table_scanline.png": _full_chain_intermittent_scanline_page("table"),
+                "private_full_chain_protected_page_number_scanline.png": _full_chain_intermittent_scanline_page(
+                    "page_number"
+                ),
+                "private_full_chain_protected_handwriting_scanline.png": _full_chain_intermittent_scanline_page(
+                    "handwriting"
+                ),
+                "private_full_chain_protected_stamp_color_scanline.png": _full_chain_intermittent_scanline_page(
+                    "stamp_color"
+                ),
+                "private_full_chain_protected_texture_scanline.png": _full_chain_intermittent_scanline_page("texture"),
+                "private_full_chain_already_clean_scanline.png": _full_chain_intermittent_scanline_page("already_clean"),
+                "private_full_chain_low_confidence_structured_scanline.png": _full_chain_intermittent_scanline_page(
+                    "low_confidence_structured"
+                ),
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-intermittent-scanline", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_name = "private_full_chain_safe_intermittent_scanline.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertTrue(safe_record["scanlines_lightened"])
+            self.assertIn("lighten_scanlines_conservative", safe_record["operations"])
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertIn(safe_audit["combination_quality_guard_action"], {"passed", "kept_original"})
+            self.assertIn(
+                safe_audit["combination_quality_guard_reason_code"],
+                {"safe_combination_passed", "low_confidence_original_preserved"},
+            )
+            self.assertGreater(safe_audit["scanlines_changed_pixel_ratio"], 0.0005)
+            self.assertLessEqual(safe_audit["scanlines_changed_pixel_ratio"], 0.04)
+            self.assertLessEqual(safe_audit["scanlines_candidate_pixel_ratio"], 0.05)
+
+            protected_names = sorted(name for name in pages if name != safe_name)
+            for name in protected_names:
+                record = records[name]
+                audit = record["processing_audit"]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
+                self.assertFalse(record["scanlines_lightened"], name)
+                self.assertIn("lighten_scanlines_noop", record["operations"], name)
+                self.assertEqual(record["scanlines_changed_pixel_ratio"], 0.0, name)
+                self.assertIsInstance(record["scanlines_reason"], str, name)
+                self.assertEqual(audit["cumulative_retouch_changed_pixel_ratio"], 0.0, name)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["scanlines_lightened_files"], 1)
+            self.assertEqual(audit_summary["counts"]["scanlines_skipped_files"], len(protected_names))
+            scanline_guard = audit_summary["guardrails"]["scanlines"]
+            self.assertEqual(scanline_guard["applied_files"], 1)
+            self.assertEqual(scanline_guard["skipped_files"], len(protected_names))
+            self.assertGreaterEqual(scanline_guard["protection_triggered_files"], 5)
+            self.assertGreaterEqual(len(scanline_guard["skip_reason_distribution"]), 4)
+            combination_reasons = audit_summary["guardrails"]["combination_quality_guard"]["reason_code_distribution"]
+            self.assertGreaterEqual(combination_reasons.get("safe_combination_passed", 0), 1)
+            self.assertGreaterEqual(
+                combination_reasons.get("safe_combination_passed", 0)
+                + combination_reasons.get("low_confidence_original_preserved", 0),
+                len(pages),
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_safe_cloud_background_stain_stays_bounded_and_private(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-cloud-stain-combo-") as temp_dir:
             root = Path(temp_dir)
@@ -9548,6 +9634,48 @@ def _sparse_intermittent_scanline_page(variant: str = "safe") -> Image.Image:
     else:
         raise ValueError(f"unsupported variant: {variant}")
     return image
+
+
+def _full_chain_intermittent_scanline_page(variant: str = "safe") -> Image.Image:
+    image = _intermittent_scanline_guard_page("safe").copy()
+    draw = ImageDraw.Draw(image)
+    if variant == "safe":
+        return image
+    if variant == "table":
+        for y in (122, 132, 144):
+            draw.line((18, y, 226, y), fill=(232, 232, 228), width=1)
+        for x in (54, 92, 132, 172, 212):
+            draw.line((x, 112, x, 154), fill=(232, 232, 228), width=1)
+        return image
+    if variant == "page_number":
+        draw.rectangle((228, 156, 252, 174), fill=(58, 58, 58))
+        return image
+    if variant == "handwriting":
+        draw.line((20, 118, 66, 132, 112, 124, 160, 142), fill=(70, 70, 66), width=2)
+        return image
+    if variant == "stamp_color":
+        draw.ellipse((172, 104, 242, 168), outline=(185, 26, 26), width=4)
+        draw.line((176, 150, 238, 112), fill=(34, 90, 190), width=3)
+        return image
+    if variant == "texture":
+        for y in range(14, 168, 6):
+            for x in range(14, 246, 9):
+                shade = 236 + ((x * 5 + y * 7) % 4)
+                draw.point((x, y), fill=(shade, shade, shade))
+        return image
+    if variant == "already_clean":
+        clean = Image.new("RGB", image.size, (242, 242, 238))
+        clean_draw = ImageDraw.Draw(clean)
+        for y in (42, 64, 86):
+            clean_draw.rectangle((42, y, 158, y + 5), fill=(36, 36, 36))
+        return clean
+    if variant == "low_confidence_structured":
+        for y in (122, 132, 144):
+            draw.line((18, y, 226, y), fill=(236, 236, 232), width=1)
+        for x in (52, 88, 126, 164, 202, 226):
+            draw.line((x, 108, x, 158), fill=(58, 58, 58), width=2)
+        return image
+    raise ValueError(f"unsupported variant: {variant}")
 
 
 def _faded_text_page() -> Image.Image:
