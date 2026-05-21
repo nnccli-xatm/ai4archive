@@ -4172,6 +4172,125 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             ):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_paper_color_cast_combination_preserves_protected_content(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-paper-cast-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "private_full_chain_safe_mild_paper_cast.png": _mild_warm_scanner_cast_page("safe"),
+                "private_full_chain_paper_cast_stamp_annotation.png": _full_chain_mild_paper_cast_page(
+                    "stamp_annotation"
+                ),
+                "private_full_chain_paper_cast_colored_form_lines.png": _full_chain_mild_paper_cast_page(
+                    "colored_form_lines"
+                ),
+                "private_full_chain_paper_cast_photo_texture.png": _full_chain_mild_paper_cast_page("photo_texture"),
+                "private_full_chain_paper_cast_faint_handwriting.png": _full_chain_mild_paper_cast_page(
+                    "faint_handwriting"
+                ),
+                "private_full_chain_paper_cast_page_number.png": _full_chain_mild_paper_cast_page("page_number"),
+                "private_full_chain_paper_cast_already_neutral.png": _full_chain_mild_paper_cast_page("already_neutral"),
+                "private_full_chain_paper_cast_low_confidence_mixed.png": _full_chain_mild_paper_cast_page(
+                    "low_confidence_mixed"
+                ),
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-paper-cast-combination", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_name = "private_full_chain_safe_mild_paper_cast.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            safe_output = Image.open(process_dir / safe_record["output_relative_path"]).convert("RGB")
+            safe_source = pages[safe_name].convert("RGB")
+            self.assertTrue(safe_record["paper_color_cast_normalized"])
+            self.assertIn(
+                safe_record["paper_color_cast_reason_code"],
+                {"applied_mild_uniform_scanner_cast", "applied_mild_mixed_scanner_cast"},
+            )
+            self.assertIn("normalize_paper_color_cast_conservative", safe_record["operations"])
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["processed_output_safety_guard_action"], "passed")
+            self.assertIn(
+                safe_audit["combination_quality_guard_reason_code"],
+                {"safe_combination_passed", "low_confidence_original_preserved"},
+            )
+            self.assertLessEqual(safe_audit["paper_color_cast_delta"], 12.0)
+            self.assertLessEqual(safe_audit["paper_color_cast_brightness_delta"], 4.0)
+            self.assertGreater(safe_audit["paper_color_cast_changed_pixel_ratio"], 0.20)
+            self.assertLessEqual(safe_audit["paper_color_cast_changed_pixel_ratio"], 0.95)
+            self.assertLessEqual(safe_audit["paper_color_cast_candidate_pixel_ratio"], 0.98)
+            self.assertLess(_mean_channel_spread(safe_output), _mean_channel_spread(safe_source) - 4.0)
+            self.assertLess(_mean_luma_delta(safe_source, safe_output), 4.0)
+            self.assertLess(_changed_ratio(safe_source, safe_output, (32, 36, 170, 108)), 0.01)
+
+            protected_expected_codes = {
+                "private_full_chain_paper_cast_stamp_annotation.png": {"protected_color_content"},
+                "private_full_chain_paper_cast_colored_form_lines.png": {
+                    "protected_color_content",
+                    "protected_dark_content",
+                    "protected_edge_mark",
+                },
+                "private_full_chain_paper_cast_photo_texture.png": {
+                    "protected_photo_or_texture",
+                    "protected_color_content",
+                    "protected_dark_content",
+                },
+                "private_full_chain_paper_cast_faint_handwriting.png": {"protected_dark_content", "protected_edge_mark"},
+                "private_full_chain_paper_cast_page_number.png": {"protected_dark_content", "protected_edge_mark"},
+                "private_full_chain_paper_cast_already_neutral.png": {"already_neutral", "protected_dark_content"},
+                "private_full_chain_paper_cast_low_confidence_mixed.png": {
+                    "not_uniform",
+                    "low_confidence_paper",
+                    "protected_dark_content",
+                },
+            }
+            for name, expected_codes in protected_expected_codes.items():
+                record = records[name]
+                processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+                audit = record["processing_audit"]
+                self.assertFalse(record["paper_color_cast_normalized"], name)
+                self.assertIn(record["paper_color_cast_reason_code"], expected_codes, name)
+                self.assertIn("normalize_paper_color_cast_noop", record["operations"], name)
+                self.assertIn(audit["cumulative_change_guard_action"], {"passed", "reverted_to_source"}, name)
+                self.assertIn(
+                    audit["combination_quality_guard_reason_code"],
+                    {"safe_combination_passed", "low_confidence_original_preserved", "combined_change_too_large_reverted"},
+                    name,
+                )
+                self.assertLess(_changed_ratio(pages[name], processed, (0, 0, processed.width, processed.height)), 0.03, name)
+
+            cast_guard = audit_summary["guardrails"]["paper_color_cast"]
+            self.assertEqual(audit_summary["counts"]["paper_color_cast_normalized_files"], 1)
+            self.assertEqual(audit_summary["counts"]["paper_color_cast_skipped_files"], len(protected_expected_codes))
+            self.assertEqual(cast_guard["applied_files"], 1)
+            self.assertEqual(cast_guard["skipped_files"], len(protected_expected_codes))
+            self.assertGreaterEqual(cast_guard["reason_code_distribution"].get("applied_mild_uniform_scanner_cast", 0), 0)
+            self.assertGreaterEqual(cast_guard["skip_reason_code_distribution"].get("protected_color_content", 0), 1)
+            self.assertGreaterEqual(cast_guard["skip_reason_code_distribution"].get("protected_dark_content", 0), 1)
+            self.assertEqual(audit_summary["counts"]["combination_quality_guard_reverted_files"], 0)
+            self.assertEqual(audit_summary["counts"]["processed_output_safety_guard_reverted_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_mild_warm_paper_cast_cleans_up_while_protected_color_content_noops(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-warm-cast-") as temp_dir:
             root = Path(temp_dir)
@@ -7692,6 +7811,63 @@ def _mild_warm_scanner_cast_page(variant: str) -> Image.Image:
         draw.line((28, 128, 150, 138), fill=(42, 84, 190), width=3)
     elif variant != "safe":
         raise ValueError(f"unknown mild warm scanner cast variant: {variant}")
+    return image
+
+
+def _full_chain_mild_paper_cast_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (260, 190), (246, 241, 230))
+    draw = ImageDraw.Draw(image)
+    for y in (44, 68, 92, 116):
+        draw.rectangle((38, y, 168, y + 4), fill=(56, 56, 56))
+    draw.rectangle((194, 24, 212, 30), fill=(74, 74, 74))
+    if variant != "safe":
+        draw.line((0, 186, 259, 186), fill=(26, 26, 26), width=2)
+        image.putpixel((24, 24), (0, 0, 0))
+
+    if variant == "stamp_annotation":
+        draw.ellipse((156, 98, 226, 166), outline=(188, 28, 28), width=4)
+        draw.line((34, 148, 156, 158), fill=(44, 86, 194), width=3)
+    elif variant == "colored_form_lines":
+        for y in (36, 58, 80, 102, 124, 146):
+            draw.line((20, y, 240, y), fill=(104, 146, 186), width=1)
+        for x in (36, 92, 148, 204):
+            draw.line((x, 30, x, 156), fill=(104, 146, 186), width=1)
+    elif variant == "photo_texture":
+        for y in range(24, 110):
+            for x in range(170, 248):
+                shade = 88 + ((x * 5 + y * 7) % 96)
+                draw.point((x, y), fill=(shade + 12, shade + 4, shade))
+    elif variant == "faint_handwriting":
+        draw.line((8, 130, 38, 138, 16, 150, 46, 160), fill=(176, 176, 172), width=2)
+        draw.line((10, 158, 36, 166), fill=(178, 178, 174), width=2)
+    elif variant == "page_number":
+        draw.rectangle((212, 168, 238, 176), fill=(166, 166, 162))
+    elif variant == "already_neutral":
+        image = Image.new("RGB", (260, 190), (244, 244, 244))
+        draw = ImageDraw.Draw(image)
+        for y in (44, 68, 92, 116):
+            draw.rectangle((38, y, 168, y + 4), fill=(56, 56, 56))
+        draw.rectangle((194, 24, 212, 30), fill=(74, 74, 74))
+        draw.line((0, 186, 259, 186), fill=(26, 26, 26), width=2)
+        image.putpixel((24, 24), (0, 0, 0))
+    elif variant == "low_confidence_mixed":
+        pixels = image.load()
+        for y in range(image.height):
+            for x in range(image.width):
+                warm = (246, 238, 226)
+                cool = (232, 240, 248)
+                blend = (x / max(1, image.width - 1)) * 0.65 + (y / max(1, image.height - 1)) * 0.35
+                mixed = tuple(round(warm[index] * (1.0 - blend) + cool[index] * blend) for index in range(3))
+                pixels[x, y] = mixed
+        draw = ImageDraw.Draw(image)
+        for y in (44, 68, 92, 116):
+            draw.rectangle((38, y, 168, y + 4), fill=(56, 56, 56))
+        draw.rectangle((194, 24, 212, 30), fill=(74, 74, 74))
+        draw.ellipse((148, 20, 248, 88), fill=(224, 214, 200))
+        draw.line((0, 186, 259, 186), fill=(26, 26, 26), width=2)
+        image.putpixel((24, 24), (0, 0, 0))
+    elif variant != "safe":
+        raise ValueError(f"unknown full-chain mild paper cast variant: {variant}")
     return image
 
 
