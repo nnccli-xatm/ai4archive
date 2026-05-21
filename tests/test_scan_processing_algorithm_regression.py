@@ -2502,6 +2502,89 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_clean_noop_pages_stay_within_synthetic_budget_and_aggregate_only(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-clean-noop-budget-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_clean_noop_primary.png": _clean_full_chain_noop_page("primary"),
+                "synthetic_clean_noop_secondary.png": _clean_full_chain_noop_page("secondary"),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, page in pages.items():
+                source = input_dir / name
+                page.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-clean-noop-budget", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            required_noops = {
+                "deskew_noop",
+                "dark_border_trim_noop",
+                "scanner_gutter_trim_noop",
+                "auto_crop_noop",
+                "despeckle_noop",
+                "normalize_tones_noop",
+                "normalize_paper_color_cast_noop",
+                "lighten_edge_shadow_noop",
+                "lighten_corner_shadows_noop",
+                "lighten_background_stains_noop",
+                "lighten_fold_shadows_noop",
+                "level_illumination_gradient_noop",
+                "clean_bleed_through_noop",
+                "lighten_scanlines_noop",
+                "enhance_faded_text_noop",
+                "sharpen_text_edges_noop",
+            }
+            for name, source_image in pages.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
+                self.assertEqual(record["status"], "processed", name)
+                for op in required_noops:
+                    self.assertIn(op, record["operations"], f"{name}:{op}")
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertEqual(audit["local_content_change_guard_action"], "passed", name)
+                self.assertEqual(audit["cumulative_change_guard_action"], "passed", name)
+                self.assertIn(
+                    audit["combination_quality_guard_reason_code"],
+                    {"safe_combination_passed", "low_confidence_original_preserved"},
+                    name,
+                )
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    self.assertIsNone(ImageChops.difference(source_image, output.convert("RGB")).getbbox(), name)
+
+            timings = audit_summary["timing"]["operation_timings"]
+            enabled_ops = [operation for operation in _operation_timings_fixture() if timings.get(operation, {}).get("enabled")]
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            aggregate_elapsed = 0.0
+            for operation in enabled_ops:
+                timing = timings[operation]
+                self.assertEqual(timing["file_count"], len(pages), operation)
+                self.assertIsInstance(timing["average_seconds_per_file"], float, operation)
+                aggregate_elapsed += float(timing["elapsed_seconds"])
+            self.assertLessEqual(
+                aggregate_elapsed,
+                1.6,
+                f"clean/no-op full-chain budget exceeded: {aggregate_elapsed:.4f}s for {len(pages)} files",
+            )
+            self.assertEqual(timings["despeckle"]["replacement_work_files"], 0)
+            for reason_code in timings["despeckle"]["reason_code_distribution"]:
+                self.assertRegex(reason_code, r"^[a-z0-9_]+$")
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_subtle_diagonal_edge_shadow_cleanup_preserves_protected_edges(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-diagonal-edge-shadow-") as temp_dir:
             root = Path(temp_dir)
@@ -9110,6 +9193,20 @@ def _noisy_edge_texture_noop_page(edge: str) -> Image.Image:
             shade = 222 + ((x_offset * 3 + y) % 6)
             image.putpixel((x, y), (shade, shade, shade))
     return image
+
+
+def _clean_full_chain_noop_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (240, 180), (245, 245, 245))
+    draw = ImageDraw.Draw(image)
+    for y in (42, 64, 86, 108, 130):
+        draw.rectangle((40, y, 172, y + 3), fill=(62, 62, 62))
+    draw.rectangle((188, 30, 202, 36), fill=(66, 66, 66))
+    if variant == "primary":
+        return image
+    if variant == "secondary":
+        draw.rectangle((46, 154, 126, 157), fill=(94, 94, 94))
+        return image
+    raise ValueError(f"unsupported clean full-chain noop variant: {variant}")
 
 
 def _pale_dotted_leader_page() -> Image.Image:
