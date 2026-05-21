@@ -4542,6 +4542,59 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in ("synthetic_shallow_deskew_combo.png", str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_narrow_uneven_single_edge_shadow_trim_preserves_protected_lookalikes(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-narrow-uneven-single-edge-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            def page(kind: str) -> Image.Image:
+                image = Image.new("RGB", (240, 180), (244, 244, 240))
+                draw = ImageDraw.Draw(image)
+                edge_width = 4 if kind != "broad_shadow" else 12
+                draw.rectangle((0, 0, edge_width - 1, 179), fill=(94, 94, 94))
+                gaps = ((18, 24), (52, 60), (90, 98), (118, 124))
+                for y0, y1 in gaps:
+                    draw.rectangle((0, y0, edge_width - 1, y1), fill=(244, 244, 240))
+                draw.rectangle((1, 28, 2, 34), fill=(122, 122, 122))
+                draw.rectangle((1, 72, 2, 78), fill=(126, 126, 126))
+                draw.rectangle((70, 68, 170, 72), fill=(30, 30, 30))
+                if kind == "page_number":
+                    draw.rectangle((5, 144, 30, 158), fill=(20, 20, 20))
+                return image
+
+            pages = {
+                "synthetic_safe_narrow_uneven_single_edge_shadow.png": page("safe"),
+                "synthetic_protected_narrow_uneven_page_number.png": page("page_number"),
+                "synthetic_protected_narrow_uneven_broad_shadow.png": page("broad_shadow"),
+            }
+            for filename, image in pages.items():
+                image.save(input_dir / filename, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "narrow-uneven-single-edge", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(trim_dark_border=True, workers=1))
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe = records["synthetic_safe_narrow_uneven_single_edge_shadow.png"]
+            self.assertTrue(safe["dark_border_trimmed"])
+            self.assertEqual(safe["dark_border_reason_code"], "trimmed_broken_single_edge_shadow")
+            self.assertEqual(safe["dark_border_edge_sides"], ["left"])
+            self.assertEqual(safe["dark_border_bbox"], [4, 0, 240, 180])
+            self.assertLessEqual(safe["processing_audit"]["max_trim_margin_ratio"], 0.017)
+
+            page_number = records["synthetic_protected_narrow_uneven_page_number.png"]
+            self.assertFalse(page_number["dark_border_trimmed"])
+            self.assertIn(
+                page_number["dark_border_reason_code"],
+                {"protected_edge_content_near_dark_border", "incomplete_dark_edge_border_evidence"},
+            )
+
+            broad_shadow = records["synthetic_protected_narrow_uneven_broad_shadow.png"]
+            self.assertFalse(broad_shadow["dark_border_trimmed"])
+            self.assertEqual(broad_shadow["dark_border_reason_code"], "incomplete_dark_edge_border_evidence")
+
     def test_deskew_preserves_sparse_low_text_pages_and_corrects_safe_text(self) -> None:
         def sparse_or_safe_page(variant: str) -> Image.Image:
             image = Image.new("RGB", (360, 480), (248, 248, 246))
