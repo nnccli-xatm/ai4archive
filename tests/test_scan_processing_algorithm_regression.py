@@ -2803,6 +2803,94 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertGreaterEqual(faded_guard["protection_triggered_files"], 2)
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
 
+    def test_full_chain_ruled_table_and_form_lines_stay_preserved_with_safe_cleanup_control(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-ruled-form-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_safe_cleanup_control.png": _faint_thumbprint_stain_page(),
+                "synthetic_protected_ruled_ledger_grid.png": _pale_blue_carbon_copy_page(
+                    with_blue_annotation=False,
+                    variant="blue_ledger_grid",
+                ),
+                "synthetic_protected_boxed_form_fields.png": _pale_blue_carbon_copy_page(
+                    with_blue_annotation=False,
+                    variant="blue_form_boxes",
+                ),
+                "synthetic_protected_checkbox_row.png": _pale_blue_carbon_copy_page(
+                    with_blue_annotation=False,
+                    variant="blue_checkbox_row",
+                ),
+                "synthetic_protected_light_form_separators.png": _pale_blue_carbon_copy_page(
+                    with_blue_annotation=False,
+                    variant="blue_light_form_separators",
+                ),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, page in pages.items():
+                source = input_dir / name
+                page.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-ruled-form-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            safe_name = "synthetic_safe_cleanup_control.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_output:
+                self.assertGreater(
+                    _mean_luma(safe_output.convert("L"), (164, 68, 210, 108))
+                    - _mean_luma(pages[safe_name].convert("L"), (164, 68, 210, 108)),
+                    1.0,
+                )
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertIn(
+                safe_audit["combination_quality_guard_reason_code"],
+                {"safe_combination_passed", "low_confidence_original_preserved"},
+            )
+
+            protected_names = set(pages) - {safe_name}
+            structure_regions = {
+                "synthetic_protected_ruled_ledger_grid.png": (30, 34, 340, 214),
+                "synthetic_protected_boxed_form_fields.png": (32, 40, 324, 210),
+                "synthetic_protected_checkbox_row.png": (32, 56, 332, 182),
+                "synthetic_protected_light_form_separators.png": (26, 46, 336, 206),
+            }
+            for name in protected_names:
+                record = records[name]
+                audit = record["processing_audit"]
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    processed = output.convert("RGB")
+                    changed_ratio = _changed_ratio(pages[name], processed, (0, 0, output.width, output.height))
+                    box = structure_regions[name]
+                    original_structure = pages[name].crop(box)
+                    processed_structure = processed.crop(box)
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
+                self.assertLessEqual(changed_ratio, 0.18, name)
+                self.assertGreaterEqual(_edge_energy(processed_structure), _edge_energy(original_structure) * 0.75, name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertIn(
+                    audit["combination_quality_guard_reason_code"],
+                    {"safe_combination_passed", "low_confidence_original_preserved"},
+                    name,
+                )
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_diagonal_fold_shadow_cleanup_lightens_safe_sparse_text_case_and_preserves_protected_marks(
         self,
     ) -> None:
@@ -8721,6 +8809,26 @@ def _pale_blue_carbon_copy_page(*, with_blue_annotation: bool, variant: str = "s
             for col in range(4):
                 left = 28 + col * 80
                 draw.rectangle((left, top, left + 68, top + 42), outline=(162, 184, 222), width=1)
+    elif variant == "blue_ledger_grid":
+        for y in range(34, 216, 18):
+            draw.line((26, y, 336, y), fill=(160, 180, 218), width=1)
+        for x in range(32, 340, 46):
+            draw.line((x, 34, x, 214), fill=(164, 184, 222), width=1)
+    elif variant == "blue_boxed_form_fields":
+        for row in range(3):
+            top = 42 + row * 56
+            for col in range(3):
+                left = 34 + col * 96
+                draw.rectangle((left, top, left + 82, top + 38), outline=(162, 184, 222), width=1)
+    elif variant == "blue_checkbox_row":
+        for y in (66, 102, 138, 174):
+            draw.rectangle((34, y - 8, 46, y + 4), outline=(162, 184, 222), width=1)
+            draw.line((58, y, 326, y), fill=(170, 190, 226), width=1)
+    elif variant == "blue_light_form_separators":
+        for y in (58, 86, 114, 142, 170, 198):
+            draw.line((28, y, 334, y), fill=(180, 198, 230), width=1)
+        for x in (116, 210):
+            draw.line((x, 46, x, 206), fill=(182, 200, 232), width=1)
     elif variant != "safe":
         raise ValueError(f"unsupported pale-blue variant: {variant}")
     return image
