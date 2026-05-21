@@ -14934,6 +14934,38 @@ class ScanQcTest(unittest.TestCase):
         self.assertEqual(saved_target, Path("private_output.jpeg"))
         self.assertEqual(save_kwargs, {"quality": 95, "subsampling": 0})
 
+    def test_save_image_preserves_icc_profile_for_jpeg_and_png_derivatives(self) -> None:
+        source = Image.new("RGB", (24, 16), "white")
+        source.info["dpi"] = (300, 300)
+        source.info["icc_profile"] = b"fake-icc-profile"
+        derivative = Image.new("RGB", (24, 16), "white")
+
+        with mock.patch("PIL.Image.Image.save", autospec=True) as save_mock:
+            processing_module._save_image(derivative, Path("private_output.jpg"), source)
+            processing_module._save_image(derivative, Path("private_output.png"), source)
+
+        self.assertEqual(save_mock.call_count, 2)
+        jpeg_kwargs = save_mock.call_args_list[0].kwargs
+        png_kwargs = save_mock.call_args_list[1].kwargs
+        self.assertEqual(jpeg_kwargs["dpi"], (300, 300))
+        self.assertEqual(jpeg_kwargs["icc_profile"], b"fake-icc-profile")
+        self.assertEqual(jpeg_kwargs["quality"], 95)
+        self.assertEqual(jpeg_kwargs["subsampling"], 0)
+        self.assertEqual(png_kwargs, {"dpi": (300, 300), "icc_profile": b"fake-icc-profile"})
+
+    def test_save_image_omits_icc_profile_for_unsupported_derivative_format(self) -> None:
+        source = Image.new("RGB", (24, 16), "white")
+        source.info["dpi"] = (300, 300)
+        source.info["icc_profile"] = b"fake-icc-profile"
+        derivative = Image.new("RGB", (24, 16), "white")
+
+        with mock.patch("PIL.Image.Image.save", autospec=True) as save_mock:
+            processing_module._save_image(derivative, Path("private_output.bmp"), source)
+
+        save_mock.assert_called_once()
+        save_kwargs = save_mock.call_args.kwargs
+        self.assertEqual(save_kwargs, {"dpi": (300, 300)})
+
     def test_production_runner_writes_derivatives_summary_and_progress_without_modifying_sources(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

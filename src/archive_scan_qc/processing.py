@@ -15720,6 +15720,10 @@ def _save_image(image: Image.Image, target: Path, source_image: Image.Image) -> 
         save_kwargs["dpi"] = dpi
 
     suffix = target.suffix.lower()
+    icc_profile = source_image.info.get("icc_profile")
+    if icc_profile and suffix in {".jpg", ".jpeg", ".jpe", ".jfif", ".png", ".tif", ".tiff"}:
+        save_kwargs["icc_profile"] = icc_profile
+
     if suffix in {".jpg", ".jpeg", ".jpe", ".jfif"}:
         if image.mode != "RGB":
             image = image.convert("RGB")
