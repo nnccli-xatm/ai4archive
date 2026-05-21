@@ -2577,6 +2577,79 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_halftone_dot_matrix_fax_and_compression_patterns_stay_preserved(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-pattern-preserve-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_safe_pattern_cleanup_control.png": _faint_thumbprint_stain_page(),
+                "synthetic_protected_halftone_screened_copy.png": _halftone_screened_copy_page(),
+                "synthetic_protected_dot_matrix_text.png": _dot_matrix_text_page(),
+                "synthetic_protected_fax_like_banding.png": _fax_like_banding_page(),
+                "synthetic_protected_low_resolution_copy_texture.png": _low_resolution_copy_texture_page(),
+                "synthetic_protected_compression_block_lookalike.png": _compression_block_lookalike_page(),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, page in pages.items():
+                source = input_dir / name
+                page.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-pattern-preserve", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            safe_name = "synthetic_safe_pattern_cleanup_control.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_output:
+                self.assertGreater(
+                    _mean_luma(safe_output.convert("L"), (164, 68, 210, 108))
+                    - _mean_luma(pages[safe_name].convert("L"), (164, 68, 210, 108)),
+                    1.0,
+                )
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertEqual(safe_audit["local_content_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed")
+
+            protected_names = set(pages) - {safe_name}
+            for name in protected_names:
+                record = records[name]
+                audit = record["processing_audit"]
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    changed_ratio = _changed_ratio(pages[name], output.convert("RGB"), (0, 0, output.width, output.height))
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
+                self.assertLessEqual(changed_ratio, 0.03, name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertIn(audit["local_content_change_guard_action"], {"passed", "reverted_to_source"}, name)
+                self.assertIn(audit["cumulative_change_guard_action"], {"passed", "reverted_to_source"}, name)
+                self.assertIn(
+                    audit["combination_quality_guard_reason_code"],
+                    {"safe_combination_passed", "low_confidence_original_preserved", "protected_content_original_preserved", "combined_change_too_large_reverted"},
+                    name,
+                )
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            self.assertIn("despeckle", audit_summary["timing"]["operation_timings"])
+            self.assertGreaterEqual(
+                audit_summary["guardrails"]["combination_quality_guard"]["reason_code_distribution"].get(
+                    "safe_combination_passed", 0
+                ),
+                1,
+            )
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_faint_official_marks_preserve_watermark_seal_stamp_and_security_details(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-faint-official-marks-") as temp_dir:
             root = Path(temp_dir)
@@ -9640,6 +9713,70 @@ def _low_contrast_halftone_texture_page() -> Image.Image:
         x = 128 + ((index * 37) % 112)
         y = 28 + ((index * 23) % 124)
         image.putpixel((x, y), (226, 224, 210))
+    return image
+
+
+def _halftone_screened_copy_page() -> Image.Image:
+    image = Image.new("RGB", (260, 180), (244, 244, 241))
+    draw = ImageDraw.Draw(image)
+    for y in (42, 68, 94):
+        draw.rectangle((44, y, 112, y + 3), fill=(66, 66, 66))
+    for y in range(24, 152, 4):
+        for x in range(126, 246, 4):
+            tone = 220 if (x + y) % 8 == 0 else 228
+            image.putpixel((x, y), (tone, tone - 1, tone - 3))
+    return image
+
+
+def _dot_matrix_text_page() -> Image.Image:
+    image = Image.new("RGB", (260, 180), (245, 245, 243))
+    draw = ImageDraw.Draw(image)
+    for y in range(40, 132, 22):
+        for x in range(40, 220, 5):
+            if (x + y) % 7 in (0, 1, 2):
+                draw.rectangle((x, y, x + 1, y + 1), fill=(78, 78, 78))
+    for y in (40, 62, 84, 106, 128):
+        draw.rectangle((24, y + 2, 30, y + 4), fill=(70, 70, 70))
+    return image
+
+
+def _fax_like_banding_page() -> Image.Image:
+    image = Image.new("RGB", (260, 180), (244, 244, 241))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((44, 48, 202, 52), fill=(70, 70, 70))
+    draw.rectangle((44, 88, 218, 92), fill=(74, 74, 74))
+    draw.rectangle((44, 126, 170, 130), fill=(72, 72, 72))
+    for y in range(20, 160):
+        if y % 9 in (0, 1):
+            shade = 232 if y % 18 == 0 else 228
+            for x in range(0, 260):
+                image.putpixel((x, y), (shade, shade, shade))
+    return image
+
+
+def _low_resolution_copy_texture_page() -> Image.Image:
+    image = Image.new("RGB", (260, 180), (244, 244, 241))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((36, 48, 210, 52), fill=(68, 68, 68))
+    draw.rectangle((36, 88, 190, 92), fill=(70, 70, 70))
+    for block_y in range(20, 160, 6):
+        for block_x in range(132, 246, 6):
+            shade = 224 + ((block_x + block_y) % 6)
+            draw.rectangle((block_x, block_y, block_x + 2, block_y + 2), fill=(shade, shade, shade - 1))
+    return image
+
+
+def _compression_block_lookalike_page() -> Image.Image:
+    image = Image.new("RGB", (260, 180), (245, 245, 242))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((36, 44, 196, 48), fill=(66, 66, 66))
+    draw.rectangle((36, 84, 206, 88), fill=(66, 66, 66))
+    for by in range(24, 152, 8):
+        for bx in range(132, 252, 8):
+            base = 222 + ((bx // 8 + by // 8) % 4)
+            draw.rectangle((bx, by, bx + 7, by + 7), fill=(base, base + 1, base))
+            draw.rectangle((bx, by, bx + 7, by), fill=(base - 2, base - 2, base - 2))
+            draw.rectangle((bx, by, bx, by + 7), fill=(base - 2, base - 2, base - 2))
     return image
 
 
