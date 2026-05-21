@@ -2577,6 +2577,72 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_faint_official_marks_preserve_watermark_seal_stamp_and_security_details(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-faint-official-marks-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_safe_faint_cleanup_control.png": _faint_official_mark_guard_page("safe_cleanup_control"),
+                "synthetic_protected_low_contrast_watermark.png": _faint_official_mark_guard_page("watermark"),
+                "synthetic_protected_blind_embossed_seal.png": _faint_official_mark_guard_page("blind_embossed_seal"),
+                "synthetic_protected_faint_official_stamp.png": _faint_official_mark_guard_page("faint_official_stamp"),
+                "synthetic_protected_subtle_security_mark.png": _faint_official_mark_guard_page("subtle_security_mark"),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, page in pages.items():
+                source = input_dir / name
+                page.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-faint-official-marks", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            safe_name = "synthetic_safe_faint_cleanup_control.png"
+            safe_record = records[safe_name]
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_output:
+                self.assertGreaterEqual(
+                    _mean_luma(safe_output.convert("L"), (160, 78, 224, 128))
+                    - _mean_luma(pages[safe_name].convert("L"), (160, 78, 224, 128)),
+                    0.0,
+                )
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+
+            protected_mark_regions = {
+                "synthetic_protected_low_contrast_watermark.png": ((126, 80, 228, 124), (28, 26, 98, 56)),
+                "synthetic_protected_blind_embossed_seal.png": ((162, 66, 220, 126), (28, 26, 98, 56)),
+                "synthetic_protected_faint_official_stamp.png": ((156, 74, 228, 138), (28, 26, 98, 56)),
+                "synthetic_protected_subtle_security_mark.png": ((152, 70, 228, 138), (28, 26, 98, 56)),
+            }
+            for name, (mark_box, paper_box) in protected_mark_regions.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    changed_ratio = _changed_ratio(pages[name], output.convert("RGB"), (0, 0, output.width, output.height))
+                    before_contrast = abs(
+                        _mean_luma(pages[name].convert("L"), mark_box) - _mean_luma(pages[name].convert("L"), paper_box)
+                    )
+                    after_contrast = abs(_mean_luma(output.convert("L"), mark_box) - _mean_luma(output.convert("L"), paper_box))
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
+                self.assertLessEqual(changed_ratio, 0.04, name)
+                self.assertGreaterEqual(after_contrast, before_contrast * 0.65, name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertEqual(audit["local_content_change_guard_action"], "passed", name)
+                self.assertEqual(audit["cumulative_change_guard_action"], "passed", name)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_clean_noop_pages_stay_within_synthetic_budget_and_aggregate_only(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-clean-noop-budget-") as temp_dir:
             root = Path(temp_dir)
@@ -10015,6 +10081,49 @@ def _risk_stamp_header_footer_page() -> Image.Image:
     draw.rectangle((48, 18, 170, 20), fill=(64, 64, 64))
     draw.rectangle((54, 158, 154, 160), fill=(64, 64, 64))
     return image.filter(ImageFilter.GaussianBlur(radius=0.6))
+
+
+def _faint_official_mark_guard_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (260, 190), (244, 244, 240))
+    draw = ImageDraw.Draw(image)
+    for y in range(44, 140, 24):
+        draw.rectangle((26, y, 112, y + 4), fill=(44, 44, 44))
+        draw.rectangle((30, y + 9, 98, y + 11), fill=(66, 66, 66))
+
+    if variant == "safe_cleanup_control":
+        mask = Image.new("L", image.size, 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.ellipse((160, 78, 224, 128), fill=145)
+        mask = mask.filter(ImageFilter.GaussianBlur(6))
+        return Image.composite(Image.new("RGB", image.size, (232, 230, 222)), image, mask)
+
+    if variant == "watermark":
+        for offset in (0, 18, 36):
+            draw.line((126 + offset, 122, 188 + offset, 84), fill=(228, 228, 224), width=2)
+        draw.text((140, 92), "ARCHIVE", fill=(230, 230, 226))
+        return image
+
+    if variant == "blind_embossed_seal":
+        draw.ellipse((162, 66, 220, 124), outline=(226, 226, 222), width=2)
+        draw.ellipse((172, 76, 210, 114), outline=(228, 228, 224), width=1)
+        draw.line((176, 94, 206, 94), fill=(229, 229, 225), width=1)
+        draw.line((191, 80, 191, 110), fill=(229, 229, 225), width=1)
+        return image
+
+    if variant == "faint_official_stamp":
+        draw.ellipse((156, 74, 228, 138), outline=(212, 178, 176), width=2)
+        draw.ellipse((166, 84, 218, 128), outline=(220, 188, 186), width=1)
+        draw.line((170, 106, 214, 106), fill=(214, 182, 180), width=1)
+        return image
+
+    if variant == "subtle_security_mark":
+        for y in range(74, 134, 6):
+            draw.line((152, y, 228, y + 4), fill=(228, 228, 224), width=1)
+        for x in range(156, 228, 8):
+            draw.line((x, 70, x - 8, 138), fill=(229, 229, 225), width=1)
+        return image
+
+    raise ValueError(f"unsupported faint official mark variant: {variant}")
 
 
 def _risk_edge_content_mark_page() -> Image.Image:
