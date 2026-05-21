@@ -5654,10 +5654,24 @@ def _lighten_background_stains_conservative(image: Image.Image) -> BackgroundSta
             and edge_density > 0.10
             and local_contrast >= 9.0
         )
+        elongated_shadow_band_risk = (
+            area_ratio >= 0.015
+            and max(width, height) / max(1, min(width, height)) >= 1.9
+            and width >= image.width * 0.30
+            and height >= image.height * 0.18
+            and edge_density <= 0.14
+            and color_shift <= 30
+        )
         if faint_detail_risk or faint_stroke_detail_risk:
             return _background_stains_noop(
                 image,
                 "background stain lightening skipped: pale mark, ruled line, texture, or detail risk",
+                candidate_ratio,
+            )
+        if elongated_shadow_band_risk:
+            return _background_stains_noop(
+                image,
+                "background stain lightening skipped: large stain or historical damage risk",
                 candidate_ratio,
             )
         low_frequency_shape = (
