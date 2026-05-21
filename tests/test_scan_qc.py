@@ -5976,6 +5976,72 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn("private_low_contrast_handwriting", audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
 
+    def test_enhance_faded_text_improves_safe_pale_blue_carbon_copy_text(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "private_pale_blue_carbon_copy.png"
+            image = _synthetic_pale_blue_carbon_copy_text_page()
+            image.save(source, dpi=(300, 300))
+            source_bytes = source.read_bytes()
+            original = image.convert("L")
+            original_text_mean = ImageStat.Stat(original.crop((46, 40, 210, 140))).mean[0]
+            original_background_mean = ImageStat.Stat(original.crop((248, 40, 330, 140))).mean[0]
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(enhance_faded_text=True, workers=1),
+            )
+            record = manifest["files"][0]
+            audit = record["processing_audit"]
+            processed = Image.open(process_dir / record["output_relative_path"]).convert("L")
+            processed_text_mean = ImageStat.Stat(processed.crop((46, 40, 210, 140))).mean[0]
+            processed_background_mean = ImageStat.Stat(processed.crop((248, 40, 330, 140))).mean[0]
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertTrue(record["faded_text_enhanced"])
+            self.assertEqual(record["faded_text_reason_code"], "applied_stable_low_contrast_text")
+            self.assertGreaterEqual(audit["faded_text_delta"], 8.0)
+            self.assertGreater(audit["faded_text_changed_pixel_ratio"], 0.0)
+            self.assertLessEqual(audit["faded_text_changed_pixel_ratio"], 0.10)
+            self.assertLessEqual(audit["faded_text_candidate_pixel_ratio"], 0.16)
+            self.assertGreater(original_text_mean - processed_text_mean, 0.15)
+            self.assertLess(abs(original_background_mean - processed_background_mean), 0.5)
+
+    def test_enhance_faded_text_skips_pale_blue_annotation_risk_page(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "private_pale_blue_annotation_risk.png"
+            image = _synthetic_pale_blue_carbon_copy_text_page(with_blue_annotation=True)
+            image.save(source, dpi=(300, 300))
+            original = image.convert("L")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(enhance_faded_text=True, workers=1),
+            )
+            record = manifest["files"][0]
+            processed = Image.open(process_dir / record["output_relative_path"]).convert("L")
+            changed = ImageChops.difference(original, processed).point(lambda value: 255 if value else 0, mode="L")
+            changed_pixels = _mask_pixel_count_for_test(changed)
+
+            self.assertFalse(record["faded_text_enhanced"])
+            self.assertEqual(record["faded_text_reason_code"], "protected_color_stamp_annotation")
+            self.assertEqual(changed_pixels, 0)
+
     def test_enhance_faded_text_improves_pale_uneven_low_contrast_text_safely(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -16942,6 +17008,23 @@ def _synthetic_pale_typed_text_page(*, ink: int = 228) -> Image.Image:
     )
     for index, line in enumerate(lines):
         draw.text((48, 42 + index * 28), line, fill=(ink, ink, ink), font=font)
+    return image
+
+
+def _synthetic_pale_blue_carbon_copy_text_page(*, with_blue_annotation: bool = False) -> Image.Image:
+    image = Image.new("RGB", (360, 240), (244, 244, 244))
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default()
+    lines = (
+        "DUPLICATE COPY REGISTER",
+        "CARBON COPY TEXT SAMPLE",
+        "PALE BLUE LOW CONTRAST",
+        "ARCHIVE OPERATOR CHECK",
+    )
+    for index, line in enumerate(lines):
+        draw.text((46, 44 + index * 28), line, fill=(204, 212, 226), font=font)
+    if with_blue_annotation:
+        draw.line((34, 188, 330, 206), fill=(58, 96, 202), width=3)
     return image
 
 
