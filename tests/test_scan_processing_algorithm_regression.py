@@ -4792,6 +4792,90 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_deskew_conservative_path_corrects_sparse_low_contrast_typed_text_only(self) -> None:
+        def sparse_low_contrast_page(variant: str) -> Image.Image:
+            image = Image.new("RGB", (520, 680), (248, 248, 246))
+            draw = ImageDraw.Draw(image)
+            if variant == "safe_typed_text":
+                for y in (196, 244):
+                    x = 132
+                    for index in range(21):
+                        width = 5 + (index % 3)
+                        height = 7 + (index % 2)
+                        tone = 176 + (index % 2)
+                        draw.rectangle((x, y, x + width, y + height), fill=(tone, tone, tone))
+                        x += width + 5
+            elif variant == "protected_table":
+                for y in (192, 238, 284):
+                    draw.line((118, y, 402, y), fill=(78, 78, 78), width=2)
+                for x in (132, 168, 204, 240, 276, 312, 348):
+                    draw.line((x, 176, x, 300), fill=(78, 78, 78), width=2)
+            elif variant == "protected_handwriting":
+                for index, x in enumerate(range(124, 404, 26)):
+                    base = 194 + ((index % 3) * 34)
+                    draw.line((x, base, x + 18, base + 8), fill=(156, 156, 156), width=2)
+                    draw.line((x + 2, base + 10, x + 16, base - 4), fill=(156, 156, 156), width=2)
+                draw.arc((150, 210, 340, 322), 20, 166, fill=(156, 156, 156), width=2)
+            else:
+                raise ValueError(f"unsupported sparse low contrast deskew variant: {variant}")
+            return image.rotate(-0.42, resample=Image.Resampling.BICUBIC, expand=True, fillcolor=(248, 248, 246))
+
+        with tempfile.TemporaryDirectory(prefix="scan-processing-sparse-low-contrast-deskew-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_sparse_low_contrast_safe_typed_text.png": sparse_low_contrast_page("safe_typed_text"),
+                "synthetic_sparse_low_contrast_protected_table.png": sparse_low_contrast_page("protected_table"),
+                "synthetic_sparse_low_contrast_protected_handwriting.png": sparse_low_contrast_page("protected_handwriting"),
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "sparse-low-contrast-deskew", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(deskew=True, workers=1))
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            safe_name = "synthetic_sparse_low_contrast_safe_typed_text.png"
+            safe_record = records[safe_name]
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertTrue(safe_record["deskewed"])
+            self.assertEqual(safe_record["deskew_reason"], "deskew applied")
+            self.assertIn("deskew_conservative", safe_record["operations"])
+            self.assertAlmostEqual(safe_record["skew_angle_degrees"], -0.42, delta=0.22)
+            self.assertLessEqual(abs(float(safe_record["skew_angle_degrees"])), 1.25)
+
+            protected_expectations = {
+                "synthetic_sparse_low_contrast_protected_table.png": {"table or color mark rotation risk", "low contrast"},
+                "synthetic_sparse_low_contrast_protected_handwriting.png": {"low contrast", "low confidence"},
+            }
+            for name, public_reasons in protected_expectations.items():
+                record = records[name]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name])
+                self.assertFalse(record["deskewed"], name)
+                self.assertIn(record["deskew_reason"], public_reasons, name)
+                self.assertIn("deskew_noop", record["operations"], name)
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    self.assertIsNone(ImageChops.difference(pages[name], output.convert("RGB")).getbbox(), name)
+
+            deskew_summary = audit_summary["guardrails"]["deskew"]
+            self.assertEqual(audit_summary["counts"]["deskewed_files"], 1)
+            self.assertEqual(audit_summary["counts"]["deskew_skipped_files"], 2)
+            self.assertEqual(deskew_summary["corrected_files"], 1)
+            self.assertEqual(deskew_summary["reason_distribution"]["deskew applied"], 1)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_deskew_auto_crop_bounds_faint_sparse_form_rows(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-faint-form-deskew-crop-") as temp_dir:
             root = Path(temp_dir)
