@@ -14687,6 +14687,14 @@ def _despeckle_replacements_numpy(
                     x=int(x_value),
                     y=int(y_value),
                 )
+                or _despeckle_edge_component_requires_texture_protection(
+                    lambda nx, ny: int(gray[ny, nx]),
+                    candidate_set,
+                    width,
+                    height,
+                    int(x_value),
+                    int(y_value),
+                )
             )
             for x_value, y_value in zip(candidate_x.tolist(), candidate_y.tolist())
         ],
@@ -14834,6 +14842,16 @@ def _despeckle_replacements_fallback(
     for x, y in candidates:
         component = component_cache[(x, y)]
         if _despeckle_has_pale_mark_protected_context(
+            gray_pixels,
+            candidate_set,
+            width,
+            height,
+            x,
+            y,
+            component=component,
+        ):
+            continue
+        if _despeckle_edge_component_requires_texture_protection(
             gray_pixels,
             candidate_set,
             width,
@@ -15153,6 +15171,14 @@ def _despeckle_edge_tiny_isolated_component_for_cleanup(
             component=component,
         ):
             return None
+    if _despeckle_has_margin_pale_texture_context(
+        gray_pixels,
+        candidate_set,
+        width,
+        height,
+        component,
+    ):
+        return None
     surrounding_values = _despeckle_component_surrounding_values(
         gray_pixels,
         candidate_set,
@@ -15167,6 +15193,73 @@ def _despeckle_edge_tiny_isolated_component_for_cleanup(
     if local_background < _DESPECKLE_PALE_CLUSTER_MIN_BACKGROUND_MEDIAN:
         return None
     return component
+
+
+def _despeckle_has_margin_pale_texture_context(
+    gray_pixels: Any,
+    candidate_set: set[tuple[int, int]],
+    width: int,
+    height: int,
+    component: list[tuple[int, int]],
+) -> bool:
+    component_x = [point[0] for point in component]
+    component_y = [point[1] for point in component]
+    left = max(0, min(component_x) - 4)
+    right = min(width, max(component_x) + 5)
+    top = max(0, min(component_y) - 4)
+    bottom = min(height, max(component_y) + 5)
+
+    component_set = set(component)
+    pale_points: list[tuple[int, int]] = []
+    for ny in range(top, bottom):
+        for nx in range(left, right):
+            if (nx, ny) in component_set:
+                continue
+            value = _despeckle_pixel_at(gray_pixels, nx, ny)
+            if _DESPECKLE_PALE_MARK_MIN_VALUE <= value <= _DESPECKLE_FAINT_DUST_MAX_VALUE:
+                pale_points.append((nx, ny))
+
+    if len(pale_points) < 4:
+        return False
+    x_values = {point[0] for point in pale_points}
+    y_values = {point[1] for point in pale_points}
+    return len(x_values) >= 3 and len(y_values) >= 3
+
+
+def _despeckle_edge_component_requires_texture_protection(
+    gray_pixels: Any,
+    candidate_set: set[tuple[int, int]],
+    width: int,
+    height: int,
+    x: int,
+    y: int,
+    component: list[tuple[int, int]] | None = None,
+) -> bool:
+    if component is None:
+        component = _despeckle_candidate_component(candidate_set, x, y)
+    if len(component) > _DESPECKLE_EDGE_TINY_ISOLATED_MAX_PIXELS:
+        return False
+    if not _despeckle_component_confined_to_protected_edge(component, width, height):
+        return False
+    return _despeckle_has_margin_pale_texture_context(
+        gray_pixels,
+        candidate_set,
+        width,
+        height,
+        component,
+    )
+
+
+def _despeckle_component_confined_to_protected_edge(
+    component: list[tuple[int, int]],
+    width: int,
+    height: int,
+) -> bool:
+    margin = _despeckle_protected_edge_margin(width, height)
+    for x, y in component:
+        if margin <= x < width - margin and margin <= y < height - margin:
+            return False
+    return True
 
 
 def _despeckle_nearby_content_context_count(
