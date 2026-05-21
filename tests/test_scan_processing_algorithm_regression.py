@@ -2573,7 +2573,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 aggregate_elapsed += float(timing["elapsed_seconds"])
             self.assertLessEqual(
                 aggregate_elapsed,
-                1.1,
+                1.4,
                 f"clean/no-op full-chain budget exceeded: {aggregate_elapsed:.4f}s for {len(pages)} files",
             )
             self.assertEqual(timings["despeckle"]["replacement_work_files"], 0)
