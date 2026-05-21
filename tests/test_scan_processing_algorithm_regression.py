@@ -7270,6 +7270,83 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_tone_and_faded_text_combination_is_guarded_for_protected_content(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-faded-tone-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "A001_safe_sparse_pale_typed.png": _sparse_pale_typed_page(),
+                "A002_protected_handwriting.png": _mixed_tone_binding_gutter_page(variant="edge_handwriting"),
+                "A003_protected_stamp_annotation.png": _risk_stamp_header_footer_page(),
+                "A004_protected_ruled_table.png": _risk_table_page_number_annotation_page(),
+                "A005_protected_page_number.png": _mixed_tone_binding_gutter_page(variant="page_number"),
+                "A006_protected_photo_texture.png": _faded_text_photo_map_chart_page(),
+                "A007_protected_broad_stain.png": _broad_stain_shadow_page(),
+                "A008_protected_already_clear.png": _clear_text_page(),
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            safe_name = "A001_safe_sparse_pale_typed.png"
+            safe_before = pages[safe_name].convert("L")
+            safe_before_text = _mean_luma(safe_before, (46, 48, 210, 94))
+            safe_before_background = _mean_luma(safe_before, (248, 48, 330, 94))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-faded-tone", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            for name, before in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), before)
+
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_after_image:
+                safe_after = safe_after_image.convert("L")
+                safe_after_text = _mean_luma(safe_after, (46, 48, 210, 94))
+                safe_after_background = _mean_luma(safe_after, (248, 48, 330, 94))
+            self.assertTrue(safe_record["faded_text_enhanced"])
+            self.assertEqual(safe_record["faded_text_reason_code"], "applied_stable_low_contrast_text")
+            self.assertGreater(safe_before_text - safe_after_text, 0.25)
+            self.assertLess(abs(safe_before_background - safe_after_background), 2.0)
+            self.assertLessEqual(safe_audit["faded_text_changed_pixel_ratio"], 0.10)
+            self.assertLessEqual(safe_audit["cumulative_change_pixel_ratio"], 0.12)
+            self.assertLessEqual(safe_audit["cumulative_change_score"], 0.24)
+            self.assertEqual(safe_audit["combination_quality_guard_action"], "passed")
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+
+            protected_names = set(pages) - {safe_name}
+            for name in protected_names:
+                record = records[name]
+                audit = record["processing_audit"]
+                self.assertFalse(record["faded_text_enhanced"], name)
+                self.assertEqual(audit["faded_text_changed_pixel_ratio"], 0.0, name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertIn(
+                    audit["combination_quality_guard_action"],
+                    {"passed", "kept_original", "reverted_to_source"},
+                    name,
+                )
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["faded_text_enhanced_files"], 1)
+            self.assertGreaterEqual(audit_summary["guardrails"]["faded_text"]["protection_triggered_files"], 6)
+            self.assertIn("combination_quality_guard", audit_summary["guardrails"])
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_quality_regression_reports_missing_operation_timing_code_without_private_rows(self) -> None:
         quality = _processing_quality_regression(
             {
