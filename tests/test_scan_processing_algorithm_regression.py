@@ -2790,13 +2790,28 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 audit_summary["guardrails"]["despeckle"]["pixels_changed"],
                 len(_safe_tiny_margin_dust_speck_points()),
             )
-            self.assertGreaterEqual(
+            protected_reason_count = (
                 audit_summary["guardrails"]["despeckle"]["reason_code_distribution"].get("no_isolated_candidates", 0)
                 + audit_summary["guardrails"]["despeckle"]["reason_code_distribution"].get(
                     "protected_edge_dark_marks",
                     0,
+                )
+                + audit_summary["guardrails"]["despeckle"]["reason_code_distribution"].get(
+                    "repeated_pale_micro_pattern_risk",
+                    0,
+                )
+                + audit_summary["guardrails"]["despeckle"]["reason_code_distribution"].get(
+                    "pale_candidate_density_exceeds_safety_threshold",
+                    0,
+                )
+            )
+            self.assertGreaterEqual(protected_reason_count, len(protected_pages))
+            self.assertGreaterEqual(
+                audit_summary["guardrails"]["despeckle"]["reason_code_distribution"].get(
+                    "repeated_pale_micro_pattern_risk",
+                    0,
                 ),
-                len(protected_pages),
+                1,
             )
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertFalse(audit_summary["privacy"]["contains_paths"])
@@ -7714,6 +7729,40 @@ def _protected_tiny_margin_dust_lookalike_pages() -> dict[str, Image.Image]:
     for point in _safe_tiny_margin_dust_speck_points():
         annotation.putpixel(point, (228, 228, 224))
     pages["synthetic_protected_margin_colored_annotation_dot.png"] = annotation
+
+    textured_paper = Image.new("RGB", (260, 180), (246, 246, 244))
+    for point in _safe_tiny_margin_dust_speck_points():
+        textured_paper.putpixel(point, (228, 228, 224))
+    for y in range(74, 106, 4):
+        for x in range(0, 24, 5):
+            textured_paper.putpixel((x, y), (231, 231, 227))
+    pages["synthetic_protected_margin_textured_paper_dots.png"] = textured_paper
+
+    halftone_margin = Image.new("RGB", (260, 180), (246, 246, 244))
+    for point in _safe_tiny_margin_dust_speck_points():
+        halftone_margin.putpixel(point, (228, 228, 224))
+    for y in range(72, 106, 3):
+        for x in range(0, 24, 3):
+            if (x + y) % 2 == 0:
+                halftone_margin.putpixel((x, y), (223, 223, 219))
+    pages["synthetic_protected_margin_halftone_dots.png"] = halftone_margin
+
+    faint_form_margin = Image.new("RGB", (260, 180), (246, 246, 244))
+    for point in _safe_tiny_margin_dust_speck_points():
+        faint_form_margin.putpixel(point, (228, 228, 224))
+    for x in range(0, 40, 2):
+        faint_form_margin.putpixel((x, 62), (226, 226, 223))
+    for y in range(44, 132, 11):
+        faint_form_margin.putpixel((18, y), (226, 226, 223))
+    pages["synthetic_protected_margin_faint_form_dots.png"] = faint_form_margin
+
+    paper_grain = Image.new("RGB", (260, 180), (246, 246, 244))
+    for point in _safe_tiny_margin_dust_speck_points():
+        paper_grain.putpixel(point, (228, 228, 224))
+    for y in range(74, 106, 6):
+        for x in range(6, 30, 6):
+            paper_grain.putpixel((x, y), (229, 229, 225))
+    pages["synthetic_protected_margin_repeated_paper_grain.png"] = paper_grain
 
     return pages
 
