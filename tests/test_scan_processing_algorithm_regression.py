@@ -2661,6 +2661,10 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "synthetic_safe_faint_cleanup_control.png": _faint_official_mark_guard_page("safe_cleanup_control"),
                 "synthetic_protected_low_contrast_watermark.png": _faint_official_mark_guard_page("watermark"),
                 "synthetic_protected_blind_embossed_seal.png": _faint_official_mark_guard_page("blind_embossed_seal"),
+                "synthetic_protected_embossed_impression.png": _faint_official_mark_guard_page("embossed_impression"),
+                "synthetic_protected_low_relief_seal.png": _faint_official_mark_guard_page("low_relief_seal"),
+                "synthetic_protected_pressed_paper_mark.png": _faint_official_mark_guard_page("pressed_paper_mark"),
+                "synthetic_protected_faint_pressure_evidence.png": _faint_official_mark_guard_page("faint_pressure_evidence"),
                 "synthetic_protected_faint_official_stamp.png": _faint_official_mark_guard_page("faint_official_stamp"),
                 "synthetic_protected_subtle_security_mark.png": _faint_official_mark_guard_page("subtle_security_mark"),
             }
@@ -2689,6 +2693,10 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             protected_mark_regions = {
                 "synthetic_protected_low_contrast_watermark.png": ((126, 80, 228, 124), (28, 26, 98, 56)),
                 "synthetic_protected_blind_embossed_seal.png": ((162, 66, 220, 126), (28, 26, 98, 56)),
+                "synthetic_protected_embossed_impression.png": ((148, 70, 230, 136), (28, 26, 98, 56)),
+                "synthetic_protected_low_relief_seal.png": ((156, 72, 228, 136), (28, 26, 98, 56)),
+                "synthetic_protected_pressed_paper_mark.png": ((150, 78, 228, 136), (28, 26, 98, 56)),
+                "synthetic_protected_faint_pressure_evidence.png": ((150, 74, 228, 138), (28, 26, 98, 56)),
                 "synthetic_protected_faint_official_stamp.png": ((156, 74, 228, 138), (28, 26, 98, 56)),
                 "synthetic_protected_subtle_security_mark.png": ((152, 70, 228, 138), (28, 26, 98, 56)),
             }
@@ -10905,6 +10913,34 @@ def _faint_official_mark_guard_page(variant: str) -> Image.Image:
         draw.ellipse((172, 76, 210, 114), outline=(228, 228, 224), width=1)
         draw.line((176, 94, 206, 94), fill=(229, 229, 225), width=1)
         draw.line((191, 80, 191, 110), fill=(229, 229, 225), width=1)
+        return image
+
+    if variant == "embossed_impression":
+        draw.ellipse((148, 70, 230, 136), outline=(227, 227, 223), width=2)
+        draw.arc((156, 78, 222, 128), 28, 208, fill=(232, 232, 228), width=2)
+        draw.arc((156, 78, 222, 128), 212, 388, fill=(222, 222, 218), width=2)
+        draw.line((166, 102, 214, 102), fill=(229, 229, 225), width=1)
+        return image
+
+    if variant == "low_relief_seal":
+        draw.ellipse((156, 72, 228, 136), outline=(227, 227, 223), width=2)
+        draw.ellipse((168, 84, 216, 124), outline=(230, 230, 226), width=1)
+        for y in range(88, 124, 8):
+            draw.line((168, y, 216, y + 2), fill=(228, 228, 224), width=1)
+        return image
+
+    if variant == "pressed_paper_mark":
+        for y in range(78, 136, 8):
+            draw.arc((150, y - 8, 228, y + 12), 202, 342, fill=(230, 230, 226), width=1)
+            draw.arc((150, y - 7, 228, y + 13), 22, 162, fill=(222, 222, 218), width=1)
+        draw.line((160, 106, 220, 106), fill=(228, 228, 224), width=1)
+        return image
+
+    if variant == "faint_pressure_evidence":
+        for x in range(152, 226, 8):
+            draw.line((x, 74, x - 10, 138), fill=(229, 229, 225), width=1)
+            draw.line((x + 1, 74, x - 9, 138), fill=(223, 223, 219), width=1)
+        draw.arc((160, 84, 220, 130), 18, 186, fill=(230, 230, 226), width=1)
         return image
 
     if variant == "faint_official_stamp":
