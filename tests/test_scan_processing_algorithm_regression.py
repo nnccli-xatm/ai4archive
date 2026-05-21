@@ -2520,6 +2520,74 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_fold_shadow_cleanup_stays_bounded_and_protects_fold_lookalikes(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-fold-shadow-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "private_full_chain_safe_fold_shadow_vertical.png": _full_chain_fold_shadow_page("safe_vertical"),
+                "private_full_chain_safe_fold_shadow_diagonal.png": _full_chain_fold_shadow_page("safe_diagonal"),
+                "private_full_chain_fold_curved_shadow_lookalike.png": _full_chain_fold_shadow_page("safe_curved"),
+                "private_full_chain_fold_handwriting_bridge.png": _full_chain_fold_shadow_page("handwriting_bridge"),
+                "private_full_chain_fold_form_lines.png": _full_chain_fold_shadow_page("form_lines"),
+                "private_full_chain_fold_page_number.png": _full_chain_fold_shadow_page("page_number"),
+                "private_full_chain_fold_stamp.png": _full_chain_fold_shadow_page("stamp"),
+                "private_full_chain_fold_photo_texture.png": _full_chain_fold_shadow_page("photo_texture"),
+                "private_full_chain_fold_broad_non_fold_shadow.png": _full_chain_fold_shadow_page("broad_non_fold_shadow"),
+            }
+            for name, image in pages.items():
+                image.save(input_dir / name, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-fold-shadow", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_names = {
+                "private_full_chain_safe_fold_shadow_vertical.png",
+            }
+            for safe_name in safe_names:
+                safe_record = records[safe_name]
+                self.assertTrue(safe_record["fold_shadows_lightened"], safe_name)
+                self.assertEqual(safe_record["fold_shadows_reason_code"], "applied_narrow_neutral_background_band", safe_name)
+                self.assertGreater(safe_record["fold_shadows_changed_pixel_ratio"], 0.002, safe_name)
+                self.assertLessEqual(safe_record["fold_shadows_changed_pixel_ratio"], 0.075, safe_name)
+                self.assertLessEqual(safe_record["fold_shadows_candidate_pixel_ratio"], 0.12, safe_name)
+                self.assertEqual(safe_record["fold_shadows_count"], 1, safe_name)
+                self.assertEqual(safe_record["processing_audit"]["guardrail_failures"], [], safe_name)
+            self.assertEqual(
+                records["private_full_chain_safe_fold_shadow_vertical.png"]["fold_shadows_orientation"],
+                "vertical",
+            )
+
+            protected_names = set(pages) - safe_names
+            for name in protected_names:
+                record = records[name]
+                self.assertFalse(record["fold_shadows_lightened"], name)
+                self.assertIn("lighten_fold_shadows_noop", record["operations"], name)
+                self.assertEqual(record["processing_audit"]["fold_shadows_changed_pixel_ratio"], 0.0, name)
+
+            fold_guard = audit_summary["guardrails"]["fold_shadows"]
+            self.assertEqual(audit_summary["counts"]["fold_shadows_lightened_files"], len(safe_names))
+            self.assertEqual(audit_summary["counts"]["fold_shadows_skipped_files"], len(protected_names))
+            self.assertEqual(fold_guard["applied_files"], len(safe_names))
+            self.assertEqual(fold_guard["skipped_files"], len(protected_names))
+            self.assertEqual(
+                fold_guard["reason_code_distribution"]["applied_narrow_neutral_background_band"],
+                len(safe_names),
+            )
+            self.assertIn("vertical", fold_guard["orientation_distribution"])
+            self.assertIn("no_confident_narrow_background_fold_band", fold_guard["skip_reason_code_distribution"])
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_despeckle_cleans_compact_dust_clusters_but_preserves_content_marks(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-despeckle-clusters-") as temp_dir:
             root = Path(temp_dir)
@@ -7879,6 +7947,64 @@ def _subtle_diagonal_fold_shadow_page(variant: str = "safe") -> Image.Image:
         draw.rectangle((2, 102, 18, 154), fill=(48, 48, 48))
     elif variant != "safe":
         raise ValueError(f"unsupported variant: {variant}")
+    return image
+
+
+def _full_chain_fold_shadow_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (320, 240), (244, 244, 240))
+    draw = ImageDraw.Draw(image)
+    for y in (70, 120):
+        draw.rectangle((72, y, 248, y + 2), fill=(50, 50, 50))
+    draw.rectangle((248, 28, 286, 31), fill=(76, 76, 76))
+    draw.rectangle((248, 188, 286, 191), fill=(76, 76, 76))
+
+    def add_vertical_band() -> None:
+        for x in range(152, 169):
+            distance = abs(x - 160) / 8
+            shade = int(round(244 - 10 * (1 - distance) ** 1.2))
+            draw.line((x, 12, x, image.height - 12), fill=(shade, shade, shade - 4))
+
+    def add_diagonal_band() -> None:
+        for offset in range(-4, 5):
+            draw.line((80 + offset, 24, 238 + offset, 212), fill=(236, 236, 232), width=1)
+
+    def add_curved_band() -> None:
+        for width in (1, 1, 2):
+            draw.arc((108, 16, 212, 224), 262, 458, fill=(236, 236, 232), width=width)
+
+    if variant == "safe_vertical":
+        add_vertical_band()
+    elif variant == "safe_diagonal":
+        add_diagonal_band()
+    elif variant == "safe_curved":
+        add_curved_band()
+    elif variant == "handwriting_bridge":
+        add_vertical_band()
+        draw.line((146, 82, 182, 90), fill=(40, 40, 40), width=3)
+        draw.line((144, 112, 184, 124), fill=(40, 40, 40), width=3)
+    elif variant == "form_lines":
+        add_diagonal_band()
+        for y in (78, 104, 130):
+            draw.line((44, y, 268, y), fill=(40, 40, 40), width=2)
+        draw.line((168, 58, 168, 164), fill=(40, 40, 40), width=2)
+    elif variant == "page_number":
+        add_vertical_band()
+        draw.rectangle((156, 206, 172, 216), fill=(34, 34, 34))
+    elif variant == "stamp":
+        add_diagonal_band()
+        draw.ellipse((92, 64, 172, 146), outline=(190, 28, 28), width=4)
+    elif variant == "photo_texture":
+        add_curved_band()
+        for y in range(40, 204, 5):
+            for x in range(56, 276, 5):
+                tone = 102 + ((x * 7 + y * 11) % 96)
+                draw.point((x, y), fill=(tone, tone, tone))
+    elif variant == "broad_non_fold_shadow":
+        for x in range(126, 196):
+            shade = 232 + ((x - 126) // 6)
+            draw.line((x, 20, x, 220), fill=(shade, shade, shade), width=1)
+    else:
+        raise ValueError(f"unsupported full-chain fold shadow variant: {variant}")
     return image
 
 
