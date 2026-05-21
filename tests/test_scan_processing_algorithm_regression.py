@@ -5106,6 +5106,115 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             ):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_aged_parchment_and_textured_paper_stays_guarded_with_safe_neutral_control(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-aged-paper-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            pages = {
+                "synthetic_safe_neutral_warm_cast.png": _aged_parchment_full_chain_page("safe_neutral"),
+                "synthetic_protected_aged_parchment_texture.png": _aged_parchment_full_chain_page("aged_parchment"),
+                "synthetic_protected_mottled_fiber_texture.png": _aged_parchment_full_chain_page("mottled_fiber"),
+                "synthetic_protected_foxing_background_evidence.png": _aged_parchment_full_chain_page("foxing"),
+                "synthetic_protected_faint_foreground_marks.png": _aged_parchment_full_chain_page("faint_marks"),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-aged-paper-guards", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                _full_chain_options(),
+            )
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_name = "synthetic_safe_neutral_warm_cast.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            safe_source = pages[safe_name]
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_output:
+                safe_output_rgb = safe_output.convert("RGB")
+                self.assertTrue(safe_record["paper_color_cast_normalized"])
+                self.assertIn("normalize_paper_color_cast_conservative", safe_record["operations"])
+                self.assertGreater(safe_audit["paper_color_cast_delta"], 6.0)
+                self.assertLessEqual(safe_audit["paper_color_cast_delta"], 12.0)
+                self.assertLessEqual(safe_audit["paper_color_cast_brightness_delta"], 4.0)
+                self.assertGreater(safe_audit["paper_color_cast_changed_pixel_ratio"], 0.85)
+                self.assertLessEqual(safe_audit["paper_color_cast_candidate_pixel_ratio"], 0.96)
+                self.assertLess(_side_paper_channel_spread(safe_output_rgb), _side_paper_channel_spread(safe_source) - 5.0)
+                self.assertLess(_mean_luma_delta(safe_source, safe_output_rgb), 4.0)
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+
+            protected_expected_codes = {
+                "synthetic_protected_aged_parchment_texture.png": {
+                    "protected_color_content",
+                    "protected_photo_or_texture",
+                    "not_uniform",
+                    "colored_paper",
+                },
+                "synthetic_protected_mottled_fiber_texture.png": {
+                    "protected_color_content",
+                    "protected_photo_or_texture",
+                    "not_uniform",
+                    "colored_paper",
+                },
+                "synthetic_protected_foxing_background_evidence.png": {
+                    "protected_color_content",
+                    "protected_photo_or_texture",
+                    "not_uniform",
+                    "colored_paper",
+                },
+                "synthetic_protected_faint_foreground_marks.png": {
+                    "protected_dark_content",
+                    "protected_edge_mark",
+                    "not_uniform",
+                },
+            }
+            protected_codes_seen: set[str] = set()
+            for name, expected_codes in protected_expected_codes.items():
+                record = records[name]
+                with Image.open(process_dir / record["output_relative_path"]) as protected_output:
+                    protected_rgb = protected_output.convert("RGB")
+                    self.assertFalse(record["paper_color_cast_normalized"], name)
+                    self.assertIn(record["paper_color_cast_reason_code"], expected_codes, name)
+                    self.assertIn("normalize_paper_color_cast_noop", record["operations"], name)
+                    self.assertLess(_changed_ratio(pages[name], protected_rgb, (0, 0, protected_rgb.width, protected_rgb.height)), 0.001)
+                protected_codes_seen.add(record["paper_color_cast_reason_code"])
+            self.assertIn("protected_color_content", protected_codes_seen)
+            self.assertIn("protected_dark_content", protected_codes_seen)
+
+            cast_guard = audit_summary["guardrails"]["paper_color_cast"]
+            self.assertEqual(audit_summary["counts"]["paper_color_cast_normalized_files"], 1)
+            self.assertEqual(audit_summary["counts"]["paper_color_cast_skipped_files"], len(protected_expected_codes))
+            self.assertEqual(cast_guard["applied_files"], 1)
+            self.assertEqual(cast_guard["skipped_files"], len(protected_expected_codes))
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            self.assertIn("paper_color_cast_changed_pixel_ratio", audit_summary["metrics"])
+            self.assertIn("paper_color_cast_candidate_pixel_ratio", audit_summary["metrics"])
+            for forbidden in (
+                "synthetic_safe_neutral_warm_cast.png",
+                "synthetic_protected_aged_parchment_texture.png",
+                str(input_dir),
+                "source_relative_path",
+                "source_sha256",
+            ):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_segmented_scanline_chain_stays_aggregate_and_guarded(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-segmented-scanline-") as temp_dir:
             root = Path(temp_dir)
@@ -8836,6 +8945,55 @@ def _mild_mixed_scanner_cast_page(variant: str) -> Image.Image:
     elif variant != "safe":
         raise ValueError(f"unknown mild mixed scanner cast variant: {variant}")
     return image
+
+
+def _aged_parchment_full_chain_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (260, 190), (246, 240, 228))
+    pixels = image.load()
+    for y in range(image.height):
+        for x in range(image.width):
+            drift = ((x * 5 + y * 7 + (x // 9) * (y // 11)) % 9) - 4
+            r = max(0, min(255, 246 + drift))
+            g = max(0, min(255, 240 + drift))
+            b = max(0, min(255, 228 + drift))
+            pixels[x, y] = (r, g, b)
+
+    draw = ImageDraw.Draw(image)
+    for y in (48, 74, 100):
+        draw.rectangle((38, y, 166, y + 4), fill=(60, 60, 58))
+    draw.rectangle((198, 28, 216, 34), fill=(74, 74, 72))
+
+    if variant == "safe_neutral":
+        return image
+    if variant == "aged_parchment":
+        for y in range(12, 178):
+            for x in range(10, 250):
+                grain = 220 + ((x * 5 + y * 7 + (x // 6) * (y // 5)) % 20)
+                cool_shift = ((x + y) % 5) - 2
+                pixels[x, y] = (
+                    max(0, min(255, grain + 8)),
+                    max(0, min(255, grain + cool_shift)),
+                    max(0, min(255, grain - 16)),
+                )
+        for box in ((26, 30, 70, 68), (176, 38, 230, 84), (100, 124, 166, 174)):
+            draw.ellipse(box, fill=(214, 192, 158))
+        draw.line((6, 144, 42, 156), fill=(170, 160, 144), width=2)
+        return image
+    if variant == "mottled_fiber":
+        for y in range(14, 176, 4):
+            for x in range(12, 248, 14):
+                draw.line((x, y, min(258, x + 8), min(188, y + 2)), fill=(225, 214, 196), width=1)
+        return image
+    if variant == "foxing":
+        for box in ((44, 34, 86, 72), (188, 42, 232, 88), (96, 126, 152, 174)):
+            draw.ellipse(box, fill=(220, 200, 170))
+        image = image.filter(ImageFilter.GaussianBlur(0.6))
+        return image
+    if variant == "faint_marks":
+        draw.line((8, 138, 54, 148, 26, 162, 68, 172), fill=(176, 170, 160), width=2)
+        draw.line((180, 144, 230, 152), fill=(178, 172, 162), width=2)
+        return image
+    raise ValueError(f"unknown aged parchment full-chain variant: {variant}")
 
 
 def _benchmark_combo(root: Path, input_dir: Path, label: str, *flags: str) -> dict[str, object]:
