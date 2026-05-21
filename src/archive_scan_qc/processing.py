@@ -14402,9 +14402,12 @@ def _despeckle_isolated_pixels_with_reason(image: Image.Image, *, backend: str =
         )
     candidate_pixels = _despeckle_mask_pixel_count(candidate_mask)
     edge_tiny_component: list[tuple[int, int]] | None = None
+    edge_short_lint_component: list[tuple[int, int]] | None = None
     if _despeckle_mask_confined_to_protected_edge(candidate_mask):
         edge_tiny_component = _despeckle_edge_tiny_isolated_component_for_cleanup(image, grayscale, candidate_mask)
         if edge_tiny_component is None:
+            edge_short_lint_component = _despeckle_edge_short_lint_component_for_cleanup(image, grayscale, candidate_mask)
+        if edge_tiny_component is None and edge_short_lint_component is None:
             return _despeckle_result(
                 image,
                 changed_pixels=0,
@@ -14414,10 +14417,12 @@ def _despeckle_isolated_pixels_with_reason(image: Image.Image, *, backend: str =
                 candidate_count=0,
                 replacement_work_performed=False,
             )
-    if edge_tiny_component is not None:
-        candidates = edge_tiny_component
-        components = [edge_tiny_component]
-        component_by_point = {point: edge_tiny_component for point in edge_tiny_component}
+    if edge_tiny_component is not None or edge_short_lint_component is not None:
+        edge_component = edge_tiny_component if edge_tiny_component is not None else edge_short_lint_component
+        assert edge_component is not None
+        candidates = edge_component
+        components = [edge_component]
+        component_by_point = {point: edge_component for point in edge_component}
         backend_mode = "fallback"
     else:
         candidates, backend_mode = _despeckle_candidate_points_with_backend(candidate_mask, backend=backend)
@@ -15122,6 +15127,88 @@ def _despeckle_has_nearby_content_context(gray_pixels: Any, width: int, height: 
         )
         >= _DESPECKLE_CONTENT_CONTEXT_MIN_DARK_PIXELS
     )
+
+
+def _despeckle_edge_short_lint_component_for_cleanup(
+    image: Image.Image,
+    grayscale: Image.Image,
+    candidate_mask: Image.Image,
+) -> list[tuple[int, int]] | None:
+    bbox = candidate_mask.getbbox()
+    if bbox is None:
+        return None
+    width, height = grayscale.size
+    left, top, right, bottom = bbox
+    candidate_points = [
+        (x, y)
+        for y in range(top, bottom)
+        for x in range(left, right)
+        if candidate_mask.getpixel((x, y)) == 255
+    ]
+    if (
+        not candidate_points
+        or len(candidate_points) < _DESPECKLE_MIN_SHORT_LINT_STREAK_PIXELS
+        or len(candidate_points) > _DESPECKLE_MAX_SHORT_LINT_STREAK_PIXELS
+    ):
+        return None
+    components, _component_by_point = _despeckle_candidate_components(candidate_points)
+    if len(components) != 1:
+        return None
+    component = components[0]
+    if not _despeckle_component_is_short_lint_streak(component):
+        return None
+    gray_pixels = grayscale.load()
+    candidate_set = set(candidate_points)
+    if any(_despeckle_pixel_at(gray_pixels, cx, cy) < _DESPECKLE_PALE_MARK_MIN_VALUE for cx, cy in component):
+        return None
+    if any(
+        _despeckle_nearby_content_context_count(gray_pixels, width, height, cx, cy, stop_at=1)
+        for cx, cy in component
+    ):
+        return None
+    surrounding_values = _despeckle_component_surrounding_values(
+        gray_pixels,
+        candidate_set,
+        width,
+        height,
+        component,
+        radius=2,
+    )
+    if len(surrounding_values) < len(component):
+        return None
+    local_background = sorted(surrounding_values)[len(surrounding_values) // 2]
+    if local_background < _DESPECKLE_PALE_CLUSTER_MIN_BACKGROUND_MEDIAN:
+        return None
+    component_values = [_despeckle_pixel_at(gray_pixels, cx, cy) for cx, cy in component]
+    component_mean = sum(component_values) / len(component_values)
+    local_delta = local_background - component_mean
+    if not (_DESPECKLE_PALE_CLUSTER_MIN_DELTA <= local_delta <= _DESPECKLE_PALE_CLUSTER_MAX_DELTA):
+        return None
+
+    rgb_pixels = (image if image.mode == "RGB" else image.convert("RGB")).load()
+    if _despeckle_short_lint_streak_color_protected(rgb_pixels, component):
+        return None
+    if _despeckle_has_sparse_text_protected_context(
+        grayscale.load(),
+        rgb_pixels,
+        candidate_set=candidate_set,
+        width=width,
+        height=height,
+        x=component[0][0],
+        y=component[0][1],
+        component=component,
+        skip_component_only=True,
+    ):
+        return None
+    if _despeckle_has_margin_pale_texture_context(
+        gray_pixels,
+        candidate_set,
+        width,
+        height,
+        component,
+    ):
+        return None
+    return component
 
 
 def _despeckle_edge_tiny_isolated_component_for_cleanup(
