@@ -5281,6 +5281,84 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             ):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_glossy_photo_and_specular_glare_stay_guarded_with_safe_control(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-glossy-guards-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            pages = {
+                "synthetic_safe_neutral_cleanup_control.png": _mild_warm_scanner_cast_page("safe"),
+                "synthetic_protected_glossy_photo_texture.png": _glossy_full_chain_page("glossy_photo"),
+                "synthetic_protected_laminated_coated_surface.png": _glossy_full_chain_page("laminated_coated"),
+                "synthetic_protected_specular_glare_streaks.png": _glossy_full_chain_page("specular_glare"),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-glossy-guards", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_name = "synthetic_safe_neutral_cleanup_control.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_output:
+                safe_output_rgb = safe_output.convert("RGB")
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertIn(
+                safe_audit["combination_quality_guard_action"],
+                {"passed", "kept_original", "reverted_to_source"},
+            )
+            self.assertTrue(safe_record["paper_color_cast_normalized"])
+            self.assertIn("normalize_paper_color_cast_conservative", safe_record["operations"])
+            self.assertGreater(safe_audit["paper_color_cast_changed_pixel_ratio"], 0.10)
+
+            protected_names = [name for name in pages if name != safe_name]
+            protected_boxes = {
+                "synthetic_protected_glossy_photo_texture.png": (126, 30, 250, 178),
+                "synthetic_protected_laminated_coated_surface.png": (0, 0, 260, 190),
+                "synthetic_protected_specular_glare_streaks.png": (132, 0, 172, 190),
+            }
+            protection_codes = {"protected_photo_or_texture", "protected_content", "not_uniform", "low_confidence"}
+            for name in protected_names:
+                record = records[name]
+                audit = record["processing_audit"]
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    processed = output.convert("RGB")
+                self.assertEqual(record["status"], "processed", name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertLess(_changed_ratio(pages[name], processed, protected_boxes[name]), 0.01, name)
+                reason_codes = (
+                    str(record.get("paper_color_cast_reason_code", "")),
+                    str(record.get("illumination_gradient_reason_code", "")),
+                    str(record.get("background_stains_reason_code", "")),
+                    str(record.get("edge_shadow_reason_code", "")),
+                    str(record.get("fold_shadows_reason_code", "")),
+                )
+                self.assertTrue(any(code in protection_codes for code in reason_codes), (name, reason_codes))
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            self.assertIn("paper_color_cast_changed_pixel_ratio", audit_summary["metrics"])
+            self.assertIn("illumination_gradient_changed_pixel_ratio", audit_summary["metrics"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_segmented_scanline_chain_stays_aggregate_and_guarded(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-segmented-scanline-") as temp_dir:
             root = Path(temp_dir)
@@ -9060,6 +9138,72 @@ def _aged_parchment_full_chain_page(variant: str) -> Image.Image:
         draw.line((180, 144, 230, 152), fill=(178, 172, 162), width=2)
         return image
     raise ValueError(f"unknown aged parchment full-chain variant: {variant}")
+
+
+def _glossy_full_chain_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (260, 190), (246, 242, 232))
+    pixels = image.load()
+    for y in range(image.height):
+        for x in range(image.width):
+            pixels[x, y] = (
+                max(0, min(255, 246 + ((x * 3 + y * 5) % 5) - 2)),
+                max(0, min(255, 242 + ((x * 2 + y * 7) % 5) - 2)),
+                max(0, min(255, 232 + ((x * 5 + y * 3) % 5) - 2)),
+            )
+    draw = ImageDraw.Draw(image)
+    for y in (40, 66, 92, 118):
+        draw.rectangle((34, y, 118, y + 4), fill=(56, 56, 56))
+    draw.rectangle((18, 154, 126, 160), fill=(214, 206, 190))
+
+    if variant == "safe_neutral":
+        for y in range(image.height):
+            for x in range(image.width):
+                r, g, b = pixels[x, y]
+                cast = max(0.0, 1.0 - x / max(1, image.width - 1))
+                pixels[x, y] = (min(255, r + int(round(9 * cast))), min(255, g + int(round(4 * cast))), b)
+        for y in range(image.height):
+            for x in range(0, 22):
+                shade = int(round(8 * (1.0 - x / 22)))
+                r, g, b = pixels[x, y]
+                pixels[x, y] = (max(0, r - shade), max(0, g - shade), max(0, b - shade))
+        return image
+
+    if variant == "glossy_photo":
+        for y in range(28, 178):
+            for x in range(126, 250):
+                red = 70 + ((x * 7 + y * 11 + (x // 5) * (y // 3)) % 88)
+                green = 78 + ((x * 5 + y * 13 + (x // 4) * (y // 7)) % 78)
+                blue = 88 + ((x * 11 + y * 3 + (x // 6) * (y // 5)) % 84)
+                pixels[x, y] = (red, green, blue)
+        draw.line((136, 38, 242, 150), fill=(252, 248, 240), width=3)
+        draw.line((146, 34, 250, 146), fill=(246, 238, 224), width=2)
+        return image
+
+    if variant == "laminated_coated":
+        for y in range(image.height):
+            for x in range(image.width):
+                if 64 <= x <= 204:
+                    band = max(0.0, 1.0 - abs(x - 134) / 72)
+                    boost = int(round(14 * band))
+                    r, g, b = pixels[x, y]
+                    pixels[x, y] = (min(255, r + boost), min(255, g + boost), min(255, b + max(2, boost // 2)))
+        draw.line((18, 20, 238, 170), fill=(252, 250, 244), width=3)
+        draw.line((22, 30, 244, 180), fill=(244, 240, 230), width=2)
+        return image
+
+    if variant == "specular_glare":
+        for y in range(image.height):
+            for x in range(132, 172):
+                band = max(0.0, 1.0 - abs(x - 152) / 20)
+                boost = int(round(26 * band))
+                r, g, b = pixels[x, y]
+                pixels[x, y] = (min(255, r + boost), min(255, g + boost), min(255, b + boost))
+        draw.line((132, 0, 170, 188), fill=(255, 252, 248), width=4)
+        draw.line((140, 0, 178, 188), fill=(248, 242, 232), width=2)
+        draw.line((138, 148, 222, 160), fill=(92, 92, 92), width=2)
+        return image
+
+    raise ValueError(f"unknown glossy full-chain variant: {variant}")
 
 
 def _benchmark_combo(root: Path, input_dir: Path, label: str, *flags: str) -> dict[str, object]:
