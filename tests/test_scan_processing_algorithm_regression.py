@@ -3181,6 +3181,39 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             draw.line((286, 140, 340, 154), fill=(58, 162, 92), width=2)
             return image
 
+        def erased_graphite_trace_page() -> Image.Image:
+            image = Image.new("RGB", (360, 240), (244, 243, 239))
+            draw = ImageDraw.Draw(image)
+            for y in (70, 104, 138):
+                draw.rectangle((52, y, 282, y + 4), fill=(44, 44, 44))
+            draw.line((84, 106, 240, 106), fill=(228, 226, 220), width=10)
+            draw.line((96, 104, 224, 104), fill=(190, 186, 178), width=2)
+            draw.line((102, 114, 218, 114), fill=(198, 194, 188), width=1)
+            return image
+
+        def graphite_overwrite_page() -> Image.Image:
+            image = Image.new("RGB", (360, 240), (244, 243, 239))
+            draw = ImageDraw.Draw(image)
+            for y in (74, 112, 150):
+                draw.rectangle((58, y, 294, y + 4), fill=(46, 46, 44))
+            draw.line((112, 114, 262, 114), fill=(78, 74, 70), width=3)
+            draw.line((104, 104, 270, 126), fill=(146, 140, 132), width=2)
+            draw.line((104, 126, 270, 104), fill=(146, 140, 132), width=2)
+            return image
+
+        def pressure_ghosting_page() -> Image.Image:
+            image = Image.new("RGB", (360, 240), (244, 243, 239))
+            draw = ImageDraw.Draw(image)
+            for y in (68, 104, 140):
+                draw.rectangle((52, y, 286, y + 4), fill=(46, 46, 44))
+            for points in (
+                ((236, 64), (248, 56), (264, 66), (278, 58)),
+                ((236, 86), (250, 76), (266, 88), (282, 80)),
+            ):
+                draw.line(points, fill=(194, 188, 180), width=1)
+            draw.line((244, 158, 296, 140), fill=(198, 192, 184), width=1)
+            return image
+
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-handwritten-guard-") as temp_dir:
             root = Path(temp_dir)
             input_dir = root / "input"
@@ -3196,6 +3229,9 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "synthetic_protected_highlighter_bands.png": highlighter_band_page(),
                 "synthetic_protected_redline_corrections.png": redline_correction_page(),
                 "synthetic_protected_colored_pencil_notes.png": colored_pencil_notes_page(),
+                "synthetic_protected_erased_graphite_trace.png": erased_graphite_trace_page(),
+                "synthetic_protected_graphite_overwrite.png": graphite_overwrite_page(),
+                "synthetic_protected_pressure_ghosting.png": pressure_ghosting_page(),
                 "synthetic_protected_faint_annotation_like_marks.png": _faint_cloud_background_stain_page("handwriting"),
             }
             source_bytes: dict[str, bytes] = {}
@@ -3219,13 +3255,30 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 self.assertGreater(safe_delta, 1.0)
 
             protected_names = set(pages) - {safe_name}
+            protected_regions = {
+                "synthetic_protected_erased_graphite_trace.png": (90, 96, 236, 122),
+                "synthetic_protected_graphite_overwrite.png": (100, 98, 274, 130),
+                "synthetic_protected_pressure_ghosting.png": (232, 52, 300, 170),
+            }
             for name in protected_names:
                 record = records[name]
                 self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
                 self.assertEqual(record["processing_audit"]["guardrail_failures"], [], name)
                 with Image.open(process_dir / record["output_relative_path"]) as output:
-                    changed_ratio = _changed_ratio(pages[name], output.convert("RGB"), (0, 0, output.width, output.height))
+                    processed = output.convert("RGB")
+                    changed_ratio = _changed_ratio(pages[name], processed, (0, 0, output.width, output.height))
                 self.assertLessEqual(changed_ratio, 0.16, name)
+                if name in protected_regions:
+                    box = protected_regions[name]
+                    original_region = pages[name].crop(box)
+                    processed_region = processed.crop(box)
+                    self.assertGreaterEqual(_edge_energy(processed_region), _edge_energy(original_region) * 0.82, name)
+                    self.assertLessEqual(
+                        abs(_mean_luma(processed_region, (0, 0, processed_region.width, processed_region.height))
+                            - _mean_luma(original_region, (0, 0, original_region.width, original_region.height))),
+                        2.5,
+                        name,
+                    )
                 self.assertIn(
                     record["processing_audit"]["combination_quality_guard_reason_code"],
                     {"safe_combination_passed", "low_confidence_original_preserved"},
