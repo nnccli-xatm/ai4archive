@@ -2903,6 +2903,11 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for point in safe_lint_points:
                 safe_page.putpixel(point, (226, 226, 222))
 
+            safe_margin_page = Image.new("RGB", (260, 180), (246, 246, 244))
+            safe_margin_lint_points = tuple((257, y) for y in range(108, 118))
+            for point in safe_margin_lint_points:
+                safe_margin_page.putpixel(point, (226, 226, 222))
+
             handwriting = Image.new("RGB", (260, 180), (246, 246, 244))
             ImageDraw.Draw(handwriting).line((164, 110, 176, 116), fill=(226, 226, 222), width=1)
 
@@ -2913,11 +2918,28 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for point in safe_lint_points:
                 colored.putpixel(point, (226, 220, 196))
 
+            clustered = Image.new("RGB", (260, 180), (246, 246, 244))
+            for point in ((257, 108), (257, 109), (257, 110), (257, 111), (257, 112), (257, 113), (257, 114), (257, 115)):
+                clustered.putpixel(point, (226, 226, 222))
+            for point in ((255, 111), (256, 111), (258, 112), (259, 112)):
+                clustered.putpixel(point, (226, 226, 222))
+
+            textured = Image.new("RGB", (260, 180), (246, 246, 244))
+            for point in safe_margin_lint_points:
+                textured.putpixel(point, (226, 226, 222))
+            for y in range(102, 124, 3):
+                for x in range(252, 260):
+                    shade = 224 + ((x + y) % 5)
+                    textured.putpixel((x, y), (shade, shade, shade))
+
             pages = {
                 "synthetic_safe_short_lint_streak.png": safe_page,
+                "synthetic_safe_margin_short_lint_streak.png": safe_margin_page,
                 "synthetic_protected_short_handwriting_stroke.png": handwriting,
                 "synthetic_protected_ruled_line.png": ruled,
                 "synthetic_protected_colored_record.png": colored,
+                "synthetic_protected_clustered_margin_marks.png": clustered,
+                "synthetic_protected_margin_texture.png": textured,
             }
             source_bytes = {}
             for name, image in pages.items():
@@ -2931,25 +2953,34 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             audit_summary = json.loads(audit_summary_text)
             records = {record["source_relative_path"]: record for record in manifest["files"]}
 
-            safe_record = records["synthetic_safe_short_lint_streak.png"]
-            safe_audit = safe_record["processing_audit"]
-            self.assertEqual((input_dir / "synthetic_safe_short_lint_streak.png").read_bytes(), source_bytes["synthetic_safe_short_lint_streak.png"])
-            self.assertTrue(safe_record["despeckled"])
-            self.assertEqual(safe_record["despeckle_pixels_changed"], len(safe_lint_points))
-            self.assertEqual(safe_record["despeckle_reason"], "isolated dark pixels replaced")
-            self.assertLessEqual(safe_audit["despeckle_pixel_ratio"], 0.001)
-            self.assertEqual(safe_audit["guardrail_failures"], [])
-            self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed")
-            self.assertEqual(safe_audit["combination_quality_guard_reason_code"], "safe_combination_passed")
-            with Image.open(process_dir / safe_record["output_relative_path"]) as output:
-                output_luma = output.convert("L")
-                for point in safe_lint_points:
-                    self.assertGreaterEqual(output_luma.getpixel(point), 240)
+            safe_expectations = {
+                "synthetic_safe_short_lint_streak.png": safe_lint_points,
+                "synthetic_safe_margin_short_lint_streak.png": safe_margin_lint_points,
+            }
+            expected_safe_pixels_changed = 0
+            for safe_name, points in safe_expectations.items():
+                safe_record = records[safe_name]
+                safe_audit = safe_record["processing_audit"]
+                self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+                self.assertTrue(safe_record["despeckled"], safe_name)
+                self.assertEqual(safe_record["despeckle_pixels_changed"], len(points), safe_name)
+                self.assertEqual(safe_record["despeckle_reason"], "isolated dark pixels replaced", safe_name)
+                self.assertLessEqual(safe_audit["despeckle_pixel_ratio"], 0.001, safe_name)
+                self.assertEqual(safe_audit["guardrail_failures"], [], safe_name)
+                self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed", safe_name)
+                self.assertEqual(safe_audit["combination_quality_guard_reason_code"], "safe_combination_passed", safe_name)
+                with Image.open(process_dir / safe_record["output_relative_path"]) as output:
+                    output_luma = output.convert("L")
+                    for point in points:
+                        self.assertGreaterEqual(output_luma.getpixel(point), 240, safe_name)
+                expected_safe_pixels_changed += len(points)
 
             for name in (
                 "synthetic_protected_short_handwriting_stroke.png",
                 "synthetic_protected_ruled_line.png",
                 "synthetic_protected_colored_record.png",
+                "synthetic_protected_clustered_margin_marks.png",
+                "synthetic_protected_margin_texture.png",
             ):
                 record = records[name]
                 audit = record["processing_audit"]
@@ -2964,11 +2995,11 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
 
             self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
             self.assertEqual(audit_summary["counts"]["failed_files"], 0)
-            self.assertEqual(audit_summary["guardrails"]["despeckle"]["applied_files"], 1)
-            self.assertEqual(audit_summary["guardrails"]["despeckle"]["pixels_changed"], len(safe_lint_points))
+            self.assertEqual(audit_summary["guardrails"]["despeckle"]["applied_files"], 2)
+            self.assertEqual(audit_summary["guardrails"]["despeckle"]["pixels_changed"], expected_safe_pixels_changed)
             self.assertEqual(
                 audit_summary["guardrails"]["despeckle"]["reason_code_distribution"]["applied_isolated_pixels"],
-                1,
+                2,
             )
             self.assertEqual(
                 audit_summary["timing"]["operation_timings"]["despeckle"]["max_component_size"]["max"],
