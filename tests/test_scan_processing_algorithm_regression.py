@@ -3030,6 +3030,100 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_blueprint_and_colored_form_originals_stay_protected_with_safe_control(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-blueprint-colored-form-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_safe_cleanup_control.png": _faint_thumbprint_stain_page(),
+                "synthetic_protected_blueprint_linework.png": _colored_original_guard_page("blueprint_linework"),
+                "synthetic_protected_colored_form_boxes.png": _colored_original_guard_page("colored_form_boxes"),
+                "synthetic_protected_colored_ruled_regions.png": _colored_original_guard_page("colored_ruled_regions"),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, page in pages.items():
+                source = input_dir / name
+                page.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-blueprint-colored-form", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            safe_name = "synthetic_safe_cleanup_control.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_output:
+                self.assertGreater(
+                    _mean_luma(safe_output.convert("L"), (164, 68, 210, 108))
+                    - _mean_luma(pages[safe_name].convert("L"), (164, 68, 210, 108)),
+                    1.0,
+                )
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertIn(
+                safe_audit["combination_quality_guard_reason_code"],
+                {"safe_combination_passed", "low_confidence_original_preserved"},
+            )
+
+            protected_names = set(pages) - {safe_name}
+            protected_regions = {
+                "synthetic_protected_blueprint_linework.png": (28, 28, 332, 212),
+                "synthetic_protected_colored_form_boxes.png": (28, 34, 332, 214),
+                "synthetic_protected_colored_ruled_regions.png": (26, 30, 334, 210),
+            }
+            max_changed_ratio = {
+                "synthetic_protected_blueprint_linework.png": 0.22,
+                "synthetic_protected_colored_form_boxes.png": 0.16,
+                "synthetic_protected_colored_ruled_regions.png": 0.23,
+            }
+            min_edge_energy_ratio = {
+                "synthetic_protected_blueprint_linework.png": 0.64,
+                "synthetic_protected_colored_form_boxes.png": 0.78,
+                "synthetic_protected_colored_ruled_regions.png": 0.75,
+            }
+            for name in protected_names:
+                record = records[name]
+                audit = record["processing_audit"]
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    processed = output.convert("RGB")
+                    changed_ratio = _changed_ratio(pages[name], processed, (0, 0, output.width, output.height))
+                    box = protected_regions[name]
+                    original_structure = pages[name].crop(box)
+                    processed_structure = processed.crop(box)
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
+                self.assertLessEqual(changed_ratio, max_changed_ratio[name], name)
+                self.assertGreaterEqual(
+                    _edge_energy(processed_structure),
+                    _edge_energy(original_structure) * min_edge_energy_ratio[name],
+                    name,
+                )
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertIn(
+                    audit["combination_quality_guard_reason_code"],
+                    {"safe_combination_passed", "low_confidence_original_preserved"},
+                    name,
+                )
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            self.assertIn("combination_quality_guard", audit_summary["guardrails"])
+            self.assertIn("performance", manifest["summary"])
+            self.assertIn("operation_timings", manifest["summary"]["performance"])
+            operation_timings = manifest["summary"]["performance"]["operation_timings"]
+            self.assertIn("enhance_faded_text", operation_timings)
+            self.assertGreaterEqual(operation_timings["enhance_faded_text"]["file_count"], len(pages))
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_handwritten_annotation_pages_stay_preserved_with_safe_cleanup_control(self) -> None:
         def signature_page() -> Image.Image:
             image = Image.new("RGB", (360, 240), (244, 244, 240))
@@ -9171,6 +9265,43 @@ def _pale_blue_carbon_copy_page(*, with_blue_annotation: bool, variant: str = "s
             draw.line((x, 46, x, 206), fill=(182, 200, 232), width=1)
     elif variant != "safe":
         raise ValueError(f"unsupported pale-blue variant: {variant}")
+    return image
+
+
+def _colored_original_guard_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (360, 240), (236, 246, 252))
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default()
+
+    if variant == "blueprint_linework":
+        draw.rectangle((30, 30, 330, 210), outline=(44, 104, 188), width=2)
+        for x in range(52, 330, 46):
+            draw.line((x, 30, x, 210), fill=(66, 136, 214), width=1)
+        for y in range(52, 210, 32):
+            draw.line((30, y, 330, y), fill=(66, 136, 214), width=1)
+        draw.line((42, 198, 314, 44), fill=(52, 120, 204), width=2)
+        draw.text((44, 40), "BLUEPRINT LAYOUT", fill=(44, 104, 188), font=font)
+    elif variant == "colored_form_boxes":
+        image.paste((244, 237, 214), (0, 0, image.width, image.height))
+        for row in range(3):
+            top = 40 + row * 58
+            for col in range(4):
+                left = 30 + col * 76
+                draw.rectangle((left, top, left + 62, top + 40), outline=(176, 122, 64), width=2)
+        for x in (110, 186, 262):
+            draw.line((x, 34, x, 214), fill=(190, 138, 78), width=1)
+    elif variant == "colored_ruled_regions":
+        image.paste((228, 240, 223), (0, 0, image.width, image.height))
+        for y in (46, 74, 102, 130, 158, 186, 214):
+            draw.line((26, y, 334, y), fill=(92, 144, 104), width=2)
+        draw.rectangle((30, 34, 334, 214), outline=(76, 128, 88), width=2)
+        draw.line((122, 34, 122, 214), fill=(92, 144, 104), width=1)
+        draw.line((232, 34, 232, 214), fill=(92, 144, 104), width=1)
+    else:
+        raise ValueError(f"unsupported colored-original variant: {variant}")
+
+    for y in range(64, 194, 22):
+        draw.text((42, y), "FORM COPY", fill=(56, 56, 56), font=font)
     return image
 
 
