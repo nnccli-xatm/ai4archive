@@ -11265,6 +11265,61 @@ class ScanQcTest(unittest.TestCase):
         self.assertGreater(timing["candidate_pixels"], 0)
         self.assertEqual(timing["replacement_work_performed"], False)
 
+    def test_despeckle_noisy_edge_margin_fast_filter_skips_edge_component_scans(self) -> None:
+        image = Image.new("RGB", (240, 180), "white")
+        for y in range(4, 176, 2):
+            image.putpixel((1, y), (30, 30, 30))
+            image.putpixel((2, y), (45, 45, 45))
+            image.putpixel((3, y), (55, 55, 55))
+
+        with (
+            mock.patch("archive_scan_qc.processing._despeckle_edge_tiny_isolated_component_for_cleanup") as tiny_component,
+            mock.patch("archive_scan_qc.processing._despeckle_edge_short_lint_component_for_cleanup") as short_lint,
+            mock.patch("archive_scan_qc.processing._despeckle_candidate_points_with_backend") as candidates,
+        ):
+            processed, operations, info = _process_image(image, ProcessingOptions(despeckle=True))
+
+        tiny_component.assert_not_called()
+        short_lint.assert_not_called()
+        candidates.assert_not_called()
+        self.assertEqual(processed.convert("RGB").tobytes(), image.tobytes())
+        self.assertIn("despeckle_noop", operations)
+        self.assertEqual(info["despeckle_reason"], "protected edge dark marks preserved")
+        timing = info["operation_timings"]["despeckle"]
+        self.assertEqual(timing["reason_code"], "protected_edge_dark_marks")
+        self.assertEqual(timing["candidate_count"], 0)
+        self.assertGreater(timing["candidate_pixels"], 12)
+        self.assertEqual(timing["replacement_work_performed"], False)
+
+    def test_processing_audit_reports_noisy_edge_margin_fast_filter_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            image = Image.new("RGB", (240, 180), "white")
+            for y in range(4, 176, 2):
+                image.putpixel((1, y), (30, 30, 30))
+                image.putpixel((2, y), (45, 45, 45))
+                image.putpixel((3, y), (55, 55, 55))
+            image.save(input_dir / "private_noisy_edge_margin.png")
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, workers=1))
+            audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
+            timing = audit_summary["timing"]["operation_timings"]["despeckle"]
+
+            self.assertEqual(manifest["files"][0]["despeckle_reason"], "protected edge dark marks preserved")
+            self.assertEqual(manifest["files"][0]["despeckle_pixels_changed"], 0)
+            self.assertEqual(timing["file_count"], 1)
+            self.assertEqual(timing["safe_skip_files"], 1)
+            self.assertEqual(timing["replacement_work_files"], 0)
+            self.assertEqual(timing["reason_code_distribution"]["protected_edge_dark_marks"], 1)
+            self.assertEqual(timing["candidate_count_bucket_distribution"]["0"], 1)
+            self.assertGreater(timing["candidate_pixels"]["max"], 12)
+
     def test_requested_numpy_despeckle_falls_back_when_numpy_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
