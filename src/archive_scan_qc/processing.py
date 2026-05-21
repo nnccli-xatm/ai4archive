@@ -13834,13 +13834,20 @@ def _detect_dark_border_bbox(image: Image.Image) -> DarkBorderDetection:
             (left_broken, right_broken, top_broken, bottom_broken),
         )
         if single_edge_shadow is not None:
-            bbox, edge_sides, band_width_bucket, broken_single_edge = single_edge_shadow
+            bbox, edge_sides, band_width_bucket, broken_single_edge, corner_connected = single_edge_shadow
             if _has_protected_dark_content_near_trim_boundary(grayscale, bbox) or (
                 broken_single_edge and _has_protected_marginal_dark_content_near_trim_boundary(grayscale, bbox)
             ):
                 reason = "protected edge content near dark border"
                 return DarkBorderDetection(None, reason, _dark_border_reason_code(reason), edge_sides, band_width_bucket)
-            reason = "broken single dark edge shadow trimmed" if broken_single_edge else "single dark edge shadow trimmed"
+            if corner_connected:
+                reason = (
+                    "broken corner-connected dark edge shadow trimmed"
+                    if broken_single_edge
+                    else "corner-connected dark edge shadow trimmed"
+                )
+            else:
+                reason = "broken single dark edge shadow trimmed" if broken_single_edge else "single dark edge shadow trimmed"
             return DarkBorderDetection(bbox, reason, _dark_border_reason_code(reason), edge_sides, band_width_bucket)
         reason = "incomplete dark edge border evidence"
         return DarkBorderDetection(None, reason, _dark_border_reason_code(reason), edge_sides, band_width_bucket)
@@ -13897,6 +13904,8 @@ def _dark_border_reason_code(reason: str | None) -> str | None:
         "broken dark edge border trimmed": "trimmed_broken_edge",
         "single dark edge shadow trimmed": "trimmed_single_edge_shadow",
         "broken single dark edge shadow trimmed": "trimmed_broken_single_edge_shadow",
+        "corner-connected dark edge shadow trimmed": "trimmed_corner_connected_edge_shadow",
+        "broken corner-connected dark edge shadow trimmed": "trimmed_broken_corner_connected_edge_shadow",
         "dark border trim disabled": "disabled",
         "image too small": "image_too_small",
         "no light page background for dark border trim": "no_light_page_background",
@@ -13919,7 +13928,7 @@ def _single_dark_edge_shadow_trim(
     image: Image.Image,
     runs: tuple[int, int, int, int],
     broken_edges: tuple[bool, bool, bool, bool],
-) -> tuple[tuple[int, int, int, int], tuple[str, ...], str | None, bool] | None:
+) -> tuple[tuple[int, int, int, int], tuple[str, ...], str | None, bool, bool] | None:
     width, height = image.size
     active = [(side, run) for side, run in zip(("left", "right", "top", "bottom"), runs) if run >= 2]
     if len(active) != 1:
@@ -13943,7 +13952,125 @@ def _single_dark_edge_shadow_trim(
         "top": (0, run, width, height),
         "bottom": (0, 0, width, height - run),
     }[side]
-    return bbox, (side,), _dark_border_band_width_bucket(run), broken_edge
+    corner_connected = False
+    adjacent = _single_edge_corner_connected_adjacent_run(image, side, run)
+    if adjacent is not None:
+        adjacent_side, adjacent_run = adjacent
+        if adjacent_side == "left":
+            bbox = (adjacent_run, bbox[1], bbox[2], bbox[3])
+        elif adjacent_side == "right":
+            bbox = (bbox[0], bbox[1], width - adjacent_run, bbox[3])
+        elif adjacent_side == "top":
+            bbox = (bbox[0], adjacent_run, bbox[2], bbox[3])
+        else:
+            bbox = (bbox[0], bbox[1], bbox[2], height - adjacent_run)
+        corner_connected = True
+        edge_sides = tuple(sorted((side, adjacent_side), key=("left", "right", "top", "bottom").index))
+        band_width_bucket = _dark_border_band_width_bucket(max(run, adjacent_run))
+        return bbox, edge_sides, band_width_bucket, broken_edge, corner_connected
+    return bbox, (side,), _dark_border_band_width_bucket(run), broken_edge, corner_connected
+
+
+def _single_edge_corner_connected_adjacent_run(
+    image: Image.Image,
+    side: str,
+    run: int,
+) -> tuple[str, int] | None:
+    width, height = image.size
+    # Only extend when primary edge is confidently narrow and nearby interior remains light.
+    if run < 3:
+        return None
+    adjacent_sides = {
+        "left": ("top", "bottom"),
+        "right": ("top", "bottom"),
+        "top": ("left", "right"),
+        "bottom": ("left", "right"),
+    }[side]
+    for adjacent in adjacent_sides:
+        adjacent_run = _corner_local_adjacent_edge_run(image, side, adjacent, max_run=2)
+        if adjacent_run != 1:
+            continue
+        if not _single_edge_corner_bridge_is_dark(image, side, adjacent, run):
+            continue
+        return adjacent, adjacent_run
+    return None
+
+
+def _corner_local_adjacent_edge_run(image: Image.Image, primary: str, adjacent: str, max_run: int) -> int:
+    width, height = image.size
+    pixels = image.load()
+    corner_span = max(20, int(min(width, height) * 0.18))
+    run = 0
+    for offset in range(max_run):
+        if adjacent == "top":
+            y = offset
+            xs = (
+                range(0, min(width, corner_span))
+                if primary == "left"
+                else range(max(0, width - corner_span), width)
+            )
+            values = [pixels[x, y] for x in xs]
+        elif adjacent == "bottom":
+            y = height - 1 - offset
+            xs = (
+                range(0, min(width, corner_span))
+                if primary == "left"
+                else range(max(0, width - corner_span), width)
+            )
+            values = [pixels[x, y] for x in xs]
+        elif adjacent == "left":
+            x = offset
+            ys = (
+                range(0, min(height, corner_span))
+                if primary == "top"
+                else range(max(0, height - corner_span), height)
+            )
+            values = [pixels[x, y] for y in ys]
+        else:
+            x = width - 1 - offset
+            ys = (
+                range(0, min(height, corner_span))
+                if primary == "top"
+                else range(max(0, height - corner_span), height)
+            )
+            values = [pixels[x, y] for y in ys]
+        if not values:
+            break
+        dark_ratio = sum(1 for value in values if value <= 118) / len(values)
+        mean = sum(values) / len(values)
+        if dark_ratio >= 0.72 and mean <= 142:
+            run = offset + 1
+        else:
+            break
+    return run
+
+
+def _single_edge_corner_bridge_is_dark(image: Image.Image, primary: str, adjacent: str, run: int) -> bool:
+    width, height = image.size
+    corner_span = max(14, int(min(width, height) * 0.16))
+    if primary == "left" and adjacent == "top":
+        box = (0, 0, run + 2, min(height, corner_span))
+    elif primary == "left" and adjacent == "bottom":
+        box = (0, max(0, height - corner_span), run + 2, height)
+    elif primary == "right" and adjacent == "top":
+        box = (max(0, width - run - 2), 0, width, min(height, corner_span))
+    elif primary == "right" and adjacent == "bottom":
+        box = (max(0, width - run - 2), max(0, height - corner_span), width, height)
+    elif primary == "top" and adjacent == "left":
+        box = (0, 0, min(width, corner_span), run + 2)
+    elif primary == "top" and adjacent == "right":
+        box = (max(0, width - corner_span), 0, width, run + 2)
+    elif primary == "bottom" and adjacent == "left":
+        box = (0, max(0, height - run - 2), min(width, corner_span), height)
+    else:
+        box = (max(0, width - corner_span), max(0, height - run - 2), width, height)
+    if box[2] <= box[0] or box[3] <= box[1]:
+        return False
+    values = image.crop(box).tobytes()
+    if not values:
+        return False
+    dark_ratio = sum(1 for value in values if value <= 118) / len(values)
+    return dark_ratio >= 0.58
 
 
 def _single_dark_edge_has_safe_small_interruptions(image: Image.Image, side: str, run: int) -> bool:

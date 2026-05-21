@@ -11693,6 +11693,61 @@ class ScanQcTest(unittest.TestCase):
         )
         self.assertEqual(detection.edge_sides, ("left",))
 
+    def test_trim_dark_border_trims_corner_connected_thin_shadow_pair(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "A001_corner_connected_shadow.png"
+            image = Image.new("RGB", (200, 140), (244, 244, 240))
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((0, 0, 3, 139), fill=(92, 92, 92))
+            draw.rectangle((0, 0, 74, 0), fill=(96, 96, 96))
+            for y in (44, 66, 88):
+                draw.rectangle((60, y, 150, y + 4), fill=(30, 30, 30))
+            image.save(source, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(trim_dark_border=True, workers=1))
+            audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
+
+            record = manifest["files"][0]
+            self.assertTrue(record["dark_border_trimmed"])
+            self.assertEqual(record["dark_border_bbox"], [4, 1, 200, 140])
+            self.assertEqual(record["dark_border_reason"], "corner-connected dark edge shadow trimmed")
+            self.assertEqual(record["dark_border_reason_code"], "trimmed_corner_connected_edge_shadow")
+            self.assertEqual(record["dark_border_edge_sides"], ["left", "top"])
+            self.assertEqual(
+                audit_summary["guardrails"]["dark_border_trim"]["guardrail_reason_code_distribution"],
+                {"trimmed_corner_connected_edge_shadow": 1},
+            )
+            self.assertEqual(
+                audit_summary["guardrails"]["dark_border_trim"]["edge_side_distribution"],
+                {"left": 1, "top": 1},
+            )
+
+    def test_trim_dark_border_corner_connected_thin_shadow_noops_for_near_corner_page_number(self) -> None:
+        image = Image.new("RGB", (200, 140), (244, 244, 240))
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((0, 0, 3, 139), fill=(92, 92, 92))
+        draw.rectangle((0, 0, 74, 0), fill=(96, 96, 96))
+        draw.rectangle((6, 3, 24, 13), fill=(20, 20, 20))
+        draw.rectangle((60, 66, 150, 70), fill=(30, 30, 30))
+
+        detection = detect_dark_border_bbox(image)
+
+        self.assertIsNone(detection.bbox)
+        self.assertIn(
+            detection.reason,
+            {"protected edge content near dark border", "incomplete dark edge border evidence"},
+        )
+        self.assertIn(
+            detection.reason_code,
+            {"protected_edge_content_near_dark_border", "incomplete_dark_edge_border_evidence"},
+        )
+
     def test_trim_dark_border_narrow_uneven_single_shadow_noops_for_broad_shadow_band(self) -> None:
         image = Image.new("RGB", (200, 140), (244, 244, 240))
         draw = ImageDraw.Draw(image)
