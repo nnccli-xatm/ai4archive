@@ -2406,16 +2406,11 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 self.assertFalse(record["bleed_through_cleaned"], name)
                 self.assertNotEqual(record["bleed_through_reason_code"], "applied_faint_reverse_ghost", name)
                 self.assertEqual(audit["bleed_through_changed_pixel_ratio"], 0.0, name)
-                self.assertIn(audit["local_content_change_guard_action"], {"passed", "reverted_to_source"}, name)
-                self.assertIn(audit["cumulative_change_guard_action"], {"passed", "reverted_to_source"}, name)
+                self.assertEqual(audit["local_content_change_guard_action"], "passed", name)
+                self.assertEqual(audit["cumulative_change_guard_action"], "passed", name)
                 self.assertIn(
                     audit["combination_quality_guard_reason_code"],
-                    {
-                        "safe_combination_passed",
-                        "low_confidence_original_preserved",
-                        "protected_content_original_preserved",
-                        "combined_change_too_large_reverted",
-                    },
+                    {"safe_combination_passed", "low_confidence_original_preserved"},
                     name,
                 )
                 self.assertEqual(audit["guardrail_failures"], [], name)
@@ -2474,16 +2469,11 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 self.assertIn("despeckle_noop", record["operations"], name)
                 self.assertEqual(audit["despeckle_pixel_ratio"], 0.0, name)
                 self.assertEqual(audit["guardrail_failures"], [], name)
-                self.assertIn(audit["local_content_change_guard_action"], {"passed", "reverted_to_source"}, name)
-                self.assertIn(audit["cumulative_change_guard_action"], {"passed", "reverted_to_source"}, name)
+                self.assertEqual(audit["local_content_change_guard_action"], "passed", name)
+                self.assertEqual(audit["cumulative_change_guard_action"], "passed", name)
                 self.assertIn(
                     audit["combination_quality_guard_reason_code"],
-                    {
-                        "safe_combination_passed",
-                        "low_confidence_original_preserved",
-                        "protected_content_original_preserved",
-                        "combined_change_too_large_reverted",
-                    },
+                    {"safe_combination_passed", "low_confidence_original_preserved"},
                     name,
                 )
                 with Image.open(process_dir / record["output_relative_path"]) as output:
@@ -2565,11 +2555,11 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
                 self.assertLessEqual(changed_ratio, 0.03, name)
                 self.assertEqual(audit["guardrail_failures"], [], name)
-                self.assertIn(audit["local_content_change_guard_action"], {"passed", "reverted_to_source"}, name)
-                self.assertIn(audit["cumulative_change_guard_action"], {"passed", "reverted_to_source"}, name)
+                self.assertEqual(audit["local_content_change_guard_action"], "passed", name)
+                self.assertEqual(audit["cumulative_change_guard_action"], "passed", name)
                 self.assertIn(
                     audit["combination_quality_guard_reason_code"],
-                    {"safe_combination_passed", "low_confidence_original_preserved", "protected_content_original_preserved", "combined_change_too_large_reverted"},
+                    {"safe_combination_passed", "low_confidence_original_preserved"},
                     name,
                 )
 
