@@ -190,6 +190,96 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for filename in protected_cases:
                 self.assertNotIn(filename.replace(".png", ""), audit_summary_text)
 
+    def test_full_chain_corner_connected_dark_border_trim_stays_bounded_and_protects_lookalikes(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-corner-connected-shadow-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            def base_page() -> Image.Image:
+                page = Image.new("RGB", (260, 190), (244, 244, 240))
+                draw = ImageDraw.Draw(page)
+                draw.rectangle((0, 0, 3, 189), fill=(92, 92, 92))
+                draw.rectangle((0, 0, 96, 0), fill=(96, 96, 96))
+                for y in (64, 86, 108):
+                    draw.rectangle((74, y, 188, y + 4), fill=(32, 32, 32))
+                for y in (30, 148):
+                    draw.rectangle((214, y, 246, y + 2), fill=(72, 72, 72))
+                return page
+
+            safe = base_page()
+            safe.save(input_dir / "private_full_chain_safe_corner_connected_shadow.png", dpi=(300, 300))
+
+            printed_frame = base_page()
+            printed_frame_draw = ImageDraw.Draw(printed_frame)
+            printed_frame_draw.rectangle((7, 5, 202, 8), fill=(18, 18, 18))
+            printed_frame_draw.rectangle((7, 5, 10, 34), fill=(18, 18, 18))
+            printed_frame.save(input_dir / "private_full_chain_protected_printed_frame.png", dpi=(300, 300))
+
+            page_number = base_page()
+            page_number_draw = ImageDraw.Draw(page_number)
+            page_number_draw.rectangle((8, 166, 30, 178), fill=(16, 16, 16))
+            page_number.save(input_dir / "private_full_chain_protected_page_number.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-corner-connected-shadow", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(
+                    trim_dark_border=True,
+                    deskew=True,
+                    auto_crop=True,
+                    scanner_gutter_trim=True,
+                    despeckle=True,
+                    normalize_tones=True,
+                    sharpen_text_edges=True,
+                    workers=1,
+                ),
+            )
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            safe_record = records["private_full_chain_safe_corner_connected_shadow.png"]
+            self.assertTrue(safe_record["dark_border_trimmed"])
+            self.assertEqual(safe_record["dark_border_reason_code"], "trimmed_corner_connected_edge_shadow")
+            self.assertLessEqual(safe_record["processing_audit"]["max_trim_margin_ratio"], 0.02)
+            self.assertEqual(safe_record["processing_audit"]["guardrail_failures"], [])
+
+            for protected_name in (
+                "private_full_chain_protected_printed_frame.png",
+                "private_full_chain_protected_page_number.png",
+            ):
+                protected_record = records[protected_name]
+                self.assertFalse(protected_record["dark_border_trimmed"])
+                self.assertIn(
+                    protected_record["dark_border_reason_code"],
+                    {
+                        "protected_edge_content_near_dark_border",
+                        "incomplete_dark_edge_border_evidence",
+                        "no_confident_dark_edge_border",
+                    },
+                )
+                self.assertEqual(protected_record["output_size"], [260, 190])
+                self.assertIn("dark_border_trim_noop", protected_record["operations"])
+                self.assertEqual(protected_record["processing_audit"]["guardrail_failures"], [])
+
+            self.assertEqual(audit_summary["counts"]["dark_border_trimmed_files"], 1)
+            self.assertEqual(audit_summary["counts"]["dark_border_skipped_files"], 2)
+            self.assertEqual(
+                audit_summary["guardrails"]["dark_border_trim"]["guardrail_reason_code_distribution"][
+                    "trimmed_corner_connected_edge_shadow"
+                ],
+                1,
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_full_chain_safe_corner_connected_shadow", audit_summary_text)
+            self.assertNotIn("private_full_chain_protected_printed_frame", audit_summary_text)
+            self.assertNotIn("private_full_chain_protected_page_number", audit_summary_text)
+
     def test_full_chain_encoded_derivative_preserves_color_detail_and_icc_profile(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-encoded-color-") as temp_dir:
             root = Path(temp_dir)
