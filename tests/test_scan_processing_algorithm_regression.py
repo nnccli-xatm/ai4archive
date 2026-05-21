@@ -53,6 +53,11 @@ def _mean_channel_spread(image: Image.Image) -> float:
     return max(means) - min(means)
 
 
+def _mean_rgb(image: Image.Image, box: tuple[int, int, int, int]) -> tuple[float, float, float]:
+    means = ImageStat.Stat(image.crop(box).convert("RGB")).mean
+    return float(means[0]), float(means[1]), float(means[2])
+
+
 def _side_paper_channel_spread(image: Image.Image) -> float:
     rgb = image.convert("RGB")
     bands = ((0, 0, 80, rgb.height), (160, 0, 240, rgb.height))
@@ -123,6 +128,52 @@ def _clean_background_scanner_glass_streak_page(variant: str) -> Image.Image:
 
 
 class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
+    def test_full_chain_encoded_derivative_preserves_color_detail_and_icc_profile(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-encoded-color-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            icc_profile = b"synthetic-icc-profile-v1"
+
+            page = Image.new("RGB", (320, 220), (246, 242, 236))
+            draw = ImageDraw.Draw(page)
+            for y in (44, 70, 96):
+                draw.rectangle((34, y, 192, y + 4), fill=(40, 40, 40))
+            draw.line((24, 152, 296, 152), fill=(210, 24, 24), width=1)
+            draw.line((24, 176, 296, 176), fill=(28, 72, 210), width=1)
+            draw.line((40, 132, 280, 132), fill=(120, 170, 70), width=1)
+
+            png_source = input_dir / "synthetic_encoded_color.png"
+            jpeg_source = input_dir / "synthetic_encoded_color.jpg"
+            page.save(png_source, dpi=(300, 300), icc_profile=icc_profile)
+            page.save(jpeg_source, dpi=(300, 300), quality=95, subsampling=0, icc_profile=icc_profile)
+            source_bytes = {path.name: path.read_bytes() for path in (png_source, jpeg_source)}
+
+            report = scan_batch(ScanConfig("synthetic-regression", "encoded-derivative-color-fidelity", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(workers=1))
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            for source_name, before in source_bytes.items():
+                self.assertEqual((input_dir / source_name).read_bytes(), before)
+
+            self.assertEqual(set(records), {"synthetic_encoded_color.jpg", "synthetic_encoded_color.png"})
+            for source_name in ("synthetic_encoded_color.png", "synthetic_encoded_color.jpg"):
+                record = records[source_name]
+                self.assertEqual(record["status"], "processed")
+                derivative_path = process_dir / record["output_relative_path"]
+                self.assertTrue(derivative_path.exists())
+                with Image.open(derivative_path) as derivative:
+                    red_line = _mean_rgb(derivative, (24, 150, 296, 155))
+                    blue_line = _mean_rgb(derivative, (24, 174, 296, 179))
+                    green_line = _mean_rgb(derivative, (40, 130, 280, 135))
+                    self.assertGreater(red_line[0] - red_line[2], 18.0)
+                    self.assertGreater(blue_line[2] - blue_line[0], 18.0)
+                    self.assertGreater(green_line[1] - green_line[0], 5.0)
+                    self.assertGreater(green_line[1] - green_line[2], 2.5)
+                    self.assertEqual(derivative.info.get("icc_profile"), icc_profile)
+
     def test_combination_quality_guard_classifies_public_reason_codes(self) -> None:
         options = ProcessingOptions()
         base_metrics = _combination_guard_metrics()
