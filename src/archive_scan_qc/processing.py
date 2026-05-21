@@ -4626,6 +4626,30 @@ def _paper_color_cast_faint_structure_reason(
             "protected_dark_content",
         )
 
+    # Keep archival paper evidence (fibers/mottling/foxing-like texture) out of cast normalization.
+    warm_mottled_background = 0
+    for y in range(sample.height):
+        for x in range(sample.width):
+            red_value, green_value, blue_value = sample_pixels[x, y]
+            brightness = (red_value + green_value + blue_value) / 3
+            if not (bg_brightness - 30 <= brightness <= bg_brightness + 6):
+                continue
+            spread = max(red_value, green_value, blue_value) - min(red_value, green_value, blue_value)
+            if spread > 20:
+                continue
+            bg_distance = max(
+                abs(red_value - background_means[0]),
+                abs(green_value - background_means[1]),
+                abs(blue_value - background_means[2]),
+            )
+            if 4 <= bg_distance <= 24 and detail_pixels[x, y] >= 3:
+                warm_mottled_background += 1
+    if warm_mottled_background / total >= 0.16:
+        return (
+            "paper color cast normalization skipped: background is not uniform enough",
+            "not_uniform",
+        )
+
     broad_pale_nonuniform = 0
     for red_value, green_value, blue_value in pixels:
         brightness = (red_value + green_value + blue_value) / 3
