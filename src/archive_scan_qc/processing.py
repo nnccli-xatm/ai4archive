@@ -14319,6 +14319,7 @@ _DESPECKLE_MAX_COMPONENT_PIXELS = 4
 _DESPECKLE_MAX_TINY_DUST_CLUSTER_PIXELS = 9
 _DESPECKLE_MAX_TINY_DARK_DUST_CLUSTER_PIXELS = 6
 _DESPECKLE_EDGE_TINY_ISOLATED_MAX_PIXELS = 4
+_DESPECKLE_EDGE_CONSERVATIVE_CLEANUP_MAX_PIXELS = 12
 _DESPECKLE_TINY_DUST_CLUSTER_MIN_VALUE = 35
 _DESPECKLE_MAX_SHORT_LINT_STREAK_PIXELS = 12
 _DESPECKLE_MIN_SHORT_LINT_STREAK_PIXELS = 5
@@ -14404,6 +14405,16 @@ def _despeckle_isolated_pixels_with_reason(image: Image.Image, *, backend: str =
     edge_tiny_component: list[tuple[int, int]] | None = None
     edge_short_lint_component: list[tuple[int, int]] | None = None
     if _despeckle_mask_confined_to_protected_edge(candidate_mask):
+        if candidate_pixels > _DESPECKLE_EDGE_CONSERVATIVE_CLEANUP_MAX_PIXELS:
+            return _despeckle_result(
+                image,
+                changed_pixels=0,
+                backend_mode="not_applicable",
+                reason="protected edge dark marks preserved",
+                candidate_pixels=candidate_pixels,
+                candidate_count=0,
+                replacement_work_performed=False,
+            )
         edge_tiny_component = _despeckle_edge_tiny_isolated_component_for_cleanup(image, grayscale, candidate_mask)
         if edge_tiny_component is None:
             edge_short_lint_component = _despeckle_edge_short_lint_component_for_cleanup(image, grayscale, candidate_mask)
