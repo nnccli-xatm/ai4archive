@@ -4665,6 +4665,72 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in ("private_cool_gray_reverse_ghost", str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_translucent_thin_paper_show_through_stays_guarded_with_safe_control(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-thin-paper-show-through-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_safe_thin_paper_reverse_ghost.png": _thin_translucent_show_through_page("safe"),
+                "synthetic_protected_tracing_texture.png": _thin_translucent_show_through_page("tracing_texture"),
+                "synthetic_protected_meaningful_reverse_evidence.png": _thin_translucent_show_through_page("meaningful_reverse"),
+                "synthetic_protected_faint_foreground_marks.png": _thin_translucent_show_through_page("faint_foreground"),
+            }
+            source_bytes = {}
+            for name, page in pages.items():
+                source = input_dir / name
+                page.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "thin-paper-show-through", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_name = "synthetic_safe_thin_paper_reverse_ghost.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            self.assertTrue(safe_record["bleed_through_cleaned"])
+            self.assertEqual(safe_record["bleed_through_reason_code"], "applied_faint_reverse_ghost")
+            self.assertGreater(safe_audit["bleed_through_changed_pixel_ratio"], 0.003)
+            self.assertLessEqual(safe_audit["bleed_through_changed_pixel_ratio"], 0.045)
+            self.assertLessEqual(safe_audit["bleed_through_candidate_pixel_ratio"], 0.065)
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+
+            protected_expected_codes = {
+                "synthetic_protected_tracing_texture.png": "protected_texture_or_archival_trace",
+                "synthetic_protected_meaningful_reverse_evidence.png": "protected_line_or_annotation",
+                "synthetic_protected_faint_foreground_marks.png": "protected_line_or_annotation",
+            }
+            for name, expected_code in protected_expected_codes.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                self.assertFalse(record["bleed_through_cleaned"], name)
+                self.assertEqual(record["bleed_through_reason_code"], expected_code, name)
+                self.assertEqual(audit["bleed_through_reason_code"], expected_code, name)
+                self.assertEqual(audit["bleed_through_changed_pixel_ratio"], 0.0, name)
+
+            bleed_guard = audit_summary["guardrails"]["bleed_through"]
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 1)
+            self.assertEqual(bleed_guard["applied_files"], 1)
+            self.assertEqual(bleed_guard["skipped_files"], len(protected_expected_codes))
+            self.assertEqual(bleed_guard["reason_code_distribution"]["applied_faint_reverse_ghost"], 1)
+            self.assertIn("protected_line_or_annotation", bleed_guard["skip_reason_code_distribution"])
+            self.assertIn("protected_texture_or_archival_trace", bleed_guard["skip_reason_code_distribution"])
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_sparse_bleed_through_cleanup_preserves_real_marks_with_public_skip_codes(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-protected-bleed-through-marks-") as temp_dir:
             root = Path(temp_dir)
@@ -10228,6 +10294,41 @@ def _cool_gray_mild_bleed_through_page() -> Image.Image:
     ghost = Image.new("RGB", image.size, (214, 222, 232))
     image.paste(ghost, (0, 0), mask.point(lambda value: int(value * 0.62)))
     return image
+
+
+def _thin_translucent_show_through_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (300, 210), (244, 242, 238))
+    draw = ImageDraw.Draw(image)
+    for y in (34, 60, 86, 112):
+        draw.rectangle((34, y, 140, y + 3), fill=(68, 68, 68))
+
+    if variant == "safe":
+        mask = Image.new("L", image.size, 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.text((170, 66), "321", fill=255)
+        mask_draw.text((172, 92), "654", fill=255)
+        mask_draw.text((174, 118), "987", fill=255)
+        mask = mask.filter(ImageFilter.GaussianBlur(4.2))
+        ghost = Image.new("RGB", image.size, (236, 232, 224))
+        image.paste(ghost, (0, 0), mask.point(lambda value: int(value * 0.28)))
+        return image
+    if variant == "tracing_texture":
+        for y in range(16, 196, 4):
+            for x in range(14, 286, 14):
+                shade = 230 + ((x + y) % 6)
+                draw.line((x, y, x + 8, y + 1), fill=(shade, shade, shade - 3), width=1)
+        return image
+    if variant == "meaningful_reverse":
+        draw.text((176, 72), "A12", fill=(225, 223, 218))
+        draw.text((176, 98), "B34", fill=(225, 223, 218))
+        draw.text((176, 124), "C56", fill=(225, 223, 218))
+        return image
+    if variant == "faint_foreground":
+        draw.text((222, 62), "note", fill=(224, 222, 218))
+        draw.line((214, 92, 282, 98), fill=(224, 222, 218), width=1)
+        draw.line((216, 120, 278, 124), fill=(224, 222, 218), width=1)
+        return image
+    raise ValueError(f"unknown thin translucent show-through variant: {variant}")
 
 
 def _protected_sparse_bleed_through_mark_pages() -> dict[str, Image.Image]:
