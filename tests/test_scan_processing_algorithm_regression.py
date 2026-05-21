@@ -5326,7 +5326,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
-    def test_sharpen_text_edges_lifts_mildly_blurred_typed_body_text_but_skips_page_number(self) -> None:
+    def test_sharpen_text_edges_lifts_mildly_blurred_typed_body_text_and_skips_protected_lookalikes(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-text-edge-body-") as temp_dir:
             root = Path(temp_dir)
             input_dir = root / "input"
@@ -5334,10 +5334,17 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             process_dir = root / "processed"
             input_dir.mkdir()
             safe_source = _mildly_blurred_typed_body_text_page()
-            protected_source = _mildly_blurred_typed_body_text_page(page_number=True)
             pages = {
                 "private_safe_mild_typed_body.png": safe_source,
-                "private_protected_page_number.png": protected_source,
+                "private_protected_page_number.png": _mildly_blurred_typed_body_text_page(variant="page_number"),
+                "private_protected_marginal_mark.png": _mildly_blurred_typed_body_text_page(variant="marginal_mark"),
+                "private_protected_ruled_table.png": _mildly_blurred_typed_body_text_page(variant="ruled_table"),
+                "private_protected_stamp.png": _mildly_blurred_typed_body_text_page(variant="stamp"),
+                "private_protected_handwriting.png": _mildly_blurred_typed_body_text_page(variant="handwriting"),
+                "private_protected_photo_texture.png": _mildly_blurred_typed_body_text_page(variant="photo_texture"),
+                "private_protected_dense_foreground.png": _mildly_blurred_typed_body_text_page(variant="dense_foreground"),
+                "private_protected_colored_mark.png": _mildly_blurred_typed_body_text_page(variant="colored_mark"),
+                "private_protected_already_clear_text.png": _mildly_blurred_typed_body_text_page(variant="already_clear"),
             }
             for name, image in pages.items():
                 image.save(input_dir / name, dpi=(300, 300))
@@ -5362,26 +5369,34 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertEqual(safe_record["text_edges_reason_zh"], "检测到浅色纸面上的稳定模糊正文边缘，已保守锐化。")
             self.assertEqual(safe_audit["guardrail_failures"], [])
 
-            protected_record = records["private_protected_page_number.png"]
-            protected_audit = protected_record["processing_audit"]
-            with Image.open(process_dir / protected_record["output_relative_path"]) as protected_output:
-                self.assertFalse(protected_record["text_edges_sharpened"])
-                self.assertIn("sharpen_text_edges_noop", protected_record["operations"])
-                self.assertLess(_changed_ratio(protected_source, protected_output, (0, 0, 420, 90)), 0.001)
-            self.assertIn(
-                protected_record["text_edges_reason_code"],
-                {"protected_edge_mark_or_binding", "protected_header_footer_or_page_number"},
-            )
-            self.assertEqual(protected_audit["text_edges_changed_pixel_ratio"], 0.0)
-            self.assertEqual(protected_audit["guardrail_failures"], [])
+            protected_names = sorted(name for name in pages if name != "private_safe_mild_typed_body.png")
+            self.assertGreaterEqual(len(protected_names), 6)
+            for name in protected_names:
+                protected_source = pages[name]
+                protected_record = records[name]
+                protected_audit = protected_record["processing_audit"]
+                with Image.open(process_dir / protected_record["output_relative_path"]) as protected_output:
+                    self.assertFalse(protected_record["text_edges_sharpened"], name)
+                    self.assertIn("sharpen_text_edges_noop", protected_record["operations"], name)
+                    self.assertLess(_changed_ratio(protected_source, protected_output, (0, 0, 420, 560)), 0.001, name)
+                self.assertIsInstance(protected_record["text_edges_reason_code"], str, name)
+                self.assertNotIn(
+                    protected_record["text_edges_reason_code"],
+                    {"unknown", "applied_stable_blurred_text_edges"},
+                    name,
+                )
+                self.assertEqual(protected_audit["text_edges_changed_pixel_ratio"], 0.0, name)
+                self.assertEqual(protected_audit["guardrail_failures"], [], name)
 
             self.assertEqual(audit_summary["counts"]["text_edges_sharpened_files"], 1)
-            self.assertEqual(audit_summary["counts"]["text_edges_skipped_files"], 1)
+            self.assertEqual(audit_summary["counts"]["text_edges_skipped_files"], len(protected_names))
             text_edge_guard = audit_summary["guardrails"]["text_edges"]
             self.assertEqual(text_edge_guard["applied_files"], 1)
-            self.assertEqual(text_edge_guard["skipped_files"], 1)
+            self.assertEqual(text_edge_guard["skipped_files"], len(protected_names))
+            self.assertGreaterEqual(text_edge_guard["protection_triggered_files"], 6)
             self.assertEqual(text_edge_guard["reason_code_distribution"]["applied_stable_blurred_text_edges"], 1)
-            self.assertIn(protected_record["text_edges_reason_code"], text_edge_guard["skip_reason_code_distribution"])
+            for name in protected_names:
+                self.assertIn(records[name]["text_edges_reason_code"], text_edge_guard["skip_reason_code_distribution"], name)
             self.assertIn("text_edges_changed_pixel_ratio", audit_summary["metrics"])
             self.assertIn("text_edges_candidate_pixel_ratio", audit_summary["metrics"])
             self.assertIn("text_edges_edge_energy_before", audit_summary["metrics"])
@@ -8177,7 +8192,7 @@ def _blurred_text_page() -> Image.Image:
     return image.filter(ImageFilter.GaussianBlur(radius=0.7))
 
 
-def _mildly_blurred_typed_body_text_page(*, page_number: bool = False) -> Image.Image:
+def _mildly_blurred_typed_body_text_page(*, variant: str = "safe") -> Image.Image:
     image = Image.new("RGB", (420, 560), (245, 245, 242))
     draw = ImageDraw.Draw(image)
     font = ImageFont.load_default()
@@ -8194,8 +8209,35 @@ def _mildly_blurred_typed_body_text_page(*, page_number: bool = False) -> Image.
     )
     for index, line in enumerate(lines):
         draw.text((64, 100 + index * 34), line, fill=(72, 72, 72), font=font)
-    if page_number:
+    if variant == "page_number":
         draw.text((358, 22), "12", fill=(65, 65, 65), font=font)
+    elif variant == "marginal_mark":
+        draw.rectangle((18, 182, 30, 258), fill=(74, 74, 72))
+    elif variant == "ruled_table":
+        for y in range(88, 500, 42):
+            draw.line((50, y, 370, y), fill=(112, 112, 112), width=1)
+        for x in range(50, 371, 68):
+            draw.line((x, 88, x, 500), fill=(112, 112, 112), width=1)
+    elif variant == "stamp":
+        draw.ellipse((286, 120, 376, 216), outline=(178, 36, 30), width=4)
+    elif variant == "handwriting":
+        draw.line((52, 432, 110, 446, 176, 428, 228, 448), fill=(86, 86, 82), width=3, joint="curve")
+    elif variant == "photo_texture":
+        for y in range(330, 516):
+            shade = 120 + ((y * 11) % 90)
+            draw.line((246, y, 390, y), fill=(shade, shade, shade))
+        for x in range(250, 392, 10):
+            draw.line((x, 338, min(390, x + 32), 510), fill=(106, 106, 106), width=2)
+    elif variant == "dense_foreground":
+        for y in range(86, 496, 18):
+            draw.rectangle((42, y, 380, y + 6), fill=(62, 62, 62))
+    elif variant == "colored_mark":
+        draw.line((56, 62, 182, 74), fill=(42, 82, 176), width=3)
+        draw.line((226, 70, 366, 84), fill=(176, 54, 48), width=3)
+    elif variant == "already_clear":
+        return image
+    elif variant != "safe":
+        raise ValueError(f"unsupported typed body variant: {variant}")
     return image.filter(ImageFilter.GaussianBlur(radius=0.75))
 
 
