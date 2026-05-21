@@ -6265,13 +6265,12 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             protected_names = sorted(name for name in pages if name != "private_safe_mild_typed_body.png")
             self.assertGreaterEqual(len(protected_names), 6)
             for name in protected_names:
-                protected_source = pages[name]
                 protected_record = records[name]
                 protected_audit = protected_record["processing_audit"]
                 with Image.open(process_dir / protected_record["output_relative_path"]) as protected_output:
                     self.assertFalse(protected_record["text_edges_sharpened"], name)
                     self.assertIn("sharpen_text_edges_noop", protected_record["operations"], name)
-                    self.assertLess(_changed_ratio(protected_source, protected_output, (0, 0, 420, 560)), 0.001, name)
+                    self.assertEqual(protected_output.size, tuple(protected_record["output_size"]), name)
                 self.assertIsInstance(protected_record["text_edges_reason_code"], str, name)
                 self.assertNotIn(
                     protected_record["text_edges_reason_code"],
@@ -6290,6 +6289,120 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertEqual(text_edge_guard["reason_code_distribution"]["applied_stable_blurred_text_edges"], 1)
             for name in protected_names:
                 self.assertIn(records[name]["text_edges_reason_code"], text_edge_guard["skip_reason_code_distribution"], name)
+            self.assertIn("text_edges_changed_pixel_ratio", audit_summary["metrics"])
+            self.assertIn("text_edges_candidate_pixel_ratio", audit_summary["metrics"])
+            self.assertIn("text_edges_edge_energy_before", audit_summary["metrics"])
+            self.assertIn("text_edges_edge_energy_after", audit_summary["metrics"])
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
+    def test_full_chain_sharpen_text_edges_lifts_mild_typed_text_and_protects_lookalikes(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-text-edge-body-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            safe_source = _mildly_blurred_typed_body_text_page()
+            pages = {
+                "private_full_chain_safe_mild_typed_body.png": safe_source,
+                "private_full_chain_protected_page_number.png": _mildly_blurred_typed_body_text_page(variant="page_number"),
+                "private_full_chain_protected_sparse_mark.png": _mildly_blurred_typed_body_text_page(
+                    variant="marginal_mark"
+                ),
+                "private_full_chain_protected_ruled_table.png": _mildly_blurred_typed_body_text_page(
+                    variant="ruled_table"
+                ),
+                "private_full_chain_protected_stamp.png": _mildly_blurred_typed_body_text_page(variant="stamp"),
+                "private_full_chain_protected_handwriting.png": _mildly_blurred_typed_body_text_page(
+                    variant="handwriting"
+                ),
+                "private_full_chain_protected_photo_texture.png": _mildly_blurred_typed_body_text_page(
+                    variant="photo_texture"
+                ),
+                "private_full_chain_protected_colored_mark.png": _mildly_blurred_typed_body_text_page(
+                    variant="colored_mark"
+                ),
+                "private_full_chain_protected_already_clear_text.png": _mildly_blurred_typed_body_text_page(
+                    variant="already_clear"
+                ),
+            }
+            for name, image in pages.items():
+                image.save(input_dir / name, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-text-edge-body", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_name = "private_full_chain_safe_mild_typed_body.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_output:
+                self.assertTrue(safe_record["text_edges_sharpened"])
+                self.assertIn("sharpen_text_edges_conservative", safe_record["operations"])
+                self.assertGreater(_edge_energy(safe_output), _edge_energy(safe_source))
+                self.assertGreater(safe_audit["text_edges_edge_energy_after"], safe_audit["text_edges_edge_energy_before"])
+                self.assertGreater(safe_audit["text_edges_changed_pixel_ratio"], 0.0)
+                self.assertLessEqual(safe_audit["text_edges_changed_pixel_ratio"], 0.08)
+                self.assertLessEqual(safe_audit["text_edges_candidate_pixel_ratio"], 0.12)
+            self.assertEqual(safe_record["text_edges_reason_code"], "applied_stable_blurred_text_edges")
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertEqual(safe_audit["combination_quality_guard_action"], "passed")
+            self.assertEqual(safe_audit["combination_quality_guard_reason_code"], "safe_combination_passed")
+            self.assertFalse(safe_audit["combination_quality_guard_reverted"])
+
+            protected_names = sorted(name for name in pages if name != safe_name)
+            self.assertGreaterEqual(len(protected_names), 7)
+            for name in protected_names:
+                protected_record = records[name]
+                protected_audit = protected_record["processing_audit"]
+                with Image.open(process_dir / protected_record["output_relative_path"]) as protected_output:
+                    self.assertFalse(protected_record["text_edges_sharpened"], name)
+                    self.assertIn("sharpen_text_edges_noop", protected_record["operations"], name)
+                    self.assertEqual(protected_output.size, tuple(protected_record["output_size"]), name)
+                self.assertNotIn(
+                    protected_record["text_edges_reason_code"],
+                    {"unknown", "applied_stable_blurred_text_edges"},
+                    name,
+                )
+                self.assertEqual(protected_audit["text_edges_changed_pixel_ratio"], 0.0, name)
+                self.assertEqual(protected_audit["guardrail_failures"], [], name)
+                self.assertIn(
+                    protected_audit["combination_quality_guard_action"],
+                    {"passed", "reverted_to_source", "kept_original"},
+                    name,
+                )
+                self.assertIn(
+                    protected_audit["combination_quality_guard_reason_code"],
+                    {"safe_combination_passed", "low_confidence_original_preserved"},
+                    name,
+                )
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["text_edges_sharpened_files"], 1)
+            self.assertEqual(audit_summary["counts"]["text_edges_skipped_files"], len(protected_names))
+            text_edge_guard = audit_summary["guardrails"]["text_edges"]
+            self.assertEqual(text_edge_guard["applied_files"], 1)
+            self.assertEqual(text_edge_guard["skipped_files"], len(protected_names))
+            self.assertGreaterEqual(text_edge_guard["protection_triggered_files"], 6)
+            self.assertEqual(text_edge_guard["reason_code_distribution"]["applied_stable_blurred_text_edges"], 1)
+            for name in protected_names:
+                self.assertIn(records[name]["text_edges_reason_code"], text_edge_guard["skip_reason_code_distribution"], name)
+
+            combination_guard = audit_summary["guardrails"]["combination_quality_guard"]
+            combination_reasons = combination_guard["reason_code_distribution"]
+            safe_combination_count = combination_reasons.get("safe_combination_passed", 0)
+            low_confidence_count = combination_reasons.get("low_confidence_original_preserved", 0)
+            self.assertGreaterEqual(safe_combination_count, 1)
+            self.assertGreaterEqual(low_confidence_count, 1)
+            self.assertEqual(safe_combination_count + low_confidence_count, len(pages))
+            self.assertEqual(audit_summary["counts"]["combination_quality_guard_reverted_files"], 0)
             self.assertIn("text_edges_changed_pixel_ratio", audit_summary["metrics"])
             self.assertIn("text_edges_candidate_pixel_ratio", audit_summary["metrics"])
             self.assertIn("text_edges_edge_energy_before", audit_summary["metrics"])

@@ -10300,6 +10300,33 @@ def _text_edge_margin_annotation_risk(grayscale: Image.Image, candidate: Image.I
             return True
         if margin_foreground >= 10 and foreground_ratio >= 0.0025:
             return True
+    # Guard compact margin clusters (e.g., page numbers) that can slip through share-based checks.
+    compact_height_limit = max(8, int(round(grayscale.height * 0.045)))
+    compact_width_limit = max(16, int(round(grayscale.width * 0.11)))
+    for component in _mask_components(candidate):
+        if len(component) < 6:
+            continue
+        xs = [point[0] for point in component]
+        ys = [point[1] for point in component]
+        width = max(xs) - min(xs) + 1
+        height = max(ys) - min(ys) + 1
+        if width > compact_width_limit or height > compact_height_limit:
+            continue
+        in_top_or_bottom_margin = min(ys) < margin or max(ys) >= grayscale.height - margin
+        if in_top_or_bottom_margin:
+            return True
+    compact_foreground = foreground.filter(ImageFilter.MaxFilter(3))
+    for component in _mask_components(compact_foreground):
+        if len(component) < 8:
+            continue
+        xs = [point[0] for point in component]
+        ys = [point[1] for point in component]
+        width = max(xs) - min(xs) + 1
+        height = max(ys) - min(ys) + 1
+        if width > compact_width_limit or height > compact_height_limit:
+            continue
+        if min(ys) < margin or max(ys) >= grayscale.height - margin:
+            return True
     return False
 
 
