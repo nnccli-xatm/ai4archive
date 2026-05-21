@@ -2891,6 +2891,81 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_handwritten_annotation_pages_stay_preserved_with_safe_cleanup_control(self) -> None:
+        def signature_page() -> Image.Image:
+            image = Image.new("RGB", (360, 240), (244, 244, 240))
+            draw = ImageDraw.Draw(image)
+            draw.line((44, 90, 150, 98, 184, 82, 248, 108, 304, 96), fill=(48, 48, 48), width=2)
+            draw.arc((200, 106, 250, 150), 20, 300, fill=(52, 52, 52), width=2)
+            draw.line((30, 210, 330, 210), fill=(218, 218, 214), width=1)
+            return image
+
+        def correction_ticks_page() -> Image.Image:
+            image = Image.new("RGB", (360, 240), (243, 243, 239))
+            draw = ImageDraw.Draw(image)
+            for y in (60, 98, 136, 174):
+                draw.rectangle((68, y, 282, y + 4), fill=(38, 38, 38))
+            for x, y in ((314, 62), (312, 100), (316, 138), (310, 176)):
+                draw.line((x, y, x + 6, y + 6), fill=(64, 64, 64), width=1)
+                draw.line((x + 6, y + 6, x + 14, y - 4), fill=(64, 64, 64), width=1)
+            return image
+
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-handwritten-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_safe_cleanup_control.png": _faint_thumbprint_stain_page(),
+                "synthetic_protected_handwritten_marginal_notes.png": _low_contrast_handwriting_page(),
+                "synthetic_protected_pencil_strokes.png": _faint_thumbprint_stain_page("pencil_strokes_near_whitespace"),
+                "synthetic_protected_signature_like_mark.png": signature_page(),
+                "synthetic_protected_correction_ticks.png": correction_ticks_page(),
+                "synthetic_protected_faint_annotation_like_marks.png": _faint_cloud_background_stain_page("handwriting"),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, page in pages.items():
+                source = input_dir / name
+                page.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-handwritten-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            safe_name = "synthetic_safe_cleanup_control.png"
+            safe_record = records[safe_name]
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertEqual(safe_record["processing_audit"]["guardrail_failures"], [])
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_output:
+                safe_delta = _mean_luma(safe_output, (164, 68, 210, 108)) - _mean_luma(pages[safe_name], (164, 68, 210, 108))
+                self.assertGreater(safe_delta, 1.0)
+
+            protected_names = set(pages) - {safe_name}
+            for name in protected_names:
+                record = records[name]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
+                self.assertEqual(record["processing_audit"]["guardrail_failures"], [], name)
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    changed_ratio = _changed_ratio(pages[name], output.convert("RGB"), (0, 0, output.width, output.height))
+                self.assertLessEqual(changed_ratio, 0.16, name)
+                self.assertIn(
+                    record["processing_audit"]["combination_quality_guard_reason_code"],
+                    {"safe_combination_passed", "low_confidence_original_preserved"},
+                    name,
+                )
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_diagonal_fold_shadow_cleanup_lightens_safe_sparse_text_case_and_preserves_protected_marks(
         self,
     ) -> None:
