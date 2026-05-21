@@ -12112,6 +12112,8 @@ def _detect_faint_stable_text_skew(
     shallow = _detect_shallow_stable_text_skew(raw_grayscale, ink, bbox, raw_high=raw_high)
     if shallow.angle_degrees is None and not faint_handwriting_or_sparse_mark_risk:
         shallow = _detect_faint_sparse_typed_text_skew(ink, bbox, raw_high=raw_high)
+    if shallow.angle_degrees is None and not faint_handwriting_or_sparse_mark_risk:
+        shallow = _detect_faint_conservative_sparse_text_skew(ink, bbox, raw_high=raw_high)
     if shallow.angle_degrees is None:
         shallow = _detect_faint_glyph_text_skew(ink, bbox)
         if shallow.angle_degrees is None:
@@ -12127,6 +12129,86 @@ def _detect_faint_stable_text_skew(
 
     confidence = max(shallow.confidence, 0.14)
     return SkewDetection(shallow.angle_degrees, round(confidence, 3), "faint stable text skew detected")
+
+
+def _detect_faint_conservative_sparse_text_skew(
+    ink: Image.Image,
+    bbox: tuple[int, int, int, int],
+    *,
+    raw_high: int,
+) -> SkewDetection:
+    if raw_high < 226:
+        return SkewDetection(None, 0.0, "low contrast")
+
+    sample = ink.crop(bbox)
+    sample.thumbnail((700, 700), Image.Resampling.BILINEAR)
+    sample_width, sample_height = sample.size
+    if sample_width < 140 or sample_height < 52:
+        return SkewDetection(None, 0.0, "low contrast")
+    component_boxes = _foreground_component_boxes(sample, max_components=256)
+    if _deskew_sparse_components_are_handwriting_like(component_boxes, sample_width, sample_height):
+        return SkewDetection(None, 0.0, "low contrast")
+    if _deskew_sparse_components_are_segmented_rules(component_boxes, sample_width):
+        return SkewDetection(None, 0.0, "low contrast")
+
+    pixels = sample.load()
+    row_counts: list[int] = []
+    for y in range(sample_height):
+        row_counts.append(sum(1 for x in range(sample_width) if pixels[x, y]))
+
+    active_threshold = max(4.0, sample_width * 0.013)
+    groups: list[tuple[int, int]] = []
+    start: int | None = None
+    for row, count in enumerate(row_counts):
+        if count >= active_threshold:
+            if start is None:
+                start = row
+        elif start is not None:
+            groups.append((start, row))
+            start = None
+    if start is not None:
+        groups.append((start, sample_height))
+    groups = _merge_close_row_groups(groups, max_gap=5)
+    if len(groups) != 2:
+        return SkewDetection(None, 0.0, "low contrast")
+
+    line_angles: list[float] = []
+    max_band_height = max(14, int(round(sample_height * 0.26)))
+    min_line_width = max(95, int(round(sample_width * 0.48)))
+    for top, bottom in groups:
+        if bottom - top > max_band_height:
+            return SkewDetection(None, 0.0, "low contrast")
+        points: list[tuple[int, int]] = []
+        min_x: int | None = None
+        max_x: int | None = None
+        max_run = 0
+        for y in range(top, bottom):
+            run = 0
+            for x in range(sample_width):
+                if pixels[x, y]:
+                    points.append((x, y))
+                    min_x = x if min_x is None else min(min_x, x)
+                    max_x = x if max_x is None else max(max_x, x)
+                    run += 1
+                    max_run = max(max_run, run)
+                else:
+                    run = 0
+        if min_x is None or max_x is None:
+            return SkewDetection(None, 0.0, "low contrast")
+        if max_x - min_x < min_line_width:
+            return SkewDetection(None, 0.0, "low contrast")
+        if max_run >= max(72, int(round(sample_width * 0.6))):
+            return SkewDetection(None, 0.0, "low contrast")
+        angle = _least_squares_line_angle(points)
+        if angle is None or not 0.2 <= abs(angle) <= 0.85:
+            return SkewDetection(None, 0.0, "low contrast")
+        line_angles.append(angle)
+
+    average_angle = sum(line_angles) / len(line_angles)
+    if max(abs(angle - average_angle) for angle in line_angles) > 0.2:
+        return SkewDetection(None, 0.0, "low contrast")
+    confidence = max(0.0, min(1.0, 0.081 + len(line_angles) * 0.012))
+    return SkewDetection(round(-average_angle, 2), round(confidence, 3), "faint sparse typed text skew detected")
 
 
 def _detect_faint_sparse_typed_text_skew(
