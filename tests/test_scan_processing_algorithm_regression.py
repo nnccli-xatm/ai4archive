@@ -5406,6 +5406,149 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in ("synthetic_shallow_deskew_combo.png", str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_skewed_dark_edge_combo_preserves_near_edge_protected_content(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-skewed-dark-edge-combo-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            def base_page() -> Image.Image:
+                page = Image.new("RGB", (280, 210), (246, 246, 242))
+                draw = ImageDraw.Draw(page)
+                for x in range(14):
+                    shade = 238 + (x % 2)
+                    draw.line((x, 0, x, 209), fill=(shade, shade, shade))
+                draw.rectangle((0, 0, 3, 209), fill=(98, 98, 98))
+                draw.rectangle((0, 0, 90, 0), fill=(100, 100, 100))
+                draw.rectangle((44, 40, 236, 174), outline=(76, 76, 76), width=2)
+                for y in (62, 86, 110, 134):
+                    draw.rectangle((64, y, 216, y + 3), fill=(42, 42, 42))
+                return page
+
+            def variant_page(variant: str) -> Image.Image:
+                page = base_page()
+                draw = ImageDraw.Draw(page)
+                if variant == "safe":
+                    return page
+                if variant == "safe_deskew_crop_apply":
+                    return _shallow_stable_text_page().rotate(
+                        -0.45,
+                        resample=Image.Resampling.BICUBIC,
+                        expand=True,
+                        fillcolor=(246, 246, 246),
+                    )
+                if variant == "page_number":
+                    draw.rectangle((10, 186, 32, 198), fill=(24, 24, 24))
+                    return page
+                if variant == "marginal_note":
+                    draw.line((10, 70, 26, 82, 12, 94, 30, 106), fill=(38, 38, 38), width=2)
+                    return page
+                if variant == "stamp":
+                    draw.ellipse((8, 136, 34, 164), outline=(172, 36, 36), width=3)
+                    return page
+                if variant == "form_border":
+                    draw.rectangle((8, 28, 116, 40), outline=(26, 26, 26), width=2)
+                    draw.rectangle((8, 28, 20, 116), outline=(26, 26, 26), width=2)
+                    return page
+                if variant == "near_edge_text":
+                    draw.rectangle((9, 52, 30, 56), fill=(30, 30, 30))
+                    draw.rectangle((9, 64, 28, 68), fill=(30, 30, 30))
+                    return page
+                if variant == "archival_edge_mark":
+                    for y in range(44, 166, 6):
+                        draw.point((9, y), fill=(32, 32, 32))
+                    return page
+                if variant == "already_tight":
+                    tight = Image.new("RGB", (238, 176), (246, 246, 242))
+                    tight_draw = ImageDraw.Draw(tight)
+                    for y in (40, 64, 88, 112):
+                        tight_draw.rectangle((16, y, 220, y + 3), fill=(42, 42, 42))
+                    tight_draw.rectangle((0, 0, 4, 175), fill=(98, 98, 98))
+                    tight_draw.rectangle((0, 0, 70, 0), fill=(100, 100, 100))
+                    return tight
+                raise ValueError(f"unsupported variant: {variant}")
+
+            variants = (
+                "safe",
+                "safe_deskew_crop_apply",
+                "page_number",
+                "marginal_note",
+                "stamp",
+                "form_border",
+                "near_edge_text",
+                "archival_edge_mark",
+                "already_tight",
+            )
+            source_bytes: dict[str, bytes] = {}
+            for variant in variants:
+                source = input_dir / f"private_full_chain_skew_dark_{variant}.png"
+                page = variant_page(variant).rotate(
+                    -0.55 if variant != "already_tight" else -0.35,
+                    resample=Image.Resampling.BICUBIC,
+                    expand=True,
+                    fillcolor=(246, 246, 242),
+                )
+                page.save(source, dpi=(300, 300))
+                source_bytes[source.name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-skewed-dark-edge-combo", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            safe_name = "private_full_chain_skew_dark_safe.png"
+            safe_record = records[safe_name]
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertEqual(safe_record["processing_audit"]["guardrail_failures"], [])
+            self.assertLessEqual(safe_record["processing_audit"]["size_change_ratio"], 0.12)
+            self.assertLessEqual(safe_record["processing_audit"]["max_trim_margin_ratio"], 0.08)
+            self.assertLessEqual(safe_record["processing_audit"]["cumulative_change_crop_ratio"], 0.12)
+
+            protected_names = [
+                "private_full_chain_skew_dark_page_number.png",
+                "private_full_chain_skew_dark_marginal_note.png",
+                "private_full_chain_skew_dark_stamp.png",
+                "private_full_chain_skew_dark_form_border.png",
+                "private_full_chain_skew_dark_near_edge_text.png",
+                "private_full_chain_skew_dark_archival_edge_mark.png",
+                "private_full_chain_skew_dark_already_tight.png",
+            ]
+            for name in protected_names:
+                record = records[name]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
+                self.assertEqual(record["status"], "processed", name)
+                self.assertEqual(record["processing_audit"]["guardrail_failures"], [], name)
+                self.assertLessEqual(record["processing_audit"]["max_trim_margin_ratio"], 0.08, name)
+                self.assertLessEqual(record["processing_audit"]["size_change_ratio"], 0.12, name)
+                self.assertEqual(record["processing_audit"]["cumulative_change_guard_action"], "passed", name)
+                self.assertIn(
+                    record["processing_audit"]["combination_quality_guard_reason_code"],
+                    {"safe_combination_passed", "low_confidence_original_preserved"},
+                    name,
+                )
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(variants))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertGreaterEqual(audit_summary["counts"]["deskew_skipped_files"], len(protected_names) - 1)
+            self.assertGreaterEqual(audit_summary["counts"]["auto_crop_skipped_files"], len(protected_names) - 1)
+            self.assertGreaterEqual(audit_summary["counts"]["dark_border_skipped_files"], len(protected_names) - 1)
+            self.assertGreaterEqual(audit_summary["counts"]["scanner_gutter_skipped_files"], len(protected_names) - 1)
+            self.assertGreaterEqual(
+                audit_summary["guardrails"]["combination_quality_guard"]["reason_code_distribution"].get(
+                    "safe_combination_passed", 0
+                ),
+                1,
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*source_bytes.keys(), str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_narrow_uneven_single_edge_shadow_trim_preserves_protected_lookalikes(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-narrow-uneven-single-edge-") as temp_dir:
             root = Path(temp_dir)
