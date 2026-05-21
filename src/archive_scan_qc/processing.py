@@ -13961,10 +13961,46 @@ def _single_dark_edge_has_safe_small_interruptions(image: Image.Image, side: str
             values = [pixels[x, height - 1 - offset] for x in range(width)]
         if _is_continuous_dark_edge_line(values):
             continue
-        if not _is_small_gap_interrupted_single_dark_edge_line(values):
+        if not _is_small_gap_interrupted_single_dark_edge_line(values) and not _is_narrow_uneven_single_dark_edge_line(
+            values
+        ):
             return False
         safe_broken_lines += 1
     return safe_broken_lines > 0
+
+
+def _is_narrow_uneven_single_dark_edge_line(values: list[int]) -> bool:
+    length = len(values)
+    if length < 60:
+        return False
+
+    deep_gray_pixels = [value <= 118 for value in values]
+    light_pixels = [value >= 176 for value in values]
+    dark_runs = _boolean_runs(deep_gray_pixels)
+    light_runs = _boolean_runs(light_pixels)
+    if len(dark_runs) < 3 or len(dark_runs) > 12:
+        return False
+    if len(light_runs) < 2 or len(light_runs) > 12:
+        return False
+    if dark_runs[0][0] > max(2, int(length * 0.03)):
+        return False
+    if length - dark_runs[-1][1] > max(3, int(length * 0.09)):
+        return False
+
+    dark_coverage = sum(end - start for start, end in dark_runs) / length
+    light_gap_lengths = [end - start for start, end in light_runs]
+    total_light_gap_ratio = sum(light_gap_lengths) / length
+    longest_light_gap_ratio = max(light_gap_lengths, default=0) / length
+    substantial_dark_runs = sum(1 for start, end in dark_runs if (end - start) / length >= 0.035)
+    mean = sum(values) / length
+
+    if dark_coverage < 0.46 or dark_coverage > 0.82:
+        return False
+    if total_light_gap_ratio > 0.40 or longest_light_gap_ratio > 0.12:
+        return False
+    if substantial_dark_runs < 3:
+        return False
+    return mean <= 172
 
 
 def _is_small_gap_interrupted_single_dark_edge_line(values: list[int]) -> bool:
