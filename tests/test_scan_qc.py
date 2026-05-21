@@ -19015,6 +19015,118 @@ def _final_handoff_bundle_payload() -> dict[str, object]:
     }
 
 
+class FaintOfficialMarkRegressionQcTest(unittest.TestCase):
+    def test_full_chain_faint_official_mark_guard_stays_aggregate_only_and_preserves_marks(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-qc-full-chain-faint-official-marks-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            pages = {
+                "private_safe_cleanup_control.png": _faint_official_mark_qc_page("safe_cleanup_control"),
+                "private_low_contrast_watermark.png": _faint_official_mark_qc_page("watermark"),
+                "private_blind_embossed_seal.png": _faint_official_mark_qc_page("blind_embossed_seal"),
+                "private_faint_official_stamp.png": _faint_official_mark_qc_page("faint_official_stamp"),
+                "private_subtle_security_mark.png": _faint_official_mark_qc_page("subtle_security_mark"),
+            }
+            for name, image in pages.items():
+                image.save(input_dir / name, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "scan-qc-faint-official-marks", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(
+                    trim_dark_border=True,
+                    deskew=True,
+                    auto_crop=True,
+                    scanner_gutter_trim=True,
+                    despeckle=True,
+                    normalize_tones=True,
+                    normalize_paper_color_cast=True,
+                    lighten_edge_shadow=True,
+                    lighten_corner_shadows=True,
+                    lighten_background_stains=True,
+                    lighten_fold_shadows=True,
+                    level_illumination_gradient=True,
+                    clean_bleed_through=True,
+                    lighten_scanlines=True,
+                    enhance_faded_text=True,
+                    sharpen_text_edges=True,
+                    workers=1,
+                ),
+            )
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            def _contrast(image: Image.Image, mark_box: tuple[int, int, int, int], paper_box: tuple[int, int, int, int]) -> float:
+                mark_luma = ImageStat.Stat(image.crop(mark_box).convert("L")).mean[0]
+                paper_luma = ImageStat.Stat(image.crop(paper_box).convert("L")).mean[0]
+                return abs(mark_luma - paper_luma)
+
+            for name, mark_box in {
+                "private_low_contrast_watermark.png": (132, 88, 230, 128),
+                "private_blind_embossed_seal.png": (160, 66, 228, 132),
+                "private_faint_official_stamp.png": (156, 76, 228, 140),
+                "private_subtle_security_mark.png": (154, 72, 230, 140),
+            }.items():
+                record = records[name]
+                before = pages[name]
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    before_contrast = _contrast(before, mark_box, (26, 26, 96, 56))
+                    after_contrast = _contrast(output.convert("RGB"), mark_box, (26, 26, 96, 56))
+                self.assertGreaterEqual(after_contrast, before_contrast * 0.65, name)
+                self.assertEqual(record["processing_audit"]["guardrail_failures"], [], name)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
+
+def _faint_official_mark_qc_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (260, 190), (244, 244, 240))
+    draw = ImageDraw.Draw(image)
+    for y in range(44, 140, 24):
+        draw.rectangle((26, y, 112, y + 4), fill=(44, 44, 44))
+        draw.rectangle((30, y + 9, 98, y + 11), fill=(66, 66, 66))
+    if variant == "safe_cleanup_control":
+        mask = Image.new("L", image.size, 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.ellipse((160, 78, 224, 128), fill=145)
+        mask = mask.filter(ImageFilter.GaussianBlur(6))
+        return Image.composite(Image.new("RGB", image.size, (232, 230, 222)), image, mask)
+    if variant == "watermark":
+        for offset in (0, 18, 36):
+            draw.line((132 + offset, 124, 192 + offset, 86), fill=(228, 228, 224), width=2)
+        draw.text((144, 92), "ARCHIVE", fill=(230, 230, 226))
+        return image
+    if variant == "blind_embossed_seal":
+        draw.ellipse((160, 66, 228, 132), outline=(226, 226, 222), width=2)
+        draw.ellipse((172, 78, 216, 120), outline=(228, 228, 224), width=1)
+        draw.line((178, 98, 210, 98), fill=(229, 229, 225), width=1)
+        return image
+    if variant == "faint_official_stamp":
+        draw.ellipse((156, 76, 228, 140), outline=(212, 178, 176), width=2)
+        draw.ellipse((166, 86, 218, 130), outline=(220, 188, 186), width=1)
+        draw.line((170, 108, 214, 108), fill=(214, 182, 180), width=1)
+        return image
+    if variant == "subtle_security_mark":
+        for y in range(72, 140, 6):
+            draw.line((154, y, 230, y + 4), fill=(228, 228, 224), width=1)
+        for x in range(160, 228, 8):
+            draw.line((x, 70, x - 8, 140), fill=(229, 229, 225), width=1)
+        return image
+    raise ValueError(f"unsupported faint official mark page variant: {variant}")
+
+
 def _dark_pixel_count(image: Image.Image) -> int:
     grayscale = image.convert("L")
     return sum(grayscale.histogram()[:31])
