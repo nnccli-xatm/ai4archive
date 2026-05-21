@@ -1948,7 +1948,12 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             source_bytes = source.read_bytes()
 
             report = scan_batch(ScanConfig("synthetic-regression", "safe-combination", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                _full_chain_options(),
+            )
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
             record = manifest["files"][0]
@@ -2134,6 +2139,60 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertLessEqual(safe_record["processing_audit"]["faded_text_candidate_pixel_ratio"], 0.16)
             self.assertFalse(protected_record["faded_text_enhanced"])
             self.assertEqual(protected_record["faded_text_reason_code"], "protected_color_stamp_annotation")
+
+    def test_full_chain_pale_blue_ruled_or_form_structure_is_protected_while_safe_copy_improves(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-pale-blue-forms-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_pale_blue_copy_safe_control.png": _pale_blue_carbon_copy_page(with_blue_annotation=False),
+                "synthetic_pale_blue_ruled_form.png": _pale_blue_carbon_copy_page(
+                    with_blue_annotation=False,
+                    variant="blue_ruled_form",
+                ),
+                "synthetic_pale_blue_form_boxes.png": _pale_blue_carbon_copy_page(
+                    with_blue_annotation=False,
+                    variant="blue_form_boxes",
+                ),
+            }
+            source_bytes = {}
+            for name, page in pages.items():
+                source = input_dir / name
+                page.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-pale-blue-forms", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
+            faded_guard = audit_summary["guardrails"]["faded_text"]
+
+            safe_record = records["synthetic_pale_blue_copy_safe_control.png"]
+            self.assertTrue(safe_record["faded_text_enhanced"])
+            self.assertEqual(safe_record["faded_text_reason_code"], "applied_stable_low_contrast_text")
+            self.assertGreater(safe_record["processing_audit"]["faded_text_changed_pixel_ratio"], 0.0)
+
+            for protected_name in ("synthetic_pale_blue_ruled_form.png", "synthetic_pale_blue_form_boxes.png"):
+                record = records[protected_name]
+                self.assertFalse(record["faded_text_enhanced"], protected_name)
+                self.assertIn(
+                    record["faded_text_reason_code"],
+                    {
+                        "protected_line_or_annotation",
+                        "protected_texture_table_or_photo_region",
+                        "protected_color_stamp_annotation",
+                    },
+                )
+                self.assertEqual(record["processing_audit"]["faded_text_changed_pixel_ratio"], 0.0)
+                self.assertEqual((input_dir / protected_name).read_bytes(), source_bytes[protected_name])
+
+            self.assertEqual(faded_guard["applied_files"], 1)
+            self.assertEqual(faded_guard["skipped_files"], 2)
+            self.assertGreaterEqual(faded_guard["protection_triggered_files"], 2)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
 
     def test_diagonal_fold_shadow_cleanup_lightens_safe_sparse_text_case_and_preserves_protected_marks(
         self,
@@ -7088,7 +7147,7 @@ def _safe_full_chain_combination_page() -> Image.Image:
     return image
 
 
-def _pale_blue_carbon_copy_page(*, with_blue_annotation: bool) -> Image.Image:
+def _pale_blue_carbon_copy_page(*, with_blue_annotation: bool, variant: str = "safe") -> Image.Image:
     image = Image.new("RGB", (360, 240), (244, 244, 244))
     draw = ImageDraw.Draw(image)
     font = ImageFont.load_default()
@@ -7102,6 +7161,19 @@ def _pale_blue_carbon_copy_page(*, with_blue_annotation: bool) -> Image.Image:
         draw.text((46, 44 + index * 28), line, fill=(204, 212, 226), font=font)
     if with_blue_annotation:
         draw.line((34, 188, 330, 206), fill=(58, 96, 202), width=3)
+    if variant == "blue_ruled_form":
+        for y in range(34, 216, 24):
+            draw.line((26, y, 336, y), fill=(158, 178, 216), width=1)
+        for x in (38, 118, 198, 278, 336):
+            draw.line((x, 34, x, 214), fill=(162, 182, 220), width=1)
+    elif variant == "blue_form_boxes":
+        for row in range(3):
+            top = 38 + row * 58
+            for col in range(4):
+                left = 28 + col * 80
+                draw.rectangle((left, top, left + 68, top + 42), outline=(162, 184, 222), width=1)
+    elif variant != "safe":
+        raise ValueError(f"unsupported pale-blue variant: {variant}")
     return image
 
 
