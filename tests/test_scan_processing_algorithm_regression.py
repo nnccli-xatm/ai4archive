@@ -7877,6 +7877,85 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_physical_paper_evidence_stays_preserved_with_aggregate_safe_audit(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-physical-evidence-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "A001_safe_cleanup_control.png": _physical_evidence_guard_page("safe_cleanup_control"),
+                "A002_torn_or_repaired_edge.png": _physical_evidence_guard_page("torn_or_repaired_edge"),
+                "A003_binder_punch_hole.png": _physical_evidence_guard_page("binder_punch_hole"),
+                "A004_archival_tape_residue.png": _physical_evidence_guard_page("archival_tape_residue"),
+                "A005_staple_shadow.png": _physical_evidence_guard_page("staple_shadow"),
+                "A006_edge_wear.png": _physical_evidence_guard_page("edge_wear"),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-physical-evidence", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_name = "A001_safe_cleanup_control.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertEqual(safe_audit["local_content_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed")
+            self.assertIn(safe_audit["combination_quality_guard_action"], {"passed", "kept_original"})
+            self.assertLessEqual(safe_audit["cumulative_change_pixel_ratio"], 0.98)
+            self.assertLessEqual(safe_audit["cumulative_change_score"], 1.0)
+
+            protected_names = [name for name in pages if name != safe_name]
+            protected_boxes = {
+                "A002_torn_or_repaired_edge.png": (6, 44, 34, 208),
+                "A003_binder_punch_hole.png": (6, 56, 58, 192),
+                "A004_archival_tape_residue.png": (8, 22, 52, 198),
+                "A005_staple_shadow.png": (18, 22, 68, 72),
+                "A006_edge_wear.png": (8, 20, 58, 210),
+            }
+            for name in protected_names:
+                record = records[name]
+                audit = record["processing_audit"]
+                before = pages[name].convert("RGB")
+                with Image.open(process_dir / record["output_relative_path"]) as output_image:
+                    after = output_image.convert("RGB")
+                self.assertEqual(record["status"], "processed", name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertIn(
+                    audit["combination_quality_guard_action"],
+                    {"passed", "kept_original", "reverted_to_source"},
+                    name,
+                )
+                self.assertLess(_changed_ratio(before, after, protected_boxes[name]), 0.02, name)
+                reason_codes = [
+                    record.get("edge_shadow_reason_code"),
+                    record.get("background_stains_reason_code"),
+                    record.get("bleed_through_reason_code"),
+                    record.get("fold_shadows_reason_code"),
+                ]
+                self.assertTrue(any(isinstance(code, str) and code for code in reason_codes), name)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_quality_regression_reports_missing_operation_timing_code_without_private_rows(self) -> None:
         quality = _processing_quality_regression(
             {
@@ -10620,6 +10699,41 @@ def _full_chain_intermittent_scanline_page(variant: str = "safe") -> Image.Image
             draw.line((x, 108, x, 158), fill=(58, 58, 58), width=2)
         return image
     raise ValueError(f"unsupported variant: {variant}")
+
+
+def _physical_evidence_guard_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (280, 220), (241, 239, 234))
+    draw = ImageDraw.Draw(image)
+    for y in (58, 84, 110, 136):
+        draw.rectangle((74, y, 228, y + 4), fill=(56, 56, 56))
+    draw.rectangle((120, 154, 256, 172), fill=(236, 234, 230))
+
+    if variant == "safe_cleanup_control":
+        draw.ellipse((168, 92, 210, 128), outline=(214, 210, 202), width=2)
+        draw.rectangle((168, 92, 210, 128), fill=(234, 232, 228))
+        return image
+    if variant == "torn_or_repaired_edge":
+        draw.polygon([(8, 40), (20, 50), (10, 60), (24, 72), (8, 86), (28, 104), (8, 124), (8, 40)], fill=(72, 72, 70))
+        draw.rectangle((10, 128, 30, 188), fill=(226, 224, 218))
+        return image
+    if variant == "binder_punch_hole":
+        for y in (62, 112, 162):
+            draw.ellipse((8, y, 30, y + 22), fill=(206, 204, 198), outline=(86, 86, 84), width=2)
+        return image
+    if variant == "archival_tape_residue":
+        draw.rectangle((10, 26, 42, 198), fill=(232, 226, 186))
+        draw.line((11, 26, 41, 198), fill=(214, 204, 166), width=2)
+        return image
+    if variant == "staple_shadow":
+        draw.rectangle((22, 26, 58, 40), fill=(100, 100, 98))
+        draw.rectangle((24, 44, 60, 58), fill=(110, 110, 108))
+        return image
+    if variant == "edge_wear":
+        for y in range(20, 208, 7):
+            shade = 226 + (y % 8)
+            draw.rectangle((8, y, 18 + (y % 5), y + 2), fill=(shade, shade - 2, shade - 4))
+        return image
+    raise ValueError(f"unsupported physical evidence variant: {variant}")
 
 
 def _faded_text_page() -> Image.Image:
