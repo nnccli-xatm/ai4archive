@@ -6298,6 +6298,46 @@ class ScanQcTest(unittest.TestCase):
             self.assertFalse(audit_summary["privacy"]["contains_paths"])
             self.assertNotIn("private_dense_texture", audit_summary_text)
 
+    def test_pale_blue_form_prefilter_skips_component_scan_and_keeps_timing_metrics(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            image = Image.new("RGB", (420, 300), (236, 238, 242))
+            draw = ImageDraw.Draw(image)
+            for y in range(36, 284, 24):
+                draw.line([(18, y), (402, y)], fill=(180, 192, 216), width=2)
+            for x in range(26, 402, 28):
+                draw.line([(x, 24), (x, 286)], fill=(182, 194, 218), width=2)
+            image.save(input_dir / "private_pale_blue_form_dense.png", dpi=(300, 300))
+
+            with mock.patch.object(
+                processing_module,
+                "_mask_components",
+                side_effect=AssertionError("pale-blue dense form should skip detailed component analysis"),
+            ):
+                self.assertFalse(processing_module._faded_text_allow_pale_blue_carbon_copy(image))
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(enhance_faded_text=True, workers=1),
+            )
+
+            record = manifest["files"][0]
+            timing = manifest["summary"]["performance"]["operation_timings"]["enhance_faded_text"]
+            self.assertFalse(record["faded_text_enhanced"])
+            self.assertEqual(record["faded_text_reason_code"], "protected_color_stamp_annotation")
+            self.assertEqual(record["processing_audit"]["faded_text_changed_pixel_ratio"], 0.0)
+            self.assertTrue(timing["enabled"])
+            self.assertEqual(timing["file_count"], 1)
+            self.assertIn("elapsed_seconds", timing)
+
     def test_full_retouch_chain_with_faded_text_keeps_public_audit_aggregate_only(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

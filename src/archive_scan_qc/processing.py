@@ -9345,6 +9345,8 @@ def _faded_text_allow_pale_blue_carbon_copy(image: Image.Image) -> bool:
     pale_blue_ratio = pale_blue / total
     if pale_blue_ratio < 0.002 or pale_blue_ratio > 0.16:
         return False
+    if not _faded_text_pale_blue_prefilter_allows_component_scan(blue_mask, pale_blue_ratio):
+        return False
 
     components = _mask_components(blue_mask)
     if not components:
@@ -9375,6 +9377,56 @@ def _faded_text_allow_pale_blue_carbon_copy(image: Image.Image) -> bool:
     if long_horizontal_lines >= 2 or long_vertical_lines >= 2:
         return False
     return text_like_components >= 4
+
+
+def _faded_text_pale_blue_prefilter_allows_component_scan(blue_mask: Image.Image, pale_blue_ratio: float) -> bool:
+    width, height = blue_mask.size
+    if width <= 0 or height <= 0:
+        return False
+    if pale_blue_ratio < 0.0035:
+        return False
+
+    pixels = blue_mask.load()
+    active_rows = 0
+    active_columns = 0
+    long_horizontal_rows = 0
+    long_vertical_columns = 0
+    row_active_threshold = max(3, int(round(width * 0.06)))
+    column_active_threshold = max(3, int(round(height * 0.06)))
+    long_row_threshold = max(28, int(round(width * 0.52)))
+    long_column_threshold = max(22, int(round(height * 0.52)))
+
+    for y in range(height):
+        row_count = 0
+        for x in range(width):
+            if pixels[x, y]:
+                row_count += 1
+        if row_count >= row_active_threshold:
+            active_rows += 1
+        if row_count >= long_row_threshold:
+            long_horizontal_rows += 1
+
+    for x in range(width):
+        column_count = 0
+        for y in range(height):
+            if pixels[x, y]:
+                column_count += 1
+        if column_count >= column_active_threshold:
+            active_columns += 1
+        if column_count >= long_column_threshold:
+            long_vertical_columns += 1
+
+    active_row_ratio = active_rows / max(1, height)
+    active_column_ratio = active_columns / max(1, width)
+    if active_row_ratio > 0.70 and active_column_ratio > 0.62:
+        return False
+    if long_horizontal_rows >= max(8, int(round(height * 0.07))):
+        return False
+    if long_vertical_columns >= max(8, int(round(width * 0.07))):
+        return False
+    if long_horizontal_rows >= 4 and long_vertical_columns >= 4:
+        return False
+    return True
 
 
 def _faded_text_noop(
