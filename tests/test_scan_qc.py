@@ -14890,6 +14890,50 @@ class ScanQcTest(unittest.TestCase):
             self.assertIn("Processing workers:", output)
             self.assertIn("Processing files/min:", output)
 
+    def test_save_image_uses_no_chroma_subsampling_for_jpeg_derivatives(self) -> None:
+        source = Image.new("RGB", (24, 16), "white")
+        source.info["dpi"] = (300, 300)
+        grayscale_derivative = Image.new("L", (24, 16), 200)
+
+        with mock.patch("PIL.Image.Image.save", autospec=True) as save_mock:
+            processing_module._save_image(grayscale_derivative, Path("private_output.jpg"), source)
+
+        save_mock.assert_called_once()
+        saved_image, saved_target = save_mock.call_args.args
+        save_kwargs = save_mock.call_args.kwargs
+        self.assertEqual(saved_target, Path("private_output.jpg"))
+        self.assertEqual(saved_image.mode, "RGB")
+        self.assertEqual(save_kwargs["dpi"], (300, 300))
+        self.assertEqual(save_kwargs["quality"], 95)
+        self.assertEqual(save_kwargs["subsampling"], 0)
+
+    def test_save_image_keeps_dpi_only_for_non_jpeg_derivatives(self) -> None:
+        source = Image.new("RGB", (24, 16), "white")
+        source.info["dpi"] = (300, 300)
+        derivative = Image.new("RGB", (24, 16), "white")
+
+        with mock.patch("PIL.Image.Image.save", autospec=True) as save_mock:
+            processing_module._save_image(derivative, Path("private_output.png"), source)
+
+        save_mock.assert_called_once()
+        _, saved_target = save_mock.call_args.args
+        save_kwargs = save_mock.call_args.kwargs
+        self.assertEqual(saved_target, Path("private_output.png"))
+        self.assertEqual(save_kwargs, {"dpi": (300, 300)})
+
+    def test_save_image_sets_jpeg_options_without_dpi_metadata(self) -> None:
+        source = Image.new("RGB", (24, 16), "white")
+        derivative = Image.new("RGB", (24, 16), "white")
+
+        with mock.patch("PIL.Image.Image.save", autospec=True) as save_mock:
+            processing_module._save_image(derivative, Path("private_output.jpeg"), source)
+
+        save_mock.assert_called_once()
+        _, saved_target = save_mock.call_args.args
+        save_kwargs = save_mock.call_args.kwargs
+        self.assertEqual(saved_target, Path("private_output.jpeg"))
+        self.assertEqual(save_kwargs, {"quality": 95, "subsampling": 0})
+
     def test_production_runner_writes_derivatives_summary_and_progress_without_modifying_sources(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
