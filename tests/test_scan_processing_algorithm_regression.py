@@ -2353,6 +2353,90 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in ("private_full_chain_low_density_reverse_ghost", str(input_dir), "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_bleed_through_cleanup_combination_protects_faint_and_clean_content(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-bleed-through-combo-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_full_chain_safe_low_density_reverse_ghost.png": _low_density_diffuse_bleed_through_page(),
+                **_protected_clean_page_faint_mark_pages(),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, page in pages.items():
+                source = input_dir / name
+                page.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-bleed-through-combo", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_name = "synthetic_full_chain_safe_low_density_reverse_ghost.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            safe_processed = Image.open(process_dir / safe_record["output_relative_path"]).convert("RGB")
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertTrue(safe_record["bleed_through_cleaned"])
+            self.assertEqual(safe_record["bleed_through_reason_code"], "applied_faint_reverse_ghost")
+            self.assertIn("clean_bleed_through_conservative", safe_record["operations"])
+            self.assertGreater(safe_audit["bleed_through_changed_pixel_ratio"], 0.01)
+            self.assertLessEqual(safe_audit["bleed_through_changed_pixel_ratio"], 0.045)
+            self.assertLessEqual(safe_audit["bleed_through_candidate_pixel_ratio"], 0.065)
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertEqual(safe_audit["local_content_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["combination_quality_guard_reason_code"], "safe_combination_passed")
+            self.assertEqual(safe_audit["processed_output_safety_guard_action"], "passed")
+            self.assertLessEqual(safe_audit["cumulative_change_score"], 1.0)
+            self.assertGreater(
+                _mean_luma(safe_processed, (94, 56, 190, 130)),
+                _mean_luma(pages[safe_name], (94, 56, 190, 130)) - 0.4,
+            )
+
+            for name in set(pages) - {safe_name}:
+                record = records[name]
+                audit = record["processing_audit"]
+                processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
+                self.assertFalse(record["bleed_through_cleaned"], name)
+                self.assertNotEqual(record["bleed_through_reason_code"], "applied_faint_reverse_ghost", name)
+                self.assertEqual(audit["bleed_through_changed_pixel_ratio"], 0.0, name)
+                self.assertEqual(audit["local_content_change_guard_action"], "passed", name)
+                self.assertEqual(audit["cumulative_change_guard_action"], "passed", name)
+                self.assertIn(
+                    audit["combination_quality_guard_reason_code"],
+                    {"safe_combination_passed", "low_confidence_original_preserved"},
+                    name,
+                )
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertIsNone(ImageChops.difference(pages[name].convert("RGB"), processed).getbbox(), name)
+
+            bleed_guard = audit_summary["guardrails"]["bleed_through"]
+            combination_guard = audit_summary["guardrails"]["combination_quality_guard"]
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 1)
+            self.assertEqual(bleed_guard["applied_files"], 1)
+            self.assertEqual(bleed_guard["skipped_files"], len(pages) - 1)
+            self.assertEqual(bleed_guard["reason_code_distribution"]["applied_faint_reverse_ghost"], 1)
+            self.assertIn("protected_line_or_annotation", bleed_guard["skip_reason_code_distribution"])
+            self.assertIn("protected_color_content", bleed_guard["skip_reason_code_distribution"])
+            self.assertIn("protected_texture_or_archival_trace", bleed_guard["skip_reason_code_distribution"])
+            self.assertGreaterEqual(combination_guard["reason_code_distribution"].get("safe_combination_passed", 0), 1)
+            self.assertGreaterEqual(
+                combination_guard["reason_code_distribution"].get("low_confidence_original_preserved", 0), 1
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_noisy_edge_texture_pages_stay_noop_with_despeckle_safe_skip_timing(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-noisy-edge-noop-") as temp_dir:
             root = Path(temp_dir)
