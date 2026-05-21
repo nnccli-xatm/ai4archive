@@ -15723,7 +15723,7 @@ def _save_image(image: Image.Image, target: Path, source_image: Image.Image) -> 
     if suffix in {".jpg", ".jpeg", ".jpe", ".jfif"}:
         if image.mode != "RGB":
             image = image.convert("RGB")
-        save_kwargs.update({"quality": 95})
+        save_kwargs.update({"quality": 95, "subsampling": 0})
     image.save(target, **save_kwargs)
 
 
