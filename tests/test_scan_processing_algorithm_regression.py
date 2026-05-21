@@ -2733,6 +2733,77 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_despeckle_cleans_tiny_isolated_margin_dust_but_preserves_margin_lookalikes(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-despeckle-tiny-margin-dust-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            protected_pages = _protected_tiny_margin_dust_lookalike_pages()
+            pages = {
+                "synthetic_tiny_margin_dust_speck.png": _safe_tiny_margin_dust_speck_page(),
+                **protected_pages,
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "despeckle-tiny-margin-dust", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, workers=1))
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_name = "synthetic_tiny_margin_dust_speck.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertTrue(safe_record["despeckled"])
+            self.assertEqual(safe_record["despeckle_pixels_changed"], len(_safe_tiny_margin_dust_speck_points()))
+            self.assertIn("despeckle_isolated_pixels", safe_record["operations"])
+            self.assertLessEqual(safe_audit["despeckle_pixel_ratio"], 0.001)
+            with Image.open(process_dir / safe_record["output_relative_path"]) as output:
+                output_luma = output.convert("L")
+                for point in _safe_tiny_margin_dust_speck_points():
+                    self.assertGreaterEqual(output_luma.getpixel(point), 240)
+
+            for name, source_image in protected_pages.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name])
+                self.assertEqual(record["status"], "processed", name)
+                self.assertFalse(record["despeckled"], name)
+                self.assertEqual(record["despeckle_pixels_changed"], 0, name)
+                self.assertIn("despeckle_noop", record["operations"], name)
+                self.assertEqual(audit["despeckle_pixel_ratio"], 0.0, name)
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    self.assertIsNone(ImageChops.difference(source_image, output.convert("RGB")).getbbox(), name)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["guardrails"]["despeckle"]["applied_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["despeckle"]["pixels_changed"],
+                len(_safe_tiny_margin_dust_speck_points()),
+            )
+            self.assertGreaterEqual(
+                audit_summary["guardrails"]["despeckle"]["reason_code_distribution"].get("no_isolated_candidates", 0)
+                + audit_summary["guardrails"]["despeckle"]["reason_code_distribution"].get(
+                    "protected_edge_dark_marks",
+                    0,
+                ),
+                len(protected_pages),
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_isolated_dust_combined_retouch_guard_stays_bounded_and_public(self) -> None:
         pages = _isolated_dust_combined_retouch_pages()
         with tempfile.TemporaryDirectory(prefix="scan-processing-isolated-dust-combined-") as temp_dir:
@@ -7612,6 +7683,39 @@ def _safe_isolated_scanner_glass_dust_speck_page() -> Image.Image:
     for point in _safe_isolated_scanner_glass_dust_speck_points():
         image.putpixel(point, (228, 228, 224))
     return image
+
+
+def _safe_tiny_margin_dust_speck_points() -> tuple[tuple[int, int], ...]:
+    return ((2, 88), (3, 88), (2, 89), (3, 89))
+
+
+def _safe_tiny_margin_dust_speck_page() -> Image.Image:
+    image = Image.new("RGB", (260, 180), (246, 246, 244))
+    for point in _safe_tiny_margin_dust_speck_points():
+        image.putpixel(point, (228, 228, 224))
+    return image
+
+
+def _protected_tiny_margin_dust_lookalike_pages() -> dict[str, Image.Image]:
+    pages: dict[str, Image.Image] = {}
+
+    page_number = Image.new("RGB", (260, 180), (246, 246, 244))
+    draw = ImageDraw.Draw(page_number)
+    draw.rectangle((7, 84, 13, 90), fill=(42, 42, 42))
+    draw.rectangle((16, 84, 22, 90), fill=(42, 42, 42))
+    for point in _safe_tiny_margin_dust_speck_points():
+        page_number.putpixel(point, (228, 228, 224))
+    pages["synthetic_protected_margin_page_number_dot.png"] = page_number
+
+    annotation = Image.new("RGB", (260, 180), (246, 246, 244))
+    draw = ImageDraw.Draw(annotation)
+    draw.ellipse((0, 74, 24, 104), outline=(188, 28, 28), width=2)
+    draw.line((8, 82, 20, 96), fill=(188, 28, 28), width=2)
+    for point in _safe_tiny_margin_dust_speck_points():
+        annotation.putpixel(point, (228, 228, 224))
+    pages["synthetic_protected_margin_colored_annotation_dot.png"] = annotation
+
+    return pages
 
 
 def _protected_isolated_scanner_glass_dust_lookalike_pages() -> dict[str, Image.Image]:
