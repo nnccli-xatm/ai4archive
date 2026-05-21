@@ -5727,6 +5727,11 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "A002_low_contrast_handwriting.png": _low_contrast_handwriting_page(),
                 "A003_ruled_table_marks.png": _risk_table_page_number_annotation_page(),
                 "A004_clear_text.png": _clear_text_page(),
+                "A005_stamp_seal.png": _risk_stamp_header_footer_page(),
+                "A006_photo_map_chart_texture.png": _faded_text_photo_map_chart_page(),
+                "A007_colored_paper_mark.png": _faded_text_colored_record_page(),
+                "A008_dense_pale_foreground.png": _dense_pale_foreground_page(),
+                "A009_broad_stain_shadow.png": _broad_stain_shadow_page(),
             }
             source_bytes = {}
             for name, image in pages.items():
@@ -5776,6 +5781,11 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "A002_low_contrast_handwriting.png": "protected_handwriting_marginalia_annotation",
                 "A003_ruled_table_marks.png": "protected_texture_table_or_photo_region",
                 "A004_clear_text.png": "protected_dark_foreground",
+                "A005_stamp_seal.png": "protected_color_stamp_annotation",
+                "A006_photo_map_chart_texture.png": "protected_foreground_too_dense",
+                "A007_colored_paper_mark.png": "protected_color_stamp_annotation",
+                "A008_dense_pale_foreground.png": "protected_foreground_too_dense",
+                "A009_broad_stain_shadow.png": "protected_foreground_too_dense",
             }
             for name, expected_code in expected_noop_codes.items():
                 record = records[name]
@@ -5786,7 +5796,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
 
             faded_guard = audit_summary["guardrails"]["faded_text"]
             self.assertEqual(faded_guard["applied_files"], 1)
-            self.assertEqual(faded_guard["skipped_files"], 3)
+            self.assertEqual(faded_guard["skipped_files"], len(expected_noop_codes))
             self.assertEqual(
                 faded_guard["reason_code_distribution"]["applied_stable_low_contrast_text"],
                 1,
@@ -5794,6 +5804,8 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertIn("protected_handwriting_marginalia_annotation", faded_guard["skip_reason_code_distribution"])
             self.assertIn("protected_texture_table_or_photo_region", faded_guard["skip_reason_code_distribution"])
             self.assertIn("protected_dark_foreground", faded_guard["skip_reason_code_distribution"])
+            self.assertIn("protected_color_stamp_annotation", faded_guard["skip_reason_code_distribution"])
+            self.assertIn("protected_foreground_too_dense", faded_guard["skip_reason_code_distribution"])
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
@@ -7686,6 +7698,44 @@ def _clear_text_page() -> Image.Image:
     draw.rectangle((24, 20, 215, 159), outline=(30, 30, 30), width=2)
     for y in range(42, 132, 18):
         draw.rectangle((48, y, 190, y + 4), fill=(20, 20, 20))
+    return image
+
+
+def _faded_text_colored_record_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), (236, 224, 188))
+    draw = ImageDraw.Draw(image)
+    for y in (44, 68, 92, 116):
+        draw.rectangle((34, y, 188, y + 4), fill=(218, 205, 170))
+    draw.line((42, 142, 172, 146), fill=(124, 92, 158), width=2)
+    return image
+
+
+def _faded_text_photo_map_chart_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), (238, 238, 238))
+    draw = ImageDraw.Draw(image)
+    for y in range(24, 154):
+        shade = 190 + ((y * 7) % 34)
+        draw.line((30, y, 210, y), fill=(shade, shade, shade))
+    for x in range(34, 210, 12):
+        shade = 188 + (x % 25)
+        draw.line((x, 26, min(216, x + 42), 154), fill=(shade, shade, shade), width=2)
+    return image
+
+
+def _dense_pale_foreground_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), (244, 244, 244))
+    draw = ImageDraw.Draw(image)
+    for y in range(18, 164, 8):
+        draw.rectangle((18, y, 222, y + 3), fill=(214, 214, 214))
+    return image
+
+
+def _broad_stain_shadow_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), (244, 244, 244))
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((42, 34, 198, 140), fill=(220, 220, 220))
+    for x in range(54, 188, 16):
+        draw.point((x, 80), fill=(214, 214, 214))
     return image
 
 
