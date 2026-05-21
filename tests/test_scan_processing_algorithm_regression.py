@@ -3049,6 +3049,36 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 draw.line((x + 6, y + 6, x + 14, y - 4), fill=(64, 64, 64), width=1)
             return image
 
+        def highlighter_band_page() -> Image.Image:
+            image = Image.new("RGB", (360, 240), (243, 243, 239))
+            draw = ImageDraw.Draw(image)
+            for y in (72, 110, 148):
+                draw.rectangle((56, y, 306, y + 16), fill=(237, 233, 118))
+                draw.rectangle((64, y + 6, 286, y + 10), fill=(42, 42, 42))
+            return image
+
+        def redline_correction_page() -> Image.Image:
+            image = Image.new("RGB", (360, 240), (244, 244, 240))
+            draw = ImageDraw.Draw(image)
+            for y in (64, 100, 136, 172):
+                draw.rectangle((64, y, 290, y + 4), fill=(40, 40, 40))
+            draw.line((92, 102, 264, 102), fill=(200, 36, 36), width=3)
+            draw.line((260, 98, 282, 114), fill=(200, 36, 36), width=3)
+            draw.line((282, 114, 304, 84), fill=(200, 36, 36), width=3)
+            return image
+
+        def colored_pencil_notes_page() -> Image.Image:
+            image = Image.new("RGB", (360, 240), (243, 242, 238))
+            draw = ImageDraw.Draw(image)
+            for y in (72, 108, 144):
+                draw.rectangle((56, y, 282, y + 4), fill=(44, 44, 44))
+            draw.line((286, 66, 334, 82), fill=(64, 120, 210), width=2)
+            draw.line((286, 80, 338, 94), fill=(64, 120, 210), width=2)
+            draw.line((286, 94, 326, 114), fill=(58, 162, 92), width=2)
+            draw.line((286, 126, 334, 140), fill=(64, 120, 210), width=2)
+            draw.line((286, 140, 340, 154), fill=(58, 162, 92), width=2)
+            return image
+
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-handwritten-guard-") as temp_dir:
             root = Path(temp_dir)
             input_dir = root / "input"
@@ -3061,6 +3091,9 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "synthetic_protected_pencil_strokes.png": _faint_thumbprint_stain_page("pencil_strokes_near_whitespace"),
                 "synthetic_protected_signature_like_mark.png": signature_page(),
                 "synthetic_protected_correction_ticks.png": correction_ticks_page(),
+                "synthetic_protected_highlighter_bands.png": highlighter_band_page(),
+                "synthetic_protected_redline_corrections.png": redline_correction_page(),
+                "synthetic_protected_colored_pencil_notes.png": colored_pencil_notes_page(),
                 "synthetic_protected_faint_annotation_like_marks.png": _faint_cloud_background_stain_page("handwriting"),
             }
             source_bytes: dict[str, bytes] = {}
@@ -3096,6 +3129,20 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     {"safe_combination_passed", "low_confidence_original_preserved"},
                     name,
                 )
+
+            self.assertIn("lighten_background_stains", audit_summary["timing"]["operation_timings"])
+            self.assertIn("despeckle", audit_summary["timing"]["operation_timings"])
+            self.assertTrue(audit_summary["timing"]["operation_timings"]["lighten_background_stains"]["enabled"])
+            self.assertTrue(audit_summary["timing"]["operation_timings"]["despeckle"]["enabled"])
+            self.assertGreater(
+                audit_summary["guardrails"]["combination_quality_guard"]["reason_code_distribution"].get(
+                    "safe_combination_passed", 0
+                )
+                + audit_summary["guardrails"]["combination_quality_guard"]["reason_code_distribution"].get(
+                    "low_confidence_original_preserved", 0
+                ),
+                0,
+            )
 
             self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
             self.assertEqual(audit_summary["counts"]["failed_files"], 0)
