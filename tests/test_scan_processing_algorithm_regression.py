@@ -2051,6 +2051,71 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in ("private_full_chain_low_density_reverse_ghost", str(input_dir), "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_noisy_edge_texture_pages_stay_noop_with_despeckle_safe_skip_timing(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-noisy-edge-noop-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_noisy_left_edge_texture.png": _noisy_edge_texture_noop_page("left"),
+                "synthetic_noisy_right_edge_texture.png": _noisy_edge_texture_noop_page("right"),
+            }
+            source_bytes = {}
+            for name, page in pages.items():
+                source = input_dir / name
+                page.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-noisy-edge-noop", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            for name, source_image in pages.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
+                self.assertFalse(record["despeckled"], name)
+                self.assertEqual(record["despeckle_pixels_changed"], 0, name)
+                self.assertIn("despeckle_noop", record["operations"], name)
+                self.assertEqual(audit["despeckle_pixel_ratio"], 0.0, name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertEqual(audit["local_content_change_guard_action"], "passed", name)
+                self.assertEqual(audit["cumulative_change_guard_action"], "passed", name)
+                self.assertIn(
+                    audit["combination_quality_guard_reason_code"],
+                    {"safe_combination_passed", "low_confidence_original_preserved"},
+                    name,
+                )
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    self.assertIsNone(ImageChops.difference(source_image, output.convert("RGB")).getbbox(), name)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["guardrails"]["despeckle"]["applied_files"], 0)
+            self.assertGreaterEqual(
+                audit_summary["guardrails"]["despeckle"]["reason_code_distribution"].get("protected_edge_dark_marks", 0),
+                len(pages),
+            )
+            despeckle_timing = audit_summary["timing"]["operation_timings"]["despeckle"]
+            self.assertEqual(despeckle_timing["replacement_work_files"], 0)
+            self.assertGreaterEqual(despeckle_timing["reason_code_distribution"].get("protected_edge_dark_marks", 0), len(pages))
+            self.assertLessEqual(despeckle_timing["average_seconds_per_file"], 0.2)
+            self.assertTrue(audit_summary["operations"]["lighten_edge_shadow"])
+            self.assertTrue(audit_summary["operations"]["lighten_corner_shadows"])
+            self.assertTrue(audit_summary["operations"]["lighten_fold_shadows"])
+            self.assertTrue(audit_summary["operations"]["lighten_background_stains"])
+            self.assertTrue(audit_summary["operations"]["enhance_faded_text"])
+            self.assertTrue(audit_summary["operations"]["sharpen_text_edges"])
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_subtle_diagonal_edge_shadow_cleanup_preserves_protected_edges(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-diagonal-edge-shadow-") as temp_dir:
             root = Path(temp_dir)
@@ -7918,6 +7983,25 @@ def _high_density_pale_texture_page() -> Image.Image:
         for x in range(132, 238, 24):
             for offset_x, offset_y in ((0, 0), (1, 0), (0, 1), (1, 1)):
                 image.putpixel((x + offset_x, y + offset_y), (226, 224, 210))
+    return image
+
+
+def _noisy_edge_texture_noop_page(edge: str) -> Image.Image:
+    image = Image.new("RGB", (260, 180), (246, 246, 244))
+    draw = ImageDraw.Draw(image)
+    for y in (40, 66, 92, 118):
+        draw.rectangle((62, y, 196, y + 3), fill=(60, 60, 60))
+    edge_x = 0 if edge == "left" else 259
+    near_edge_x = 1 if edge == "left" else 258
+    for y in range(14, 166, 6):
+        draw.point((edge_x, y), fill=(56, 56, 56))
+        if y % 12 == 0:
+            draw.point((near_edge_x, y), fill=(58, 58, 58))
+    for y in range(20, 160, 8):
+        for x_offset in range(0, 10):
+            x = (6 + x_offset) if edge == "left" else (253 - x_offset)
+            shade = 222 + ((x_offset * 3 + y) % 6)
+            image.putpixel((x, y), (shade, shade, shade))
     return image
 
 

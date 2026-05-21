@@ -4868,6 +4868,12 @@ class ScanQcTest(unittest.TestCase):
                                 "enabled": True,
                                 "file_count": 8,
                                 "elapsed_seconds": 1.2,
+                                "replacement_work_files": 2,
+                                "no_op_files": 6,
+                                "reason_code_distribution": {
+                                    "applied_isolated_pixels": 2,
+                                    "protected_edge_dark_marks": 6,
+                                },
                                 "backend_counts": {
                                     "numpy": 8,
                                     "fallback": 0,
@@ -4902,6 +4908,11 @@ class ScanQcTest(unittest.TestCase):
                                 "enabled": True,
                                 "file_count": 8,
                                 "elapsed_seconds": 0.8,
+                                "replacement_work_files": 0,
+                                "no_op_files": 8,
+                                "reason_code_distribution": {
+                                    "protected_edge_dark_marks": 8,
+                                },
                                 "backend_counts": {
                                     "numpy": 0,
                                     "fallback": 8,
