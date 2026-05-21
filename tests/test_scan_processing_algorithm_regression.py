@@ -143,10 +143,20 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             safe_draw.rectangle((64, 62, 166, 67), fill=(28, 28, 28))
             safe.save(input_dir / "private_safe_corner_connected_shadow.png")
 
-            protected = safe.copy()
-            protected_draw = ImageDraw.Draw(protected)
-            protected_draw.rectangle((6, 4, 26, 14), fill=(20, 20, 20))
-            protected.save(input_dir / "private_protected_corner_connected_shadow.png")
+            protected_cases: dict[str, tuple[int, int, int, int]] = {
+                "private_protected_printed_frame_shadow.png": (6, 4, 170, 8),
+                "private_protected_l_form_border_shadow.png": (6, 4, 76, 8),
+                "private_protected_corner_stamp_shadow.png": (6, 4, 26, 14),
+                "private_protected_page_number_block_shadow.png": (6, 146, 26, 156),
+                "private_protected_marginal_annotation_shadow.png": (6, 52, 22, 122),
+            }
+            for filename, box in protected_cases.items():
+                protected = safe.copy()
+                protected_draw = ImageDraw.Draw(protected)
+                protected_draw.rectangle(box, fill=(20, 20, 20))
+                if "l_form" in filename:
+                    protected_draw.rectangle((6, 4, 10, 28), fill=(20, 20, 20))
+                protected.save(input_dir / filename)
 
             report = scan_batch(ScanConfig("synthetic-regression", "corner-connected-shadow", input_dir, output_dir))
             manifest = process_images(report, input_dir, process_dir, ProcessingOptions(trim_dark_border=True, workers=1))
@@ -158,15 +168,18 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertTrue(safe_record["dark_border_trimmed"])
             self.assertEqual(safe_record["dark_border_reason_code"], "trimmed_corner_connected_edge_shadow")
 
-            protected_record = records["private_protected_corner_connected_shadow.png"]
-            self.assertFalse(protected_record["dark_border_trimmed"])
-            self.assertIn(
-                protected_record["dark_border_reason_code"],
-                {"protected_edge_content_near_dark_border", "incomplete_dark_edge_border_evidence"},
-            )
+            protected_reason_codes = {
+                "protected_edge_content_near_dark_border",
+                "incomplete_dark_edge_border_evidence",
+                "no_confident_dark_edge_border",
+            }
+            for filename in protected_cases:
+                protected_record = records[filename]
+                self.assertFalse(protected_record["dark_border_trimmed"])
+                self.assertIn(protected_record["dark_border_reason_code"], protected_reason_codes)
 
             self.assertEqual(audit_summary["counts"]["dark_border_trimmed_files"], 1)
-            self.assertEqual(audit_summary["counts"]["dark_border_skipped_files"], 1)
+            self.assertEqual(audit_summary["counts"]["dark_border_skipped_files"], 5)
             self.assertEqual(
                 audit_summary["guardrails"]["dark_border_trim"]["guardrail_reason_code_distribution"][
                     "trimmed_corner_connected_edge_shadow"
@@ -174,7 +187,8 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 1,
             )
             self.assertNotIn("private_safe_corner_connected_shadow", audit_summary_text)
-            self.assertNotIn("private_protected_corner_connected_shadow", audit_summary_text)
+            for filename in protected_cases:
+                self.assertNotIn(filename.replace(".png", ""), audit_summary_text)
 
     def test_full_chain_encoded_derivative_preserves_color_detail_and_icc_profile(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-encoded-color-") as temp_dir:
