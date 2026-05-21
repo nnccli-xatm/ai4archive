@@ -5058,6 +5058,198 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages.keys(), str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_adjacent_two_edge_post_deskew_canvas_trims_safe_light_wedges(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-two-edge-post-deskew-canvas-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            _adjacent_two_edge_post_deskew_light_canvas_page().save(
+                input_dir / "private_two_edge_post_deskew_canvas.png", dpi=(300, 300)
+            )
+
+            report = scan_batch(
+                ScanConfig("synthetic-regression", "two-edge-post-deskew-canvas", input_dir, output_dir)
+            )
+            with mock.patch.object(
+                processing_module,
+                "_detect_skew",
+                return_value=processing_module.SkewDetection(0.45, 1.0, "synthetic adjacent-two-edge deskew"),
+            ), mock.patch.object(
+                processing_module,
+                "_safe_deskew_skip_from_scan_record",
+                return_value=None,
+            ), mock.patch.object(
+                processing_module,
+                "_safe_deskew_skip_from_page_evidence",
+                return_value=None,
+            ), mock.patch.object(
+                processing_module,
+                "_deskew_has_edge_content_risk",
+                return_value=False,
+            ), mock.patch.object(
+                processing_module,
+                "_deskew_has_color_or_table_risk",
+                return_value=False,
+            ), mock.patch.object(
+                processing_module,
+                "_rotate_for_deskew",
+                side_effect=lambda image, _angle: image.copy(),
+            ):
+                manifest = process_images(
+                    report,
+                    input_dir,
+                    process_dir,
+                    ProcessingOptions(auto_crop=True, deskew=True, workers=1),
+                )
+
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            record = manifest["files"][0]
+            audit = record["processing_audit"]
+
+            self.assertTrue(record["deskewed"])
+            self.assertTrue(record["cropped"])
+            self.assertEqual(record["crop_reason"], "post-deskew safe canvas crop applied")
+            self.assertEqual(record["crop_bbox"], [14, 12, 319, 239])
+            self.assertEqual(record["output_size"], [305, 227])
+            self.assertLessEqual(audit["crop_ratio"], 0.10)
+            self.assertLessEqual(audit["cumulative_change_crop_ratio"], 0.10)
+            self.assertEqual(audit["guardrail_failures"], [])
+            self.assertEqual(audit["cumulative_change_guard_action"], "passed")
+            self.assertEqual(audit_summary["counts"]["auto_crop_applied_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["auto_crop"]["post_deskew_safe_crop_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["auto_crop"]["reason_distribution"][
+                    "post-deskew safe canvas crop applied"
+                ],
+                1,
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            for forbidden in (
+                "private_two_edge_post_deskew_canvas.png",
+                str(input_dir),
+                "source_relative_path",
+                "source_sha256",
+            ):
+                self.assertNotIn(forbidden, audit_summary_text)
+
+    def test_adjacent_two_edge_post_deskew_canvas_protects_content_and_low_confidence_boundaries(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-two-edge-post-deskew-canvas-guards-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_two_edge_faint_page_number.png": _adjacent_two_edge_post_deskew_light_canvas_page(
+                    variant="faint_page_number"
+                ),
+                "synthetic_two_edge_faint_marginal_note.png": _adjacent_two_edge_post_deskew_light_canvas_page(
+                    variant="faint_marginal_note"
+                ),
+                "synthetic_two_edge_faint_edge_mark.png": _adjacent_two_edge_post_deskew_light_canvas_page(
+                    variant="faint_edge_mark"
+                ),
+                "synthetic_two_edge_colored_stamp.png": _adjacent_two_edge_post_deskew_light_canvas_page(
+                    variant="colored_stamp"
+                ),
+                "synthetic_two_edge_ruled_table.png": _adjacent_two_edge_post_deskew_light_canvas_page(
+                    variant="ruled_table"
+                ),
+                "synthetic_two_edge_photo_chart.png": _adjacent_two_edge_post_deskew_light_canvas_page(
+                    variant="photo_chart"
+                ),
+                "synthetic_two_edge_aged_uneven_edge.png": _adjacent_two_edge_post_deskew_light_canvas_page(
+                    variant="aged_uneven_edge"
+                ),
+                "synthetic_two_edge_low_confidence_boundary.png": _adjacent_two_edge_post_deskew_light_canvas_page(
+                    variant="low_confidence_boundary"
+                ),
+            }
+            for filename, page in pages.items():
+                page.save(input_dir / filename, dpi=(300, 300))
+
+            report = scan_batch(
+                ScanConfig("synthetic-regression", "two-edge-post-deskew-canvas-guards", input_dir, output_dir)
+            )
+            with mock.patch.object(
+                processing_module,
+                "_detect_skew",
+                return_value=processing_module.SkewDetection(0.45, 1.0, "synthetic adjacent-two-edge deskew"),
+            ), mock.patch.object(
+                processing_module,
+                "_safe_deskew_skip_from_scan_record",
+                return_value=None,
+            ), mock.patch.object(
+                processing_module,
+                "_safe_deskew_skip_from_page_evidence",
+                return_value=None,
+            ), mock.patch.object(
+                processing_module,
+                "_deskew_has_edge_content_risk",
+                return_value=False,
+            ), mock.patch.object(
+                processing_module,
+                "_deskew_has_color_or_table_risk",
+                return_value=False,
+            ), mock.patch.object(
+                processing_module,
+                "_rotate_for_deskew",
+                side_effect=lambda image, _angle: image.copy(),
+            ):
+                manifest = process_images(
+                    report,
+                    input_dir,
+                    process_dir,
+                    ProcessingOptions(auto_crop=True, deskew=True, workers=1),
+                )
+
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            for name, record in records.items():
+                self.assertEqual(record["status"], "processed", name)
+                self.assertTrue(record["deskewed"], name)
+                self.assertFalse(record["cropped"], name)
+                self.assertEqual(record["output_size"], [320, 240], name)
+                self.assertEqual(record["processing_audit"]["crop_ratio"], 0.0, name)
+                self.assertEqual(record["processing_audit"]["guardrail_failures"], [], name)
+                self.assertIn(
+                    record["crop_reason"],
+                    {
+                        "post-deskew crop skipped: edge content protection",
+                        "post-deskew crop skipped: low-confidence canvas edge",
+                        "candidate crop exceeds conservative crop ratio",
+                    },
+                    name,
+                )
+
+            self.assertEqual(audit_summary["counts"]["auto_crop_applied_files"], 0)
+            self.assertEqual(audit_summary["counts"]["auto_crop_skipped_files"], len(pages))
+            self.assertGreaterEqual(
+                audit_summary["guardrails"]["auto_crop"]["skip_reason_distribution"].get(
+                    "post-deskew crop skipped: edge content protection", 0
+                ),
+                6,
+            )
+            self.assertGreaterEqual(
+                audit_summary["guardrails"]["auto_crop"]["skip_reason_distribution"].get(
+                    "post-deskew crop skipped: low-confidence canvas edge", 0
+                )
+                + audit_summary["guardrails"]["auto_crop"]["skip_reason_distribution"].get(
+                    "candidate crop exceeds conservative crop ratio", 0
+                ),
+                1,
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages.keys(), str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_conservative_auto_crop_preserves_faint_edge_content(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-faint-edge-auto-crop-") as temp_dir:
             root = Path(temp_dir)
@@ -7862,6 +8054,52 @@ def _single_edge_post_deskew_light_canvas_page(variant: str = "safe") -> Image.I
         draw.line((6, 18, 6, 216), fill=(233, 233, 233), width=1)
         for y in range(34, 190, 31):
             draw.line((3, y, 11, y + 3), fill=(230, 230, 230), width=1)
+    elif variant != "safe":
+        raise ValueError(f"unsupported variant: {variant}")
+    return image
+
+
+def _adjacent_two_edge_post_deskew_light_canvas_page(variant: str = "safe") -> Image.Image:
+    image = Image.new("RGB", (320, 240), (242, 242, 242))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 0, 13, 239), fill=(250, 250, 250))
+    draw.rectangle((0, 0, 319, 11), fill=(250, 250, 250))
+    for y in (76, 98, 120, 142, 164):
+        draw.rectangle((90, y, 254, y + 3), fill=(45, 45, 45))
+    if variant == "faint_page_number":
+        draw.text((2, 2), "12", fill=(232, 232, 232))
+    elif variant == "faint_marginal_note":
+        draw.line((2, 20, 10, 28, 5, 36, 11, 44), fill=(232, 232, 232), width=1)
+    elif variant == "faint_edge_mark":
+        draw.line((8, 1, 8, 30), fill=(232, 232, 232), width=1)
+    elif variant == "colored_stamp":
+        draw.ellipse((2, 2, 46, 38), outline=(178, 35, 35), width=3)
+    elif variant == "ruled_table":
+        for y in (3, 9, 15, 21):
+            draw.line((0, y, 60, y), fill=(232, 232, 232), width=1)
+        for x in (5, 16, 27):
+            draw.line((x, 0, x, 28), fill=(232, 232, 232), width=1)
+    elif variant == "photo_chart":
+        for y in range(0, 38):
+            shade = 210 + ((y * 9) % 30)
+            draw.line((0, y, 52, y), fill=(shade, shade, shade))
+        for x in range(0, 52, 8):
+            shade = 208 + (x % 20)
+            draw.line((x, 0, min(52, x + 15), 38), fill=(shade, shade, shade), width=1)
+    elif variant == "aged_uneven_edge":
+        for x in range(0, 14):
+            shade = 241 + ((x * 5) % 7)
+            draw.line((x, 0, x, 239), fill=(shade, shade - 1, shade - 2), width=1)
+        for y in range(0, 12):
+            shade = 241 + ((y * 7) % 7)
+            draw.line((0, y, 319, y), fill=(shade, shade - 1, shade - 2), width=1)
+        draw.line((2, 4, 12, 18), fill=(232, 231, 230), width=1)
+        draw.line((4, 2, 10, 22), fill=(232, 231, 230), width=1)
+    elif variant == "low_confidence_boundary":
+        draw.rectangle((0, 0, 13, 239), fill=(242, 242, 242))
+        draw.rectangle((0, 0, 319, 11), fill=(242, 242, 242))
+        draw.rectangle((0, 0, 1, 239), fill=(250, 250, 250))
+        draw.rectangle((0, 0, 319, 1), fill=(250, 250, 250))
     elif variant != "safe":
         raise ValueError(f"unsupported variant: {variant}")
     return image
