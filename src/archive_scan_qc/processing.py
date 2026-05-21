@@ -8321,18 +8321,27 @@ def _bleed_through_sparse_real_mark_risk(
         xs = [point[0] for point in component]
         ys = [point[1] for point in component]
         boxes.append((len(component), min(xs), min(ys), max(xs), max(ys)))
-    if warm_haze_only and all(area <= 48 for area, _left, _top, _right, _bottom in boxes):
-        total_area = sum(area for area, _left, _top, _right, _bottom in boxes)
-        if total_area / max(1, image_width * image_height) <= 0.002:
-            return True
-    if any(area > 48 for area, _left, _top, _right, _bottom in boxes):
-        return False
     left = min(box[1] for box in boxes)
     top = min(box[2] for box in boxes)
     right = max(box[3] for box in boxes)
     bottom = max(box[4] for box in boxes)
     width = right - left + 1
     height = bottom - top + 1
+    total_area = sum(area for area, _left, _top, _right, _bottom in boxes)
+    if warm_haze_only and all(area <= 48 for area, _left, _top, _right, _bottom in boxes):
+        if total_area / max(1, image_width * image_height) <= 0.002:
+            return True
+    # Protect narrow stacked faint glyph traces (e.g., meaningful reverse-side alphanumeric evidence on thin paper).
+    if (
+        len(components) >= 6
+        and all(area <= 48 for area, _left, _top, _right, _bottom in boxes)
+        and total_area / max(1, image_width * image_height) <= 0.005
+        and width <= max(12, int(image_width * 0.10))
+        and max(12, int(image_height * 0.12)) <= height <= int(image_height * 0.45)
+    ):
+        return True
+    if any(area > 48 for area, _left, _top, _right, _bottom in boxes):
+        return False
     if height <= max(10, image_height * 0.12) and width <= max(10, image_width * 0.18):
         return True
     if len(components) >= 5 and height <= max(6, image_height * 0.08) and width <= image_width * 0.55:
