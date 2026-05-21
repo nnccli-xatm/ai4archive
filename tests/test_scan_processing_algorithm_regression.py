@@ -2106,6 +2106,35 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_pale_blue_carbon_copy_text_improves_but_blue_annotation_is_protected(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-pale-blue-copy-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_pale_blue_copy_safe.png": _pale_blue_carbon_copy_page(with_blue_annotation=False),
+                "synthetic_pale_blue_copy_annotation.png": _pale_blue_carbon_copy_page(with_blue_annotation=True),
+            }
+            for name, page in pages.items():
+                page.save(input_dir / name, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-pale-blue-copy", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            safe_record = records["synthetic_pale_blue_copy_safe.png"]
+            protected_record = records["synthetic_pale_blue_copy_annotation.png"]
+
+            self.assertTrue(safe_record["faded_text_enhanced"])
+            self.assertEqual(safe_record["faded_text_reason_code"], "applied_stable_low_contrast_text")
+            self.assertGreater(safe_record["processing_audit"]["faded_text_delta"], 7.5)
+            self.assertGreater(safe_record["processing_audit"]["faded_text_changed_pixel_ratio"], 0.0)
+            self.assertLessEqual(safe_record["processing_audit"]["faded_text_changed_pixel_ratio"], 0.10)
+            self.assertLessEqual(safe_record["processing_audit"]["faded_text_candidate_pixel_ratio"], 0.16)
+            self.assertFalse(protected_record["faded_text_enhanced"])
+            self.assertEqual(protected_record["faded_text_reason_code"], "protected_color_stamp_annotation")
+
     def test_diagonal_fold_shadow_cleanup_lightens_safe_sparse_text_case_and_preserves_protected_marks(
         self,
     ) -> None:
@@ -7056,6 +7085,23 @@ def _safe_full_chain_combination_page() -> Image.Image:
         draw.line((58, y, 174, y), fill=(202, 202, 202), width=2)
     draw.ellipse((165, 28, 210, 58), fill=(222, 222, 222))
     image.putpixel((24, 24), (0, 0, 0))
+    return image
+
+
+def _pale_blue_carbon_copy_page(*, with_blue_annotation: bool) -> Image.Image:
+    image = Image.new("RGB", (360, 240), (244, 244, 244))
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default()
+    lines = (
+        "DUPLICATE COPY REGISTER",
+        "CARBON COPY TEXT SAMPLE",
+        "PALE BLUE LOW CONTRAST",
+        "ARCHIVE OPERATOR CHECK",
+    )
+    for index, line in enumerate(lines):
+        draw.text((46, 44 + index * 28), line, fill=(204, 212, 226), font=font)
+    if with_blue_annotation:
+        draw.line((34, 188, 330, 206), fill=(58, 96, 202), width=3)
     return image
 
 

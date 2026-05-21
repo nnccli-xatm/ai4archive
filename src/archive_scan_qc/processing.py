@@ -9112,7 +9112,7 @@ def _enhance_faded_text_conservative(image: Image.Image) -> FadedTextEnhancement
     if image.width < 80 or image.height < 80:
         return _faded_text_noop(image, "faded text enhancement skipped: image too small")
     color_risk = _tone_color_risk_reason(image)
-    if color_risk:
+    if color_risk and not _faded_text_allow_pale_blue_carbon_copy(image):
         return _faded_text_noop(image, "faded text enhancement skipped: color content, stamp, or annotation risk")
 
     grayscale = image.convert("L")
@@ -9299,6 +9299,82 @@ def _enhance_faded_text_conservative(image: Image.Image) -> FadedTextEnhancement
         round(selected_ratio, 6),
         round(candidate_ratio, 6),
     )
+
+
+def _faded_text_allow_pale_blue_carbon_copy(image: Image.Image) -> bool:
+    if image.mode == "L":
+        return False
+    sample = image.convert("RGB")
+    sample.thumbnail((600, 600), Image.Resampling.BILINEAR)
+    width, height = sample.size
+    total = max(1, width * height)
+    pixels = sample.load()
+
+    blue_mask = Image.new("L", sample.size, 0)
+    blue_pixels = blue_mask.load()
+    pale_blue = 0
+    red_risk = 0
+    saturated_color = 0
+    for y in range(height):
+        for x in range(width):
+            red_value, green_value, blue_value = pixels[x, y]
+            high = max(red_value, green_value, blue_value)
+            low = min(red_value, green_value, blue_value)
+            spread = high - low
+            brightness = (red_value + green_value + blue_value) / 3
+            if red_value >= 110 and red_value - green_value >= 35 and red_value - blue_value >= 35:
+                red_risk += 1
+            if spread >= 36 and 40 <= brightness <= 245:
+                saturated_color += 1
+            is_pale_blue = (
+                150 <= brightness <= 246
+                and 6 <= spread <= 34
+                and blue_value - red_value >= 7
+                and blue_value - green_value >= 3
+                and red_value >= 120
+                and green_value >= 126
+            )
+            if is_pale_blue:
+                blue_pixels[x, y] = 255
+                pale_blue += 1
+
+    if red_risk / total >= 0.0004:
+        return False
+    if saturated_color / total >= 0.002:
+        return False
+    pale_blue_ratio = pale_blue / total
+    if pale_blue_ratio < 0.002 or pale_blue_ratio > 0.16:
+        return False
+
+    components = _mask_components(blue_mask)
+    if not components:
+        return False
+    text_like_components = 0
+    long_horizontal_lines = 0
+    long_vertical_lines = 0
+    for component in components:
+        area = len(component)
+        if area < 4:
+            continue
+        xs = [point[0] for point in component]
+        ys = [point[1] for point in component]
+        box_width = max(xs) - min(xs) + 1
+        box_height = max(ys) - min(ys) + 1
+        if box_height <= 3 and box_width >= width * 0.55:
+            long_horizontal_lines += 1
+        if box_width <= 3 and box_height >= height * 0.55:
+            long_vertical_lines += 1
+        if area / total > 0.018 or box_width > width * 0.45 or box_height > height * 0.22:
+            continue
+        fill_ratio = area / max(1, box_width * box_height)
+        if fill_ratio > 0.82 and area > 24:
+            continue
+        aspect = max(box_width / max(1, box_height), box_height / max(1, box_width))
+        if aspect <= 60:
+            text_like_components += 1
+    if long_horizontal_lines >= 2 or long_vertical_lines >= 2:
+        return False
+    return text_like_components >= 4
 
 
 def _faded_text_noop(
