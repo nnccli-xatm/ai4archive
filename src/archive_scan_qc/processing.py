@@ -15667,6 +15667,14 @@ def _despeckle_short_lint_streak_allows_cleanup(
         for cx, cy in component
     ):
         return False
+    if _despeckle_short_lint_streak_has_endpoint_context_risk(
+        gray_pixels,
+        candidate_set,
+        width,
+        height,
+        component,
+    ):
+        return False
 
     surrounding_values = _despeckle_component_surrounding_values(
         gray_pixels,
@@ -15702,6 +15710,51 @@ def _despeckle_component_is_short_lint_streak(component: list[tuple[int, int]]) 
     if minor_span > _DESPECKLE_MAX_SHORT_LINT_STREAK_MINOR_SPAN:
         return False
     return span_x == 1 or span_y == 1
+
+
+def _despeckle_short_lint_streak_has_endpoint_context_risk(
+    gray_pixels: Any,
+    candidate_set: set[tuple[int, int]],
+    width: int,
+    height: int,
+    component: list[tuple[int, int]],
+) -> bool:
+    component_set = set(component)
+    if len(component_set) != len(component):
+        return True
+    if len(component) < 2:
+        return True
+    endpoints = [point for point in component if _despeckle_component_neighbor_count(component_set, point) <= 1]
+    if len(endpoints) != 2:
+        return True
+    endpoint_context_hits = 0
+    for endpoint_x, endpoint_y in endpoints:
+        found_context = False
+        for ny in range(max(0, endpoint_y - 1), min(height, endpoint_y + 2)):
+            for nx in range(max(0, endpoint_x - 1), min(width, endpoint_x + 2)):
+                if (nx, ny) in component_set:
+                    continue
+                if (nx, ny) in candidate_set:
+                    continue
+                if _despeckle_pixel_at(gray_pixels, nx, ny) <= _DESPECKLE_FAINT_DUST_MAX_VALUE:
+                    found_context = True
+                    break
+            if found_context:
+                break
+        if found_context:
+            endpoint_context_hits += 1
+            if endpoint_context_hits >= 1:
+                return True
+    return False
+
+
+def _despeckle_component_neighbor_count(component_set: set[tuple[int, int]], point: tuple[int, int]) -> int:
+    px, py = point
+    neighbors = 0
+    for offset_x, offset_y in _DESPECKLE_NEIGHBOR_OFFSETS:
+        if (px + offset_x, py + offset_y) in component_set:
+            neighbors += 1
+    return neighbors
 
 
 def _despeckle_short_lint_streak_color_protected(

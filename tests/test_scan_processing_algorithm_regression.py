@@ -2932,6 +2932,23 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     shade = 224 + ((x + y) % 5)
                     textured.putpixel((x, y), (shade, shade, shade))
 
+            low_contrast_punctuation = Image.new("RGB", (260, 180), (246, 246, 244))
+            for point in safe_lint_points:
+                low_contrast_punctuation.putpixel(point, (226, 226, 222))
+            low_contrast_punctuation.putpixel((172, 110), (228, 228, 224))
+            low_contrast_punctuation.putpixel((172, 114), (228, 228, 224))
+
+            diagonal_rule_fragment = Image.new("RGB", (260, 180), (246, 246, 244))
+            ImageDraw.Draw(diagonal_rule_fragment).line((164, 108, 176, 116), fill=(226, 226, 222), width=1)
+            diagonal_rule_fragment.putpixel((170, 112), (228, 228, 224))
+
+            edge_form_mark = Image.new("RGB", (260, 180), (246, 246, 244))
+            edge_form_lint_points = tuple((257, y) for y in range(108, 118))
+            for point in edge_form_lint_points:
+                edge_form_mark.putpixel(point, (226, 226, 222))
+            for point in ((255, 108), (256, 108), (255, 117), (256, 117), (255, 112)):
+                edge_form_mark.putpixel(point, (228, 228, 224))
+
             pages = {
                 "synthetic_safe_short_lint_streak.png": safe_page,
                 "synthetic_safe_margin_short_lint_streak.png": safe_margin_page,
@@ -2940,6 +2957,9 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "synthetic_protected_colored_record.png": colored,
                 "synthetic_protected_clustered_margin_marks.png": clustered,
                 "synthetic_protected_margin_texture.png": textured,
+                "synthetic_protected_low_contrast_punctuation_fragment.png": low_contrast_punctuation,
+                "synthetic_protected_diagonal_rule_fragment.png": diagonal_rule_fragment,
+                "synthetic_protected_edge_form_mark_fragment.png": edge_form_mark,
             }
             source_bytes = {}
             for name, image in pages.items():
@@ -2981,6 +3001,9 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "synthetic_protected_colored_record.png",
                 "synthetic_protected_clustered_margin_marks.png",
                 "synthetic_protected_margin_texture.png",
+                "synthetic_protected_low_contrast_punctuation_fragment.png",
+                "synthetic_protected_diagonal_rule_fragment.png",
+                "synthetic_protected_edge_form_mark_fragment.png",
             ):
                 record = records[name]
                 audit = record["processing_audit"]
