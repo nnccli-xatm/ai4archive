@@ -1721,8 +1721,11 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertEqual(audit_summary["counts"]["illumination_gradient_skipped_files"], len(protected_names))
             self.assertEqual(illumination_summary["applied_files"], 1)
             self.assertEqual(illumination_summary["skipped_files"], len(protected_names))
-            self.assertEqual(illumination_summary["reason_code_distribution"].get("applied", 0), 1)
-            self.assertEqual(sum(illumination_summary["skip_reason_code_distribution"].values()), len(protected_names))
+            self.assertEqual(illumination_summary["reason_code_distribution"]["applied"], 1)
+            self.assertEqual(
+                sum(illumination_summary["skip_reason_code_distribution"].values()),
+                len(protected_names),
+            )
             self.assertGreaterEqual(illumination_summary["protection_triggered_files"], 5)
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertFalse(audit_summary["privacy"]["contains_paths"])
@@ -1834,25 +1837,21 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             safe_name = "synthetic_safe_mild_two_edge_illumination.png"
             safe_record = records[safe_name]
             self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
-            self.assertIn(safe_record["illumination_gradient_reason_code"], {"applied", "low_confidence", "protected_content"})
-            self.assertIn(safe_record["illumination_gradient_orientation"], {"vertical", "none", None})
-            if safe_record["illumination_gradient_levelled"]:
-                self.assertGreaterEqual(safe_record["illumination_gradient_delta_before"], 3.5)
-                self.assertLess(
-                    safe_record["illumination_gradient_delta_after"], safe_record["illumination_gradient_delta_before"]
-                )
-                self.assertLessEqual(safe_record["illumination_gradient_correction_delta"], 4.0)
-                self.assertGreater(safe_record["illumination_gradient_changed_pixel_ratio"], 0.50)
-                self.assertLessEqual(safe_record["illumination_gradient_changed_pixel_ratio"], 0.95)
-            else:
-                self.assertEqual(safe_record["illumination_gradient_changed_pixel_ratio"], 0.0)
+            self.assertTrue(safe_record["illumination_gradient_levelled"])
+            self.assertEqual(safe_record["illumination_gradient_reason_code"], "applied")
+            self.assertEqual(safe_record["illumination_gradient_orientation"], "vertical")
+            self.assertGreaterEqual(safe_record["illumination_gradient_delta_before"], 3.5)
+            self.assertLess(safe_record["illumination_gradient_delta_after"], safe_record["illumination_gradient_delta_before"])
+            self.assertLessEqual(safe_record["illumination_gradient_correction_delta"], 4.0)
+            self.assertGreater(safe_record["illumination_gradient_changed_pixel_ratio"], 0.50)
+            self.assertLessEqual(safe_record["illumination_gradient_changed_pixel_ratio"], 0.95)
             self.assertEqual(safe_record["processing_audit"]["guardrail_failures"], [])
             with Image.open(process_dir / safe_record["output_relative_path"]) as output:
                 original_edge = _mean_luma(pages[safe_name], (0, 0, 24, 150))
                 original_center = _mean_luma(pages[safe_name], (98, 0, 122, 150))
                 processed_edge = _mean_luma(output, (0, 0, 24, 150))
                 processed_center = _mean_luma(output, (98, 0, 122, 150))
-                self.assertLessEqual(processed_center - processed_edge, original_center - original_edge + 0.5)
+                self.assertLess(processed_center - processed_edge, original_center - original_edge - 1.0)
 
             protected_names = set(pages) - {safe_name}
             for name in protected_names:
@@ -1869,26 +1868,14 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     self.assertEqual(output.convert("RGB").tobytes(), pages[name].tobytes(), name)
 
             illumination_summary = audit_summary["guardrails"]["illumination_gradient"]
-            self.assertEqual(
-                audit_summary["counts"]["illumination_gradient_levelled_files"],
-                int(safe_record["illumination_gradient_levelled"]),
-            )
-            self.assertEqual(
-                audit_summary["counts"]["illumination_gradient_skipped_files"],
-                len(pages) - int(safe_record["illumination_gradient_levelled"]),
-            )
-            self.assertEqual(illumination_summary["applied_files"], int(safe_record["illumination_gradient_levelled"]))
-            self.assertEqual(
-                illumination_summary["skipped_files"],
-                len(pages) - int(safe_record["illumination_gradient_levelled"]),
-            )
-            self.assertEqual(
-                illumination_summary["reason_code_distribution"].get("applied", 0),
-                int(safe_record["illumination_gradient_levelled"]),
-            )
+            self.assertEqual(audit_summary["counts"]["illumination_gradient_levelled_files"], 1)
+            self.assertEqual(audit_summary["counts"]["illumination_gradient_skipped_files"], len(protected_names))
+            self.assertEqual(illumination_summary["applied_files"], 1)
+            self.assertEqual(illumination_summary["skipped_files"], len(protected_names))
+            self.assertEqual(illumination_summary["reason_code_distribution"]["applied"], 1)
             self.assertEqual(
                 sum(illumination_summary["skip_reason_code_distribution"].values()),
-                len(pages) - int(safe_record["illumination_gradient_levelled"]),
+                len(protected_names),
             )
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertFalse(audit_summary["privacy"]["contains_paths"])
@@ -2026,8 +2013,11 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertEqual(audit_summary["counts"]["illumination_gradient_skipped_files"], len(protected_names))
             self.assertEqual(illumination_summary["applied_files"], 1)
             self.assertEqual(illumination_summary["skipped_files"], len(protected_names))
-            self.assertEqual(illumination_summary["reason_code_distribution"].get("applied", 0), 1)
-            self.assertEqual(sum(illumination_summary["skip_reason_code_distribution"].values()), len(protected_names))
+            self.assertEqual(illumination_summary["reason_code_distribution"]["applied"], 1)
+            self.assertEqual(
+                sum(illumination_summary["skip_reason_code_distribution"].values()),
+                len(protected_names),
+            )
             self.assertGreaterEqual(illumination_summary["protection_triggered_files"], 4)
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertFalse(audit_summary["privacy"]["contains_paths"])
@@ -2162,8 +2152,11 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             illumination_summary = audit_summary["guardrails"]["illumination_gradient"]
             self.assertEqual(illumination_summary["applied_files"], 1)
             self.assertEqual(illumination_summary["skipped_files"], len(protected_names))
-            self.assertEqual(illumination_summary["reason_code_distribution"].get("applied", 0), 1)
-            self.assertEqual(sum(illumination_summary["skip_reason_code_distribution"].values()), len(protected_names))
+            self.assertEqual(illumination_summary["reason_code_distribution"]["applied"], 1)
+            self.assertEqual(
+                sum(illumination_summary["skip_reason_code_distribution"].values()),
+                len(protected_names),
+            )
             self.assertGreaterEqual(illumination_summary["protection_triggered_files"], 6)
             combination_summary = audit_summary["guardrails"]["combination_quality_guard"]
             combination_reasons = combination_summary["reason_code_distribution"]
@@ -2489,7 +2482,9 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertLessEqual(audit["cumulative_change_score"], 1.0)
             self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 1)
             self.assertEqual(
-                audit_summary["guardrails"]["bleed_through"]["reason_code_distribution"].get("applied_faint_reverse_ghost", 0),
+                audit_summary["guardrails"]["bleed_through"]["reason_code_distribution"][
+                    "applied_faint_reverse_ghost"
+                ],
                 1,
             )
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
@@ -2543,20 +2538,14 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 _mean_luma(pages[safe_name], (94, 56, 190, 130)) - 0.4,
             )
 
-            protected_cleaned_names: list[str] = []
             for name in set(pages) - {safe_name}:
                 record = records[name]
                 audit = record["processing_audit"]
                 processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
                 self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
-                if record["bleed_through_cleaned"]:
-                    protected_cleaned_names.append(name)
-                    self.assertEqual(record["bleed_through_reason_code"], "applied_faint_reverse_ghost", name)
-                    self.assertGreater(audit["bleed_through_changed_pixel_ratio"], 0.0, name)
-                    self.assertLessEqual(audit["bleed_through_changed_pixel_ratio"], 0.01, name)
-                else:
-                    self.assertNotEqual(record["bleed_through_reason_code"], "applied_faint_reverse_ghost", name)
-                    self.assertEqual(audit["bleed_through_changed_pixel_ratio"], 0.0, name)
+                self.assertFalse(record["bleed_through_cleaned"], name)
+                self.assertNotEqual(record["bleed_through_reason_code"], "applied_faint_reverse_ghost", name)
+                self.assertEqual(audit["bleed_through_changed_pixel_ratio"], 0.0, name)
                 self.assertEqual(audit["local_content_change_guard_action"], "passed", name)
                 self.assertEqual(audit["cumulative_change_guard_action"], "passed", name)
                 self.assertIn(
@@ -2565,30 +2554,17 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     name,
                 )
                 self.assertEqual(audit["guardrail_failures"], [], name)
-                self.assertLessEqual(
-                    _changed_ratio(pages[name], processed, (0, 0, processed.width, processed.height)),
-                    0.01,
-                    name,
-                )
-
-            self.assertLessEqual(len(protected_cleaned_names), 1)
-            if protected_cleaned_names:
-                self.assertEqual(protected_cleaned_names, ["A101_page_number.png"])
+                self.assertIsNone(ImageChops.difference(pages[name].convert("RGB"), processed).getbbox(), name)
 
             bleed_guard = audit_summary["guardrails"]["bleed_through"]
             combination_guard = audit_summary["guardrails"]["combination_quality_guard"]
             self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
             self.assertEqual(audit_summary["counts"]["failed_files"], 0)
-            expected_applied = 1 + len(protected_cleaned_names)
-            self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], expected_applied)
-            self.assertEqual(bleed_guard["applied_files"], expected_applied)
-            self.assertEqual(bleed_guard["skipped_files"], len(pages) - expected_applied)
-            self.assertEqual(bleed_guard["reason_code_distribution"]["applied_faint_reverse_ghost"], expected_applied)
-            self.assertGreaterEqual(
-                bleed_guard["skip_reason_code_distribution"].get("protected_line_or_annotation", 0)
-                + bleed_guard["skip_reason_code_distribution"].get("low_confidence", 0),
-                1,
-            )
+            self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 1)
+            self.assertEqual(bleed_guard["applied_files"], 1)
+            self.assertEqual(bleed_guard["skipped_files"], len(pages) - 1)
+            self.assertEqual(bleed_guard["reason_code_distribution"]["applied_faint_reverse_ghost"], 1)
+            self.assertIn("protected_line_or_annotation", bleed_guard["skip_reason_code_distribution"])
             self.assertIn("protected_color_content", bleed_guard["skip_reason_code_distribution"])
             self.assertIn("protected_texture_or_archival_trace", bleed_guard["skip_reason_code_distribution"])
             self.assertGreaterEqual(combination_guard["reason_code_distribution"].get("safe_combination_passed", 0), 1)
@@ -2657,8 +2633,9 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 audit = record["processing_audit"]
                 processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
                 self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
-                self.assertLessEqual(audit["bleed_through_changed_pixel_ratio"], 0.01, name)
-                self.assertIn(record["bleed_through_reason_code"], {"applied_faint_reverse_ghost", "low_confidence", "protected_line_or_annotation", "protected_edge_content", "protected_color_content", "protected_texture_or_archival_trace", "protected_foreground_too_dense"}, name)
+                self.assertFalse(record["bleed_through_cleaned"], name)
+                self.assertNotEqual(record["bleed_through_reason_code"], "applied_faint_reverse_ghost", name)
+                self.assertEqual(audit["bleed_through_changed_pixel_ratio"], 0.0, name)
                 self.assertEqual(audit["guardrail_failures"], [], name)
                 self.assertEqual(audit["local_content_change_guard_action"], "passed", name)
                 self.assertEqual(audit["cumulative_change_guard_action"], "passed", name)
@@ -2678,14 +2655,11 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             bleed_guard = audit_summary["guardrails"]["bleed_through"]
             self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
             self.assertEqual(audit_summary["counts"]["failed_files"], 0)
-            self.assertGreaterEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 1)
-            self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], bleed_guard["applied_files"])
-            self.assertEqual(bleed_guard["applied_files"] + bleed_guard["skipped_files"], len(pages))
-            self.assertEqual(
-                bleed_guard["reason_code_distribution"].get("applied_faint_reverse_ghost", 0),
-                bleed_guard["applied_files"],
-            )
-            self.assertGreaterEqual(len(bleed_guard["skip_reason_code_distribution"]), 1)
+            self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 1)
+            self.assertEqual(bleed_guard["applied_files"], 1)
+            self.assertEqual(bleed_guard["skipped_files"], len(pages) - 1)
+            self.assertEqual(bleed_guard["reason_code_distribution"]["applied_faint_reverse_ghost"], 1)
+            self.assertIn("protected_line_or_annotation", bleed_guard["skip_reason_code_distribution"])
             self.assertIn("protected_color_content", bleed_guard["skip_reason_code_distribution"])
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertFalse(audit_summary["privacy"]["contains_paths"])
@@ -3364,7 +3338,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 self.assertLessEqual(changed_ratio, max_changed_ratio[name], name)
                 self.assertGreaterEqual(
                     _edge_energy(processed_structure),
-                    _edge_energy(original_structure) * (min_edge_energy_ratio[name] - 0.01),
+                    _edge_energy(original_structure) * min_edge_energy_ratio[name],
                     name,
                 )
                 self.assertEqual(audit["guardrail_failures"], [], name)
@@ -4568,45 +4542,35 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
 
             self.assertEqual(source.read_bytes(), source_bytes)
-            self.assertEqual(audit["bleed_through_reason_code"], record["bleed_through_reason_code"])
-            self.assertIn(
-                record["bleed_through_reason_code"],
-                {"applied_faint_reverse_ghost", "low_confidence", "protected_line_or_annotation"},
-            )
-            if record["bleed_through_cleaned"]:
-                self.assertEqual(record["bleed_through_reason_code"], "applied_faint_reverse_ghost")
-                self.assertGreater(audit["bleed_through_delta"], 3.0)
-                self.assertGreater(audit["bleed_through_changed_pixel_ratio"], 0.0)
-                self.assertEqual(audit["combination_quality_guard_reason_code"], "safe_combination_passed")
-            else:
-                self.assertIn(record["bleed_through_reason_code"], {"low_confidence", "protected_line_or_annotation"})
-                self.assertEqual(audit["bleed_through_delta"], 0.0)
-                self.assertEqual(audit["bleed_through_changed_pixel_ratio"], 0.0)
-                self.assertIn(
-                    audit["combination_quality_guard_reason_code"],
-                    {"safe_combination_passed", "low_confidence_original_preserved"},
-                )
+            self.assertTrue(record["bleed_through_cleaned"])
+            self.assertEqual(record["bleed_through_reason_code"], "applied_faint_reverse_ghost")
+            self.assertEqual(audit["bleed_through_reason_code"], "applied_faint_reverse_ghost")
+            self.assertGreater(audit["bleed_through_delta"], 3.0)
+            self.assertGreater(audit["bleed_through_changed_pixel_ratio"], 0.0)
             self.assertLessEqual(audit["bleed_through_changed_pixel_ratio"], 0.045)
             self.assertLessEqual(audit["bleed_through_candidate_pixel_ratio"], 0.065)
             self.assertEqual(audit["guardrail_failures"], [])
             self.assertEqual(audit["local_content_change_guard_action"], "passed")
+            self.assertEqual(audit["combination_quality_guard_reason_code"], "safe_combination_passed")
             self.assertEqual(audit["processed_output_safety_guard_action"], "passed")
 
             original = page.convert("RGB")
             ghost_box = (118, 80, 176, 122)
             before = ImageStat.Stat(original.crop(ghost_box).convert("L")).mean[0]
             after = ImageStat.Stat(processed.crop(ghost_box).convert("L")).mean[0]
-            self.assertGreaterEqual(after - before, 0.0)
+            self.assertGreater(after - before, 0.08)
             protected_box = (30, 34, 72, 50)
             self.assertIsNone(
                 ImageChops.difference(original.crop(protected_box), processed.crop(protected_box)).getbbox()
             )
 
-            self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], int(record["bleed_through_cleaned"]))
-            self.assertEqual(audit_summary["guardrails"]["bleed_through"]["applied_files"], int(record["bleed_through_cleaned"]))
+            self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["bleed_through"]["applied_files"], 1)
             self.assertEqual(
-                audit_summary["guardrails"]["bleed_through"]["reason_code_distribution"].get("applied_faint_reverse_ghost", 0),
-                int(record["bleed_through_cleaned"]),
+                audit_summary["guardrails"]["bleed_through"]["reason_code_distribution"][
+                    "applied_faint_reverse_ghost"
+                ],
+                1,
             )
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertFalse(audit_summary["privacy"]["contains_paths"])
@@ -4667,7 +4631,9 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 1)
             self.assertEqual(audit_summary["guardrails"]["bleed_through"]["applied_files"], 1)
             self.assertEqual(
-                audit_summary["guardrails"]["bleed_through"]["reason_code_distribution"].get("applied_faint_reverse_ghost", 0),
+                audit_summary["guardrails"]["bleed_through"]["reason_code_distribution"][
+                    "applied_faint_reverse_ghost"
+                ],
                 1,
             )
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
@@ -4737,26 +4703,20 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 record = records[name]
                 audit = record["processing_audit"]
                 processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
-                self.assertLessEqual(audit["bleed_through_changed_pixel_ratio"], 0.01, name)
-                self.assertIn(record["bleed_through_reason_code"], {"applied_faint_reverse_ghost", "low_confidence", "protected_line_or_annotation", "protected_edge_content", "protected_color_content", "protected_texture_or_archival_trace", "protected_foreground_too_dense"}, name)
-                self.assertLessEqual(
-                    _changed_ratio(pages[name], processed, (0, 0, processed.width, processed.height)),
-                    0.01,
-                    name,
-                )
+                self.assertFalse(record["bleed_through_cleaned"], name)
+                self.assertNotEqual(record["bleed_through_reason_code"], "applied_faint_reverse_ghost", name)
+                self.assertEqual(audit["bleed_through_changed_pixel_ratio"], 0.0, name)
+                self.assertIsNone(ImageChops.difference(pages[name].convert("RGB"), processed).getbbox(), name)
 
             bleed_guard = audit_summary["guardrails"]["bleed_through"]
             self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
             self.assertEqual(audit_summary["counts"]["failed_files"], 0)
-            self.assertGreaterEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 1)
-            self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], bleed_guard["applied_files"])
-            self.assertEqual(bleed_guard["applied_files"] + bleed_guard["skipped_files"], len(pages))
-            self.assertEqual(
-                bleed_guard["reason_code_distribution"].get("applied_faint_reverse_ghost", 0),
-                bleed_guard["applied_files"],
-            )
-            self.assertGreaterEqual(len(bleed_guard["skip_reason_code_distribution"]), 1)
-            self.assertGreaterEqual(len(bleed_guard["skip_reason_code_distribution"]), 1)
+            self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 1)
+            self.assertEqual(bleed_guard["applied_files"], 1)
+            self.assertEqual(bleed_guard["skipped_files"], len(pages) - 1)
+            self.assertEqual(bleed_guard["reason_code_distribution"]["applied_faint_reverse_ghost"], 1)
+            self.assertIn("protected_line_or_annotation", bleed_guard["skip_reason_code_distribution"])
+            self.assertIn("protected_edge_content", bleed_guard["skip_reason_code_distribution"])
             self.assertIn("protected_color_content", bleed_guard["skip_reason_code_distribution"])
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertFalse(audit_summary["privacy"]["contains_paths"])
@@ -4813,23 +4773,17 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 record = records[name]
                 audit = record["processing_audit"]
                 processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
-                self.assertLessEqual(audit["bleed_through_changed_pixel_ratio"], 0.01, name)
-                self.assertIn(record["bleed_through_reason_code"], {"applied_faint_reverse_ghost", "low_confidence", "protected_line_or_annotation", "protected_edge_content", "protected_color_content", "protected_texture_or_archival_trace", "protected_foreground_too_dense"}, name)
-                self.assertLessEqual(
-                    _changed_ratio(pages[name], processed, (0, 0, processed.width, processed.height)),
-                    0.01,
-                    name,
-                )
+                self.assertFalse(record["bleed_through_cleaned"], name)
+                self.assertNotEqual(record["bleed_through_reason_code"], "applied_faint_reverse_ghost", name)
+                self.assertEqual(audit["bleed_through_changed_pixel_ratio"], 0.0, name)
+                self.assertIsNone(ImageChops.difference(pages[name].convert("RGB"), processed).getbbox(), name)
 
             bleed_guard = audit_summary["guardrails"]["bleed_through"]
-            self.assertGreaterEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 1)
-            self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], bleed_guard["applied_files"])
-            self.assertEqual(
-                bleed_guard["reason_code_distribution"].get("applied_faint_reverse_ghost", 0),
-                bleed_guard["applied_files"],
-            )
-            self.assertGreaterEqual(len(bleed_guard["skip_reason_code_distribution"]), 1)
-            self.assertGreaterEqual(len(bleed_guard["skip_reason_code_distribution"]), 1)
+            self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 1)
+            self.assertEqual(bleed_guard["applied_files"], 1)
+            self.assertEqual(bleed_guard["reason_code_distribution"]["applied_faint_reverse_ghost"], 1)
+            self.assertIn("protected_line_or_annotation", bleed_guard["skip_reason_code_distribution"])
+            self.assertIn("protected_edge_content", bleed_guard["skip_reason_code_distribution"])
             self.assertIn("protected_color_content", bleed_guard["skip_reason_code_distribution"])
             self.assertIn("protected_texture_or_archival_trace", bleed_guard["skip_reason_code_distribution"])
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
@@ -4880,33 +4834,21 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             safe_record = records[safe_name]
             safe_audit = safe_record["processing_audit"]
             safe_processed = Image.open(process_dir / safe_record["output_relative_path"]).convert("RGB")
-            self.assertIn(
-                safe_record["bleed_through_reason_code"],
-                {"applied_faint_reverse_ghost", "low_confidence", "protected_line_or_annotation"},
-            )
-            if safe_record["bleed_through_cleaned"]:
-                self.assertEqual(safe_record["bleed_through_reason_code"], "applied_faint_reverse_ghost")
-                self.assertGreater(safe_audit["bleed_through_delta"], 3.0)
-                self.assertGreater(safe_audit["bleed_through_changed_pixel_ratio"], 0.003)
-                self.assertEqual(safe_audit["combination_quality_guard_reason_code"], "safe_combination_passed")
-                self.assertGreater(
-                    _mean_luma(safe_processed, (144, 66, 220, 148)),
-                    _mean_luma(pages[safe_name], (144, 66, 220, 148)) + 0.02,
-                )
-            else:
-                self.assertIn(safe_record["bleed_through_reason_code"], {"low_confidence", "protected_line_or_annotation"})
-                self.assertEqual(safe_audit["bleed_through_delta"], 0.0)
-                self.assertEqual(safe_audit["bleed_through_changed_pixel_ratio"], 0.0)
-                self.assertIn(
-                    safe_audit["combination_quality_guard_reason_code"],
-                    {"safe_combination_passed", "low_confidence_original_preserved"},
-                )
+            self.assertTrue(safe_record["bleed_through_cleaned"])
+            self.assertEqual(safe_record["bleed_through_reason_code"], "applied_faint_reverse_ghost")
+            self.assertGreater(safe_audit["bleed_through_delta"], 3.0)
+            self.assertGreater(safe_audit["bleed_through_changed_pixel_ratio"], 0.003)
             self.assertLessEqual(safe_audit["bleed_through_changed_pixel_ratio"], 0.045)
             self.assertLessEqual(safe_audit["bleed_through_candidate_pixel_ratio"], 0.065)
             self.assertEqual(safe_audit["guardrail_failures"], [])
             self.assertEqual(safe_audit["local_content_change_guard_action"], "passed")
             self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["combination_quality_guard_reason_code"], "safe_combination_passed")
             self.assertEqual(safe_audit["processed_output_safety_guard_action"], "passed")
+            self.assertGreater(
+                _mean_luma(safe_processed, (144, 66, 220, 148)),
+                _mean_luma(pages[safe_name], (144, 66, 220, 148)) + 0.02,
+            )
             self.assertIsNone(
                 ImageChops.difference(
                     pages[safe_name].crop((30, 32, 130, 88)),
@@ -4928,41 +4870,20 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 record = records[name]
                 audit = record["processing_audit"]
                 processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
-                self.assertEqual(audit["bleed_through_reason_code"], record["bleed_through_reason_code"], name)
-                if record["bleed_through_cleaned"]:
-                    self.assertEqual(record["bleed_through_reason_code"], "applied_faint_reverse_ghost", name)
-                else:
-                    self.assertIn(
-                        record["bleed_through_reason_code"],
-                        {
-                            expected_code,
-                            "protected_line_or_annotation",
-                            "protected_edge_content",
-                            "protected_color_content",
-                            "protected_texture_or_archival_trace",
-                            "low_confidence",
-                        },
-                        name,
-                    )
-                self.assertLessEqual(audit["bleed_through_changed_pixel_ratio"], 0.01, name)
-                self.assertLessEqual(
-                    _changed_ratio(pages[name], processed, (0, 0, processed.width, processed.height)),
-                    0.01,
-                    name,
-                )
+                self.assertFalse(record["bleed_through_cleaned"], name)
+                self.assertEqual(record["bleed_through_reason_code"], expected_code, name)
+                self.assertEqual(audit["bleed_through_reason_code"], expected_code, name)
+                self.assertEqual(audit["bleed_through_changed_pixel_ratio"], 0.0, name)
+                self.assertIsNone(ImageChops.difference(pages[name].convert("RGB"), processed).getbbox(), name)
 
             bleed_guard = audit_summary["guardrails"]["bleed_through"]
             self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
             self.assertEqual(audit_summary["counts"]["failed_files"], 0)
-            self.assertLessEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 1)
-            self.assertLessEqual(bleed_guard["applied_files"], 1)
+            self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 1)
+            self.assertEqual(bleed_guard["applied_files"], 1)
             self.assertEqual(bleed_guard["skipped_files"], len(expected_codes))
-            self.assertLessEqual(bleed_guard["reason_code_distribution"].get("applied_faint_reverse_ghost", 0), 1)
-            self.assertGreaterEqual(
-                bleed_guard["skip_reason_code_distribution"].get("protected_line_or_annotation", 0)
-                + bleed_guard["skip_reason_code_distribution"].get("low_confidence", 0),
-                1,
-            )
+            self.assertEqual(bleed_guard["reason_code_distribution"]["applied_faint_reverse_ghost"], 1)
+            self.assertIn("protected_line_or_annotation", bleed_guard["skip_reason_code_distribution"])
             self.assertIn("protected_color_content", bleed_guard["skip_reason_code_distribution"])
             self.assertIn("protected_foreground_too_dense", bleed_guard["skip_reason_code_distribution"])
             self.assertIn("protected_edge_content", bleed_guard["skip_reason_code_distribution"])
@@ -5024,7 +4945,9 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 1)
             self.assertEqual(audit_summary["guardrails"]["bleed_through"]["applied_files"], 1)
             self.assertEqual(
-                audit_summary["guardrails"]["bleed_through"]["reason_code_distribution"].get("applied_faint_reverse_ghost", 0),
+                audit_summary["guardrails"]["bleed_through"]["reason_code_distribution"][
+                    "applied_faint_reverse_ghost"
+                ],
                 1,
             )
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
@@ -5079,25 +5002,19 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for name, expected_code in protected_expected_codes.items():
                 record = records[name]
                 audit = record["processing_audit"]
-                self.assertEqual(audit["bleed_through_reason_code"], record["bleed_through_reason_code"], name)
-                if record["bleed_through_cleaned"]:
-                    self.assertEqual(record["bleed_through_reason_code"], "applied_faint_reverse_ghost", name)
-                else:
-                    self.assertIn(record["bleed_through_reason_code"], {expected_code, "low_confidence"}, name)
-                self.assertLessEqual(audit["bleed_through_changed_pixel_ratio"], 0.01, name)
+                self.assertFalse(record["bleed_through_cleaned"], name)
+                self.assertEqual(record["bleed_through_reason_code"], expected_code, name)
+                self.assertEqual(audit["bleed_through_reason_code"], expected_code, name)
+                self.assertEqual(audit["bleed_through_changed_pixel_ratio"], 0.0, name)
 
             bleed_guard = audit_summary["guardrails"]["bleed_through"]
             self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
             self.assertEqual(audit_summary["counts"]["failed_files"], 0)
-            self.assertLessEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 1)
-            self.assertLessEqual(bleed_guard["applied_files"], 1)
+            self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 1)
+            self.assertEqual(bleed_guard["applied_files"], 1)
             self.assertEqual(bleed_guard["skipped_files"], len(protected_expected_codes))
-            self.assertLessEqual(bleed_guard["reason_code_distribution"].get("applied_faint_reverse_ghost", 0), 1)
-            self.assertGreaterEqual(
-                bleed_guard["skip_reason_code_distribution"].get("protected_line_or_annotation", 0)
-                + bleed_guard["skip_reason_code_distribution"].get("low_confidence", 0),
-                1,
-            )
+            self.assertEqual(bleed_guard["reason_code_distribution"]["applied_faint_reverse_ghost"], 1)
+            self.assertIn("protected_line_or_annotation", bleed_guard["skip_reason_code_distribution"])
             self.assertIn("protected_texture_or_archival_trace", bleed_guard["skip_reason_code_distribution"])
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertFalse(audit_summary["privacy"]["contains_paths"])
@@ -5137,48 +5054,25 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             }
 
             self.assertEqual(set(records), set(expected_reason_codes))
-            applied_records = []
             for name, expected_code in expected_reason_codes.items():
                 record = records[name]
                 audit = record["processing_audit"]
                 processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
                 original = pages[name].convert("RGB")
 
-                self.assertEqual(audit["bleed_through_reason_code"], record["bleed_through_reason_code"], name)
-                if record["bleed_through_cleaned"]:
-                    applied_records.append(name)
-                    self.assertEqual(record["bleed_through_reason_code"], "applied_faint_reverse_ghost", name)
-                else:
-                    self.assertIn(
-                        record["bleed_through_reason_code"],
-                        {
-                            expected_code,
-                            "protected_line_or_annotation",
-                            "protected_edge_content",
-                            "protected_color_content",
-                            "protected_texture_or_archival_trace",
-                            "low_confidence",
-                        },
-                        name,
-                    )
-                self.assertLessEqual(audit["bleed_through_changed_pixel_ratio"], 0.01, name)
+                self.assertFalse(record["bleed_through_cleaned"], name)
+                self.assertEqual(record["bleed_through_reason_code"], expected_code, name)
+                self.assertEqual(audit["bleed_through_reason_code"], expected_code, name)
+                self.assertEqual(audit["bleed_through_changed_pixel_ratio"], 0.0, name)
                 self.assertLessEqual(audit["bleed_through_candidate_pixel_ratio"], 0.065, name)
-                self.assertLessEqual(
-                    _changed_ratio(original, processed, (0, 0, processed.width, processed.height)),
-                    0.01,
-                    name,
-                )
-
-            self.assertLessEqual(len(applied_records), 1)
-            if applied_records:
-                self.assertEqual(applied_records, ["A001_page_number.png"])
+                self.assertIsNone(ImageChops.difference(original, processed).getbbox(), name)
 
             bleed_guard = audit_summary["guardrails"]["bleed_through"]
-            self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], len(applied_records))
-            self.assertEqual(bleed_guard["applied_files"], len(applied_records))
-            self.assertEqual(bleed_guard["skipped_files"], len(expected_reason_codes) - len(applied_records))
-            self.assertGreaterEqual(len(bleed_guard["skip_reason_code_distribution"]), 1)
-            self.assertGreaterEqual(len(bleed_guard["skip_reason_code_distribution"]), 1)
+            self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 0)
+            self.assertEqual(bleed_guard["applied_files"], 0)
+            self.assertEqual(bleed_guard["skipped_files"], len(expected_reason_codes))
+            self.assertIn("protected_line_or_annotation", bleed_guard["skip_reason_code_distribution"])
+            self.assertIn("protected_edge_content", bleed_guard["skip_reason_code_distribution"])
             self.assertIn("protected_color_content", bleed_guard["skip_reason_code_distribution"])
             self.assertIn("protected_texture_or_archival_trace", bleed_guard["skip_reason_code_distribution"])
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
@@ -8304,8 +8198,9 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             safe_record = records["private_safe_mild_typed_body.png"]
             safe_audit = safe_record["processing_audit"]
             with Image.open(process_dir / safe_record["output_relative_path"]) as safe_output:
+                self.assertTrue(safe_record["text_edges_sharpened"])
                 self.assertIn("sharpen_text_edges_conservative", safe_record["operations"])
-                self.assertGreaterEqual(_edge_energy(safe_output), _edge_energy(safe_source) * 0.85)
+                self.assertGreater(_edge_energy(safe_output), _edge_energy(safe_source))
                 self.assertGreater(safe_audit["text_edges_edge_energy_after"], safe_audit["text_edges_edge_energy_before"])
                 self.assertGreater(safe_audit["text_edges_changed_pixel_ratio"], 0.0)
                 self.assertLessEqual(safe_audit["text_edges_changed_pixel_ratio"], 0.08)
@@ -8397,7 +8292,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             with Image.open(process_dir / safe_record["output_relative_path"]) as safe_output:
                 self.assertTrue(safe_record["text_edges_sharpened"])
                 self.assertIn("sharpen_text_edges_conservative", safe_record["operations"])
-                self.assertGreaterEqual(_edge_energy(safe_output), _edge_energy(safe_source) * 0.85)
+                self.assertGreater(_edge_energy(safe_output), _edge_energy(safe_source))
                 self.assertGreater(safe_audit["text_edges_edge_energy_after"], safe_audit["text_edges_edge_energy_before"])
                 self.assertGreater(safe_audit["text_edges_changed_pixel_ratio"], 0.0)
                 self.assertLessEqual(safe_audit["text_edges_changed_pixel_ratio"], 0.08)
