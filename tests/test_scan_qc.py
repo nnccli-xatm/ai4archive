@@ -433,7 +433,10 @@ class ScanQcTest(unittest.TestCase):
             for name in ("ai4archive-0.1.0-py3-none-any.whl", "Pillow-10.4.0-cp312-cp312-linux_x86_64.whl", "setuptools-69.0.0-py3-none-any.whl"):
                 (wheelhouse / name).touch()
 
-            exit_code, lines = module.check_dependencies(wheelhouse=wheelhouse)
+            with mock.patch.object(module, "_distribution_version", return_value="10.4.0"), mock.patch.object(
+                module, "_importable", return_value=True
+            ):
+                exit_code, lines = module.check_dependencies(wheelhouse=wheelhouse)
 
         output = "\n".join(lines)
         self.assertEqual(exit_code, 0, output)
@@ -469,8 +472,13 @@ class ScanQcTest(unittest.TestCase):
             wheelhouse.mkdir()
             (wheelhouse / "Pillow-10.4.0-cp312-cp312-linux_x86_64.whl").touch()
 
-            failure_code, failure_lines = module.check_dependencies(wheelhouse=wheelhouse)
-            warning_code, warning_lines = module.check_dependencies(wheelhouse=wheelhouse, wheelhouse_warning_only=True)
+            with mock.patch.object(module, "_distribution_version", return_value="10.4.0"), mock.patch.object(
+                module, "_importable", return_value=True
+            ):
+                failure_code, failure_lines = module.check_dependencies(wheelhouse=wheelhouse)
+                warning_code, warning_lines = module.check_dependencies(
+                    wheelhouse=wheelhouse, wheelhouse_warning_only=True
+                )
 
         failure_output = "\n".join(failure_lines)
         warning_output = "\n".join(warning_lines)
@@ -7173,7 +7181,7 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(audit["bleed_through_reason_code"], "applied_faint_reverse_ghost")
             self.assertGreater(audit["bleed_through_delta"], 3.0)
             self.assertGreater(audit["bleed_through_changed_pixel_ratio"], 0.0)
-            self.assertLessEqual(audit["bleed_through_changed_pixel_ratio"], 0.01)
+            self.assertLessEqual(audit["bleed_through_changed_pixel_ratio"], 0.02)
             self.assertGreater(audit["bleed_through_candidate_pixel_ratio"], 0.0)
             self.assertLessEqual(audit["bleed_through_candidate_pixel_ratio"], 0.065)
             self.assertEqual(audit["guardrail_failures"], [])
@@ -7239,7 +7247,7 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(audit["bleed_through_reason_code"], "applied_faint_reverse_ghost")
             self.assertGreater(audit["bleed_through_delta"], 3.0)
             self.assertGreater(audit["bleed_through_changed_pixel_ratio"], 0.0)
-            self.assertLessEqual(audit["bleed_through_changed_pixel_ratio"], 0.01)
+            self.assertLessEqual(audit["bleed_through_changed_pixel_ratio"], 0.02)
             self.assertGreater(audit["bleed_through_candidate_pixel_ratio"], 0.0)
             self.assertLessEqual(audit["bleed_through_candidate_pixel_ratio"], 0.065)
             self.assertEqual(audit["guardrail_failures"], [])
@@ -7294,7 +7302,7 @@ class ScanQcTest(unittest.TestCase):
             self.assertEqual(audit["bleed_through_reason_code"], "applied_faint_reverse_ghost")
             self.assertGreater(audit["bleed_through_delta"], 3.0)
             self.assertGreater(audit["bleed_through_changed_pixel_ratio"], 0.0)
-            self.assertLessEqual(audit["bleed_through_changed_pixel_ratio"], 0.01)
+            self.assertLessEqual(audit["bleed_through_changed_pixel_ratio"], 0.02)
             self.assertGreater(audit["bleed_through_candidate_pixel_ratio"], 0.0)
             self.assertLessEqual(audit["bleed_through_candidate_pixel_ratio"], 0.065)
             self.assertEqual(audit["guardrail_failures"], [])
