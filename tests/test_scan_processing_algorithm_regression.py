@@ -8416,9 +8416,11 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "A001_safe_cleanup_control.png": _physical_evidence_guard_page("safe_cleanup_control"),
                 "A002_torn_or_repaired_edge.png": _physical_evidence_guard_page("torn_or_repaired_edge"),
                 "A003_binder_punch_hole.png": _physical_evidence_guard_page("binder_punch_hole"),
-                "A004_archival_tape_residue.png": _physical_evidence_guard_page("archival_tape_residue"),
-                "A005_staple_shadow.png": _physical_evidence_guard_page("staple_shadow"),
-                "A006_edge_wear.png": _physical_evidence_guard_page("edge_wear"),
+                "A004_archival_tape_strip_and_halo.png": _physical_evidence_guard_page("archival_tape_strip_and_halo"),
+                "A005_rusty_staple_transfer.png": _physical_evidence_guard_page("rusty_staple_transfer"),
+                "A006_clip_pressure_trace.png": _physical_evidence_guard_page("clip_pressure_trace"),
+                "A007_edge_wear.png": _physical_evidence_guard_page("edge_wear"),
+                "A008_faint_foreground_near_tape.png": _physical_evidence_guard_page("faint_foreground_near_tape"),
             }
             source_bytes: dict[str, bytes] = {}
             for name, image in pages.items():
@@ -8450,9 +8452,11 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             protected_boxes = {
                 "A002_torn_or_repaired_edge.png": (6, 44, 34, 208),
                 "A003_binder_punch_hole.png": (6, 56, 58, 192),
-                "A004_archival_tape_residue.png": (8, 22, 52, 198),
-                "A005_staple_shadow.png": (18, 22, 68, 72),
-                "A006_edge_wear.png": (8, 20, 58, 210),
+                "A004_archival_tape_strip_and_halo.png": (8, 18, 64, 202),
+                "A005_rusty_staple_transfer.png": (14, 18, 84, 78),
+                "A006_clip_pressure_trace.png": (10, 22, 74, 88),
+                "A007_edge_wear.png": (8, 20, 58, 210),
+                "A008_faint_foreground_near_tape.png": (12, 24, 98, 196),
             }
             for name in protected_names:
                 record = records[name]
@@ -8478,6 +8482,9 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
 
             self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
             self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertIn("timing", audit_summary)
+            self.assertIn("operation_timings", audit_summary["timing"])
+            self.assertGreater(len(audit_summary["timing"]["operation_timings"]), 0)
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertFalse(audit_summary["privacy"]["contains_paths"])
             self.assertFalse(audit_summary["privacy"]["contains_hashes"])
@@ -11631,14 +11638,40 @@ def _physical_evidence_guard_page(variant: str) -> Image.Image:
         draw.rectangle((10, 26, 42, 198), fill=(232, 226, 186))
         draw.line((11, 26, 41, 198), fill=(214, 204, 166), width=2)
         return image
+    if variant == "archival_tape_strip_and_halo":
+        draw.rectangle((12, 24, 42, 196), fill=(229, 222, 184))
+        draw.rectangle((16, 30, 38, 190), fill=(235, 229, 196))
+        draw.line((17, 30, 37, 190), fill=(214, 206, 170), width=2)
+        halo = Image.new("L", image.size, 0)
+        halo_draw = ImageDraw.Draw(halo)
+        halo_draw.rectangle((8, 20, 56, 202), fill=84)
+        halo = halo.filter(ImageFilter.GaussianBlur(5))
+        return Image.composite(Image.new("RGB", image.size, (236, 230, 206)), image, halo)
     if variant == "staple_shadow":
         draw.rectangle((22, 26, 58, 40), fill=(100, 100, 98))
         draw.rectangle((24, 44, 60, 58), fill=(110, 110, 108))
+        return image
+    if variant == "rusty_staple_transfer":
+        draw.rectangle((18, 24, 54, 36), fill=(126, 114, 102))
+        draw.rectangle((22, 46, 58, 58), fill=(136, 120, 104))
+        draw.line((20, 22, 82, 62), fill=(154, 118, 92), width=2)
+        draw.ellipse((70, 52, 84, 66), fill=(168, 126, 98))
+        return image
+    if variant == "clip_pressure_trace":
+        draw.arc((10, 24, 66, 82), start=260, end=85, fill=(138, 134, 126), width=3)
+        draw.arc((22, 34, 74, 86), start=248, end=78, fill=(188, 182, 172), width=2)
+        draw.line((20, 70, 58, 70), fill=(146, 140, 132), width=2)
         return image
     if variant == "edge_wear":
         for y in range(20, 208, 7):
             shade = 226 + (y % 8)
             draw.rectangle((8, y, 18 + (y % 5), y + 2), fill=(shade, shade - 2, shade - 4))
+        return image
+    if variant == "faint_foreground_near_tape":
+        draw.rectangle((16, 26, 42, 194), fill=(231, 225, 188))
+        draw.line((14, 72, 96, 60), fill=(114, 108, 102), width=1)
+        draw.line((16, 94, 92, 86), fill=(120, 114, 108), width=1)
+        draw.line((18, 116, 88, 108), fill=(116, 110, 104), width=1)
         return image
     raise ValueError(f"unsupported physical evidence variant: {variant}")
 
