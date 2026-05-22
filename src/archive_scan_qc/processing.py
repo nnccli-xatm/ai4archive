@@ -13206,6 +13206,8 @@ def _detect_conservative_crop_bbox(image: Image.Image) -> CropDetection:
 
     grayscale = image.convert("L")
     background = _corner_background_value(grayscale)
+    if not _has_light_page_background_for_auto_crop(grayscale):
+        return CropDetection(None, "no light page background for auto crop")
     diff = grayscale.point(lambda value: 255 if abs(value - background) >= 18 else 0)
     strong_bbox = diff.getbbox()
     strong_result: CropDetection | None = None
@@ -13240,6 +13242,18 @@ def _detect_conservative_crop_bbox(image: Image.Image) -> CropDetection:
         return strong_result or CropDetection(None, "crop boundary evidence is too sparse")
 
     return CropDetection((left, top, right, bottom), "conservative crop applied")
+
+
+def _has_light_page_background_for_auto_crop(image: Image.Image) -> bool:
+    histogram = image.histogram()
+    area = image.width * image.height
+    if area <= 0:
+        return False
+    bright_percentile = float(_histogram_percentile(histogram, area, 0.82))
+    if bright_percentile < 140.0:
+        return False
+    dark_pixels = sum(histogram[:80])
+    return (dark_pixels / area) <= 0.78
 
 
 def _conservative_crop_candidate_from_bbox(

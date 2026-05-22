@@ -6694,6 +6694,120 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*source_bytes.keys(), str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_reversal_tone_and_microfilm_frame_originals_stay_preserved_with_safe_control(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-reversal-tone-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            def page(variant: str) -> Image.Image:
+                if variant == "safe_neutral_control":
+                    return _low_density_diffuse_bleed_through_page()
+                image = Image.new("RGB", (260, 190), (20, 20, 20))
+                draw = ImageDraw.Draw(image)
+                if variant == "reversal_typed_marks":
+                    for y in (44, 66, 88, 110):
+                        draw.rectangle((34, y, 194, y + 3), fill=(228, 228, 224))
+                    draw.rectangle((210, 148, 240, 158), fill=(230, 230, 226))
+                    return image
+                if variant == "microfilm_contact_frame":
+                    draw.rectangle((10, 12, 250, 178), outline=(236, 236, 232), width=2)
+                    draw.rectangle((24, 28, 236, 162), outline=(212, 212, 208), width=1)
+                    draw.rectangle((42, 56, 210, 60), fill=(228, 228, 224))
+                    draw.rectangle((42, 82, 214, 86), fill=(228, 228, 224))
+                    draw.rectangle((42, 108, 200, 112), fill=(228, 228, 224))
+                    return image
+                if variant == "black_backing_edge_evidence":
+                    draw.rectangle((0, 0, 259, 189), fill=(16, 16, 16))
+                    draw.rectangle((14, 12, 246, 176), outline=(78, 78, 78), width=2)
+                    draw.rectangle((34, 42, 214, 46), fill=(230, 230, 226))
+                    draw.rectangle((34, 68, 202, 72), fill=(230, 230, 226))
+                    draw.rectangle((34, 94, 206, 98), fill=(230, 230, 226))
+                    return image
+                if variant == "dark_photo_insert":
+                    for y in (38, 62, 86):
+                        draw.rectangle((24, y, 116, y + 3), fill=(226, 226, 222))
+                    for y in range(34, 150):
+                        for x in range(144, 248):
+                            shade = 34 + ((x * 7 + y * 5) % 82)
+                            draw.point((x, y), fill=(shade, shade, shade))
+                    draw.rectangle((138, 28, 252, 156), outline=(200, 200, 196), width=1)
+                    return image
+                raise ValueError(f"unsupported variant: {variant}")
+
+            variants = (
+                "safe_neutral_control",
+                "reversal_typed_marks",
+                "microfilm_contact_frame",
+                "black_backing_edge_evidence",
+                "dark_photo_insert",
+            )
+            source_bytes: dict[str, bytes] = {}
+            for variant in variants:
+                source = input_dir / f"private_full_chain_reversal_guard_{variant}.png"
+                page(variant).save(source, dpi=(300, 300))
+                source_bytes[source.name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-reversal-tone-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            safe_name = "private_full_chain_reversal_guard_safe_neutral_control.png"
+            safe_record = records[safe_name]
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertEqual(safe_record["processing_audit"]["guardrail_failures"], [])
+            self.assertEqual(safe_record["processing_audit"]["cumulative_change_guard_action"], "passed")
+            self.assertTrue(safe_record["paper_color_cast_normalized"])
+            self.assertIn("normalize_paper_color_cast_conservative", safe_record["operations"])
+            self.assertGreater(safe_record["processing_audit"]["paper_color_cast_changed_pixel_ratio"], 0.08)
+            self.assertIn(
+                safe_record["processing_audit"]["combination_quality_guard_reason_code"],
+                {"safe_combination_passed", "low_confidence_original_preserved"},
+            )
+
+            protected_names = [
+                "private_full_chain_reversal_guard_reversal_typed_marks.png",
+                "private_full_chain_reversal_guard_microfilm_contact_frame.png",
+                "private_full_chain_reversal_guard_black_backing_edge_evidence.png",
+                "private_full_chain_reversal_guard_dark_photo_insert.png",
+            ]
+            for name in protected_names:
+                record = records[name]
+                self.assertEqual(record["status"], "processed", name)
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
+                self.assertEqual(record["processing_audit"]["guardrail_failures"], [], name)
+                self.assertEqual(record["processing_audit"]["cumulative_change_guard_action"], "passed", name)
+                self.assertFalse(record["dark_border_trimmed"], name)
+                self.assertFalse(record["deskewed"], name)
+                self.assertFalse(record["cropped"], name)
+                self.assertFalse(record["illumination_gradient_levelled"], name)
+                self.assertFalse(record["text_edges_sharpened"], name)
+                self.assertIn("despeckle_noop", record["operations"], name)
+                self.assertIn("sharpen_text_edges_noop", record["operations"], name)
+                self.assertIn(
+                    record["processing_audit"]["combination_quality_guard_reason_code"],
+                    {"safe_combination_passed", "low_confidence_original_preserved"},
+                    name,
+                )
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(variants))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertGreaterEqual(audit_summary["counts"]["dark_border_skipped_files"], len(protected_names))
+            self.assertGreaterEqual(audit_summary["counts"]["auto_crop_skipped_files"], len(protected_names))
+            self.assertGreaterEqual(audit_summary["counts"]["deskew_skipped_files"], len(protected_names))
+            self.assertGreaterEqual(audit_summary["counts"]["illumination_gradient_skipped_files"], len(protected_names))
+            self.assertGreaterEqual(audit_summary["counts"]["despeckle_skipped_files"], len(protected_names))
+            self.assertGreaterEqual(audit_summary["counts"]["text_edges_skipped_files"], len(protected_names))
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*source_bytes.keys(), str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_narrow_uneven_single_edge_shadow_trim_preserves_protected_lookalikes(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-narrow-uneven-single-edge-") as temp_dir:
             root = Path(temp_dir)
