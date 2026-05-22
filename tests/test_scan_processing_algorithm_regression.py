@@ -8925,6 +8925,104 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_seal_ribbons_string_ties_and_hanging_tags_stay_preserved_with_safe_cleanup_control(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-seal-ribbon-tag-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "A001_safe_neutral_cleanup_control.png": _water_damage_evidence_guard_page("safe_neutral_cleanup_control"),
+                "A002_seal_ribbon_tail.png": _seal_ribbon_tag_guard_page("seal_ribbon_tail"),
+                "A003_string_tie_knot.png": _seal_ribbon_tag_guard_page("string_tie_knot"),
+                "A004_cord_shadow_crossing_edge.png": _seal_ribbon_tag_guard_page("cord_shadow_crossing_edge"),
+                "A005_hanging_margin_tag.png": _seal_ribbon_tag_guard_page("hanging_margin_tag"),
+                "A006_small_tag_hole_loop.png": _seal_ribbon_tag_guard_page("small_tag_hole_loop"),
+                "A007_faint_foreground_near_tie.png": _seal_ribbon_tag_guard_page("faint_foreground_near_tie"),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            safe_name = "A001_safe_neutral_cleanup_control.png"
+            safe_before = pages[safe_name].convert("L")
+            safe_before_stain = _mean_luma(safe_before, (186, 66, 254, 128))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-seal-ribbon-tag", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            with Image.open(process_dir / safe_record["output_relative_path"]) as processed_image:
+                safe_after = processed_image.convert("L")
+                safe_after_stain = _mean_luma(safe_after, (186, 66, 254, 128))
+
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertIn(safe_audit["combination_quality_guard_action"], {"passed", "kept_original"})
+            self.assertEqual(safe_audit["local_content_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed")
+            self.assertTrue(safe_record["background_stains_lightened"])
+            self.assertIn("lighten_background_stains_conservative", safe_record["operations"])
+            self.assertGreaterEqual(safe_audit["background_stains_delta"], 1.0)
+            self.assertGreater(safe_after_stain - safe_before_stain, 0.5)
+            self.assertGreater(safe_audit["background_stains_changed_pixel_ratio"], 0.0)
+            self.assertLessEqual(safe_audit["background_stains_changed_pixel_ratio"], 0.08)
+            self.assertLessEqual(safe_audit["cumulative_change_pixel_ratio"], 0.98)
+            self.assertLessEqual(safe_audit["cumulative_change_score"], 1.0)
+
+            protected_names = [name for name in pages if name != safe_name]
+            protected_boxes = {
+                "A002_seal_ribbon_tail.png": (6, 34, 86, 198),
+                "A003_string_tie_knot.png": (6, 38, 132, 198),
+                "A004_cord_shadow_crossing_edge.png": (4, 20, 194, 208),
+                "A005_hanging_margin_tag.png": (212, 18, 278, 132),
+                "A006_small_tag_hole_loop.png": (6, 34, 86, 198),
+                "A007_faint_foreground_near_tie.png": (6, 28, 136, 206),
+            }
+            for name in protected_names:
+                record = records[name]
+                audit = record["processing_audit"]
+                before = pages[name].convert("RGB")
+                with Image.open(process_dir / record["output_relative_path"]) as output_image:
+                    after = output_image.convert("RGB")
+                self.assertEqual(record["status"], "processed", name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertIn(
+                    audit["combination_quality_guard_action"],
+                    {"passed", "kept_original", "reverted_to_source"},
+                    name,
+                )
+                self.assertLessEqual(_changed_ratio(before, after, protected_boxes[name]), 0.03, name)
+                reason_codes = [
+                    record.get("edge_shadow_reason_code"),
+                    record.get("fold_shadows_reason_code"),
+                    record.get("dark_border_reason_code"),
+                    record.get("background_stains_reason_code"),
+                    record.get("despeckle_reason_code"),
+                ]
+                self.assertTrue(any(isinstance(code, str) and code for code in reason_codes), name)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertIn("timing", audit_summary)
+            self.assertIn("operation_timings", audit_summary["timing"])
+            self.assertGreater(len(audit_summary["timing"]["operation_timings"]), 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_water_damage_evidence_stays_preserved_with_safe_cleanup_control(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-water-damage-") as temp_dir:
             root = Path(temp_dir)
@@ -12283,6 +12381,64 @@ def _attached_pasted_evidence_guard_page(variant: str) -> Image.Image:
         draw.line((156, 172, 236, 164), fill=(116, 110, 102), width=1)
         return image
     raise ValueError(f"unsupported attached/pasted evidence variant: {variant}")
+
+
+def _seal_ribbon_tag_guard_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (280, 220), (242, 240, 236))
+    draw = ImageDraw.Draw(image)
+    for y in (56, 82, 108, 134):
+        draw.rectangle((74, y, 226, y + 4), fill=(58, 58, 58))
+    draw.rectangle((120, 154, 256, 172), fill=(236, 234, 230))
+
+    if variant == "safe_neutral_cleanup_control":
+        mask = Image.new("L", image.size, 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.ellipse((188, 66, 266, 132), fill=104)
+        mask_draw.ellipse((204, 84, 276, 154), fill=92)
+        mask = mask.filter(ImageFilter.GaussianBlur(8))
+        image = Image.composite(Image.new("RGB", image.size, (232, 230, 224)), image, mask)
+        draw = ImageDraw.Draw(image)
+        for y in (76, 98, 120):
+            draw.rectangle((176, y, 270, y + 2), fill=(224, 221, 214))
+        return image
+    if variant == "seal_ribbon_tail":
+        draw.polygon([(8, 30), (26, 44), (18, 162), (8, 188)], fill=(152, 68, 66))
+        draw.polygon([(24, 40), (40, 56), (32, 172), (20, 196)], fill=(184, 82, 78))
+        draw.ellipse((8, 24, 38, 54), fill=(188, 82, 80))
+        return image
+    if variant == "string_tie_knot":
+        draw.line((10, 32, 60, 76), fill=(124, 116, 98), width=2)
+        draw.line((58, 76, 128, 146), fill=(124, 116, 98), width=2)
+        draw.line((58, 76, 112, 44), fill=(128, 120, 102), width=2)
+        draw.ellipse((48, 66, 68, 86), outline=(116, 108, 90), width=2)
+        draw.ellipse((58, 70, 70, 82), fill=(132, 124, 104))
+        return image
+    if variant == "cord_shadow_crossing_edge":
+        draw.line((4, 30, 174, 170), fill=(122, 114, 102), width=2)
+        draw.line((6, 34, 176, 174), fill=(210, 204, 192), width=1)
+        draw.line((28, 62, 86, 52), fill=(114, 108, 100), width=1)
+        draw.line((34, 90, 92, 82), fill=(114, 108, 100), width=1)
+        return image
+    if variant == "hanging_margin_tag":
+        draw.rectangle((214, 22, 272, 122), fill=(236, 230, 198))
+        draw.rectangle((220, 30, 266, 116), fill=(242, 236, 206))
+        draw.ellipse((238, 40, 250, 52), outline=(118, 112, 102), width=2)
+        draw.line((242, 22, 208, 6), fill=(126, 118, 106), width=2)
+        draw.text((228, 72), "T-6", fill=(90, 88, 82), font=ImageFont.load_default())
+        return image
+    if variant == "small_tag_hole_loop":
+        draw.polygon([(10, 44), (44, 56), (34, 188), (8, 170)], fill=(236, 230, 198))
+        draw.ellipse((22, 64, 34, 76), outline=(116, 110, 100), width=2)
+        draw.arc((10, 30, 54, 80), start=220, end=330, fill=(122, 116, 106), width=2)
+        return image
+    if variant == "faint_foreground_near_tie":
+        draw.line((10, 34, 126, 150), fill=(130, 122, 106), width=2)
+        draw.ellipse((48, 72, 66, 90), outline=(116, 108, 94), width=2)
+        draw.line((20, 74, 104, 64), fill=(114, 108, 100), width=1)
+        draw.line((22, 100, 106, 90), fill=(116, 110, 102), width=1)
+        draw.line((24, 126, 108, 118), fill=(116, 110, 102), width=1)
+        return image
+    raise ValueError(f"unsupported seal ribbon/tag variant: {variant}")
 
 
 def _water_damage_evidence_guard_page(variant: str) -> Image.Image:
