@@ -7715,6 +7715,128 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages.keys(), str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_single_edge_post_deskew_crop_applies_to_safe_page_and_skips_protected_edge_evidence(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-single-edge-post-deskew-mixed-safety-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_single_edge_safe_page.png": _single_edge_post_deskew_light_canvas_page(),
+                "synthetic_single_edge_page_number.png": _single_edge_post_deskew_light_canvas_page(
+                    variant="page_number"
+                ),
+                "synthetic_single_edge_marginal_note.png": _single_edge_post_deskew_light_canvas_page(
+                    variant="edge_handwriting"
+                ),
+                "synthetic_single_edge_stamp.png": _single_edge_post_deskew_light_canvas_page(variant="stamp"),
+                "synthetic_single_edge_fold_out_mark.png": _single_edge_post_deskew_light_canvas_page(
+                    variant="fold_out_edge"
+                ),
+                "synthetic_single_edge_thin_border_evidence.png": _single_edge_post_deskew_light_canvas_page(
+                    variant="thin_border_evidence"
+                ),
+            }
+            for filename, page in pages.items():
+                page.save(input_dir / filename, dpi=(300, 300))
+
+            report = scan_batch(
+                ScanConfig("synthetic-regression", "single-edge-post-deskew-mixed-safety", input_dir, output_dir)
+            )
+            with mock.patch.object(
+                processing_module,
+                "_detect_skew",
+                return_value=processing_module.SkewDetection(0.35, 1.0, "synthetic single-edge deskew"),
+            ), mock.patch.object(
+                processing_module,
+                "_safe_deskew_skip_from_scan_record",
+                return_value=None,
+            ), mock.patch.object(
+                processing_module,
+                "_safe_deskew_skip_from_page_evidence",
+                return_value=None,
+            ), mock.patch.object(
+                processing_module,
+                "_deskew_has_edge_content_risk",
+                return_value=False,
+            ), mock.patch.object(
+                processing_module,
+                "_deskew_has_color_or_table_risk",
+                return_value=False,
+            ), mock.patch.object(
+                processing_module,
+                "_rotate_for_deskew",
+                side_effect=lambda image, _angle: image.copy(),
+            ):
+                manifest = process_images(
+                    report,
+                    input_dir,
+                    process_dir,
+                    ProcessingOptions(auto_crop=True, deskew=True, workers=1),
+                )
+
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_record = records["synthetic_single_edge_safe_page.png"]
+            safe_audit = safe_record["processing_audit"]
+            self.assertTrue(safe_record["deskewed"])
+            self.assertLessEqual(abs(safe_record["skew_angle_degrees"]), 0.5)
+            self.assertTrue(safe_record["cropped"])
+            self.assertEqual(safe_record["crop_reason"], "post-deskew safe canvas crop applied")
+            self.assertEqual(safe_record["crop_bbox"], [14, 0, 320, 240])
+            self.assertEqual(safe_record["output_size"], [306, 240])
+            self.assertLessEqual(safe_audit["crop_ratio"], 0.05)
+            self.assertLessEqual(safe_audit["cumulative_change_crop_ratio"], 0.05)
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+
+            protected_names = set(pages) - {"synthetic_single_edge_safe_page.png"}
+            for name in protected_names:
+                record = records[name]
+                self.assertTrue(record["deskewed"], name)
+                self.assertFalse(record["cropped"], name)
+                self.assertEqual(record["output_size"], [320, 240], name)
+                self.assertIn(
+                    record["crop_reason"],
+                    {
+                        "post-deskew crop skipped: edge content protection",
+                        "foreground reaches crop safety margin",
+                    },
+                    name,
+                )
+                with Image.open(input_dir / name) as source, Image.open(
+                    process_dir / record["output_relative_path"]
+                ) as processed:
+                    self.assertIsNone(ImageChops.difference(source, processed).getbbox(), name)
+                self.assertEqual(record["processing_audit"]["crop_ratio"], 0.0, name)
+                self.assertEqual(record["processing_audit"]["cumulative_change_crop_ratio"], 0.0, name)
+                self.assertEqual(record["processing_audit"]["guardrail_failures"], [], name)
+
+            auto_crop_guard = audit_summary["guardrails"]["auto_crop"]
+            self.assertEqual(audit_summary["counts"]["auto_crop_applied_files"], 1)
+            self.assertEqual(audit_summary["counts"]["auto_crop_skipped_files"], len(protected_names))
+            self.assertEqual(
+                auto_crop_guard["reason_distribution"]["post-deskew safe canvas crop applied"],
+                1,
+            )
+            self.assertEqual(
+                sum(auto_crop_guard["skip_reason_distribution"].values()),
+                len(protected_names),
+            )
+            self.assertGreaterEqual(
+                auto_crop_guard["skip_reason_distribution"].get(
+                    "post-deskew crop skipped: edge content protection", 0
+                ),
+                4,
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages.keys(), str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_adjacent_two_edge_post_deskew_canvas_trims_safe_light_wedges(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-two-edge-post-deskew-canvas-") as temp_dir:
             root = Path(temp_dir)
@@ -12238,6 +12360,13 @@ def _single_edge_post_deskew_light_canvas_page(variant: str = "safe") -> Image.I
         draw.line((6, 18, 6, 216), fill=(233, 233, 233), width=1)
         for y in range(34, 190, 31):
             draw.line((3, y, 11, y + 3), fill=(230, 230, 230), width=1)
+    elif variant == "fold_out_edge":
+        draw.line((2, 26, 11, 52), fill=(230, 230, 230), width=1)
+        draw.line((3, 26, 12, 52), fill=(231, 231, 231), width=1)
+        draw.line((2, 52, 9, 68), fill=(230, 230, 230), width=1)
+    elif variant == "thin_border_evidence":
+        draw.line((2, 2, 2, 238), fill=(232, 232, 232), width=1)
+        draw.line((2, 2, 24, 2), fill=(232, 232, 232), width=1)
     elif variant != "safe":
         raise ValueError(f"unsupported variant: {variant}")
     return image
