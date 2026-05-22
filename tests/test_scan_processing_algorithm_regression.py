@@ -9025,6 +9025,106 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_fold_out_map_panel_evidence_stays_preserved_with_safe_cleanup_control(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-fold-out-map-panel-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "A001_safe_neutral_cleanup_control.png": _fold_out_map_panel_guard_page("safe_neutral_cleanup_control"),
+                "A002_fold_out_panel_seam.png": _fold_out_map_panel_guard_page("fold_out_panel_seam"),
+                "A003_map_panel_boundary_ticks.png": _fold_out_map_panel_guard_page("map_panel_boundary_ticks"),
+                "A004_accordion_insert_crease.png": _fold_out_map_panel_guard_page("accordion_insert_crease"),
+                "A005_old_fold_line_crossing_content.png": _fold_out_map_panel_guard_page("old_fold_line_crossing_content"),
+                "A006_oversized_insert_edge_boundary.png": _fold_out_map_panel_guard_page("oversized_insert_edge_boundary"),
+                "A007_faint_foreground_near_panel_seam.png": _fold_out_map_panel_guard_page(
+                    "faint_foreground_near_panel_seam"
+                ),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-fold-out-map-panel", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_name = "A001_safe_neutral_cleanup_control.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertEqual(safe_audit["local_content_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed")
+            self.assertIn(safe_audit["combination_quality_guard_action"], {"passed", "kept_original"})
+            self.assertLessEqual(safe_audit["cumulative_change_pixel_ratio"], 0.98)
+            self.assertLessEqual(safe_audit["cumulative_change_score"], 1.0)
+
+            protected_names = [name for name in pages if name != safe_name]
+            protected_boxes = {
+                "A002_fold_out_panel_seam.png": (78, 18, 146, 206),
+                "A003_map_panel_boundary_ticks.png": (134, 24, 200, 198),
+                "A004_accordion_insert_crease.png": (40, 18, 170, 206),
+                "A005_old_fold_line_crossing_content.png": (28, 30, 214, 182),
+                "A006_oversized_insert_edge_boundary.png": (230, 18, 236, 206),
+                "A007_faint_foreground_near_panel_seam.png": (88, 54, 196, 186),
+            }
+            for name in protected_names:
+                record = records[name]
+                audit = record["processing_audit"]
+                before = pages[name].convert("RGB")
+                with Image.open(process_dir / record["output_relative_path"]) as output_image:
+                    after = output_image.convert("RGB")
+                self.assertEqual(record["status"], "processed", name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertIn(
+                    audit["combination_quality_guard_action"],
+                    {"passed", "kept_original", "reverted_to_source"},
+                    name,
+                )
+                if name == "A006_oversized_insert_edge_boundary.png":
+                    before_l = before.convert("L")
+                    after_l = after.convert("L")
+                    for point, adjacent in (
+                        ((232, 24), (226, 24)),
+                        ((232, 108), (226, 108)),
+                        ((232, 198), (226, 198)),
+                        ((248, 42), (248, 36)),
+                        ((248, 74), (248, 68)),
+                    ):
+                        before_contrast = abs(before_l.getpixel(point) - before_l.getpixel(adjacent))
+                        after_contrast = abs(after_l.getpixel(point) - after_l.getpixel(adjacent))
+                        self.assertGreaterEqual(after_contrast, min(14.0, before_contrast * 0.5), name)
+                else:
+                    self.assertLess(_changed_ratio(before, after, protected_boxes[name]), 0.02, name)
+                reason_codes = [
+                    record.get("edge_shadow_reason_code"),
+                    record.get("background_stains_reason_code"),
+                    record.get("bleed_through_reason_code"),
+                    record.get("fold_shadows_reason_code"),
+                ]
+                self.assertTrue(any(isinstance(code, str) and code for code in reason_codes), name)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertIn("timing", audit_summary)
+            self.assertIn("operation_timings", audit_summary["timing"])
+            self.assertGreater(len(audit_summary["timing"]["operation_timings"]), 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_quality_regression_reports_missing_operation_timing_code_without_private_rows(self) -> None:
         quality = _processing_quality_regression(
             {
@@ -12243,6 +12343,62 @@ def _water_damage_evidence_guard_page(variant: str) -> Image.Image:
         return image
 
     raise ValueError(f"unsupported water damage variant: {variant}")
+
+
+def _fold_out_map_panel_guard_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (320, 224), (242, 240, 234))
+    draw = ImageDraw.Draw(image)
+    for y in (48, 74, 100, 126):
+        draw.rectangle((34, y, 146, y + 4), fill=(54, 54, 52))
+    draw.rectangle((164, 152, 300, 172), fill=(236, 234, 228))
+
+    if variant == "safe_neutral_cleanup_control":
+        mask = Image.new("L", image.size, 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.ellipse((196, 66, 266, 132), fill=112)
+        mask_draw.ellipse((214, 90, 286, 156), fill=96)
+        mask = mask.filter(ImageFilter.GaussianBlur(7))
+        return Image.composite(Image.new("RGB", image.size, (232, 230, 224)), image, mask)
+    if variant == "fold_out_panel_seam":
+        draw.line((112, 14, 112, 210), fill=(126, 120, 112), width=2)
+        draw.line((114, 14, 114, 210), fill=(210, 206, 198), width=1)
+        draw.line((108, 36, 98, 48, 106, 58), fill=(112, 106, 98), width=1)
+        return image
+    if variant == "map_panel_boundary_ticks":
+        draw.line((166, 16, 166, 208), fill=(134, 128, 120), width=1)
+        for y in range(26, 196, 24):
+            draw.line((158, y, 176, y), fill=(116, 110, 104), width=1)
+        draw.line((172, 62, 222, 52), fill=(114, 108, 100), width=1)
+        draw.line((174, 88, 226, 80), fill=(114, 108, 100), width=1)
+        return image
+    if variant == "accordion_insert_crease":
+        for x in (56, 96, 136):
+            draw.line((x, 14, x, 208), fill=(142, 136, 128), width=1)
+        draw.line((92, 56, 124, 48), fill=(114, 108, 100), width=1)
+        draw.line((88, 84, 126, 76), fill=(114, 108, 100), width=1)
+        return image
+    if variant == "old_fold_line_crossing_content":
+        draw.line((24, 162, 224, 52), fill=(146, 140, 132), width=1)
+        draw.line((32, 172, 232, 62), fill=(204, 198, 190), width=1)
+        draw.line((44, 146, 108, 134), fill=(108, 102, 96), width=1)
+        draw.line((116, 108, 196, 94), fill=(110, 104, 98), width=1)
+        return image
+    if variant == "oversized_insert_edge_boundary":
+        draw.line((224, 16, 224, 208), fill=(86, 82, 76), width=2)
+        draw.rectangle((232, 18, 272, 206), outline=(128, 122, 114), width=2)
+        draw.line((232, 42, 272, 42), fill=(176, 170, 162), width=1)
+        draw.line((232, 74, 272, 74), fill=(176, 170, 162), width=1)
+        draw.line((170, 66, 226, 58), fill=(112, 106, 98), width=1)
+        draw.line((168, 94, 226, 86), fill=(110, 104, 98), width=1)
+        return image
+    if variant == "faint_foreground_near_panel_seam":
+        draw.line((126, 18, 126, 208), fill=(132, 126, 118), width=1)
+        draw.line((130, 52, 194, 40), fill=(118, 112, 104), width=1)
+        draw.line((132, 78, 196, 68), fill=(118, 112, 104), width=1)
+        draw.line((132, 104, 196, 96), fill=(118, 112, 104), width=1)
+        draw.line((128, 132, 198, 124), fill=(120, 114, 106), width=1)
+        return image
+    raise ValueError(f"unsupported fold-out map panel variant: {variant}")
 
 
 def _faded_text_page() -> Image.Image:
