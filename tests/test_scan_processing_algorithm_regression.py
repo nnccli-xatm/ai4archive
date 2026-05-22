@@ -5650,6 +5650,112 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_transparent_sleeves_and_archival_envelope_edges_stay_guarded_with_safe_control(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-sleeve-envelope-guards-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            pages = {
+                "synthetic_safe_neutral_cleanup_control.png": _mild_warm_scanner_cast_page("safe"),
+                "synthetic_protected_transparent_sleeve_seam.png": _transparent_sleeve_envelope_full_chain_page(
+                    "sleeve_seam"
+                ),
+                "synthetic_protected_laminated_border_shine.png": _transparent_sleeve_envelope_full_chain_page(
+                    "laminated_border_shine"
+                ),
+                "synthetic_protected_archival_envelope_flap_line.png": _transparent_sleeve_envelope_full_chain_page(
+                    "archival_envelope_flap_line"
+                ),
+                "synthetic_protected_pocket_corner_glare.png": _transparent_sleeve_envelope_full_chain_page(
+                    "pocket_corner_glare"
+                ),
+                "synthetic_protected_faint_foreground_near_sleeve_boundary.png": _transparent_sleeve_envelope_full_chain_page(
+                    "faint_foreground_near_boundary"
+                ),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-sleeve-envelope-guards", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_name = "synthetic_safe_neutral_cleanup_control.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_output:
+                safe_output_rgb = safe_output.convert("RGB")
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertIn(
+                safe_audit["combination_quality_guard_action"],
+                {"passed", "kept_original", "reverted_to_source"},
+            )
+            safe_changed_ratios = (
+                safe_audit["paper_color_cast_changed_pixel_ratio"],
+                safe_audit["background_stains_changed_pixel_ratio"],
+                safe_audit["edge_shadow_changed_pixel_ratio"],
+                safe_audit["fold_shadows_changed_pixel_ratio"],
+                safe_audit["illumination_gradient_changed_pixel_ratio"],
+            )
+            self.assertGreater(max(safe_changed_ratios), 0.003)
+            self.assertLess(_mean_luma_delta(pages[safe_name], safe_output_rgb), 5.0)
+
+            protected_expected: dict[str, tuple[int, int, int, int]] = {
+                "synthetic_protected_transparent_sleeve_seam.png": (150, 12, 164, 182),
+                "synthetic_protected_laminated_border_shine.png": (12, 12, 248, 178),
+                "synthetic_protected_archival_envelope_flap_line.png": (24, 118, 236, 156),
+                "synthetic_protected_pocket_corner_glare.png": (168, 12, 248, 92),
+                "synthetic_protected_faint_foreground_near_sleeve_boundary.png": (142, 36, 202, 154),
+            }
+            protection_codes = {
+                "protected_photo_or_texture",
+                "protected_content",
+                "protected_edge_mark",
+                "protected_dark_content",
+                "not_uniform",
+                "low_confidence",
+            }
+            for name, protected_box in protected_expected.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    processed = output.convert("RGB")
+                self.assertEqual(record["status"], "processed", name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertLess(_changed_ratio(pages[name], processed, protected_box), 0.015, name)
+                reason_codes = (
+                    str(record.get("paper_color_cast_reason_code", "")),
+                    str(record.get("illumination_gradient_reason_code", "")),
+                    str(record.get("background_stains_reason_code", "")),
+                    str(record.get("edge_shadow_reason_code", "")),
+                    str(record.get("fold_shadows_reason_code", "")),
+                    str(record.get("bleed_through_reason_code", "")),
+                )
+                self.assertTrue(any(code in protection_codes for code in reason_codes), (name, reason_codes))
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            self.assertIn("paper_color_cast_changed_pixel_ratio", audit_summary["metrics"])
+            self.assertIn("illumination_gradient_changed_pixel_ratio", audit_summary["metrics"])
+            self.assertIn("edge_shadow_changed_pixel_ratio", audit_summary["metrics"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_segmented_scanline_chain_stays_aggregate_and_guarded(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-segmented-scanline-") as temp_dir:
             root = Path(temp_dir)
@@ -10004,6 +10110,66 @@ def _glossy_full_chain_page(variant: str) -> Image.Image:
         return image
 
     raise ValueError(f"unknown glossy full-chain variant: {variant}")
+
+
+def _transparent_sleeve_envelope_full_chain_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (260, 190), (242, 242, 242))
+    pixels = image.load()
+    for y in range(image.height):
+        for x in range(image.width):
+            pixels[x, y] = (
+                max(0, min(255, 242 + ((x * 2 + y * 3) % 5) - 2)),
+                max(0, min(255, 242 + ((x * 4 + y * 5) % 5) - 2)),
+                max(0, min(255, 242 + ((x * 3 + y * 2) % 5) - 2)),
+            )
+    draw = ImageDraw.Draw(image)
+    for y in (44, 70, 96, 122):
+        draw.rectangle((30, y, 122, y + 4), fill=(60, 60, 60))
+    draw.rectangle((16, 156, 126, 162), fill=(214, 206, 188))
+
+    if variant == "safe_neutral":
+        for y in range(22, 168):
+            for x in range(182, 240):
+                r, g, b = pixels[x, y]
+                shadow = int(round(8 * max(0.0, 1.0 - abs(y - 94) / 74)))
+                pixels[x, y] = (max(0, r - shadow), max(0, g - shadow), max(0, b - shadow))
+        return image
+
+    if variant == "sleeve_seam":
+        draw.line((156, 8, 156, 184), fill=(248, 246, 240), width=2)
+        draw.line((160, 8, 160, 184), fill=(230, 226, 216), width=1)
+        draw.line((154, 24, 236, 24), fill=(244, 238, 228), width=2)
+        return image
+
+    if variant == "laminated_border_shine":
+        draw.rectangle((10, 10, 249, 179), outline=(246, 242, 234), width=3)
+        draw.line((16, 26, 238, 168), fill=(252, 250, 246), width=3)
+        draw.line((18, 34, 244, 176), fill=(238, 232, 220), width=2)
+        return image
+
+    if variant == "archival_envelope_flap_line":
+        draw.polygon(((24, 118), (236, 118), (196, 152), (64, 152)), outline=(226, 218, 202), fill=(240, 234, 222))
+        draw.line((24, 118, 236, 118), fill=(222, 212, 194), width=2)
+        draw.line((64, 152, 196, 152), fill=(220, 210, 190), width=2)
+        return image
+
+    if variant == "pocket_corner_glare":
+        draw.polygon(((170, 12), (248, 12), (248, 90)), fill=(248, 244, 236))
+        draw.line((170, 12, 248, 90), fill=(254, 252, 248), width=3)
+        draw.line((174, 16, 248, 16), fill=(240, 236, 226), width=2)
+        draw.line((244, 16, 244, 90), fill=(240, 236, 226), width=2)
+        return image
+
+    if variant == "faint_foreground_near_boundary":
+        draw.line((148, 18, 148, 182), fill=(246, 242, 234), width=2)
+        draw.line((152, 18, 152, 182), fill=(230, 224, 214), width=1)
+        draw.line((154, 44, 196, 66), fill=(174, 170, 160), width=1)
+        draw.line((156, 76, 198, 94), fill=(176, 172, 162), width=1)
+        draw.line((154, 106, 198, 122), fill=(172, 168, 158), width=1)
+        draw.line((154, 134, 194, 150), fill=(170, 166, 156), width=1)
+        return image
+
+    raise ValueError(f"unknown transparent sleeve/envelope full-chain variant: {variant}")
 
 
 def _benchmark_combo(root: Path, input_dir: Path, label: str, *flags: str) -> dict[str, object]:
