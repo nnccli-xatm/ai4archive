@@ -8103,6 +8103,106 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages.keys(), str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_conservative_dark_border_and_gutter_cleanup_applies_only_to_safe_pages(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-conservative-dark-border-gutter-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_safe_segmented_dark_border.png": _segmented_dark_scanner_border_page(),
+                "synthetic_protected_segmented_dark_border_stamp.png": _segmented_dark_scanner_border_page("stamp"),
+                "synthetic_safe_mixed_tone_gutter.png": _mixed_tone_binding_gutter_page(),
+                "synthetic_protected_mixed_tone_gutter_handwriting.png": _mixed_tone_binding_gutter_page(
+                    variant="edge_handwriting"
+                ),
+            }
+            source_bytes = {}
+            for filename, page in pages.items():
+                source = input_dir / filename
+                page.save(source, dpi=(300, 300))
+                source_bytes[filename] = source.read_bytes()
+
+            report = scan_batch(
+                ScanConfig("synthetic-regression", "conservative-dark-border-gutter", input_dir, output_dir)
+            )
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(trim_dark_border=True, scanner_gutter_trim=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_dark_record = records["synthetic_safe_segmented_dark_border.png"]
+            self.assertTrue(safe_dark_record["dark_border_trimmed"])
+            self.assertEqual(safe_dark_record["dark_border_reason_code"], "trimmed_broken_edge")
+            self.assertEqual(safe_dark_record["output_size"], [232, 172])
+            self.assertLessEqual(safe_dark_record["processing_audit"]["max_trim_margin_ratio"], 0.025)
+            self.assertLessEqual(safe_dark_record["processing_audit"]["cumulative_change_crop_ratio"], 0.03)
+            self.assertEqual(safe_dark_record["processing_audit"]["guardrail_failures"], [])
+
+            protected_dark_name = "synthetic_protected_segmented_dark_border_stamp.png"
+            protected_dark_record = records[protected_dark_name]
+            self.assertFalse(protected_dark_record["dark_border_trimmed"])
+            self.assertEqual(protected_dark_record["output_size"], [240, 180])
+            self.assertIn(
+                protected_dark_record["dark_border_reason_code"],
+                {
+                    "protected_edge_content_near_dark_border",
+                    "candidate_trim_exceeds_conservative_retain_ratio",
+                },
+            )
+            with Image.open(process_dir / protected_dark_record["output_relative_path"]) as output:
+                self.assertEqual(output.convert("RGB").tobytes(), pages[protected_dark_name].tobytes())
+
+            safe_gutter_record = records["synthetic_safe_mixed_tone_gutter.png"]
+            self.assertTrue(safe_gutter_record["scanner_gutter_trimmed"])
+            self.assertEqual(safe_gutter_record["scanner_gutter_reason"], "scanner gutter trim applied")
+            self.assertEqual(safe_gutter_record["output_size"], [245, 190])
+            self.assertLessEqual(safe_gutter_record["processing_audit"]["scanner_gutter_max_trim_margin_ratio"], 0.06)
+            self.assertLessEqual(safe_gutter_record["processing_audit"]["cumulative_change_crop_ratio"], 0.06)
+            self.assertEqual(safe_gutter_record["processing_audit"]["guardrail_failures"], [])
+
+            protected_gutter_name = "synthetic_protected_mixed_tone_gutter_handwriting.png"
+            protected_gutter_record = records[protected_gutter_name]
+            self.assertFalse(protected_gutter_record["scanner_gutter_trimmed"])
+            self.assertEqual(protected_gutter_record["output_size"], [260, 190])
+            self.assertIn(
+                protected_gutter_record["scanner_gutter_reason"],
+                {
+                    "scanner gutter skipped: protected edge content",
+                    "scanner gutter skipped: no narrow uniform light band",
+                },
+            )
+            with Image.open(process_dir / protected_gutter_record["output_relative_path"]) as output:
+                self.assertEqual(output.convert("RGB").tobytes(), pages[protected_gutter_name].tobytes())
+
+            self.assertEqual((input_dir / protected_dark_name).read_bytes(), source_bytes[protected_dark_name])
+            self.assertEqual((input_dir / protected_gutter_name).read_bytes(), source_bytes[protected_gutter_name])
+            self.assertEqual(audit_summary["counts"]["dark_border_trimmed_files"], 1)
+            self.assertEqual(audit_summary["counts"]["dark_border_skipped_files"], 3)
+            self.assertEqual(audit_summary["counts"]["scanner_gutter_trimmed_files"], 1)
+            self.assertEqual(audit_summary["counts"]["scanner_gutter_skipped_files"], 3)
+            self.assertEqual(
+                audit_summary["guardrails"]["dark_border_trim"]["guardrail_reason_code_distribution"]["trimmed_broken_edge"],
+                1,
+            )
+            self.assertGreaterEqual(
+                audit_summary["guardrails"]["dark_border_trim"]["guardrail_reason_code_distribution"][
+                    "protected_edge_content_near_dark_border"
+                ],
+                1,
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages.keys(), str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_risk_combination_pages_skip_or_stay_low_change(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-risk-") as temp_dir:
             root = Path(temp_dir)
