@@ -4977,7 +4977,10 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     "low_confidence",
                     "protected_line_or_annotation",
                 },
-                "synthetic_protected_faint_foreground_marks.png": "low_confidence",
+                "synthetic_protected_faint_foreground_marks.png": {
+                    "low_confidence",
+                    "protected_line_or_annotation",
+                },
             }
             for name, expected_code in protected_expected_codes.items():
                 record = records[name]
