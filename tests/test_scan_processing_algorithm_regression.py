@@ -8484,6 +8484,106 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_water_damage_evidence_stays_preserved_with_safe_cleanup_control(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-water-damage-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "A001_safe_neutral_cleanup_control.png": _water_damage_evidence_guard_page("safe_neutral_cleanup_control"),
+                "A002_protected_tide_mark_band.png": _water_damage_evidence_guard_page("tide_mark_band"),
+                "A003_protected_water_ring.png": _water_damage_evidence_guard_page("water_ring"),
+                "A004_protected_mildew_like_speckles.png": _water_damage_evidence_guard_page("mildew_like_speckles"),
+                "A005_protected_tide_line_shadow.png": _water_damage_evidence_guard_page("tide_line_shadow"),
+                "A006_protected_faint_staining_near_content.png": _water_damage_evidence_guard_page("faint_staining_near_content"),
+                "A007_protected_faint_foreground_near_tide.png": _water_damage_evidence_guard_page("faint_foreground_near_tide"),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            safe_name = "A001_safe_neutral_cleanup_control.png"
+            safe_before = pages[safe_name].convert("L")
+            safe_before_stain = _mean_luma(safe_before, (186, 66, 254, 128))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-water-damage", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            with Image.open(process_dir / safe_record["output_relative_path"]) as processed_image:
+                safe_after = processed_image.convert("L")
+                safe_after_stain = _mean_luma(safe_after, (186, 66, 254, 128))
+
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertTrue(safe_record["background_stains_lightened"])
+            self.assertIn("lighten_background_stains_conservative", safe_record["operations"])
+            self.assertGreaterEqual(safe_audit["background_stains_delta"], 1.0)
+            self.assertGreater(safe_after_stain - safe_before_stain, 0.5)
+            self.assertGreater(safe_audit["background_stains_changed_pixel_ratio"], 0.0)
+            self.assertLessEqual(safe_audit["background_stains_changed_pixel_ratio"], 0.08)
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertIn(safe_audit["combination_quality_guard_action"], {"passed", "kept_original"})
+            self.assertEqual(safe_audit["local_content_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed")
+
+            protected_names = [name for name in pages if name != safe_name]
+            protected_boxes = {
+                "A002_protected_tide_mark_band.png": (176, 80, 278, 164),
+                "A003_protected_water_ring.png": (166, 66, 274, 160),
+                "A004_protected_mildew_like_speckles.png": (168, 60, 278, 160),
+                "A005_protected_tide_line_shadow.png": (180, 90, 276, 130),
+                "A006_protected_faint_staining_near_content.png": (150, 56, 290, 152),
+                "A007_protected_faint_foreground_near_tide.png": (156, 62, 286, 168),
+            }
+            for name in protected_names:
+                record = records[name]
+                audit = record["processing_audit"]
+                before = pages[name].convert("RGB")
+                with Image.open(process_dir / record["output_relative_path"]) as output_image:
+                    after = output_image.convert("RGB")
+                self.assertEqual(record["status"], "processed", name)
+                self.assertFalse(record["background_stains_lightened"], name)
+                self.assertIn("lighten_background_stains_noop", record["operations"], name)
+                self.assertEqual(audit["background_stains_changed_pixel_ratio"], 0.0, name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertIn(
+                    audit["combination_quality_guard_action"],
+                    {"passed", "kept_original", "reverted_to_source"},
+                    name,
+                )
+                if name == "A005_protected_tide_line_shadow.png":
+                    before_l = before.convert("L")
+                    after_l = after.convert("L")
+                    before_mark = _mean_luma(before_l, (186, 96, 270, 124))
+                    after_mark = _mean_luma(after_l, (186, 96, 270, 124))
+                    self.assertLess(abs(after_mark - before_mark), 4.0, name)
+                else:
+                    self.assertLessEqual(_changed_ratio(before, after, protected_boxes[name]), 0.02, name)
+                self.assertNotEqual(record.get("background_stains_reason_code"), "applied_localized_low_contrast_stain", name)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["background_stains_lightened_files"], 1)
+            self.assertEqual(audit_summary["counts"]["background_stains_skipped_files"], len(protected_names))
+            self.assertEqual(audit_summary["guardrails"]["background_stains"]["applied_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["background_stains"]["skipped_files"], len(protected_names))
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_quality_regression_reports_missing_operation_timing_code_without_private_rows(self) -> None:
         quality = _processing_quality_regression(
             {
@@ -11541,6 +11641,66 @@ def _physical_evidence_guard_page(variant: str) -> Image.Image:
             draw.rectangle((8, y, 18 + (y % 5), y + 2), fill=(shade, shade - 2, shade - 4))
         return image
     raise ValueError(f"unsupported physical evidence variant: {variant}")
+
+
+def _water_damage_evidence_guard_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (320, 220), (243, 241, 236))
+    draw = ImageDraw.Draw(image)
+    for y in (44, 68, 92, 116):
+        draw.rectangle((32, y, 142, y + 4), fill=(52, 52, 50))
+
+    if variant == "safe_neutral_cleanup_control":
+        mask = Image.new("L", image.size, 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.ellipse((186, 66, 254, 128), fill=120)
+        mask_draw.ellipse((202, 84, 276, 154), fill=104)
+        mask = mask.filter(ImageFilter.GaussianBlur(8))
+        return Image.composite(Image.new("RGB", image.size, (233, 231, 224)), image, mask)
+
+    if variant == "tide_mark_band":
+        for y in range(86, 166):
+            wave = int(8 * math.sin((y - 82) / 12))
+            x0 = 188 + wave
+            draw.line((x0, y, 286, y), fill=(221, 218, 210))
+            if y % 5 == 0:
+                draw.line((x0 - 3, y, x0 + 12, y), fill=(216, 212, 204))
+        return image
+
+    if variant == "water_ring":
+        draw.ellipse((168, 68, 270, 156), outline=(223, 220, 212), width=3)
+        draw.ellipse((182, 82, 256, 144), outline=(226, 223, 216), width=2)
+        return image
+
+    if variant == "mildew_like_speckles":
+        for x in range(170, 278, 8):
+            for y in range(62, 162, 9):
+                shade = 212 + ((x * 5 + y * 7) % 12)
+                radius = 1 if (x + y) % 3 else 2
+                draw.ellipse((x, y, x + radius, y + radius), fill=(shade, shade - 2, shade - 6))
+        return image
+
+    if variant == "tide_line_shadow":
+        for x in range(176, 286):
+            y = 94 + int(7 * math.sin((x - 170) / 16))
+            draw.line((x, y, x, y + 46), fill=(225, 221, 214))
+        draw.line((182, 102, 208, 94, 236, 110, 268, 98), fill=(120, 112, 104), width=2)
+        draw.line((186, 120, 214, 112, 242, 126, 272, 116), fill=(128, 120, 112), width=1)
+        return image
+
+    if variant == "faint_staining_near_content":
+        for y in (74, 98, 122):
+            draw.rectangle((156, y, 278, y + 2), fill=(224, 221, 214))
+        draw.line((174, 86, 204, 74, 230, 94, 262, 80), fill=(74, 72, 68), width=1)
+        draw.line((174, 112, 204, 100, 230, 120, 262, 106), fill=(74, 72, 68), width=1)
+        return image
+
+    if variant == "faint_foreground_near_tide":
+        draw.ellipse((174, 70, 282, 164), outline=(224, 220, 212), width=2)
+        draw.line((188, 108, 206, 96, 226, 114, 250, 98), fill=(112, 106, 98), width=2)
+        draw.line((194, 126, 214, 114, 238, 132, 262, 116), fill=(116, 110, 102), width=2)
+        return image
+
+    raise ValueError(f"unsupported water damage variant: {variant}")
 
 
 def _faded_text_page() -> Image.Image:
