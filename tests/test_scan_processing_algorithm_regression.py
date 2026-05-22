@@ -8835,6 +8835,96 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_attached_slips_and_pasted_labels_stay_preserved_with_safe_cleanup_control(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-attached-pasted-evidence-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "A001_safe_neutral_cleanup_control.png": _attached_pasted_evidence_guard_page("safe_neutral_cleanup_control"),
+                "A002_attached_slip_edge.png": _attached_pasted_evidence_guard_page("attached_slip_edge"),
+                "A003_pasted_label_patch.png": _attached_pasted_evidence_guard_page("pasted_label_patch"),
+                "A004_page_tab_marker.png": _attached_pasted_evidence_guard_page("page_tab_marker"),
+                "A005_accession_sticker.png": _attached_pasted_evidence_guard_page("accession_sticker"),
+                "A006_sticky_note_annotation.png": _attached_pasted_evidence_guard_page("sticky_note_annotation"),
+                "A007_adhesive_shadow_near_margin.png": _attached_pasted_evidence_guard_page("adhesive_shadow_near_margin"),
+                "A008_faint_foreground_near_pasted_label.png": _attached_pasted_evidence_guard_page(
+                    "faint_foreground_near_pasted_label"
+                ),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-attached-pasted-evidence", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_name = "A001_safe_neutral_cleanup_control.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertEqual(safe_audit["local_content_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed")
+            self.assertIn(safe_audit["combination_quality_guard_action"], {"passed", "kept_original"})
+            self.assertGreaterEqual(len(safe_record["operations"]), 1)
+            self.assertLessEqual(safe_audit["cumulative_change_pixel_ratio"], 0.98)
+            self.assertLessEqual(safe_audit["cumulative_change_score"], 1.0)
+
+            protected_names = [name for name in pages if name != safe_name]
+            protected_boxes = {
+                "A002_attached_slip_edge.png": (6, 30, 84, 202),
+                "A003_pasted_label_patch.png": (156, 30, 274, 108),
+                "A004_page_tab_marker.png": (230, 22, 278, 82),
+                "A005_accession_sticker.png": (156, 124, 272, 202),
+                "A006_sticky_note_annotation.png": (148, 28, 276, 126),
+                "A007_adhesive_shadow_near_margin.png": (6, 24, 92, 204),
+                "A008_faint_foreground_near_pasted_label.png": (148, 34, 276, 204),
+            }
+            for name in protected_names:
+                record = records[name]
+                audit = record["processing_audit"]
+                before = pages[name].convert("RGB")
+                with Image.open(process_dir / record["output_relative_path"]) as output_image:
+                    after = output_image.convert("RGB")
+                self.assertEqual(record["status"], "processed", name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertIn(
+                    audit["combination_quality_guard_action"],
+                    {"passed", "kept_original", "reverted_to_source"},
+                    name,
+                )
+                self.assertLessEqual(_changed_ratio(before, after, protected_boxes[name]), 0.03, name)
+                reason_codes = [
+                    record.get("edge_shadow_reason_code"),
+                    record.get("fold_shadows_reason_code"),
+                    record.get("dark_border_reason_code"),
+                    record.get("background_stains_reason_code"),
+                    record.get("paper_color_cast_reason_code"),
+                ]
+                self.assertTrue(any(isinstance(code, str) and code for code in reason_codes), name)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertIn("timing", audit_summary)
+            self.assertIn("operation_timings", audit_summary["timing"])
+            self.assertGreater(len(audit_summary["timing"]["operation_timings"]), 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_water_damage_evidence_stays_preserved_with_safe_cleanup_control(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-water-damage-") as temp_dir:
             root = Path(temp_dir)
@@ -12031,6 +12121,68 @@ def _physical_evidence_guard_page(variant: str) -> Image.Image:
         draw.line((18, 116, 88, 108), fill=(116, 110, 104), width=1)
         return image
     raise ValueError(f"unsupported physical evidence variant: {variant}")
+
+
+def _attached_pasted_evidence_guard_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (280, 220), (242, 240, 236))
+    draw = ImageDraw.Draw(image)
+    for y in (56, 82, 108, 134):
+        draw.rectangle((72, y, 224, y + 4), fill=(58, 58, 58))
+    draw.rectangle((118, 154, 254, 172), fill=(236, 234, 230))
+
+    if variant == "safe_neutral_cleanup_control":
+        mask = Image.new("L", image.size, 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.ellipse((172, 92, 220, 134), fill=110)
+        mask = mask.filter(ImageFilter.GaussianBlur(7))
+        return Image.composite(Image.new("RGB", image.size, (233, 231, 226)), image, mask)
+    if variant == "attached_slip_edge":
+        draw.rectangle((8, 34, 66, 204), fill=(232, 230, 226))
+        draw.polygon([(66, 40), (76, 52), (66, 64)], fill=(226, 224, 218))
+        draw.line((66, 34, 66, 204), fill=(160, 156, 148), width=1)
+        return image
+    if variant == "pasted_label_patch":
+        draw.rectangle((158, 36, 270, 104), fill=(236, 234, 230))
+        draw.rectangle((166, 46, 262, 94), fill=(246, 244, 239))
+        draw.text((176, 64), "LX-21", fill=(96, 96, 92), font=ImageFont.load_default())
+        return image
+    if variant == "page_tab_marker":
+        draw.rectangle((236, 26, 278, 78), fill=(234, 230, 196))
+        draw.rectangle((238, 28, 274, 74), fill=(239, 236, 204))
+        draw.line((236, 26, 236, 78), fill=(172, 166, 138), width=2)
+        return image
+    if variant == "accession_sticker":
+        draw.rectangle((158, 126, 270, 202), fill=(232, 228, 188))
+        draw.rectangle((166, 136, 262, 192), fill=(238, 234, 198))
+        draw.text((174, 156), "A-104", fill=(84, 84, 80), font=ImageFont.load_default())
+        return image
+    if variant == "sticky_note_annotation":
+        draw.rectangle((150, 34, 274, 124), fill=(244, 236, 182))
+        draw.line((158, 58, 262, 58), fill=(132, 124, 90), width=1)
+        draw.line((158, 80, 262, 80), fill=(132, 124, 90), width=1)
+        draw.line((160, 102, 248, 102), fill=(132, 124, 90), width=1)
+        draw.line((154, 36, 272, 122), fill=(196, 186, 136), width=1)
+        return image
+    if variant == "adhesive_shadow_near_margin":
+        draw.rectangle((10, 26, 42, 200), fill=(232, 226, 188))
+        halo = Image.new("L", image.size, 0)
+        halo_draw = ImageDraw.Draw(halo)
+        halo_draw.rectangle((8, 24, 90, 204), fill=76)
+        halo = halo.filter(ImageFilter.GaussianBlur(6))
+        image = Image.composite(Image.new("RGB", image.size, (236, 231, 210)), image, halo)
+        draw = ImageDraw.Draw(image)
+        draw.line((18, 72, 94, 64), fill=(112, 106, 98), width=1)
+        draw.line((18, 98, 94, 90), fill=(118, 112, 104), width=1)
+        return image
+    if variant == "faint_foreground_near_pasted_label":
+        draw.rectangle((156, 36, 270, 108), fill=(236, 234, 230))
+        draw.rectangle((164, 46, 262, 98), fill=(246, 244, 239))
+        draw.text((174, 66), "L-17", fill=(102, 102, 98), font=ImageFont.load_default())
+        draw.line((150, 132, 230, 118), fill=(116, 110, 102), width=1)
+        draw.line((154, 152, 234, 142), fill=(118, 112, 104), width=1)
+        draw.line((156, 172, 236, 164), fill=(116, 110, 102), width=1)
+        return image
+    raise ValueError(f"unsupported attached/pasted evidence variant: {variant}")
 
 
 def _water_damage_evidence_guard_page(variant: str) -> Image.Image:
