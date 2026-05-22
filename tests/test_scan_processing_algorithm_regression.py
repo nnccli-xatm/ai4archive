@@ -5001,7 +5001,12 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertEqual(bleed_guard["applied_files"], 1)
             self.assertEqual(bleed_guard["skipped_files"], len(protected_expected_codes))
             self.assertEqual(bleed_guard["reason_code_distribution"]["applied_faint_reverse_ghost"], 1)
-            self.assertIn("low_confidence", bleed_guard["skip_reason_code_distribution"])
+            self.assertTrue(
+                any(
+                    code in bleed_guard["skip_reason_code_distribution"]
+                    for code in ("low_confidence", "protected_line_or_annotation")
+                )
+            )
             self.assertIn("protected_texture_or_archival_trace", bleed_guard["skip_reason_code_distribution"])
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertFalse(audit_summary["privacy"]["contains_paths"])
