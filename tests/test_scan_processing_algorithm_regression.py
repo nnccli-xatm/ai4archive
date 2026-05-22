@@ -1121,6 +1121,146 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_curled_and_warped_edge_evidence_stays_protected_with_neutral_control(self) -> None:
+        def curled_warped_page(variant: str) -> Image.Image:
+            image = Image.new("RGB", (320, 240), (244, 244, 240))
+            draw = ImageDraw.Draw(image)
+
+            for y in range(16, 224):
+                phase = (y - 16) / 208
+                curl_center = 18 + int(round(4 * math.sin(phase * math.pi * 1.2)))
+                curl_width = 6 + int(round(2 * math.cos(phase * math.pi)))
+                for dx in range(curl_width):
+                    shade = 236 - min(10, dx * 2)
+                    draw.point((curl_center + dx, y), fill=(shade, shade, shade - 3))
+
+            for y in range(0, 20):
+                width = 26 - y
+                shade = 212 + y
+                draw.line((0, y, width, y), fill=(shade, shade, shade - 6))
+
+            if variant == "safe_neutral":
+                return image
+            if variant == "faint_near_edge_mark":
+                for y in range(56, 196, 18):
+                    left = 74 + int(round(5 * math.sin(y / 22)))
+                    right = 256 + int(round(5 * math.sin((y + 9) / 24)))
+                    draw.rectangle((left, y, right, y + 3), fill=(52, 52, 52))
+                for y in range(74, 170):
+                    edge_x = 11 + int(round(3 * math.sin(y / 17)))
+                    draw.point((edge_x, y), fill=(198, 198, 194))
+                    draw.point((edge_x + 1, y), fill=(198, 198, 194))
+                return image
+            if variant == "warped_corner_stamp":
+                for y in range(56, 196, 18):
+                    left = 74 + int(round(5 * math.sin(y / 22)))
+                    right = 256 + int(round(5 * math.sin((y + 9) / 24)))
+                    draw.rectangle((left, y, right, y + 3), fill=(52, 52, 52))
+                draw.ellipse((6, 12, 44, 52), outline=(176, 40, 40), width=3)
+                return image
+            if variant == "gutter_curl_note":
+                for y in range(56, 196, 18):
+                    left = 74 + int(round(5 * math.sin(y / 22)))
+                    right = 256 + int(round(5 * math.sin((y + 9) / 24)))
+                    draw.rectangle((left, y, right, y + 3), fill=(52, 52, 52))
+                draw.line((10, 118, 36, 132, 14, 148, 42, 160), fill=(58, 58, 58), width=2)
+                return image
+            if variant == "wavy_boundary_rule":
+                for y in range(56, 196, 18):
+                    left = 74 + int(round(5 * math.sin(y / 22)))
+                    right = 256 + int(round(5 * math.sin((y + 9) / 24)))
+                    draw.rectangle((left, y, right, y + 3), fill=(52, 52, 52))
+                for y in range(36, 206, 26):
+                    draw.line((12, y, 42, y + 6), fill=(198, 198, 194), width=1)
+                return image
+            raise ValueError(f"unsupported variant: {variant}")
+
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-curled-warped-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_full_chain_safe_neutral_curl_shadow.png": curled_warped_page("safe_neutral"),
+                "synthetic_full_chain_faint_near_edge_mark.png": curled_warped_page("faint_near_edge_mark"),
+                "synthetic_full_chain_warped_corner_stamp.png": curled_warped_page("warped_corner_stamp"),
+                "synthetic_full_chain_gutter_curl_note.png": curled_warped_page("gutter_curl_note"),
+                "synthetic_full_chain_wavy_boundary_rule.png": curled_warped_page("wavy_boundary_rule"),
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-curled-warped", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(
+                    trim_dark_border=True,
+                    auto_crop=True,
+                    deskew=True,
+                    scanner_gutter_trim=True,
+                    lighten_edge_shadow=True,
+                    lighten_fold_shadows=True,
+                    level_illumination_gradient=True,
+                    workers=1,
+                ),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_name = "synthetic_full_chain_safe_neutral_curl_shadow.png"
+            safe_record = records[safe_name]
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertTrue(safe_record["edge_shadow_lightened"] or safe_record["fold_shadows_lightened"])
+            self.assertIn(
+                safe_record["edge_shadow_reason_code"],
+                {
+                    "applied_narrow_neutral_edge_shadow",
+                    "no_conservative_edge_shadow_candidate",
+                    "low_tonal_separation",
+                },
+            )
+            self.assertIn(
+                safe_record["fold_shadows_reason_code"],
+                {"applied_narrow_neutral_background_band", "no_conservative_fold_shadow_candidate"},
+            )
+            self.assertEqual(safe_record["processing_audit"]["guardrail_failures"], [])
+
+            protected_names = set(pages) - {safe_name}
+            for name in protected_names:
+                record = records[name]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name])
+                self.assertFalse(record["dark_border_trimmed"], name)
+                self.assertFalse(record["scanner_gutter_trimmed"], name)
+                self.assertEqual(record["output_size"], [320, 240], name)
+                self.assertFalse(record["edge_shadow_lightened"], name)
+                self.assertFalse(record["fold_shadows_lightened"], name)
+                self.assertEqual(record["edge_shadow_changed_pixel_ratio"], 0.0, name)
+                self.assertEqual(record["fold_shadows_changed_pixel_ratio"], 0.0, name)
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    self.assertEqual(output.convert("RGB").tobytes(), pages[name].tobytes(), name)
+
+            edge_shadow_summary = audit_summary["guardrails"]["edge_shadow"]
+            fold_guard = audit_summary["guardrails"]["fold_shadows"]
+            self.assertGreaterEqual(audit_summary["counts"]["edge_shadow_skipped_files"], len(protected_names))
+            self.assertGreaterEqual(audit_summary["counts"]["fold_shadows_skipped_files"], len(protected_names))
+            self.assertGreaterEqual(
+                fold_guard["reason_code_distribution"].get("applied_narrow_neutral_background_band", 0)
+                + edge_shadow_summary["reason_code_distribution"].get("applied_narrow_neutral_edge_shadow", 0),
+                1,
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_mild_vertical_fold_shadow_cleanup_allows_sparse_text_and_preserves_rules(self) -> None:
         def mild_fold_page(variant: str) -> Image.Image:
             image = Image.new("RGB", (320, 240), (244, 244, 240))
