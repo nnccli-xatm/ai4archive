@@ -9031,6 +9031,95 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_perforated_tearoff_and_stamp_hinge_evidence_stays_preserved_with_safe_control(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-perforated-tearoff-hinge-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "A001_safe_cleanup_control.png": _perforated_tearoff_hinge_guard_page("safe_cleanup_control"),
+                "A002_perforated_row_near_margin.png": _perforated_tearoff_hinge_guard_page("perforated_row_near_margin"),
+                "A003_serrated_ticket_stub_boundary.png": _perforated_tearoff_hinge_guard_page(
+                    "serrated_ticket_stub_boundary"
+                ),
+                "A004_stamp_hinge_remnant_shadow.png": _perforated_tearoff_hinge_guard_page("stamp_hinge_remnant_shadow"),
+                "A005_faint_foreground_near_perforation.png": _perforated_tearoff_hinge_guard_page(
+                    "faint_foreground_near_perforation"
+                ),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            safe_name = "A001_safe_cleanup_control.png"
+
+            report = scan_batch(
+                ScanConfig("synthetic-regression", "full-chain-perforated-tearoff-hinge-evidence", input_dir, output_dir)
+            )
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertIn(safe_audit["combination_quality_guard_action"], {"passed", "kept_original"})
+            self.assertEqual(safe_audit["local_content_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed")
+            self.assertTrue(safe_record["paper_color_cast_normalized"])
+            self.assertIn("normalize_paper_color_cast_conservative", safe_record["operations"])
+            self.assertGreater(safe_audit["paper_color_cast_changed_pixel_ratio"], 0.0)
+            self.assertLessEqual(safe_audit["paper_color_cast_changed_pixel_ratio"], 0.98)
+
+            protected_boxes = {
+                "A002_perforated_row_near_margin.png": (8, 58, 66, 212),
+                "A003_serrated_ticket_stub_boundary.png": (8, 128, 124, 206),
+                "A004_stamp_hinge_remnant_shadow.png": (8, 28, 84, 94),
+                "A005_faint_foreground_near_perforation.png": (8, 62, 138, 204),
+            }
+            for name, box in protected_boxes.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                before = pages[name].convert("RGB")
+                with Image.open(process_dir / record["output_relative_path"]) as output_image:
+                    after = output_image.convert("RGB")
+                self.assertEqual(record["status"], "processed", name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertIn(
+                    audit["combination_quality_guard_action"],
+                    {"passed", "kept_original", "reverted_to_source"},
+                    name,
+                )
+                self.assertLessEqual(_changed_ratio(before, after, box), 0.03, name)
+                reason_codes = [
+                    record.get("dark_border_reason_code"),
+                    record.get("edge_shadow_reason_code"),
+                    record.get("fold_shadows_reason_code"),
+                    record.get("background_stains_reason_code"),
+                    record.get("despeckle_reason_code"),
+                ]
+                self.assertTrue(any(isinstance(code, str) and code for code in reason_codes), name)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertIn("timing", audit_summary)
+            self.assertIn("operation_timings", audit_summary["timing"])
+            self.assertGreater(len(audit_summary["timing"]["operation_timings"]), 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_seal_ribbons_string_ties_and_hanging_tags_stay_preserved_with_safe_cleanup_control(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-seal-ribbon-tag-") as temp_dir:
             root = Path(temp_dir)
@@ -12547,6 +12636,66 @@ def _attached_pasted_evidence_guard_page(variant: str) -> Image.Image:
         draw.line((156, 172, 236, 164), fill=(116, 110, 102), width=1)
         return image
     raise ValueError(f"unsupported attached/pasted evidence variant: {variant}")
+
+
+def _perforated_tearoff_hinge_guard_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (320, 240), (242, 240, 236))
+    draw = ImageDraw.Draw(image)
+    for y in (58, 84, 110, 136):
+        draw.rectangle((76, y, 244, y + 4), fill=(58, 58, 58))
+    draw.rectangle((126, 168, 280, 188), fill=(236, 234, 230))
+
+    if variant == "safe_cleanup_control":
+        mask = Image.new("L", image.size, 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.ellipse((190, 66, 298, 162), fill=116)
+        mask_draw.ellipse((210, 90, 308, 186), fill=104)
+        mask = mask.filter(ImageFilter.GaussianBlur(10))
+        image = Image.composite(Image.new("RGB", image.size, (231, 228, 220)), image, mask)
+        draw = ImageDraw.Draw(image)
+        draw.ellipse((224, 78, 296, 150), fill=(227, 224, 214))
+        draw.ellipse((236, 100, 308, 188), fill=(228, 225, 216))
+        return image
+
+    if variant == "perforated_row_near_margin":
+        draw.rectangle((6, 54, 12, 214), fill=(226, 224, 218))
+        for y in range(60, 212, 14):
+            draw.ellipse((12, y, 22, y + 10), outline=(122, 118, 110), width=2)
+        draw.line((24, 58, 24, 214), fill=(138, 132, 122), width=1)
+        return image
+
+    if variant == "serrated_ticket_stub_boundary":
+        points: list[tuple[int, int]] = [(6, 128)]
+        for index in range(0, 12):
+            x = 6 + index * 10
+            points.extend([(x + 5, 136), (x + 10, 128)])
+        points.extend([(126, 206), (6, 206)])
+        draw.polygon(points, fill=(232, 228, 218), outline=(136, 130, 120))
+        draw.line((6, 156, 126, 156), fill=(150, 144, 134), width=1)
+        draw.line((18, 174, 108, 166), fill=(118, 112, 104), width=1)
+        return image
+
+    if variant == "stamp_hinge_remnant_shadow":
+        draw.rectangle((10, 30, 34, 92), fill=(232, 228, 214))
+        draw.rectangle((14, 36, 30, 84), fill=(238, 234, 220))
+        draw.line((14, 36, 30, 84), fill=(200, 192, 170), width=2)
+        draw.arc((8, 26, 42, 98), start=252, end=112, fill=(140, 132, 118), width=2)
+        draw.line((34, 42, 84, 34), fill=(116, 110, 102), width=1)
+        draw.line((34, 62, 82, 56), fill=(118, 112, 104), width=1)
+        return image
+
+    if variant == "faint_foreground_near_perforation":
+        draw.rectangle((6, 56, 12, 212), fill=(226, 224, 218))
+        for y in range(64, 210, 16):
+            draw.ellipse((12, y, 22, y + 10), outline=(126, 120, 112), width=2)
+        draw.line((26, 62, 136, 54), fill=(132, 126, 116), width=1)
+        draw.line((28, 86, 134, 80), fill=(134, 128, 118), width=1)
+        draw.line((30, 110, 132, 106), fill=(130, 124, 114), width=1)
+        draw.line((30, 136, 130, 132), fill=(132, 126, 116), width=1)
+        draw.line((28, 162, 128, 158), fill=(134, 128, 118), width=1)
+        return image
+
+    raise ValueError(f"unsupported perforated tear-off/hinge variant: {variant}")
 
 
 def _seal_ribbon_tag_guard_page(variant: str) -> Image.Image:
