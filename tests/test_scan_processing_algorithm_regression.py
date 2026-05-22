@@ -2437,6 +2437,96 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_bleed_through_cleanup_preserves_ink_smudge_transfer_and_stamp_ghosting_evidence(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-ink-evidence-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = _ink_evidence_bleed_through_guard_pages()
+            source_bytes: dict[str, bytes] = {}
+            for name, page in pages.items():
+                source = input_dir / name
+                page.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-ink-evidence-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_name = "synthetic_full_chain_safe_neutral_reverse_ghost.png"
+            protected_evidence_boxes = {
+                "synthetic_protected_ink_bleed_halo.png": (136, 72, 174, 132),
+                "synthetic_protected_ink_smudge.png": (220, 44, 268, 124),
+                "synthetic_protected_offset_transfer_mark.png": (144, 66, 202, 110),
+                "synthetic_protected_stamp_ghosting.png": (128, 68, 192, 132),
+                "synthetic_protected_dark_ink_blots.png": (128, 82, 146, 108),
+                "synthetic_protected_faint_foreground_marks.png": (118, 74, 146, 108),
+            }
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            safe_processed = Image.open(process_dir / safe_record["output_relative_path"]).convert("RGB")
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertTrue(safe_record["bleed_through_cleaned"])
+            self.assertEqual(safe_record["bleed_through_reason_code"], "applied_faint_reverse_ghost")
+            self.assertIn("clean_bleed_through_conservative", safe_record["operations"])
+            self.assertGreater(safe_audit["bleed_through_changed_pixel_ratio"], 0.01)
+            self.assertLessEqual(safe_audit["bleed_through_changed_pixel_ratio"], 0.045)
+            self.assertLessEqual(safe_audit["bleed_through_candidate_pixel_ratio"], 0.065)
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertEqual(safe_audit["local_content_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed")
+            self.assertIn(
+                safe_audit["combination_quality_guard_reason_code"],
+                {"safe_combination_passed", "low_confidence_original_preserved"},
+            )
+            self.assertGreater(
+                _mean_luma(safe_processed, (92, 56, 192, 132)),
+                _mean_luma(pages[safe_name], (92, 56, 192, 132)) - 0.4,
+            )
+
+            for name in set(pages) - {safe_name}:
+                record = records[name]
+                audit = record["processing_audit"]
+                processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
+                self.assertFalse(record["bleed_through_cleaned"], name)
+                self.assertNotEqual(record["bleed_through_reason_code"], "applied_faint_reverse_ghost", name)
+                self.assertEqual(audit["bleed_through_changed_pixel_ratio"], 0.0, name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertEqual(audit["local_content_change_guard_action"], "passed", name)
+                self.assertEqual(audit["cumulative_change_guard_action"], "passed", name)
+                self.assertIn(
+                    audit["combination_quality_guard_reason_code"],
+                    {"safe_combination_passed", "low_confidence_original_preserved"},
+                    name,
+                )
+                evidence_box = protected_evidence_boxes.get(name)
+                if evidence_box:
+                    self.assertLessEqual(
+                        _mean_luma(processed, evidence_box),
+                        _mean_luma(pages[name], evidence_box) + 1.0,
+                        name,
+                    )
+
+            bleed_guard = audit_summary["guardrails"]["bleed_through"]
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 1)
+            self.assertEqual(bleed_guard["applied_files"], 1)
+            self.assertEqual(bleed_guard["skipped_files"], len(pages) - 1)
+            self.assertEqual(bleed_guard["reason_code_distribution"]["applied_faint_reverse_ghost"], 1)
+            self.assertIn("protected_line_or_annotation", bleed_guard["skip_reason_code_distribution"])
+            self.assertIn("protected_color_content", bleed_guard["skip_reason_code_distribution"])
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_noisy_edge_texture_pages_stay_noop_with_despeckle_safe_skip_timing(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-noisy-edge-noop-") as temp_dir:
             root = Path(temp_dir)
@@ -10686,6 +10776,19 @@ def _protected_sparse_bleed_through_mark_pages() -> dict[str, Image.Image]:
         draw.rectangle((x, y, x + 1, y + 1), fill=(225, 225, 221))
     pages["A007_archival_dirt_marks.png"] = image
 
+    return pages
+
+
+def _ink_evidence_bleed_through_guard_pages() -> dict[str, Image.Image]:
+    clean_mark_pages = _protected_clean_page_faint_mark_pages()
+    sparse_mark_pages = _protected_sparse_bleed_through_mark_pages()
+    pages = {"synthetic_full_chain_safe_neutral_reverse_ghost.png": _low_density_diffuse_bleed_through_page()}
+    pages["synthetic_protected_ink_bleed_halo.png"] = clean_mark_pages["A106_handwriting.png"]
+    pages["synthetic_protected_ink_smudge.png"] = clean_mark_pages["A103_thin_marginal_note.png"]
+    pages["synthetic_protected_offset_transfer_mark.png"] = clean_mark_pages["A102_punctuation_like_dots.png"]
+    pages["synthetic_protected_stamp_ghosting.png"] = _faint_warm_bleed_through_haze_page("stamp")
+    pages["synthetic_protected_dark_ink_blots.png"] = sparse_mark_pages["A003_punctuation_i_dot.png"]
+    pages["synthetic_protected_faint_foreground_marks.png"] = clean_mark_pages["A101_page_number.png"]
     return pages
 
 
