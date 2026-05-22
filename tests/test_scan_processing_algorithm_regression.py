@@ -4511,7 +4511,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             process_dir = root / "processed"
             input_dir.mkdir()
             source = input_dir / "private_warm_reverse_ghost.png"
-            page = _warm_mild_bleed_through_page()
+            page = _faint_warm_bleed_through_haze_page("safe")
             page.save(source, dpi=(300, 300))
             source_bytes = source.read_bytes()
 
@@ -4529,28 +4529,26 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
 
             self.assertEqual(source.read_bytes(), source_bytes)
-            self.assertFalse(record["bleed_through_cleaned"])
-            self.assertNotEqual(record["bleed_through_reason_code"], "applied_faint_reverse_ghost")
-            self.assertEqual(audit["bleed_through_changed_pixel_ratio"], 0.0)
+            self.assertTrue(record["bleed_through_cleaned"])
+            self.assertEqual(record["bleed_through_reason_code"], "applied_faint_reverse_ghost")
+            self.assertGreater(audit["bleed_through_changed_pixel_ratio"], 0.005)
+            self.assertLessEqual(audit["bleed_through_changed_pixel_ratio"], 0.02)
             self.assertEqual(audit["guardrail_failures"], [])
             self.assertEqual(audit["local_content_change_guard_action"], "passed")
-            self.assertIn(
-                audit["combination_quality_guard_reason_code"],
-                {"safe_combination_passed", "low_confidence_original_preserved"},
-            )
+            self.assertEqual(audit["combination_quality_guard_reason_code"], "safe_combination_passed")
 
             original = page.convert("RGB")
-            ghost_box = (118, 80, 176, 122)
+            ghost_box = (160, 76, 218, 158)
             before = ImageStat.Stat(original.crop(ghost_box).convert("L")).mean[0]
             after = ImageStat.Stat(processed.crop(ghost_box).convert("L")).mean[0]
-            self.assertLessEqual(after - before, 0.08)
-            protected_box = (30, 34, 72, 50)
+            self.assertGreater(after - before, 0.25)
+            protected_box = (30, 34, 124, 86)
             self.assertIsNone(
                 ImageChops.difference(original.crop(protected_box), processed.crop(protected_box)).getbbox()
             )
 
-            self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 0)
-            self.assertEqual(audit_summary["guardrails"]["bleed_through"]["applied_files"], 0)
+            self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["bleed_through"]["applied_files"], 1)
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertFalse(audit_summary["privacy"]["contains_paths"])
             self.assertFalse(audit_summary["privacy"]["contains_hashes"])
