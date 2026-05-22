@@ -3038,6 +3038,74 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_synthetic_cleanup_batch_has_aggregate_performance_guardrails(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-synthetic-cleanup-batch-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            pages = {
+                "synthetic_cleanup_safe_combo.png": _safe_full_chain_combination_page(),
+                "synthetic_cleanup_paper_cast_stamp.png": _full_chain_mild_paper_cast_page("stamp_annotation"),
+                "synthetic_cleanup_fold_shadow.png": _full_chain_fold_shadow_page("safe_vertical"),
+                "synthetic_cleanup_bleed_through.png": _warm_mild_bleed_through_page(),
+                "synthetic_cleanup_scanlines.png": _full_chain_intermittent_scanline_page("safe"),
+                "synthetic_cleanup_binding_gutter.png": _mixed_tone_binding_gutter_page("safe"),
+            }
+            for name, page in pages.items():
+                page.save(input_dir / name, dpi=(300, 300))
+
+            report = scan_batch(
+                ScanConfig("synthetic-regression", "full-chain-synthetic-cleanup-batch", input_dir, output_dir)
+            )
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+
+            timings = audit_summary["timing"]["operation_timings"]
+            representative_operations = (
+                "trim_dark_border",
+                "scanner_gutter_trim",
+                "despeckle",
+                "deskew",
+                "auto_crop",
+                "level_illumination_gradient",
+                "clean_bleed_through",
+                "lighten_scanlines",
+                "sharpen_text_edges",
+            )
+            aggregate_elapsed = 0.0
+            for operation in representative_operations:
+                timing = timings[operation]
+                self.assertTrue(timing["enabled"], operation)
+                self.assertLessEqual(timing["file_count"], len(pages), operation)
+                self.assertIn("elapsed_seconds", timing)
+                self.assertIn("average_seconds_per_file", timing)
+                self.assertIn("files_per_minute", timing)
+                aggregate_elapsed += float(timing["elapsed_seconds"])
+            self.assertGreater(aggregate_elapsed, 0.0)
+            self.assertLessEqual(
+                aggregate_elapsed,
+                18.0,
+                f"synthetic cleanup aggregate elapsed exceeded loose guard: {aggregate_elapsed:.4f}s for {len(pages)} files",
+            )
+
+            records = manifest["files"]
+            self.assertEqual(len(records), len(pages))
+            for record in records:
+                self.assertEqual(record["status"], "processed")
+
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_subtle_diagonal_edge_shadow_cleanup_preserves_protected_edges(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-diagonal-edge-shadow-") as temp_dir:
             root = Path(temp_dir)
