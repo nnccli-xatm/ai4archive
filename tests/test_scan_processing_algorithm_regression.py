@@ -4163,6 +4163,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertTrue(safe_record["despeckled"])
             self.assertEqual(safe_record["despeckle_pixels_changed"], len(_safe_tiny_margin_dust_speck_points()))
             self.assertIn("despeckle_isolated_pixels", safe_record["operations"])
+            self.assertGreater(safe_audit["despeckle_pixel_ratio"], 0.0)
             self.assertLessEqual(safe_audit["despeckle_pixel_ratio"], 0.001)
             with Image.open(process_dir / safe_record["output_relative_path"]) as output:
                 output_luma = output.convert("L")
@@ -4184,9 +4185,14 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
             self.assertEqual(audit_summary["counts"]["failed_files"], 0)
             self.assertEqual(audit_summary["guardrails"]["despeckle"]["applied_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["despeckle"]["skipped_files"], len(protected_pages))
             self.assertEqual(
                 audit_summary["guardrails"]["despeckle"]["pixels_changed"],
                 len(_safe_tiny_margin_dust_speck_points()),
+            )
+            self.assertEqual(
+                audit_summary["guardrails"]["despeckle"]["reason_code_distribution"]["applied_isolated_pixels"],
+                1,
             )
             protected_reason_count = (
                 audit_summary["guardrails"]["despeckle"]["reason_code_distribution"].get("no_isolated_candidates", 0)
@@ -4210,6 +4216,16 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     0,
                 ),
                 1,
+            )
+            self.assertEqual(
+                audit_summary["timing"]["operation_timings"]["despeckle"]["reason_code_distribution"][
+                    "applied_isolated_pixels"
+                ],
+                1,
+            )
+            self.assertEqual(
+                audit_summary["timing"]["operation_timings"]["despeckle"]["max_component_size"]["max"],
+                len(_safe_tiny_margin_dust_speck_points()),
             )
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertFalse(audit_summary["privacy"]["contains_paths"])
