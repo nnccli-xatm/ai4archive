@@ -8765,6 +8765,89 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_halftone_stipple_screened_and_dotted_texture_guard_stays_conservative(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-halftone-stipple-screened-dotted-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_safe_dot_texture_cleanup_control.png": _faint_thumbprint_stain_page(),
+                "synthetic_protected_halftone_newsprint_portrait.png": _halftone_stipple_screened_dotted_page("halftone"),
+                "synthetic_protected_stipple_diagram_shading.png": _halftone_stipple_screened_dotted_page("stipple"),
+                "synthetic_protected_screened_print_form_background.png": _halftone_stipple_screened_dotted_page("screened_form"),
+                "synthetic_protected_dotted_archival_map_texture.png": _halftone_stipple_screened_dotted_page("dotted_map"),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, page in pages.items():
+                source = input_dir / name
+                page.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(
+                ScanConfig("synthetic-regression", "full-chain-halftone-stipple-screened-dotted-guard", input_dir, output_dir)
+            )
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            safe_name = "synthetic_safe_dot_texture_cleanup_control.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_output:
+                self.assertGreater(
+                    _mean_luma(safe_output.convert("L"), (164, 68, 210, 108))
+                    - _mean_luma(pages[safe_name].convert("L"), (164, 68, 210, 108)),
+                    1.0,
+                )
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertEqual(safe_audit["local_content_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed")
+            self.assertIn(
+                safe_audit["combination_quality_guard_reason_code"],
+                {"safe_combination_passed", "low_confidence_original_preserved", "combined_change_too_large_reverted"},
+            )
+
+            protected_names = set(pages) - {safe_name}
+            for name in protected_names:
+                record = records[name]
+                audit = record["processing_audit"]
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    changed_ratio = _changed_ratio(pages[name], output.convert("RGB"), (0, 0, output.width, output.height))
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
+                self.assertLessEqual(changed_ratio, 0.04, name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertIn(audit["local_content_change_guard_action"], {"passed", "reverted_to_source"}, name)
+                self.assertIn(audit["cumulative_change_guard_action"], {"passed", "reverted_to_source"}, name)
+                self.assertIn(
+                    audit["combination_quality_guard_reason_code"],
+                    {
+                        "safe_combination_passed",
+                        "low_confidence_original_preserved",
+                        "protected_content_original_preserved",
+                        "combined_change_too_large_reverted",
+                    },
+                    name,
+                )
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            self.assertIn("despeckle", audit_summary["timing"]["operation_timings"])
+            self.assertGreaterEqual(
+                audit_summary["guardrails"]["combination_quality_guard"]["reason_code_distribution"].get(
+                    "safe_combination_passed", 0
+                ),
+                1,
+            )
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_faint_official_marks_preserve_watermark_seal_stamp_and_security_details(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-faint-official-marks-") as temp_dir:
             root = Path(temp_dir)
@@ -22597,6 +22680,62 @@ def _low_resolution_copy_texture_page() -> Image.Image:
         for block_x in range(132, 246, 6):
             shade = 224 + ((block_x + block_y) % 6)
             draw.rectangle((block_x, block_y, block_x + 2, block_y + 2), fill=(shade, shade, shade - 1))
+    return image
+
+
+def _halftone_stipple_screened_dotted_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (300, 210), (244, 244, 240))
+    draw = ImageDraw.Draw(image)
+    for y in (34, 58, 82):
+        draw.rectangle((28, y, 126, y + 4), fill=(70, 70, 70))
+    draw.rectangle((24, 24, 130, 98), outline=(84, 84, 84), width=1)
+    # Keep boundary content so full-chain auto-crop does not remove meaningful texture regions.
+    draw.rectangle((8, 8, 14, 12), fill=(92, 92, 92))
+    draw.rectangle((286, 8, 292, 12), fill=(92, 92, 92))
+    draw.rectangle((8, 196, 14, 200), fill=(92, 92, 92))
+    draw.rectangle((286, 196, 292, 200), fill=(92, 92, 92))
+
+    if variant == "halftone":
+        for y in range(34, 174, 4):
+            for x in range(154, 286, 4):
+                if (x + y) % 8 == 0:
+                    draw.ellipse((x, y, x + 1, y + 1), fill=(206, 206, 202))
+        draw.ellipse((180, 56, 260, 154), fill=(232, 232, 228))
+        for y in range(56, 154, 5):
+            for x in range(180, 260, 5):
+                if (x + y) % 10 == 0:
+                    draw.ellipse((x, y, x + 1, y + 1), fill=(194, 194, 190))
+    elif variant == "stipple":
+        draw.rectangle((152, 34, 286, 174), fill=(236, 236, 232))
+        for y in range(40, 168, 6):
+            for x in range(158, 282, 6):
+                if (x * 5 + y * 3) % 11 in (0, 1, 2):
+                    shade = 198 + ((x + y) % 6)
+                    draw.point((x, y), fill=(shade, shade, shade - 1))
+        draw.rectangle((174, 70, 256, 140), outline=(112, 112, 112), width=1)
+    elif variant == "screened_form":
+        draw.rectangle((152, 34, 286, 174), fill=(238, 238, 234))
+        for y in range(34, 174, 3):
+            for x in range(152, 286, 3):
+                if (x + y) % 6 == 0:
+                    draw.point((x, y), fill=(214, 214, 210))
+        for y in (66, 94, 122, 150):
+            draw.line((160, y, 278, y), fill=(136, 136, 136), width=1)
+        for x in (176, 210, 244):
+            draw.line((x, 46, x, 162), fill=(136, 136, 136), width=1)
+    elif variant == "dotted_map":
+        draw.rectangle((152, 34, 286, 174), fill=(236, 236, 232))
+        polygon = [(170, 42), (244, 50), (280, 98), (256, 164), (190, 170), (154, 120)]
+        draw.polygon(polygon, fill=(232, 232, 228), outline=(110, 110, 110))
+        for y in range(44, 168, 5):
+            for x in range(156, 284, 5):
+                if (x * 7 + y * 11) % 13 in (0, 1):
+                    draw.point((x, y), fill=(202, 202, 198))
+        draw.line((188, 64, 248, 146), fill=(116, 116, 116), width=1)
+        draw.line((174, 132, 264, 98), fill=(120, 120, 120), width=1)
+    else:
+        raise ValueError(f"unsupported halftone/stipple/screened/dotted variant: {variant}")
+
     return image
 
 
