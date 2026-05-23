@@ -10660,6 +10660,90 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_index_tabs_sticky_flags_divider_protrusions_and_small_edge_labels_stay_preserved(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-index-tab-sticky-divider-edge-label-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "A001_safe_cleanup_control.png": _index_tab_sticky_flag_guard_page("safe_cleanup_control"),
+                "A002_colored_index_tab.png": _index_tab_sticky_flag_guard_page("colored_index_tab"),
+                "A003_pale_divider_tab_protrusion.png": _index_tab_sticky_flag_guard_page("pale_divider_tab_protrusion"),
+                "A004_sticky_note_flag.png": _index_tab_sticky_flag_guard_page("sticky_note_flag"),
+                "A005_small_edge_label.png": _index_tab_sticky_flag_guard_page("small_edge_label"),
+                "A006_flag_near_table_rules_and_page_number.png": _index_tab_sticky_flag_guard_page(
+                    "flag_near_table_rules_and_page_number"
+                ),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-index-tab-sticky-divider-edge-label", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            safe_name = "A001_safe_cleanup_control.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertEqual(safe_audit["local_content_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed")
+            self.assertIn(safe_audit["combination_quality_guard_action"], {"passed", "kept_original"})
+
+            protected_boxes = {
+                "A002_colored_index_tab.png": (242, 28, 296, 102),
+                "A003_pale_divider_tab_protrusion.png": (230, 124, 306, 206),
+                "A004_sticky_note_flag.png": (246, 36, 302, 136),
+                "A005_small_edge_label.png": (236, 170, 302, 214),
+                "A006_flag_near_table_rules_and_page_number.png": (226, 56, 304, 212),
+            }
+            for name, box in protected_boxes.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                before = pages[name].convert("RGB")
+                with Image.open(process_dir / record["output_relative_path"]) as output_image:
+                    after = output_image.convert("RGB")
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
+                self.assertEqual(record["status"], "processed", name)
+                self.assertFalse(record["dark_border_trimmed"], name)
+                self.assertFalse(record["scanner_gutter_trimmed"], name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertIn(
+                    audit["combination_quality_guard_action"],
+                    {"passed", "kept_original", "reverted_to_source"},
+                    name,
+                )
+                self.assertIn(
+                    audit["combination_quality_guard_reason_code"],
+                    {
+                        "safe_combination_passed",
+                        "low_confidence_original_preserved",
+                        "protected_content_original_preserved",
+                        "combined_change_too_large_reverted",
+                    },
+                    name,
+                )
+                self.assertLessEqual(_changed_ratio(before, after, box), 0.04, name)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            self.assertIn("timing", audit_summary)
+            self.assertIn("operation_timings", audit_summary["timing"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_perforated_tearoff_and_stamp_hinge_evidence_stays_preserved_with_safe_control(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-perforated-tearoff-hinge-") as temp_dir:
             root = Path(temp_dir)
@@ -14798,6 +14882,62 @@ def _attached_pasted_evidence_guard_page(variant: str) -> Image.Image:
         draw.line((156, 172, 236, 164), fill=(116, 110, 102), width=1)
         return image
     raise ValueError(f"unsupported attached/pasted evidence variant: {variant}")
+
+
+def _index_tab_sticky_flag_guard_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (304, 224), (242, 240, 236))
+    draw = ImageDraw.Draw(image)
+    for y in (56, 84, 112, 140):
+        draw.rectangle((64, y, 226, y + 4), fill=(58, 58, 58))
+    draw.rectangle((84, 168, 212, 190), fill=(236, 234, 230))
+
+    if variant == "safe_cleanup_control":
+        mask = Image.new("L", image.size, 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.ellipse((164, 74, 252, 150), fill=110)
+        mask = mask.filter(ImageFilter.GaussianBlur(8))
+        return Image.composite(Image.new("RGB", image.size, (233, 231, 226)), image, mask)
+
+    if variant == "colored_index_tab":
+        draw.rectangle((242, 28, 302, 100), fill=(232, 172, 116))
+        draw.rectangle((248, 36, 298, 96), fill=(244, 190, 136))
+        draw.line((242, 28, 242, 100), fill=(156, 106, 72), width=2)
+        draw.text((254, 58), "3", fill=(92, 62, 44), font=ImageFont.load_default())
+        return image
+
+    if variant == "pale_divider_tab_protrusion":
+        draw.rectangle((230, 124, 304, 206), fill=(232, 228, 214))
+        draw.rectangle((236, 132, 298, 200), fill=(240, 236, 224))
+        draw.line((230, 124, 230, 206), fill=(166, 160, 144), width=2)
+        draw.line((244, 156, 292, 156), fill=(124, 118, 108), width=1)
+        draw.line((244, 174, 288, 174), fill=(124, 118, 108), width=1)
+        return image
+
+    if variant == "sticky_note_flag":
+        draw.rectangle((246, 36, 302, 134), fill=(244, 236, 182))
+        draw.line((246, 36, 302, 134), fill=(196, 186, 136), width=1)
+        draw.line((252, 62, 294, 62), fill=(132, 124, 90), width=1)
+        draw.line((252, 84, 294, 84), fill=(132, 124, 90), width=1)
+        draw.line((252, 106, 286, 106), fill=(132, 124, 90), width=1)
+        return image
+
+    if variant == "small_edge_label":
+        draw.rectangle((236, 170, 302, 214), fill=(236, 234, 230))
+        draw.rectangle((244, 176, 296, 208), fill=(246, 244, 239))
+        draw.text((250, 188), "E7", fill=(90, 90, 86), font=ImageFont.load_default())
+        return image
+
+    if variant == "flag_near_table_rules_and_page_number":
+        draw.rectangle((226, 56, 304, 146), fill=(236, 196, 126))
+        draw.rectangle((232, 64, 298, 140), fill=(244, 208, 140))
+        draw.line((226, 56, 226, 146), fill=(156, 118, 76), width=2)
+        for y in (162, 178, 194):
+            draw.line((86, y, 236, y), fill=(114, 110, 102), width=1)
+        draw.rectangle((252, 184, 296, 212), fill=(78, 78, 74))
+        draw.text((238, 114), "A2", fill=(98, 74, 48), font=ImageFont.load_default())
+        return image
+
+    raise ValueError(f"unsupported index tab/sticky flag guard variant: {variant}")
 
 
 def _perforated_tearoff_hinge_guard_page(variant: str) -> Image.Image:
