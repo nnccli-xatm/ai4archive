@@ -1641,6 +1641,7 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
         for audit in audit_records
         if isinstance(audit.get("processed_output_safety_guard_reason_code"), str)
     ]
+    full_chain_cleanup_signal = _full_chain_cleanup_quality_signal(processed_records, audit_records)
     return {
         "schema_version": "scan-qc.processing.audit.v1",
         "generated_at": manifest["generated_at"],
@@ -2734,6 +2735,9 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
                 ),
             },
         },
+        "quality_signals": {
+            "full_chain_cleanup": full_chain_cleanup_signal,
+        },
         "reuse_decisions": {
             "resume_skipped_existing_derivatives": {
                 "count": summary["skipped_due_to_resume"],
@@ -3197,6 +3201,88 @@ def _reason_counts(reasons: list[str]) -> dict[str, int]:
     for reason in reasons:
         counts[reason] = counts.get(reason, 0) + 1
     return counts
+
+
+def _full_chain_cleanup_quality_signal(
+    processed_records: list[dict[str, Any]],
+    audit_records: list[dict[str, Any]],
+) -> dict[str, Any]:
+    total_files = min(len(processed_records), len(audit_records))
+    improved_files = 0
+    preserved_files = 0
+    reverted_files = 0
+    skipped_files = 0
+
+    for record, audit in zip(processed_records[:total_files], audit_records[:total_files]):
+        cleanup_applied = _cleanup_operation_applied(record, audit)
+        reverted = _cleanup_reverted(audit)
+        preserved = reverted or audit.get("combination_quality_guard_reason_code") == "low_confidence_original_preserved"
+
+        if cleanup_applied and not reverted:
+            improved_files += 1
+        if preserved:
+            preserved_files += 1
+        if reverted:
+            reverted_files += 1
+        if not cleanup_applied and not preserved:
+            skipped_files += 1
+
+    return {
+        "basis": "synthetic_full_chain_cleanup",
+        "total_files": total_files,
+        "improved_files": improved_files,
+        "preserved_files": preserved_files,
+        "reverted_files": reverted_files,
+        "skipped_files": skipped_files,
+        "improved_ratio": _safe_ratio(improved_files, total_files),
+        "preserved_ratio": _safe_ratio(preserved_files, total_files),
+        "reverted_ratio": _safe_ratio(reverted_files, total_files),
+        "skipped_ratio": _safe_ratio(skipped_files, total_files),
+    }
+
+
+def _cleanup_operation_applied(record: dict[str, Any], audit: dict[str, Any]) -> bool:
+    return any(
+        [
+            record.get("cropped") is True,
+            record.get("deskewed") is True,
+            record.get("dark_border_trimmed") is True,
+            record.get("scanner_gutter_trimmed") is True,
+            record.get("despeckled") is True,
+            audit.get("tone_normalized") is True,
+            audit.get("paper_color_cast_normalized") is True,
+            audit.get("edge_shadow_lightened") is True,
+            audit.get("corner_shadows_lightened") is True,
+            audit.get("background_stains_lightened") is True,
+            audit.get("fold_shadows_lightened") is True,
+            audit.get("illumination_gradient_levelled") is True,
+            audit.get("bleed_through_cleaned") is True,
+            audit.get("scanlines_lightened") is True,
+            audit.get("faded_text_enhanced") is True,
+            audit.get("text_edges_sharpened") is True,
+        ]
+    )
+
+
+def _cleanup_reverted(audit: dict[str, Any]) -> bool:
+    return any(
+        [
+            audit.get("local_content_change_guard_reverted") is True,
+            audit.get("cumulative_change_guard_reverted") is True,
+            audit.get("combination_quality_guard_reverted") is True,
+            audit.get("processed_output_safety_guard_reverted") is True,
+            audit.get("local_content_change_guard_action") == "reverted_to_source",
+            audit.get("cumulative_change_guard_action") == "reverted_to_source",
+            audit.get("combination_quality_guard_action") == "reverted_to_source",
+            audit.get("processed_output_safety_guard_action") == "reverted_to_source",
+        ]
+    )
+
+
+def _safe_ratio(numerator: int, denominator: int) -> float:
+    if denominator <= 0:
+        return 0.0
+    return round(numerator / denominator, 6)
 
 
 def _process_image(

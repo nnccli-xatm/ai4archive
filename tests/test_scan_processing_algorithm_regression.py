@@ -575,6 +575,19 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 + cumulative_reasons.get("cumulative_edge_content_weakening", 0),
                 len(protected_names),
             )
+            cleanup_signal = audit_summary["quality_signals"]["full_chain_cleanup"]
+            self.assertEqual(cleanup_signal["basis"], "synthetic_full_chain_cleanup")
+            self.assertEqual(cleanup_signal["total_files"], len(pages))
+            self.assertEqual(cleanup_signal["improved_files"], 1)
+            self.assertEqual(cleanup_signal["preserved_files"], len(protected_names))
+            self.assertEqual(cleanup_signal["reverted_files"], len(protected_names))
+            self.assertEqual(cleanup_signal["skipped_files"], 0)
+            self.assertAlmostEqual(cleanup_signal["improved_ratio"], 1 / len(pages), places=6)
+            self.assertAlmostEqual(cleanup_signal["preserved_ratio"], len(protected_names) / len(pages), places=6)
+            self.assertAlmostEqual(cleanup_signal["reverted_ratio"], len(protected_names) / len(pages), places=6)
+            self.assertAlmostEqual(cleanup_signal["skipped_ratio"], 0.0, places=6)
+            self.assertGreater(cleanup_signal["improved_ratio"], 0.0)
+            self.assertLess(cleanup_signal["reverted_ratio"], 1.0)
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertFalse(audit_summary["privacy"]["contains_paths"])
             self.assertFalse(audit_summary["privacy"]["contains_hashes"])
@@ -878,6 +891,16 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 ),
                 len(protected_names),
             )
+            cleanup_signal = audit_summary["quality_signals"]["full_chain_cleanup"]
+            self.assertEqual(cleanup_signal["basis"], "synthetic_full_chain_cleanup")
+            self.assertEqual(cleanup_signal["total_files"], len(pages))
+            self.assertGreaterEqual(cleanup_signal["preserved_files"], len(protected_names))
+            self.assertGreaterEqual(cleanup_signal["reverted_files"], len(protected_names))
+            self.assertGreaterEqual(cleanup_signal["skipped_files"], 0)
+            self.assertAlmostEqual(cleanup_signal["improved_ratio"], cleanup_signal["improved_files"] / len(pages), places=6)
+            self.assertAlmostEqual(cleanup_signal["preserved_ratio"], cleanup_signal["preserved_files"] / len(pages), places=6)
+            self.assertAlmostEqual(cleanup_signal["reverted_ratio"], cleanup_signal["reverted_files"] / len(pages), places=6)
+            self.assertAlmostEqual(cleanup_signal["skipped_ratio"], cleanup_signal["skipped_files"] / len(pages), places=6)
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertFalse(audit_summary["privacy"]["contains_paths"])
             self.assertFalse(audit_summary["privacy"]["contains_hashes"])
