@@ -2547,6 +2547,96 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_clean_background_scanner_glass_streak_cleanup_preserves_lookalikes_and_private_audit(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-clean-glass-streak-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "private_full_chain_safe_horizontal_scanner_glass_streak.png": _clean_background_scanner_glass_streak_page(
+                    "horizontal"
+                ),
+                "private_full_chain_safe_vertical_scanner_glass_streak.png": _clean_background_scanner_glass_streak_page(
+                    "vertical"
+                ),
+                "private_full_chain_protected_repeated_form_rows.png": _clean_background_scanner_glass_streak_page(
+                    "repeated_form_rows"
+                ),
+                "private_full_chain_protected_ruled_background.png": _clean_background_scanner_glass_streak_page(
+                    "ruled_background"
+                ),
+                "private_full_chain_protected_vertical_ruled_background.png": _clean_background_scanner_glass_streak_page(
+                    "vertical_ruled_background"
+                ),
+                "private_full_chain_protected_underline.png": _clean_background_scanner_glass_streak_page("underline"),
+                "private_full_chain_protected_page_number_adjacent_content.png": _clean_background_scanner_glass_streak_page(
+                    "page_number"
+                ),
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(
+                ScanConfig("synthetic-regression", "full-chain-clean-glass-streak", input_dir, output_dir)
+            )
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            scanline_guard = audit_summary["guardrails"]["scanlines"]
+            reason_code_distribution = _reason_code_distribution(scanline_guard["skip_reason_distribution"])
+
+            for name, source_bytes_before in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes_before, name)
+
+            horizontal_safe_name = "private_full_chain_safe_horizontal_scanner_glass_streak.png"
+            horizontal_safe = records[horizontal_safe_name]
+            self.assertTrue(horizontal_safe["scanlines_lightened"], horizontal_safe_name)
+            self.assertIn("lighten_scanlines_conservative", horizontal_safe["operations"], horizontal_safe_name)
+            self.assertGreater(horizontal_safe["scanlines_changed_pixel_ratio"], 0.0007, horizontal_safe_name)
+            self.assertLess(horizontal_safe["scanlines_changed_pixel_ratio"], 0.018, horizontal_safe_name)
+            self.assertEqual(horizontal_safe["processing_audit"]["guardrail_failures"], [], horizontal_safe_name)
+
+            vertical_safe_name = "private_full_chain_safe_vertical_scanner_glass_streak.png"
+            vertical_safe = records[vertical_safe_name]
+            self.assertFalse(vertical_safe["scanlines_lightened"], vertical_safe_name)
+            self.assertIn("lighten_fold_shadows_conservative", vertical_safe["operations"], vertical_safe_name)
+            self.assertIn("lighten_scanlines_noop", vertical_safe["operations"], vertical_safe_name)
+            self.assertGreater(vertical_safe["processing_audit"]["fold_shadows_changed_pixel_ratio"], 0.0007, vertical_safe_name)
+            self.assertLess(vertical_safe["processing_audit"]["fold_shadows_changed_pixel_ratio"], 0.018, vertical_safe_name)
+            self.assertEqual(vertical_safe["processing_audit"]["guardrail_failures"], [], vertical_safe_name)
+
+            protected_names = sorted(
+                name for name in pages if name not in {horizontal_safe_name, vertical_safe_name}
+            )
+            for name in protected_names:
+                record = records[name]
+                self.assertFalse(record["scanlines_lightened"], name)
+                self.assertIn("lighten_scanlines_noop", record["operations"], name)
+                self.assertEqual(record["scanlines_changed_pixel_ratio"], 0.0, name)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["scanlines_lightened_files"], 1)
+            self.assertEqual(audit_summary["counts"]["scanlines_skipped_files"], len(protected_names) + 1)
+            self.assertEqual(scanline_guard["applied_files"], 1)
+            self.assertEqual(scanline_guard["skipped_files"], len(protected_names) + 1)
+            self.assertEqual(scanline_guard["direction_distribution"], {"horizontal": 1})
+            self.assertGreaterEqual(scanline_guard["protection_triggered_files"], len(protected_names) - 1)
+            self.assertGreaterEqual(reason_code_distribution.get("SCANLINE_SCOPE_RISK", 0), 2)
+            self.assertGreaterEqual(reason_code_distribution.get("SCANLINE_CONTENT_RISK", 0), 1)
+            self.assertGreaterEqual(reason_code_distribution.get("SCANLINE_EDGE_CONTENT_RISK", 0), 1)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_safe_combination_page_stays_conservative(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-safe-") as temp_dir:
             root = Path(temp_dir)
