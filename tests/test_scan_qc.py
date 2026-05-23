@@ -735,6 +735,34 @@ class ScanQcTest(unittest.TestCase):
         self.assertEqual(digest["acceptance_sampling"]["reviewed_sample_count"], 2)
         self.assertIn("closure_gate_summary", digest["reused_aggregate_fields"])
         self.assertIn("acceptance_sampling", digest["reused_aggregate_fields"])
+        self.assertIn("warning_items", digest["reused_aggregate_fields"])
+
+    def test_release_candidate_summary_carries_cleanup_quality_warning_digest_from_acceptance(self) -> None:
+        module = _load_release_candidate_module()
+        acceptance = _release_candidate_acceptance(status="pass")
+        acceptance["warning_items"] = [
+            {
+                "code": "full_chain_cleanup_low_improved_ratio",
+                "title_zh": "清理改善比例偏低",
+                "message_zh": "全链路清理在聚合结果中的改善比例偏低，请在导出前复核清理参数与抽样结果。",
+                "next_step_zh": "检查清理参数并抽检代表性处理结果；如偏差持续，请补充聚合证据后重跑验收。",
+                "observed": {"ratios": {"improved_ratio": 0.35}},
+            }
+        ]
+        summary = module.build_release_candidate_summary(
+            aggregate_baseline_summary=_release_candidate_baseline(),
+            acceptance_summary=acceptance,
+            release_readiness_summary=_release_candidate_readiness(status="pass"),
+            cleanup_requested=True,
+            generated_at="2026-01-01T00:00:00+00:00",
+        )
+
+        self.assertEqual(summary["warning_item_count"], 1)
+        self.assertEqual(summary["warning_items"][0]["code"], "full_chain_cleanup_low_improved_ratio")
+        self.assertIn("清理改善比例偏低", summary["warning_items"][0]["title_zh"])
+        raw = json.dumps(summary, ensure_ascii=False)
+        self.assertNotIn("\"ratios\"", raw)
+        self.assertNotIn("0.35", raw)
 
     def test_release_candidate_command_omits_sensitive_values_and_records_cleanup_intent(self) -> None:
         module = _load_release_candidate_module()
@@ -1235,6 +1263,39 @@ class ScanQcTest(unittest.TestCase):
         self.assertNotIn("page_0001", raw)
         self.assertNotIn("/Users/private/archive", raw)
         self.assertNotIn("observed", raw)
+
+    def test_final_handoff_summary_promotes_cleanup_warnings_from_release_candidate_generated_from_acceptance(self) -> None:
+        module = _load_release_candidate_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            acceptance = _release_candidate_acceptance(status="pass")
+            acceptance["warning_items"] = [
+                {
+                    "code": "full_chain_cleanup_high_reverted_ratio",
+                    "title_zh": "清理回退比例偏高",
+                    "message_zh": "全链路清理在聚合结果中的回退比例偏高，请在导出前复核清理参数与抽样结果。",
+                    "next_step_zh": "检查清理参数并抽检代表性处理结果；如偏差持续，请补充聚合证据后重跑验收。",
+                    "observed": {"ratios": {"reverted_ratio": 0.3}},
+                }
+            ]
+            release_payload = module.build_release_candidate_summary(
+                aggregate_baseline_summary=_release_candidate_baseline(),
+                acceptance_summary=acceptance,
+                release_readiness_summary=_release_candidate_readiness(status="pass"),
+                cleanup_requested=True,
+                generated_at="2026-01-01T00:00:00+00:00",
+            )
+            _write_json(root / "aggregate_evidence_bundle_summary.json", _aggregate_evidence_bundle_payload(status="pass"))
+            _write_json(root / "release_candidate_summary.json", release_payload)
+
+            summary = build_final_handoff_summary(root, generated_at="2026-01-01T00:00:00+00:00")
+            raw = json.dumps(summary, ensure_ascii=False)
+
+        digest = summary["handoff_blocker_summary_zh"]
+        self.assertEqual(digest["cleanup_quality_warning_codes"], ["full_chain_cleanup_high_reverted_ratio"])
+        self.assertEqual(digest["cleanup_quality_warnings_zh"][0]["code"], "full_chain_cleanup_high_reverted_ratio")
+        self.assertNotIn("\"ratios\"", raw)
+        self.assertNotIn("0.3", raw)
 
     def test_final_handoff_summary_passes_real_review_decision_verifier_output_source_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
