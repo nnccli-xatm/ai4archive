@@ -4473,6 +4473,94 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_compact_margin_dust_cleanup_preserves_edge_lookalikes_and_public_audit(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-compact-margin-dust-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            protected_pages = _protected_full_chain_margin_dust_lookalike_pages()
+            pages = {
+                "synthetic_safe_full_chain_compact_margin_dust.png": _safe_tiny_margin_dust_speck_page(),
+                **protected_pages,
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-compact-margin-dust", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(
+                    despeckle=True,
+                    normalize_paper_color_cast=True,
+                    lighten_background_stains=True,
+                    clean_bleed_through=True,
+                    lighten_scanlines=True,
+                    workers=1,
+                ),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_name = "synthetic_safe_full_chain_compact_margin_dust.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertTrue(safe_record["despeckled"])
+            self.assertEqual(safe_record["despeckle_pixels_changed"], len(_safe_tiny_margin_dust_speck_points()))
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertEqual(safe_audit["local_content_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed")
+            with Image.open(process_dir / safe_record["output_relative_path"]) as output:
+                output_luma = output.convert("L")
+                for point in _safe_tiny_margin_dust_speck_points():
+                    self.assertGreaterEqual(output_luma.getpixel(point), 240)
+
+            for name, source_image in protected_pages.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name])
+                self.assertEqual(record["status"], "processed", name)
+                self.assertFalse(record["despeckled"], name)
+                self.assertEqual(record["despeckle_pixels_changed"], 0, name)
+                self.assertIn("despeckle_noop", record["operations"], name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertEqual(audit["local_content_change_guard_action"], "passed", name)
+                self.assertEqual(audit["cumulative_change_guard_action"], "passed", name)
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    self.assertIsNone(ImageChops.difference(source_image, output.convert("RGB")).getbbox(), name)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["guardrails"]["despeckle"]["applied_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["despeckle"]["skipped_files"], len(protected_pages))
+            self.assertEqual(
+                audit_summary["guardrails"]["despeckle"]["pixels_changed"],
+                len(_safe_tiny_margin_dust_speck_points()),
+            )
+            reason_distribution = audit_summary["guardrails"]["despeckle"]["reason_code_distribution"]
+            self.assertEqual(reason_distribution["applied_isolated_pixels"], 1)
+            protected_reason_count = (
+                reason_distribution.get("no_isolated_candidates", 0)
+                + reason_distribution.get("protected_edge_dark_marks", 0)
+                + reason_distribution.get("repeated_pale_micro_pattern_risk", 0)
+                + reason_distribution.get("pale_candidate_density_exceeds_safety_threshold", 0)
+            )
+            self.assertGreaterEqual(protected_reason_count, len(protected_pages))
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_isolated_dust_combined_retouch_guard_stays_bounded_and_public(self) -> None:
         pages = _isolated_dust_combined_retouch_pages()
         with tempfile.TemporaryDirectory(prefix="scan-processing-isolated-dust-combined-") as temp_dir:
@@ -11719,6 +11807,45 @@ def _protected_tiny_margin_dust_lookalike_pages() -> dict[str, Image.Image]:
         for x in range(6, 30, 6):
             paper_grain.putpixel((x, y), (229, 229, 225))
     pages["synthetic_protected_margin_repeated_paper_grain.png"] = paper_grain
+
+    return pages
+
+
+def _protected_full_chain_margin_dust_lookalike_pages() -> dict[str, Image.Image]:
+    pages: dict[str, Image.Image] = {}
+
+    stamp = Image.new("RGB", (260, 180), (246, 246, 244))
+    draw = ImageDraw.Draw(stamp)
+    draw.rectangle((2, 70, 34, 112), outline=(176, 28, 28), width=2)
+    draw.ellipse((8, 76, 28, 98), outline=(176, 28, 28), width=2)
+    for point in _safe_tiny_margin_dust_speck_points():
+        stamp.putpixel(point, (228, 228, 224))
+    pages["synthetic_protected_full_chain_margin_stamp_fragment.png"] = stamp
+
+    marginal_note = Image.new("RGB", (260, 180), (246, 246, 244))
+    draw = ImageDraw.Draw(marginal_note)
+    draw.line((4, 74, 30, 100), fill=(36, 36, 36), width=2)
+    draw.line((6, 92, 26, 92), fill=(36, 36, 36), width=2)
+    for point in _safe_tiny_margin_dust_speck_points():
+        marginal_note.putpixel(point, (228, 228, 224))
+    pages["synthetic_protected_full_chain_margin_marginal_note_fragment.png"] = marginal_note
+
+    ruled_edges = Image.new("RGB", (260, 180), (246, 246, 244))
+    for y in range(40, 142, 9):
+        ruled_edges.putpixel((16, y), (226, 226, 223))
+    for x in range(4, 54):
+        ruled_edges.putpixel((x, 68), (226, 226, 223))
+    for point in _safe_tiny_margin_dust_speck_points():
+        ruled_edges.putpixel(point, (228, 228, 224))
+    pages["synthetic_protected_full_chain_margin_ruled_form_edge.png"] = ruled_edges
+
+    page_number = Image.new("RGB", (260, 180), (246, 246, 244))
+    draw = ImageDraw.Draw(page_number)
+    draw.rectangle((6, 82, 12, 90), fill=(44, 44, 44))
+    draw.rectangle((15, 82, 21, 90), fill=(44, 44, 44))
+    for point in _safe_tiny_margin_dust_speck_points():
+        page_number.putpixel(point, (228, 228, 224))
+    pages["synthetic_protected_full_chain_margin_page_number.png"] = page_number
 
     return pages
 
