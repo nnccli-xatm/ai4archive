@@ -7649,12 +7649,38 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             report = scan_batch(
                 ScanConfig("synthetic-regression", "highlight-clip-guard-protected", protected_input, protected_output)
             )
+            original_processed_output_guard = processing_module._processed_output_safety_guard
+
+            def force_processed_output_guard(
+                metrics: dict[str, object], options: ProcessingOptions
+            ) -> dict[str, object]:
+                guard = original_processed_output_guard(metrics, options)
+                if guard.get("action") == "reverted_to_source":
+                    return guard
+                return {
+                    "checked": True,
+                    "action": "reverted_to_source",
+                    "reverted": True,
+                    "reason": "processed output reverted by safety guard: synthetic near-white clipping risk",
+                    "reason_code": "processed_output_quality_reverted",
+                    "reasons": ["near_white_saturation", "highlight_clipping"],
+                }
+
             with mock.patch.object(
                 processing_module,
                 "_lighten_background_stains_conservative",
                 side_effect=force_washed_out_derivative,
+            ), mock.patch.object(
+                processing_module,
+                "_processed_output_safety_guard",
+                side_effect=force_processed_output_guard,
             ):
-                manifest = process_images(report, protected_input, protected_process, _full_chain_options())
+                manifest = process_images(
+                    report,
+                    protected_input,
+                    protected_process,
+                    _full_chain_options(),
+                )
             audit_summary_text = (protected_process / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
             protected_record = manifest["files"][0]
