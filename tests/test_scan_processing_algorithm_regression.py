@@ -5820,6 +5820,65 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             ):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_thermal_receipt_and_vellum_overlay_stays_guarded_with_safe_control(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-thermal-vellum-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_safe_receipt_shadow_control.png": _thermal_receipt_vellum_guard_page("safe"),
+                "synthetic_protected_thermal_text.png": _thermal_receipt_vellum_guard_page("thermal_text"),
+                "synthetic_protected_vellum_overlay.png": _thermal_receipt_vellum_guard_page("vellum_overlay"),
+                "synthetic_protected_receipt_table_rules.png": _thermal_receipt_vellum_guard_page("receipt_rules"),
+                "synthetic_protected_receipt_stamp_margin_note.png": _thermal_receipt_vellum_guard_page("stamp_note"),
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "thermal-vellum-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_name = "synthetic_safe_receipt_shadow_control.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertLessEqual(safe_audit["cumulative_change_pixel_ratio"], 0.05)
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertIn(
+                safe_audit["combination_quality_guard_reason_code"],
+                {"safe_combination_passed", "low_confidence_original_preserved"},
+            )
+
+            protected_names = set(pages) - {safe_name}
+            for name in protected_names:
+                record = records[name]
+                audit = record["processing_audit"]
+                self.assertLessEqual(audit["cumulative_change_pixel_ratio"], 0.012, name)
+                self.assertIn(
+                    audit["combination_quality_guard_reason_code"],
+                    {"safe_combination_passed", "low_confidence_original_preserved"},
+                    name,
+                )
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_paper_color_cast_combination_preserves_protected_content(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-paper-cast-") as temp_dir:
             root = Path(temp_dir)
@@ -12785,6 +12844,50 @@ def _thin_translucent_show_through_page(variant: str) -> Image.Image:
         draw.line((216, 120, 278, 124), fill=(224, 222, 218), width=1)
         return image
     raise ValueError(f"unknown thin translucent show-through variant: {variant}")
+
+
+def _thermal_receipt_vellum_guard_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (300, 210), (242, 240, 232))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((24, 20, 278, 188), outline=(206, 202, 190), width=2)
+    for y in range(36, 176, 18):
+        draw.line((40, y, 266, y), fill=(230, 226, 216), width=1)
+
+    if variant == "safe":
+        for y in (58, 86, 114):
+            draw.rectangle((56, y, 192, y + 3), fill=(82, 82, 82))
+        mask = Image.new("L", image.size, 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.text((196, 60), "321", fill=255)
+        mask_draw.text((198, 88), "654", fill=255)
+        mask_draw.text((200, 116), "987", fill=255)
+        mask = mask.filter(ImageFilter.GaussianBlur(4.2))
+        haze = Image.new("RGB", image.size, (232, 228, 214))
+        image.paste(haze, (0, 0), mask.point(lambda value: int(value * 0.32)))
+        return image
+    if variant == "thermal_text":
+        for y in (52, 78, 104, 130):
+            draw.text((52, y), "TOTAL 12.30", fill=(168, 164, 154))
+        return image
+    if variant == "vellum_overlay":
+        for y in range(44, 178, 7):
+            shade = 228 + (y % 4)
+            draw.line((150, y, 276, y + 2), fill=(shade, shade, shade - 5), width=1)
+        draw.text((164, 70), "ref", fill=(212, 208, 198))
+        draw.line((162, 95, 256, 102), fill=(212, 208, 198), width=1)
+        return image
+    if variant == "receipt_rules":
+        for y in (54, 80, 106, 132):
+            draw.line((52, y, 248, y), fill=(198, 194, 184), width=1)
+        for x in (108, 186):
+            draw.line((x, 42, x, 148), fill=(198, 194, 184), width=1)
+        return image
+    if variant == "stamp_note":
+        draw.ellipse((206, 112, 260, 166), outline=(188, 50, 50), width=2)
+        draw.text((44, 144), "p.7", fill=(188, 184, 174))
+        draw.text((52, 52), "paid", fill=(176, 172, 162))
+        return image
+    raise ValueError(f"unknown thermal/vellum guard variant: {variant}")
 
 
 def _protected_sparse_bleed_through_mark_pages() -> dict[str, Image.Image]:
