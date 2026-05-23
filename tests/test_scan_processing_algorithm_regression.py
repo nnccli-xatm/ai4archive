@@ -9936,6 +9936,85 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_binding_and_repair_evidence_guard_preserves_binder_staple_clip_rust_and_tape(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-binding-repair-evidence-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "A001_safe_cleanup_control.png": _physical_evidence_guard_page("safe_cleanup_control"),
+                "A002_binder_punch_hole.png": _physical_evidence_guard_page("binder_punch_hole"),
+                "A003_staple_shadow.png": _physical_evidence_guard_page("staple_shadow"),
+                "A004_rusty_staple_transfer.png": _physical_evidence_guard_page("rusty_staple_transfer"),
+                "A005_clip_pressure_trace.png": _physical_evidence_guard_page("clip_pressure_trace"),
+                "A006_archival_tape_strip_and_halo.png": _physical_evidence_guard_page("archival_tape_strip_and_halo"),
+                "A007_faint_foreground_near_tape.png": _physical_evidence_guard_page("faint_foreground_near_tape"),
+                "A008_crease_near_page_number_block.png": _physical_evidence_guard_page("crease_near_page_number_block"),
+                "A009_crease_near_handwriting_like.png": _physical_evidence_guard_page("crease_near_handwriting_like"),
+                "A010_crease_near_table_rule_lines.png": _physical_evidence_guard_page("crease_near_table_rule_lines"),
+                "A011_crease_near_stamp_tone.png": _physical_evidence_guard_page("crease_near_stamp_tone"),
+                "A012_crease_near_photo_texture.png": _physical_evidence_guard_page("crease_near_photo_texture"),
+            }
+            for name, image in pages.items():
+                image.save(input_dir / name, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-binding-repair-evidence", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            safe_name = "A001_safe_cleanup_control.png"
+            safe_record = records[safe_name]
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertEqual(safe_record["processing_audit"]["guardrail_failures"], [])
+            self.assertIn(
+                safe_record["processing_audit"]["combination_quality_guard_action"],
+                {"passed", "kept_original"},
+            )
+
+            protected_boxes = {
+                "A002_binder_punch_hole.png": (6, 56, 58, 192),
+                "A003_staple_shadow.png": (14, 18, 84, 78),
+                "A004_rusty_staple_transfer.png": (14, 18, 84, 78),
+                "A005_clip_pressure_trace.png": (10, 22, 74, 88),
+                "A006_archival_tape_strip_and_halo.png": (8, 18, 64, 202),
+                "A007_faint_foreground_near_tape.png": (12, 24, 98, 196),
+                "A008_crease_near_page_number_block.png": (150, 136, 258, 208),
+                "A009_crease_near_handwriting_like.png": (96, 44, 222, 184),
+                "A010_crease_near_table_rule_lines.png": (74, 48, 230, 176),
+                "A011_crease_near_stamp_tone.png": (10, 14, 84, 100),
+                "A012_crease_near_photo_texture.png": (146, 24, 272, 170),
+            }
+            for name, box in protected_boxes.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                before = pages[name].convert("RGB")
+                with Image.open(process_dir / record["output_relative_path"]) as output_image:
+                    after = output_image.convert("RGB")
+                self.assertEqual(record["status"], "processed", name)
+                self.assertFalse(record["dark_border_trimmed"], name)
+                self.assertFalse(record["scanner_gutter_trimmed"], name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertIn(
+                    audit["combination_quality_guard_action"],
+                    {"passed", "kept_original", "reverted_to_source"},
+                    name,
+                )
+                self.assertLess(_changed_ratio(before, after, box), 0.03, name)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            self.assertIn("timing", audit_summary)
+            self.assertIn("operation_timings", audit_summary["timing"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_attached_slips_and_pasted_labels_stay_preserved_with_safe_cleanup_control(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-attached-pasted-evidence-") as temp_dir:
             root = Path(temp_dir)
