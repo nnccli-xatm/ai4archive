@@ -976,6 +976,113 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_faint_marginal_note_cleanup_guard_preserves_protected_edge_content(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-faint-marginal-note-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            pages = {
+                "synthetic_safe_cleanup_dust_control.png": _safe_clean_page_faint_dust_speck_page(),
+                "synthetic_protected_faint_marginal_note.png": _combined_retouch_guard_page("marginal_note"),
+                "synthetic_protected_small_check_mark.png": _combined_retouch_guard_page("marginal_note"),
+                "synthetic_protected_page_side_annotation.png": _combined_retouch_guard_page("edge_mark"),
+                "synthetic_protected_page_number_adjacent_mark.png": _combined_retouch_guard_page("page_number"),
+                "synthetic_protected_stamp_color_mark.png": _combined_retouch_guard_page("stamp"),
+                "synthetic_protected_ruled_table_edge.png": _combined_retouch_guard_page("table_lines"),
+                "synthetic_protected_textured_region.png": _subtle_diagonal_edge_shadow_page("texture"),
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            def synthetic_stain_cleanup(current: Image.Image) -> processing_module.BackgroundStainLighteningResult:
+                changed = current.copy()
+                draw = ImageDraw.Draw(changed)
+                draw.rectangle((0, 0, changed.width - 1, changed.height - 1), fill=(238, 238, 234))
+                return processing_module.BackgroundStainLighteningResult(
+                    changed,
+                    True,
+                    "background stains lightened: synthetic broad cleanup",
+                    214.0,
+                    238.0,
+                    24.0,
+                    0.26,
+                    0.26,
+                )
+
+            def synthetic_scanline_cleanup(current: Image.Image) -> processing_module.ScanlineLighteningResult:
+                changed = current.copy()
+                draw = ImageDraw.Draw(changed)
+                for y in (38, 58, 78, 98, 118, 138):
+                    draw.rectangle((8, y, changed.width - 8, y + 2), fill=(240, 240, 236))
+                return processing_module.ScanlineLighteningResult(
+                    changed,
+                    True,
+                    "scanlines lightened: synthetic broad cleanup",
+                    "horizontal",
+                    6,
+                    204.0,
+                    240.0,
+                    36.0,
+                    0.10,
+                    0.10,
+                )
+
+            report = scan_batch(
+                ScanConfig("synthetic-regression", "full-chain-faint-marginal-note-guard", input_dir, output_dir)
+            )
+            with mock.patch.object(
+                processing_module,
+                "_lighten_background_stains_conservative",
+                side_effect=synthetic_stain_cleanup,
+            ), mock.patch.object(
+                processing_module,
+                "_lighten_scanlines_conservative",
+                side_effect=synthetic_scanline_cleanup,
+            ):
+                manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_name = "synthetic_safe_cleanup_dust_control.png"
+            safe_record = records[safe_name]
+            self.assertEqual(safe_record["status"], "processed")
+
+            protected_names = set(pages) - {safe_name}
+            for name in protected_names:
+                record = records[name]
+                audit = record["processing_audit"]
+                self.assertEqual(audit["local_content_change_guard_action"], "reverted_to_source", name)
+                self.assertEqual(audit["cumulative_change_guard_action"], "reverted_to_source", name)
+                self.assertEqual(audit["combination_quality_guard_action"], "reverted_to_source", name)
+                self.assertEqual(audit["combination_quality_guard_reason_code"], "combined_change_too_large_reverted", name)
+                self.assertIn("combination_quality_guard_reverted_to_source", record["operations"], name)
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    self.assertEqual(output.convert("RGB").tobytes(), pages[name].tobytes(), name)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertGreaterEqual(audit_summary["counts"]["local_content_change_guard_reverted_files"], len(protected_names))
+            self.assertGreaterEqual(audit_summary["counts"]["cumulative_change_guard_reverted_files"], len(protected_names))
+            self.assertGreaterEqual(
+                audit_summary["counts"]["combination_quality_guard_reverted_files"], len(protected_names)
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_mild_broad_corner_vignette_cleanup_preserves_corner_mark(self) -> None:
         def mild_broad_corner_vignette_page(variant: str) -> Image.Image:
             image = Image.new("RGB", (320, 240), (244, 244, 240))
