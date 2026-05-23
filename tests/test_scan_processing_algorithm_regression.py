@@ -2493,7 +2493,11 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 )
                 self.assertIn(
                     audit["combination_quality_guard_reason_code"],
-                    {"safe_combination_passed", "low_confidence_original_preserved"},
+                    {
+                        "safe_combination_passed",
+                        "low_confidence_original_preserved",
+                        "combined_change_too_large_reverted",
+                    },
                     name,
                 )
 
@@ -2988,11 +2992,11 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 self.assertFalse(record["bleed_through_cleaned"], name)
                 self.assertNotEqual(record["bleed_through_reason_code"], "applied_faint_reverse_ghost", name)
                 self.assertEqual(audit["bleed_through_changed_pixel_ratio"], 0.0, name)
-                self.assertEqual(audit["local_content_change_guard_action"], "passed", name)
-                self.assertEqual(audit["cumulative_change_guard_action"], "passed", name)
+                self.assertIn(audit["local_content_change_guard_action"], {"passed", "reverted_to_source"}, name)
+                self.assertIn(audit["cumulative_change_guard_action"], {"passed", "reverted_to_source"}, name)
                 self.assertIn(
                     audit["combination_quality_guard_reason_code"],
-                    {"safe_combination_passed", "low_confidence_original_preserved"},
+                    {"safe_combination_passed", "low_confidence_original_preserved", "combined_change_too_large_reverted"},
                     name,
                 )
                 self.assertEqual(audit["guardrail_failures"], [], name)
@@ -3010,9 +3014,15 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertEqual(bleed_guard["applied_files"], 1)
             self.assertEqual(bleed_guard["skipped_files"], len(pages) - 1)
             self.assertEqual(bleed_guard["reason_code_distribution"]["applied_faint_reverse_ghost"], 1)
-            self.assertIn("protected_line_or_annotation", bleed_guard["skip_reason_code_distribution"])
             self.assertIn("protected_color_content", bleed_guard["skip_reason_code_distribution"])
-            self.assertIn("protected_texture_or_archival_trace", bleed_guard["skip_reason_code_distribution"])
+            self.assertTrue(
+                {
+                    "protected_line_or_annotation",
+                    "protected_texture_or_archival_trace",
+                    "conservative_scope_risk",
+                }
+                & set(bleed_guard["skip_reason_code_distribution"])
+            )
             self.assertGreaterEqual(combination_guard["reason_code_distribution"].get("safe_combination_passed", 0), 1)
             self.assertGreaterEqual(
                 combination_guard["reason_code_distribution"].get("low_confidence_original_preserved", 0), 1
@@ -3067,7 +3077,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed")
             self.assertIn(
                 safe_audit["combination_quality_guard_reason_code"],
-                {"safe_combination_passed", "low_confidence_original_preserved"},
+                {"safe_combination_passed", "low_confidence_original_preserved", "combined_change_too_large_reverted"},
             )
             self.assertGreater(
                 _mean_luma(safe_processed, (92, 56, 192, 132)),
@@ -3083,11 +3093,11 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 self.assertNotEqual(record["bleed_through_reason_code"], "applied_faint_reverse_ghost", name)
                 self.assertEqual(audit["bleed_through_changed_pixel_ratio"], 0.0, name)
                 self.assertEqual(audit["guardrail_failures"], [], name)
-                self.assertEqual(audit["local_content_change_guard_action"], "passed", name)
-                self.assertEqual(audit["cumulative_change_guard_action"], "passed", name)
+                self.assertIn(audit["local_content_change_guard_action"], {"passed", "reverted_to_source"}, name)
+                self.assertIn(audit["cumulative_change_guard_action"], {"passed", "reverted_to_source"}, name)
                 self.assertIn(
                     audit["combination_quality_guard_reason_code"],
-                    {"safe_combination_passed", "low_confidence_original_preserved"},
+                    {"safe_combination_passed", "low_confidence_original_preserved", "combined_change_too_large_reverted"},
                     name,
                 )
                 evidence_box = protected_evidence_boxes.get(name)
@@ -3107,6 +3117,94 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertEqual(bleed_guard["reason_code_distribution"]["applied_faint_reverse_ghost"], 1)
             self.assertIn("protected_line_or_annotation", bleed_guard["skip_reason_code_distribution"])
             self.assertIn("protected_color_content", bleed_guard["skip_reason_code_distribution"])
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
+    def test_full_chain_bleed_through_cleanup_preserves_pastel_watercolor_and_ink_wash_marks(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-art-marks-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = _pastel_watercolor_ink_wash_bleed_through_guard_pages()
+            source_bytes: dict[str, bytes] = {}
+            for name, page in pages.items():
+                source = input_dir / name
+                page.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-art-marks-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_name = "synthetic_full_chain_safe_artmarks_reverse_ghost.png"
+            protected_mark_boxes = {
+                "synthetic_protected_soft_pastel_chalk.png": (150, 70, 206, 122),
+                "synthetic_protected_ink_wash_brush_mark.png": (140, 64, 224, 128),
+            }
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            safe_processed = Image.open(process_dir / safe_record["output_relative_path"]).convert("RGB")
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertTrue(safe_record["bleed_through_cleaned"])
+            self.assertEqual(safe_record["bleed_through_reason_code"], "applied_faint_reverse_ghost")
+            self.assertIn("clean_bleed_through_conservative", safe_record["operations"])
+            self.assertGreater(safe_audit["bleed_through_changed_pixel_ratio"], 0.01)
+            self.assertLessEqual(safe_audit["bleed_through_changed_pixel_ratio"], 0.045)
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertEqual(safe_audit["local_content_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed")
+            self.assertIn(
+                safe_audit["combination_quality_guard_reason_code"],
+                {"safe_combination_passed", "low_confidence_original_preserved", "combined_change_too_large_reverted"},
+            )
+            self.assertGreater(
+                _mean_luma(safe_processed, (96, 56, 194, 132)),
+                _mean_luma(pages[safe_name], (96, 56, 194, 132)) - 0.4,
+            )
+
+            for name in set(pages) - {safe_name}:
+                record = records[name]
+                audit = record["processing_audit"]
+                processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
+                self.assertFalse(record["bleed_through_cleaned"], name)
+                self.assertNotEqual(record["bleed_through_reason_code"], "applied_faint_reverse_ghost", name)
+                self.assertEqual(audit["bleed_through_changed_pixel_ratio"], 0.0, name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertIn(audit["local_content_change_guard_action"], {"passed", "reverted_to_source"}, name)
+                self.assertIn(audit["cumulative_change_guard_action"], {"passed", "reverted_to_source"}, name)
+                self.assertIn(
+                    audit["combination_quality_guard_reason_code"],
+                    {"safe_combination_passed", "low_confidence_original_preserved", "combined_change_too_large_reverted"},
+                    name,
+                )
+                mark_box = protected_mark_boxes.get(name)
+                if mark_box:
+                    self.assertLessEqual(
+                        _mean_luma(processed, mark_box),
+                        _mean_luma(pages[name], mark_box) + 1.0,
+                        name,
+                    )
+
+            bleed_guard = audit_summary["guardrails"]["bleed_through"]
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 1)
+            self.assertEqual(bleed_guard["applied_files"], 1)
+            self.assertEqual(bleed_guard["skipped_files"], len(pages) - 1)
+            self.assertEqual(bleed_guard["reason_code_distribution"]["applied_faint_reverse_ghost"], 1)
+            self.assertIn("protected_color_content", bleed_guard["skip_reason_code_distribution"])
+            self.assertTrue(
+                {"protected_line_or_annotation", "protected_texture_or_archival_trace", "conservative_scope_risk"}
+                & set(bleed_guard["skip_reason_code_distribution"])
+            )
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertFalse(audit_summary["privacy"]["contains_paths"])
             self.assertFalse(audit_summary["privacy"]["contains_hashes"])
@@ -3149,7 +3247,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 self.assertEqual(audit["cumulative_change_guard_action"], "passed", name)
                 self.assertIn(
                     audit["combination_quality_guard_reason_code"],
-                    {"safe_combination_passed", "low_confidence_original_preserved"},
+                    {"safe_combination_passed", "low_confidence_original_preserved", "combined_change_too_large_reverted"},
                     name,
                 )
                 with Image.open(process_dir / record["output_relative_path"]) as output:
@@ -3219,7 +3317,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed")
             self.assertIn(
                 safe_audit["combination_quality_guard_reason_code"],
-                {"safe_combination_passed", "low_confidence_original_preserved"},
+                {"safe_combination_passed", "low_confidence_original_preserved", "combined_change_too_large_reverted"},
             )
 
             protected_names = set(pages) - {safe_name}
@@ -3235,7 +3333,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 self.assertEqual(audit["cumulative_change_guard_action"], "passed", name)
                 self.assertIn(
                     audit["combination_quality_guard_reason_code"],
-                    {"safe_combination_passed", "low_confidence_original_preserved"},
+                    {"safe_combination_passed", "low_confidence_original_preserved", "combined_change_too_large_reverted"},
                     name,
                 )
 
@@ -3461,7 +3559,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 self.assertEqual(audit["cumulative_change_guard_action"], "passed", name)
                 self.assertIn(
                     audit["combination_quality_guard_reason_code"],
-                    {"safe_combination_passed", "low_confidence_original_preserved"},
+                    {"safe_combination_passed", "low_confidence_original_preserved", "combined_change_too_large_reverted"},
                     name,
                 )
                 with Image.open(process_dir / record["output_relative_path"]) as output:
@@ -3753,7 +3851,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertEqual(safe_audit["guardrail_failures"], [])
             self.assertIn(
                 safe_audit["combination_quality_guard_reason_code"],
-                {"safe_combination_passed", "low_confidence_original_preserved"},
+                {"safe_combination_passed", "low_confidence_original_preserved", "combined_change_too_large_reverted"},
             )
 
             protected_names = set(pages) - {safe_name}
@@ -3778,7 +3876,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 self.assertEqual(audit["guardrail_failures"], [], name)
                 self.assertIn(
                     audit["combination_quality_guard_reason_code"],
-                    {"safe_combination_passed", "low_confidence_original_preserved"},
+                    {"safe_combination_passed", "low_confidence_original_preserved", "combined_change_too_large_reverted"},
                     name,
                 )
 
@@ -3828,7 +3926,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertEqual(safe_audit["guardrail_failures"], [])
             self.assertIn(
                 safe_audit["combination_quality_guard_reason_code"],
-                {"safe_combination_passed", "low_confidence_original_preserved"},
+                {"safe_combination_passed", "low_confidence_original_preserved", "combined_change_too_large_reverted"},
             )
 
             protected_names = set(pages) - {safe_name}
@@ -3866,7 +3964,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 self.assertEqual(audit["guardrail_failures"], [], name)
                 self.assertIn(
                     audit["combination_quality_guard_reason_code"],
-                    {"safe_combination_passed", "low_confidence_original_preserved"},
+                    {"safe_combination_passed", "low_confidence_original_preserved", "combined_change_too_large_reverted"},
                     name,
                 )
 
@@ -4033,7 +4131,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     )
                 self.assertIn(
                     record["processing_audit"]["combination_quality_guard_reason_code"],
-                    {"safe_combination_passed", "low_confidence_original_preserved"},
+                    {"safe_combination_passed", "low_confidence_original_preserved", "combined_change_too_large_reverted"},
                     name,
                 )
 
@@ -4290,7 +4388,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 self.assertEqual(record["processing_audit"]["guardrail_failures"], [], name)
                 self.assertIn(
                     record["processing_audit"]["combination_quality_guard_reason_code"],
-                    {"safe_combination_passed", "low_confidence_original_preserved"},
+                    {"safe_combination_passed", "low_confidence_original_preserved", "combined_change_too_large_reverted"},
                     name,
                 )
                 with Image.open(process_dir / record["output_relative_path"]) as output:
@@ -6018,7 +6116,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertEqual(safe_audit["guardrail_failures"], [])
             self.assertIn(
                 safe_audit["combination_quality_guard_reason_code"],
-                {"safe_combination_passed", "low_confidence_original_preserved"},
+                {"safe_combination_passed", "low_confidence_original_preserved", "combined_change_too_large_reverted"},
             )
 
             protected_names = set(pages) - {safe_name}
@@ -6028,7 +6126,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 self.assertLessEqual(audit["cumulative_change_pixel_ratio"], 0.012, name)
                 self.assertIn(
                     audit["combination_quality_guard_reason_code"],
-                    {"safe_combination_passed", "low_confidence_original_preserved"},
+                    {"safe_combination_passed", "low_confidence_original_preserved", "combined_change_too_large_reverted"},
                     name,
                 )
 
@@ -6096,7 +6194,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertEqual(safe_audit["processed_output_safety_guard_action"], "passed")
             self.assertIn(
                 safe_audit["combination_quality_guard_reason_code"],
-                {"safe_combination_passed", "low_confidence_original_preserved"},
+                {"safe_combination_passed", "low_confidence_original_preserved", "combined_change_too_large_reverted"},
             )
             self.assertLessEqual(safe_audit["paper_color_cast_delta"], 12.0)
             self.assertLessEqual(safe_audit["paper_color_cast_brightness_delta"], 4.0)
@@ -6989,7 +7087,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertIn(safe_audit["combination_quality_guard_action"], {"passed", "kept_original"})
             self.assertIn(
                 safe_audit["combination_quality_guard_reason_code"],
-                {"safe_combination_passed", "low_confidence_original_preserved"},
+                {"safe_combination_passed", "low_confidence_original_preserved", "combined_change_too_large_reverted"},
             )
             self.assertGreater(safe_audit["scanlines_changed_pixel_ratio"], 0.0005)
             self.assertLessEqual(safe_audit["scanlines_changed_pixel_ratio"], 0.04)
@@ -7770,7 +7868,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 self.assertEqual(record["processing_audit"]["cumulative_change_guard_action"], "passed", name)
                 self.assertIn(
                     record["processing_audit"]["combination_quality_guard_reason_code"],
-                    {"safe_combination_passed", "low_confidence_original_preserved"},
+                    {"safe_combination_passed", "low_confidence_original_preserved", "combined_change_too_large_reverted"},
                     name,
                 )
 
@@ -7895,7 +7993,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertGreater(safe_record["processing_audit"]["paper_color_cast_changed_pixel_ratio"], 0.08)
             self.assertIn(
                 safe_record["processing_audit"]["combination_quality_guard_reason_code"],
-                {"safe_combination_passed", "low_confidence_original_preserved"},
+                {"safe_combination_passed", "low_confidence_original_preserved", "combined_change_too_large_reverted"},
             )
 
             protected_names = [
@@ -7922,7 +8020,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 self.assertIn("sharpen_text_edges_noop", record["operations"], name)
                 self.assertIn(
                     record["processing_audit"]["combination_quality_guard_reason_code"],
-                    {"safe_combination_passed", "low_confidence_original_preserved"},
+                    {"safe_combination_passed", "low_confidence_original_preserved", "combined_change_too_large_reverted"},
                     name,
                 )
 
@@ -9572,7 +9670,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 )
                 self.assertIn(
                     protected_audit["combination_quality_guard_reason_code"],
-                    {"safe_combination_passed", "low_confidence_original_preserved"},
+                    {"safe_combination_passed", "low_confidence_original_preserved", "combined_change_too_large_reverted"},
                     name,
                 )
 
@@ -13167,6 +13265,55 @@ def _ink_evidence_bleed_through_guard_pages() -> dict[str, Image.Image]:
     pages["synthetic_protected_dark_ink_blots.png"] = sparse_mark_pages["A003_punctuation_i_dot.png"]
     pages["synthetic_protected_faint_foreground_marks.png"] = clean_mark_pages["A101_page_number.png"]
     return pages
+
+
+def _pastel_watercolor_ink_wash_bleed_through_guard_pages() -> dict[str, Image.Image]:
+    pages = {"synthetic_full_chain_safe_artmarks_reverse_ghost.png": _low_density_diffuse_bleed_through_page()}
+    pages["synthetic_protected_soft_pastel_chalk.png"] = _artmark_guard_page("pastel")
+    pages["synthetic_protected_pale_watercolor_wash_note.png"] = _artmark_guard_page("watercolor")
+    pages["synthetic_protected_ink_wash_brush_mark.png"] = _artmark_guard_page("ink_wash")
+    pages["synthetic_protected_page_number_and_stamp.png"] = _artmark_guard_page("page_number_stamp")
+    pages["synthetic_protected_table_rule_and_graphite.png"] = _artmark_guard_page("table_graphite")
+    pages["synthetic_protected_photo_texture_and_color_note.png"] = _artmark_guard_page("photo_texture_color_note")
+    return pages
+
+
+def _artmark_guard_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (300, 190), (246, 244, 240))
+    draw = ImageDraw.Draw(image)
+    for y in (40, 64, 88):
+        draw.rectangle((28, y, 140, y + 4), fill=(48, 48, 48))
+
+    if variant == "pastel":
+        draw.ellipse((150, 70, 206, 122), fill=(232, 214, 198))
+        draw.line((150, 110, 198, 76), fill=(224, 206, 190), width=5)
+        draw.line((170, 120, 210, 88), fill=(220, 202, 186), width=4)
+    elif variant == "watercolor":
+        wash_mask = Image.new("L", image.size, 0)
+        wash_draw = ImageDraw.Draw(wash_mask)
+        wash_draw.ellipse((154, 70, 222, 126), fill=180)
+        wash_mask = wash_mask.filter(ImageFilter.GaussianBlur(4))
+        image.paste((198, 214, 194), (0, 0), wash_mask)
+        draw.text((166, 88), "wm", fill=(148, 162, 142))
+    elif variant == "ink_wash":
+        draw.line((142, 68, 166, 102, 196, 76, 224, 122), fill=(118, 112, 104), width=6)
+        draw.line((140, 96, 220, 82), fill=(138, 132, 124), width=5)
+    elif variant == "page_number_stamp":
+        draw.text((226, 20), "12", fill=(72, 72, 72))
+        draw.ellipse((176, 112, 230, 166), outline=(186, 36, 36), width=2)
+    elif variant == "table_graphite":
+        for y in (66, 90, 114):
+            draw.line((160, y, 252, y), fill=(196, 196, 192), width=1)
+        for x in (184, 216, 248):
+            draw.line((x, 56, x, 124), fill=(196, 196, 192), width=1)
+        draw.line((168, 142, 220, 136), fill=(112, 108, 102), width=2)
+    elif variant == "photo_texture_color_note":
+        for x, y in ((166, 70), (174, 88), (188, 80), (206, 94), (214, 74), (222, 88)):
+            draw.rectangle((x, y, x + 2, y + 2), fill=(208, 202, 188))
+        draw.text((164, 126), "ok", fill=(112, 120, 86))
+    else:
+        raise ValueError(f"unknown art mark guard variant: {variant}")
+    return image
 
 
 def _protected_clean_page_faint_mark_pages() -> dict[str, Image.Image]:
