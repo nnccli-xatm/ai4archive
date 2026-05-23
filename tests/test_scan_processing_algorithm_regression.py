@@ -280,6 +280,75 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertNotIn("private_full_chain_protected_printed_frame", audit_summary_text)
             self.assertNotIn("private_full_chain_protected_page_number", audit_summary_text)
 
+    def test_full_chain_subtle_diagonal_edge_shadow_trim_stays_safe_and_preserves_lookalikes(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-subtle-diagonal-shadow-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "private_diag_safe_shadow.png": _subtle_diagonal_edge_shadow_page(),
+                "private_diag_protected_handwriting.png": _subtle_diagonal_edge_shadow_page("edge_handwriting"),
+                "private_diag_protected_stamp.png": _subtle_diagonal_edge_shadow_page("stamp"),
+                "private_diag_protected_ruled_table.png": _subtle_diagonal_edge_shadow_page("ruled_table"),
+                "private_diag_protected_page_number.png": _subtle_diagonal_edge_shadow_page("page_number"),
+                "private_diag_protected_archival_edge_mark.png": _subtle_diagonal_edge_shadow_page("archival_edge_mark"),
+                "private_diag_protected_photo_texture.png": _subtle_diagonal_edge_shadow_page("texture"),
+            }
+            for name, image in pages.items():
+                image.save(input_dir / name, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-subtle-diagonal-shadow", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            safe_record = records["private_diag_safe_shadow.png"]
+            self.assertTrue(safe_record["edge_shadow_lightened"])
+            self.assertEqual(safe_record["edge_shadow_reason_code"], "applied_narrow_neutral_edge_shadow")
+            self.assertGreater(safe_record["edge_shadow_changed_pixel_ratio"], 0.01)
+            self.assertLess(safe_record["edge_shadow_changed_pixel_ratio"], 0.11)
+            self.assertEqual(safe_record["processing_audit"]["guardrail_failures"], [])
+            self.assertIn("lighten_edge_shadow_conservative", safe_record["operations"])
+
+            protected_names = (
+                "private_diag_protected_handwriting.png",
+                "private_diag_protected_stamp.png",
+                "private_diag_protected_ruled_table.png",
+                "private_diag_protected_page_number.png",
+                "private_diag_protected_archival_edge_mark.png",
+                "private_diag_protected_photo_texture.png",
+            )
+            for protected_name in protected_names:
+                protected_record = records[protected_name]
+                self.assertFalse(protected_record["edge_shadow_lightened"])
+                self.assertIn(
+                    protected_record["edge_shadow_reason_code"],
+                    {
+                        "protected_edge_mark",
+                        "protected_color_content",
+                        "protected_margin_content",
+                        "foreground_too_dense",
+                        "texture_risk",
+                        "protected_content",
+                        "no_confident_shadow",
+                        "low_tonal_separation",
+                    },
+                )
+                self.assertEqual(protected_record["output_size"], [260, 180])
+                self.assertIn("lighten_edge_shadow_noop", protected_record["operations"])
+                self.assertEqual(protected_record["processing_audit"]["guardrail_failures"], [])
+
+            self.assertEqual(audit_summary["counts"]["edge_shadow_lightened_files"], 1)
+            reason_distribution = audit_summary["guardrails"]["edge_shadow"]["reason_code_distribution"]
+            self.assertEqual(reason_distribution["applied_narrow_neutral_edge_shadow"], 1)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_diag_safe_shadow", audit_summary_text)
+            for protected_name in protected_names:
+                self.assertNotIn(protected_name.replace(".png", ""), audit_summary_text)
+
     def test_full_chain_encoded_derivative_preserves_color_detail_and_icc_profile(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-encoded-color-") as temp_dir:
             root = Path(temp_dir)
