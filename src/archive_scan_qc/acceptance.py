@@ -132,6 +132,7 @@ def build_acceptance_summary(
     human_review = _human_review_summary(review_summary)
     privacy_self_check = _privacy_self_check_summary(aggregate_baseline_summary)
     cleanup = _cleanup_summary(aggregate_baseline_summary)
+    full_chain_cleanup_quality = _full_chain_cleanup_quality_summary(processing_audit_summary)
     sampling_gate = _sampling_gate_summary(
         _extract_aggregate_sampling_counts(aggregate_sampling_counts)
         or _extract_aggregate_sampling_counts(aggregate_baseline_summary)
@@ -330,6 +331,7 @@ def build_acceptance_summary(
         "acceptance_sampling": sampling_gate,
         "privacy_self_check": privacy_self_check,
         "cleanup": cleanup,
+        "full_chain_cleanup_quality": full_chain_cleanup_quality,
         "recommended_next_steps": _recommended_next_steps(passed, blocking_items, warnings),
     }
 
@@ -840,6 +842,32 @@ def _cleanup_summary(aggregate_baseline_summary: dict[str, Any] | None) -> dict[
         "removed_artifact_count": len(removed) if isinstance(removed, list) else None,
         "preserved_artifact_count": len(preserved) if isinstance(preserved, list) else None,
         "retained_public_summary": _safe_text(retained_summary),
+    }
+
+
+def _full_chain_cleanup_quality_summary(processing_audit_summary: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(processing_audit_summary, dict):
+        return {"provided": False, "status": "unknown", "counts": None, "ratios": None}
+    quality_signals = processing_audit_summary.get("quality_signals")
+    signal = quality_signals.get("full_chain_cleanup") if isinstance(quality_signals, dict) else None
+    if not isinstance(signal, dict):
+        return {"provided": False, "status": "unknown", "counts": None, "ratios": None}
+    return {
+        "provided": True,
+        "status": "available",
+        "counts": {
+            "total_files": _coerce_int(signal.get("total_files")) or 0,
+            "improved_files": _coerce_int(signal.get("improved_files")) or 0,
+            "preserved_files": _coerce_int(signal.get("preserved_files")) or 0,
+            "reverted_files": _coerce_int(signal.get("reverted_files")) or 0,
+            "skipped_files": _coerce_int(signal.get("skipped_files")) or 0,
+        },
+        "ratios": {
+            "improved_ratio": _coerce_float(signal.get("improved_ratio")) or 0.0,
+            "preserved_ratio": _coerce_float(signal.get("preserved_ratio")) or 0.0,
+            "reverted_ratio": _coerce_float(signal.get("reverted_ratio")) or 0.0,
+            "skipped_ratio": _coerce_float(signal.get("skipped_ratio")) or 0.0,
+        },
     }
 
 

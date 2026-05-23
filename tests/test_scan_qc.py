@@ -2250,6 +2250,19 @@ class ScanQcTest(unittest.TestCase):
                 "counts": {"failed_files": 0},
                 "throughput": {"processed_files_per_minute": 82.0},
                 "workers": {"effective_workers": 2},
+                "quality_signals": {
+                    "full_chain_cleanup": {
+                        "total_files": 10,
+                        "improved_files": 6,
+                        "preserved_files": 3,
+                        "reverted_files": 1,
+                        "skipped_files": 1,
+                        "improved_ratio": 0.6,
+                        "preserved_ratio": 0.3,
+                        "reverted_ratio": 0.1,
+                        "skipped_ratio": 0.1,
+                    }
+                },
             },
             benchmark_results={
                 "schema_version": "scan-qc.benchmark.v1",
@@ -2272,6 +2285,24 @@ class ScanQcTest(unittest.TestCase):
         self.assertEqual(payload["failed_batches"], 0)
         self.assertEqual(payload["processing_failed_files"], 0)
         self.assertFalse(payload["blocking_items"])
+        self.assertEqual(payload["full_chain_cleanup_quality"]["status"], "available")
+        self.assertEqual(payload["full_chain_cleanup_quality"]["counts"]["improved_files"], 6)
+        self.assertEqual(payload["full_chain_cleanup_quality"]["ratios"]["reverted_ratio"], 0.1)
+
+    def test_acceptance_summary_marks_full_chain_cleanup_quality_unknown_when_missing(self) -> None:
+        payload = build_acceptance_summary(
+            processing_audit_summary={
+                "schema_version": "scan-qc.processing-audit.v1",
+                "privacy": {"aggregate_only": True},
+                "counts": {"failed_files": 0},
+            }
+        )
+
+        self.assertFalse(payload["blocking_items"])
+        self.assertEqual(payload["full_chain_cleanup_quality"]["provided"], False)
+        self.assertEqual(payload["full_chain_cleanup_quality"]["status"], "unknown")
+        self.assertIsNone(payload["full_chain_cleanup_quality"]["counts"])
+        self.assertIsNone(payload["full_chain_cleanup_quality"]["ratios"])
 
     def test_acceptance_summary_blocks_when_sampling_target_not_met(self) -> None:
         payload = build_acceptance_summary(
@@ -3479,6 +3510,40 @@ class ScanQcTest(unittest.TestCase):
         self.assertTrue(payload["privacy"]["local_only"])
         self.assertFalse(payload["privacy"]["contains_thumbnails"])
         self.assertFalse(payload["privacy"]["contains_image_content"])
+        self.assertEqual(payload["summary"]["processing"]["full_chain_cleanup_quality"]["status"], "unknown")
+
+    def test_rework_action_list_includes_aggregate_full_chain_cleanup_quality_when_present(self) -> None:
+        report = {
+            "schema_version": "scan-qc.phase1.v1",
+            "summary": {"total_findings": 0, "p0_findings": 0, "p1_findings": 0, "p2_findings": 0},
+            "findings": [],
+        }
+        payload = build_rework_action_list(
+            report,
+            processing_audit_summary={
+                "schema_version": "scan-qc.processing-audit.v1",
+                "privacy": {"aggregate_only": True},
+                "quality_signals": {
+                    "full_chain_cleanup": {
+                        "total_files": 8,
+                        "improved_files": 5,
+                        "preserved_files": 2,
+                        "reverted_files": 1,
+                        "skipped_files": 1,
+                        "improved_ratio": 0.625,
+                        "preserved_ratio": 0.25,
+                        "reverted_ratio": 0.125,
+                        "skipped_ratio": 0.125,
+                    }
+                },
+            },
+        )
+
+        quality = payload["summary"]["processing"]["full_chain_cleanup_quality"]
+        self.assertTrue(quality["provided"])
+        self.assertEqual(quality["status"], "available")
+        self.assertEqual(quality["counts"]["improved_files"], 5)
+        self.assertEqual(quality["ratios"]["improved_ratio"], 0.625)
 
     def test_rework_action_list_writes_deterministic_json_and_csv(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

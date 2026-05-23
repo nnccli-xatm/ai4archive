@@ -238,7 +238,32 @@ def _summary(
         },
         "processing": {
             "audit_counts": audit_summary.get("counts") if audit_summary else None,
+            "full_chain_cleanup_quality": _full_chain_cleanup_quality_summary(audit_summary),
             "retry_list_files": (retry_manifest.get("summary", {}) if retry_manifest else {}).get("retry_list_files"),
+        },
+    }
+
+
+def _full_chain_cleanup_quality_summary(audit_summary: dict[str, Any] | None) -> dict[str, Any]:
+    quality_signals = audit_summary.get("quality_signals") if isinstance(audit_summary, dict) else None
+    signal = quality_signals.get("full_chain_cleanup") if isinstance(quality_signals, dict) else None
+    if not isinstance(signal, dict):
+        return {"provided": False, "status": "unknown", "counts": None, "ratios": None}
+    return {
+        "provided": True,
+        "status": "available",
+        "counts": {
+            "total_files": _coerce_int(signal.get("total_files")) or 0,
+            "improved_files": _coerce_int(signal.get("improved_files")) or 0,
+            "preserved_files": _coerce_int(signal.get("preserved_files")) or 0,
+            "reverted_files": _coerce_int(signal.get("reverted_files")) or 0,
+            "skipped_files": _coerce_int(signal.get("skipped_files")) or 0,
+        },
+        "ratios": {
+            "improved_ratio": _coerce_float(signal.get("improved_ratio")) or 0.0,
+            "preserved_ratio": _coerce_float(signal.get("preserved_ratio")) or 0.0,
+            "reverted_ratio": _coerce_float(signal.get("reverted_ratio")) or 0.0,
+            "skipped_ratio": _coerce_float(signal.get("skipped_ratio")) or 0.0,
         },
     }
 
@@ -278,6 +303,24 @@ def _load_json_object(path: Path, label: str) -> dict[str, Any]:
 
 def _text(value: Any) -> str:
     return "" if value is None else str(value)
+
+
+def _coerce_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return round(float(value), 6)
+    except (TypeError, ValueError):
+        return None
 
 
 def _utc_now() -> str:
