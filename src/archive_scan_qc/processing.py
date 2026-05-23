@@ -11243,7 +11243,10 @@ def _cumulative_foreground_weakening_ratios(
 
 def _processed_output_safety_guard(metrics: dict[str, Any], options: ProcessingOptions) -> dict[str, Any]:
     reasons: list[str] = []
-    if metrics.get("pixel_change_guardrail_scope") == "geometric_change_recorded_by_size_crop_trim_or_deskew":
+    if (
+        metrics.get("pixel_change_guardrail_scope") == "geometric_change_recorded_by_size_crop_trim_or_deskew"
+        and _processed_output_foreground_risk_operation_count(metrics) == 0
+    ):
         return {
             "checked": True,
             "action": "passed",
