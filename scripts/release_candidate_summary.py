@@ -45,6 +45,7 @@ def build_release_candidate_summary(
     blocking_item_count = _blocking_count(acceptance_summary) + _readiness_blocking_count(release_readiness_summary)
     status = "pass" if production_status == "pass" and readiness_status == "pass" and blocking_item_count == 0 else "fail"
     acceptance_blockers = _acceptance_blocker_summary_zh(acceptance_summary, status == "pass")
+    warning_items = _acceptance_cleanup_warning_digest(acceptance_summary)
     return {
         "schema_version": SCHEMA_VERSION,
         "generated_at": generated_at or datetime.now(timezone.utc).isoformat(),
@@ -53,6 +54,8 @@ def build_release_candidate_summary(
         "handoff_status_zh": "可交接" if status == "pass" else "不可交接",
         "admin_summary_zh": acceptance_blockers["summary_zh"],
         "acceptance_blocker_summary_zh": acceptance_blockers,
+        "warning_items": warning_items,
+        "warning_item_count": len(warning_items),
         "privacy": {
             "aggregate_only": True,
             "contains_paths": False,
@@ -357,8 +360,37 @@ def _acceptance_blocker_summary_zh(acceptance: dict[str, Any], ready: bool) -> d
         "blockers_zh": blockers,
         "closure_gate_summary": closure,
         "acceptance_sampling": sampling,
-        "reused_aggregate_fields": ["closure_gate_summary", "acceptance_sampling", "blocking_items"],
+        "reused_aggregate_fields": ["closure_gate_summary", "acceptance_sampling", "blocking_items", "warning_items"],
     }
+
+
+def _acceptance_cleanup_warning_digest(acceptance: dict[str, Any]) -> list[dict[str, str]]:
+    warning_items = acceptance.get("warning_items")
+    if not isinstance(warning_items, list):
+        return []
+    digest: list[dict[str, str]] = []
+    seen_codes: set[str] = set()
+    for item in warning_items:
+        if not isinstance(item, dict):
+            continue
+        code = item.get("code")
+        title_zh = item.get("title_zh")
+        message_zh = item.get("message_zh")
+        next_step_zh = item.get("next_step_zh")
+        if not all(isinstance(value, str) and value for value in (code, title_zh, message_zh, next_step_zh)):
+            continue
+        if code in seen_codes:
+            continue
+        seen_codes.add(code)
+        digest.append(
+            {
+                "code": code,
+                "title_zh": title_zh,
+                "message_zh": message_zh,
+                "next_step_zh": next_step_zh,
+            }
+        )
+    return digest
 
 
 def _closure_gate_status(value: Any) -> dict[str, Any]:
