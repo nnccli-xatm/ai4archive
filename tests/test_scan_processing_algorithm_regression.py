@@ -10122,6 +10122,10 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "A005_faint_foreground_near_perforation.png": _perforated_tearoff_hinge_guard_page(
                     "faint_foreground_near_perforation"
                 ),
+                "A006_deckled_page_edge_with_marginalia.png": _perforated_tearoff_hinge_guard_page(
+                    "deckled_page_edge_with_marginalia"
+                ),
+                "A007_small_torn_tab_and_notch.png": _perforated_tearoff_hinge_guard_page("small_torn_tab_and_notch"),
             }
             source_bytes: dict[str, bytes] = {}
             for name, image in pages.items():
@@ -10159,6 +10163,8 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "A003_serrated_ticket_stub_boundary.png": (8, 128, 124, 206),
                 "A004_stamp_hinge_remnant_shadow.png": (8, 28, 84, 94),
                 "A005_faint_foreground_near_perforation.png": (8, 62, 138, 204),
+                "A006_deckled_page_edge_with_marginalia.png": (6, 26, 120, 214),
+                "A007_small_torn_tab_and_notch.png": (6, 30, 88, 214),
             }
             for name, box in protected_boxes.items():
                 record = records[name]
@@ -10173,6 +10179,8 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     {"passed", "kept_original", "reverted_to_source"},
                     name,
                 )
+                self.assertFalse(record["dark_border_trimmed"], name)
+                self.assertFalse(record["scanner_gutter_trimmed"], name)
                 self.assertLessEqual(_changed_ratio(before, after, box), 0.03, name)
                 reason_codes = [
                     record.get("dark_border_reason_code"),
@@ -14044,6 +14052,26 @@ def _perforated_tearoff_hinge_guard_page(variant: str) -> Image.Image:
         draw.line((30, 110, 132, 106), fill=(130, 124, 114), width=1)
         draw.line((30, 136, 130, 132), fill=(132, 126, 116), width=1)
         draw.line((28, 162, 128, 158), fill=(134, 128, 118), width=1)
+        return image
+
+    if variant == "deckled_page_edge_with_marginalia":
+        points: list[tuple[int, int]] = [(6, 24), (14, 34), (8, 44), (16, 54), (10, 68), (18, 82)]
+        for y in range(96, 206, 14):
+            points.extend([(8, y), (18, y + 8)])
+        points.extend([(18, 214), (6, 214)])
+        draw.polygon(points, fill=(231, 227, 218), outline=(138, 132, 122))
+        draw.line((28, 52, 106, 46), fill=(112, 106, 98), width=1)
+        draw.line((30, 78, 108, 72), fill=(114, 108, 100), width=1)
+        draw.line((30, 104, 108, 98), fill=(112, 106, 98), width=1)
+        draw.rectangle((82, 172, 118, 188), fill=(76, 76, 74))
+        return image
+
+    if variant == "small_torn_tab_and_notch":
+        draw.polygon([(8, 34), (44, 50), (30, 96), (8, 116)], fill=(230, 226, 216), outline=(138, 132, 122))
+        draw.polygon([(8, 152), (24, 162), (8, 172)], fill=(230, 226, 216), outline=(138, 132, 122))
+        draw.line((30, 42, 84, 36), fill=(112, 106, 98), width=1)
+        draw.line((28, 68, 82, 64), fill=(114, 108, 100), width=1)
+        draw.line((30, 188, 86, 182), fill=(112, 106, 98), width=1)
         return image
 
     raise ValueError(f"unsupported perforated tear-off/hinge variant: {variant}")
