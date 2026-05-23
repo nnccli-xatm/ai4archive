@@ -361,6 +361,7 @@ def _handoff_blocker_summary_zh(
         elif closure["can_complete_delivery"] is False and open_p0 == 0 and open_p1 == 0:
             blockers.append(f"人工处理结论不足：已有人工处理结论 {handled_count} 项，但闭环状态仍未达到交接条件。")
     sampling = _release_acceptance_sampling_status(release_payload)
+    cleanup_warning_digest = _release_cleanup_quality_warning_digest_zh(release_payload)
     if sampling["provided"]:
         target = sampling["target_sample_count"] or 0
         generated = sampling["generated_sample_task_count"] or 0
@@ -383,6 +384,8 @@ def _handoff_blocker_summary_zh(
         "can_handoff": status_zh == "可交接",
         "summary_zh": summary_zh,
         "blockers_zh": blockers,
+        "cleanup_quality_warnings_zh": cleanup_warning_digest,
+        "cleanup_quality_warning_codes": [item["code"] for item in cleanup_warning_digest],
         "closure_gate_summary": closure,
         "acceptance_sampling": sampling,
         "reused_aggregate_fields": [
@@ -391,6 +394,7 @@ def _handoff_blocker_summary_zh(
             "release_candidate_summary",
             "review_decision_verification_summary",
             "blocking_items",
+            "warning_items",
         ],
     }
 
@@ -443,6 +447,56 @@ def _release_acceptance_sampling_status(payload: dict[str, Any]) -> dict[str, An
         "sample_task_target_met": sampling.get("sample_task_target_met") if isinstance(sampling.get("sample_task_target_met"), bool) else None,
         "sampling_target_met": sampling.get("sampling_target_met") if isinstance(sampling.get("sampling_target_met"), bool) else None,
     }
+
+
+def _release_cleanup_quality_warning_digest_zh(payload: dict[str, Any]) -> list[dict[str, str]]:
+    warning_items = _release_acceptance_warning_items(payload)
+    digests: list[dict[str, str]] = []
+    seen_codes: set[str] = set()
+    for item in warning_items:
+        code = item.get("code")
+        title_zh = item.get("title_zh")
+        message_zh = item.get("message_zh")
+        next_step_zh = item.get("next_step_zh")
+        if not isinstance(code, str) or not code:
+            continue
+        if code in seen_codes:
+            continue
+        if not all(isinstance(value, str) and value for value in (title_zh, message_zh, next_step_zh)):
+            continue
+        seen_codes.add(code)
+        digests.append(
+            {
+                "code": code,
+                "title_zh": title_zh,
+                "message_zh": message_zh,
+                "next_step_zh": next_step_zh,
+            }
+        )
+    return digests
+
+
+def _release_acceptance_warning_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    candidates: list[Any] = []
+    candidates.append(payload.get("warning_items"))
+
+    acceptance = payload.get("acceptance")
+    if isinstance(acceptance, dict):
+        candidates.append(acceptance.get("warning_items"))
+        summary = acceptance.get("summary")
+        if isinstance(summary, dict):
+            candidates.append(summary.get("warning_items"))
+
+    production = payload.get("production_validation")
+    if isinstance(production, dict):
+        acceptance_summary = production.get("acceptance_summary")
+        if isinstance(acceptance_summary, dict):
+            candidates.append(acceptance_summary.get("warning_items"))
+
+    for candidate in candidates:
+        if isinstance(candidate, list):
+            return [item for item in candidate if isinstance(item, dict)]
+    return []
 
 
 def _closure_gate_status(value: Any) -> dict[str, Any]:
