@@ -9850,6 +9850,14 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "A006_clip_pressure_trace.png": _physical_evidence_guard_page("clip_pressure_trace"),
                 "A007_edge_wear.png": _physical_evidence_guard_page("edge_wear"),
                 "A008_faint_foreground_near_tape.png": _physical_evidence_guard_page("faint_foreground_near_tape"),
+                "A009_subtle_center_crease_line.png": _physical_evidence_guard_page("subtle_center_crease_line"),
+                "A010_shallow_wrinkle_arc.png": _physical_evidence_guard_page("shallow_wrinkle_arc"),
+                "A011_edge_crease_mark.png": _physical_evidence_guard_page("edge_crease_mark"),
+                "A012_crease_near_handwriting_like.png": _physical_evidence_guard_page("crease_near_handwriting_like"),
+                "A013_crease_near_page_number_block.png": _physical_evidence_guard_page("crease_near_page_number_block"),
+                "A014_crease_near_table_rule_lines.png": _physical_evidence_guard_page("crease_near_table_rule_lines"),
+                "A015_crease_near_stamp_tone.png": _physical_evidence_guard_page("crease_near_stamp_tone"),
+                "A016_crease_near_photo_texture.png": _physical_evidence_guard_page("crease_near_photo_texture"),
             }
             source_bytes: dict[str, bytes] = {}
             for name, image in pages.items():
@@ -9886,6 +9894,14 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "A006_clip_pressure_trace.png": (10, 22, 74, 88),
                 "A007_edge_wear.png": (8, 20, 58, 210),
                 "A008_faint_foreground_near_tape.png": (12, 24, 98, 196),
+                "A009_subtle_center_crease_line.png": (118, 24, 164, 206),
+                "A010_shallow_wrinkle_arc.png": (80, 92, 198, 188),
+                "A011_edge_crease_mark.png": (8, 26, 64, 198),
+                "A012_crease_near_handwriting_like.png": (96, 44, 222, 184),
+                "A013_crease_near_page_number_block.png": (150, 136, 258, 208),
+                "A014_crease_near_table_rule_lines.png": (74, 48, 230, 176),
+                "A015_crease_near_stamp_tone.png": (10, 14, 84, 100),
+                "A016_crease_near_photo_texture.png": (146, 24, 272, 170),
             }
             for name in protected_names:
                 record = records[name]
@@ -13780,6 +13796,55 @@ def _physical_evidence_guard_page(variant: str) -> Image.Image:
         draw.line((16, 94, 92, 86), fill=(120, 114, 108), width=1)
         draw.line((18, 116, 88, 108), fill=(116, 110, 104), width=1)
         return image
+    if variant == "subtle_center_crease_line":
+        draw.line((142, 24, 142, 206), fill=(208, 203, 196), width=1)
+        draw.line((144, 24, 144, 206), fill=(228, 224, 218), width=1)
+        return image
+    if variant == "shallow_wrinkle_arc":
+        draw.arc((82, 96, 194, 186), start=194, end=356, fill=(204, 198, 188), width=2)
+        draw.arc((90, 102, 198, 184), start=198, end=356, fill=(226, 220, 210), width=1)
+        return image
+    if variant == "edge_crease_mark":
+        draw.line((18, 28, 40, 196), fill=(206, 200, 192), width=1)
+        draw.line((22, 30, 44, 196), fill=(228, 224, 216), width=1)
+        return image
+    if variant == "crease_near_handwriting_like":
+        draw.line((110, 36, 166, 196), fill=(206, 200, 192), width=1)
+        draw.line((112, 40, 168, 196), fill=(228, 224, 216), width=1)
+        draw.arc((166, 64, 220, 114), 188, 358, fill=(96, 92, 86), width=2)
+        draw.arc((176, 82, 228, 132), 198, 8, fill=(98, 94, 88), width=2)
+        return image
+    if variant == "crease_near_page_number_block":
+        draw.line((178, 108, 200, 202), fill=(208, 202, 194), width=1)
+        draw.line((180, 108, 202, 202), fill=(228, 224, 218), width=1)
+        draw.rectangle((224, 170, 258, 198), fill=(90, 90, 86))
+        return image
+    if variant == "crease_near_table_rule_lines":
+        draw.line((110, 24, 124, 198), fill=(206, 200, 192), width=1)
+        draw.line((112, 24, 126, 198), fill=(226, 222, 214), width=1)
+        for y in (52, 78, 104, 130, 156):
+            draw.line((74, y, 230, y), fill=(108, 106, 102), width=1)
+        for x in (126, 176):
+            draw.line((x, 48, x, 176), fill=(112, 110, 104), width=1)
+        return image
+    if variant == "crease_near_stamp_tone":
+        draw.line((34, 18, 58, 100), fill=(206, 200, 192), width=1)
+        draw.line((36, 18, 60, 100), fill=(228, 224, 218), width=1)
+        draw.rectangle((10, 18, 62, 72), fill=(196, 170, 160))
+        draw.rectangle((16, 24, 56, 66), fill=(212, 184, 174))
+        return image
+    if variant == "crease_near_photo_texture":
+        draw.line((178, 22, 212, 168), fill=(208, 202, 196), width=1)
+        draw.line((180, 22, 214, 168), fill=(228, 224, 218), width=1)
+        texture = Image.new("L", image.size, 0)
+        texture_draw = ImageDraw.Draw(texture)
+        texture_draw.rectangle((148, 28, 272, 166), fill=86)
+        texture = texture.filter(ImageFilter.GaussianBlur(5))
+        blended = Image.composite(Image.new("RGB", image.size, (214, 212, 208)), image, texture)
+        blended_draw = ImageDraw.Draw(blended)
+        for y in range(34, 164, 10):
+            blended_draw.line((152, y, 268, y + 6), fill=(198, 196, 192), width=1)
+        return blended
     raise ValueError(f"unsupported physical evidence variant: {variant}")
 
 
