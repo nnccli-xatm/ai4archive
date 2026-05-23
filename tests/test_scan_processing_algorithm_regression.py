@@ -10665,8 +10665,8 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
-    def test_full_chain_water_damage_evidence_stays_preserved_with_safe_cleanup_control(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-water-damage-") as temp_dir:
+    def test_full_chain_historical_stain_evidence_stays_preserved_with_safe_cleanup_control(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-historical-stain-") as temp_dir:
             root = Path(temp_dir)
             input_dir = root / "input"
             output_dir = root / "reports"
@@ -10680,6 +10680,8 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "A005_protected_tide_line_shadow.png": _water_damage_evidence_guard_page("tide_line_shadow"),
                 "A006_protected_faint_staining_near_content.png": _water_damage_evidence_guard_page("faint_staining_near_content"),
                 "A007_protected_faint_foreground_near_tide.png": _water_damage_evidence_guard_page("faint_foreground_near_tide"),
+                "A008_protected_foxing_clusters.png": _aged_parchment_full_chain_page("foxing"),
+                "A009_protected_table_rule_graphite_marks.png": _artmark_guard_page("table_graphite"),
             }
             source_bytes: dict[str, bytes] = {}
             for name, image in pages.items():
@@ -10691,7 +10693,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             safe_before = pages[safe_name].convert("L")
             safe_before_stain = _mean_luma(safe_before, (186, 66, 254, 128))
 
-            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-water-damage", input_dir, output_dir))
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-historical-stain-evidence", input_dir, output_dir))
             manifest = process_images(report, input_dir, process_dir, _full_chain_options())
             records = {record["source_relative_path"]: record for record in manifest["files"]}
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
@@ -10726,6 +10728,8 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "A005_protected_tide_line_shadow.png": (180, 90, 276, 130),
                 "A006_protected_faint_staining_near_content.png": (150, 56, 290, 152),
                 "A007_protected_faint_foreground_near_tide.png": (156, 62, 286, 168),
+                "A008_protected_foxing_clusters.png": (90, 120, 158, 178),
+                "A009_protected_table_rule_graphite_marks.png": (32, 76, 222, 124),
             }
             for name in protected_names:
                 record = records[name]
@@ -10751,6 +10755,8 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     self.assertLess(abs(after_mark - before_mark), 4.0, name)
                 else:
                     self.assertLessEqual(_changed_ratio(before, after, protected_boxes[name]), 0.02, name)
+                if name == "A008_protected_foxing_clusters.png":
+                    self.assertFalse(record["paper_color_cast_normalized"], name)
                 self.assertNotEqual(record.get("background_stains_reason_code"), "applied_localized_low_contrast_stain", name)
 
             self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
