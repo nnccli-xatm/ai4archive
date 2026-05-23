@@ -3336,6 +3336,10 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "synthetic_protected_faint_pressure_evidence.png": _faint_official_mark_guard_page("faint_pressure_evidence"),
                 "synthetic_protected_faint_official_stamp.png": _faint_official_mark_guard_page("faint_official_stamp"),
                 "synthetic_protected_subtle_security_mark.png": _faint_official_mark_guard_page("subtle_security_mark"),
+                "synthetic_protected_paper_fiber_watermark.png": _faint_official_mark_guard_page("paper_fiber_watermark"),
+                "synthetic_protected_watermark_page_number_nearby.png": _faint_official_mark_guard_page("watermark_page_number_nearby"),
+                "synthetic_protected_embossed_ring_handwriting_nearby.png": _faint_official_mark_guard_page("embossed_ring_handwriting_nearby"),
+                "synthetic_protected_blind_stamp_table_lines_nearby.png": _faint_official_mark_guard_page("blind_stamp_table_lines_nearby"),
             }
             source_bytes: dict[str, bytes] = {}
             for name, page in pages.items():
@@ -3368,6 +3372,10 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "synthetic_protected_faint_pressure_evidence.png": ((150, 74, 228, 138), (28, 26, 98, 56)),
                 "synthetic_protected_faint_official_stamp.png": ((156, 74, 228, 138), (28, 26, 98, 56)),
                 "synthetic_protected_subtle_security_mark.png": ((152, 70, 228, 138), (28, 26, 98, 56)),
+                "synthetic_protected_paper_fiber_watermark.png": ((154, 74, 228, 138), (28, 26, 98, 56)),
+                "synthetic_protected_watermark_page_number_nearby.png": ((126, 80, 228, 124), (28, 26, 98, 56)),
+                "synthetic_protected_embossed_ring_handwriting_nearby.png": ((156, 72, 228, 136), (28, 26, 98, 56)),
+                "synthetic_protected_blind_stamp_table_lines_nearby.png": ((158, 72, 228, 136), (28, 26, 98, 56)),
             }
             for name, (mark_box, paper_box) in protected_mark_regions.items():
                 record = records[name]
@@ -13141,6 +13149,39 @@ def _faint_official_mark_guard_page(variant: str) -> Image.Image:
             draw.line((152, y, 228, y + 4), fill=(228, 228, 224), width=1)
         for x in range(156, 228, 8):
             draw.line((x, 70, x - 8, 138), fill=(229, 229, 225), width=1)
+        return image
+
+    if variant == "paper_fiber_watermark":
+        for y in range(74, 136, 7):
+            draw.line((154, y, 228, y + 3), fill=(228, 228, 224), width=1)
+        for x in range(156, 228, 10):
+            draw.line((x, 74, x - 10, 138), fill=(229, 229, 225), width=1)
+        for y in range(70, 140, 6):
+            draw.point((150 + ((y * 3) % 14), y), fill=(226, 226, 222))
+        return image
+
+    if variant == "watermark_page_number_nearby":
+        for offset in (0, 18, 36):
+            draw.line((126 + offset, 122, 188 + offset, 84), fill=(228, 228, 224), width=2)
+        draw.text((140, 92), "ARCHIVE", fill=(230, 230, 226))
+        draw.rectangle((214, 148, 236, 168), fill=(231, 231, 227))
+        draw.text((220, 151), "9", fill=(218, 218, 214))
+        return image
+
+    if variant == "embossed_ring_handwriting_nearby":
+        draw.ellipse((156, 72, 228, 136), outline=(227, 227, 223), width=2)
+        draw.ellipse((168, 84, 216, 124), outline=(230, 230, 226), width=1)
+        draw.arc((108, 112, 158, 146), 0, 190, fill=(212, 212, 208), width=2)
+        draw.arc((128, 110, 192, 148), 188, 360, fill=(216, 216, 212), width=2)
+        return image
+
+    if variant == "blind_stamp_table_lines_nearby":
+        draw.ellipse((158, 72, 228, 136), outline=(227, 227, 223), width=2)
+        draw.ellipse((170, 84, 216, 124), outline=(229, 229, 225), width=1)
+        for y in (62, 80, 98, 116, 134):
+            draw.line((22, y, 138, y), fill=(210, 210, 206), width=1)
+        for x in (44, 74, 104, 134):
+            draw.line((x, 62, x, 136), fill=(214, 214, 210), width=1)
         return image
 
     raise ValueError(f"unsupported faint official mark variant: {variant}")
