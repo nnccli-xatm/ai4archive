@@ -2288,6 +2288,7 @@ class ScanQcTest(unittest.TestCase):
         self.assertEqual(payload["full_chain_cleanup_quality"]["status"], "available")
         self.assertEqual(payload["full_chain_cleanup_quality"]["counts"]["improved_files"], 6)
         self.assertEqual(payload["full_chain_cleanup_quality"]["ratios"]["reverted_ratio"], 0.1)
+        self.assertEqual(payload["warning_items"], [])
 
     def test_acceptance_summary_marks_full_chain_cleanup_quality_unknown_when_missing(self) -> None:
         payload = build_acceptance_summary(
@@ -2303,6 +2304,63 @@ class ScanQcTest(unittest.TestCase):
         self.assertEqual(payload["full_chain_cleanup_quality"]["status"], "unknown")
         self.assertIsNone(payload["full_chain_cleanup_quality"]["counts"])
         self.assertIsNone(payload["full_chain_cleanup_quality"]["ratios"])
+        self.assertEqual(payload["warning_items"], [])
+
+    def test_acceptance_summary_warns_for_low_full_chain_cleanup_improved_ratio(self) -> None:
+        payload = build_acceptance_summary(
+            processing_audit_summary={
+                "schema_version": "scan-qc.processing-audit.v1",
+                "privacy": {"aggregate_only": True},
+                "quality_signals": {
+                    "full_chain_cleanup": {
+                        "total_files": 20,
+                        "improved_files": 1,
+                        "preserved_files": 17,
+                        "reverted_files": 2,
+                        "skipped_files": 0,
+                        "improved_ratio": 0.05,
+                        "preserved_ratio": 0.85,
+                        "reverted_ratio": 0.1,
+                        "skipped_ratio": 0.0,
+                    }
+                },
+            }
+        )
+
+        self.assertTrue(payload["pass"])
+        self.assertIn("full_chain_cleanup_low_improved_ratio", {item["code"] for item in payload["warning_items"]})
+        self.assertIn("review cleanup settings or sample outputs", " ".join(payload["warnings"]))
+        self.assertTrue(
+            any("Review cleanup parameters and spot-check representative processed outputs" in step for step in payload["recommended_next_steps"])
+        )
+        raw = json.dumps(payload, ensure_ascii=False)
+        for forbidden in ("/Users/private", "page_0001.png", "OCR TEXT", "abcdef0123456789"):
+            self.assertNotIn(forbidden, raw)
+
+    def test_acceptance_summary_warns_for_high_full_chain_cleanup_reverted_ratio(self) -> None:
+        payload = build_acceptance_summary(
+            processing_audit_summary={
+                "schema_version": "scan-qc.processing-audit.v1",
+                "privacy": {"aggregate_only": True},
+                "quality_signals": {
+                    "full_chain_cleanup": {
+                        "total_files": 24,
+                        "improved_files": 8,
+                        "preserved_files": 9,
+                        "reverted_files": 7,
+                        "skipped_files": 0,
+                        "improved_ratio": 0.333333,
+                        "preserved_ratio": 0.375,
+                        "reverted_ratio": 0.291667,
+                        "skipped_ratio": 0.0,
+                    }
+                },
+            }
+        )
+
+        self.assertTrue(payload["pass"])
+        self.assertIn("full_chain_cleanup_high_reverted_ratio", {item["code"] for item in payload["warning_items"]})
+        self.assertIn("review cleanup settings or sample outputs", " ".join(payload["warnings"]))
 
     def test_acceptance_summary_blocks_when_sampling_target_not_met(self) -> None:
         payload = build_acceptance_summary(

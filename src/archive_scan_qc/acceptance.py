@@ -12,6 +12,9 @@ ACCEPTANCE_JSON = "acceptance_summary.json"
 SCHEMA_VERSION = "scan-qc.acceptance-summary.v1"
 DEFAULT_MAIN_COMPARISON_REGRESSION_RATIO = 0.15
 DEFAULT_MAIN_COMPARISON_REGRESSION_MIN_DELTA = 10.0
+LOW_IMPROVED_RATIO_WARNING_THRESHOLD = 0.05
+HIGH_REVERTED_RATIO_WARNING_THRESHOLD = 0.2
+MIN_CLEANUP_QUALITY_WARNING_TOTAL_FILES = 10
 EVIDENCE_TYPES = (
     "run_plan_summary",
     "review_summary",
@@ -133,6 +136,9 @@ def build_acceptance_summary(
     privacy_self_check = _privacy_self_check_summary(aggregate_baseline_summary)
     cleanup = _cleanup_summary(aggregate_baseline_summary)
     full_chain_cleanup_quality = _full_chain_cleanup_quality_summary(processing_audit_summary)
+    cleanup_quality_warning_items = _full_chain_cleanup_quality_warning_items(full_chain_cleanup_quality)
+    for item in cleanup_quality_warning_items:
+        warnings.append(item["message"])
     sampling_gate = _sampling_gate_summary(
         _extract_aggregate_sampling_counts(aggregate_sampling_counts)
         or _extract_aggregate_sampling_counts(aggregate_baseline_summary)
@@ -332,7 +338,13 @@ def build_acceptance_summary(
         "privacy_self_check": privacy_self_check,
         "cleanup": cleanup,
         "full_chain_cleanup_quality": full_chain_cleanup_quality,
-        "recommended_next_steps": _recommended_next_steps(passed, blocking_items, warnings),
+        "warning_items": cleanup_quality_warning_items,
+        "recommended_next_steps": _recommended_next_steps(
+            passed,
+            blocking_items,
+            warnings,
+            warning_codes=[item["code"] for item in cleanup_quality_warning_items],
+        ),
     }
 
 
@@ -876,15 +888,75 @@ def _block_if_positive(blocking_items: list[dict[str, Any]], code: str, value: i
         blocking_items.append({"code": code, "message": message, "observed": value, "threshold": 0})
 
 
+def _full_chain_cleanup_quality_warning_items(full_chain_cleanup_quality: dict[str, Any]) -> list[dict[str, Any]]:
+    if not isinstance(full_chain_cleanup_quality, dict) or full_chain_cleanup_quality.get("status") != "available":
+        return []
+    counts = full_chain_cleanup_quality.get("counts")
+    ratios = full_chain_cleanup_quality.get("ratios")
+    if not isinstance(counts, dict) or not isinstance(ratios, dict):
+        return []
+    total_files = _coerce_int(counts.get("total_files")) or 0
+    if total_files < MIN_CLEANUP_QUALITY_WARNING_TOTAL_FILES:
+        return []
+
+    improved_ratio = _coerce_float(ratios.get("improved_ratio")) or 0.0
+    reverted_ratio = _coerce_float(ratios.get("reverted_ratio")) or 0.0
+    warning_items: list[dict[str, Any]] = []
+    if improved_ratio <= LOW_IMPROVED_RATIO_WARNING_THRESHOLD:
+        warning_items.append(
+            {
+                "code": "full_chain_cleanup_low_improved_ratio",
+                "message": (
+                    "Full-chain cleanup improved ratio is unusually low in aggregate summary; "
+                    "review cleanup settings or sample outputs before final release."
+                ),
+                "observed": {"counts": counts, "ratios": ratios},
+                "threshold": {
+                    "improved_ratio_lte": LOW_IMPROVED_RATIO_WARNING_THRESHOLD,
+                    "total_files_gte": MIN_CLEANUP_QUALITY_WARNING_TOTAL_FILES,
+                },
+            }
+        )
+    if reverted_ratio >= HIGH_REVERTED_RATIO_WARNING_THRESHOLD:
+        warning_items.append(
+            {
+                "code": "full_chain_cleanup_high_reverted_ratio",
+                "message": (
+                    "Full-chain cleanup reverted ratio is unusually high in aggregate summary; "
+                    "review cleanup settings or sample outputs before final release."
+                ),
+                "observed": {"counts": counts, "ratios": ratios},
+                "threshold": {
+                    "reverted_ratio_gte": HIGH_REVERTED_RATIO_WARNING_THRESHOLD,
+                    "total_files_gte": MIN_CLEANUP_QUALITY_WARNING_TOTAL_FILES,
+                },
+            }
+        )
+    return warning_items
+
+
 def _recommended_next_steps(
     passed: bool,
     blocking_items: list[dict[str, Any]],
     warnings: list[str],
+    warning_codes: list[str] | None = None,
 ) -> list[str]:
+    warning_code_set = set(warning_codes or [])
+
+    def _append_cleanup_quality_step(steps: list[str]) -> None:
+        if (
+            "full_chain_cleanup_low_improved_ratio" in warning_code_set
+            or "full_chain_cleanup_high_reverted_ratio" in warning_code_set
+        ):
+            steps.append(
+                "Review cleanup parameters and spot-check representative processed outputs; rerun aggregate evidence if quality drift persists."
+            )
+
     if passed:
         steps = ["Proceed with batch delivery approval after local sign-off."]
         if warnings:
             steps.append("Review warnings and attach any omitted aggregate evidence before final release if required.")
+        _append_cleanup_quality_step(steps)
         return steps
     codes = {item["code"] for item in blocking_items}
     steps: list[str] = []
@@ -904,4 +976,5 @@ def _recommended_next_steps(
         steps.append("完成抽检任务生成和抽检复核，使聚合抽检数量达到当前目标比例后重新生成验收摘要。")
     if any(code.endswith("_not_aggregate_only") for code in codes):
         steps.append("Replace non-aggregate evidence with approved aggregate-only summaries.")
+    _append_cleanup_quality_step(steps)
     return steps or ["Review blocking items, regenerate aggregate evidence, and rerun acceptance."]
