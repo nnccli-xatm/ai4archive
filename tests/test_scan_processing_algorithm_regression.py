@@ -3211,6 +3211,97 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_bleed_through_cleanup_preserves_machine_readable_marks(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-machine-readable-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = _machine_readable_mark_bleed_through_guard_pages()
+            source_bytes: dict[str, bytes] = {}
+            for name, page in pages.items():
+                source = input_dir / name
+                page.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-machine-readable-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_name = "synthetic_full_chain_safe_machine_marks_reverse_ghost.png"
+            protected_mark_boxes = {
+                "synthetic_protected_barcode_stripes.png": (152, 76, 248, 136),
+                "synthetic_protected_qr_like_modules.png": (156, 66, 242, 152),
+                "synthetic_protected_accession_label_code.png": (152, 70, 252, 148),
+                "synthetic_protected_dense_machine_mark_cluster.png": (162, 82, 236, 146),
+                "synthetic_protected_table_rule_and_page_number.png": (156, 56, 250, 152),
+            }
+
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            safe_processed = Image.open(process_dir / safe_record["output_relative_path"]).convert("RGB")
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertTrue(safe_record["bleed_through_cleaned"])
+            self.assertEqual(safe_record["bleed_through_reason_code"], "applied_faint_reverse_ghost")
+            self.assertIn("clean_bleed_through_conservative", safe_record["operations"])
+            self.assertGreater(safe_audit["bleed_through_changed_pixel_ratio"], 0.01)
+            self.assertLessEqual(safe_audit["bleed_through_changed_pixel_ratio"], 0.045)
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertEqual(safe_audit["local_content_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed")
+            self.assertIn(
+                safe_audit["combination_quality_guard_reason_code"],
+                {"safe_combination_passed", "low_confidence_original_preserved", "combined_change_too_large_reverted"},
+            )
+            self.assertGreater(
+                _mean_luma(safe_processed, (96, 56, 194, 132)),
+                _mean_luma(pages[safe_name], (96, 56, 194, 132)) - 0.4,
+            )
+
+            for name in set(pages) - {safe_name}:
+                record = records[name]
+                audit = record["processing_audit"]
+                processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
+                self.assertFalse(record["bleed_through_cleaned"], name)
+                self.assertNotEqual(record["bleed_through_reason_code"], "applied_faint_reverse_ghost", name)
+                self.assertEqual(audit["bleed_through_changed_pixel_ratio"], 0.0, name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertIn(audit["local_content_change_guard_action"], {"passed", "reverted_to_source"}, name)
+                self.assertIn(audit["cumulative_change_guard_action"], {"passed", "reverted_to_source"}, name)
+                self.assertIn(
+                    audit["combination_quality_guard_reason_code"],
+                    {"safe_combination_passed", "low_confidence_original_preserved", "combined_change_too_large_reverted"},
+                    name,
+                )
+                mark_box = protected_mark_boxes.get(name)
+                if mark_box:
+                    self.assertLessEqual(
+                        _mean_luma(processed, mark_box),
+                        _mean_luma(pages[name], mark_box) + 1.2,
+                        name,
+                    )
+
+            bleed_guard = audit_summary["guardrails"]["bleed_through"]
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 1)
+            self.assertEqual(bleed_guard["applied_files"], 1)
+            self.assertEqual(bleed_guard["skipped_files"], len(pages) - 1)
+            self.assertEqual(bleed_guard["reason_code_distribution"]["applied_faint_reverse_ghost"], 1)
+            self.assertTrue(
+                {"protected_line_or_annotation", "protected_texture_or_archival_trace", "conservative_scope_risk"}
+                & set(bleed_guard["skip_reason_code_distribution"])
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_noisy_edge_texture_pages_stay_noop_with_despeckle_safe_skip_timing(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-noisy-edge-noop-") as temp_dir:
             root = Path(temp_dir)
@@ -13282,6 +13373,67 @@ def _pastel_watercolor_ink_wash_bleed_through_guard_pages() -> dict[str, Image.I
     pages["synthetic_protected_table_rule_and_graphite.png"] = _artmark_guard_page("table_graphite")
     pages["synthetic_protected_photo_texture_and_color_note.png"] = _artmark_guard_page("photo_texture_color_note")
     return pages
+
+
+def _machine_readable_mark_bleed_through_guard_pages() -> dict[str, Image.Image]:
+    pages = {"synthetic_full_chain_safe_machine_marks_reverse_ghost.png": _low_density_diffuse_bleed_through_page()}
+    pages["synthetic_protected_barcode_stripes.png"] = _machine_readable_mark_guard_page("barcode")
+    pages["synthetic_protected_qr_like_modules.png"] = _machine_readable_mark_guard_page("qr_like")
+    pages["synthetic_protected_accession_label_code.png"] = _machine_readable_mark_guard_page("accession_code")
+    pages["synthetic_protected_dense_machine_mark_cluster.png"] = _machine_readable_mark_guard_page("dense_cluster")
+    pages["synthetic_protected_table_rule_and_page_number.png"] = _machine_readable_mark_guard_page("table_page_number")
+    pages["synthetic_protected_photo_texture_and_colored_mark.png"] = _machine_readable_mark_guard_page("photo_colored_mark")
+    return pages
+
+
+def _machine_readable_mark_guard_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (300, 190), (246, 244, 240))
+    draw = ImageDraw.Draw(image)
+    for y in (40, 64, 88):
+        draw.rectangle((28, y, 140, y + 4), fill=(48, 48, 48))
+
+    if variant == "barcode":
+        x = 152
+        widths = (2, 1, 3, 1, 2, 4, 1, 2, 1, 3, 2, 1, 4, 1, 2)
+        for idx, width in enumerate(widths):
+            shade = 28 if idx % 2 == 0 else 42
+            draw.rectangle((x, 76, x + width - 1, 136), fill=(shade, shade, shade))
+            x += width + 1
+    elif variant == "qr_like":
+        draw.rectangle((156, 66, 242, 152), fill=(232, 232, 228))
+        for row in range(0, 12):
+            for col in range(0, 12):
+                if ((row * 7 + col * 5) % 4) in {0, 1}:
+                    x0 = 160 + col * 6
+                    y0 = 70 + row * 6
+                    draw.rectangle((x0, y0, x0 + 4, y0 + 4), fill=(34, 34, 34))
+        for x0, y0 in ((160, 70), (206, 70), (160, 116)):
+            draw.rectangle((x0, y0, x0 + 18, y0 + 18), outline=(26, 26, 26), width=2)
+    elif variant == "accession_code":
+        draw.rectangle((152, 70, 252, 148), outline=(60, 60, 60), width=1)
+        draw.text((160, 76), "A-2741", fill=(44, 44, 44))
+        x = 162
+        for width in (1, 2, 1, 3, 1, 2, 4, 1, 2, 1, 3, 1, 2):
+            draw.rectangle((x, 96, x + width - 1, 140), fill=(30, 30, 30))
+            x += width + 1
+    elif variant == "dense_cluster":
+        for y in range(82, 146, 6):
+            for x in range(162, 236, 5):
+                fill = (32, 32, 32) if ((x // 5 + y // 6) % 2 == 0) else (230, 230, 226)
+                draw.rectangle((x, y, x + 3, y + 3), fill=fill)
+    elif variant == "table_page_number":
+        for y in (68, 92, 116, 140):
+            draw.line((156, y, 250, y), fill=(196, 196, 192), width=1)
+        for x in (178, 206, 234):
+            draw.line((x, 56, x, 150), fill=(196, 196, 192), width=1)
+        draw.text((226, 22), "17", fill=(72, 72, 72))
+    elif variant == "photo_colored_mark":
+        for x, y in ((166, 70), (174, 88), (188, 80), (206, 94), (214, 74), (222, 88)):
+            draw.rectangle((x, y, x + 2, y + 2), fill=(208, 202, 188))
+        draw.ellipse((168, 122, 224, 160), outline=(168, 42, 42), width=2)
+    else:
+        raise ValueError(f"unknown machine-readable mark guard variant: {variant}")
+    return image
 
 
 def _artmark_guard_page(variant: str) -> Image.Image:
