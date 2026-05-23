@@ -4161,6 +4161,160 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_graphite_charcoal_and_erasure_marks_stay_preserved_with_safe_cleanup_control(self) -> None:
+        def _base_page() -> Image.Image:
+            image = Image.new("RGB", (360, 240), (243, 242, 238))
+            draw = ImageDraw.Draw(image)
+            for y in (66, 104, 142, 180):
+                draw.rectangle((58, y, 302, y + 4), fill=(44, 44, 44))
+            draw.rectangle((0, 0, 359, 0), fill=(112, 112, 108))
+            return image
+
+        def _graphite_stroke_page() -> Image.Image:
+            image = _base_page()
+            draw = ImageDraw.Draw(image)
+            draw.line((84, 116, 246, 114), fill=(130, 126, 120), width=2)
+            draw.line((88, 122, 240, 120), fill=(136, 132, 126), width=1)
+            return image
+
+        def _charcoal_smear_page() -> Image.Image:
+            image = _base_page()
+            draw = ImageDraw.Draw(image)
+            draw.ellipse((246, 56, 334, 108), fill=(194, 190, 184))
+            draw.ellipse((254, 64, 326, 100), fill=(180, 176, 170))
+            draw.ellipse((262, 70, 318, 94), fill=(168, 164, 158))
+            return image
+
+        def _erasure_halo_page() -> Image.Image:
+            image = _base_page()
+            draw = ImageDraw.Draw(image)
+            draw.line((96, 110, 246, 110), fill=(226, 222, 214), width=10)
+            draw.line((104, 110, 238, 110), fill=(188, 184, 176), width=2)
+            draw.line((110, 118, 232, 118), fill=(196, 192, 184), width=1)
+            return image
+
+        def _rubbed_margin_trace_page() -> Image.Image:
+            image = _base_page()
+            draw = ImageDraw.Draw(image)
+            for x in range(20, 46, 3):
+                draw.line((x, 46, x + 1, 208), fill=(198, 194, 186), width=1)
+            for y in range(54, 202, 6):
+                draw.line((22, y, 44, y + 2), fill=(188, 184, 176), width=1)
+            return image
+
+        def _page_number_lookalike_page() -> Image.Image:
+            image = _base_page()
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((14, 198, 40, 214), fill=(42, 42, 42))
+            return image
+
+        def _table_rule_lookalike_page() -> Image.Image:
+            image = _base_page()
+            draw = ImageDraw.Draw(image)
+            for y in (74, 92, 110, 128, 146):
+                draw.line((42, y, 334, y), fill=(136, 132, 126), width=1)
+            for x in (96, 158, 220, 282):
+                draw.line((x, 74, x, 146), fill=(136, 132, 126), width=1)
+            return image
+
+        def _stamp_lookalike_page() -> Image.Image:
+            image = _base_page()
+            draw = ImageDraw.Draw(image)
+            draw.ellipse((268, 158, 338, 224), fill=(194, 66, 66))
+            draw.ellipse((278, 168, 328, 214), fill=(226, 120, 120))
+            return image
+
+        def _photo_texture_lookalike_page() -> Image.Image:
+            image = _base_page()
+            draw = ImageDraw.Draw(image)
+            for y in range(64, 200, 4):
+                for x in range(210, 344, 4):
+                    tone = 208 + ((x * 5 + y * 7) % 20)
+                    draw.point((x, y), fill=(tone, tone, tone))
+            return image
+
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-graphite-charcoal-erasure-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            pages = {
+                "synthetic_safe_cleanup_control.png": _faint_thumbprint_stain_page(),
+                "synthetic_protected_graphite_strokes.png": _graphite_stroke_page(),
+                "synthetic_protected_charcoal_smear.png": _charcoal_smear_page(),
+                "synthetic_protected_erasure_halo.png": _erasure_halo_page(),
+                "synthetic_protected_rubbed_margin_trace.png": _rubbed_margin_trace_page(),
+                "synthetic_protected_page_number_lookalike.png": _page_number_lookalike_page(),
+                "synthetic_protected_table_rule_lookalike.png": _table_rule_lookalike_page(),
+                "synthetic_protected_stamp_lookalike.png": _stamp_lookalike_page(),
+                "synthetic_protected_photo_texture_lookalike.png": _photo_texture_lookalike_page(),
+            }
+            for name, page in pages.items():
+                page.save(input_dir / name, dpi=(300, 300))
+
+            report = scan_batch(
+                ScanConfig("synthetic-regression", "full-chain-graphite-charcoal-erasure-guard", input_dir, output_dir)
+            )
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            safe_name = "synthetic_safe_cleanup_control.png"
+            with Image.open(process_dir / records[safe_name]["output_relative_path"]) as safe_output:
+                safe_delta = _mean_luma(safe_output, (164, 68, 210, 108)) - _mean_luma(pages[safe_name], (164, 68, 210, 108))
+                self.assertGreater(safe_delta, 1.0)
+
+            protected_names = set(pages) - {safe_name}
+            protected_regions = {
+                "synthetic_protected_graphite_strokes.png": (80, 108, 252, 126),
+                "synthetic_protected_charcoal_smear.png": (244, 54, 336, 110),
+                "synthetic_protected_erasure_halo.png": (94, 102, 248, 122),
+                "synthetic_protected_rubbed_margin_trace.png": (18, 44, 48, 210),
+                "synthetic_protected_page_number_lookalike.png": (12, 196, 42, 216),
+                "synthetic_protected_table_rule_lookalike.png": (40, 72, 336, 148),
+                "synthetic_protected_stamp_lookalike.png": (266, 156, 340, 226),
+                "synthetic_protected_photo_texture_lookalike.png": (208, 62, 346, 202),
+            }
+            for name in protected_names:
+                record = records[name]
+                self.assertEqual(record["processing_audit"]["guardrail_failures"], [], name)
+                self.assertIn(
+                    record["processing_audit"]["combination_quality_guard_reason_code"],
+                    {"safe_combination_passed", "low_confidence_original_preserved"},
+                    name,
+                )
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    processed = output.convert("RGB")
+                changed_ratio = _changed_ratio(pages[name], processed, (0, 0, processed.width, processed.height))
+                self.assertLessEqual(changed_ratio, 0.18, name)
+
+                box = protected_regions[name]
+                original_region = pages[name].crop(box)
+                processed_region = processed.crop(box)
+                self.assertGreaterEqual(_edge_energy(processed_region), _edge_energy(original_region) * 0.78, name)
+                self.assertLessEqual(
+                    abs(
+                        _mean_luma(processed_region, (0, 0, processed_region.width, processed_region.height))
+                        - _mean_luma(original_region, (0, 0, original_region.width, original_region.height))
+                    ),
+                    3.5,
+                    name,
+                )
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            self.assertIn("despeckle", audit_summary["timing"]["operation_timings"])
+            self.assertTrue(audit_summary["timing"]["operation_timings"]["despeckle"]["enabled"])
+            self.assertIn("combination_quality_guard", audit_summary["guardrails"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_fold_shadow_cleanup_stays_bounded_and_protects_fold_lookalikes(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-fold-shadow-") as temp_dir:
             root = Path(temp_dir)
