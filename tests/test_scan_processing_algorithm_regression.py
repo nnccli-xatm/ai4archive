@@ -3515,6 +3515,98 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_low_quality_jpeg_block_banding_and_mosquito_noise_stays_conservative(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-jpeg-artifact-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_safe_jpeg_artifact_cleanup_control.png": _faint_thumbprint_stain_page(),
+                "synthetic_protected_jpeg_block_text_form.jpg": _jpeg_block_text_form_page(),
+                "synthetic_protected_jpeg_banding_posterization.jpg": _jpeg_banding_posterization_page(),
+                "synthetic_protected_jpeg_mosquito_pale_foreground.jpg": _jpeg_mosquito_pale_foreground_page(),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, page in pages.items():
+                source = input_dir / name
+                if name.endswith(".jpg"):
+                    page.save(source, dpi=(300, 300), quality=18, subsampling=2)
+                else:
+                    page.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-jpeg-artifact-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            safe_name = "synthetic_safe_jpeg_artifact_cleanup_control.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_output:
+                self.assertGreater(
+                    _mean_luma(safe_output.convert("L"), (164, 68, 210, 108))
+                    - _mean_luma(pages[safe_name].convert("L"), (164, 68, 210, 108)),
+                    1.0,
+                )
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertIn(safe_audit["processed_output_safety_guard_action"], {"passed", "kept_original", "reverted_to_source"})
+
+            protected_names = set(pages) - {safe_name}
+            protected_regions = {
+                "synthetic_protected_jpeg_block_text_form.jpg": (168, 28, 286, 180),
+                "synthetic_protected_jpeg_banding_posterization.jpg": (168, 30, 292, 184),
+                "synthetic_protected_jpeg_mosquito_pale_foreground.jpg": (176, 42, 282, 148),
+            }
+            for name in protected_names:
+                record = records[name]
+                audit = record["processing_audit"]
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    changed_ratio = _changed_ratio(pages[name], output.convert("RGB"), protected_regions[name])
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
+                self.assertLessEqual(changed_ratio, 0.45, name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertIn(audit["local_content_change_guard_action"], {"passed", "reverted_to_source", "kept_original"}, name)
+                self.assertIn(audit["cumulative_change_guard_action"], {"passed", "reverted_to_source", "kept_original"}, name)
+                self.assertIn(
+                    audit["combination_quality_guard_reason_code"],
+                    {
+                        "safe_combination_passed",
+                        "low_confidence_original_preserved",
+                        "protected_content_original_preserved",
+                        "combined_change_too_large_reverted",
+                    },
+                    name,
+                )
+                self.assertIn(
+                    audit["processed_output_safety_guard_action"], {"passed", "reverted_to_source", "kept_original"}, name
+                )
+                self.assertIn(
+                    audit["processed_output_safety_guard_reason_code"],
+                    {"safe_processed_output_passed", "processed_output_quality_reverted", "low_confidence_original_preserved"},
+                    name,
+                )
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            self.assertIn("despeckle", audit_summary["timing"]["operation_timings"])
+            self.assertGreaterEqual(
+                audit_summary["guardrails"]["combination_quality_guard"]["reason_code_distribution"].get(
+                    "safe_combination_passed", 0
+                ),
+                1,
+            )
+            self.assertIn("processed_output_safety_guard", audit_summary["guardrails"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_faint_official_marks_preserve_watermark_seal_stamp_and_security_details(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-faint-official-marks-") as temp_dir:
             root = Path(temp_dir)
@@ -13427,6 +13519,52 @@ def _compression_block_lookalike_page() -> Image.Image:
             draw.rectangle((bx, by, bx + 7, by + 7), fill=(base, base + 1, base))
             draw.rectangle((bx, by, bx + 7, by), fill=(base - 2, base - 2, base - 2))
             draw.rectangle((bx, by, bx, by + 7), fill=(base - 2, base - 2, base - 2))
+    return image
+
+
+def _jpeg_block_text_form_page() -> Image.Image:
+    image = Image.new("RGB", (300, 210), (244, 244, 240))
+    draw = ImageDraw.Draw(image)
+    for y in (34, 58, 82, 106):
+        draw.rectangle((32, y, 146, y + 4), fill=(58, 58, 58))
+    draw.rectangle((170, 28, 274, 142), outline=(124, 124, 124), width=1)
+    for y in range(34, 140, 12):
+        draw.line((174, y, 270, y), fill=(166, 166, 166), width=1)
+    for x in range(174, 270, 16):
+        draw.line((x, 34, x, 138), fill=(170, 170, 170), width=1)
+    draw.rectangle((176, 150, 274, 156), fill=(72, 72, 72))
+    draw.rectangle((176, 170, 238, 176), fill=(74, 74, 74))
+    return image
+
+
+def _jpeg_banding_posterization_page() -> Image.Image:
+    image = Image.new("RGB", (300, 210), (246, 246, 242))
+    draw = ImageDraw.Draw(image)
+    for y in (34, 58, 82):
+        draw.rectangle((32, y, 158, y + 4), fill=(62, 62, 62))
+    for x in range(168, 292):
+        bucket = min(22, max(0, (x - 168) // 6))
+        level = 222 + bucket
+        draw.line((x, 30, x, 184), fill=(level, level, level - 1), width=1)
+    draw.rectangle((172, 146, 286, 150), fill=(232, 232, 229))
+    draw.rectangle((172, 162, 252, 166), fill=(234, 234, 231))
+    return image
+
+
+def _jpeg_mosquito_pale_foreground_page() -> Image.Image:
+    image = Image.new("RGB", (300, 210), (245, 245, 241))
+    draw = ImageDraw.Draw(image)
+    for y in (36, 62, 88):
+        draw.rectangle((32, y, 156, y + 4), fill=(64, 64, 64))
+    draw.rectangle((176, 42, 282, 148), fill=(236, 236, 233))
+    draw.rectangle((184, 62, 242, 66), fill=(226, 226, 222))
+    draw.rectangle((186, 84, 250, 88), fill=(227, 227, 223))
+    draw.rectangle((188, 106, 256, 110), fill=(226, 226, 222))
+    for cx, cy in ((182, 60), (246, 82), (252, 106), (198, 124), (230, 136), (268, 70)):
+        draw.ellipse((cx, cy, cx + 2, cy + 2), fill=(220, 220, 216))
+    for x in range(174, 286, 8):
+        tone = 233 + ((x // 8) % 3)
+        draw.line((x, 46, x, 144), fill=(tone, tone, tone - 1), width=1)
     return image
 
 
