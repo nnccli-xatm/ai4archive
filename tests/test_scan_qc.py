@@ -2330,10 +2330,15 @@ class ScanQcTest(unittest.TestCase):
         self.assertTrue(payload["pass"])
         self.assertIn("full_chain_cleanup_low_improved_ratio", {item["code"] for item in payload["warning_items"]})
         self.assertIn("review cleanup settings or sample outputs", " ".join(payload["warnings"]))
+        low_item = next(item for item in payload["warning_items"] if item["code"] == "full_chain_cleanup_low_improved_ratio")
+        self.assertEqual(low_item["title_zh"], "清理改善比例偏低")
+        self.assertIn("改善比例偏低", low_item["message_zh"])
+        self.assertIn("重跑验收", low_item["next_step_zh"])
         self.assertTrue(
             any("Review cleanup parameters and spot-check representative processed outputs" in step for step in payload["recommended_next_steps"])
         )
         raw = json.dumps(payload, ensure_ascii=False)
+        self.assertIn("清理改善比例偏低", raw)
         for forbidden in ("/Users/private", "page_0001.png", "OCR TEXT", "abcdef0123456789"):
             self.assertNotIn(forbidden, raw)
 
@@ -2361,6 +2366,10 @@ class ScanQcTest(unittest.TestCase):
         self.assertTrue(payload["pass"])
         self.assertIn("full_chain_cleanup_high_reverted_ratio", {item["code"] for item in payload["warning_items"]})
         self.assertIn("review cleanup settings or sample outputs", " ".join(payload["warnings"]))
+        high_item = next(item for item in payload["warning_items"] if item["code"] == "full_chain_cleanup_high_reverted_ratio")
+        self.assertEqual(high_item["title_zh"], "清理回退比例偏高")
+        self.assertIn("回退比例偏高", high_item["message_zh"])
+        self.assertIn("重跑验收", high_item["next_step_zh"])
 
     def test_acceptance_summary_blocks_when_sampling_target_not_met(self) -> None:
         payload = build_acceptance_summary(

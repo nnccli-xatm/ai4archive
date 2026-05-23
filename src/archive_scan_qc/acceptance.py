@@ -906,6 +906,9 @@ def _full_chain_cleanup_quality_warning_items(full_chain_cleanup_quality: dict[s
         warning_items.append(
             {
                 "code": "full_chain_cleanup_low_improved_ratio",
+                "title_zh": "清理改善比例偏低",
+                "message_zh": "全链路清理在聚合结果中的改善比例偏低，请在导出前复核清理参数与抽样结果。",
+                "next_step_zh": "检查清理参数并抽检代表性处理结果；如偏差持续，请补充聚合证据后重跑验收。",
                 "message": (
                     "Full-chain cleanup improved ratio is unusually low in aggregate summary; "
                     "review cleanup settings or sample outputs before final release."
@@ -921,6 +924,9 @@ def _full_chain_cleanup_quality_warning_items(full_chain_cleanup_quality: dict[s
         warning_items.append(
             {
                 "code": "full_chain_cleanup_high_reverted_ratio",
+                "title_zh": "清理回退比例偏高",
+                "message_zh": "全链路清理在聚合结果中的回退比例偏高，请在导出前复核清理参数与抽样结果。",
+                "next_step_zh": "检查清理参数并抽检代表性处理结果；如偏差持续，请补充聚合证据后重跑验收。",
                 "message": (
                     "Full-chain cleanup reverted ratio is unusually high in aggregate summary; "
                     "review cleanup settings or sample outputs before final release."
