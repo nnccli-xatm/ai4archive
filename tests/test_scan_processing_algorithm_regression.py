@@ -3979,6 +3979,105 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_music_staff_technical_drawing_contour_and_dense_line_art_stay_preserved_with_safe_control(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-line-art-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_safe_cleanup_control.png": _faint_thumbprint_stain_page(),
+                "synthetic_protected_music_staff.png": _line_art_preservation_guard_page("music_staff"),
+                "synthetic_protected_technical_drawing.png": _line_art_preservation_guard_page("technical_drawing"),
+                "synthetic_protected_contour_map_curves.png": _line_art_preservation_guard_page("contour_map"),
+                "synthetic_protected_dense_line_art.png": _line_art_preservation_guard_page("dense_line_art"),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, page in pages.items():
+                source = input_dir / name
+                page.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-line-art-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            safe_name = "synthetic_safe_cleanup_control.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_output:
+                self.assertGreater(
+                    _mean_luma(safe_output.convert("L"), (164, 68, 210, 108))
+                    - _mean_luma(pages[safe_name].convert("L"), (164, 68, 210, 108)),
+                    1.0,
+                )
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertIn(
+                safe_audit["combination_quality_guard_reason_code"],
+                {"safe_combination_passed", "low_confidence_original_preserved", "combined_change_too_large_reverted"},
+            )
+
+            protected_names = set(pages) - {safe_name}
+            protected_regions = {
+                "synthetic_protected_music_staff.png": (24, 34, 338, 222),
+                "synthetic_protected_technical_drawing.png": (24, 26, 338, 222),
+                "synthetic_protected_contour_map_curves.png": (24, 26, 338, 222),
+                "synthetic_protected_dense_line_art.png": (24, 28, 338, 224),
+            }
+            max_changed_ratio = {
+                "synthetic_protected_music_staff.png": 0.35,
+                "synthetic_protected_technical_drawing.png": 0.4,
+                "synthetic_protected_contour_map_curves.png": 0.45,
+                "synthetic_protected_dense_line_art.png": 0.65,
+            }
+            min_edge_energy_ratio = {
+                "synthetic_protected_music_staff.png": 0.78,
+                "synthetic_protected_technical_drawing.png": 0.76,
+                "synthetic_protected_contour_map_curves.png": 0.72,
+                "synthetic_protected_dense_line_art.png": 0.74,
+            }
+            for name in protected_names:
+                record = records[name]
+                audit = record["processing_audit"]
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    processed = output.convert("RGB")
+                    box = protected_regions[name]
+                    changed_ratio = _changed_ratio(pages[name], processed, box)
+                    original_structure = pages[name].crop(box)
+                    processed_structure = processed.crop(box)
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
+                self.assertLessEqual(changed_ratio, max_changed_ratio[name], name)
+                self.assertGreaterEqual(
+                    _edge_energy(processed_structure),
+                    _edge_energy(original_structure) * min_edge_energy_ratio[name],
+                    name,
+                )
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertIn(
+                    audit["combination_quality_guard_action"],
+                    {"passed", "reverted_to_source", "kept_original"},
+                    name,
+                )
+                self.assertIn(
+                    audit["combination_quality_guard_reason_code"],
+                    {"safe_combination_passed", "low_confidence_original_preserved", "combined_change_too_large_reverted"},
+                    name,
+                )
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_blueprint_and_colored_form_originals_stay_protected_with_safe_control(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-blueprint-colored-form-") as temp_dir:
             root = Path(temp_dir)
@@ -13014,6 +13113,57 @@ def _pale_dotted_leader_page() -> Image.Image:
     draw.rectangle((204, 62, 236, 65), fill=(58, 58, 58))
     for x in range(90, 200, 10):
         image.putpixel((x, 64), (226, 224, 210))
+    return image
+
+
+def _line_art_preservation_guard_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (360, 240), (246, 246, 242))
+    draw = ImageDraw.Draw(image)
+
+    if variant == "music_staff":
+        for y0 in (44, 112, 178):
+            for offset in range(5):
+                draw.line((28, y0 + offset * 5, 332, y0 + offset * 5), fill=(70, 70, 70), width=1)
+        for x, y in ((72, 62), (98, 57), (124, 67), (150, 62), (228, 131), (254, 126), (280, 136), (306, 131)):
+            draw.ellipse((x - 4, y - 3, x + 4, y + 3), fill=(56, 56, 56))
+            draw.line((x + 4, y - 3, x + 4, y - 22), fill=(56, 56, 56), width=1)
+        draw.rectangle((30, 206, 66, 222), fill=(72, 72, 72))
+    elif variant == "technical_drawing":
+        draw.rectangle((34, 34, 326, 210), outline=(68, 68, 68), width=1)
+        draw.rectangle((62, 58, 174, 170), outline=(70, 70, 70), width=1)
+        draw.rectangle((206, 74, 302, 170), outline=(70, 70, 70), width=1)
+        draw.line((62, 114, 174, 114), fill=(66, 66, 66), width=1)
+        draw.line((118, 58, 118, 170), fill=(66, 66, 66), width=1)
+        draw.line((188, 120, 206, 120), fill=(66, 66, 66), width=1)
+        draw.polygon(((200, 117), (206, 120), (200, 123)), fill=(66, 66, 66))
+        draw.line((302, 120, 320, 120), fill=(66, 66, 66), width=1)
+        draw.polygon(((308, 117), (302, 120), (308, 123)), fill=(66, 66, 66))
+        draw.rectangle((266, 26, 324, 40), fill=(74, 74, 74))
+    elif variant == "contour_map":
+        for index in range(10):
+            inset = 16 + index * 7
+            draw.arc((inset, 22 + index * 2, 346 - inset, 212 - index * 2), 18, 344, fill=(72, 72, 72), width=1)
+        draw.line((42, 188, 130, 160), fill=(76, 76, 76), width=1)
+        draw.line((130, 160, 222, 178), fill=(76, 76, 76), width=1)
+        draw.line((222, 178, 312, 148), fill=(76, 76, 76), width=1)
+        draw.rectangle((270, 196, 322, 222), fill=(56, 56, 56))
+    elif variant == "dense_line_art":
+        draw.rectangle((30, 34, 330, 216), outline=(70, 70, 70), width=1)
+        for x in range(36, 324, 8):
+            draw.line((x, 42, x, 208), fill=(82, 82, 82), width=1)
+        for y in range(44, 208, 8):
+            draw.line((38, y, 322, y), fill=(80, 80, 80), width=1)
+        for offset in range(-80, 140, 10):
+            draw.line((40 + max(0, offset), 208, 40 + min(280, 280 + offset), 42), fill=(90, 90, 90), width=1)
+        draw.rectangle((36, 188, 74, 222), fill=(64, 64, 64))
+    else:
+        raise ValueError(f"unsupported line-art guard variant: {variant}")
+
+    draw.rectangle((22, 22, 66, 30), fill=(88, 88, 88))
+    draw.rectangle((292, 218, 338, 230), fill=(84, 84, 84))
+    draw.rectangle((18, 80, 24, 140), fill=(92, 92, 92))
+    draw.rectangle((338, 96, 344, 148), fill=(92, 92, 92))
+
     return image
 
 
