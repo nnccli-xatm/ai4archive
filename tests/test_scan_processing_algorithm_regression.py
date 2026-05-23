@@ -6611,6 +6611,75 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_faint_broken_scanline_cleanup_stays_safe_and_private(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-faint-broken-scanline-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "private_full_chain_safe_faint_broken_scanline.png": _full_chain_broken_scanline_safety_page("safe"),
+                "private_full_chain_protected_repeated_rows_scanline.png": _full_chain_broken_scanline_safety_page(
+                    "repeated_rows"
+                ),
+                "private_full_chain_protected_ruled_background_scanline.png": _full_chain_broken_scanline_safety_page(
+                    "ruled_background"
+                ),
+                "private_full_chain_protected_underline_scanline.png": _full_chain_broken_scanline_safety_page(
+                    "underline"
+                ),
+                "private_full_chain_protected_page_number_adjacent_scanline.png": _full_chain_broken_scanline_safety_page(
+                    "page_number_adjacent"
+                ),
+                "private_full_chain_protected_repeated_marks_scanline.png": _full_chain_broken_scanline_safety_page(
+                    "repeated_marks"
+                ),
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(
+                ScanConfig("synthetic-regression", "full-chain-faint-broken-scanline-safety", input_dir, output_dir)
+            )
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_name = "private_full_chain_safe_faint_broken_scanline.png"
+            safe_record = records[safe_name]
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertTrue(safe_record["scanlines_lightened"])
+            self.assertIn("lighten_scanlines_conservative", safe_record["operations"])
+            self.assertGreater(safe_record["scanlines_changed_pixel_ratio"], 0.0005)
+            self.assertLessEqual(safe_record["scanlines_changed_pixel_ratio"], 0.04)
+            self.assertLessEqual(safe_record["scanlines_candidate_pixel_ratio"], 0.05)
+
+            protected_names = sorted(name for name in pages if name != safe_name)
+            for name in protected_names:
+                record = records[name]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
+                self.assertFalse(record["scanlines_lightened"], name)
+                self.assertIn("lighten_scanlines_noop", record["operations"], name)
+                self.assertEqual(record["scanlines_changed_pixel_ratio"], 0.0, name)
+                self.assertIsInstance(record["scanlines_reason"], str, name)
+
+            scanline_guard = audit_summary["guardrails"]["scanlines"]
+            self.assertEqual(audit_summary["counts"]["scanlines_lightened_files"], 1)
+            self.assertEqual(audit_summary["counts"]["scanlines_skipped_files"], len(protected_names))
+            self.assertEqual(scanline_guard["applied_files"], 1)
+            self.assertEqual(scanline_guard["skipped_files"], len(protected_names))
+            self.assertGreaterEqual(scanline_guard["protection_triggered_files"], 3)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_safe_cloud_background_stain_stays_bounded_and_private(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-cloud-stain-combo-") as temp_dir:
             root = Path(temp_dir)
@@ -13402,6 +13471,38 @@ def _full_chain_intermittent_scanline_page(variant: str = "safe") -> Image.Image
             draw.line((x, 108, x, 158), fill=(58, 58, 58), width=2)
         return image
     raise ValueError(f"unsupported variant: {variant}")
+
+
+def _full_chain_broken_scanline_safety_page(variant: str) -> Image.Image:
+    image = _full_chain_intermittent_scanline_page("safe").copy()
+    draw = ImageDraw.Draw(image)
+    if variant == "safe":
+        return image
+    if variant == "repeated_rows":
+        for y in (118, 130, 142, 154):
+            draw.line((18, y, 226, y), fill=(236, 236, 232), width=1)
+        for x in (54, 92, 132, 172, 212):
+            draw.line((x, 108, x, 160), fill=(64, 64, 60), width=2)
+        return image
+    if variant == "ruled_background":
+        for y in range(26, 168, 12):
+            draw.line((14, y, 246, y), fill=(236, 236, 232), width=1)
+        return image
+    if variant == "underline":
+        draw.line((22, 140, 238, 140), fill=(84, 84, 80), width=1)
+        for x0 in (24, 52, 80, 108, 136, 164):
+            draw.rectangle((x0, 130, x0 + 16, 134), fill=(58, 58, 54))
+        return image
+    if variant == "page_number_adjacent":
+        draw.rectangle((228, 156, 252, 174), fill=(62, 62, 58))
+        draw.rectangle((196, 146, 224, 148), fill=(236, 236, 232))
+        return image
+    if variant == "repeated_marks":
+        for x in (18, 42, 66, 90, 114, 138, 162, 186, 210, 234):
+            draw.rectangle((x, 116, x + 6, 120), fill=(84, 84, 80))
+            draw.rectangle((x, 152, x + 6, 156), fill=(84, 84, 80))
+        return image
+    raise ValueError(f"unsupported full-chain broken scanline safety variant: {variant}")
 
 
 def _physical_evidence_guard_page(variant: str) -> Image.Image:
