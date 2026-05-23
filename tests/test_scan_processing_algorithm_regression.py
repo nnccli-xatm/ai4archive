@@ -4561,6 +4561,85 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_isolated_scanner_glass_dust_cleanup_preserves_lookalikes_and_public_audit(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-isolated-glass-dust-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            protected_pages = _protected_isolated_scanner_glass_dust_lookalike_pages()
+            pages = {
+                "synthetic_safe_full_chain_isolated_scanner_glass_dust_speck.png": _safe_isolated_scanner_glass_dust_speck_page(),
+                **protected_pages,
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-isolated-glass-dust", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_name = "synthetic_safe_full_chain_isolated_scanner_glass_dust_speck.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertTrue(safe_record["despeckled"])
+            self.assertEqual(
+                safe_record["despeckle_pixels_changed"],
+                len(_safe_isolated_scanner_glass_dust_speck_points()),
+            )
+            self.assertIn("despeckle_isolated_pixels", safe_record["operations"])
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertLessEqual(safe_audit["despeckle_pixel_ratio"], 0.001)
+            self.assertEqual(safe_audit["local_content_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed")
+            with Image.open(process_dir / safe_record["output_relative_path"]) as output:
+                output_luma = output.convert("L")
+                for point in _safe_isolated_scanner_glass_dust_speck_points():
+                    self.assertGreaterEqual(output_luma.getpixel(point), 240)
+
+            for name, source_image in protected_pages.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name])
+                self.assertEqual(record["status"], "processed", name)
+                self.assertFalse(record["despeckled"], name)
+                self.assertEqual(record["despeckle_pixels_changed"], 0, name)
+                self.assertIn("despeckle_noop", record["operations"], name)
+                self.assertEqual(audit["despeckle_pixel_ratio"], 0.0, name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertIn(
+                    audit["combination_quality_guard_action"],
+                    {"passed", "kept_original", "reverted_to_source"},
+                    name,
+                )
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    self.assertIsNone(ImageChops.difference(source_image, output.convert("RGB")).getbbox(), name)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["guardrails"]["despeckle"]["applied_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["despeckle"]["skipped_files"], len(protected_pages))
+            self.assertEqual(
+                audit_summary["guardrails"]["despeckle"]["pixels_changed"],
+                len(_safe_isolated_scanner_glass_dust_speck_points()),
+            )
+            reason_distribution = audit_summary["guardrails"]["despeckle"]["reason_code_distribution"]
+            self.assertEqual(reason_distribution["applied_isolated_pixels"], 1)
+            self.assertGreaterEqual(reason_distribution.get("no_isolated_candidates", 0), len(protected_pages))
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_isolated_dust_combined_retouch_guard_stays_bounded_and_public(self) -> None:
         pages = _isolated_dust_combined_retouch_pages()
         with tempfile.TemporaryDirectory(prefix="scan-processing-isolated-dust-combined-") as temp_dir:
