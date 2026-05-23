@@ -991,7 +991,14 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "synthetic_protected_page_side_annotation.png": _combined_retouch_guard_page("edge_mark"),
                 "synthetic_protected_page_number_adjacent_mark.png": _combined_retouch_guard_page("page_number"),
                 "synthetic_protected_stamp_color_mark.png": _combined_retouch_guard_page("stamp"),
+                "synthetic_protected_colored_pencil_note.png": _combined_retouch_guard_page("colored_pencil"),
+                "synthetic_protected_wax_crayon_stroke.png": _combined_retouch_guard_page("wax_crayon"),
+                "synthetic_protected_highlighter_band.png": _combined_retouch_guard_page("highlighter"),
+                "synthetic_protected_felt_marker_annotation.png": _combined_retouch_guard_page("felt_marker"),
                 "synthetic_protected_ruled_table_edge.png": _combined_retouch_guard_page("table_lines"),
+                "synthetic_protected_page_number_text_lookalike.png": _combined_retouch_guard_page("printed_text"),
+                "synthetic_protected_graphite_mark.png": _combined_retouch_guard_page("graphite_mark"),
+                "synthetic_protected_photo_texture_patch.png": _combined_retouch_guard_page("photo_texture"),
                 "synthetic_protected_textured_region.png": _subtle_diagonal_edge_shadow_page("texture"),
             }
             source_bytes = {}
@@ -12209,10 +12216,29 @@ def _combined_retouch_guard_page(variant: str = "safe") -> Image.Image:
             draw.line((x, 44, x, 106), fill=(205, 205, 201), width=2)
     elif variant == "stamp":
         draw.ellipse((86, 42, 142, 96), outline=(180, 28, 28), width=4)
+    elif variant == "colored_pencil":
+        draw.line((14, 48, 40, 58, 18, 70, 44, 82), fill=(196, 52, 48), width=2)
+    elif variant == "wax_crayon":
+        draw.line((150, 118, 184, 128, 162, 140, 192, 150), fill=(36, 94, 184), width=5)
+    elif variant == "highlighter":
+        draw.rectangle((42, 58, 178, 72), fill=(250, 232, 104))
+        draw.text((46, 60), "ARCHIVE", fill=(66, 66, 66), font=ImageFont.load_default())
+    elif variant == "felt_marker":
+        draw.line((26, 126, 74, 114, 122, 126, 170, 112), fill=(28, 148, 92), width=4)
     elif variant == "marginal_note":
         draw.line((6, 46, 30, 58, 10, 70, 34, 82), fill=(205, 205, 201), width=2)
     elif variant == "edge_mark":
         draw.rectangle((4, 120, 24, 132), fill=(205, 205, 201))
+    elif variant == "photo_texture":
+        for y in range(34, 128):
+            for x in range(132, 208):
+                shade = 168 + ((x * 7 + y * 9) % 42)
+                image.putpixel((x, y), (shade, max(0, shade - 6), max(0, shade - 10)))
+    elif variant == "graphite_mark":
+        draw.line((10, 132, 34, 120, 62, 134), fill=(72, 72, 72), width=3)
+    elif variant == "printed_text":
+        font = ImageFont.load_default()
+        draw.text((34, 86), "CATALOG INDEX RECORD", fill=(74, 74, 74), font=font)
     else:
         raise ValueError(f"unsupported variant: {variant}")
     return image
