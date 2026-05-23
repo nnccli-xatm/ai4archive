@@ -6365,6 +6365,12 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "synthetic_protected_faint_foreground_near_sleeve_boundary.png": _transparent_sleeve_envelope_full_chain_page(
                     "faint_foreground_near_boundary"
                 ),
+                "synthetic_protected_glassine_overlay_halo.png": _transparent_sleeve_envelope_full_chain_page(
+                    "glassine_overlay_halo"
+                ),
+                "synthetic_protected_sleeve_boundary_page_number_and_table_rule.png": _transparent_sleeve_envelope_full_chain_page(
+                    "sleeve_boundary_page_number_table_rule"
+                ),
             }
             source_bytes: dict[str, bytes] = {}
             for name, image in pages.items():
@@ -6408,6 +6414,8 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "synthetic_protected_archival_envelope_flap_line.png": (24, 118, 236, 156),
                 "synthetic_protected_pocket_corner_glare.png": (168, 12, 248, 92),
                 "synthetic_protected_faint_foreground_near_sleeve_boundary.png": (142, 36, 202, 154),
+                "synthetic_protected_glassine_overlay_halo.png": (116, 36, 250, 172),
+                "synthetic_protected_sleeve_boundary_page_number_and_table_rule.png": (132, 124, 246, 186),
             }
             protection_codes = {
                 "protected_photo_or_texture",
@@ -6425,6 +6433,11 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 self.assertEqual(record["status"], "processed", name)
                 self.assertEqual(audit["guardrail_failures"], [], name)
                 self.assertLess(_changed_ratio(pages[name], processed, protected_box), 0.015, name)
+                if name == "synthetic_protected_glassine_overlay_halo.png":
+                    self.assertIn(
+                        str(record.get("illumination_gradient_reason_code", "")),
+                        {"protected_photo_or_texture", "protected_content", "not_uniform", "low_confidence"},
+                    )
                 reason_codes = (
                     str(record.get("paper_color_cast_reason_code", "")),
                     str(record.get("illumination_gradient_reason_code", "")),
@@ -11439,6 +11452,24 @@ def _transparent_sleeve_envelope_full_chain_page(variant: str) -> Image.Image:
         draw.line((156, 76, 198, 94), fill=(176, 172, 162), width=1)
         draw.line((154, 106, 198, 122), fill=(172, 168, 158), width=1)
         draw.line((154, 134, 194, 150), fill=(170, 166, 156), width=1)
+        return image
+
+    if variant == "glassine_overlay_halo":
+        draw.line((164, 14, 164, 184), fill=(246, 244, 238), width=2)
+        draw.line((168, 14, 168, 184), fill=(232, 226, 216), width=1)
+        draw.ellipse((118, 38, 248, 170), outline=(250, 248, 244), width=3)
+        draw.ellipse((124, 44, 242, 164), outline=(238, 232, 222), width=2)
+        draw.line((132, 84, 230, 118), fill=(252, 250, 246), width=2)
+        draw.line((136, 88, 226, 120), fill=(240, 234, 224), width=1)
+        return image
+
+    if variant == "sleeve_boundary_page_number_table_rule":
+        draw.line((154, 16, 154, 184), fill=(246, 242, 234), width=2)
+        draw.line((158, 16, 158, 184), fill=(230, 224, 214), width=1)
+        draw.rectangle((168, 124, 244, 126), fill=(190, 186, 176))
+        draw.rectangle((168, 142, 244, 144), fill=(190, 186, 176))
+        draw.rectangle((204, 166, 224, 180), fill=(96, 96, 92))
+        draw.rectangle((172, 168, 184, 178), fill=(108, 108, 104))
         return image
 
     raise ValueError(f"unknown transparent sleeve/envelope full-chain variant: {variant}")
