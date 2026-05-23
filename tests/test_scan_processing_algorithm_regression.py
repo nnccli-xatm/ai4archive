@@ -7599,10 +7599,14 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
     def test_full_chain_reverts_washed_out_highlight_clipping_derivative_and_keeps_safe_control(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-highlight-clip-guard-") as temp_dir:
             root = Path(temp_dir)
-            input_dir = root / "input"
-            output_dir = root / "reports"
-            process_dir = root / "processed"
-            input_dir.mkdir()
+            safe_input = root / "safe-input"
+            safe_output = root / "safe-reports"
+            safe_process = root / "safe-processed"
+            protected_input = root / "protected-input"
+            protected_output = root / "protected-reports"
+            protected_process = root / "protected-processed"
+            safe_input.mkdir()
+            protected_input.mkdir()
             safe_name = "synthetic_safe_cleanup_control.png"
             protected_name = "synthetic_protected_pale_foreground_marks.png"
             safe_page = _safe_full_chain_combination_page().resize((160, 120), Image.Resampling.BILINEAR).convert("RGB")
@@ -7613,61 +7617,49 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for y in (68, 88, 108):
                 protected_draw.line((18, y, 164, y), fill=(214, 214, 210), width=2)
             protected_draw.ellipse((118, 24, 164, 74), outline=(216, 192, 192), width=2)
-            pages = {
-                safe_name: safe_page,
-                protected_name: protected_page,
-            }
-            source_bytes: dict[str, bytes] = {}
-            for name, page in pages.items():
-                source = input_dir / name
-                page.save(source, dpi=(300, 300))
-                source_bytes[name] = source.read_bytes()
+            safe_source = safe_input / safe_name
+            safe_page.save(safe_source, dpi=(300, 300))
+            safe_source_bytes = safe_source.read_bytes()
+            protected_source = protected_input / protected_name
+            protected_page.save(protected_source, dpi=(300, 300))
+            protected_source_bytes = protected_source.read_bytes()
 
-            def wash_out_only_protected(current: Image.Image) -> processing_module.BackgroundStainLighteningResult:
-                if current.size == protected_page.size:
-                    washed = Image.new("RGB", current.size, (255, 255, 255))
-                    return processing_module.BackgroundStainLighteningResult(
-                        washed,
-                        True,
-                        "background stains lightened: stable isolated stains on light paper",
-                        236.0,
-                        255.0,
-                        19.0,
-                        1.0,
-                        1.0,
-                    )
-                return processing_module.BackgroundStainLighteningResult(
-                    current,
-                    False,
-                    "background stains unchanged: no candidate stains",
-                    None,
-                    None,
-                    0.0,
-                    0.0,
-                    0.0,
-                )
-
-            report = scan_batch(ScanConfig("synthetic-regression", "highlight-clip-guard", input_dir, output_dir))
-            with mock.patch.object(
-                processing_module,
-                "_lighten_background_stains_conservative",
-                side_effect=wash_out_only_protected,
-            ):
-                manifest = process_images(report, input_dir, process_dir, _full_chain_options())
-            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
-            audit_summary = json.loads(audit_summary_text)
-            records = {record["source_relative_path"]: record for record in manifest["files"]}
-
-            safe_record = records[safe_name]
+            safe_report = scan_batch(ScanConfig("synthetic-regression", "highlight-clip-guard-safe", safe_input, safe_output))
+            safe_manifest = process_images(safe_report, safe_input, safe_process, _full_chain_options())
+            safe_record = safe_manifest["files"][0]
             safe_audit = safe_record["processing_audit"]
-            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertEqual((safe_input / safe_name).read_bytes(), safe_source_bytes)
             self.assertEqual(safe_record["status"], "processed")
             self.assertEqual(safe_audit["processed_output_safety_guard_action"], "passed")
             self.assertEqual(safe_audit["processed_output_safety_guard_reason_code"], "safe_processed_output_passed")
 
-            protected_record = records[protected_name]
+            def force_washed_out_derivative(current: Image.Image) -> processing_module.BackgroundStainLighteningResult:
+                washed = Image.new("RGB", current.size, (255, 255, 255))
+                return processing_module.BackgroundStainLighteningResult(
+                    washed,
+                    True,
+                    "background stains lightened: stable isolated stains on light paper",
+                    236.0,
+                    255.0,
+                    19.0,
+                    1.0,
+                    1.0,
+                )
+
+            report = scan_batch(
+                ScanConfig("synthetic-regression", "highlight-clip-guard-protected", protected_input, protected_output)
+            )
+            with mock.patch.object(
+                processing_module,
+                "_lighten_background_stains_conservative",
+                side_effect=force_washed_out_derivative,
+            ):
+                manifest = process_images(report, protected_input, protected_process, _full_chain_options())
+            audit_summary_text = (protected_process / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            protected_record = manifest["files"][0]
             protected_audit = protected_record["processing_audit"]
-            self.assertEqual((input_dir / protected_name).read_bytes(), source_bytes[protected_name])
+            self.assertEqual((protected_input / protected_name).read_bytes(), protected_source_bytes)
             self.assertEqual(protected_record["status"], "processed")
             self.assertFalse(protected_record["background_stains_lightened"])
             self.assertEqual(protected_audit["processed_output_safety_guard_action"], "reverted_to_source")
@@ -7675,12 +7667,12 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertIn("near_white_saturation", protected_audit["processed_output_safety_guard_reasons"])
             self.assertIn("highlight_clipping", protected_audit["processed_output_safety_guard_reasons"])
             self.assertIn("processed_output_safety_guard_reverted_to_source", protected_record["operations"])
-            with Image.open(process_dir / protected_record["output_relative_path"]) as protected_processed:
+            with Image.open(protected_process / protected_record["output_relative_path"]) as protected_processed:
                 self.assertEqual(protected_processed.convert("RGB").tobytes(), protected_page.tobytes())
 
-            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["processed_files"], 1)
             self.assertEqual(audit_summary["counts"]["failed_files"], 0)
-            self.assertEqual(audit_summary["counts"]["processed_output_safety_guard_checked_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["processed_output_safety_guard_checked_files"], 1)
             self.assertEqual(audit_summary["counts"]["processed_output_safety_guard_reverted_files"], 1)
             self.assertEqual(audit_summary["counts"]["processed_output_washout_guard_reverted_files"], 1)
             self.assertEqual(audit_summary["counts"]["processed_output_clipping_guard_reverted_files"], 1)
@@ -7690,7 +7682,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertFalse(audit_summary["privacy"]["contains_paths"])
             self.assertFalse(audit_summary["privacy"]["contains_hashes"])
-            for forbidden in (safe_name, protected_name, str(input_dir), "source_relative_path", "source_sha256"):
+            for forbidden in (safe_name, protected_name, str(protected_input), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
     def test_low_confidence_combination_preserves_original_with_public_reason_code(self) -> None:
