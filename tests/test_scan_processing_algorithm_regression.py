@@ -7656,12 +7656,40 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     draw.rectangle((42, 82, 214, 86), fill=(228, 228, 224))
                     draw.rectangle((42, 108, 200, 112), fill=(228, 228, 224))
                     return image
+                if variant == "photographic_negative_strip":
+                    draw.rectangle((12, 26, 248, 164), outline=(238, 238, 234), width=2)
+                    for frame_index in range(4):
+                        left = 22 + frame_index * 56
+                        draw.rectangle((left, 38, left + 46, 152), outline=(214, 214, 210), width=1)
+                        for y in range(44, 148, 8):
+                            shade = 188 + ((frame_index * 11 + y * 3) % 42)
+                            draw.line((left + 4, y, left + 42, y), fill=(shade, shade, shade), width=1)
+                    draw.rectangle((20, 154, 238, 160), fill=(232, 232, 228))
+                    return image
                 if variant == "black_backing_edge_evidence":
                     draw.rectangle((0, 0, 259, 189), fill=(16, 16, 16))
                     draw.rectangle((14, 12, 246, 176), outline=(78, 78, 78), width=2)
                     draw.rectangle((34, 42, 214, 46), fill=(230, 230, 226))
                     draw.rectangle((34, 68, 202, 72), fill=(230, 230, 226))
                     draw.rectangle((34, 94, 206, 98), fill=(230, 230, 226))
+                    return image
+                if variant == "blueprint_diazo_linework":
+                    image = Image.new("RGB", (260, 190), (18, 48, 88))
+                    draw = ImageDraw.Draw(image)
+                    draw.rectangle((14, 14, 246, 176), outline=(196, 228, 246), width=2)
+                    for x in range(30, 240, 30):
+                        draw.line((x, 22, x, 170), fill=(172, 214, 240), width=1)
+                    for y in range(34, 172, 24):
+                        draw.line((20, y, 240, y), fill=(172, 214, 240), width=1)
+                    draw.line((26, 160, 224, 36), fill=(188, 222, 244), width=2)
+                    draw.rectangle((24, 146, 116, 166), outline=(188, 222, 244), width=1)
+                    return image
+                if variant == "dark_background_white_text":
+                    for y in (38, 62, 86, 110):
+                        draw.rectangle((22, y, 226, y + 4), fill=(232, 232, 228))
+                    draw.rectangle((22, 134, 112, 150), outline=(222, 222, 218), width=1)
+                    draw.rectangle((130, 134, 236, 150), outline=(222, 222, 218), width=1)
+                    draw.ellipse((214, 20, 246, 54), outline=(226, 226, 222), width=2)
                     return image
                 if variant == "dark_photo_insert":
                     for y in (38, 62, 86):
@@ -7678,7 +7706,10 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "safe_neutral_control",
                 "reversal_typed_marks",
                 "microfilm_contact_frame",
+                "photographic_negative_strip",
                 "black_backing_edge_evidence",
+                "blueprint_diazo_linework",
+                "dark_background_white_text",
                 "dark_photo_insert",
             )
             source_bytes: dict[str, bytes] = {}
@@ -7709,7 +7740,10 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             protected_names = [
                 "private_full_chain_reversal_guard_reversal_typed_marks.png",
                 "private_full_chain_reversal_guard_microfilm_contact_frame.png",
+                "private_full_chain_reversal_guard_photographic_negative_strip.png",
                 "private_full_chain_reversal_guard_black_backing_edge_evidence.png",
+                "private_full_chain_reversal_guard_blueprint_diazo_linework.png",
+                "private_full_chain_reversal_guard_dark_background_white_text.png",
                 "private_full_chain_reversal_guard_dark_photo_insert.png",
             ]
             for name in protected_names:
