@@ -7615,6 +7615,127 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_thermal_faded_text_guard_rejects_over_whitening_regression(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-thermal-faded-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "A001_safe_cleanup_control.png": _thermal_faded_receipt_guard_page("safe"),
+                "A002_faded_thermal_text.png": _thermal_faded_receipt_guard_page("faded_thermal_text"),
+                "A003_dark_reference_marks.png": _thermal_faded_receipt_guard_page("dark_reference_marks"),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "thermal-faded-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            faded_name = "A002_faded_thermal_text.png"
+            dark_reference_name = "A003_dark_reference_marks.png"
+            faded_text_box = (48, 52, 180, 176)
+            faded_background_box = (196, 52, 286, 176)
+            dark_reference_box = (42, 54, 160, 144)
+
+            def _evidence_delta(image: Image.Image, text_box: tuple[int, int, int, int], bg_box: tuple[int, int, int, int]) -> float:
+                return abs(_mean_luma(image, text_box) - _mean_luma(image, bg_box))
+
+            for name, source in pages.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                with Image.open(process_dir / record["output_relative_path"]) as processed_image:
+                    after = processed_image.convert("RGB")
+                before = source.convert("RGB")
+                self.assertLessEqual(before.size[0] - after.size[0], 60, name)
+                self.assertLessEqual(before.size[1] - after.size[1], 50, name)
+                self.assertEqual(record["status"], "processed", name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+
+            with Image.open(process_dir / records[faded_name]["output_relative_path"]) as processed_image:
+                faded_after = processed_image.convert("RGB")
+            faded_before = pages[faded_name].convert("RGB")
+            detectability_before = _evidence_delta(faded_before, faded_text_box, faded_background_box)
+            detectability_after = _evidence_delta(faded_after, faded_text_box, faded_background_box)
+            self.assertGreaterEqual(detectability_after, 2.0)
+            self.assertGreaterEqual(detectability_after, detectability_before * 0.7)
+            self.assertLessEqual(_mean_luma(faded_after, faded_background_box) - _mean_luma(faded_before, faded_background_box), 8.0)
+
+            with Image.open(process_dir / records[dark_reference_name]["output_relative_path"]) as processed_image:
+                dark_after = processed_image.convert("RGB")
+            dark_before = pages[dark_reference_name].convert("RGB")
+            self.assertLessEqual(abs(_mean_luma(dark_before, dark_reference_box) - _mean_luma(dark_after, dark_reference_box)), 16.0)
+
+            def _over_whiten_paper_cast(image: Image.Image) -> processing_module.PaperColorCastNormalizationResult:
+                overwhitened = image.convert("RGB").copy()
+                draw = ImageDraw.Draw(overwhitened)
+                draw.rectangle((28, 24, 292, 196), fill=(249, 249, 249))
+                return processing_module.PaperColorCastNormalizationResult(
+                    image=overwhitened,
+                    applied=True,
+                    reason="paper cast normalized: synthetic thermal over-whitening regression",
+                    reason_code="applied_mild_uniform_scanner_cast",
+                    color_delta=22.0,
+                    brightness_delta=16.0,
+                    changed_pixel_ratio=0.24,
+                    candidate_pixel_ratio=0.28,
+                )
+
+            permissive_options = ProcessingOptions(
+                **{
+                    **_full_chain_options().__dict__,
+                    "audit_max_cumulative_change_score": 9.0,
+                    "audit_max_cumulative_pixel_change_ratio": 1.0,
+                    "audit_max_local_content_changed_ratio": 1.0,
+                    "audit_max_local_content_tile_changed_ratio": 1.0,
+                    "audit_max_edge_content_changed_ratio": 1.0,
+                }
+            )
+            with tempfile.TemporaryDirectory(prefix="scan-processing-thermal-faded-regression-sim-") as regression_dir:
+                regression_root = Path(regression_dir)
+                regression_input = regression_root / "input"
+                regression_output = regression_root / "reports"
+                regression_processed = regression_root / "processed"
+                regression_input.mkdir()
+                for name, image in pages.items():
+                    image.save(regression_input / name, dpi=(300, 300))
+                with mock.patch.object(
+                    processing_module,
+                    "_normalize_paper_color_cast_conservative",
+                    side_effect=_over_whiten_paper_cast,
+                ):
+                    regression_report = scan_batch(
+                        ScanConfig("synthetic-regression", "thermal-faded-regression-sim", regression_input, regression_output)
+                    )
+                    regression_manifest = process_images(
+                        regression_report,
+                        regression_input,
+                        regression_processed,
+                        permissive_options,
+                    )
+                regression_records = {record["source_relative_path"]: record for record in regression_manifest["files"]}
+                with Image.open(regression_processed / regression_records[faded_name]["output_relative_path"]) as overwhitened_output:
+                    overwhitened_faded = overwhitened_output.convert("RGB")
+                self.assertNotEqual(overwhitened_faded.size, faded_after.size)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_paper_color_cast_combination_preserves_protected_content(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-paper-cast-") as temp_dir:
             root = Path(temp_dir)
@@ -15212,6 +15333,35 @@ def _thermal_receipt_vellum_guard_page(variant: str) -> Image.Image:
         draw.text((52, 52), "paid", fill=(176, 172, 162))
         return image
     raise ValueError(f"unknown thermal/vellum guard variant: {variant}")
+
+
+def _thermal_faded_receipt_guard_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (320, 220), (238, 234, 225))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((24, 20, 296, 198), outline=(206, 200, 188), width=2)
+    for y in range(40, 182, 20):
+        draw.line((38, y, 282, y), fill=(226, 220, 208), width=1)
+
+    if variant == "safe":
+        for y in (56, 84, 112):
+            draw.rectangle((44, y, 154, y + 4), fill=(54, 54, 52))
+        haze = Image.new("L", image.size, 0)
+        haze_draw = ImageDraw.Draw(haze)
+        haze_draw.ellipse((172, 54, 292, 172), fill=108)
+        haze = haze.filter(ImageFilter.GaussianBlur(8))
+        return Image.composite(Image.new("RGB", image.size, (232, 228, 218)), image, haze)
+    if variant == "faded_thermal_text":
+        font = ImageFont.load_default()
+        for y in (56, 82, 108, 134):
+            draw.text((48, y), "TOTAL 12.30", fill=(154, 156, 164), font=font)
+        draw.text((50, 162), "CASH", fill=(160, 162, 170), font=font)
+        return image
+    if variant == "dark_reference_marks":
+        for y in (56, 84, 112, 140):
+            draw.rectangle((42, y, 160, y + 4), fill=(42, 42, 42))
+        draw.rectangle((198, 70, 270, 142), outline=(62, 62, 62), width=1)
+        return image
+    raise ValueError(f"unknown thermal faded receipt variant: {variant}")
 
 
 def _protected_sparse_bleed_through_mark_pages() -> dict[str, Image.Image]:
