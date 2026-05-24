@@ -150,6 +150,54 @@ def _clean_background_scanner_glass_streak_page(variant: str) -> Image.Image:
 
 
 class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
+    def test_corrupt_input_is_privacy_safe_and_does_not_abort_batch(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-corrupt-input-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            control = Image.new("RGB", (120, 180), (244, 244, 240))
+            control_draw = ImageDraw.Draw(control)
+            control_draw.rectangle((24, 52, 96, 58), fill=(34, 34, 34))
+            control_path = input_dir / "private_valid_control.png"
+            control.save(control_path)
+
+            corrupt_path = input_dir / "private_corrupt_input.png"
+            corrupt_path.write_bytes(b"\x89PNG\r\n\x1a\nBROKEN-TRUNCATED")
+
+            source_bytes_before = {path.name: path.read_bytes() for path in sorted(input_dir.glob("*.png"))}
+
+            report = scan_batch(ScanConfig("synthetic-regression", "corrupt-input-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(workers=1))
+
+            source_bytes_after = {path.name: path.read_bytes() for path in sorted(input_dir.glob("*.png"))}
+            self.assertEqual(source_bytes_before, source_bytes_after)
+
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            control_record = records["private_valid_control.png"]
+            corrupt_record = records["private_corrupt_input.png"]
+
+            self.assertEqual(control_record["status"], "processed")
+            self.assertTrue((process_dir / "images" / "private_valid_control.png").exists())
+            self.assertIn(corrupt_record["status"], {"skipped", "failed"})
+            self.assertEqual(corrupt_record["failure_reason"], "source image is not openable")
+            self.assertEqual(corrupt_record["error"], "source image is not openable")
+
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            self.assertEqual(audit_summary["counts"]["total_files"], 2)
+            self.assertEqual(audit_summary["counts"]["processed_files"], 1)
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["skipped_files"], 1)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in ("private_valid_control", "private_corrupt_input", str(input_dir), str(corrupt_path)):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_multi_frame_tiff_processing_has_aggregate_guard_without_source_mutation(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-multi-frame-guard-") as temp_dir:
             root = Path(temp_dir)
