@@ -4730,6 +4730,116 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (source_name, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_gray_pencil_erasure_smudge_marks_remain_detectable_near_reference_content(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-gray-pencil-erasure-smudge-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            source_name = "synthetic_protected_gray_pencil_erasure_smudge.png"
+            source_page = _gray_pencil_erasure_smudge_guard_page()
+            source_path = input_dir / source_name
+            source_page.save(source_path, dpi=(300, 300))
+            source_bytes = source_path.read_bytes()
+            source_bbox = _content_bbox(source_page)
+            source_text_energy = _edge_energy(source_page.crop((32, 34, 170, 132)))
+            source_smudge_energy = _edge_energy(source_page.crop((184, 74, 286, 126)))
+            source_rubbed_mark_energy = _edge_energy(source_page.crop((188, 136, 290, 182)))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-gray-pencil-erasure-smudge", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            record = manifest["files"][0]
+            audit = record["processing_audit"]
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            with Image.open(process_dir / record["output_relative_path"]) as output_image:
+                output = output_image.convert("RGB")
+                output_bbox = _content_bbox(output)
+                output_text_energy = _edge_energy(output.crop((32, 34, 170, 132)))
+                output_smudge_energy = _edge_energy(output.crop((184, 74, 286, 126)))
+                output_rubbed_mark_energy = _edge_energy(output.crop((188, 136, 290, 182)))
+
+            self.assertEqual(source_path.read_bytes(), source_bytes)
+            self.assertEqual(output.size, source_page.size)
+            self.assertIsNotNone(source_bbox)
+            self.assertIsNotNone(output_bbox)
+            assert source_bbox is not None and output_bbox is not None
+            self.assertLessEqual(abs(source_bbox[0] - output_bbox[0]), 3)
+            self.assertLessEqual(abs(source_bbox[1] - output_bbox[1]), 3)
+            self.assertLessEqual(abs(source_bbox[2] - output_bbox[2]), 3)
+            self.assertLessEqual(abs(source_bbox[3] - output_bbox[3]), 3)
+
+            self.assertGreaterEqual(output_text_energy, source_text_energy * 0.90)
+            self.assertGreaterEqual(output_smudge_energy, source_smudge_energy * 0.60)
+            self.assertGreaterEqual(output_rubbed_mark_energy, source_rubbed_mark_energy * 0.60)
+            self.assertEqual(audit["guardrail_failures"], [])
+            self.assertIn(audit["combination_quality_guard_action"], {"passed", "kept_original", "reverted_to_source"})
+
+            # Regression signal: emulate aggressive local whitening that erases faint gray marks.
+            def _aggressive_gray_smudge_cleanup(image: Image.Image) -> processing_module.BackgroundStainLighteningResult:
+                cleaned = image.convert("RGB").copy()
+                draw = ImageDraw.Draw(cleaned)
+                draw.rectangle((176, 66, 296, 188), fill=(248, 248, 248))
+                return processing_module.BackgroundStainLighteningResult(
+                    image=cleaned,
+                    applied=True,
+                    reason="background stains lightened: synthetic aggressive gray smudge cleanup regression",
+                    stain_mean_before=224.0,
+                    stain_mean_after=248.0,
+                    stain_delta=24.0,
+                    changed_pixel_ratio=0.19,
+                    candidate_pixel_ratio=0.23,
+                )
+
+            permissive_options = ProcessingOptions(
+                **{
+                    **_full_chain_options().__dict__,
+                    "audit_max_cumulative_change_score": 9.0,
+                    "audit_max_cumulative_pixel_change_ratio": 1.0,
+                    "audit_max_local_content_changed_ratio": 1.0,
+                    "audit_max_local_content_tile_changed_ratio": 1.0,
+                    "audit_max_edge_content_changed_ratio": 1.0,
+                }
+            )
+            with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-gray-smudge-regression-sim-") as regression_dir:
+                regression_root = Path(regression_dir)
+                regression_input = regression_root / "input"
+                regression_output = regression_root / "reports"
+                regression_processed = regression_root / "processed"
+                regression_input.mkdir()
+                source_page.save(regression_input / source_name, dpi=(300, 300))
+                with mock.patch.object(
+                    processing_module,
+                    "_lighten_background_stains_conservative",
+                    side_effect=_aggressive_gray_smudge_cleanup,
+                ):
+                    regression_report = scan_batch(
+                        ScanConfig("synthetic-regression", "full-chain-gray-smudge-regression-sim", regression_input, regression_output)
+                    )
+                    regression_manifest = process_images(
+                        regression_report,
+                        regression_input,
+                        regression_processed,
+                        permissive_options,
+                    )
+                regression_record = regression_manifest["files"][0]
+                with Image.open(regression_processed / regression_record["output_relative_path"]) as overcleaned:
+                    overcleaned_smudge_energy = _edge_energy(overcleaned.crop((184, 74, 286, 126)))
+                    overcleaned_rubbed_mark_energy = _edge_energy(overcleaned.crop((188, 136, 290, 182)))
+                self.assertLess(overcleaned_smudge_energy, source_smudge_energy * 0.50)
+                self.assertLess(overcleaned_rubbed_mark_energy, source_rubbed_mark_energy * 0.50)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], 1)
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (source_name, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_embossed_seal_low_contrast_impression_guard(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-embossed-seal-impression-") as temp_dir:
             root = Path(temp_dir)
@@ -17009,6 +17119,31 @@ def _faint_colored_pencil_annotation_guard_page() -> Image.Image:
     draw.line((176, 78, 274, 90), fill=(188, 122, 126), width=2)
     draw.line((178, 110, 276, 124), fill=(92, 132, 206), width=3)
     draw.line((184, 142, 206, 154), fill=(86, 84, 80), width=1)
+    return image
+
+
+def _gray_pencil_erasure_smudge_guard_page() -> Image.Image:
+    image = Image.new("RGB", (320, 220), (245, 243, 238))
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default()
+    for row, text in enumerate(("ENTRY 0712", "LEDGER LINE", "AMOUNT", "APPROVED")):
+        y = 36 + row * 22
+        draw.text((36, y), text, fill=(56, 56, 54), font=font)
+        draw.line((176, y + 10, 296, y + 10), fill=(70, 70, 68), width=1)
+
+    smudge_mask = Image.new("L", image.size, 0)
+    smudge_draw = ImageDraw.Draw(smudge_mask)
+    smudge_draw.ellipse((182, 66, 296, 132), fill=92)
+    smudge_draw.ellipse((194, 78, 308, 146), fill=70)
+    smudge_draw.rectangle((186, 136, 292, 182), fill=74)
+    smudge_mask = smudge_mask.filter(ImageFilter.GaussianBlur(6))
+    image = Image.composite(Image.new("RGB", image.size, (232, 230, 226)), image, smudge_mask)
+
+    draw = ImageDraw.Draw(image)
+    draw.line((188, 84, 274, 98), fill=(144, 142, 138), width=1)
+    draw.line((190, 104, 278, 118), fill=(148, 146, 142), width=1)
+    draw.line((192, 146, 278, 162), fill=(146, 144, 140), width=1)
+    draw.line((200, 154, 286, 172), fill=(150, 148, 144), width=1)
     return image
 
 
