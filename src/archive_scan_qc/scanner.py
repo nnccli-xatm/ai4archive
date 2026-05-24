@@ -38,6 +38,12 @@ SUPPORTED_EXTENSIONS = {
     ".tiff",
 }
 
+PROCESSING_OUTPUT_MARKER_FILES = {
+    "processing_manifest.json",
+    "processing_retry_manifest.json",
+    "processing_audit_summary.json",
+}
+
 PROTECTED_P0_RULES = {
     "openability",
     "dpi_minimum",
@@ -273,6 +279,8 @@ def _iter_candidate_files(input_dir: Path, output_dir: Path, manifest_csv: Path 
                 hidden_directories += 1
             elif _is_relative_to(path.resolve(), output_dir):
                 output_directories += 1
+            elif _looks_like_processing_output_dir(path):
+                output_directories += 1
             else:
                 kept_dirnames.append(dirname)
         dirnames[:] = kept_dirnames
@@ -295,6 +303,15 @@ def _iter_candidate_files(input_dir: Path, output_dir: Path, manifest_csv: Path 
             manifest_files=manifest_files,
         ),
     )
+
+
+def _looks_like_processing_output_dir(path: Path) -> bool:
+    if path.name != "processed":
+        return False
+    markers = [path / marker for marker in PROCESSING_OUTPUT_MARKER_FILES]
+    if any(marker.exists() for marker in markers):
+        return True
+    return (path / "images").is_dir()
 
 
 def _effective_profile(config: ScanConfig) -> RulesProfile:
