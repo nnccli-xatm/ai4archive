@@ -934,6 +934,92 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertNotIn("private_folded_corner_safe_shadow", audit_summary_text)
             self.assertNotIn("private_folded_corner_protected_marks", audit_summary_text)
 
+    def test_full_chain_warped_book_page_curvature_guard_preserves_bowed_lines_and_near_gutter_faint_marks(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-warped-book-page-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            def warped_book_page() -> Image.Image:
+                page = Image.new("RGB", (320, 230), (245, 243, 239))
+                px = page.load()
+                for y in range(page.height):
+                    for x in range(page.width):
+                        gutter_shadow = max(0, 18 - (x // 9))
+                        texture = ((x * 5 + y * 7) % 7) - 3
+                        tone = max(0, min(255, 245 - gutter_shadow + texture))
+                        px[x, y] = (tone, max(0, tone - 1), max(0, tone - 3))
+                draw = ImageDraw.Draw(page)
+                for idx, y in enumerate((52, 74, 96, 118, 140, 162)):
+                    bow = 9 + (idx % 2)
+                    draw.arc((24, y - bow, 292, y + bow), start=190, end=348, fill=(56, 56, 56), width=2)
+                for y in (66, 110, 154):
+                    draw.rectangle((12, y, 22, y + 1), fill=(174, 174, 170))
+                draw.rectangle((304, 40, 309, 186), fill=(74, 74, 72))
+                draw.rectangle((292, 196, 314, 201), fill=(84, 84, 82))
+                return page
+
+            source_name = "private_warped_book_page_guard.png"
+            before = warped_book_page()
+            before.save(input_dir / source_name, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-warped-book-page-curvature", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            record = manifest["files"][0]
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            self.assertEqual(record["status"], "processed")
+            self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            self.assertNotIn("private_warped_book_page_guard", audit_summary_text)
+
+            output_path = process_dir / record["output_relative_path"]
+            with Image.open(output_path) as processed:
+                before_edges = _edge_energy(before.crop((40, 44, 288, 176)))
+                after_edges = _edge_energy(processed.crop((40, 44, 288, 176)))
+                self.assertGreater(after_edges / max(1.0, before_edges), 0.62)
+
+                before_faint_luma = _mean_luma(before, (10, 62, 26, 156))
+                after_faint_luma = _mean_luma(processed, (10, 62, 26, 156))
+                faint_changed = _changed_ratio(before, processed, (10, 62, 26, 156))
+                self.assertLess(after_faint_luma, 236.0)
+                self.assertLessEqual(after_faint_luma - before_faint_luma, 20.0)
+                self.assertLess(faint_changed, 0.55)
+
+                size_ratio = (processed.width * processed.height) / float(before.width * before.height)
+                self.assertGreater(size_ratio, 0.89)
+
+            with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-warped-book-page-regression-") as regression_dir:
+                regression_root = Path(regression_dir)
+                regression_input = regression_root / "input"
+                regression_output = regression_root / "reports"
+                regression_process = regression_root / "processed"
+                regression_input.mkdir()
+                before.save(regression_input / source_name, dpi=(300, 300))
+                regression_report = scan_batch(
+                    ScanConfig("synthetic-regression", "full-chain-warped-book-page-curvature-negative", regression_input, regression_output)
+                )
+                aggressive_crop = processing_module.CropDetection((36, 0, 320, 230), "regression: aggressive near-gutter crop")
+                with mock.patch.object(processing_module, "_detect_conservative_crop_bbox", return_value=aggressive_crop):
+                    regression_manifest = process_images(
+                        regression_report,
+                        regression_input,
+                        regression_process,
+                        ProcessingOptions(**{**_full_chain_options().__dict__, "deskew": False, "workers": 1}),
+                    )
+                regression_record = regression_manifest["files"][0]
+                regression_output_path = regression_process / regression_record["output_relative_path"]
+                self.assertEqual(regression_record["crop_bbox"], [36, 0, 320, 230])
+                with Image.open(regression_output_path) as regressed:
+                    regressed_changed = _changed_ratio(before, regressed, (10, 62, 26, 156))
+                    self.assertLess(regressed.width, 300)
+                    self.assertGreater(regressed_changed, 0.30)
+
     def test_full_chain_encoded_derivative_preserves_color_detail_and_icc_profile(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-encoded-color-") as temp_dir:
             root = Path(temp_dir)
