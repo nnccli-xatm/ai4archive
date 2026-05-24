@@ -58,6 +58,14 @@ def _mean_rgb(image: Image.Image, box: tuple[int, int, int, int]) -> tuple[float
     return float(means[0]), float(means[1]), float(means[2])
 
 
+def _display_safe_rgb(image: Image.Image) -> Image.Image:
+    if "A" not in image.getbands():
+        return image.convert("RGB")
+    flattened = Image.new("RGB", image.size, (255, 255, 255))
+    flattened.paste(image.convert("RGB"), mask=image.getchannel("A"))
+    return flattened
+
+
 def _assert_dpi_close(
     testcase: unittest.TestCase,
     actual: tuple[float, float] | None,
@@ -528,6 +536,54 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     ink_luma = _mean_luma(derivative, (40, 48, 214, 109))
                     self.assertGreater(paper_luma, ink_luma)
                     self.assertGreater(paper_luma - ink_luma, 12.0)
+
+    def test_full_chain_alpha_channel_derivative_stays_display_safe_with_opaque_control(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-alpha-display-safe-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            opaque_control = Image.new("RGB", (300, 220), (246, 244, 238))
+            opaque_draw = ImageDraw.Draw(opaque_control)
+            for y in (52, 82, 112):
+                opaque_draw.rectangle((44, y, 228, y + 6), fill=(38, 38, 38))
+
+            alpha_source = Image.new("RGBA", (300, 220), (246, 244, 238, 0))
+            alpha_draw = ImageDraw.Draw(alpha_source)
+            alpha_draw.rectangle((34, 26, 266, 194), fill=(247, 245, 239, 148))
+            alpha_draw.rectangle((58, 54, 244, 60), fill=(42, 42, 42, 255))
+            alpha_draw.rectangle((58, 86, 232, 92), fill=(44, 44, 44, 255))
+            alpha_draw.rectangle((58, 118, 254, 124), fill=(40, 40, 40, 255))
+
+            opaque_path = input_dir / "synthetic_opaque_control.png"
+            alpha_path = input_dir / "synthetic_alpha_source.png"
+            opaque_control.save(opaque_path, dpi=(300, 300))
+            alpha_source.save(alpha_path, dpi=(300, 300))
+            source_bytes = {path.name: path.read_bytes() for path in (opaque_path, alpha_path)}
+
+            report = scan_batch(ScanConfig("synthetic-regression", "alpha-display-safe-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(workers=1))
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            for source_name, before in source_bytes.items():
+                self.assertEqual((input_dir / source_name).read_bytes(), before)
+
+            self.assertEqual(set(records), {"synthetic_opaque_control.png", "synthetic_alpha_source.png"})
+            for source_name in ("synthetic_opaque_control.png", "synthetic_alpha_source.png"):
+                record = records[source_name]
+                self.assertEqual(record["status"], "processed")
+                derivative_path = process_dir / record["output_relative_path"]
+                self.assertTrue(derivative_path.exists())
+                with Image.open(derivative_path) as derivative:
+                    self.assertIn(derivative.mode, {"RGB", "RGBA"})
+                    display_safe = _display_safe_rgb(derivative)
+                    paper_luma = _mean_luma(display_safe, (0, 0, 28, display_safe.height))
+                    ink_luma = _mean_luma(display_safe, (58, 54, 254, 126))
+                    self.assertGreater(paper_luma, 170.0)
+                    self.assertGreater(paper_luma, ink_luma)
+                    self.assertGreater(paper_luma - ink_luma, 14.0)
 
     def test_full_chain_derivative_preserves_source_dpi_metadata_with_rounding_tolerance(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-preserve-dpi-") as temp_dir:
