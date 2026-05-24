@@ -283,6 +283,67 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in ("private_valid_control", "private_corrupt_input", str(input_dir), str(corrupt_path)):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_non_image_sidecars_are_tolerated_without_aborting_batch(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-sidecar-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            valid = Image.new("RGB", (140, 190), (243, 243, 239))
+            valid_draw = ImageDraw.Draw(valid)
+            valid_draw.rectangle((24, 48, 118, 56), fill=(36, 36, 36))
+            valid_path = input_dir / "private_valid_scan_001.png"
+            valid.save(valid_path)
+
+            sidecars = {
+                "private_valid_scan_001.xmp": b"<x:xmpmeta>local sidecar metadata</x:xmpmeta>",
+                "private_valid_scan_001.jpg.tmp": b"TEMP-EXPORT",
+                "private_valid_scan_001.notes.txt": b"operator notes should not block image processing",
+                "private_valid_scan_001_thumb.db": b"sqlite-ish-placeholder",
+            }
+            for filename, payload in sidecars.items():
+                (input_dir / filename).write_bytes(payload)
+
+            source_bytes_before = {path.name: path.read_bytes() for path in sorted(input_dir.iterdir()) if path.is_file()}
+
+            report = scan_batch(ScanConfig("synthetic-regression", "non-image-sidecar-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(workers=1))
+
+            source_bytes_after = {path.name: path.read_bytes() for path in sorted(input_dir.iterdir()) if path.is_file()}
+            self.assertEqual(source_bytes_before, source_bytes_after)
+
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            self.assertEqual(records["private_valid_scan_001.png"]["status"], "processed")
+            self.assertTrue((process_dir / "images" / "private_valid_scan_001.png").exists())
+
+            sidecar_names = set(sidecars)
+            self.assertEqual(set(records) - {"private_valid_scan_001.png"}, sidecar_names)
+            for sidecar_name in sidecar_names:
+                self.assertEqual(records[sidecar_name]["status"], "skipped")
+                self.assertEqual(records[sidecar_name]["failure_reason"], "source image is not openable")
+                self.assertEqual(records[sidecar_name]["error"], "source image is not openable")
+
+            unsupported_format_count = sum(1 for finding in report["findings"] if finding["rule"] == "unsupported_format")
+            self.assertEqual(unsupported_format_count, len(sidecar_names))
+
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            self.assertEqual(audit_summary["counts"]["total_files"], 1 + len(sidecar_names))
+            self.assertEqual(audit_summary["counts"]["processed_files"], 1)
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["skipped_files"], len(sidecar_names))
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (
+                "private_valid_scan_001",
+                str(input_dir),
+                str(process_dir),
+            ):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_multi_frame_tiff_processing_has_aggregate_guard_without_source_mutation(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-multi-frame-guard-") as temp_dir:
             root = Path(temp_dir)
