@@ -2107,6 +2107,180 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_uneven_illumination_guard_preserves_faint_marks_and_detects_overwhitening_regression(self) -> None:
+        def uneven_illumination_page(variant: str) -> Image.Image:
+            image = Image.new("RGB", (320, 240), (244, 244, 241))
+            draw = ImageDraw.Draw(image)
+            pixels = image.load()
+            for y in range(image.height):
+                for x in range(image.width):
+                    horizontal = (x / max(1, image.width - 1)) ** 1.15
+                    vertical = (y / max(1, image.height - 1)) ** 1.35
+                    vignette = max(0.0, 1.0 - math.hypot(x - 20, y - 18) / 190.0)
+                    dim = int(round(12.0 * horizontal + 7.0 * vertical + 10.0 * vignette))
+                    base = max(0, min(255, 244 - dim))
+                    pixels[x, y] = (base, base, max(0, base - 3))
+            for y in (74, 98, 122, 146):
+                draw.rectangle((116, y, 268, y + 5), fill=(42, 42, 42))
+            if variant == "safe":
+                return image
+            if variant == "faint_margin_text":
+                draw.line((16, 24, 58, 30), fill=(176, 176, 172), width=2)
+                draw.line((18, 34, 54, 42), fill=(178, 178, 174), width=2)
+                return image
+            if variant == "photo_texture":
+                for y in range(14, 80):
+                    for x in range(10, 74):
+                        drift = int(round(4 * math.sin(x * 0.48) + 3 * math.cos(y * 0.63)))
+                        r, g, b = pixels[x, y]
+                        pixels[x, y] = (
+                            max(0, min(255, r + drift)),
+                            max(0, min(255, g + drift - 1)),
+                            max(0, min(255, b + drift - 2)),
+                        )
+                return image
+            if variant == "stamp":
+                draw.ellipse((18, 34, 76, 92), outline=(176, 38, 38), width=3)
+                return image
+            raise ValueError(f"unsupported variant: {variant}")
+
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-uneven-illumination-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "A001_safe_uneven_illumination.png": uneven_illumination_page("safe"),
+                "A002_faint_margin_text_near_gradient.png": uneven_illumination_page("faint_margin_text"),
+                "A003_photo_texture_near_gradient.png": uneven_illumination_page("photo_texture"),
+                "A004_stamp_near_gradient.png": uneven_illumination_page("stamp"),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-uneven-illumination-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            safe_name = "A001_safe_uneven_illumination.png"
+            safe_record = records[safe_name]
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertIn(safe_record["illumination_gradient_reason_code"], {"applied", "low_confidence", "protected_content"})
+            if safe_record["illumination_gradient_levelled"]:
+                self.assertGreater(safe_record["illumination_gradient_correction_delta"], 2.0)
+            else:
+                self.assertEqual(safe_record["illumination_gradient_correction_delta"], 0.0)
+            self.assertLessEqual(safe_record["illumination_gradient_changed_pixel_ratio"], 0.28)
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_after:
+                self.assertLess(
+                    abs(
+                        _mean_luma(safe_after, (0, 0, 70, 70))
+                        - _mean_luma(pages[safe_name], (0, 0, 70, 70))
+                    ),
+                    10.0,
+                )
+                self.assertLess(_changed_ratio(pages[safe_name], safe_after, (116, 70, 272, 172)), 0.01)
+
+            protected_boxes = {
+                "A002_faint_margin_text_near_gradient.png": (10, 18, 62, 46),
+                "A003_photo_texture_near_gradient.png": (8, 12, 78, 84),
+                "A004_stamp_near_gradient.png": (14, 30, 82, 98),
+            }
+            reference_text_box = (122, 70, 266, 170)
+            for name, box in protected_boxes.items():
+                record = records[name]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
+                with Image.open(process_dir / record["output_relative_path"]) as output_image:
+                    after = output_image.convert("RGB")
+                before = pages[name].convert("RGB")
+                self.assertEqual(before.size, after.size, name)
+                self.assertEqual(_content_bbox(after), _content_bbox(before), name)
+                self.assertLessEqual(_changed_ratio(before, after, box), 0.03, name)
+                self.assertLessEqual(abs(_mean_luma(after, reference_text_box) - _mean_luma(before, reference_text_box)), 3.0, name)
+                self.assertEqual(record["processing_audit"]["guardrail_failures"], [], name)
+
+            # Regression signal: emulate an over-whitening bug during illumination leveling.
+            def _aggressive_illumination_leveling(
+                image: Image.Image,
+            ) -> processing_module.IlluminationGradientLevelingResult:
+                whitened = image.convert("RGB").copy()
+                draw = ImageDraw.Draw(whitened)
+                draw.rectangle((6, 8, 96, 104), fill=(250, 250, 250))
+                return processing_module.IlluminationGradientLevelingResult(
+                    image=whitened,
+                    applied=True,
+                    reason="illumination gradient leveled: synthetic aggressive whitening regression",
+                    reason_code="applied",
+                    orientation="diagonal",
+                    gradient_delta_before=7.2,
+                    gradient_delta_after=0.9,
+                    correction_delta=6.3,
+                    changed_pixel_ratio=0.16,
+                    candidate_pixel_ratio=0.24,
+                )
+
+            permissive_options = ProcessingOptions(
+                **{
+                    **_full_chain_options().__dict__,
+                    "audit_max_cumulative_change_score": 9.0,
+                    "audit_max_cumulative_pixel_change_ratio": 1.0,
+                    "audit_max_local_content_changed_ratio": 1.0,
+                    "audit_max_local_content_tile_changed_ratio": 1.0,
+                    "audit_max_edge_content_changed_ratio": 1.0,
+                }
+            )
+            with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-uneven-illumination-regression-sim-") as regression_dir:
+                regression_root = Path(regression_dir)
+                regression_input = regression_root / "input"
+                regression_output = regression_root / "reports"
+                regression_processed = regression_root / "processed"
+                regression_input.mkdir()
+                for name, image in pages.items():
+                    image.save(regression_input / name, dpi=(300, 300))
+                with mock.patch.object(
+                    processing_module,
+                    "_level_illumination_gradient_conservative",
+                    side_effect=_aggressive_illumination_leveling,
+                ):
+                    regression_report = scan_batch(
+                        ScanConfig(
+                            "synthetic-regression",
+                            "full-chain-uneven-illumination-regression-sim",
+                            regression_input,
+                            regression_output,
+                        )
+                    )
+                    regression_manifest = process_images(
+                        regression_report,
+                        regression_input,
+                        regression_processed,
+                        permissive_options,
+                    )
+                regression_records = {record["source_relative_path"]: record for record in regression_manifest["files"]}
+                with Image.open(
+                    regression_processed / regression_records["A002_faint_margin_text_near_gradient.png"]["output_relative_path"]
+                ) as overwhitened_image:
+                    overwhitened_ratio = _changed_ratio(
+                        pages["A002_faint_margin_text_near_gradient.png"].convert("RGB"),
+                        overwhitened_image.convert("RGB"),
+                        protected_boxes["A002_faint_margin_text_near_gradient.png"],
+                    )
+                self.assertGreater(overwhitened_ratio, 0.08)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_mild_partial_edge_shadow_cleanup_preserves_edge_content(self) -> None:
         def mild_partial_edge_shadow_page(variant: str) -> Image.Image:
             image = Image.new("RGB", (240, 180), (244, 244, 240))
