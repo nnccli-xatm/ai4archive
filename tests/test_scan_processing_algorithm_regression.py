@@ -5384,6 +5384,89 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_fine_rules_and_tiny_print_remain_detectable_with_overclean_regression_guard(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-fine-rule-tiny-print-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            page = Image.new("RGB", (360, 240), (244, 244, 240))
+            draw = ImageDraw.Draw(page)
+            font = ImageFont.load_default()
+
+            for y in (74, 90, 106, 122, 138):
+                draw.line((26, y, 334, y), fill=(136, 136, 132), width=1)
+            for x in (82, 150, 218, 286):
+                draw.line((x, 62, x, 150), fill=(140, 140, 136), width=1)
+
+            draw.text((34, 38), "REFERENCE LEDGER HEADER", fill=(24, 24, 24), font=font)
+            draw.text((34, 170), "R1:A17  R2:B04  R3:C92", fill=(28, 28, 28), font=font)
+            draw.text((238, 78), "pt", fill=(120, 120, 116), font=font)
+            draw.text((238, 94), "qn", fill=(124, 124, 120), font=font)
+            draw.text((238, 110), "7x", fill=(118, 118, 114), font=font)
+            for x, y in ((242, 126), (250, 126), (258, 126), (266, 126), (274, 126)):
+                draw.point((x, y), fill=(122, 122, 118))
+
+            source_path = input_dir / "synthetic_protected_fine_rules_tiny_print.png"
+            page.save(source_path, dpi=(300, 300))
+            source_bytes = source_path.read_bytes()
+            source_rgb = page.convert("RGB")
+
+            fine_rule_box = (26, 62, 334, 150)
+            tiny_print_box = (232, 72, 286, 134)
+            dark_reference_box = (30, 34, 236, 186)
+            source_rule_edges = _edge_energy(source_rgb.crop(fine_rule_box))
+            source_tiny_edges = _edge_energy(source_rgb.crop(tiny_print_box))
+            source_reference_luma = _mean_luma(source_rgb, dark_reference_box)
+            source_bbox = _content_bbox(source_rgb)
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-fine-rule-tiny-print", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            record = records["synthetic_protected_fine_rules_tiny_print.png"]
+
+            with Image.open(process_dir / record["output_relative_path"]) as output_image:
+                output_rgb = output_image.convert("RGB")
+                output_rule_edges = _edge_energy(output_rgb.crop(fine_rule_box))
+                output_tiny_edges = _edge_energy(output_rgb.crop(tiny_print_box))
+                output_reference_luma = _mean_luma(output_rgb, dark_reference_box)
+                self.assertEqual(output_rgb.size, source_rgb.size)
+                self.assertEqual(_content_bbox(output_rgb), source_bbox)
+
+                self.assertGreaterEqual(output_rule_edges, source_rule_edges * 0.58)
+                self.assertGreaterEqual(output_tiny_edges, source_tiny_edges * 0.54)
+                self.assertLessEqual(abs(output_reference_luma - source_reference_luma), 8.5)
+
+                # Simulate an over-cleaned/over-smoothed regression path that erases thin print detail.
+                regressed = output_rgb.filter(ImageFilter.GaussianBlur(radius=2.6))
+                regressed = regressed.filter(ImageFilter.MedianFilter(size=3))
+                regressed = Image.blend(regressed, Image.new("RGB", output_rgb.size, (249, 249, 246)), 0.72)
+                regressed_rule_edges = _edge_energy(regressed.crop(fine_rule_box))
+                regressed_tiny_edges = _edge_energy(regressed.crop(tiny_print_box))
+
+                self.assertLess(regressed_rule_edges, output_rule_edges * 0.66)
+                self.assertLess(regressed_tiny_edges, output_tiny_edges * 0.60)
+
+            self.assertEqual(source_path.read_bytes(), source_bytes)
+            self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
+            self.assertLessEqual(record["processing_audit"]["cumulative_change_crop_ratio"], 0.02)
+
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (
+                "synthetic_protected_fine_rules_tiny_print",
+                str(input_dir),
+                str(process_dir),
+                "source_relative_path",
+                "source_sha256",
+            ):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_music_staff_technical_drawing_contour_and_dense_line_art_stay_preserved_with_safe_control(
         self,
     ) -> None:
