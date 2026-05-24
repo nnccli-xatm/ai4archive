@@ -58,6 +58,15 @@ def _mean_rgb(image: Image.Image, box: tuple[int, int, int, int]) -> tuple[float
     return float(means[0]), float(means[1]), float(means[2])
 
 
+def _mean_saturation(image: Image.Image, box: tuple[int, int, int, int]) -> float:
+    return float(ImageStat.Stat(image.crop(box).convert("HSV")).mean[1])
+
+
+def _content_bbox(image: Image.Image, threshold: int = 240) -> tuple[int, int, int, int] | None:
+    mask = image.convert("L").point(lambda value: 255 if value < threshold else 0)
+    return mask.getbbox()
+
+
 def _display_safe_rgb(image: Image.Image) -> Image.Image:
     if "A" not in image.getbands():
         return image.convert("RGB")
@@ -4653,6 +4662,72 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertFalse(audit_summary["privacy"]["contains_paths"])
             self.assertFalse(audit_summary["privacy"]["contains_hashes"])
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
+    def test_full_chain_faint_colored_pencil_annotations_remain_detectable_under_cleanup_and_tone_steps(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-faint-colored-pencil-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            source_name = "synthetic_protected_faint_colored_pencil_annotation.png"
+            source_page = _faint_colored_pencil_annotation_guard_page()
+            source_path = input_dir / source_name
+            source_page.save(source_path, dpi=(300, 300))
+            source_bytes = source_path.read_bytes()
+            source_text_energy = _edge_energy(source_page.crop((36, 34, 166, 126)))
+            source_red_saturation = _mean_saturation(source_page, (174, 74, 276, 92))
+            source_blue_saturation = _mean_saturation(source_page, (172, 108, 278, 126))
+            source_red_rgb = _mean_rgb(source_page, (174, 68, 276, 96))
+            source_blue_rgb = _mean_rgb(source_page, (172, 108, 278, 126))
+            source_bbox = _content_bbox(source_page)
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-faint-colored-pencil-annotation", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            record = manifest["files"][0]
+            audit = record["processing_audit"]
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            with Image.open(process_dir / record["output_relative_path"]) as output_image:
+                output = output_image.convert("RGB")
+                output_text_energy = _edge_energy(output.crop((36, 34, 166, 126)))
+                output_red_saturation = _mean_saturation(output, (174, 74, 276, 92))
+                output_blue_saturation = _mean_saturation(output, (172, 108, 278, 126))
+                output_red_rgb = _mean_rgb(output, (174, 68, 276, 96))
+                output_blue_rgb = _mean_rgb(output, (172, 108, 278, 126))
+                output_bbox = _content_bbox(output)
+
+            self.assertEqual(source_path.read_bytes(), source_bytes)
+            self.assertEqual(output.size, source_page.size)
+            self.assertIsNotNone(source_bbox)
+            self.assertIsNotNone(output_bbox)
+            assert source_bbox is not None and output_bbox is not None
+            self.assertLessEqual(abs(source_bbox[0] - output_bbox[0]), 3)
+            self.assertLessEqual(abs(source_bbox[1] - output_bbox[1]), 3)
+            self.assertLessEqual(abs(source_bbox[2] - output_bbox[2]), 3)
+            self.assertLessEqual(abs(source_bbox[3] - output_bbox[3]), 3)
+
+            self.assertGreaterEqual(output_text_energy, source_text_energy * 0.92)
+            self.assertGreaterEqual(output_red_saturation, source_red_saturation * 0.70)
+            self.assertGreaterEqual(output_blue_saturation, source_blue_saturation * 0.70)
+            self.assertGreater(output_red_rgb[0] - output_red_rgb[2], 6.0)
+            self.assertGreater(output_blue_rgb[2] - output_blue_rgb[0], 2.0)
+            self.assertGreaterEqual(audit["tone_changed_pixel_ratio"], 0.0)
+            self.assertLessEqual(audit["tone_changed_pixel_ratio"], 0.35)
+            self.assertIn(audit.get("tone_reason", ""), ("", "tone normalization skipped: red stamp or red annotation risk", "tone normalization skipped: light color annotation or faint mark risk"))
+            self.assertEqual(audit["guardrail_failures"], [])
+            self.assertEqual(audit["local_content_change_guard_action"], "passed")
+            self.assertIn(audit["cumulative_change_guard_action"], {"passed", "kept_original"})
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], 1)
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (source_name, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
     def test_full_chain_embossed_seal_low_contrast_impression_guard(self) -> None:
@@ -16762,6 +16837,29 @@ def _water_damage_evidence_guard_page(variant: str) -> Image.Image:
         return image
 
     raise ValueError(f"unsupported water damage variant: {variant}")
+
+
+def _faint_colored_pencil_annotation_guard_page() -> Image.Image:
+    image = Image.new("RGB", (320, 220), (244, 242, 236))
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default()
+    for row, text in enumerate(("ENTRY 1042", "AMOUNT DUE", "REVIEW STATUS", "ARCHIVE COPY")):
+        y = 36 + row * 22
+        draw.text((36, y), text, fill=(56, 56, 54), font=font)
+        draw.line((182, y + 10, 298, y + 10), fill=(68, 68, 66), width=1)
+
+    stain_mask = Image.new("L", image.size, 0)
+    mask_draw = ImageDraw.Draw(stain_mask)
+    mask_draw.ellipse((184, 52, 302, 170), fill=88)
+    mask_draw.ellipse((196, 66, 316, 186), fill=64)
+    stain_mask = stain_mask.filter(ImageFilter.GaussianBlur(8))
+    image = Image.composite(Image.new("RGB", image.size, (235, 232, 224)), image, stain_mask)
+
+    draw = ImageDraw.Draw(image)
+    draw.line((176, 78, 274, 90), fill=(188, 122, 126), width=2)
+    draw.line((178, 110, 276, 124), fill=(92, 132, 206), width=3)
+    draw.line((184, 142, 206, 154), fill=(86, 84, 80), width=1)
+    return image
 
 
 def _fold_out_map_panel_guard_page(variant: str) -> Image.Image:
