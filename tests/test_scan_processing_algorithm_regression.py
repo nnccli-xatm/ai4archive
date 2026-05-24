@@ -16046,3 +16046,99 @@ def _guard_passed() -> dict[str, object]:
 
 def _guard_reverted(*reasons: str) -> dict[str, object]:
     return {"checked": True, "action": "reverted_to_source", "reverted": True, "reasons": list(reasons)}
+
+
+class ScanProcessingNestedBasenameCollisionRegressionTest(unittest.TestCase):
+    def test_nested_same_basename_sources_produce_distinct_derivatives_without_overwrite(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-nested-basename-collision-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            batch_a_dir = input_dir / "batch_a"
+            batch_b_dir = input_dir / "batch_b"
+            batch_a_dir.mkdir(parents=True)
+            batch_b_dir.mkdir(parents=True)
+
+            page_a = Image.new("RGB", (140, 180), (244, 244, 240))
+            draw_a = ImageDraw.Draw(page_a)
+            draw_a.rectangle((18, 22, 122, 42), fill=(38, 38, 38))
+
+            page_b = Image.new("RGB", (140, 180), (244, 244, 240))
+            draw_b = ImageDraw.Draw(page_b)
+            draw_b.rectangle((18, 130, 122, 150), fill=(38, 38, 38))
+
+            control = Image.new("RGB", (140, 180), (244, 244, 240))
+            control_draw = ImageDraw.Draw(control)
+            control_draw.rectangle((30, 72, 110, 94), fill=(48, 48, 48))
+
+            shared_name = "shared_page.png"
+            page_a_path = batch_a_dir / shared_name
+            page_b_path = batch_b_dir / shared_name
+            control_path = input_dir / "control_unique.png"
+            page_a.save(page_a_path)
+            page_b.save(page_b_path)
+            control.save(control_path)
+
+            source_relative_paths = (
+                "batch_a/shared_page.png",
+                "batch_b/shared_page.png",
+                "control_unique.png",
+            )
+            source_bytes_before = {
+                relative_path: (input_dir / relative_path).read_bytes() for relative_path in source_relative_paths
+            }
+
+            report = scan_batch(ScanConfig("synthetic-regression", "nested-same-basename-collision", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(workers=1))
+
+            discovered_paths = {item["relative_path"] for item in report["files"]}
+            self.assertEqual(discovered_paths, set(source_relative_paths))
+
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            self.assertEqual(set(records), set(source_relative_paths))
+            self.assertTrue(all(record["status"] == "processed" for record in records.values()))
+
+            output_paths = [records[path]["output_relative_path"] for path in source_relative_paths]
+            self.assertEqual(len(output_paths), len(set(output_paths)))
+            self.assertTrue(all(isinstance(path, str) and path for path in output_paths))
+
+            output_files = {
+                relative_path: process_dir / records[relative_path]["output_relative_path"] for relative_path in source_relative_paths
+            }
+            self.assertTrue(all(path.exists() and path.is_file() for path in output_files.values()))
+
+            shared_a_record = records["batch_a/shared_page.png"]
+            shared_b_record = records["batch_b/shared_page.png"]
+            self.assertNotEqual(shared_a_record["output_relative_path"], shared_b_record["output_relative_path"])
+            self.assertNotEqual(shared_a_record["output_sha256"], shared_b_record["output_sha256"])
+
+            with Image.open(output_files["batch_a/shared_page.png"]) as processed_a:
+                top_band_luma_a = _mean_luma(processed_a, (20, 18, 120, 48))
+                bottom_band_luma_a = _mean_luma(processed_a, (20, 126, 120, 156))
+                self.assertLess(top_band_luma_a, bottom_band_luma_a - 30.0)
+
+            with Image.open(output_files["batch_b/shared_page.png"]) as processed_b:
+                top_band_luma_b = _mean_luma(processed_b, (20, 18, 120, 48))
+                bottom_band_luma_b = _mean_luma(processed_b, (20, 126, 120, 156))
+                self.assertLess(bottom_band_luma_b, top_band_luma_b - 30.0)
+
+            source_bytes_after = {
+                relative_path: (input_dir / relative_path).read_bytes() for relative_path in source_relative_paths
+            }
+            self.assertEqual(source_bytes_before, source_bytes_after)
+
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            self.assertEqual(audit_summary["counts"]["total_files"], 3)
+            self.assertEqual(audit_summary["counts"]["processed_files"], 3)
+            for forbidden in (
+                "batch_a/shared_page.png",
+                "batch_b/shared_page.png",
+                "control_unique.png",
+                str(input_dir),
+            ):
+                self.assertNotIn(forbidden, audit_summary_text)
