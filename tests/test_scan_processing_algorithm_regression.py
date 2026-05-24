@@ -4972,6 +4972,147 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (source_name, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_saturated_color_marks_preserve_stamp_highlighter_and_operator_chroma(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-saturated-color-marks-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            source_name = "synthetic_protected_saturated_color_marks.png"
+            source_page = _saturated_color_mark_guard_page()
+            source_path = input_dir / source_name
+            source_page.save(source_path, dpi=(300, 300))
+            source_bytes = source_path.read_bytes()
+            source_bbox = _content_bbox(source_page)
+            source_text_energy = _edge_energy(source_page.crop((26, 34, 202, 154)))
+            source_red_saturation = _mean_saturation(source_page, (216, 52, 296, 126))
+            source_green_saturation = _mean_saturation(source_page, (216, 134, 300, 182))
+            source_highlighter_saturation = _mean_saturation(source_page, (40, 88, 200, 112))
+            source_red_rgb = _mean_rgb(source_page, (216, 52, 296, 126))
+            source_green_rgb = _mean_rgb(source_page, (216, 134, 300, 182))
+            source_highlighter_rgb = _mean_rgb(source_page, (40, 88, 200, 112))
+            source_text_luma = _mean_luma(source_page, (36, 44, 194, 150))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-saturated-color-marks", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            record = manifest["files"][0]
+            audit = record["processing_audit"]
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            with Image.open(process_dir / record["output_relative_path"]) as output_image:
+                output = output_image.convert("RGB")
+                output_bbox = _content_bbox(output)
+                output_text_energy = _edge_energy(output.crop((26, 34, 202, 154)))
+                output_red_saturation = _mean_saturation(output, (216, 52, 296, 126))
+                output_green_saturation = _mean_saturation(output, (216, 134, 300, 182))
+                output_highlighter_saturation = _mean_saturation(output, (40, 88, 200, 112))
+                output_red_rgb = _mean_rgb(output, (216, 52, 296, 126))
+                output_green_rgb = _mean_rgb(output, (216, 134, 300, 182))
+                output_highlighter_rgb = _mean_rgb(output, (40, 88, 200, 112))
+                output_text_luma = _mean_luma(output, (36, 44, 194, 150))
+
+            self.assertEqual(source_path.read_bytes(), source_bytes)
+            self.assertEqual(output.size, source_page.size)
+            self.assertIsNotNone(source_bbox)
+            self.assertIsNotNone(output_bbox)
+            assert source_bbox is not None and output_bbox is not None
+            self.assertLessEqual(abs(source_bbox[0] - output_bbox[0]), 3)
+            self.assertLessEqual(abs(source_bbox[1] - output_bbox[1]), 3)
+            self.assertLessEqual(abs(source_bbox[2] - output_bbox[2]), 3)
+            self.assertLessEqual(abs(source_bbox[3] - output_bbox[3]), 3)
+
+            self.assertGreaterEqual(output_text_energy, source_text_energy * 0.90)
+            self.assertLessEqual(abs(output_text_luma - source_text_luma), 12.0)
+            self.assertGreaterEqual(output_red_saturation, source_red_saturation * 0.70)
+            self.assertGreaterEqual(output_green_saturation, source_green_saturation * 0.70)
+            self.assertGreaterEqual(output_highlighter_saturation, source_highlighter_saturation * 0.60)
+            self.assertGreater(output_red_rgb[0] - output_red_rgb[1], 18.0)
+            self.assertGreater(output_red_rgb[0] - output_red_rgb[2], 18.0)
+            self.assertGreater(output_green_rgb[1] - output_green_rgb[0], 10.0)
+            self.assertGreater(output_green_rgb[1] - output_green_rgb[2], 10.0)
+            self.assertGreater(((output_highlighter_rgb[0] + output_highlighter_rgb[1]) / 2.0) - output_highlighter_rgb[2], 4.0)
+            self.assertEqual(audit["guardrail_failures"], [])
+            self.assertEqual(audit["local_content_change_guard_action"], "passed")
+            self.assertIn(audit["cumulative_change_guard_action"], {"passed", "kept_original"})
+
+            # Regression signal: emulate aggressive paper cast normalization that desaturates meaningful marks.
+            def _aggressive_desaturating_paper_cast(
+                image: Image.Image,
+            ) -> processing_module.PaperColorCastNormalizationResult:
+                monochrome = image.convert("L")
+                washed = ImageOps.colorize(monochrome, black=(112, 112, 112), white=(246, 246, 244)).convert("RGB")
+                return processing_module.PaperColorCastNormalizationResult(
+                    image=washed,
+                    applied=True,
+                    reason="paper color cast normalized: synthetic aggressive desaturation regression",
+                    reason_code="synthetic_desaturation_regression",
+                    color_delta=14.0,
+                    brightness_delta=5.0,
+                    changed_pixel_ratio=0.94,
+                    candidate_pixel_ratio=0.98,
+                )
+
+            permissive_options = ProcessingOptions(
+                **{
+                    **_full_chain_options().__dict__,
+                    "audit_max_cumulative_change_score": 9.0,
+                    "audit_max_cumulative_pixel_change_ratio": 1.0,
+                    "audit_max_local_content_changed_ratio": 1.0,
+                    "audit_max_local_content_tile_changed_ratio": 1.0,
+                    "audit_max_edge_content_changed_ratio": 1.0,
+                }
+            )
+            with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-saturated-color-regression-sim-") as regression_dir:
+                regression_root = Path(regression_dir)
+                regression_input = regression_root / "input"
+                regression_output = regression_root / "reports"
+                regression_processed = regression_root / "processed"
+                regression_input.mkdir()
+                source_page.save(regression_input / source_name, dpi=(300, 300))
+                with mock.patch.object(
+                    processing_module,
+                    "_normalize_paper_color_cast_conservative",
+                    side_effect=_aggressive_desaturating_paper_cast,
+                ):
+                    regression_report = scan_batch(
+                        ScanConfig("synthetic-regression", "full-chain-saturated-color-regression-sim", regression_input, regression_output)
+                    )
+                    regression_manifest = process_images(
+                        regression_report,
+                        regression_input,
+                        regression_processed,
+                        permissive_options,
+                    )
+                regression_record = regression_manifest["files"][0]
+                regression_output_path = regression_record["output_relative_path"]
+                if isinstance(regression_output_path, str) and regression_output_path:
+                    with Image.open(regression_processed / regression_output_path) as washed_output:
+                        washed = washed_output.convert("RGB")
+                        washed_red_saturation = _mean_saturation(washed, (216, 52, 296, 126))
+                        washed_green_saturation = _mean_saturation(washed, (216, 134, 300, 182))
+                        washed_highlighter_saturation = _mean_saturation(washed, (40, 88, 200, 112))
+                        washed_red_rgb = _mean_rgb(washed, (216, 52, 296, 126))
+                        washed_green_rgb = _mean_rgb(washed, (216, 134, 300, 182))
+                    self.assertLess(washed_red_saturation, source_red_saturation * 0.45)
+                    self.assertLess(washed_green_saturation, source_green_saturation * 0.45)
+                    self.assertLess(washed_highlighter_saturation, source_highlighter_saturation * 0.45)
+                    self.assertLess(washed_red_rgb[0] - washed_red_rgb[1], source_red_rgb[0] - source_red_rgb[1] - 12.0)
+                    self.assertLess(washed_green_rgb[1] - washed_green_rgb[0], source_green_rgb[1] - source_green_rgb[0] - 8.0)
+                else:
+                    self.assertNotEqual(regression_record["status"], "processed")
+                    self.assertNotEqual(regression_record["processing_audit"]["guardrail_failures"], [])
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], 1)
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (source_name, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_gray_pencil_erasure_smudge_marks_remain_detectable_near_reference_content(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-gray-pencil-erasure-smudge-") as temp_dir:
             root = Path(temp_dir)
@@ -17458,6 +17599,24 @@ def _faint_colored_pencil_annotation_guard_page() -> Image.Image:
     draw.line((176, 78, 274, 90), fill=(188, 122, 126), width=2)
     draw.line((178, 110, 276, 124), fill=(92, 132, 206), width=3)
     draw.line((184, 142, 206, 154), fill=(86, 84, 80), width=1)
+    return image
+
+
+def _saturated_color_mark_guard_page() -> Image.Image:
+    image = Image.new("RGB", (320, 220), (244, 243, 239))
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default()
+
+    for y in (44, 62, 80, 98, 116, 134):
+        draw.text((36, y), "ARCHIVE RECORD LINE", fill=(44, 44, 44), font=font)
+    draw.rectangle((38, 92, 202, 110), fill=(244, 236, 120))
+    draw.text((44, 94), "PROTECT NOTE BAND", fill=(52, 52, 52), font=font)
+
+    draw.ellipse((218, 54, 296, 124), outline=(198, 30, 30), width=6)
+    draw.line((232, 84, 286, 84), fill=(198, 30, 30), width=4)
+    draw.ellipse((228, 136, 298, 182), outline=(36, 156, 82), width=5)
+    draw.line((238, 150, 284, 170), fill=(36, 156, 82), width=4)
+    draw.rectangle((246, 188, 286, 198), fill=(58, 58, 58))
     return image
 
 
