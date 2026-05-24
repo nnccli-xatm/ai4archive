@@ -855,6 +855,76 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for protected_name in protected_names:
                 self.assertNotIn(protected_name.replace(".png", ""), audit_summary_text)
 
+    def test_full_chain_folded_corner_crop_and_cleanup_preserve_near_corner_evidence(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-folded-corner-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            def folded_corner_page(with_corner_marks: bool = False) -> Image.Image:
+                page = Image.new("RGB", (280, 200), (245, 244, 240))
+                draw = ImageDraw.Draw(page)
+                for y in (58, 84, 110, 136):
+                    draw.rectangle((72, y, 236, y + 4), fill=(42, 42, 42))
+                draw.polygon(((0, 0), (88, 0), (0, 72)), fill=(176, 176, 172))
+                draw.polygon(((0, 0), (58, 0), (0, 44)), fill=(212, 212, 208))
+                draw.line((56, 0, 0, 42), fill=(132, 132, 128), width=1)
+                draw.line((0, 0, 88, 0), fill=(162, 162, 158), width=1)
+                draw.line((0, 0, 0, 72), fill=(162, 162, 158), width=1)
+                if with_corner_marks:
+                    draw.rectangle((10, 14, 64, 18), fill=(26, 26, 26))
+                    draw.rectangle((14, 18, 18, 60), fill=(30, 30, 30))
+                    draw.rectangle((20, 48, 60, 52), fill=(34, 34, 34))
+                return page
+
+            safe = folded_corner_page(with_corner_marks=False)
+            safe.save(input_dir / "private_folded_corner_safe_shadow.png", dpi=(300, 300))
+
+            protected = folded_corner_page(with_corner_marks=True)
+            protected.save(input_dir / "private_folded_corner_protected_marks.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-folded-corner-preservation", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            protected_record = records["private_folded_corner_protected_marks.png"]
+            self.assertFalse(protected_record["dark_border_trimmed"])
+            self.assertIn(
+                protected_record["dark_border_reason_code"],
+                {
+                    "protected_edge_content_near_dark_border",
+                    "incomplete_dark_edge_border_evidence",
+                    "no_confident_dark_edge_border",
+                },
+            )
+            self.assertEqual(protected_record["output_size"], [280, 200])
+            self.assertIsNone(protected_record["crop_bbox"])
+            self.assertEqual(protected_record["processing_audit"]["guardrail_failures"], [])
+
+            protected_output = process_dir / protected_record["output_relative_path"]
+            with Image.open(protected_output) as processed:
+                near_corner_box = (8, 12, 66, 62)
+                before_luma = _mean_luma(protected, near_corner_box)
+                after_luma = _mean_luma(processed, near_corner_box)
+                near_corner_changed_ratio = _changed_ratio(protected, processed, near_corner_box)
+                self.assertLess(after_luma, 170.0)
+                self.assertLessEqual(after_luma - before_luma, 40.0)
+                self.assertLess(near_corner_changed_ratio, 0.35)
+
+            safe_record = records["private_folded_corner_safe_shadow.png"]
+            self.assertEqual(safe_record["output_size"], [280, 200])
+            self.assertEqual(safe_record["processing_audit"]["guardrail_failures"], [])
+
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            self.assertNotIn("private_folded_corner_safe_shadow", audit_summary_text)
+            self.assertNotIn("private_folded_corner_protected_marks", audit_summary_text)
+
     def test_full_chain_encoded_derivative_preserves_color_detail_and_icc_profile(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-encoded-color-") as temp_dir:
             root = Path(temp_dir)
