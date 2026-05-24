@@ -235,6 +235,62 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 self.assertNotIn(token, first_audit_summary_text)
                 self.assertNotIn(token, second_audit_summary_text)
 
+    def test_output_under_input_subtree_is_not_recursively_processed(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-output-under-input-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = input_dir / "processed"
+            input_dir.mkdir()
+
+            first_page = Image.new("RGB", (140, 180), (244, 244, 240))
+            first_draw = ImageDraw.Draw(first_page)
+            first_draw.rectangle((18, 34, 112, 42), fill=(30, 30, 30))
+            first_draw.rectangle((20, 72, 118, 78), fill=(54, 54, 54))
+            first_page.save(input_dir / "private_nested_source_a.png")
+
+            second_page = Image.new("RGB", (140, 180), (240, 240, 236))
+            second_draw = ImageDraw.Draw(second_page)
+            second_draw.rectangle((22, 36, 108, 44), fill=(34, 34, 34))
+            second_draw.rectangle((24, 84, 120, 90), fill=(58, 58, 58))
+            second_page.save(input_dir / "private_nested_source_b.png")
+
+            source_bytes_before = {path.name: path.read_bytes() for path in sorted(input_dir.glob("*.png"))}
+
+            first_report = scan_batch(
+                ScanConfig("synthetic-regression", "output-under-input-recursion-guard", input_dir, output_dir)
+            )
+            first_manifest = process_images(first_report, input_dir, process_dir, ProcessingOptions(workers=1))
+            first_sources = {record["source_relative_path"] for record in first_manifest["files"]}
+            self.assertEqual(first_sources, {"private_nested_source_a.png", "private_nested_source_b.png"})
+
+            second_report = scan_batch(
+                ScanConfig("synthetic-regression", "output-under-input-recursion-guard", input_dir, output_dir)
+            )
+            scanned_paths = {entry["relative_path"] for entry in second_report["files"]}
+            self.assertEqual(scanned_paths, {"private_nested_source_a.png", "private_nested_source_b.png"})
+
+            second_manifest = process_images(second_report, input_dir, process_dir, ProcessingOptions(workers=1))
+            second_records = second_manifest["files"]
+            second_sources = [record["source_relative_path"] for record in second_records]
+            self.assertEqual(len(second_sources), len(set(second_sources)))
+            self.assertEqual(set(second_sources), {"private_nested_source_a.png", "private_nested_source_b.png"})
+            self.assertFalse(any(source.startswith("processed/") for source in second_sources))
+
+            source_bytes_after = {path.name: path.read_bytes() for path in sorted(input_dir.glob("*.png"))}
+            self.assertEqual(source_bytes_before, source_bytes_after)
+
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            self.assertEqual(audit_summary["counts"]["total_files"], 2)
+
+            forbidden_tokens = ("private_nested_source_a", "private_nested_source_b", str(input_dir), str(process_dir))
+            for token in forbidden_tokens:
+                self.assertNotIn(token, audit_summary_text)
+
     def test_corrupt_input_is_privacy_safe_and_does_not_abort_batch(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-corrupt-input-guard-") as temp_dir:
             root = Path(temp_dir)
