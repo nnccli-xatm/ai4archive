@@ -4277,6 +4277,90 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_machine_readable_identifier_marks_and_reference_text_remain_detectable(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-machine-readable-identifier-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_guard_barcode_stripes.png": _machine_readable_mark_guard_page("barcode"),
+                "synthetic_guard_accession_label_code.png": _machine_readable_mark_guard_page("accession_code"),
+                "synthetic_guard_table_rule_reference.png": _machine_readable_mark_guard_page("table_page_number"),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, page in pages.items():
+                source = input_dir / name
+                page.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-machine-readable-identifier-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            regions = {
+                "synthetic_guard_barcode_stripes.png": {"mark": (152, 76, 248, 136), "reference": (28, 36, 140, 96)},
+                "synthetic_guard_accession_label_code.png": {"mark": (152, 70, 252, 148), "reference": (28, 36, 140, 96)},
+                "synthetic_guard_table_rule_reference.png": {"mark": (156, 56, 250, 152), "reference": (28, 36, 140, 96)},
+            }
+
+            for name, source_image in pages.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    output_rgb = output.convert("RGB")
+                    self.assertEqual(output_rgb.size, source_image.size, name)
+
+                    source_bbox = _content_bbox(source_image)
+                    output_bbox = _content_bbox(output_rgb)
+                    self.assertIsNotNone(source_bbox, name)
+                    self.assertIsNotNone(output_bbox, name)
+                    assert source_bbox is not None and output_bbox is not None
+                    source_area = (source_bbox[2] - source_bbox[0]) * (source_bbox[3] - source_bbox[1])
+                    output_area = (output_bbox[2] - output_bbox[0]) * (output_bbox[3] - output_bbox[1])
+                    self.assertGreaterEqual(output_area / max(1, source_area), 0.88, name)
+
+                    mark_box = regions[name]["mark"]
+                    reference_box = regions[name]["reference"]
+                    source_mark_edge = _edge_energy(source_image.crop(mark_box))
+                    output_mark_edge = _edge_energy(output_rgb.crop(mark_box))
+                    source_reference_edge = _edge_energy(source_image.crop(reference_box))
+                    output_reference_edge = _edge_energy(output_rgb.crop(reference_box))
+                    source_mark_stddev = ImageStat.Stat(source_image.crop(mark_box).convert("L")).stddev[0]
+                    output_mark_stddev = ImageStat.Stat(output_rgb.crop(mark_box).convert("L")).stddev[0]
+
+                    self.assertGreaterEqual(output_mark_edge / max(1e-6, source_mark_edge), 0.58, name)
+                    self.assertGreaterEqual(output_mark_stddev / max(1e-6, source_mark_stddev), 0.58, name)
+                    self.assertGreaterEqual(output_reference_edge / max(1e-6, source_reference_edge), 0.75, name)
+                    self.assertLessEqual(output_reference_edge / max(1e-6, source_reference_edge), 1.30, name)
+                    self.assertEqual(audit["guardrail_failures"], [], name)
+                    self.assertIn(audit["local_content_change_guard_action"], {"passed", "reverted_to_source"}, name)
+                    self.assertIn(audit["cumulative_change_guard_action"], {"passed", "reverted_to_source"}, name)
+
+                    regressed = output_rgb.filter(ImageFilter.GaussianBlur(radius=2.7))
+                    regressed = Image.blend(regressed, Image.new("RGB", regressed.size, (255, 255, 255)), alpha=0.28)
+                    regressed = regressed.crop((3, 3, regressed.width - 3, regressed.height - 3)).resize(
+                        output_rgb.size, Image.Resampling.BICUBIC
+                    )
+                    regressed_mark_edge = _edge_energy(regressed.crop(mark_box))
+                    regressed_mark_stddev = ImageStat.Stat(regressed.crop(mark_box).convert("L")).stddev[0]
+                    self.assertLess(regressed_mark_edge / max(1e-6, source_mark_edge), 0.50, name)
+                    self.assertLess(regressed_mark_stddev / max(1e-6, source_mark_stddev), 0.50, name)
+                    self.assertLess(regressed_mark_edge, output_mark_edge, name)
+                    self.assertLess(regressed_mark_stddev, output_mark_stddev, name)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_noisy_edge_texture_pages_stay_noop_with_despeckle_safe_skip_timing(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-noisy-edge-noop-") as temp_dir:
             root = Path(temp_dir)
