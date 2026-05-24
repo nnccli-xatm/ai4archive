@@ -4490,6 +4490,82 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_halftone_newsprint_texture_guard_catches_over_smoothing_regression(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-halftone-newsprint-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            page = Image.new("RGB", (320, 220), (245, 245, 242))
+            draw = ImageDraw.Draw(page)
+            for y in (30, 52, 74, 96):
+                draw.rectangle((20, y, 142, y + 4), fill=(52, 52, 52))
+            for y in (132, 152, 172, 192):
+                draw.line((18, y, 152, y), fill=(166, 166, 162), width=1)
+            draw.line((12, 124, 306, 124), fill=(82, 82, 82), width=1)
+            draw.rectangle((178, 28, 302, 92), outline=(72, 72, 72), width=1)
+            for y in range(32, 90):
+                for x in range(182, 300):
+                    shade = 124 + ((x * 7 + y * 9 + (x // 5) * (y // 3)) % 82)
+                    page.putpixel((x, y), (shade + 8, shade + 2, shade))
+            for y in range(130, 206, 3):
+                for x in range(176, 306, 3):
+                    dot = 221 if ((x // 3) + (y // 3)) % 2 == 0 else 231
+                    page.putpixel((x, y), (dot, dot - 1, dot - 3))
+
+            source_path = input_dir / "synthetic_halftone_newsprint_screen_tone_guard.png"
+            page.save(source_path, dpi=(300, 300))
+            source_bytes = source_path.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-halftone-newsprint-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            record = manifest["files"][0]
+            self.assertEqual(record["source_relative_path"], "synthetic_halftone_newsprint_screen_tone_guard.png")
+
+            output_path = process_dir / record["output_relative_path"]
+            with Image.open(output_path) as output:
+                output_rgb = output.convert("RGB")
+                source_rgb = page.convert("RGB")
+                halftone_box = (176, 130, 306, 206)
+                text_box = (26, 34, 136, 98)
+                ruled_line_box = (24, 123, 302, 126)
+                photo_box = (178, 28, 302, 92)
+
+                source_halftone_stddev = ImageStat.Stat(source_rgb.crop(halftone_box).convert("L")).stddev[0]
+                output_halftone_stddev = ImageStat.Stat(output_rgb.crop(halftone_box).convert("L")).stddev[0]
+                output_text_luma = _mean_luma(output_rgb, text_box)
+                source_text_luma = _mean_luma(source_rgb, text_box)
+                output_ruled_line_luma = _mean_luma(output_rgb, ruled_line_box)
+                source_ruled_line_luma = _mean_luma(source_rgb, ruled_line_box)
+                source_photo_edge = _edge_energy(source_rgb.crop(photo_box))
+                output_photo_edge = _edge_energy(output_rgb.crop(photo_box))
+
+                self.assertEqual(output_rgb.size, source_rgb.size)
+                self.assertEqual(_content_bbox(output_rgb), _content_bbox(source_rgb))
+                self.assertGreaterEqual(output_halftone_stddev / max(1e-6, source_halftone_stddev), 0.58)
+                self.assertLessEqual(abs(output_text_luma - source_text_luma), 8.0)
+                self.assertLessEqual(abs(output_ruled_line_luma - source_ruled_line_luma), 8.0)
+                self.assertGreaterEqual(output_photo_edge / max(1e-6, source_photo_edge), 0.72)
+
+                regressed = output_rgb.filter(ImageFilter.GaussianBlur(radius=1.8))
+                regressed_halftone_stddev = ImageStat.Stat(regressed.crop(halftone_box).convert("L")).stddev[0]
+                regressed_photo_edge = _edge_energy(regressed.crop(photo_box))
+                self.assertLess(regressed_halftone_stddev / max(1e-6, source_halftone_stddev), 0.50)
+                self.assertLess(regressed_photo_edge / max(1e-6, source_photo_edge), 0.65)
+
+            self.assertEqual(source_bytes, source_path.read_bytes())
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            self.assertEqual(audit_summary["counts"]["processed_files"], 1)
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            for forbidden in ("synthetic_halftone_newsprint_screen_tone_guard", str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_low_quality_jpeg_block_banding_and_mosquito_noise_stays_conservative(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-jpeg-artifact-guard-") as temp_dir:
             root = Path(temp_dir)
