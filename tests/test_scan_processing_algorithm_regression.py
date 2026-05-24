@@ -4655,6 +4655,92 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_embossed_seal_low_contrast_impression_guard(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-embossed-seal-impression-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            protected_name = "A001_embossed_seal_low_contrast_impression.png"
+            pages = {
+                "A000_safe_cleanup_control.png": _faint_official_mark_guard_page("safe_cleanup_control"),
+                protected_name: _embossed_seal_impression_guard_page(),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, page in pages.items():
+                source = input_dir / name
+                page.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-embossed-seal-impression", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            protected_record = records[protected_name]
+            protected_audit = protected_record["processing_audit"]
+
+            seal_box = (154, 70, 232, 138)
+            paper_box = (30, 20, 106, 58)
+            line_box = (32, 88, 118, 114)
+            text_box = (102, 120, 154, 148)
+
+            with Image.open(process_dir / protected_record["output_relative_path"]) as processed_output:
+                output_rgb = processed_output.convert("RGB")
+                smoothed = output_rgb.filter(ImageFilter.GaussianBlur(radius=2.6))
+                over_whitened = Image.blend(smoothed, Image.new("RGB", output_rgb.size, (248, 248, 246)), 0.72)
+                regressed_luma = over_whitened.convert("L")
+                regressed_luma = regressed_luma.crop((3, 3, regressed_luma.width - 3, regressed_luma.height - 3)).resize(
+                    output_rgb.size,
+                    resample=Image.Resampling.BICUBIC,
+                )
+                regressed_output = regressed_luma.convert("RGB")
+
+                before = pages[protected_name]
+                before_luma = before.convert("L")
+                processed_luma = output_rgb.convert("L")
+                regressed_luma = regressed_output.convert("L")
+
+                before_seal_contrast = abs(_mean_luma(before_luma, seal_box) - _mean_luma(before_luma, paper_box))
+                processed_seal_contrast = abs(_mean_luma(processed_luma, seal_box) - _mean_luma(processed_luma, paper_box))
+                regressed_seal_contrast = abs(_mean_luma(regressed_luma, seal_box) - _mean_luma(regressed_luma, paper_box))
+
+                before_seal_edges = _edge_energy(before_luma.crop(seal_box))
+                processed_seal_edges = _edge_energy(processed_luma.crop(seal_box))
+                regressed_seal_edges = _edge_energy(regressed_luma.crop(seal_box))
+
+                processed_text_change = _changed_ratio(before, output_rgb, text_box)
+                regressed_text_change = _changed_ratio(before, regressed_output, text_box)
+                processed_line_change = _changed_ratio(before, output_rgb, line_box)
+                regressed_line_change = _changed_ratio(before, regressed_output, line_box)
+
+            self.assertEqual((input_dir / protected_name).read_bytes(), source_bytes[protected_name])
+            self.assertEqual(output_rgb.size, pages[protected_name].size)
+            self.assertLessEqual(_changed_ratio(pages[protected_name], output_rgb, (0, 0, output_rgb.width, output_rgb.height)), 0.06)
+            self.assertGreaterEqual(processed_seal_contrast, before_seal_contrast * 0.65)
+            self.assertGreaterEqual(processed_seal_edges, before_seal_edges * 0.50)
+            self.assertLessEqual(processed_text_change, 0.28)
+            self.assertLessEqual(processed_line_change, 0.28)
+            self.assertEqual(protected_audit["guardrail_failures"], [])
+            self.assertEqual(protected_audit["local_content_change_guard_action"], "passed")
+            self.assertEqual(protected_audit["cumulative_change_guard_action"], "passed")
+
+            self.assertLess(regressed_seal_contrast, before_seal_contrast * 0.65)
+            self.assertLess(regressed_seal_edges, before_seal_edges * 0.75)
+            self.assertLess(regressed_seal_edges, processed_seal_edges * 0.90)
+            self.assertGreater(regressed_text_change, processed_text_change)
+            self.assertGreater(regressed_line_change, processed_line_change)
+
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_clean_noop_pages_stay_within_synthetic_budget_and_aggregate_only(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-clean-noop-budget-") as temp_dir:
             root = Path(temp_dir)
@@ -15695,6 +15781,26 @@ def _faint_official_mark_guard_page(variant: str) -> Image.Image:
         return image
 
     raise ValueError(f"unsupported faint official mark variant: {variant}")
+
+
+def _embossed_seal_impression_guard_page() -> Image.Image:
+    image = Image.new("RGB", (260, 190), (244, 244, 240))
+    draw = ImageDraw.Draw(image)
+    for y in range(42, 140, 24):
+        draw.rectangle((28, y, 122, y + 4), fill=(48, 48, 48))
+        draw.rectangle((34, y + 10, 106, y + 12), fill=(68, 68, 68))
+    for y in (66, 88, 110, 132, 154):
+        draw.line((20, y, 132, y), fill=(210, 210, 206), width=1)
+
+    draw.ellipse((154, 70, 232, 138), outline=(227, 227, 223), width=2)
+    draw.ellipse((166, 82, 220, 126), outline=(230, 230, 226), width=1)
+    draw.arc((162, 78, 224, 130), 22, 182, fill=(232, 232, 228), width=2)
+    draw.arc((162, 78, 224, 130), 198, 358, fill=(222, 222, 218), width=2)
+    draw.line((172, 104, 216, 104), fill=(228, 228, 224), width=1)
+    draw.arc((96, 118, 152, 152), 0, 190, fill=(214, 214, 210), width=2)
+    draw.arc((118, 116, 178, 154), 188, 360, fill=(218, 218, 214), width=2)
+    draw.text((104, 126), "9", fill=(216, 216, 212))
+    return image
 
 
 def _risk_edge_content_mark_page() -> Image.Image:
