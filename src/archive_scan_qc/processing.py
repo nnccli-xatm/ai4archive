@@ -16591,6 +16591,9 @@ def _save_image(image: Image.Image, target: Path, source_image: Image.Image) -> 
     if icc_profile and suffix in {".jpg", ".jpeg", ".jpe", ".jfif", ".png", ".tif", ".tiff"}:
         save_kwargs["icc_profile"] = icc_profile
 
+    if image.mode not in {"RGB", "RGBA"}:
+        image = image.convert("RGBA" if "A" in image.getbands() else "RGB")
+
     if suffix in {".jpg", ".jpeg", ".jpe", ".jfif"}:
         if image.mode != "RGB":
             image = image.convert("RGB")
