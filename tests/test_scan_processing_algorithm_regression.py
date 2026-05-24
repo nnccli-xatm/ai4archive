@@ -13416,6 +13416,113 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_multipart_carbon_copy_form_guard_preserves_lines_and_edge_evidence(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-multipart-carbon-copy-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "A001_safe_carbon_copy_control.png": _multipart_carbon_copy_form_guard_page("safe_carbon_copy_control"),
+                "A002_ruled_form_with_perforation.png": _multipart_carbon_copy_form_guard_page(
+                    "ruled_form_with_perforation"
+                ),
+                "A003_grid_table_with_tearoff_edge.png": _multipart_carbon_copy_form_guard_page(
+                    "grid_table_with_tearoff_edge"
+                ),
+                "A004_faint_near_edge_copy_with_deckled_side.png": _multipart_carbon_copy_form_guard_page(
+                    "faint_near_edge_copy_with_deckled_side"
+                ),
+                "A005_receipt_stub_perforation_with_margin_mark.png": _multipart_carbon_copy_form_guard_page(
+                    "receipt_stub_perforation_with_margin_mark"
+                ),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-multipart-carbon-copy-form-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_name = "A001_safe_carbon_copy_control.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            with Image.open(process_dir / safe_record["output_relative_path"]) as output_image:
+                safe_after = output_image.convert("RGB")
+            safe_before = pages[safe_name].convert("RGB")
+            safe_text_box = (96, 80, 250, 148)
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertIn(safe_audit["combination_quality_guard_action"], {"passed", "kept_original"})
+            self.assertIn(safe_audit["combination_quality_guard_reason_code"], {"safe_combination_passed", "low_confidence_original_preserved"})
+            self.assertLessEqual(safe_audit["size_change_ratio"], 0.12)
+            self.assertLessEqual(safe_audit["crop_ratio"], 0.08)
+            self.assertLessEqual(safe_audit["cumulative_change_crop_ratio"], 0.08)
+            self.assertIn(
+                safe_record.get("faded_text_reason_code"),
+                {"applied_stable_low_saturation_text", "low_confidence_measurement", "protected_color_stamp_annotation"},
+            )
+            self.assertGreaterEqual(
+                _edge_energy(safe_after.crop(safe_text_box)),
+                _edge_energy(safe_before.crop(safe_text_box)) * 0.97,
+            )
+
+            protected_specs = {
+                "A002_ruled_form_with_perforation.png": {"edge_box": (6, 50, 64, 222), "line_box": (84, 66, 286, 180)},
+                "A003_grid_table_with_tearoff_edge.png": {"edge_box": (6, 124, 138, 220), "line_box": (72, 72, 284, 196)},
+                "A004_faint_near_edge_copy_with_deckled_side.png": {"edge_box": (6, 26, 124, 220), "line_box": (88, 76, 286, 190)},
+                "A005_receipt_stub_perforation_with_margin_mark.png": {"edge_box": (6, 42, 96, 216), "line_box": (82, 84, 286, 196)},
+            }
+            for name, boxes in protected_specs.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                before = pages[name].convert("RGB")
+                with Image.open(process_dir / record["output_relative_path"]) as output_image:
+                    after = output_image.convert("RGB")
+                self.assertEqual(record["status"], "processed", name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertIn(audit["combination_quality_guard_action"], {"passed", "kept_original", "reverted_to_source"}, name)
+                self.assertIn(
+                    audit["combination_quality_guard_reason_code"],
+                    {
+                        "safe_combination_passed",
+                        "low_confidence_original_preserved",
+                        "protected_content_original_preserved",
+                        "combined_change_too_large_reverted",
+                    },
+                    name,
+                )
+                self.assertFalse(record["dark_border_trimmed"], name)
+                self.assertFalse(record["scanner_gutter_trimmed"], name)
+                self.assertLessEqual(audit["size_change_ratio"], 0.12, name)
+                self.assertLessEqual(audit["cumulative_change_crop_ratio"], 0.10, name)
+                self.assertLessEqual(_changed_ratio(before, after, boxes["edge_box"]), 0.04, name)
+                self.assertGreaterEqual(
+                    _edge_energy(after.crop(boxes["line_box"])),
+                    _edge_energy(before.crop(boxes["line_box"])) * 0.90,
+                    name,
+                )
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertIn("timing", audit_summary)
+            self.assertIn("operation_timings", audit_summary["timing"])
+            self.assertGreater(len(audit_summary["timing"]["operation_timings"]), 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_seal_ribbons_string_ties_and_hanging_tags_stay_preserved_with_safe_cleanup_control(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-seal-ribbon-tag-") as temp_dir:
             root = Path(temp_dir)
@@ -17828,6 +17935,69 @@ def _perforated_tearoff_hinge_guard_page(variant: str) -> Image.Image:
         return image
 
     raise ValueError(f"unsupported perforated tear-off/hinge variant: {variant}")
+
+
+def _multipart_carbon_copy_form_guard_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (320, 240), (242, 245, 250))
+    draw = ImageDraw.Draw(image)
+    for y in (62, 90, 118, 146):
+        draw.line((84, y, 286, y), fill=(106, 138, 170), width=1)
+    draw.rectangle((80, 168, 286, 192), fill=(236, 240, 246))
+
+    if variant == "safe_carbon_copy_control":
+        draw.rectangle((86, 78, 242, 82), fill=(150, 174, 198))
+        draw.rectangle((90, 104, 250, 108), fill=(152, 176, 200))
+        draw.rectangle((94, 130, 246, 134), fill=(150, 174, 198))
+        return image
+
+    if variant == "ruled_form_with_perforation":
+        draw.rectangle((6, 50, 12, 222), fill=(232, 236, 242))
+        for y in range(56, 220, 16):
+            draw.ellipse((12, y, 22, y + 10), outline=(114, 132, 148), width=2)
+        draw.line((24, 52, 24, 220), fill=(120, 136, 150), width=1)
+        draw.rectangle((88, 78, 246, 82), fill=(150, 174, 198))
+        draw.rectangle((92, 106, 254, 110), fill=(152, 176, 200))
+        return image
+
+    if variant == "grid_table_with_tearoff_edge":
+        points: list[tuple[int, int]] = [(6, 124)]
+        for index in range(0, 12):
+            x = 6 + index * 11
+            points.extend([(x + 6, 132), (x + 11, 124)])
+        points.extend([(138, 220), (6, 220)])
+        draw.polygon(points, fill=(232, 236, 242), outline=(118, 136, 152))
+        for y in (74, 102, 130, 158):
+            draw.line((72, y, 284, y), fill=(102, 134, 166), width=1)
+        for x in (104, 136, 168, 200, 232, 264):
+            draw.line((x, 64, x, 196), fill=(102, 134, 166), width=1)
+        draw.rectangle((94, 86, 252, 90), fill=(152, 176, 200))
+        return image
+
+    if variant == "faint_near_edge_copy_with_deckled_side":
+        points = [(6, 24), (14, 34), (8, 46), (16, 58), (10, 72), (18, 86)]
+        for y in range(98, 208, 14):
+            points.extend([(8, y), (18, y + 8)])
+        points.extend([(18, 220), (6, 220)])
+        draw.polygon(points, fill=(232, 236, 242), outline=(118, 136, 152))
+        draw.rectangle((90, 82, 252, 86), fill=(154, 178, 202))
+        draw.rectangle((94, 110, 258, 114), fill=(156, 180, 204))
+        draw.line((28, 54, 118, 48), fill=(124, 142, 156), width=1)
+        draw.line((28, 80, 116, 76), fill=(126, 144, 158), width=1)
+        draw.rectangle((86, 176, 126, 192), fill=(88, 102, 116))
+        return image
+
+    if variant == "receipt_stub_perforation_with_margin_mark":
+        draw.polygon([(8, 36), (36, 46), (28, 188), (8, 214)], fill=(232, 236, 242), outline=(118, 136, 152))
+        for y in range(44, 212, 18):
+            draw.ellipse((16, y, 24, y + 8), outline=(118, 136, 152), width=1)
+        draw.line((30, 58, 98, 50), fill=(124, 142, 156), width=1)
+        draw.line((30, 86, 96, 80), fill=(124, 142, 156), width=1)
+        draw.rectangle((84, 86, 248, 90), fill=(152, 176, 200))
+        draw.rectangle((88, 114, 254, 118), fill=(154, 178, 202))
+        draw.line((12, 154, 64, 142), fill=(96, 112, 126), width=2)
+        return image
+
+    raise ValueError(f"unsupported multipart carbon-copy guard variant: {variant}")
 
 
 def _seal_ribbon_tag_guard_page(variant: str) -> Image.Image:
