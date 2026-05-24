@@ -9,7 +9,7 @@ import unittest
 from unittest import mock
 from pathlib import Path
 
-from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, ImageStat
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, ImageOps, ImageStat
 
 from archive_scan_qc import processing as processing_module
 from archive_scan_qc.benchmark import _processing_quality_regression, run_benchmark
@@ -443,6 +443,40 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 derivative_path = process_dir / record["output_relative_path"]
                 with Image.open(derivative_path) as derivative:
                     _assert_dpi_close(self, derivative.info.get("dpi"), expected_dpi)
+
+    def test_full_chain_derivative_applies_exif_orientation_and_preserves_dpi_metadata(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-exif-orientation-dpi-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            source = input_dir / "synthetic_exif_orientation_dpi.jpg"
+            page = Image.new("RGB", (320, 220), (246, 242, 236))
+            draw = ImageDraw.Draw(page)
+            draw.rectangle((24, 24, 116, 42), fill=(30, 30, 30))
+            draw.rectangle((24, 80, 200, 98), fill=(50, 50, 50))
+            draw.rectangle((24, 136, 178, 154), fill=(70, 70, 70))
+            exif = Image.Exif()
+            exif[274] = 6
+            page.save(source, format="JPEG", dpi=(600, 600), quality=95, subsampling=0, exif=exif)
+            source_bytes = source.read_bytes()
+
+            with Image.open(source) as source_image:
+                expected_size = ImageOps.exif_transpose(source_image).size
+
+            report = scan_batch(ScanConfig("synthetic-regression", "exif-orientation-preserve-dpi", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(workers=1))
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            record = records[source.name]
+            self.assertEqual(record["status"], "processed")
+            derivative_path = process_dir / record["output_relative_path"]
+            with Image.open(derivative_path) as derivative:
+                self.assertEqual(derivative.size, expected_size)
+                _assert_dpi_close(self, derivative.info.get("dpi"), (600.0, 600.0))
 
     def test_combination_quality_guard_classifies_public_reason_codes(self) -> None:
         options = ProcessingOptions()
