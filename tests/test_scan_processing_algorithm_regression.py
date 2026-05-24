@@ -142,6 +142,55 @@ def _clean_background_scanner_glass_streak_page(variant: str) -> Image.Image:
 
 
 class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
+    def test_multi_frame_tiff_processing_has_aggregate_guard_without_source_mutation(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-multi-frame-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            single_page = Image.new("RGB", (120, 180), (244, 244, 240))
+            single_draw = ImageDraw.Draw(single_page)
+            single_draw.rectangle((24, 48, 96, 54), fill=(38, 38, 38))
+            single_page.save(input_dir / "private_single_page_control.tif", dpi=(300, 300))
+
+            multi_frame_first = Image.new("RGB", (120, 180), (244, 244, 240))
+            multi_frame_first_draw = ImageDraw.Draw(multi_frame_first)
+            multi_frame_first_draw.rectangle((20, 42, 98, 48), fill=(36, 36, 36))
+            multi_frame_second = multi_frame_first.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+            multi_frame_first.save(
+                input_dir / "private_multi_frame_input.tif",
+                save_all=True,
+                append_images=[multi_frame_second],
+                dpi=(300, 300),
+            )
+
+            source_bytes_before = {
+                path.name: path.read_bytes()
+                for path in sorted(input_dir.glob("*.tif"))
+            }
+
+            report = scan_batch(ScanConfig("synthetic-regression", "multi-frame-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(workers=1))
+
+            source_bytes_after = {
+                path.name: path.read_bytes()
+                for path in sorted(input_dir.glob("*.tif"))
+            }
+            self.assertEqual(source_bytes_before, source_bytes_after)
+
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            self.assertEqual(records["private_single_page_control.tif"]["status"], "processed")
+            self.assertEqual(records["private_multi_frame_input.tif"]["status"], "processed")
+
+            frame_counts = {item["relative_path"]: item.get("frame_count") for item in report["files"]}
+            self.assertEqual(frame_counts["private_single_page_control.tif"], 1)
+            self.assertEqual(frame_counts["private_multi_frame_input.tif"], 2)
+
+            warning_rules = {finding["rule"] for finding in report["findings"]}
+            self.assertIn("multi_page_image_container", warning_rules)
+
     def test_corner_connected_dark_border_trim_applies_and_protects_with_aggregate_reasons(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-corner-connected-shadow-") as temp_dir:
             root = Path(temp_dir)
