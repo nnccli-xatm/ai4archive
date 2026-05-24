@@ -298,6 +298,15 @@ def _full_chain_regression_guard(variants: list[dict[str, Any]]) -> dict[str, An
             "Full-chain aggregate quality evidence failed synthetic guard requirements.",
             quality_guard_signal=quality_signal,
         )
+    quality_runs = quality_signal.get("runs")
+    count_guard = _full_chain_count_stability_guard(quality_runs)
+    if count_guard.get("status") == "failed":
+        return _failed_guard(
+            count_guard.get("code", "full_chain_processed_failed_count_regression"),
+            "Full-chain aggregate processed/failed counts regressed from synthetic guard expectations.",
+            count_guard_signal=count_guard,
+            quality_guard_signal=quality_signal,
+        )
 
     return {
         "schema_version": "scan-qc.synthetic-full-chain-regression-guard.v1",
@@ -307,6 +316,7 @@ def _full_chain_regression_guard(variants: list[dict[str, Any]]) -> dict[str, An
         "required_operations": list(REGRESSION_SIGNAL_OPERATIONS),
         "budget_signal": budget_signal,
         "quality_guard_signal": quality_signal,
+        "count_guard_signal": count_guard,
         "privacy": _privacy_flags(),
     }
 
@@ -475,6 +485,80 @@ def _quality_guard_counts(counts: Any) -> dict[str, int]:
         "processed_output_foreground_weakening_guard_reverted_files",
     )
     return {key: _coerce_int(counts.get(key)) for key in keys}
+
+
+def _full_chain_count_stability_guard(quality_runs: Any) -> dict[str, Any]:
+    if not isinstance(quality_runs, list) or not quality_runs:
+        return {
+            "aggregate_only": True,
+            "status": "failed",
+            "code": "missing_full_chain_processed_failed_counts",
+            "message": "Missing quality runs needed for aggregate processed/failed count guard.",
+            "run_count": 0,
+            "baseline": None,
+            "mismatched_runs": [],
+            "failed_runs": [],
+        }
+
+    baseline: dict[str, int] | None = None
+    mismatched_runs: list[dict[str, int]] = []
+    failed_runs: list[dict[str, int]] = []
+    for run in quality_runs:
+        if not isinstance(run, dict):
+            continue
+        counts = run.get("counts")
+        if not isinstance(counts, dict):
+            continue
+        processed_files = _coerce_int(counts.get("processed_files"))
+        failed_files = _coerce_int(counts.get("failed_files"))
+        run_index = _coerce_int(run.get("run_index"))
+        summary = {
+            "run_index": run_index,
+            "processed_files": processed_files,
+            "failed_files": failed_files,
+        }
+        if processed_files <= 0:
+            mismatched_runs.append(summary)
+        if failed_files > 0:
+            failed_runs.append(summary)
+        if baseline is None and processed_files > 0:
+            baseline = {
+                "processed_files": processed_files,
+                "failed_files": failed_files,
+            }
+            continue
+        if baseline is not None and (
+            processed_files != baseline["processed_files"] or failed_files != baseline["failed_files"]
+        ):
+            mismatched_runs.append(summary)
+
+    if baseline is None:
+        return {
+            "aggregate_only": True,
+            "status": "failed",
+            "code": "missing_full_chain_processed_failed_counts",
+            "message": "No usable aggregate processed/failed count baseline was found.",
+            "run_count": len(quality_runs),
+            "baseline": None,
+            "mismatched_runs": mismatched_runs,
+            "failed_runs": failed_runs,
+        }
+
+    status = "failed" if mismatched_runs or failed_runs else "pass"
+    return {
+        "aggregate_only": True,
+        "status": status,
+        "code": "full_chain_processed_failed_count_regression" if status == "failed" else None,
+        "message": (
+            "Aggregate processed/failed counts stayed stable across synthetic runs."
+            if status == "pass"
+            else "Aggregate processed/failed counts regressed from synthetic baseline."
+        ),
+        "run_count": len(quality_runs),
+        "baseline": baseline,
+        "mismatched_runs": mismatched_runs,
+        "failed_runs": failed_runs,
+    }
 
 
 def _operation_timing_regression_signal(benchmark: dict[str, Any]) -> dict[str, Any]:

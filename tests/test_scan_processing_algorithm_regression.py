@@ -3381,6 +3381,88 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 ):
                     self.assertNotIn(forbidden, raw)
 
+    def test_synthetic_full_chain_mixed_batch_guard_keeps_aggregate_timing_counts_quality_and_budget(self) -> None:
+        comparison = _synthetic_performance_comparison_module()
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-mixed-batch-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            input_dir.mkdir()
+            _synthetic_full_chain_mixed_pages(input_dir)
+
+            full_payload = _benchmark_combo(root, input_dir, "full-mixed-guard", *(BASE_FLAGS + CONSERVATIVE_REPAIR_FLAGS))
+            signal = comparison._operation_timing_regression_signal(full_payload)
+            budget = comparison._full_chain_budget_signal({"id": comparison.FULL_CHAIN_VARIANT_ID}, full_payload)
+            quality = comparison._full_chain_quality_guard_signal({"id": comparison.FULL_CHAIN_VARIANT_ID}, full_payload)
+            guard = comparison._full_chain_regression_guard(
+                [
+                    {
+                        "id": comparison.FULL_CHAIN_VARIANT_ID,
+                        "operation_timing_regression_signal": signal,
+                        "full_chain_budget_signal": budget,
+                        "full_chain_quality_guard_signal": quality,
+                    }
+                ]
+            )
+
+            self.assertEqual(guard["status"], "pass")
+            self.assertEqual(guard["quality_guard_signal"]["status"], "pass")
+            self.assertEqual(guard["budget_signal"]["status"], "pass")
+            self.assertEqual(guard["count_guard_signal"]["status"], "pass")
+            self.assertEqual(guard["count_guard_signal"]["baseline"]["processed_files"], 4)
+            self.assertEqual(guard["count_guard_signal"]["baseline"]["failed_files"], 0)
+            self.assertLessEqual(
+                guard["budget_signal"]["max_average_seconds_per_file"],
+                comparison.FULL_CHAIN_SYNTHETIC_BUDGET_SECONDS_PER_FILE,
+            )
+            self.assertEqual(signal["missing_operations"], [])
+            for operation in REQUIRED_OPERATIONS:
+                self.assertTrue(signal["operations"][operation]["enabled"], operation)
+                self.assertTrue(signal["operations"][operation]["signal_available"], operation)
+
+    def test_synthetic_full_chain_guard_fails_on_count_regression_without_private_rows(self) -> None:
+        comparison = _synthetic_performance_comparison_module()
+        benchmark = _full_chain_benchmark_fixture(
+            _operation_timings_fixture(),
+            elapsed_seconds=0.8,
+            processed_files=4,
+        )
+        quality_signal = comparison._full_chain_quality_guard_signal(
+            {"id": comparison.FULL_CHAIN_VARIANT_ID}, benchmark
+        )
+        assert isinstance(quality_signal, dict)
+        quality_signal["runs"].append(
+            {
+                "run_index": 2,
+                "requested_workers": 1,
+                "status": "pass",
+                "counts": {"processed_files": 3, "failed_files": 1},
+            }
+        )
+
+        guard = comparison._full_chain_regression_guard(
+            [
+                {
+                    "id": comparison.FULL_CHAIN_VARIANT_ID,
+                    "operation_timing_regression_signal": comparison._operation_timing_regression_signal(benchmark),
+                    "full_chain_budget_signal": comparison._full_chain_budget_signal(
+                        {"id": comparison.FULL_CHAIN_VARIANT_ID}, benchmark
+                    ),
+                    "full_chain_quality_guard_signal": quality_signal,
+                }
+            ]
+        )
+        raw = json.dumps(guard, ensure_ascii=False, sort_keys=True)
+
+        self.assertEqual(guard["status"], "failed")
+        self.assertEqual(guard["code"], "full_chain_processed_failed_count_regression")
+        self.assertEqual(guard["count_guard_signal"]["status"], "failed")
+        self.assertEqual(guard["count_guard_signal"]["baseline"]["processed_files"], 4)
+        self.assertEqual(guard["count_guard_signal"]["baseline"]["failed_files"], 0)
+        self.assertEqual(guard["count_guard_signal"]["failed_runs"][0]["failed_files"], 1)
+        self.assertEqual(guard["count_guard_signal"]["mismatched_runs"][0]["processed_files"], 3)
+        for forbidden in ("/private/archive", "source_sha256", "h" * 64):
+            self.assertNotIn(forbidden, raw)
+
     def test_intermittent_scanline_cleanup_preserves_low_contrast_protected_context(self) -> None:
         safe_page = _intermittent_scanline_guard_page("safe")
         safe_result = processing_module._lighten_scanlines_conservative(safe_page)
@@ -14517,6 +14599,20 @@ def _synthetic_pages(input_dir: Path) -> None:
     _scanline_page().save(input_dir / "private_scanline_page.png", dpi=(300, 300))
     _faded_text_page().save(input_dir / "private_faded_text_page.png", dpi=(300, 300))
     _blurred_text_page().save(input_dir / "private_blurred_text_page.png", dpi=(300, 300))
+
+
+def _synthetic_full_chain_mixed_pages(input_dir: Path) -> None:
+    pages = {
+        "synthetic_clean_text_control.png": _text_page(),
+        "synthetic_protected_low_contrast_content.png": _pale_blue_carbon_copy_page(
+            with_blue_annotation=False,
+            variant="blue_light_form_separators",
+        ),
+        "synthetic_texture_noise_region.png": _artmark_guard_page("photo_texture_color_note"),
+        "synthetic_identifier_like_marks.png": _machine_readable_mark_guard_page("accession_code"),
+    }
+    for name, page in pages.items():
+        page.save(input_dir / name, dpi=(300, 300))
 
 
 def _shallow_stable_text_page() -> Image.Image:
