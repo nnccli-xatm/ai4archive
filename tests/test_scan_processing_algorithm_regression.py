@@ -11790,6 +11790,134 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_tape_residue_cleanup_guard_preserves_nearby_content_and_dimensions(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-tape-residue-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            pages = {
+                "A001_safe_cleanup_control.png": _physical_evidence_guard_page("safe_cleanup_control"),
+                "A002_translucent_tape_residue_band.png": _physical_evidence_guard_page("archival_tape_residue"),
+                "A003_tape_strip_halo_edge_shadow.png": _physical_evidence_guard_page("archival_tape_strip_and_halo"),
+                "A004_faint_foreground_near_tape.png": _physical_evidence_guard_page("faint_foreground_near_tape"),
+                "A005_adhesive_shadow_near_margin.png": _attached_pasted_evidence_guard_page("adhesive_shadow_near_margin"),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-tape-residue-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            protected_boxes = {
+                "A002_translucent_tape_residue_band.png": (8, 22, 48, 202),
+                "A003_tape_strip_halo_edge_shadow.png": (8, 18, 64, 202),
+                "A004_faint_foreground_near_tape.png": (12, 24, 100, 198),
+                "A005_adhesive_shadow_near_margin.png": (6, 24, 96, 204),
+            }
+            foreground_near_tape_box = (14, 56, 108, 126)
+            for name, box in protected_boxes.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                before = pages[name].convert("RGB")
+                with Image.open(process_dir / record["output_relative_path"]) as output_image:
+                    after = output_image.convert("RGB")
+                self.assertEqual(before.size, after.size, name)
+                self.assertEqual(record["status"], "processed", name)
+                self.assertFalse(record["dark_border_trimmed"], name)
+                self.assertFalse(record["scanner_gutter_trimmed"], name)
+                self.assertIn(
+                    audit["combination_quality_guard_action"],
+                    {"passed", "kept_original", "reverted_to_source"},
+                    name,
+                )
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertLessEqual(_changed_ratio(before, after, box), 0.03, name)
+
+            before_fg = _mean_luma(pages["A004_faint_foreground_near_tape.png"], foreground_near_tape_box)
+            with Image.open(process_dir / records["A004_faint_foreground_near_tape.png"]["output_relative_path"]) as output_image:
+                after_fg = _mean_luma(output_image, foreground_near_tape_box)
+            self.assertLessEqual(abs(before_fg - after_fg), 8.0)
+
+            # Regression signal: emulate an over-cleanup bug around tape/residue.
+            # A focused guard must fail this behavior by detecting aggressive local erasure.
+            def _aggressive_tape_cleanup(image: Image.Image) -> processing_module.BackgroundStainLighteningResult:
+                cleaned = image.convert("RGB").copy()
+                draw = ImageDraw.Draw(cleaned)
+                draw.rectangle((6, 18, 104, 208), fill=(248, 248, 248))
+                return processing_module.BackgroundStainLighteningResult(
+                    image=cleaned,
+                    applied=True,
+                    reason="background stains lightened: synthetic aggressive tape cleanup regression",
+                    stain_mean_before=220.0,
+                    stain_mean_after=248.0,
+                    stain_delta=28.0,
+                    changed_pixel_ratio=0.22,
+                    candidate_pixel_ratio=0.26,
+                )
+
+            permissive_options = ProcessingOptions(
+                **{
+                    **_full_chain_options().__dict__,
+                    "audit_max_cumulative_change_score": 9.0,
+                    "audit_max_cumulative_pixel_change_ratio": 1.0,
+                    "audit_max_local_content_changed_ratio": 1.0,
+                    "audit_max_local_content_tile_changed_ratio": 1.0,
+                    "audit_max_edge_content_changed_ratio": 1.0,
+                }
+            )
+            with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-tape-residue-regression-sim-") as regression_dir:
+                regression_root = Path(regression_dir)
+                regression_input = regression_root / "input"
+                regression_output = regression_root / "reports"
+                regression_processed = regression_root / "processed"
+                regression_input.mkdir()
+                for name, image in pages.items():
+                    image.save(regression_input / name, dpi=(300, 300))
+                with mock.patch.object(
+                    processing_module,
+                    "_lighten_background_stains_conservative",
+                    side_effect=_aggressive_tape_cleanup,
+                ):
+                    regression_report = scan_batch(
+                        ScanConfig("synthetic-regression", "full-chain-tape-residue-regression-sim", regression_input, regression_output)
+                    )
+                    regression_manifest = process_images(
+                        regression_report,
+                        regression_input,
+                        regression_processed,
+                        permissive_options,
+                    )
+                regression_records = {record["source_relative_path"]: record for record in regression_manifest["files"]}
+                with Image.open(
+                    regression_processed / regression_records["A004_faint_foreground_near_tape.png"]["output_relative_path"]
+                ) as overcleaned_image:
+                    overcleaned_ratio = _changed_ratio(
+                        pages["A004_faint_foreground_near_tape.png"].convert("RGB"),
+                        overcleaned_image.convert("RGB"),
+                        protected_boxes["A004_faint_foreground_near_tape.png"],
+                    )
+                self.assertGreater(overcleaned_ratio, 0.08)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_attached_slips_and_pasted_labels_stay_preserved_with_safe_cleanup_control(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-attached-pasted-evidence-") as temp_dir:
             root = Path(temp_dir)
