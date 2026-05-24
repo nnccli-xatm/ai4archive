@@ -150,6 +150,111 @@ def _clean_background_scanner_glass_streak_page(variant: str) -> Image.Image:
 
 
 class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
+    def test_case_variant_extensions_and_output_stem_collisions_remain_stable_and_privacy_safe(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-case-variant-collision-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            fixtures = (
+                ("private_case_variant_alpha.JPG", "JPEG", (242, 242, 238), (26, 26, 26)),
+                ("private_case_variant_Alpha.jpeg", "JPEG", (240, 240, 236), (34, 34, 34)),
+                ("private_case_variant_alpha-v2.TIF", "TIFF", (244, 244, 240), (42, 42, 42)),
+                ("private_case_variant_alpha_v2.tiff", "TIFF", (238, 238, 234), (50, 50, 50)),
+                ("private_case_variant_beta.PnG", "PNG", (241, 241, 237), (28, 28, 28)),
+            )
+            for index, (filename, image_format, background, foreground) in enumerate(fixtures):
+                page = Image.new("RGB", (152, 196), background)
+                draw = ImageDraw.Draw(page)
+                draw.rectangle((22, 36, 124, 44), fill=foreground)
+                draw.rectangle((24, 84, 126, 92), fill=foreground)
+                draw.rectangle((24, 128, 88 + index * 8, 136), fill=foreground)
+                page.save(input_dir / filename, format=image_format)
+
+            source_paths = sorted(input_dir.iterdir())
+            source_bytes_before = {path.name: path.read_bytes() for path in source_paths}
+
+            first_report = scan_batch(ScanConfig("synthetic-regression", "case-variant-collision-guard", input_dir, output_dir))
+            first_manifest = process_images(first_report, input_dir, process_dir, ProcessingOptions(workers=1))
+            source_bytes_after_first = {path.name: path.read_bytes() for path in source_paths}
+            self.assertEqual(source_bytes_before, source_bytes_after_first)
+
+            first_records = first_manifest["files"]
+            first_sources = [record["source_relative_path"] for record in first_records]
+            first_outputs = [record["output_relative_path"] for record in first_records]
+            self.assertEqual(len(first_records), len(fixtures))
+            self.assertEqual(set(first_sources), {name for name, *_ in fixtures})
+            self.assertEqual(len(first_sources), len(set(first_sources)))
+            self.assertEqual(len(first_outputs), len(set(first_outputs)))
+            first_record_by_source = {record["source_relative_path"]: record for record in first_records}
+            first_output_sha_by_source = {source: record["output_sha256"] for source, record in first_record_by_source.items()}
+            first_output_path_by_source = {
+                source: record["output_relative_path"] for source, record in first_record_by_source.items()
+            }
+            first_output_bytes_by_source = {
+                source: (process_dir / output_path).read_bytes()
+                for source, output_path in first_output_path_by_source.items()
+                if isinstance(output_path, str) and output_path
+            }
+
+            first_audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            first_audit_summary = json.loads(first_audit_summary_text)
+            first_retry_manifest_text = (process_dir / "processing_retry_manifest.json").read_text(encoding="utf-8")
+            first_retry_manifest = json.loads(first_retry_manifest_text)
+            self.assertTrue(first_audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(first_audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(first_audit_summary["privacy"]["contains_hashes"])
+            self.assertIn("summary", first_retry_manifest)
+            self.assertEqual(first_retry_manifest["summary"]["retry_list_files"], 0)
+
+            second_report = scan_batch(ScanConfig("synthetic-regression", "case-variant-collision-guard", input_dir, output_dir))
+            second_manifest = process_images(second_report, input_dir, process_dir, ProcessingOptions(workers=1))
+            source_bytes_after_second = {path.name: path.read_bytes() for path in source_paths}
+            self.assertEqual(source_bytes_before, source_bytes_after_second)
+
+            second_records = second_manifest["files"]
+            second_sources = [record["source_relative_path"] for record in second_records]
+            second_outputs = [record["output_relative_path"] for record in second_records]
+            self.assertEqual(len(second_records), len(fixtures))
+            self.assertEqual(set(second_sources), {name for name, *_ in fixtures})
+            self.assertEqual(len(second_sources), len(set(second_sources)))
+            self.assertEqual(len(second_outputs), len(set(second_outputs)))
+            second_record_by_source = {record["source_relative_path"]: record for record in second_records}
+            second_output_sha_by_source = {source: record["output_sha256"] for source, record in second_record_by_source.items()}
+            second_output_path_by_source = {
+                source: record["output_relative_path"] for source, record in second_record_by_source.items()
+            }
+            second_output_bytes_by_source = {
+                source: (process_dir / output_path).read_bytes()
+                for source, output_path in second_output_path_by_source.items()
+                if isinstance(output_path, str) and output_path
+            }
+
+            self.assertEqual(first_output_path_by_source, second_output_path_by_source)
+            self.assertEqual(first_output_sha_by_source, second_output_sha_by_source)
+            self.assertEqual(first_output_bytes_by_source, second_output_bytes_by_source)
+            for source in sorted(first_record_by_source):
+                self.assertEqual(first_record_by_source[source]["status"], second_record_by_source[source]["status"])
+
+            second_audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            second_audit_summary = json.loads(second_audit_summary_text)
+            second_retry_manifest_text = (process_dir / "processing_retry_manifest.json").read_text(encoding="utf-8")
+            second_retry_manifest = json.loads(second_retry_manifest_text)
+            self.assertTrue(second_audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(second_audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(second_audit_summary["privacy"]["contains_hashes"])
+            self.assertIn("summary", second_retry_manifest)
+            self.assertEqual(second_retry_manifest["summary"]["retry_list_files"], 0)
+
+            forbidden_tokens = tuple(name.rsplit(".", 1)[0] for name, *_ in fixtures) + (str(input_dir), str(process_dir))
+            for token in forbidden_tokens:
+                self.assertNotIn(token, first_audit_summary_text)
+                self.assertNotIn(token, first_retry_manifest_text)
+                self.assertNotIn(token, second_audit_summary_text)
+                self.assertNotIn(token, second_retry_manifest_text)
+
     def test_same_batch_rerun_processing_is_idempotent_and_privacy_safe(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-rerun-idempotency-guard-") as temp_dir:
             root = Path(temp_dir)
