@@ -2918,6 +2918,114 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_mixed_artifact_batch_keeps_runtime_guard_and_protected_quality(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-mixed-artifact-batch-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            def periodic_sensor_band_page() -> Image.Image:
+                image = Image.new("RGB", (260, 180), (241, 241, 237))
+                draw = ImageDraw.Draw(image)
+                for y in range(20, 166):
+                    wave = 2 * math.sin(y / 7.0)
+                    x0 = int(round(68 + wave))
+                    draw.rectangle((x0, y, x0 + 1, y), fill=(232, 232, 228))
+                    x1 = int(round(128 - wave))
+                    draw.rectangle((x1, y, x1 + 1, y), fill=(233, 233, 229))
+                for y in (48, 84, 120):
+                    draw.rectangle((84, y, 208, y + 4), fill=(36, 36, 36))
+                return image
+
+            def fine_texture_page() -> Image.Image:
+                image = Image.new("RGB", (260, 180), (240, 240, 236))
+                draw = ImageDraw.Draw(image)
+                for y in range(18, 164):
+                    for x in range(18, 244):
+                        texture = 234 + ((x * 7 + y * 11 + (x // 4) * (y // 3)) % 6)
+                        image.putpixel((x, y), (texture, texture, max(0, texture - 2)))
+                for y in (50, 88, 126):
+                    draw.rectangle((62, y, 196, y + 4), fill=(34, 34, 34))
+                return image
+
+            pages = {
+                "private_mixed_safe_cleanup_control.png": _clean_background_scanner_glass_streak_page("horizontal"),
+                "private_mixed_protected_periodic_sensor_band.png": periodic_sensor_band_page(),
+                "private_mixed_protected_fine_texture.png": fine_texture_page(),
+                "private_mixed_protected_faint_content.png": _combined_retouch_guard_page("faint_text"),
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-mixed-artifact-batch", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            timings = audit_summary["timing"]["operation_timings"]
+            scanline_guard = audit_summary["guardrails"]["scanlines"]
+
+            for name, source_bytes_before in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes_before, name)
+
+            safe_name = "private_mixed_safe_cleanup_control.png"
+            safe_record = records[safe_name]
+            self.assertTrue(safe_record["scanlines_lightened"], safe_name)
+            self.assertIn("lighten_scanlines_conservative", safe_record["operations"], safe_name)
+            self.assertGreater(safe_record["scanlines_changed_pixel_ratio"], 0.0007, safe_name)
+            self.assertLess(safe_record["scanlines_changed_pixel_ratio"], 0.02, safe_name)
+            self.assertEqual(safe_record["processing_audit"]["guardrail_failures"], [], safe_name)
+
+            protected_names = sorted(name for name in pages if name != safe_name)
+            for name in protected_names:
+                record = records[name]
+                self.assertFalse(record["scanlines_lightened"], name)
+                self.assertIn("lighten_scanlines_noop", record["operations"], name)
+                self.assertEqual(record["scanlines_changed_pixel_ratio"], 0.0, name)
+                self.assertEqual(record["processing_audit"]["guardrail_failures"], [], name)
+
+            representative_operations = (
+                "trim_dark_border",
+                "scanner_gutter_trim",
+                "despeckle",
+                "deskew",
+                "auto_crop",
+                "clean_bleed_through",
+                "lighten_scanlines",
+                "sharpen_text_edges",
+            )
+            aggregate_elapsed = 0.0
+            for operation in representative_operations:
+                timing = timings[operation]
+                self.assertTrue(timing["enabled"], operation)
+                self.assertEqual(timing["file_count"], len(pages), operation)
+                self.assertIn("elapsed_seconds", timing)
+                self.assertIn("average_seconds_per_file", timing)
+                aggregate_elapsed += float(timing["elapsed_seconds"])
+            self.assertGreater(aggregate_elapsed, 0.0)
+            self.assertLessEqual(
+                aggregate_elapsed,
+                10.0,
+                f"mixed artifact aggregate elapsed exceeded guard: {aggregate_elapsed:.4f}s for {len(pages)} files",
+            )
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["scanlines_lightened_files"], 1)
+            self.assertGreaterEqual(audit_summary["counts"]["scanlines_skipped_files"], len(protected_names))
+            self.assertEqual(scanline_guard["applied_files"], 1)
+            self.assertGreaterEqual(scanline_guard["protection_triggered_files"], 2)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_safe_combination_page_stays_conservative(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-safe-") as temp_dir:
             root = Path(temp_dir)
