@@ -12228,6 +12228,73 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_gutter_shadow_page_curl_guard_preserves_near_gutter_content(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-gutter-shadow-page-curl-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "A001_safe_control.png": _full_chain_gutter_shadow_page("safe_control"),
+                "A002_protected_near_gutter_marks.png": _full_chain_gutter_shadow_page("protected_near_gutter_marks"),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-gutter-shadow-page-curl", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_record = records["A001_safe_control.png"]
+            safe_audit = safe_record["processing_audit"]
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertEqual(safe_record["output_size"], [320, 240])
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertIn(safe_audit["combination_quality_guard_action"], {"passed", "kept_original"})
+
+            protected_name = "A002_protected_near_gutter_marks.png"
+            protected_record = records[protected_name]
+            protected_audit = protected_record["processing_audit"]
+            with Image.open(process_dir / protected_record["output_relative_path"]) as output_image:
+                protected_after = output_image.convert("RGB")
+            protected_before = pages[protected_name].convert("RGB")
+            self.assertEqual(protected_record["status"], "processed")
+            self.assertEqual(protected_record["output_size"], [320, 240])
+            self.assertFalse(protected_record["scanner_gutter_trimmed"])
+            self.assertIn(
+                protected_record["scanner_gutter_reason"],
+                {
+                    "scanner gutter skipped: protected edge content",
+                    "scanner gutter skipped: no narrow uniform light band",
+                    "scanner gutter skipped: no inset content evidence",
+                },
+            )
+            self.assertFalse(protected_record["edge_shadow_lightened"])
+            self.assertFalse(protected_record["fold_shadows_lightened"])
+            self.assertLessEqual(_changed_ratio(protected_before, protected_after, (0, 36, 72, 210)), 0.03)
+            self.assertEqual(protected_audit["guardrail_failures"], [])
+            self.assertIn(
+                protected_audit["combination_quality_guard_action"],
+                {"passed", "kept_original", "reverted_to_source"},
+            )
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_fold_out_map_panel_evidence_stays_preserved_with_safe_cleanup_control(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-fold-out-map-panel-") as temp_dir:
             root = Path(temp_dir)
@@ -13942,6 +14009,39 @@ def _full_chain_fold_shadow_page(variant: str) -> Image.Image:
     else:
         raise ValueError(f"unsupported full-chain fold shadow variant: {variant}")
     return image
+
+
+def _full_chain_gutter_shadow_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (320, 240), (244, 244, 240))
+    draw = ImageDraw.Draw(image)
+    for y in (72, 108, 144):
+        draw.rectangle((74, y, 280, y + 3), fill=(46, 46, 46))
+    draw.rectangle((260, 28, 294, 32), fill=(78, 78, 78))
+    draw.rectangle((260, 194, 294, 198), fill=(78, 78, 78))
+
+    for x in range(0, 34):
+        shade = 92 + min(66, x * 2)
+        draw.line((x, 8, x, image.height - 8), fill=(shade, shade, shade))
+    draw.arc((2, 22, 78, 220), 262, 458, fill=(124, 124, 124), width=2)
+
+    for y in range(image.height):
+        curl_lift = max(0, 14 - int(abs(y - 120) / 9))
+        if curl_lift <= 0:
+            continue
+        r, g, b = image.getpixel((44, y))
+        lift = min(255, r + curl_lift)
+        image.putpixel((44, y), (lift, lift, max(0, b - 2)))
+
+    if variant == "safe_control":
+        return image
+    if variant == "protected_near_gutter_marks":
+        draw.line((14, 62, 58, 66), fill=(38, 38, 38), width=2)
+        draw.line((16, 96, 60, 102), fill=(38, 38, 38), width=2)
+        draw.line((12, 132, 56, 138), fill=(38, 38, 38), width=2)
+        draw.line((10, 168, 52, 174), fill=(38, 38, 38), width=2)
+        draw.rectangle((22, 196, 32, 208), fill=(42, 42, 42))
+        return image
+    raise ValueError(f"unsupported full-chain gutter shadow variant: {variant}")
 
 
 def _safe_compact_dust_cluster_points() -> tuple[tuple[int, int], ...]:
