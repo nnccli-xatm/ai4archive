@@ -409,7 +409,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     self.assertGreater(green_line[1] - green_line[2], 2.5)
                     self.assertEqual(derivative.info.get("icc_profile"), icc_profile)
 
-    def test_full_chain_grayscale_and_cmyk_derivatives_stay_display_safe_without_tone_inversion(self) -> None:
+    def test_full_chain_grayscale_palette_and_cmyk_derivatives_stay_display_safe_without_tone_inversion(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-grayscale-cmyk-") as temp_dir:
             root = Path(temp_dir)
             input_dir = root / "input"
@@ -421,6 +421,13 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             grayscale_draw = ImageDraw.Draw(grayscale_source)
             for y in (48, 76, 104):
                 grayscale_draw.rectangle((36, y, 214, y + 5), fill=28)
+            grayscale_16_source = grayscale_source.convert("I;16")
+
+            palette_source = Image.new("P", (280, 200), 236)
+            palette_source.putpalette([value for value in range(256) for _ in range(3)])
+            palette_draw = ImageDraw.Draw(palette_source)
+            for y in (48, 76, 104):
+                palette_draw.rectangle((36, y, 214, y + 5), fill=28)
 
             cmyk_source = Image.new("CMYK", (280, 200), (8, 6, 10, 0))
             cmyk_draw = ImageDraw.Draw(cmyk_source)
@@ -428,10 +435,17 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 cmyk_draw.rectangle((36, y, 214, y + 5), fill=(0, 0, 0, 90))
 
             grayscale_path = input_dir / "synthetic_source_grayscale.png"
+            grayscale_16_path = input_dir / "synthetic_source_grayscale_16bit.png"
+            palette_path = input_dir / "synthetic_source_palette.png"
             cmyk_path = input_dir / "synthetic_source_cmyk.tif"
             grayscale_source.save(grayscale_path, dpi=(300, 300))
+            grayscale_16_source.save(grayscale_16_path, dpi=(300, 300))
+            palette_source.save(palette_path, dpi=(300, 300))
             cmyk_source.save(cmyk_path, dpi=(300, 300))
-            source_bytes = {path.name: path.read_bytes() for path in (grayscale_path, cmyk_path)}
+            source_bytes = {
+                path.name: path.read_bytes()
+                for path in (grayscale_path, grayscale_16_path, palette_path, cmyk_path)
+            }
 
             report = scan_batch(ScanConfig("synthetic-regression", "grayscale-cmyk-color-mode-guard", input_dir, output_dir))
             manifest = process_images(report, input_dir, process_dir, ProcessingOptions(workers=1))
@@ -440,8 +454,21 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for source_name, before in source_bytes.items():
                 self.assertEqual((input_dir / source_name).read_bytes(), before)
 
-            self.assertEqual(set(records), {"synthetic_source_grayscale.png", "synthetic_source_cmyk.tif"})
-            for source_name in ("synthetic_source_grayscale.png", "synthetic_source_cmyk.tif"):
+            self.assertEqual(
+                set(records),
+                {
+                    "synthetic_source_grayscale.png",
+                    "synthetic_source_grayscale_16bit.png",
+                    "synthetic_source_palette.png",
+                    "synthetic_source_cmyk.tif",
+                },
+            )
+            for source_name in (
+                "synthetic_source_grayscale.png",
+                "synthetic_source_grayscale_16bit.png",
+                "synthetic_source_palette.png",
+                "synthetic_source_cmyk.tif",
+            ):
                 record = records[source_name]
                 self.assertEqual(record["status"], "processed")
                 derivative_path = process_dir / record["output_relative_path"]
