@@ -6272,6 +6272,74 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_binding_edge_punched_and_spiral_marks_stay_preserved_near_useful_edge_content(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-binding-edge-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            pages = {
+                "synthetic_safe_full_chain_binding_edge_dust_control.png": _full_chain_binding_edge_guard_page("safe_control"),
+                "synthetic_protected_full_chain_binding_edge_punched_spiral_marks.png": _full_chain_binding_edge_guard_page(
+                    "binding_edge_protected"
+                ),
+            }
+            source_bytes = {}
+            source_sizes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+                source_sizes[name] = image.size
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-binding-edge", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_name = "synthetic_safe_full_chain_binding_edge_dust_control.png"
+            safe_record = records[safe_name]
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertTrue(safe_record["despeckled"])
+            self.assertGreater(safe_record["despeckle_pixels_changed"], 0)
+            self.assertFalse(safe_record["cropped"])
+            self.assertIsNone(safe_record["crop_bbox"])
+
+            protected_name = "synthetic_protected_full_chain_binding_edge_punched_spiral_marks.png"
+            protected_record = records[protected_name]
+            self.assertEqual((input_dir / protected_name).read_bytes(), source_bytes[protected_name])
+            self.assertEqual(protected_record["status"], "processed")
+            self.assertFalse(protected_record["despeckled"])
+            self.assertEqual(protected_record["despeckle_pixels_changed"], 0)
+            self.assertFalse(protected_record["cropped"])
+            self.assertIsNone(protected_record["crop_bbox"])
+            self.assertIn("despeckle_noop", protected_record["operations"])
+            with Image.open(process_dir / protected_record["output_relative_path"]) as output:
+                self.assertEqual(output.size, source_sizes[protected_name])
+                self.assertIsNone(
+                    ImageChops.difference(pages[protected_name], output.convert("RGB")).getbbox(),
+                    protected_name,
+                )
+
+            reason_distribution = audit_summary["guardrails"]["despeckle"]["reason_code_distribution"]
+            protected_skip_count = (
+                reason_distribution.get("protected_edge_dark_marks", 0)
+                + reason_distribution.get("protected_dark_content", 0)
+                + reason_distribution.get("no_isolated_candidates", 0)
+            )
+            self.assertGreaterEqual(protected_skip_count, 1)
+            self.assertGreaterEqual(audit_summary["guardrails"]["despeckle"]["skipped_files"], 1)
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_isolated_scanner_glass_dust_cleanup_preserves_lookalikes_and_public_audit(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-isolated-glass-dust-") as temp_dir:
             root = Path(temp_dir)
@@ -14237,6 +14305,32 @@ def _protected_full_chain_margin_dust_lookalike_pages() -> dict[str, Image.Image
     pages["synthetic_protected_full_chain_margin_page_number.png"] = page_number
 
     return pages
+
+
+def _full_chain_binding_edge_guard_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (280, 200), (244, 244, 240))
+    draw = ImageDraw.Draw(image)
+    for y in (52, 78, 104, 130):
+        draw.rectangle((64, y, 228, y + 3), fill=(54, 54, 54))
+
+    if variant == "safe_control":
+        for x, y in ((170, 38), (171, 38), (170, 39), (171, 39), (206, 146), (207, 146), (206, 147), (207, 147)):
+            image.putpixel((x, y), (228, 228, 224))
+        return image
+
+    if variant == "binding_edge_protected":
+        # Simulate repeated punched/spiral marks along the left binding edge.
+        for y in (20, 50, 80, 110, 140, 170):
+            draw.ellipse((4, y, 24, y + 20), fill=(208, 206, 200), outline=(88, 88, 84), width=2)
+            draw.arc((16, y - 8, 40, y + 28), start=242, end=118, fill=(70, 70, 66), width=2)
+        # Useful near-edge evidence that should never be erased by cleanup/crop.
+        draw.line((28, 56, 74, 60), fill=(42, 42, 42), width=2)
+        draw.line((26, 90, 76, 95), fill=(42, 42, 42), width=2)
+        draw.rectangle((30, 124, 36, 132), fill=(42, 42, 42))
+        draw.rectangle((40, 124, 46, 132), fill=(42, 42, 42))
+        return image
+
+    raise ValueError(f"unsupported full-chain binding edge guard variant: {variant}")
 
 
 def _protected_isolated_scanner_glass_dust_lookalike_pages() -> dict[str, Image.Image]:
