@@ -3934,6 +3934,109 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_mixed_artifact_batch_stays_within_budget_while_preserving_protected_pages(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-mixed-artifact-budget-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            safe_name = "synthetic_safe_cleanup_control.png"
+            protected_periodic_name = "synthetic_protected_periodic_barcode_like.png"
+            protected_faint_name = "synthetic_protected_faint_handwriting.png"
+            pages = {
+                safe_name: _safe_full_chain_combination_page(),
+                protected_periodic_name: _machine_readable_mark_guard_page("barcode"),
+                protected_faint_name: _combined_retouch_guard_page("faint_text"),
+            }
+            for name, page in pages.items():
+                page.save(input_dir / name, dpi=(300, 300))
+
+            report = scan_batch(
+                ScanConfig("synthetic-regression", "full-chain-mixed-artifact-budget-guard", input_dir, output_dir)
+            )
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertEqual(safe_audit["combination_quality_guard_action"], "passed")
+            self.assertEqual(safe_audit["combination_quality_guard_reason_code"], "safe_combination_passed")
+            self.assertTrue(
+                any(operation.endswith("_conservative") for operation in safe_record["operations"]),
+                safe_record["operations"],
+            )
+
+            for protected_name in (protected_periodic_name, protected_faint_name):
+                protected_record = records[protected_name]
+                protected_audit = protected_record["processing_audit"]
+                self.assertEqual(protected_record["status"], "processed", protected_name)
+                self.assertEqual(protected_audit["guardrail_failures"], [], protected_name)
+                self.assertIn(
+                    protected_audit["combination_quality_guard_action"],
+                    {"passed", "reverted_to_source", "kept_original"},
+                    protected_name,
+                )
+                self.assertIn(
+                    protected_audit["combination_quality_guard_reason_code"],
+                    {
+                        "safe_combination_passed",
+                        "combined_change_too_large_reverted",
+                        "low_confidence_original_preserved",
+                    },
+                    protected_name,
+                )
+                with Image.open(process_dir / protected_record["output_relative_path"]) as output:
+                    self.assertLessEqual(
+                        _changed_ratio(pages[protected_name], output.convert("RGB"), (0, 0, output.width, output.height)),
+                        0.05,
+                        protected_name,
+                    )
+
+            timings = audit_summary["timing"]["operation_timings"]
+            representative_operations = (
+                "trim_dark_border",
+                "scanner_gutter_trim",
+                "despeckle",
+                "auto_crop",
+                "level_illumination_gradient",
+                "clean_bleed_through",
+                "lighten_scanlines",
+                "sharpen_text_edges",
+            )
+            aggregate_elapsed = 0.0
+            for operation in representative_operations:
+                timing = timings[operation]
+                self.assertTrue(timing["enabled"], operation)
+                self.assertLessEqual(timing["file_count"], len(pages), operation)
+                self.assertIn("elapsed_seconds", timing)
+                self.assertIn("average_seconds_per_file", timing)
+                aggregate_elapsed += float(timing["elapsed_seconds"])
+            self.assertLessEqual(
+                aggregate_elapsed,
+                12.0,
+                f"mixed-artifact full-chain aggregate elapsed exceeded guard: {aggregate_elapsed:.4f}s for {len(pages)} files",
+            )
+
+            cleanup_signal = audit_summary["quality_signals"]["full_chain_cleanup"]
+            self.assertEqual(cleanup_signal["basis"], "synthetic_full_chain_cleanup")
+            self.assertEqual(cleanup_signal["total_files"], len(pages))
+            self.assertGreaterEqual(cleanup_signal["improved_files"], 1)
+            self.assertLess(cleanup_signal["improved_files"], len(pages))
+            self.assertGreaterEqual(cleanup_signal["preserved_files"], 1)
+            self.assertGreaterEqual(cleanup_signal["reverted_files"], 0)
+
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_subtle_diagonal_edge_shadow_cleanup_preserves_protected_edges(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-diagonal-edge-shadow-") as temp_dir:
             root = Path(temp_dir)
