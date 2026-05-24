@@ -339,6 +339,86 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in ("private_valid_control", "private_corrupt_input", str(input_dir), str(corrupt_path)):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_chinese_and_spaced_filenames_are_processed_with_stable_unique_outputs(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-chinese-space-filename-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "输入 扫描(批次A)"
+            output_dir = root / "reports"
+            process_dir = root / "processed 输出"
+            input_dir.mkdir()
+
+            pages = (
+                "私有 档案(封面)-A.PNG",
+                "批次 01 - 合同（扫描）.jpg",
+                "记录_第2页 (复印).JPEG",
+                "目录-附注（最终版） 03.png",
+            )
+            for index, page_name in enumerate(pages):
+                page = Image.new("RGB", (140, 180), (244 - index * 2, 243 - index * 2, 239 - index * 2))
+                draw = ImageDraw.Draw(page)
+                draw.rectangle((18, 36, 112, 44), fill=(34 + index * 4, 34 + index * 4, 34 + index * 4))
+                draw.rectangle((20, 84, 118, 90), fill=(58 + index * 3, 58 + index * 3, 58 + index * 3))
+                page.save(input_dir / page_name)
+
+            source_bytes_before = {path.name: path.read_bytes() for path in sorted(input_dir.iterdir())}
+
+            first_report = scan_batch(
+                ScanConfig("synthetic-regression", "chinese-spaced-filename-processing-guard", input_dir, output_dir)
+            )
+            first_manifest = process_images(first_report, input_dir, process_dir, ProcessingOptions(workers=1))
+            source_bytes_after_first_run = {path.name: path.read_bytes() for path in sorted(input_dir.iterdir())}
+            self.assertEqual(source_bytes_before, source_bytes_after_first_run)
+
+            first_records = first_manifest["files"]
+            first_sources = [record["source_relative_path"] for record in first_records]
+            self.assertEqual(len(first_sources), len(pages))
+            self.assertEqual(set(first_sources), set(pages))
+            self.assertEqual(len(first_sources), len(set(first_sources)))
+
+            first_record_by_source = {record["source_relative_path"]: record for record in first_records}
+            first_output_path_by_source = {source: record["output_relative_path"] for source, record in first_record_by_source.items()}
+            first_output_sha_by_source = {source: record["output_sha256"] for source, record in first_record_by_source.items()}
+            self.assertEqual(len(set(first_output_path_by_source.values())), len(pages))
+
+            for source, output_relative_path in first_output_path_by_source.items():
+                self.assertTrue((process_dir / output_relative_path).exists(), msg=f"missing derivative for {source}")
+                self.assertEqual(first_record_by_source[source]["status"], "processed")
+
+            second_report = scan_batch(
+                ScanConfig("synthetic-regression", "chinese-spaced-filename-processing-guard", input_dir, output_dir)
+            )
+            second_manifest = process_images(second_report, input_dir, process_dir, ProcessingOptions(workers=1))
+            source_bytes_after_second_run = {path.name: path.read_bytes() for path in sorted(input_dir.iterdir())}
+            self.assertEqual(source_bytes_before, source_bytes_after_second_run)
+
+            second_records = second_manifest["files"]
+            second_record_by_source = {record["source_relative_path"]: record for record in second_records}
+            second_output_path_by_source = {
+                source: record["output_relative_path"] for source, record in second_record_by_source.items()
+            }
+            second_output_sha_by_source = {source: record["output_sha256"] for source, record in second_record_by_source.items()}
+            self.assertEqual(set(second_record_by_source), set(pages))
+            self.assertEqual(first_output_path_by_source, second_output_path_by_source)
+            self.assertEqual(first_output_sha_by_source, second_output_sha_by_source)
+
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            retry_manifest_text = (process_dir / "processing_retry_manifest.json").read_text(encoding="utf-8")
+
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_file_list"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            self.assertFalse(audit_summary["privacy"]["contains_thumbnails"])
+            self.assertFalse(audit_summary["privacy"]["contains_image_content"])
+            self.assertEqual(audit_summary["counts"]["total_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+
+            forbidden_tokens = (*pages, str(input_dir), str(process_dir), "source_relative_path", "source_sha256")
+            for forbidden in forbidden_tokens:
+                self.assertNotIn(forbidden, audit_summary_text)
+                self.assertNotIn(forbidden, retry_manifest_text)
+
     def test_non_image_sidecars_are_tolerated_without_aborting_batch(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-sidecar-guard-") as temp_dir:
             root = Path(temp_dir)
