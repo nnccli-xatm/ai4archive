@@ -58,6 +58,20 @@ def _mean_rgb(image: Image.Image, box: tuple[int, int, int, int]) -> tuple[float
     return float(means[0]), float(means[1]), float(means[2])
 
 
+def _assert_dpi_close(
+    testcase: unittest.TestCase,
+    actual: tuple[float, float] | None,
+    expected: tuple[float, float],
+    *,
+    tolerance: float = 1.0,
+) -> None:
+    testcase.assertIsNotNone(actual)
+    assert actual is not None
+    testcase.assertEqual(len(actual), 2)
+    testcase.assertAlmostEqual(float(actual[0]), float(expected[0]), delta=tolerance)
+    testcase.assertAlmostEqual(float(actual[1]), float(expected[1]), delta=tolerance)
+
+
 def _side_paper_channel_spread(image: Image.Image) -> float:
     rgb = image.convert("RGB")
     bands = ((0, 0, 80, rgb.height), (160, 0, 240, rgb.height))
@@ -394,6 +408,41 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     self.assertGreater(green_line[1] - green_line[0], 5.0)
                     self.assertGreater(green_line[1] - green_line[2], 2.5)
                     self.assertEqual(derivative.info.get("icc_profile"), icc_profile)
+
+    def test_full_chain_derivative_preserves_source_dpi_metadata_with_rounding_tolerance(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-preserve-dpi-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            page = Image.new("RGB", (320, 220), (246, 242, 236))
+            draw = ImageDraw.Draw(page)
+            for y in (44, 70, 96):
+                draw.rectangle((34, y, 192, y + 4), fill=(40, 40, 40))
+
+            source_specs = {
+                "synthetic_preserve_dpi_300.png": (300.0, 300.0),
+                "synthetic_preserve_dpi_600.jpg": (600.0, 600.0),
+            }
+            for name, dpi in source_specs.items():
+                page.save(input_dir / name, dpi=dpi)
+            source_bytes = {name: (input_dir / name).read_bytes() for name in source_specs}
+
+            report = scan_batch(ScanConfig("synthetic-regression", "preserve-dpi-metadata", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(workers=1))
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            for source_name, before in source_bytes.items():
+                self.assertEqual((input_dir / source_name).read_bytes(), before)
+
+            for source_name, expected_dpi in source_specs.items():
+                record = records[source_name]
+                self.assertEqual(record["status"], "processed")
+                derivative_path = process_dir / record["output_relative_path"]
+                with Image.open(derivative_path) as derivative:
+                    _assert_dpi_close(self, derivative.info.get("dpi"), expected_dpi)
 
     def test_combination_quality_guard_classifies_public_reason_codes(self) -> None:
         options = ProcessingOptions()
