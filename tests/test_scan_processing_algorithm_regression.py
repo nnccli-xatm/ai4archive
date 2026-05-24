@@ -1051,6 +1051,115 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     self.assertGreater(paper_luma, ink_luma)
                     self.assertGreater(paper_luma - ink_luma, 12.0)
 
+    def test_full_chain_bilevel_and_high_bit_depth_grayscale_stay_display_safe_and_revert_simulated_damage(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-bilevel-hdr-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            regression_process_dir = root / "processed-regression"
+            input_dir.mkdir()
+
+            bilevel_base = Image.new("L", (300, 210), 255)
+            bilevel_draw = ImageDraw.Draw(bilevel_base)
+            for y in (58, 88, 118):
+                bilevel_draw.rectangle((40, y, 238, y + 4), fill=0)
+            bilevel_page = bilevel_base.convert("1")
+
+            high_depth_base = Image.new("L", (300, 210), 242)
+            high_depth_draw = ImageDraw.Draw(high_depth_base)
+            for y in (58, 88, 118):
+                high_depth_draw.rectangle((40, y, 238, y + 4), fill=44)
+            for y in (150, 160):
+                high_depth_draw.rectangle((46, y, 224, y + 1), fill=182)
+            high_depth_page = high_depth_base.convert("I;16")
+
+            bilevel_name = "synthetic_bilevel_textline.png"
+            high_depth_name = "synthetic_grayscale_16bit_faint_detail.png"
+            bilevel_path = input_dir / bilevel_name
+            high_depth_path = input_dir / high_depth_name
+            bilevel_page.save(bilevel_path, dpi=(300, 300))
+            high_depth_page.save(high_depth_path, dpi=(300, 300))
+            source_bytes = {path.name: path.read_bytes() for path in (bilevel_path, high_depth_path)}
+
+            report = scan_batch(ScanConfig("synthetic-regression", "bilevel-highbit-display-safety", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            self.assertEqual((input_dir / bilevel_name).read_bytes(), source_bytes[bilevel_name])
+            self.assertEqual((input_dir / high_depth_name).read_bytes(), source_bytes[high_depth_name])
+            self.assertEqual(set(records), {bilevel_name, high_depth_name})
+
+            for source_name in (bilevel_name, high_depth_name):
+                record = records[source_name]
+                self.assertEqual(record["status"], "processed")
+                self.assertEqual(record["processing_audit"]["processed_output_safety_guard_action"], "passed")
+                derivative_path = process_dir / record["output_relative_path"]
+                with Image.open(derivative_path) as derivative:
+                    display_safe = _display_safe_rgb(derivative)
+                    self.assertEqual(display_safe.size, (300, 210))
+                    content_box = _content_bbox(display_safe, threshold=236)
+                    self.assertIsNotNone(content_box)
+                    assert content_box is not None
+                    self.assertGreaterEqual(content_box[0], 36)
+                    self.assertGreaterEqual(content_box[1], 54)
+                    self.assertLessEqual(content_box[2], 242)
+                    self.assertLessEqual(content_box[3], 170)
+                    paper_luma = _mean_luma(display_safe, (0, 0, 32, display_safe.height))
+                    ink_luma = _mean_luma(display_safe, (46, 58, 236, 124))
+                    self.assertGreater(paper_luma, ink_luma)
+                    self.assertGreater(paper_luma - ink_luma, 14.0)
+
+                    if source_name == high_depth_name:
+                        faint_luma = _mean_luma(display_safe, (46, 150, 224, 162))
+                        self.assertLess(faint_luma, paper_luma)
+                        self.assertGreater(paper_luma - faint_luma, 3.0)
+
+            def force_inverted_clipped_output(current: Image.Image) -> processing_module.BackgroundStainLighteningResult:
+                damaged = ImageOps.invert(_display_safe_rgb(current)).point(lambda value: 255 if value > 232 else value)
+                return processing_module.BackgroundStainLighteningResult(
+                    damaged.convert("RGB"),
+                    True,
+                    "background stains lightened: synthetic inversion+clipping regression",
+                    236.0,
+                    255.0,
+                    19.0,
+                    1.0,
+                    1.0,
+                )
+
+            with mock.patch.object(
+                processing_module,
+                "_lighten_background_stains_conservative",
+                side_effect=force_inverted_clipped_output,
+            ):
+                regression_manifest = process_images(report, input_dir, regression_process_dir, _full_chain_options())
+
+            regression_records = {record["source_relative_path"]: record for record in regression_manifest["files"]}
+            audit_summary_text = (regression_process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for source_name in (bilevel_name, high_depth_name):
+                record = regression_records[source_name]
+                audit = record["processing_audit"]
+                self.assertEqual(record["status"], "processed")
+                self.assertEqual(audit["processed_output_safety_guard_action"], "reverted_to_source")
+                self.assertIn(audit["processed_output_safety_guard_reason_code"], {"processed_output_quality_reverted"})
+                self.assertTrue(audit["processed_output_safety_guard_reasons"])
+                self.assertIn("processed_output_safety_guard_reverted_to_source", record["operations"])
+                with Image.open(regression_process_dir / record["output_relative_path"]) as processed:
+                    with Image.open(input_dir / source_name) as source:
+                        self.assertEqual(processed.convert("RGB").tobytes(), source.convert("RGB").tobytes())
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], 2)
+            self.assertEqual(audit_summary["counts"]["processed_output_safety_guard_checked_files"], 2)
+            self.assertEqual(audit_summary["counts"]["processed_output_safety_guard_reverted_files"], 2)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (bilevel_name, high_depth_name, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_alpha_channel_derivative_stays_display_safe_with_opaque_control(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-alpha-display-safe-") as temp_dir:
             root = Path(temp_dir)
