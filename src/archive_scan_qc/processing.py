@@ -497,7 +497,7 @@ def aggregate_processing_reuse_precheck(
         "开始处理后，系统会复用可安全确认的已有输出，并补齐需要处理的图片。",
         "预检只用于开始前判断，不代表本批已经完成交接。",
     ]
-    return {
+    payload = {
         **base,
         "reusable_files": reusable_files,
         "needs_processing_files": needs_processing_files,
@@ -507,10 +507,11 @@ def aggregate_processing_reuse_precheck(
         "message_zh": message_zh,
         "next_steps_zh": next_steps_zh,
     }
+    return payload
 
 
 def _processing_precheck_unknown(base: dict[str, Any], reason: str, total_files: int) -> dict[str, Any]:
-    return {
+    payload = {
         **base,
         "reusable_files": None,
         "needs_processing_files": None,
@@ -525,6 +526,7 @@ def _processing_precheck_unknown(base: dict[str, Any], reason: str, total_files:
             "如果不确定是否同一批，请更换空输出文件夹或交管理员确认。",
         ],
     }
+    return payload
 
 
 def _process_records(
@@ -1642,7 +1644,7 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
         if isinstance(audit.get("processed_output_safety_guard_reason_code"), str)
     ]
     full_chain_cleanup_signal = _full_chain_cleanup_quality_signal(processed_records, audit_records)
-    return {
+    payload = {
         "schema_version": "scan-qc.processing.audit.v1",
         "generated_at": manifest["generated_at"],
         "operations": {
@@ -2765,6 +2767,115 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "contains_thumbnails": False,
             "contains_image_content": False,
         },
+    }
+    payload["conservative_auto_retouch_handoff_zh"] = _build_conservative_auto_retouch_handoff_zh(
+        summary=summary,
+        guardrails=payload["guardrails"],
+    )
+    return payload
+
+
+def _build_conservative_auto_retouch_handoff_zh(
+    *,
+    summary: dict[str, Any],
+    guardrails: dict[str, Any],
+) -> dict[str, Any]:
+    operation_labels_zh = {
+        "auto_crop": "自动裁切",
+        "deskew": "倾斜矫正",
+        "scanner_gutter_trim": "装订边去除",
+        "trim_dark_border": "黑边修整",
+        "despeckle": "去噪点",
+        "tone_normalization": "明暗归一",
+        "paper_color_cast": "纸色偏差修正",
+        "edge_shadow": "边缘阴影淡化",
+        "corner_shadows": "角部阴影淡化",
+        "background_stains": "背景污渍淡化",
+        "fold_shadows": "折痕阴影淡化",
+        "illumination_gradient": "光照梯度校正",
+        "bleed_through": "透印清理",
+        "scanlines": "扫描线淡化",
+        "faded_text": "褪色文字增强",
+        "text_edges": "文字边缘锐化",
+    }
+    reason_class_fields = (
+        ("protection_triggered_files", "保护原始标记或边缘内容"),
+        ("conservative_scope_skip_files", "保守范围或清理风险"),
+        ("low_confidence_skip_files", "低置信度保守跳过"),
+        ("reverted_files", "安全守护触发并回退原图"),
+        ("warning_files", "建议人工复核"),
+    )
+    operation_reason_counts: list[dict[str, Any]] = []
+    decision_totals = {
+        "保护保留": 0,
+        "风险跳过": 0,
+        "低置信度跳过": 0,
+        "回退原图": 0,
+        "建议复核": 0,
+    }
+    for operation, operation_zh in operation_labels_zh.items():
+        payload = guardrails.get(operation)
+        if not isinstance(payload, dict):
+            continue
+        reason_code_distribution = payload.get("reason_code_distribution")
+        if (
+            _int_count(payload.get("protection_triggered_files")) <= 0
+            and isinstance(reason_code_distribution, dict)
+        ):
+            protected_count = sum(
+                _int_count(count)
+                for code, count in reason_code_distribution.items()
+                if isinstance(code, str) and "protected" in code
+            )
+            if protected_count > 0:
+                payload = {**payload, "protection_triggered_files": protected_count}
+        for field, reason_class_zh in reason_class_fields:
+            count = _int_count(payload.get(field))
+            if count <= 0:
+                continue
+            decision_key = {
+                "protection_triggered_files": "保护保留",
+                "conservative_scope_skip_files": "风险跳过",
+                "low_confidence_skip_files": "低置信度跳过",
+                "reverted_files": "回退原图",
+                "warning_files": "建议复核",
+            }[field]
+            decision_totals[decision_key] += count
+            operation_reason_counts.append(
+                {
+                    "operation": operation,
+                    "operation_zh": operation_zh,
+                    "reason_class_zh": reason_class_zh,
+                    "count": count,
+                }
+            )
+    operation_reason_counts.sort(
+        key=lambda item: (
+            -int(item["count"]),
+            str(item["operation"]),
+            str(item["reason_class_zh"]),
+        )
+    )
+    decision_counts = {key: value for key, value in decision_totals.items() if value > 0}
+    message_parts = [
+        f"本批共处理 {summary['total_files']} 张；"
+        f"自动修复后生成 {summary['processed_files']} 张，失败 {summary['failed_files']} 张。"
+    ]
+    if decision_counts:
+        message_parts.append(
+            "保守决策汇总："
+            + "，".join(f"{label} {count} 次" for label, count in decision_counts.items())
+            + "。"
+        )
+    else:
+        message_parts.append("本批未触发需要保守跳过、回退或复核的自动修复决策。")
+    return {
+        "title_zh": "保守自动修复决策汇总",
+        "aggregate_only": True,
+        "decision_counts_zh": decision_counts,
+        "operation_reason_class_counts_zh": operation_reason_counts,
+        "message_zh": "".join(message_parts),
+        "privacy_note_zh": "仅包含聚合计数，不含文件名、路径、哈希、OCR 文本、缩略图或逐张结果。",
     }
 
 

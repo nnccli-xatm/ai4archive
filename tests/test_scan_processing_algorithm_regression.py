@@ -7336,6 +7336,18 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 ],
                 1,
             )
+            handoff = audit_summary["conservative_auto_retouch_handoff_zh"]
+            self.assertTrue(handoff["aggregate_only"])
+            self.assertEqual(handoff["title_zh"], "保守自动修复决策汇总")
+            self.assertIn("保护保留", handoff["decision_counts_zh"])
+            self.assertGreater(handoff["decision_counts_zh"]["保护保留"], 0)
+            self.assertTrue(
+                any(
+                    item["operation"] == "despeckle" and item["reason_class_zh"] == "保护原始标记或边缘内容"
+                    for item in handoff["operation_reason_class_counts_zh"]
+                )
+            )
+            self.assertNotIn("source_relative_path", json.dumps(handoff, ensure_ascii=False, sort_keys=True))
             self.assertGreaterEqual(
                 audit_summary["timing"]["operation_timings"]["despeckle"]["max_component_size"]["max"],
                 4,
