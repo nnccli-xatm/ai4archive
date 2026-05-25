@@ -10165,6 +10165,98 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_conservative_handoff_aggregates_protection_skip_and_rollback_reasons(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-conservative-handoff-mixed-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_skip_scope_page.png": _safe_scattered_pale_dust_page().resize((170, 130), Image.Resampling.NEAREST),
+                "synthetic_revert_guard_page.png": _safe_full_chain_combination_page().resize(
+                    (171, 130), Image.Resampling.BILINEAR
+                ),
+                "synthetic_protected_marks_page.png": _risk_edge_content_mark_page().resize(
+                    (172, 130), Image.Resampling.BILINEAR
+                ),
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.convert("RGB").save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            original_background_stains = processing_module._lighten_background_stains_conservative
+
+            def _patched_background_stains(image: Image.Image) -> processing_module.BackgroundStainLighteningResult:
+                if image.width == 170:
+                    return processing_module.BackgroundStainLighteningResult(
+                        image,
+                        False,
+                        "background stain lightening skipped: broad uneven lighting is outside conservative scope",
+                        None,
+                        None,
+                        0.0,
+                        0.0,
+                        0.09,
+                    )
+                if image.width == 171:
+                    washed = Image.new("RGB", image.size, (255, 255, 255))
+                    return processing_module.BackgroundStainLighteningResult(
+                        washed,
+                        True,
+                        "background stains lightened: stable isolated stains on light paper",
+                        224.0,
+                        255.0,
+                        31.0,
+                        1.0,
+                        1.0,
+                    )
+                return original_background_stains(image)
+
+            report = scan_batch(ScanConfig("synthetic-regression", "conservative-handoff-mixed", input_dir, output_dir))
+            with mock.patch.object(
+                processing_module,
+                "_lighten_background_stains_conservative",
+                side_effect=_patched_background_stains,
+            ):
+                manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            for name in pages:
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name])
+                self.assertEqual(records[name]["status"], "processed")
+
+            reverted = records["synthetic_revert_guard_page.png"]["processing_audit"]
+            self.assertEqual(reverted["processed_output_safety_guard_action"], "reverted_to_source")
+            self.assertIn("processed_output_safety_guard_reverted_to_source", records["synthetic_revert_guard_page.png"]["operations"])
+
+            handoff = audit_summary["conservative_auto_retouch_handoff_zh"]
+            self.assertTrue(handoff["aggregate_only"])
+            self.assertGreater(handoff["decision_counts_zh"].get("保护保留", 0), 0)
+            self.assertGreater(handoff["decision_counts_zh"].get("风险跳过", 0), 0)
+            self.assertGreater(handoff["decision_counts_zh"].get("回退原图", 0), 0)
+            self.assertTrue(
+                any(
+                    item["reason_class_zh"] == "保护原始标记或边缘内容"
+                    for item in handoff["operation_reason_class_counts_zh"]
+                )
+            )
+            self.assertTrue(
+                any(item["reason_class_zh"] == "保守范围或清理风险" for item in handoff["operation_reason_class_counts_zh"])
+            )
+            self.assertTrue(any(item["reason_class_zh"] == "安全守护触发并回退原图" for item in handoff["operation_reason_class_counts_zh"]))
+
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_safe_cloud_background_stain_stays_bounded_and_private(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-cloud-stain-combo-") as temp_dir:
             root = Path(temp_dir)
