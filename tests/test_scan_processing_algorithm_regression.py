@@ -14144,6 +14144,166 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_wet_ink_signature_and_stamp_bleed_preserved_with_safe_cleanup_control(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-wet-ink-signature-stamp-bleed-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "A001_safe_neutral_cleanup_control.png": _water_damage_evidence_guard_page("safe_neutral_cleanup_control"),
+                "A002_blue_signature_soft_feather.png": _wet_ink_signature_stamp_guard_page("blue_signature_soft_feather"),
+                "A003_black_initials_near_typed_reference.png": _wet_ink_signature_stamp_guard_page(
+                    "black_initials_near_typed_reference"
+                ),
+                "A004_red_approval_stamp_bleed.png": _wet_ink_signature_stamp_guard_page("red_approval_stamp_bleed"),
+                "A005_red_stamp_near_fold_rule.png": _wet_ink_signature_stamp_guard_page("red_stamp_near_fold_rule"),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            safe_name = "A001_safe_neutral_cleanup_control.png"
+            safe_before = pages[safe_name].convert("L")
+            safe_before_stain = _mean_luma(safe_before, (186, 66, 254, 128))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-wet-ink-signature-stamp-bleed", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            with Image.open(process_dir / safe_record["output_relative_path"]) as processed_image:
+                safe_after = processed_image.convert("L")
+                safe_after_stain = _mean_luma(safe_after, (186, 66, 254, 128))
+
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertTrue(safe_record["background_stains_lightened"])
+            self.assertIn("lighten_background_stains_conservative", safe_record["operations"])
+            self.assertGreater(safe_after_stain - safe_before_stain, 0.5)
+            self.assertGreater(safe_audit["background_stains_changed_pixel_ratio"], 0.0)
+            self.assertLessEqual(safe_audit["background_stains_changed_pixel_ratio"], 0.08)
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertIn(safe_audit["combination_quality_guard_action"], {"passed", "kept_original"})
+
+            protected_boxes = {
+                "A002_blue_signature_soft_feather.png": (124, 116, 292, 182),
+                "A003_black_initials_near_typed_reference.png": (230, 78, 284, 124),
+                "A004_red_approval_stamp_bleed.png": (170, 48, 280, 146),
+                "A005_red_stamp_near_fold_rule.png": (28, 34, 184, 176),
+            }
+            for name, box in protected_boxes.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                before = pages[name].convert("RGB")
+                with Image.open(process_dir / record["output_relative_path"]) as output_image:
+                    after = output_image.convert("RGB")
+                self.assertEqual(record["status"], "processed", name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertIn(
+                    audit["combination_quality_guard_action"],
+                    {"passed", "kept_original", "reverted_to_source"},
+                    name,
+                )
+                self.assertLessEqual(audit["size_change_ratio"], 0.10, name)
+                self.assertLessEqual(audit["cumulative_change_crop_ratio"], 0.08, name)
+                self.assertLessEqual(_changed_ratio(before, after, box), 0.06, name)
+                self.assertGreaterEqual(_edge_energy(after.crop(box)), _edge_energy(before.crop(box)) * 0.86, name)
+                if name in {"A004_red_approval_stamp_bleed.png", "A005_red_stamp_near_fold_rule.png"}:
+                    before_r, before_g, before_b = _mean_rgb(before, box)
+                    after_r, after_g, after_b = _mean_rgb(after, box)
+                    self.assertGreater(before_r - before_g, 8.0, name)
+                    self.assertGreater(after_r - after_g, 6.0, name)
+                    self.assertGreater(after_r - after_b, 6.0, name)
+                reason_codes = [
+                    record.get("background_stains_reason_code"),
+                    record.get("fold_shadows_reason_code"),
+                    record.get("auto_crop_reason_code"),
+                    record.get("despeckle_reason_code"),
+                ]
+                self.assertTrue(any(isinstance(code, str) and code for code in reason_codes), name)
+
+            def _aggressive_wet_ink_cleanup(image: Image.Image) -> processing_module.BackgroundStainLighteningResult:
+                cleaned = image.convert("RGB").copy()
+                draw = ImageDraw.Draw(cleaned)
+                draw.rectangle((162, 40, 288, 150), fill=(249, 249, 248))
+                return processing_module.BackgroundStainLighteningResult(
+                    image=cleaned,
+                    applied=True,
+                    reason="background stains lightened: synthetic wet-ink wipeout regression",
+                    stain_mean_before=216.0,
+                    stain_mean_after=248.0,
+                    stain_delta=32.0,
+                    changed_pixel_ratio=0.21,
+                    candidate_pixel_ratio=0.28,
+                )
+
+            permissive_options = ProcessingOptions(
+                **{
+                    **_full_chain_options().__dict__,
+                    "audit_max_cumulative_change_score": 9.0,
+                    "audit_max_cumulative_pixel_change_ratio": 1.0,
+                    "audit_max_local_content_changed_ratio": 1.0,
+                    "audit_max_local_content_tile_changed_ratio": 1.0,
+                    "audit_max_edge_content_changed_ratio": 1.0,
+                }
+            )
+            with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-wet-ink-signature-regression-sim-") as regression_dir:
+                regression_root = Path(regression_dir)
+                regression_input = regression_root / "input"
+                regression_output = regression_root / "reports"
+                regression_process = regression_root / "processed"
+                regression_input.mkdir()
+                target_name = "A004_red_approval_stamp_bleed.png"
+                pages[target_name].save(regression_input / target_name, dpi=(300, 300))
+                regression_report = scan_batch(
+                    ScanConfig("synthetic-regression", "full-chain-wet-ink-signature-regression-sim", regression_input, regression_output)
+                )
+                with mock.patch.object(
+                    processing_module, "_lighten_background_stains_conservative", side_effect=_aggressive_wet_ink_cleanup
+                ):
+                    regression_manifest = process_images(
+                        regression_report,
+                        regression_input,
+                        regression_process,
+                        ProcessingOptions(**{**permissive_options.__dict__, "workers": 1}),
+                    )
+                regression_record = regression_manifest["files"][0]
+                regression_audit = regression_record["processing_audit"]
+                with Image.open(regression_process / regression_record["output_relative_path"]) as regressed:
+                    regressed_rgb = regressed.convert("RGB")
+                    regressed_changed = _changed_ratio(
+                        pages[target_name].convert("RGB"),
+                        regressed_rgb,
+                        protected_boxes[target_name],
+                    )
+                    reverted = regression_audit.get("cumulative_change_guard_action") == "reverted_to_source" or (
+                        regression_audit.get("combination_quality_guard_action") == "reverted_to_source"
+                    )
+                    if reverted:
+                        self.assertLess(regressed_changed, 0.01)
+                    else:
+                        self.assertGreater(regressed_changed, 0.20)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertIn("timing", audit_summary)
+            self.assertIn("operation_timings", audit_summary["timing"])
+            self.assertGreater(len(audit_summary["timing"]["operation_timings"]), 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256", "output_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_multipart_carbon_copy_form_guard_preserves_lines_and_edge_evidence(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-multipart-carbon-copy-") as temp_dir:
             root = Path(temp_dir)
@@ -18818,6 +18978,63 @@ def _perforated_tearoff_hinge_guard_page(variant: str) -> Image.Image:
         return image
 
     raise ValueError(f"unsupported perforated tear-off/hinge variant: {variant}")
+
+
+def _wet_ink_signature_stamp_guard_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (304, 224), (244, 243, 239))
+    draw = ImageDraw.Draw(image)
+    for y in (34, 52, 70, 88, 106, 124, 142):
+        draw.line((34, y, 270, y), fill=(66, 66, 66), width=1)
+    draw.rectangle((204, 24, 286, 80), fill=(230, 226, 219))
+
+    if variant == "safe_neutral_cleanup_control":
+        for x, y in ((216, 32), (228, 46), (236, 58), (256, 42), (266, 62)):
+            draw.ellipse((x, y, x + 4, y + 4), fill=(206, 201, 193))
+        return image
+
+    if variant == "blue_signature_soft_feather":
+        draw.rectangle((120, 114, 298, 184), fill=(242, 241, 238))
+        signature_strokes = (
+            (126, 154, 166, 140, 202, 160, 240, 142, 288, 158),
+            (138, 164, 178, 150, 214, 170, 250, 152, 294, 166),
+            (146, 170, 184, 160, 226, 176, 262, 162),
+        )
+        for points in signature_strokes:
+            draw.line(points, fill=(58, 92, 166), width=3)
+            draw.line(points, fill=(86, 122, 188), width=1)
+        return image
+
+    if variant == "black_initials_near_typed_reference":
+        draw.rectangle((204, 62, 288, 132), fill=(242, 241, 237))
+        draw.line((232, 114, 232, 84), fill=(44, 44, 44), width=3)
+        draw.line((232, 86, 252, 114), fill=(46, 46, 46), width=3)
+        draw.line((252, 86, 252, 114), fill=(46, 46, 46), width=3)
+        draw.line((262, 112, 274, 86), fill=(42, 42, 42), width=2)
+        draw.line((274, 86, 284, 112), fill=(42, 42, 42), width=2)
+        return image
+
+    if variant == "red_approval_stamp_bleed":
+        draw.ellipse((172, 46, 282, 150), outline=(182, 42, 42), width=4)
+        draw.ellipse((182, 56, 272, 140), outline=(196, 74, 74), width=2)
+        draw.line((194, 84, 258, 84), fill=(176, 36, 36), width=3)
+        draw.line((194, 102, 258, 102), fill=(176, 36, 36), width=3)
+        draw.line((194, 120, 258, 120), fill=(176, 36, 36), width=3)
+        draw.ellipse((176, 52, 278, 146), outline=(214, 132, 132), width=1)
+        return image
+
+    if variant == "red_stamp_near_fold_rule":
+        draw.line((28, 18, 28, 208), fill=(196, 192, 186), width=2)
+        draw.line((36, 18, 36, 208), fill=(230, 226, 220), width=1)
+        draw.line((18, 162, 292, 162), fill=(218, 214, 206), width=1)
+        draw.ellipse((44, 44, 172, 172), outline=(170, 34, 34), width=4)
+        draw.ellipse((52, 52, 164, 164), outline=(188, 74, 74), width=2)
+        draw.line((66, 88, 150, 88), fill=(164, 28, 28), width=3)
+        draw.line((66, 106, 150, 106), fill=(164, 28, 28), width=3)
+        draw.line((66, 124, 150, 124), fill=(164, 28, 28), width=3)
+        draw.ellipse((48, 48, 168, 168), outline=(206, 128, 128), width=1)
+        return image
+
+    raise ValueError(f"unknown wet ink signature stamp guard variant: {variant}")
 
 
 def _tractor_feed_edge_guard_page(variant: str) -> Image.Image:
