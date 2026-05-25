@@ -507,10 +507,11 @@ def aggregate_processing_reuse_precheck(
         "message_zh": message_zh,
         "next_steps_zh": next_steps_zh,
     }
+    return payload
 
 
 def _processing_precheck_unknown(base: dict[str, Any], reason: str, total_files: int) -> dict[str, Any]:
-    return {
+    payload = {
         **base,
         "reusable_files": None,
         "needs_processing_files": None,
@@ -525,6 +526,7 @@ def _processing_precheck_unknown(base: dict[str, Any], reason: str, total_files:
             "如果不确定是否同一批，请更换空输出文件夹或交管理员确认。",
         ],
     }
+    return payload
 
 
 def _process_records(
@@ -1642,7 +1644,7 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
         if isinstance(audit.get("processed_output_safety_guard_reason_code"), str)
     ]
     full_chain_cleanup_signal = _full_chain_cleanup_quality_signal(processed_records, audit_records)
-    return {
+    payload = {
         "schema_version": "scan-qc.processing.audit.v1",
         "generated_at": manifest["generated_at"],
         "operations": {
@@ -2815,6 +2817,18 @@ def _build_conservative_auto_retouch_handoff_zh(
         payload = guardrails.get(operation)
         if not isinstance(payload, dict):
             continue
+        reason_code_distribution = payload.get("reason_code_distribution")
+        if (
+            _int_count(payload.get("protection_triggered_files")) <= 0
+            and isinstance(reason_code_distribution, dict)
+        ):
+            protected_count = sum(
+                _int_count(count)
+                for code, count in reason_code_distribution.items()
+                if isinstance(code, str) and "protected" in code
+            )
+            if protected_count > 0:
+                payload = {**payload, "protection_triggered_files": protected_count}
         for field, reason_class_zh in reason_class_fields:
             count = _int_count(payload.get(field))
             if count <= 0:
