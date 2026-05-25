@@ -14525,6 +14525,103 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256", "output_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_brittle_chipped_edge_and_missing_corner_stay_preserved_with_safe_cleanup_control(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-brittle-edge-corner-loss-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            pages = {
+                "A001_safe_cleanup_control.png": _brittle_chipped_edge_guard_page("safe_cleanup_control"),
+                "A002_brittle_chipped_edge.png": _brittle_chipped_edge_guard_page("brittle_chipped_edge"),
+                "A003_missing_corner_with_marginal_note.png": _brittle_chipped_edge_guard_page("missing_corner_with_marginal_note"),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-brittle-edge-corner-loss-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_name = "A001_safe_cleanup_control.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            safe_before = pages[safe_name].convert("RGB")
+            with Image.open(process_dir / safe_record["output_relative_path"]) as output_image:
+                safe_after = output_image.convert("RGB")
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertIn(safe_audit["combination_quality_guard_action"], {"passed", "kept_original", "reverted_to_source"})
+            self.assertLessEqual(_changed_ratio(safe_before, safe_after, (196, 66, 258, 142)), 0.08)
+
+            protected_boxes = {
+                "A002_brittle_chipped_edge.png": (6, 28, 82, 220),
+                "A003_missing_corner_with_marginal_note.png": (188, 8, 320, 96),
+            }
+            for name, box in protected_boxes.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                before = pages[name].convert("RGB")
+                with Image.open(process_dir / record["output_relative_path"]) as output_image:
+                    after = output_image.convert("RGB")
+                self.assertEqual(record["status"], "processed", name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertIn(audit["combination_quality_guard_action"], {"passed", "kept_original", "reverted_to_source"}, name)
+                self.assertFalse(record["dark_border_trimmed"], name)
+                self.assertFalse(record["scanner_gutter_trimmed"], name)
+                self.assertLessEqual(audit["size_change_ratio"], 0.12, name)
+                self.assertLessEqual(audit["cumulative_change_crop_ratio"], 0.10, name)
+                self.assertLessEqual(_changed_ratio(before, after, box), 0.05, name)
+                self.assertGreaterEqual(_edge_energy(after.crop(box)), _edge_energy(before.crop(box)) * 0.84, name)
+
+            with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-brittle-edge-regression-sim-") as regression_dir:
+                regression_root = Path(regression_dir)
+                regression_input = regression_root / "input"
+                regression_output = regression_root / "reports"
+                regression_process = regression_root / "processed"
+                regression_input.mkdir()
+                protected_name = "A002_brittle_chipped_edge.png"
+                protected_before = pages[protected_name]
+                protected_before.save(regression_input / protected_name, dpi=(300, 300))
+                regression_report = scan_batch(
+                    ScanConfig("synthetic-regression", "full-chain-brittle-edge-regression-sim", regression_input, regression_output)
+                )
+                aggressive_crop = processing_module.CropDetection((52, 0, 320, 240), "regression: aggressive brittle edge crop")
+                with mock.patch.object(processing_module, "_detect_conservative_crop_bbox", return_value=aggressive_crop):
+                    regression_manifest = process_images(
+                        regression_report,
+                        regression_input,
+                        regression_process,
+                        ProcessingOptions(**{**_full_chain_options().__dict__, "deskew": False, "workers": 1}),
+                    )
+                regression_record = regression_manifest["files"][0]
+                self.assertEqual(regression_record["crop_bbox"], [52, 0, 320, 240])
+                with Image.open(regression_process / regression_record["output_relative_path"]) as regressed:
+                    regressed_changed = _changed_ratio(protected_before, regressed.convert("RGB"), (6, 28, 82, 220))
+                    self.assertLess(regressed.width, 300)
+                    self.assertGreater(regressed_changed, 0.20)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertIn("timing", audit_summary)
+            self.assertIn("operation_timings", audit_summary["timing"])
+            self.assertGreater(len(audit_summary["timing"]["operation_timings"]), 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256", "output_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_seal_ribbons_string_ties_and_hanging_tags_stay_preserved_with_safe_cleanup_control(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-seal-ribbon-tag-") as temp_dir:
             root = Path(temp_dir)
@@ -19178,6 +19275,40 @@ def _tractor_feed_edge_guard_page(variant: str) -> Image.Image:
         return image
 
     raise ValueError(f"unsupported tractor-feed edge guard variant: {variant}")
+
+
+def _brittle_chipped_edge_guard_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (320, 240), (243, 241, 236))
+    draw = ImageDraw.Draw(image)
+    for y in (56, 84, 112, 140):
+        draw.rectangle((82, y, 286, y + 4), fill=(64, 64, 62))
+    draw.rectangle((96, 168, 288, 190), fill=(236, 234, 228))
+
+    if variant == "safe_cleanup_control":
+        for x, y in ((206, 72), (226, 86), (246, 100), (216, 116), (238, 128)):
+            draw.ellipse((x, y, x + 3, y + 3), fill=(122, 120, 116))
+        return image
+
+    if variant == "brittle_chipped_edge":
+        draw.polygon(
+            [(6, 30), (20, 38), (8, 54), (22, 72), (10, 90), (24, 110), (8, 132), (22, 154), (6, 178), (6, 220)],
+            fill=(230, 226, 216),
+            outline=(138, 132, 122),
+        )
+        draw.line((28, 58, 126, 52), fill=(116, 110, 102), width=1)
+        draw.line((28, 84, 124, 80), fill=(118, 112, 104), width=1)
+        draw.text((30, 176), "frag edge", fill=(122, 116, 108), font=ImageFont.load_default())
+        return image
+
+    if variant == "missing_corner_with_marginal_note":
+        draw.polygon([(240, 8), (318, 8), (318, 86)], fill=(234, 230, 220), outline=(142, 136, 124))
+        draw.line((224, 34, 248, 50), fill=(126, 120, 112), width=1)
+        draw.line((212, 52, 246, 72), fill=(124, 118, 110), width=1)
+        draw.line((194, 68, 236, 92), fill=(122, 116, 108), width=1)
+        draw.line((190, 148, 280, 142), fill=(114, 108, 100), width=1)
+        return image
+
+    raise ValueError(f"unsupported brittle chipped edge guard variant: {variant}")
 
 
 def _multipart_carbon_copy_form_guard_page(variant: str) -> Image.Image:
