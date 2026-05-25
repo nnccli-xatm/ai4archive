@@ -11786,6 +11786,94 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             ):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_deskew_conservative_faint_ruled_forms_with_edge_content_lookalikes(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-deskew-faint-ruled-form-edge-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            def _faint_ruled_page(variant: str) -> Image.Image:
+                image = Image.new("RGB", (520, 680), (248, 248, 246))
+                draw = ImageDraw.Draw(image)
+                for y in (168, 214, 260, 306, 352, 398):
+                    draw.line((110, y, 410, y), fill=(235, 235, 233), width=1)
+                for x in (146, 242, 338):
+                    draw.line((x, 150, x, 420), fill=(236, 236, 234), width=1)
+                if variant == "safe":
+                    for y in (180, 272, 364):
+                        draw.rectangle((180, y, 348, y + 6), fill=(52, 52, 52))
+                elif variant == "edge_page_number":
+                    draw.rectangle((186, 246, 328, 252), fill=(66, 66, 66))
+                    draw.text((10, 84), "12", fill=(232, 232, 232), font=ImageFont.load_default())
+                    draw.line((2, 68, 28, 68), fill=(233, 233, 233), width=1)
+                    draw.line((2, 72, 20, 72), fill=(233, 233, 233), width=1)
+                elif variant == "edge_marginal_note":
+                    draw.rectangle((186, 246, 328, 252), fill=(66, 66, 66))
+                    draw.line((8, 236, 24, 230, 30, 238, 20, 244), fill=(232, 232, 232), width=1)
+                    draw.line((10, 252, 30, 248), fill=(232, 232, 232), width=1)
+                    draw.line((0, 220, 20, 220), fill=(233, 233, 233), width=1)
+                else:
+                    raise ValueError(f"unsupported faint ruled form variant: {variant}")
+                return image.rotate(
+                    -0.62,
+                    resample=Image.Resampling.BICUBIC,
+                    expand=True,
+                    fillcolor=(248, 248, 246),
+                )
+
+            pages = {
+                "synthetic_deskew_faint_form_safe.png": _faint_ruled_page("safe"),
+                "synthetic_deskew_faint_form_edge_page_number.png": _faint_ruled_page("edge_page_number"),
+                "synthetic_deskew_faint_form_edge_note.png": _faint_ruled_page("edge_marginal_note"),
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "deskew-faint-ruled-form-edge", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, deskew=True, workers=1))
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            safe_name = "synthetic_deskew_faint_form_safe.png"
+            safe_record = records[safe_name]
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertTrue(safe_record["deskewed"])
+            self.assertEqual(safe_record["deskew_reason"], "deskew applied")
+            self.assertLessEqual(abs(float(safe_record["skew_angle_degrees"])), 1.25)
+            self.assertIn("deskew_conservative", safe_record["operations"])
+
+            protected_names = (
+                "synthetic_deskew_faint_form_edge_page_number.png",
+                "synthetic_deskew_faint_form_edge_note.png",
+            )
+            for name in protected_names:
+                record = records[name]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name])
+                self.assertFalse(record["deskewed"], name)
+                self.assertIn(
+                    record["deskew_reason"],
+                    {"low contrast", "faint edge content protection", "edge content protection"},
+                    name,
+                )
+                self.assertIn("deskew_noop", record["operations"], name)
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    self.assertIsNone(ImageChops.difference(pages[name], output.convert("RGB")).getbbox(), name)
+
+            self.assertEqual(audit_summary["counts"]["deskewed_files"], 1)
+            self.assertEqual(audit_summary["counts"]["deskew_skipped_files"], 2)
+            self.assertTrue(audit_summary["operations"]["deskew"])
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_post_deskew_corner_wedge_crop_stays_within_geometry_limits(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-post-deskew-wedge-full-chain-") as temp_dir:
             root = Path(temp_dir)
