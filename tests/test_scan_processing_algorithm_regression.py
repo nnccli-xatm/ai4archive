@@ -13781,6 +13781,185 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_sticky_note_tab_and_adhesive_label_preservation_guard_with_overclean_overcrop_signal(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-sticky-tab-label-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            pages = {
+                "A001_safe_neutral_cleanup_control.png": _attached_pasted_evidence_guard_page("safe_neutral_cleanup_control"),
+                "A002_sticky_note_annotation.png": _attached_pasted_evidence_guard_page("sticky_note_annotation"),
+                "A003_small_edge_tab.png": _index_tab_sticky_flag_guard_page("small_edge_label"),
+                "A004_adhesive_label_boundary_near_table.png": _attached_pasted_evidence_guard_page(
+                    "faint_foreground_near_pasted_label"
+                ),
+            }
+            for name, image in pages.items():
+                image.save(input_dir / name, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-sticky-tab-label-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            safe_name = "A001_safe_neutral_cleanup_control.png"
+            safe_record = records[safe_name]
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertEqual(safe_record["processing_audit"]["guardrail_failures"], [])
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_output:
+                safe_changed_ratio = _changed_ratio(
+                    pages[safe_name].convert("RGB"),
+                    safe_output.convert("RGB"),
+                    (24, 24, 108, 196),
+                )
+            self.assertLess(safe_changed_ratio, 0.18)
+
+            protected_boxes = {
+                "A002_sticky_note_annotation.png": (148, 28, 276, 126),
+                "A003_small_edge_tab.png": (236, 170, 302, 214),
+                "A004_adhesive_label_boundary_near_table.png": (148, 34, 276, 204),
+            }
+            for name, box in protected_boxes.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                before = pages[name].convert("RGB")
+                with Image.open(process_dir / record["output_relative_path"]) as output_image:
+                    after = output_image.convert("RGB")
+                self.assertEqual(record["status"], "processed", name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertFalse(record["dark_border_trimmed"], name)
+                self.assertFalse(record["scanner_gutter_trimmed"], name)
+                self.assertIn(audit["combination_quality_guard_action"], {"passed", "kept_original", "reverted_to_source"}, name)
+                self.assertLessEqual(_changed_ratio(before, after, box), 0.04, name)
+                self.assertGreater(after.width * after.height, before.width * before.height * 0.88, name)
+
+            # Control signal: conservative cleanup is still allowed and measurable.
+            def _mild_cleanup_control(image: Image.Image) -> processing_module.BackgroundStainLighteningResult:
+                cleaned = image.convert("RGB").copy()
+                draw = ImageDraw.Draw(cleaned)
+                draw.rectangle((14, 14, 86, 198), fill=(243, 243, 241))
+                return processing_module.BackgroundStainLighteningResult(
+                    image=cleaned,
+                    applied=True,
+                    reason="background stains lightened: synthetic mild cleanup control",
+                    stain_mean_before=226.0,
+                    stain_mean_after=236.0,
+                    stain_delta=10.0,
+                    changed_pixel_ratio=0.05,
+                    candidate_pixel_ratio=0.08,
+                )
+
+            with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-sticky-tab-label-cleanup-control-") as control_dir:
+                control_root = Path(control_dir)
+                control_input = control_root / "input"
+                control_output = control_root / "reports"
+                control_process = control_root / "processed"
+                control_input.mkdir()
+                control_name = "A001_safe_neutral_cleanup_control.png"
+                pages[control_name].save(control_input / control_name, dpi=(300, 300))
+                control_report = scan_batch(
+                    ScanConfig("synthetic-regression", "full-chain-sticky-tab-label-cleanup-control", control_input, control_output)
+                )
+                with mock.patch.object(
+                    processing_module,
+                    "_lighten_background_stains_conservative",
+                    side_effect=_mild_cleanup_control,
+                ):
+                    control_manifest = process_images(
+                        control_report,
+                        control_input,
+                        control_process,
+                        ProcessingOptions(**{**_full_chain_options().__dict__, "deskew": False, "workers": 1}),
+                    )
+                control_record = control_manifest["files"][0]
+                with Image.open(control_process / control_record["output_relative_path"]) as control_after:
+                    cleanup_activity = _changed_ratio(
+                        pages[control_name].convert("RGB"),
+                        control_after.convert("RGB"),
+                        (14, 14, 86, 198),
+                    )
+                self.assertGreater(cleanup_activity, 0.02)
+                self.assertLess(cleanup_activity, 0.30)
+
+            def _aggressive_sticky_cleanup(image: Image.Image) -> processing_module.BackgroundStainLighteningResult:
+                cleaned = image.convert("RGB").copy()
+                draw = ImageDraw.Draw(cleaned)
+                draw.rectangle((140, 20, 302, 214), fill=(249, 249, 249))
+                return processing_module.BackgroundStainLighteningResult(
+                    image=cleaned,
+                    applied=True,
+                    reason="background stains lightened: synthetic sticky/tab wipeout regression",
+                    stain_mean_before=218.0,
+                    stain_mean_after=248.0,
+                    stain_delta=30.0,
+                    changed_pixel_ratio=0.24,
+                    candidate_pixel_ratio=0.29,
+                )
+
+            permissive_options = ProcessingOptions(
+                **{
+                    **_full_chain_options().__dict__,
+                    "audit_max_cumulative_change_score": 9.0,
+                    "audit_max_cumulative_pixel_change_ratio": 1.0,
+                    "audit_max_local_content_changed_ratio": 1.0,
+                    "audit_max_local_content_tile_changed_ratio": 1.0,
+                    "audit_max_edge_content_changed_ratio": 1.0,
+                }
+            )
+            with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-sticky-tab-label-regression-sim-") as regression_dir:
+                regression_root = Path(regression_dir)
+                regression_input = regression_root / "input"
+                regression_output = regression_root / "reports"
+                regression_process = regression_root / "processed"
+                regression_input.mkdir()
+                target_name = "A003_small_edge_tab.png"
+                pages[target_name].save(regression_input / target_name, dpi=(300, 300))
+                regression_report = scan_batch(
+                    ScanConfig("synthetic-regression", "full-chain-sticky-tab-label-regression-sim", regression_input, regression_output)
+                )
+                aggressive_crop = processing_module.CropDetection((44, 0, 304, 224), "regression: aggressive sticky tab edge crop")
+                with (
+                    mock.patch.object(processing_module, "_lighten_background_stains_conservative", side_effect=_aggressive_sticky_cleanup),
+                    mock.patch.object(processing_module, "_detect_post_deskew_canvas_crop_bbox", return_value=aggressive_crop),
+                ):
+                    regression_manifest = process_images(
+                        regression_report,
+                        regression_input,
+                        regression_process,
+                        ProcessingOptions(**{**permissive_options.__dict__, "deskew": True, "workers": 1}),
+                    )
+                regression_record = regression_manifest["files"][0]
+                regression_audit = regression_record["processing_audit"]
+                with Image.open(regression_process / regression_record["output_relative_path"]) as regressed:
+                    regressed_rgb = regressed.convert("RGB")
+                    regressed_changed = _changed_ratio(
+                        pages[target_name].convert("RGB"),
+                        regressed_rgb,
+                        protected_boxes[target_name],
+                    )
+                    reverted = regression_audit.get("cumulative_change_guard_action") == "reverted_to_source" or (
+                        regression_audit.get("combination_quality_guard_action") == "reverted_to_source"
+                    )
+                    if reverted:
+                        self.assertLess(regressed_changed, 0.01)
+                    else:
+                        self.assertGreater(regressed_changed, 0.20)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertIn("timing", audit_summary)
+            self.assertIn("operation_timings", audit_summary["timing"])
+            self.assertGreater(len(audit_summary["timing"]["operation_timings"]), 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256", "output_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_near_blank_separator_marks_stay_preserved_with_conservative_cleanup(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-near-blank-separator-marks-") as temp_dir:
             root = Path(temp_dir)
