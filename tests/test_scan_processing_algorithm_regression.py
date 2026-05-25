@@ -8308,6 +8308,86 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_despeckle_edge_dust_clusters_cleaned_while_near_edge_content_is_preserved(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-despeckle-edge-dust-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            safe_cluster_points = tuple((257, y) for y in range(108, 118))
+
+            safe_edge_dust = Image.new("RGB", (260, 180), (246, 246, 244))
+            for point in safe_cluster_points:
+                safe_edge_dust.putpixel(point, (224, 224, 222))
+
+            protected_punctuation = Image.new("RGB", (260, 180), (246, 246, 244))
+            protected_punctuation.putpixel((258, 106), (224, 224, 222))
+            protected_punctuation.putpixel((258, 110), (224, 224, 222))
+            ImageDraw.Draw(protected_punctuation).line((252, 112, 259, 112), fill=(224, 224, 222), width=1)
+
+            protected_stamp_fragment = Image.new("RGB", (260, 180), (246, 246, 244))
+            stamp_draw = ImageDraw.Draw(protected_stamp_fragment)
+            stamp_draw.arc((246, 96, 268, 118), start=186, end=324, fill=(226, 226, 222), width=1)
+            stamp_draw.point((255, 108), fill=(224, 224, 222))
+            stamp_draw.point((257, 109), fill=(224, 224, 222))
+
+            pages = {
+                "synthetic_safe_isolated_edge_dust_cluster.png": safe_edge_dust,
+                "synthetic_protected_edge_punctuation_fragment.png": protected_punctuation,
+                "synthetic_protected_edge_stamp_fragment.png": protected_stamp_fragment,
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "despeckle-edge-dust", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, workers=1))
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_name = "synthetic_safe_isolated_edge_dust_cluster.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertTrue(safe_record["despeckled"])
+            self.assertEqual(safe_record["despeckle_pixels_changed"], len(safe_cluster_points))
+            self.assertEqual(safe_record["despeckle_reason"], "isolated dark pixels replaced")
+            self.assertLessEqual(safe_audit["despeckle_pixel_ratio"], 0.001)
+            with Image.open(process_dir / safe_record["output_relative_path"]) as output:
+                output_luma = output.convert("L")
+                for point in safe_cluster_points:
+                    self.assertGreaterEqual(output_luma.getpixel(point), 240)
+
+            protected_names = (
+                "synthetic_protected_edge_punctuation_fragment.png",
+                "synthetic_protected_edge_stamp_fragment.png",
+            )
+            for name in protected_names:
+                record = records[name]
+                audit = record["processing_audit"]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name])
+                self.assertFalse(record["despeckled"], name)
+                self.assertEqual(record["despeckle_pixels_changed"], 0, name)
+                self.assertIn("despeckle_noop", record["operations"], name)
+                self.assertEqual(audit["despeckle_pixel_ratio"], 0.0, name)
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    self.assertIsNone(ImageChops.difference(pages[name], output.convert("RGB")).getbbox(), name)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["guardrails"]["despeckle"]["applied_files"], 1)
+            self.assertEqual(audit_summary["guardrails"]["despeckle"]["pixels_changed"], len(safe_cluster_points))
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_warm_mild_bleed_through_is_cleaned_without_private_audit_rows(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-warm-bleed-through-") as temp_dir:
             root = Path(temp_dir)
