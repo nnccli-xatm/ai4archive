@@ -1020,6 +1020,73 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     self.assertLess(regressed.width, 300)
                     self.assertGreater(regressed_changed, 0.30)
 
+    def test_full_chain_post_deskew_faint_edge_content_prefers_crop_safety_and_preserves_marks(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-post-deskew-faint-edge-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            def _skewed_page(with_faint_edge_mark: bool) -> Image.Image:
+                page = Image.new("RGB", (290, 210), (244, 243, 239))
+                draw = ImageDraw.Draw(page)
+                for y in (54, 78, 102, 126, 150):
+                    draw.rectangle((54, y, 234, y + 4), fill=(40, 40, 40))
+                draw.rectangle((238, 36, 272, 40), fill=(74, 74, 74))
+                if with_faint_edge_mark:
+                    for y in range(62, 162, 4):
+                        draw.rectangle((8, y, 20, y + 1), fill=(212, 212, 208))
+                    draw.rectangle((10, 86, 14, 126), fill=(208, 208, 204))
+                return page.rotate(2.0, resample=Image.Resampling.BICUBIC, expand=True, fillcolor=(244, 243, 239))
+
+            safe_name = "private_post_deskew_faint_edge_safe.png"
+            protected_name = "private_post_deskew_faint_edge_protected.png"
+            safe = _skewed_page(with_faint_edge_mark=False)
+            protected = _skewed_page(with_faint_edge_mark=True)
+            safe.save(input_dir / safe_name, dpi=(300, 300))
+            protected.save(input_dir / protected_name, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-post-deskew-faint-edge", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            self.assertTrue(records[safe_name]["deskewed"])
+            self.assertTrue(records[protected_name]["deskewed"])
+
+            protected_record = records[protected_name]
+            self.assertIn(
+                protected_record["crop_reason"],
+                {
+                    "post-deskew crop skipped: edge content protection",
+                    "faint edge content protection",
+                    "edge content protection",
+                    "inconsistent crop margin evidence",
+                    "crop boundary evidence is too sparse",
+                    "low-confidence subtle page edge evidence",
+                },
+            )
+            self.assertIsNone(protected_record["crop_bbox"])
+            self.assertEqual(protected_record["processing_audit"]["guardrail_failures"], [])
+
+            protected_output_path = process_dir / protected_record["output_relative_path"]
+            with Image.open(protected_output_path) as processed:
+                edge_box = (8, 62, 22, 162)
+                before_luma = _mean_luma(protected, edge_box)
+                after_luma = _mean_luma(processed, edge_box)
+                edge_changed = _changed_ratio(protected, processed, edge_box)
+                self.assertLess(after_luma, 238.0)
+                self.assertLessEqual(after_luma - before_luma, 20.0)
+                self.assertLess(edge_changed, 0.60)
+
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            self.assertNotIn("private_post_deskew_faint_edge_safe", audit_summary_text)
+            self.assertNotIn("private_post_deskew_faint_edge_protected", audit_summary_text)
+
     def test_full_chain_encoded_derivative_preserves_color_detail_and_icc_profile(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-encoded-color-") as temp_dir:
             root = Path(temp_dir)
