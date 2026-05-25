@@ -14830,6 +14830,106 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_water_damage_cockled_paper_guard_preserves_evidence_with_safe_cleanup_control(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-water-cockled-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "A001_safe_neutral_cleanup_control.png": _water_damage_evidence_guard_page("safe_neutral_cleanup_control"),
+                "A002_protected_tide_mark_band.png": _water_damage_evidence_guard_page("tide_mark_band"),
+                "A003_protected_cockled_ripple_band.png": _physical_evidence_guard_page("shallow_wrinkle_arc"),
+                "A004_protected_edge_wrinkle_arc.png": _physical_evidence_guard_page("crease_near_table_rule_lines"),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            safe_name = "A001_safe_neutral_cleanup_control.png"
+            safe_before = pages[safe_name].convert("L")
+            safe_before_stain = _mean_luma(safe_before, (186, 66, 254, 128))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-water-cockled-paper-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            with Image.open(process_dir / safe_record["output_relative_path"]) as processed_image:
+                safe_after = processed_image.convert("L")
+                safe_after_stain = _mean_luma(safe_after, (186, 66, 254, 128))
+            self.assertTrue(safe_record["background_stains_lightened"])
+            self.assertIn("lighten_background_stains_conservative", safe_record["operations"])
+            self.assertGreater(safe_after_stain - safe_before_stain, 0.5)
+            self.assertGreater(safe_audit["background_stains_changed_pixel_ratio"], 0.0)
+            self.assertLessEqual(safe_audit["background_stains_changed_pixel_ratio"], 0.08)
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+
+            protected_boxes = {
+                "A002_protected_tide_mark_band.png": (176, 80, 278, 164),
+                "A003_protected_cockled_ripple_band.png": (82, 96, 198, 186),
+                "A004_protected_edge_wrinkle_arc.png": (104, 24, 130, 198),
+            }
+            for name, box in protected_boxes.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                before = pages[name].convert("RGB")
+                with Image.open(process_dir / record["output_relative_path"]) as output_image:
+                    after = output_image.convert("RGB")
+                self.assertEqual(record["status"], "processed", name)
+                self.assertEqual(record["output_size"], [before.width, before.height], name)
+                self.assertLessEqual(_changed_ratio(before, after, box), 0.04, name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertIn(
+                    audit["combination_quality_guard_action"],
+                    {"passed", "kept_original", "reverted_to_source"},
+                    name,
+                )
+
+            protected_edge_name = "A004_protected_edge_wrinkle_arc.png"
+            protected_edge_before = pages[protected_edge_name].convert("RGB")
+            with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-water-cockled-regression-sim-") as regression_dir:
+                regression_root = Path(regression_dir)
+                regression_input = regression_root / "input"
+                regression_output = regression_root / "reports"
+                regression_process = regression_root / "processed"
+                regression_input.mkdir()
+                protected_edge_before.save(regression_input / protected_edge_name, dpi=(300, 300))
+                regression_report = scan_batch(
+                    ScanConfig("synthetic-regression", "full-chain-water-cockled-regression-sim", regression_input, regression_output)
+                )
+                aggressive_crop = processing_module.CropDetection((60, 0, 280, 220), "regression: aggressive wrinkle-edge crop")
+                with mock.patch.object(processing_module, "_detect_conservative_crop_bbox", return_value=aggressive_crop):
+                    regression_manifest = process_images(
+                        regression_report,
+                        regression_input,
+                        regression_process,
+                        ProcessingOptions(**{**_full_chain_options().__dict__, "deskew": False, "workers": 1}),
+                    )
+                regression_record = regression_manifest["files"][0]
+                self.assertEqual(regression_record["crop_bbox"], [60, 0, 280, 220])
+                with Image.open(regression_process / regression_record["output_relative_path"]) as regressed:
+                    regressed_changed = _changed_ratio(protected_edge_before, regressed.convert("RGB"), (0, 0, 120, 220))
+                    self.assertLess(regressed.width, 260)
+                    self.assertGreater(regressed_changed, 0.08)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256", "output_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_gutter_shadow_page_curl_guard_preserves_near_gutter_content(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-gutter-shadow-page-curl-") as temp_dir:
             root = Path(temp_dir)
