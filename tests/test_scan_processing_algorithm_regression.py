@@ -12567,6 +12567,23 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 ) as processed:
                     self.assertIsNone(ImageChops.difference(source, processed).getbbox(), name)
 
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_file_list"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            self.assertFalse(audit_summary["privacy"]["contains_thumbnails"])
+            self.assertFalse(audit_summary["privacy"]["contains_image_content"])
+            for forbidden in (
+                *pages.keys(),
+                str(input_dir),
+                str(process_dir),
+                "source_relative_path",
+                "source_sha256",
+            ):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_variable_pale_gutter_trim_stays_bounded_and_private(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-variable-gutter-full-chain-") as temp_dir:
             root = Path(temp_dir)
