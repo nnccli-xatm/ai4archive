@@ -2797,6 +2797,7 @@ def _build_conservative_auto_retouch_handoff_zh(
         "scanlines": "扫描线淡化",
         "faded_text": "褪色文字增强",
         "text_edges": "文字边缘锐化",
+        "processed_output_safety_guard": "成品安全守护",
     }
     reason_class_fields = (
         ("protection_triggered_files", "保护原始标记或边缘内容"),
