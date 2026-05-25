@@ -12522,6 +12522,68 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages.keys(), str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_auto_crop_light_margin_safe_case_and_near_edge_lookalikes(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-auto-crop-light-margin-guards-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_auto_crop_light_margin_safe_canvas.png": _light_margin_auto_crop_page(),
+                "synthetic_auto_crop_light_margin_page_number.png": _light_margin_auto_crop_page(
+                    variant="page_number"
+                ),
+                "synthetic_auto_crop_light_margin_table_edge_line.png": _light_margin_auto_crop_page(
+                    variant="table_border"
+                ),
+                "synthetic_auto_crop_light_margin_marginal_note.png": _light_margin_auto_crop_page(
+                    variant="marginal_note"
+                ),
+            }
+            for filename, page in pages.items():
+                page.save(input_dir / filename, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "auto-crop-light-margin-guards", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, workers=1))
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_record = records["synthetic_auto_crop_light_margin_safe_canvas.png"]
+            self.assertTrue(safe_record["cropped"])
+            self.assertEqual(safe_record["crop_reason"], "conservative crop applied")
+            self.assertEqual(safe_record["crop_bbox"], [10, 10, 231, 171])
+            self.assertLessEqual(safe_record["processing_audit"]["crop_ratio"], 0.2)
+            self.assertEqual(safe_record["processing_audit"]["guardrail_failures"], [])
+
+            protected_names = set(pages) - {"synthetic_auto_crop_light_margin_safe_canvas.png"}
+            for name in protected_names:
+                record = records[name]
+                self.assertFalse(record["cropped"], name)
+                self.assertEqual(record["crop_reason"], "faint edge content protection", name)
+                self.assertEqual(record["output_size"], [240, 180], name)
+                self.assertEqual(record["processing_audit"]["crop_ratio"], 0.0, name)
+                with Image.open(input_dir / name) as source, Image.open(
+                    process_dir / record["output_relative_path"]
+                ) as processed:
+                    self.assertIsNone(ImageChops.difference(source, processed).getbbox(), name)
+
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_file_list"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            self.assertFalse(audit_summary["privacy"]["contains_thumbnails"])
+            self.assertFalse(audit_summary["privacy"]["contains_image_content"])
+            for forbidden in (
+                *pages.keys(),
+                str(input_dir),
+                str(process_dir),
+                "source_relative_path",
+                "source_sha256",
+            ):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_variable_pale_gutter_trim_stays_bounded_and_private(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-variable-gutter-full-chain-") as temp_dir:
             root = Path(temp_dir)
