@@ -369,6 +369,7 @@ class WorkbenchController:
         )
         handoff_counts = _completion_handoff_counts(run_summary, decision_summary)
         reuse_handoff_summary = _local_reuse_handoff_summary(run_summary)
+        conservative_handoff = _conservative_auto_retouch_handoff_zh(run_summary)
         operator_name = str(summary.get("operator_name") or "").strip()
         stage_timings_note = _completion_stage_timings_note(run_summary)
         completion_note_lines = [
@@ -389,6 +390,10 @@ class WorkbenchController:
         ]
         if isinstance(reuse_handoff_summary, dict):
             completion_note_lines.insert(9, reuse_handoff_summary["message_zh"])
+        if isinstance(conservative_handoff, dict) and isinstance(conservative_handoff.get("message_zh"), str):
+            completion_note_lines.append(
+                f"{str(conservative_handoff.get('title_zh') or '保守自动修复决策汇总')}：{conservative_handoff['message_zh']}"
+            )
         if stage_timings_note:
             completion_note_lines.append(stage_timings_note)
         completion_note_lines.extend(
@@ -442,6 +447,8 @@ class WorkbenchController:
         }
         if reuse_handoff_summary is not None:
             completion_panel["local_reuse_summary"] = reuse_handoff_summary
+        if conservative_handoff is not None:
+            completion_panel["conservative_auto_retouch_handoff_zh"] = conservative_handoff
 
         return {
             "schema_version": SERVER_SCHEMA,
@@ -2509,6 +2516,35 @@ def _completion_stage_timings_note(run_summary: dict[str, Any] | None) -> str | 
     if not fragments:
         return None
     return f"聚合阶段耗时：{'、'.join(fragments)}。"
+
+
+def _conservative_auto_retouch_handoff_zh(run_summary: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(run_summary, dict):
+        return None
+    payload = run_summary.get("conservative_auto_retouch_handoff_zh")
+    if isinstance(payload, dict) and payload.get("aggregate_only") is True:
+        return payload
+    audit_summary = run_summary.get("processing_audit_summary")
+    if isinstance(audit_summary, dict):
+        payload = audit_summary.get("conservative_auto_retouch_handoff_zh")
+        if isinstance(payload, dict) and payload.get("aggregate_only") is True:
+            return payload
+    artifacts = run_summary.get("artifacts")
+    if not isinstance(artifacts, dict):
+        return None
+    audit_path = artifacts.get("processing_audit_summary")
+    if not isinstance(audit_path, str) or not audit_path.strip():
+        return None
+    try:
+        summary_payload = _read_json(Path(audit_path))
+    except OSError:
+        return None
+    if not isinstance(summary_payload, dict):
+        return None
+    payload = summary_payload.get("conservative_auto_retouch_handoff_zh")
+    if isinstance(payload, dict) and payload.get("aggregate_only") is True:
+        return payload
+    return None
 
 
 def _safe_nonnegative_int(value: Any) -> int:
