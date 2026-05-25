@@ -14072,6 +14072,120 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_tractor_feed_edge_perforation_guard_preserves_repeating_holes_and_torn_fragments(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-tractor-feed-edge-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            pages = {
+                "A001_safe_cleanup_control.png": _tractor_feed_edge_guard_page("safe_cleanup_control"),
+                "A002_tractor_feed_repeating_holes.png": _tractor_feed_edge_guard_page("tractor_feed_repeating_holes"),
+                "A003_torn_perforation_edge_fragment.png": _tractor_feed_edge_guard_page("torn_edge_fragment"),
+                "A004_faint_reference_near_perforation.png": _tractor_feed_edge_guard_page("faint_reference_near_perforation"),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-tractor-feed-edge-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_name = "A001_safe_cleanup_control.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            safe_before = pages[safe_name].convert("RGB")
+            with Image.open(process_dir / safe_record["output_relative_path"]) as output_image:
+                safe_after = output_image.convert("RGB")
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertIn(safe_audit["combination_quality_guard_action"], {"passed", "kept_original", "reverted_to_source"})
+            self.assertLessEqual(_changed_ratio(safe_before, safe_after, (200, 64, 258, 146)), 0.08)
+            safe_reason_codes = [
+                safe_record.get("despeckle_reason_code"),
+                safe_record.get("dark_border_reason_code"),
+                safe_record.get("scanner_gutter_reason_code"),
+                safe_record.get("auto_crop_reason_code"),
+            ]
+            self.assertTrue(any(isinstance(code, str) and code for code in safe_reason_codes))
+
+            protected_boxes = {
+                "A002_tractor_feed_repeating_holes.png": (6, 44, 74, 220),
+                "A003_torn_perforation_edge_fragment.png": (6, 28, 64, 220),
+                "A004_faint_reference_near_perforation.png": (6, 50, 86, 216),
+            }
+            for name, box in protected_boxes.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                before = pages[name].convert("RGB")
+                with Image.open(process_dir / record["output_relative_path"]) as output_image:
+                    after = output_image.convert("RGB")
+                self.assertEqual(record["status"], "processed", name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertIn(audit["combination_quality_guard_action"], {"passed", "kept_original", "reverted_to_source"}, name)
+                self.assertFalse(record["dark_border_trimmed"], name)
+                self.assertFalse(record["scanner_gutter_trimmed"], name)
+                self.assertLessEqual(audit["size_change_ratio"], 0.12, name)
+                self.assertLessEqual(audit["cumulative_change_crop_ratio"], 0.10, name)
+                self.assertLessEqual(_changed_ratio(before, after, box), 0.05, name)
+                self.assertGreaterEqual(_edge_energy(after.crop(box)), _edge_energy(before.crop(box)) * 0.84, name)
+                self.assertGreater(after.width * after.height, before.width * before.height * 0.88, name)
+                reason_codes = [
+                    record.get("despeckle_reason_code"),
+                    record.get("dark_border_reason_code"),
+                    record.get("scanner_gutter_reason_code"),
+                    record.get("auto_crop_reason_code"),
+                ]
+                self.assertTrue(any(isinstance(code, str) and code for code in reason_codes), name)
+
+            with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-tractor-feed-edge-regression-sim-") as regression_dir:
+                regression_root = Path(regression_dir)
+                regression_input = regression_root / "input"
+                regression_output = regression_root / "reports"
+                regression_process = regression_root / "processed"
+                regression_input.mkdir()
+                protected_name = "A002_tractor_feed_repeating_holes.png"
+                protected_before = pages[protected_name]
+                protected_before.save(regression_input / protected_name, dpi=(300, 300))
+                regression_report = scan_batch(
+                    ScanConfig("synthetic-regression", "full-chain-tractor-feed-edge-regression-sim", regression_input, regression_output)
+                )
+                aggressive_crop = processing_module.CropDetection((36, 0, 320, 240), "regression: aggressive tractor-feed edge crop")
+                with mock.patch.object(processing_module, "_detect_conservative_crop_bbox", return_value=aggressive_crop):
+                    regression_manifest = process_images(
+                        regression_report,
+                        regression_input,
+                        regression_process,
+                        ProcessingOptions(**{**_full_chain_options().__dict__, "deskew": False, "workers": 1}),
+                    )
+                regression_record = regression_manifest["files"][0]
+                self.assertEqual(regression_record["crop_bbox"], [36, 0, 320, 240])
+                with Image.open(regression_process / regression_record["output_relative_path"]) as regressed:
+                    regressed_changed = _changed_ratio(protected_before, regressed.convert("RGB"), (6, 44, 74, 220))
+                    self.assertLess(regressed.width, 300)
+                    self.assertGreater(regressed_changed, 0.20)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertIn("timing", audit_summary)
+            self.assertIn("operation_timings", audit_summary["timing"])
+            self.assertGreater(len(audit_summary["timing"]["operation_timings"]), 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256", "output_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_seal_ribbons_string_ties_and_hanging_tags_stay_preserved_with_safe_cleanup_control(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-seal-ribbon-tag-") as temp_dir:
             root = Path(temp_dir)
@@ -18525,6 +18639,49 @@ def _perforated_tearoff_hinge_guard_page(variant: str) -> Image.Image:
         return image
 
     raise ValueError(f"unsupported perforated tear-off/hinge variant: {variant}")
+
+
+def _tractor_feed_edge_guard_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (320, 240), (243, 241, 236))
+    draw = ImageDraw.Draw(image)
+    for y in (56, 84, 112, 140):
+        draw.rectangle((82, y, 286, y + 4), fill=(64, 64, 62))
+    draw.rectangle((92, 166, 288, 190), fill=(236, 234, 228))
+
+    if variant == "safe_cleanup_control":
+        for x, y in ((208, 70), (226, 84), (244, 96), (220, 112), (238, 126), (254, 138)):
+            draw.ellipse((x, y, x + 2, y + 2), fill=(122, 120, 116))
+        return image
+
+    if variant == "tractor_feed_repeating_holes":
+        draw.rectangle((6, 42, 14, 220), fill=(230, 227, 220))
+        for y in range(48, 218, 14):
+            draw.ellipse((14, y, 25, y + 10), outline=(118, 112, 102), width=2)
+        draw.line((28, 44, 28, 220), fill=(136, 130, 120), width=1)
+        draw.line((30, 78, 150, 70), fill=(124, 118, 108), width=1)
+        draw.line((32, 102, 154, 96), fill=(122, 116, 106), width=1)
+        draw.text((104, 170), "REF 27B", fill=(100, 96, 90), font=ImageFont.load_default())
+        return image
+
+    if variant == "torn_edge_fragment":
+        draw.polygon([(8, 30), (40, 44), (28, 148), (12, 168), (8, 220)], fill=(230, 226, 216), outline=(138, 132, 122))
+        draw.polygon([(8, 154), (32, 166), (16, 184), (8, 176)], fill=(226, 222, 212), outline=(138, 132, 122))
+        draw.line((28, 52, 106, 46), fill=(114, 108, 100), width=1)
+        draw.line((28, 78, 108, 74), fill=(116, 110, 102), width=1)
+        draw.line((30, 106, 110, 100), fill=(114, 108, 100), width=1)
+        return image
+
+    if variant == "faint_reference_near_perforation":
+        draw.rectangle((6, 50, 14, 216), fill=(230, 227, 220))
+        for y in range(56, 214, 16):
+            draw.ellipse((14, y, 25, y + 10), outline=(122, 116, 106), width=2)
+        draw.line((28, 58, 146, 52), fill=(132, 126, 116), width=1)
+        draw.line((30, 82, 146, 78), fill=(132, 126, 116), width=1)
+        draw.line((32, 108, 144, 104), fill=(132, 126, 116), width=1)
+        draw.text((30, 188), "lot 14", fill=(138, 132, 122), font=ImageFont.load_default())
+        return image
+
+    raise ValueError(f"unsupported tractor-feed edge guard variant: {variant}")
 
 
 def _multipart_carbon_copy_form_guard_page(variant: str) -> Image.Image:
