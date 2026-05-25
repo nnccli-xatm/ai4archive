@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from smoke_production_workbench_completion_export import run_smoke as run_completion_export_smoke
+from smoke_production_workbench_operator_loop import run_smoke as run_operator_loop_smoke
 from smoke_production_workbench_review_decisions import run_smoke as run_review_decisions_smoke
 from smoke_production_workbench_start_preview import run_smoke as run_start_preview_smoke
 
@@ -47,6 +48,7 @@ class SmokeCheck:
 
 
 CHECKS = [
+    SmokeCheck("operator_first_closed_loop_entry", run_operator_loop_smoke),
     SmokeCheck("configure_start_preview", run_start_preview_smoke),
     SmokeCheck("preview_review_decisions", run_review_decisions_smoke),
     SmokeCheck("completion_export", run_completion_export_smoke),
