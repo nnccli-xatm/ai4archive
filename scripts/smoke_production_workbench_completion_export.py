@@ -114,6 +114,25 @@ def run_smoke() -> dict[str, Any]:
                         "failed_files": 0,
                         "remaining_files": 0,
                     },
+                    "artifacts": {"processing_audit_summary": str(output_dir / "processing_audit_summary.json")},
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        (output_dir / "processing_audit_summary.json").write_text(
+            json.dumps(
+                {
+                    "conservative_auto_retouch_handoff_zh": {
+                        "title_zh": "保守自动修复决策汇总",
+                        "aggregate_only": True,
+                        "decision_counts_zh": {"保护保留": 2, "风险跳过": 1},
+                        "operation_reason_class_counts_zh": [
+                            {"operation": "despeckle", "operation_zh": "去噪点", "reason_class_zh": "保护原始标记或边缘内容", "count": 2}
+                        ],
+                        "message_zh": "保守决策汇总：保护保留 2 次，风险跳过 1 次。",
+                        "privacy_note_zh": "仅包含聚合计数，不含文件名、路径、哈希、OCR 文本、缩略图或逐张结果。",
+                    }
                 },
                 ensure_ascii=False,
             ),
@@ -169,6 +188,11 @@ def run_smoke() -> dict[str, Any]:
         _assert(panel.get("completion_status_zh") == "本批已完成", "completion status copy changed")
         _assert(panel.get("manual_work_zh") == "没有待人工处理图片", "manual work copy changed")
         _assert(panel.get("admin_handoff_zh") == "不需要", "admin handoff copy changed")
+        _assert(isinstance(panel.get("conservative_auto_retouch_handoff_zh"), dict), "conservative handoff missing")
+        _assert(
+            panel.get("conservative_auto_retouch_handoff_zh", {}).get("aggregate_only") is True,
+            "conservative handoff aggregate flag missing",
+        )
         _assert(panel.get("total_review_items") == 3, "completion panel total count changed")
         _assert(panel.get("reviewed_items") == 3, "completion panel reviewed count changed")
         _assert(panel.get("pending_items") == 0, "completion panel pending count changed")
@@ -227,6 +251,7 @@ def run_smoke() -> dict[str, Any]:
         _assert("未关闭 P0：0" in completion_note, "completion note missing aggregate open P0 count")
         _assert("未关闭 P1：0" in completion_note, "completion note missing aggregate open P1 count")
         _assert("已有人工处理结论：3" in completion_note, "completion note missing aggregate handled count")
+        _assert("保守自动修复决策汇总" in completion_note, "completion note missing conservative handoff")
         _assert_no_private_terms(saved_summary, "saved summary")
         _assert_no_private_terms({"completion_note": completion_note}, "completion note")
         _assert_no_private_terms(
