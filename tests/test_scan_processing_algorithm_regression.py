@@ -12341,6 +12341,120 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_sharpen_text_edges_bounds_halo_and_stroke_thickening_near_protected_marks(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-text-edge-halo-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "private_full_chain_safe_small_typed_text.png": _small_typed_text_halo_guard_page(),
+                "private_full_chain_protected_pencil_mark.png": _small_typed_text_halo_guard_page(variant="pencil_mark"),
+                "private_full_chain_protected_ruled_mark.png": _small_typed_text_halo_guard_page(variant="ruled_mark"),
+            }
+            for name, image in pages.items():
+                image.save(input_dir / name, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-text-edge-halo-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            safe_name = "private_full_chain_safe_small_typed_text.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_output:
+                safe_change = _changed_ratio(pages[safe_name], safe_output.convert("RGB"), (54, 96, 326, 262))
+                self.assertTrue(safe_record["text_edges_sharpened"])
+                self.assertIn("sharpen_text_edges_conservative", safe_record["operations"])
+                self.assertGreater(safe_audit["text_edges_edge_energy_after"], safe_audit["text_edges_edge_energy_before"])
+                self.assertGreater(safe_audit["text_edges_changed_pixel_ratio"], 0.0)
+                self.assertLessEqual(safe_audit["text_edges_changed_pixel_ratio"], 0.06)
+                self.assertLessEqual(safe_change, 0.08)
+                self.assertLessEqual(safe_audit["text_edges_candidate_pixel_ratio"], 0.1)
+                self.assertEqual(safe_output.size, tuple(safe_record["output_size"]))
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+
+            protected_zones = {
+                "private_full_chain_protected_pencil_mark.png": (42, 116, 124, 188),
+                "private_full_chain_protected_ruled_mark.png": (44, 314, 344, 348),
+            }
+            for name, zone in protected_zones.items():
+                protected_record = records[name]
+                protected_audit = protected_record["processing_audit"]
+                with Image.open(process_dir / protected_record["output_relative_path"]) as protected_output:
+                    self.assertEqual(protected_output.size, tuple(protected_record["output_size"]), name)
+                    before_mark_mean = _mean_luma(pages[name], zone)
+                    after_mark_mean = _mean_luma(protected_output, zone)
+                    self.assertLessEqual(abs(after_mark_mean - before_mark_mean), 6.0, name)
+                self.assertLessEqual(protected_audit["text_edges_changed_pixel_ratio"], 0.06, name)
+                self.assertLessEqual(protected_audit["text_edges_candidate_pixel_ratio"], 0.1, name)
+                self.assertEqual(protected_audit["guardrail_failures"], [], name)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertGreaterEqual(audit_summary["counts"]["text_edges_sharpened_files"], 1)
+            self.assertEqual(audit_summary["counts"]["auto_crop_applied_files"], 0)
+            self.assertEqual(audit_summary["counts"]["dark_border_trimmed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
+            # Regression signal: emulate over-aggressive sharpening halo/stroke inflation.
+            def _aggressive_halo_sharpen(image: Image.Image) -> processing_module.TextEdgeSharpeningResult:
+                sharpened = image.convert("RGB").filter(ImageFilter.UnsharpMask(radius=1.8, percent=420, threshold=0))
+                overlay = Image.new("RGB", image.size, (255, 255, 255))
+                ring_mask = Image.new("L", image.size, 0)
+                ring_draw = ImageDraw.Draw(ring_mask)
+                ring_draw.rectangle((52, 96, 332, 270), outline=96, width=4)
+                ring_mask = ring_mask.filter(ImageFilter.GaussianBlur(1.6))
+                sharpened = Image.composite(overlay, sharpened, ring_mask)
+                return processing_module.TextEdgeSharpeningResult(
+                    image=sharpened,
+                    applied=True,
+                    reason="text edge sharpening applied: synthetic halo/stroke inflation regression",
+                    edge_delta=18.0,
+                    changed_pixel_ratio=0.24,
+                    candidate_pixel_ratio=0.25,
+                    edge_energy_before=2.6,
+                    edge_energy_after=6.2,
+                )
+
+            permissive_options = ProcessingOptions(
+                **{
+                    **_full_chain_options().__dict__,
+                    "audit_max_cumulative_change_score": 9.0,
+                    "audit_max_cumulative_pixel_change_ratio": 1.0,
+                    "audit_max_local_content_changed_ratio": 1.0,
+                    "audit_max_local_content_tile_changed_ratio": 1.0,
+                    "audit_max_edge_content_changed_ratio": 1.0,
+                }
+            )
+            with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-text-edge-halo-regression-sim-") as sim_dir:
+                sim_root = Path(sim_dir)
+                sim_input = sim_root / "input"
+                sim_output = sim_root / "reports"
+                sim_processed = sim_root / "processed"
+                sim_input.mkdir()
+                for name, image in pages.items():
+                    image.save(sim_input / name, dpi=(300, 300))
+                with mock.patch.object(
+                    processing_module,
+                    "_sharpen_text_edges_conservative",
+                    side_effect=_aggressive_halo_sharpen,
+                ):
+                    sim_report = scan_batch(
+                        ScanConfig("synthetic-regression", "full-chain-text-edge-halo-regression-sim", sim_input, sim_output)
+                    )
+                    sim_manifest = process_images(sim_report, sim_input, sim_processed, permissive_options)
+                sim_records = {record["source_relative_path"]: record for record in sim_manifest["files"]}
+                regression_audit = sim_records[safe_name]["processing_audit"]
+                self.assertGreater(regression_audit["text_edges_changed_pixel_ratio"], 0.12)
+                self.assertGreater(regression_audit["text_edges_candidate_pixel_ratio"], 0.12)
+
     def test_sharpen_text_edges_skips_mildly_blurred_ruled_table_background(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-text-edge-ruled-table-") as temp_dir:
             root = Path(temp_dir)
@@ -18319,6 +18433,37 @@ def _mildly_blurred_ruled_table_background_page() -> Image.Image:
             draw.rectangle((x, y, x + 26, y + 3), fill=(86, 86, 86))
             draw.rectangle((x, y + 10, x + 16, y + 12), fill=(96, 96, 96))
     return image.filter(ImageFilter.GaussianBlur(radius=0.75))
+
+
+def _small_typed_text_halo_guard_page(*, variant: str = "safe") -> Image.Image:
+    image = Image.new("RGB", (388, 420), (244, 241, 234))
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default()
+    for y in range(24, 404, 18):
+        shade = 238 + ((y * 7) % 6)
+        draw.line((12, y, 376, y), fill=(shade, shade - 1, shade - 2), width=1)
+    lines = (
+        "CATALOG ENTRY 1943",
+        "SMALL TYPED RECORD",
+        "EDGE SOFTENED SAMPLE",
+        "KEEP MARKS DETECTABLE",
+        "NO HALO OR RINGING",
+        "NO STROKE INFLATION",
+        "FULL CHAIN SAFETY",
+    )
+    for index, line in enumerate(lines):
+        draw.text((58, 104 + index * 24), line, fill=(84, 84, 80), font=font)
+
+    if variant == "pencil_mark":
+        draw.line((48, 124, 88, 156, 120, 186), fill=(150, 148, 142), width=1)
+        draw.line((50, 138, 90, 170, 122, 198), fill=(154, 152, 146), width=1)
+    elif variant == "ruled_mark":
+        draw.line((42, 322, 344, 322), fill=(148, 148, 146), width=1)
+        draw.line((42, 338, 344, 338), fill=(150, 150, 148), width=1)
+    elif variant != "safe":
+        raise ValueError(f"unsupported small typed halo guard variant: {variant}")
+
+    return image.filter(ImageFilter.GaussianBlur(radius=0.72))
 
 
 def _combination_guard_metrics() -> dict[str, object]:
