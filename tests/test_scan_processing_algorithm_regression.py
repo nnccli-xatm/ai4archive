@@ -10848,6 +10848,83 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages.keys(), str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_uneven_interrupted_scanner_edge_shadow_trim_stays_conservative(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-uneven-interrupted-dark-border-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            pages = {
+                "synthetic_safe_uneven_interrupted_dark_border.png": _interrupted_dark_scanner_border_page(),
+                "synthetic_protected_uneven_interrupted_table_border.png": _interrupted_dark_scanner_border_page(
+                    "table_lines"
+                ),
+                "synthetic_protected_uneven_interrupted_marginal_text.png": _interrupted_dark_scanner_border_page(
+                    "marginal_text"
+                ),
+                "synthetic_protected_uneven_interrupted_stamp.png": _interrupted_dark_scanner_border_page("stamp_block"),
+            }
+            source_bytes = {}
+            for filename, page in pages.items():
+                source = input_dir / filename
+                page.save(source, dpi=(300, 300))
+                source_bytes[filename] = source.read_bytes()
+
+            report = scan_batch(
+                ScanConfig("synthetic-regression", "full-chain-uneven-interrupted-dark-border-guard", input_dir, output_dir)
+            )
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(trim_dark_border=True, workers=1))
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_name = "synthetic_safe_uneven_interrupted_dark_border.png"
+            safe_record = records[safe_name]
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertTrue(safe_record["dark_border_trimmed"])
+            self.assertEqual(safe_record["dark_border_reason_code"], "trimmed_broken_edge")
+            self.assertEqual(safe_record["dark_border_bbox"], [4, 4, 236, 176])
+            self.assertLessEqual(safe_record["processing_audit"]["max_trim_margin_ratio"], 0.03)
+            self.assertEqual(safe_record["processing_audit"]["guardrail_failures"], [])
+
+            protected_names = (
+                "synthetic_protected_uneven_interrupted_table_border.png",
+                "synthetic_protected_uneven_interrupted_marginal_text.png",
+                "synthetic_protected_uneven_interrupted_stamp.png",
+            )
+            for name in protected_names:
+                record = records[name]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name])
+                self.assertFalse(record["dark_border_trimmed"], name)
+                self.assertEqual(record["output_size"], [240, 180], name)
+                self.assertIn("dark_border_trim_noop", record["operations"], name)
+                self.assertIn(
+                    record["dark_border_reason_code"],
+                    {
+                        "protected_edge_content_near_dark_border",
+                        "incomplete_dark_edge_border_evidence",
+                        "candidate_trim_exceeds_conservative_retain_ratio",
+                    },
+                    name,
+                )
+                self.assertEqual(record["processing_audit"]["guardrail_failures"], [], name)
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    self.assertEqual(output.convert("RGB").tobytes(), pages[name].tobytes(), name)
+
+            self.assertEqual(audit_summary["counts"]["dark_border_trimmed_files"], 1)
+            self.assertEqual(audit_summary["counts"]["dark_border_skipped_files"], len(pages) - 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["dark_border_trim"]["guardrail_reason_code_distribution"]["trimmed_broken_edge"],
+                1,
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages.keys(), str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_shallow_deskew_auto_crop_trim_combination_stays_controlled(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-shallow-deskew-combo-") as temp_dir:
             root = Path(temp_dir)
