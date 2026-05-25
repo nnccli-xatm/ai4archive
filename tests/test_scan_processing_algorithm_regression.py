@@ -2011,6 +2011,163 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_conservative_combined_cleanup_budget_guard_preserves_faint_evidence(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-conservative-budget-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            pages = {
+                "synthetic_safe_combined_budget_control.png": _mixed_tone_binding_gutter_page(),
+                "synthetic_protected_combined_budget_faint_text.png": _combined_retouch_guard_page("faint_text"),
+                "synthetic_protected_combined_budget_ruled_lines.png": _combined_retouch_guard_page("table_lines"),
+                "synthetic_protected_combined_budget_pale_annotation.png": _combined_retouch_guard_page("colored_pencil"),
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            def synthetic_stain_cleanup(current: Image.Image) -> processing_module.BackgroundStainLighteningResult:
+                changed = current.copy()
+                draw = ImageDraw.Draw(changed)
+                protected_signal = min(
+                    _mean_luma(current, (8, 132, 52, 170)),
+                    _mean_luma(current, (86, 42, 146, 104)),
+                    _mean_luma(current, (36, 42, 176, 108)),
+                )
+                if protected_signal < 225.0:
+                    draw.rectangle((0, 0, changed.width - 1, changed.height - 1), fill=(238, 238, 234))
+                    return processing_module.BackgroundStainLighteningResult(
+                        changed,
+                        True,
+                        "background stains lightened: synthetic broad cleanup",
+                        216.0,
+                        238.0,
+                        22.0,
+                        0.22,
+                        0.22,
+                    )
+                draw.ellipse((132, 70, 184, 118), fill=(236, 236, 232))
+                return processing_module.BackgroundStainLighteningResult(
+                    changed,
+                    True,
+                    "background stains lightened: synthetic mild cleanup",
+                    226.0,
+                    236.0,
+                    10.0,
+                    0.03,
+                    0.03,
+                )
+
+            def synthetic_scanline_cleanup(current: Image.Image) -> processing_module.ScanlineLighteningResult:
+                changed = current.copy()
+                draw = ImageDraw.Draw(changed)
+                protected_signal = min(
+                    _mean_luma(current, (8, 132, 52, 170)),
+                    _mean_luma(current, (86, 42, 146, 104)),
+                    _mean_luma(current, (36, 42, 176, 108)),
+                )
+                if protected_signal < 225.0:
+                    for y in (44, 66, 88, 110, 132):
+                        draw.rectangle((18, y, 228, y + 2), fill=(240, 240, 236))
+                    return processing_module.ScanlineLighteningResult(
+                        changed,
+                        True,
+                        "scanlines lightened: synthetic broad cleanup",
+                        "horizontal",
+                        2,
+                        204.0,
+                        240.0,
+                        36.0,
+                        0.09,
+                        0.09,
+                    )
+                draw.line((72, 124, 168, 124), fill=(242, 242, 238), width=2)
+                return processing_module.ScanlineLighteningResult(
+                    changed,
+                    True,
+                    "scanlines lightened: synthetic mild cleanup",
+                    "horizontal",
+                    1,
+                    216.0,
+                    236.0,
+                    20.0,
+                    0.01,
+                    0.01,
+                )
+
+            report = scan_batch(
+                ScanConfig("synthetic-regression", "full-chain-conservative-combined-budget", input_dir, output_dir)
+            )
+            with mock.patch.object(
+                processing_module,
+                "_lighten_background_stains_conservative",
+                side_effect=synthetic_stain_cleanup,
+            ), mock.patch.object(
+                processing_module,
+                "_lighten_scanlines_conservative",
+                side_effect=synthetic_scanline_cleanup,
+            ):
+                manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_name = "synthetic_safe_combined_budget_control.png"
+            safe_audit = records[safe_name]["processing_audit"]
+            self.assertEqual(safe_audit["local_content_change_guard_action"], "passed")
+            self.assertIn(safe_audit["cumulative_change_guard_action"], {"passed", "reverted_to_source"})
+            if safe_audit["cumulative_change_guard_action"] == "passed":
+                self.assertLessEqual(safe_audit["cumulative_retouch_changed_pixel_ratio"], 0.16)
+            else:
+                self.assertIn("retouch_changed_pixel_ratio", safe_audit["cumulative_change_guard_reasons"])
+
+            protected_names = set(pages) - {safe_name}
+            protected_local_boxes = {
+                "synthetic_protected_combined_budget_faint_text.png": (8, 132, 52, 170),
+                "synthetic_protected_combined_budget_ruled_lines.png": (36, 42, 176, 108),
+                "synthetic_protected_combined_budget_pale_annotation.png": (8, 132, 52, 170),
+            }
+            for name in protected_names:
+                record = records[name]
+                audit = record["processing_audit"]
+                self.assertEqual(audit["local_content_change_guard_action"], "reverted_to_source", name)
+                self.assertEqual(audit["combination_quality_guard_action"], "reverted_to_source", name)
+                self.assertIn(
+                    audit["cumulative_change_guard_action"],
+                    {"reverted_to_source", "passed"},
+                    name,
+                )
+                self.assertIn("combination_quality_guard_reverted_to_source", record["operations"], name)
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    self.assertEqual(output.convert("RGB").tobytes(), pages[name].tobytes(), name)
+                    local_changed_ratio = _changed_ratio(pages[name], output, protected_local_boxes[name])
+                self.assertLessEqual(local_changed_ratio, 0.01, name)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertGreaterEqual(
+                audit_summary["counts"]["combination_quality_guard_reverted_files"],
+                len(protected_names),
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            cleanup_signal = audit_summary["quality_signals"]["full_chain_cleanup"]
+            self.assertEqual(cleanup_signal["basis"], "synthetic_full_chain_cleanup")
+            self.assertEqual(cleanup_signal["total_files"], len(pages))
+            self.assertGreaterEqual(cleanup_signal["preserved_files"], len(protected_names))
+            self.assertGreaterEqual(cleanup_signal["reverted_files"], len(protected_names))
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_faint_marginal_note_cleanup_guard_preserves_protected_edge_content(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-faint-marginal-note-guard-") as temp_dir:
             root = Path(temp_dir)
