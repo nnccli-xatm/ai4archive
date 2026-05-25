@@ -15405,6 +15405,85 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_background_stain_cleanup_preserves_faint_text_and_form_lines(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-background-stain-faint-form-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "A001_safe_clouded_background_cleanup.png": _water_damage_evidence_guard_page("safe_neutral_cleanup_control"),
+                "A002_protected_faint_typed_text.png": _faint_cloud_background_stain_page("faint_content"),
+                "A003_protected_ruled_form_lines.png": _faint_cloud_background_stain_page("ruled_table"),
+                "A004_protected_carbon_copy_rule_band.png": _multipart_carbon_copy_form_guard_page(
+                    "ruled_form_with_perforation"
+                ),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            safe_name = "A001_safe_clouded_background_cleanup.png"
+            safe_before = pages[safe_name].convert("L")
+            safe_before_stain = _mean_luma(safe_before, (186, 66, 254, 128))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-background-stain-faint-form", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            with Image.open(process_dir / safe_record["output_relative_path"]) as output_image:
+                safe_after = output_image.convert("L")
+                safe_after_stain = _mean_luma(safe_after, (186, 66, 254, 128))
+            self.assertTrue(safe_record["background_stains_lightened"])
+            self.assertGreater(safe_after_stain - safe_before_stain, 0.5)
+            self.assertGreater(safe_audit["background_stains_changed_pixel_ratio"], 0.0)
+            self.assertLessEqual(safe_audit["background_stains_changed_pixel_ratio"], 0.08)
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+
+            protected_names = [name for name in pages if name != safe_name]
+            protected_boxes = {
+                "A002_protected_faint_typed_text.png": (82, 80, 180, 134),
+                "A003_protected_ruled_form_lines.png": (60, 66, 198, 148),
+                "A004_protected_carbon_copy_rule_band.png": (84, 66, 286, 180),
+            }
+            for name in protected_names:
+                record = records[name]
+                audit = record["processing_audit"]
+                before = pages[name].convert("RGB")
+                with Image.open(process_dir / record["output_relative_path"]) as output_image:
+                    after = output_image.convert("RGB")
+                self.assertEqual(record["status"], "processed", name)
+                self.assertFalse(record["background_stains_lightened"], name)
+                self.assertIn("lighten_background_stains_noop", record["operations"], name)
+                self.assertEqual(audit["background_stains_changed_pixel_ratio"], 0.0, name)
+                self.assertLessEqual(_changed_ratio(before, after, protected_boxes[name]), 0.03, name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertIn(
+                    audit["combination_quality_guard_action"],
+                    {"passed", "kept_original", "reverted_to_source"},
+                    name,
+                )
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(audit_summary["counts"]["background_stains_lightened_files"], 1)
+            self.assertGreaterEqual(audit_summary["counts"]["background_stains_skipped_files"], len(protected_names))
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_water_damage_cockled_paper_guard_preserves_evidence_with_safe_cleanup_control(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-water-cockled-") as temp_dir:
             root = Path(temp_dir)
