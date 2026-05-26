@@ -314,7 +314,7 @@ jobs:
           echo "Selected ${test_count} tests for shard ${{ matrix.shard-label }}/4"
 
       - name: Run full-test shard
-        run: PYTHONPATH=src python -m unittest $(cat /tmp/test-shard.txt)
+        run: PYTHONPATH=src:tests python -m unittest $(cat /tmp/test-shard.txt)
 
   deep-full-test-build-smoke:
     name: Deep full Python ${{ matrix.python-version }}

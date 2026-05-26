@@ -91,7 +91,9 @@ main push 的完整测试在 Python 3.11 上按 4 个 shard 并行：
 - 使用 `unittest.defaultTestLoader.discover("tests")` 收集完整测试 ID。
 - 对每个测试 ID 做 SHA-256 hash。
 - 按 `hash % 4` 分配到 shard。
-- 每个 shard 用 `python -m unittest <test ids...>` 执行。
+- 每个 shard 用 `PYTHONPATH=src:tests python -m unittest <test ids...>` 执行。
+
+`discover("tests")` 产生的测试 ID 是 `test_xxx.Class.method` 形式，直接按 ID 执行时需要把 `tests/` 放进 `PYTHONPATH`。完整 discover 可以只用 `PYTHONPATH=src`，但分片后的按 ID 执行必须同时包含 `tests`，否则 CI 会把每个测试模块误判为不可导入。
 
 这种方式的优点：
 
@@ -149,4 +151,3 @@ main push 的完整测试在 Python 3.11 上按 4 个 shard 并行：
 4. deep-full 失败
    - 如果只有某个 Python 版本失败，优先判断跨版本兼容性。
    - 如果三版本都失败，优先按普通完整回归处理。
-
