@@ -1468,6 +1468,158 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertNotIn("private_full_chain_page_number_corner_safe_control", audit_summary_text)
             self.assertNotIn("private_full_chain_page_number_corner_protected_folio", audit_summary_text)
 
+    def test_full_chain_bottom_margin_continuation_marks_preserved_during_cleanup_and_crop(self) -> None:
+        def _bottom_margin_continuation_page(variant: str) -> Image.Image:
+            image = Image.new("RGB", (336, 248), (245, 244, 239))
+            pixels = image.load()
+            for y in range(image.height):
+                for x in range(image.width):
+                    wave = int(round(2.2 * math.sin(x * 0.043) + 1.8 * math.cos(y * 0.051)))
+                    cast = int(round(1.9 * (x / max(1, image.width - 1)) + 1.2 * (y / max(1, image.height - 1))))
+                    base = max(0, min(255, 245 + wave - cast))
+                    pixels[x, y] = (base, base, max(0, base - 2))
+
+            draw = ImageDraw.Draw(image)
+            font = ImageFont.load_default()
+            draw.text((22, 20), "REGISTER PAGE", fill=(112, 112, 108), font=font)
+            for y in (56, 80, 104, 128, 152, 176, 200, 224):
+                draw.line((20, y, 316, y), fill=(202, 202, 198), width=1)
+            for x in (84, 220, 316):
+                draw.line((x, 40, x, 228), fill=(200, 200, 196), width=1)
+
+            if variant == "safe_control":
+                # Bottom-edge dirt/shadow to be reduced by cleanup without meaningful marks nearby.
+                for x in range(24, 152, 6):
+                    draw.point((x, 238), fill=(130, 130, 124))
+                    draw.point((x + 2, 241), fill=(124, 124, 118))
+                    if x % 12 == 0:
+                        draw.point((x + 1, 244), fill=(118, 118, 112))
+                draw.line((22, 246, 152, 246), fill=(166, 166, 160), width=1)
+                return image
+
+            if variant == "protected_continuation_mark":
+                draw.text((232, 214), "cont.", fill=(168, 168, 162), font=font)
+                draw.line((270, 220, 286, 220), fill=(160, 160, 154), width=1)
+                draw.line((286, 220, 282, 216), fill=(160, 160, 154), width=1)
+                draw.line((286, 220, 282, 224), fill=(160, 160, 154), width=1)
+                draw.line((232, 226, 292, 226), fill=(188, 188, 184), width=1)
+                return image
+
+            raise ValueError(f"unsupported variant: {variant}")
+
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-bottom-margin-continuation-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            safe_name = "private_full_chain_bottom_margin_safe_control.png"
+            protected_name = "private_full_chain_bottom_margin_continuation_mark.png"
+            safe = _interrupted_dark_scanner_border_page("single_edge")
+            protected = _bottom_margin_continuation_page("protected_continuation_mark")
+            safe_path = input_dir / safe_name
+            protected_path = input_dir / protected_name
+            safe.save(safe_path, dpi=(300, 300))
+            protected.save(protected_path, dpi=(300, 300))
+            source_bytes_before = {
+                safe_name: safe_path.read_bytes(),
+                protected_name: protected_path.read_bytes(),
+            }
+
+            report = scan_batch(
+                ScanConfig("synthetic-regression", "full-chain-bottom-margin-continuation-guard", input_dir, output_dir)
+            )
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_record = records[safe_name]
+            protected_record = records[protected_name]
+            self.assertEqual(safe_record["processing_audit"]["guardrail_failures"], [])
+            self.assertEqual(protected_record["processing_audit"]["guardrail_failures"], [])
+
+            source_bytes_after = {
+                safe_name: safe_path.read_bytes(),
+                protected_name: protected_path.read_bytes(),
+            }
+            self.assertEqual(source_bytes_before, source_bytes_after)
+
+            safe_bottom_artifact_box = (0, 120, 14, 176)
+            continuation_mark_box = (230, 212, 292, 228)
+            safe_dark_threshold = 116
+            mark_dark_threshold = 178
+            min_keep_ratio = 0.70
+
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_processed:
+                safe_before = safe.convert("RGB")
+                safe_after = safe_processed.convert("RGB")
+                safe_before_region = safe_before.convert("L").crop(safe_bottom_artifact_box)
+                safe_after_region = safe_after.convert("L").crop(safe_bottom_artifact_box)
+                safe_before_dark = sum(1 for value in safe_before_region.getdata() if value < safe_dark_threshold)
+                safe_after_dark = sum(1 for value in safe_after_region.getdata() if value < safe_dark_threshold)
+                self.assertGreaterEqual(
+                    safe_before_dark,
+                    120,
+                    "safe-control precondition: bottom-edge artifact region must contain dark pixels before cleanup",
+                )
+                safe_dark_ratio = safe_after_dark / max(1, safe_before_dark)
+                safe_changed_ratio = _changed_ratio(safe_before, safe_after, safe_bottom_artifact_box)
+                self.assertTrue(
+                    safe_record["dark_border_trimmed"] or safe_dark_ratio <= 0.90 or safe_changed_ratio >= 0.02,
+                    "safe bottom-edge artifact should be reduced or meaningfully changed by cleanup/crop",
+                )
+                self.assertLess(safe_dark_ratio, 1.15)
+
+            with Image.open(process_dir / protected_record["output_relative_path"]) as protected_processed:
+                protected_before = protected.convert("RGB")
+                protected_after = protected_processed.convert("RGB")
+                protected_before_region = protected_before.convert("L").crop(continuation_mark_box)
+                protected_after_region = protected_after.convert("L").crop(continuation_mark_box)
+                before_dark = sum(1 for value in protected_before_region.getdata() if value < mark_dark_threshold)
+                after_dark = sum(1 for value in protected_after_region.getdata() if value < mark_dark_threshold)
+                self.assertGreaterEqual(
+                    before_dark,
+                    40,
+                    "protected precondition: bottom-margin continuation mark must be detectable before cleanup",
+                )
+                keep_ratio = after_dark / max(1, before_dark)
+                changed_ratio = _changed_ratio(protected_before, protected_after, continuation_mark_box)
+                self.assertGreaterEqual(keep_ratio, min_keep_ratio)
+                self.assertLess(changed_ratio, 0.72)
+
+                negative_path = protected_after.copy()
+                ImageDraw.Draw(negative_path).rectangle(continuation_mark_box, fill=(247, 247, 244))
+                negative_region = negative_path.convert("L").crop(continuation_mark_box)
+                negative_dark = sum(1 for value in negative_region.getdata() if value < mark_dark_threshold)
+                negative_keep_ratio = negative_dark / max(1, before_dark)
+                self.assertLess(
+                    negative_keep_ratio,
+                    min_keep_ratio,
+                    "sensitivity check: erasing the bottom-margin continuation mark must fail the keep-ratio guard",
+                )
+
+            for record in (safe_record, protected_record):
+                if record["dark_border_trimmed"]:
+                    self.assertLessEqual(record["processing_audit"]["max_trim_margin_ratio"], 0.03)
+                else:
+                    self.assertIn(
+                        record["dark_border_reason_code"],
+                        {
+                            "protected_edge_content_near_dark_border",
+                            "incomplete_dark_edge_border_evidence",
+                            "no_confident_dark_edge_border",
+                            "not_dark_enough_for_trim",
+                        },
+                    )
+
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            self.assertNotIn("private_full_chain_bottom_margin_safe_control", audit_summary_text)
+            self.assertNotIn("private_full_chain_bottom_margin_continuation_mark", audit_summary_text)
+
     def test_full_chain_dark_rectangular_margin_stamps_preserved_during_edge_cleanup(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-dark-rectangular-margin-guard-") as temp_dir:
             root = Path(temp_dir)
