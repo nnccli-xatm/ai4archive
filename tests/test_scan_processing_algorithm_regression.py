@@ -1248,6 +1248,101 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertNotIn("private_full_chain_dark_edge_faint_page_number", audit_summary_text)
             self.assertNotIn("private_full_chain_dark_edge_binder_marks", audit_summary_text)
 
+    def test_full_chain_dark_rectangular_margin_stamps_preserved_during_edge_cleanup(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-dark-rectangular-margin-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            safe_name = "private_full_chain_dark_rectangular_safe_control.png"
+            stamp_name = "private_full_chain_dark_rectangular_margin_stamp.png"
+            stamp_with_faint_name = "private_full_chain_dark_rectangular_with_faint_rules.png"
+
+            safe = _interrupted_dark_scanner_border_page("broad_shadow")
+            near_margin_stamp = _dark_rectangular_margin_stamp_page("stamp_only")
+            stamp_with_faint_rules = _dark_rectangular_margin_stamp_page("stamp_with_faint_rules")
+            safe.save(input_dir / safe_name, dpi=(300, 300))
+            near_margin_stamp.save(input_dir / stamp_name, dpi=(300, 300))
+            stamp_with_faint_rules.save(input_dir / stamp_with_faint_name, dpi=(300, 300))
+
+            report = scan_batch(
+                ScanConfig("synthetic-regression", "full-chain-dark-rectangular-margin-edge-cleanup", input_dir, output_dir)
+            )
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_record = records[safe_name]
+            self.assertEqual(safe_record["processing_audit"]["guardrail_failures"], [])
+            self.assertTrue(
+                safe_record["dark_border_trimmed"]
+                or safe_record["dark_border_reason_code"]
+                in {
+                    "no_confident_dark_edge_border",
+                    "incomplete_dark_edge_border_evidence",
+                    "not_dark_enough_for_trim",
+                    "protected_edge_content_near_dark_border",
+                }
+            )
+
+            protected_expectations = {
+                stamp_name: ((18, 132, 72, 170), near_margin_stamp, (4, 26, 238, 188), 0.80, 0.58, 0.03),
+                stamp_with_faint_name: ((20, 128, 74, 166), stamp_with_faint_rules, (4, 22, 238, 188), 0.78, 0.62, 0.03),
+            }
+            for name, (stamp_box, source_page, bbox_probe, min_keep_ratio, max_changed_ratio, max_trim_ratio) in (
+                protected_expectations.items()
+            ):
+                record = records[name]
+                self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
+                output_path = process_dir / record["output_relative_path"]
+                with Image.open(output_path) as processed_image:
+                    before = source_page.convert("RGB")
+                    after = processed_image.convert("RGB")
+                    before_stamp = before.crop(stamp_box).convert("L")
+                    after_stamp = after.crop(stamp_box).convert("L")
+
+                    before_dark = sum(1 for value in before_stamp.getdata() if value < 96)
+                    after_dark = sum(1 for value in after_stamp.getdata() if value < 96)
+                    keep_ratio = after_dark / max(1, before_dark)
+                    changed_ratio = _changed_ratio(before, after, stamp_box)
+                    self.assertGreaterEqual(keep_ratio, min_keep_ratio, name)
+                    self.assertLess(changed_ratio, max_changed_ratio, name)
+
+                    before_bbox = _content_bbox(before.crop(bbox_probe), threshold=236)
+                    after_bbox = _content_bbox(after.crop(bbox_probe), threshold=236)
+                    self.assertIsNotNone(before_bbox, name)
+                    self.assertIsNotNone(after_bbox, name)
+                    assert before_bbox is not None
+                    assert after_bbox is not None
+                    self.assertLessEqual(abs(after_bbox[0] - before_bbox[0]), 8, name)
+                    self.assertLessEqual(abs(after_bbox[1] - before_bbox[1]), 8, name)
+                    self.assertLessEqual(abs(after_bbox[2] - before_bbox[2]), 8, name)
+                    self.assertLessEqual(abs(after_bbox[3] - before_bbox[3]), 8, name)
+
+                if record["dark_border_trimmed"]:
+                    self.assertLessEqual(record["processing_audit"]["max_trim_margin_ratio"], max_trim_ratio, name)
+                else:
+                    self.assertIn(
+                        record["dark_border_reason_code"],
+                        {
+                            "protected_edge_content_near_dark_border",
+                            "incomplete_dark_edge_border_evidence",
+                            "no_confident_dark_edge_border",
+                            "not_dark_enough_for_trim",
+                        },
+                        name,
+                    )
+
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            self.assertNotIn("private_full_chain_dark_rectangular_safe_control", audit_summary_text)
+            self.assertNotIn("private_full_chain_dark_rectangular_margin_stamp", audit_summary_text)
+            self.assertNotIn("private_full_chain_dark_rectangular_with_faint_rules", audit_summary_text)
+
     def test_full_chain_encoded_derivative_preserves_color_detail_and_icc_profile(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-encoded-color-") as temp_dir:
             root = Path(temp_dir)
@@ -21445,6 +21540,24 @@ def _interrupted_dark_scanner_border_page(variant: str = "safe") -> Image.Image:
     elif variant not in {"safe", "single_edge"}:
         raise ValueError(f"unsupported variant: {variant}")
     return image
+
+
+def _dark_rectangular_margin_stamp_page(variant: str) -> Image.Image:
+    image = _interrupted_dark_scanner_border_page("broad_shadow")
+    draw = ImageDraw.Draw(image)
+    if variant == "stamp_only":
+        draw.rectangle((18, 132, 72, 170), fill=(26, 26, 26))
+        draw.rectangle((74, 144, 100, 148), fill=(78, 78, 78))
+        draw.rectangle((96, 52, 224, 55), fill=(48, 48, 48))
+        return image
+    if variant == "stamp_with_faint_rules":
+        draw.rectangle((20, 128, 74, 166), fill=(24, 24, 24))
+        for y in (138, 148, 158):
+            draw.rectangle((78, y, 214, y + 1), fill=(188, 188, 184))
+        draw.rectangle((82, 134, 116, 136), fill=(82, 82, 82))
+        draw.rectangle((80, 142, 124, 144), fill=(86, 86, 86))
+        return image
+    raise ValueError(f"unsupported dark rectangular margin stamp variant: {variant}")
 
 
 def _text_page() -> Image.Image:
