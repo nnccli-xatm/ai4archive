@@ -39,6 +39,47 @@ def _changed_ratio(before: Image.Image, after: Image.Image, box: tuple[int, int,
     return changed / max(1, before_luma.width * before_luma.height)
 
 
+def _dark_pixel_count(image: Image.Image, box: tuple[int, int, int, int], threshold: int) -> int:
+    region = image.convert("L").crop(box)
+    return sum(1 for value in region.getdata() if value < threshold)
+
+
+def _assert_full_chain_region_preservation(
+    testcase: unittest.TestCase,
+    *,
+    before: Image.Image,
+    after: Image.Image,
+    box: tuple[int, int, int, int],
+    dark_threshold: int,
+    min_source_dark_pixels: int,
+    min_keep_ratio: float,
+    max_changed_ratio: float,
+    negative_fill_rgb: tuple[int, int, int],
+    label: str,
+) -> None:
+    before_dark = _dark_pixel_count(before, box, dark_threshold)
+    testcase.assertGreaterEqual(
+        before_dark,
+        min_source_dark_pixels,
+        f"protected precondition: {label} must contain detectable dark pixels before cleanup",
+    )
+    after_dark = _dark_pixel_count(after, box, dark_threshold)
+    keep_ratio = after_dark / max(1, before_dark)
+    changed_ratio = _changed_ratio(before, after, box)
+    testcase.assertGreaterEqual(keep_ratio, min_keep_ratio, label)
+    testcase.assertLess(changed_ratio, max_changed_ratio, label)
+
+    negative_after = after.copy()
+    ImageDraw.Draw(negative_after).rectangle(box, fill=negative_fill_rgb)
+    negative_dark = _dark_pixel_count(negative_after, box, dark_threshold)
+    negative_keep_ratio = negative_dark / max(1, before_dark)
+    testcase.assertLess(
+        negative_keep_ratio,
+        min_keep_ratio,
+        f"sensitivity check: erasing {label} must fail the keep-ratio guard",
+    )
+
+
 def _reason_code_distribution(reason_distribution: dict[str, int]) -> dict[str, int]:
     reason_codes: dict[str, int] = {}
     for reason, count in reason_distribution.items():
@@ -1421,29 +1462,17 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 self.assertLess(safe_dark_ratio, 1.15)
 
             with Image.open(process_dir / protected_record["output_relative_path"]) as protected_processed:
-                protected_before_region = protected.convert("L").crop(mark_box)
-                protected_after_region = protected_processed.convert("L").crop(mark_box)
-                before_dark = sum(1 for value in protected_before_region.getdata() if value < mark_dark_threshold)
-                after_dark = sum(1 for value in protected_after_region.getdata() if value < mark_dark_threshold)
-                self.assertGreaterEqual(
-                    before_dark,
-                    140,
-                    "protected precondition: folio mark region must contain detectable dark pixels before cleanup",
-                )
-                keep_ratio = after_dark / max(1, before_dark)
-                changed_ratio = _changed_ratio(protected.convert("RGB"), protected_processed.convert("RGB"), mark_box)
-                self.assertGreaterEqual(keep_ratio, min_keep_ratio)
-                self.assertLess(changed_ratio, 0.70)
-
-                negative_path = protected_processed.convert("RGB")
-                ImageDraw.Draw(negative_path).rectangle(mark_box, fill=(246, 246, 242))
-                negative_region = negative_path.convert("L").crop(mark_box)
-                negative_dark = sum(1 for value in negative_region.getdata() if value < mark_dark_threshold)
-                negative_keep_ratio = negative_dark / max(1, before_dark)
-                self.assertLess(
-                    negative_keep_ratio,
-                    min_keep_ratio,
-                    "sensitivity check: erasing the corner page-number mark must fail the keep-ratio guard",
+                _assert_full_chain_region_preservation(
+                    self,
+                    before=protected.convert("RGB"),
+                    after=protected_processed.convert("RGB"),
+                    box=mark_box,
+                    dark_threshold=mark_dark_threshold,
+                    min_source_dark_pixels=140,
+                    min_keep_ratio=min_keep_ratio,
+                    max_changed_ratio=0.70,
+                    negative_fill_rgb=(246, 246, 242),
+                    label="the corner page-number mark",
                 )
 
             for record in (safe_record, protected_record):
@@ -1573,29 +1602,17 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             with Image.open(process_dir / protected_record["output_relative_path"]) as protected_processed:
                 protected_before = protected.convert("RGB")
                 protected_after = protected_processed.convert("RGB")
-                protected_before_region = protected_before.convert("L").crop(continuation_mark_box)
-                protected_after_region = protected_after.convert("L").crop(continuation_mark_box)
-                before_dark = sum(1 for value in protected_before_region.getdata() if value < mark_dark_threshold)
-                after_dark = sum(1 for value in protected_after_region.getdata() if value < mark_dark_threshold)
-                self.assertGreaterEqual(
-                    before_dark,
-                    40,
-                    "protected precondition: bottom-margin continuation mark must be detectable before cleanup",
-                )
-                keep_ratio = after_dark / max(1, before_dark)
-                changed_ratio = _changed_ratio(protected_before, protected_after, continuation_mark_box)
-                self.assertGreaterEqual(keep_ratio, min_keep_ratio)
-                self.assertLess(changed_ratio, 0.72)
-
-                negative_path = protected_after.copy()
-                ImageDraw.Draw(negative_path).rectangle(continuation_mark_box, fill=(247, 247, 244))
-                negative_region = negative_path.convert("L").crop(continuation_mark_box)
-                negative_dark = sum(1 for value in negative_region.getdata() if value < mark_dark_threshold)
-                negative_keep_ratio = negative_dark / max(1, before_dark)
-                self.assertLess(
-                    negative_keep_ratio,
-                    min_keep_ratio,
-                    "sensitivity check: erasing the bottom-margin continuation mark must fail the keep-ratio guard",
+                _assert_full_chain_region_preservation(
+                    self,
+                    before=protected_before,
+                    after=protected_after,
+                    box=continuation_mark_box,
+                    dark_threshold=mark_dark_threshold,
+                    min_source_dark_pixels=40,
+                    min_keep_ratio=min_keep_ratio,
+                    max_changed_ratio=0.72,
+                    negative_fill_rgb=(247, 247, 244),
+                    label="the bottom-margin continuation mark",
                 )
 
             for record in (safe_record, protected_record):
