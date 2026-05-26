@@ -3003,6 +3003,95 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_thin_ruled_form_lines_preserved_during_cleanup(self) -> None:
+        def thin_ruled_form_page(variant: str) -> Image.Image:
+            image = Image.new("RGB", (336, 248), (245, 245, 242))
+            draw = ImageDraw.Draw(image)
+            font = ImageFont.load_default()
+            grid_left, grid_top, grid_right, grid_bottom = (34, 48, 308, 220)
+            for y in (76, 104, 132, 160, 188):
+                draw.line((grid_left, y, grid_right, y), fill=(186, 186, 182), width=1)
+            for x in (96, 162, 228, 286):
+                draw.line((x, grid_top, x, grid_bottom), fill=(188, 188, 184), width=1)
+            draw.text((40, 24), "LEDGER FORM", fill=(102, 102, 98), font=font)
+            draw.text((42, 56), "ROW A", fill=(118, 118, 114), font=font)
+            draw.text((42, 84), "ROW B", fill=(118, 118, 114), font=font)
+            draw.text((42, 112), "ROW C", fill=(118, 118, 114), font=font)
+            if variant == "safe":
+                return image
+            if variant == "stain_and_shading":
+                draw.ellipse((204, 146, 282, 208), fill=(232, 228, 220))
+                for y in range(64, 212):
+                    shade = 4 + ((y - 64) * 10) // max(1, 212 - 64)
+                    draw.line((198, y, 298, y), fill=(238 - shade, 236 - shade, 230 - shade), width=1)
+                for y in range(56, 214, 18):
+                    draw.point((300, y), fill=(176, 172, 164))
+                    draw.point((304, y + 3), fill=(178, 174, 166))
+                return image
+            raise ValueError(f"unsupported thin-ruled form variant: {variant}")
+
+        def _inklike_pixels(image: Image.Image, box: tuple[int, int, int, int], threshold: int = 208) -> int:
+            region = image.convert("L").crop(box)
+            return sum(1 for value in region.getdata() if value <= threshold)
+
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-thin-ruled-form-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "A001_safe_form_background.png": thin_ruled_form_page("safe"),
+                "A002_thin_ruled_form_with_stain.png": thin_ruled_form_page("stain_and_shading"),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-thin-ruled-form-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            ruled_region = (32, 46, 310, 222)
+            line_boxes = ((60, 76, 282, 77), (60, 132, 282, 133), (162, 56, 163, 206), (286, 56, 287, 206))
+            for name in ("A001_safe_form_background.png", "A002_thin_ruled_form_with_stain.png"):
+                record = records[name]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    after = output.convert("RGB")
+                before = pages[name].convert("RGB")
+                self.assertEqual(before.size, after.size, name)
+                self.assertEqual(_content_bbox(before), _content_bbox(after), name)
+                self.assertLessEqual(_changed_ratio(before, after, ruled_region), 0.085, name)
+                self.assertLessEqual(abs(_mean_luma(after, ruled_region) - _mean_luma(before, ruled_region)), 5.0, name)
+                for line_box in line_boxes:
+                    before_ink = _inklike_pixels(before, line_box)
+                    after_ink = _inklike_pixels(after, line_box)
+                    self.assertGreaterEqual(before_ink, 1, name)
+                    self.assertGreaterEqual(after_ink, max(1, int(math.floor(before_ink * 0.65))), name)
+
+            protected_audit = records["A002_thin_ruled_form_with_stain.png"]["processing_audit"]
+            self.assertIn(
+                protected_audit.get("combination_quality_guard_action"),
+                {"passed", "reverted_to_source", "kept_original"},
+            )
+            self.assertIn(
+                protected_audit.get("cumulative_change_guard_action"),
+                {"passed", "reverted_to_source", "kept_original"},
+            )
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_handwritten_correction_marks_preserved_against_overclean_regression(self) -> None:
         def correction_mark_page(variant: str) -> Image.Image:
             image = Image.new("RGB", (336, 244), (245, 245, 242))
