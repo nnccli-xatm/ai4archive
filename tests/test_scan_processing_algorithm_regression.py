@@ -2267,6 +2267,154 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_subtotal_underline_guard_preserves_low_contrast_ledger_rules(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-subtotal-underline-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            pages = {
+                "synthetic_safe_subtotal_underline_control.png": _ledger_subtotal_underline_guard_page("safe_control"),
+                "synthetic_protected_subtotal_underline_rule.png": _ledger_subtotal_underline_guard_page("subtotal_rule"),
+                "synthetic_protected_total_double_underline_rule.png": _ledger_subtotal_underline_guard_page("double_rule_total"),
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            def aggressive_stain_cleanup(current: Image.Image) -> processing_module.BackgroundStainLighteningResult:
+                changed = current.copy()
+                draw = ImageDraw.Draw(changed)
+                draw.ellipse((172, 24, 218, 58), fill=(246, 246, 242))
+                protected_marker = min(
+                    _mean_luma(current, (58, 82, 206, 94)),
+                    _mean_luma(current, (58, 112, 206, 124)),
+                )
+                if protected_marker < 220.0:
+                    draw.rectangle((54, 80, 208, 126), fill=(246, 246, 242))
+                    changed_ratio = 0.20
+                else:
+                    changed_ratio = 0.03
+                return processing_module.BackgroundStainLighteningResult(
+                    changed,
+                    True,
+                    "background stains lightened: synthetic subtotal-underline cleanup",
+                    224.0,
+                    246.0,
+                    22.0,
+                    changed_ratio,
+                    changed_ratio,
+                )
+
+            def aggressive_scanline_cleanup(current: Image.Image) -> processing_module.ScanlineLighteningResult:
+                changed = current.copy()
+                draw = ImageDraw.Draw(changed)
+                draw.line((58, 88, 206, 88), fill=(246, 246, 242), width=2)
+                draw.line((58, 118, 206, 118), fill=(246, 246, 242), width=2)
+                return processing_module.ScanlineLighteningResult(
+                    changed,
+                    True,
+                    "scanlines lightened: synthetic subtotal-underline cleanup",
+                    "horizontal",
+                    2,
+                    220.0,
+                    246.0,
+                    26.0,
+                    0.14,
+                    0.14,
+                )
+
+            report = scan_batch(ScanConfig("synthetic-regression", "subtotal-underline-guard", input_dir, output_dir))
+            with mock.patch.object(
+                processing_module,
+                "_lighten_background_stains_conservative",
+                side_effect=aggressive_stain_cleanup,
+            ), mock.patch.object(
+                processing_module,
+                "_lighten_scanlines_conservative",
+                side_effect=aggressive_scanline_cleanup,
+            ):
+                manifest = process_images(
+                    report,
+                    input_dir,
+                    process_dir,
+                    ProcessingOptions(lighten_background_stains=True, lighten_scanlines=True, workers=1),
+                )
+
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            self.assertEqual(set(records), set(pages))
+            for name, original in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original)
+
+            safe_name = "synthetic_safe_subtotal_underline_control.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            self.assertIn(safe_audit["combination_quality_guard_action"], {"passed", "reverted_to_source", "kept_original"})
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_output:
+                self.assertEqual(safe_output.size, pages[safe_name].size)
+                self.assertEqual(_content_bbox(safe_output), _content_bbox(pages[safe_name]))
+
+            protected_names = (
+                "synthetic_protected_subtotal_underline_rule.png",
+                "synthetic_protected_total_double_underline_rule.png",
+            )
+            rule_boxes = {
+                "synthetic_protected_subtotal_underline_rule.png": (58, 82, 206, 94),
+                "synthetic_protected_total_double_underline_rule.png": (58, 112, 206, 124),
+            }
+            for name in protected_names:
+                record = records[name]
+                audit = record["processing_audit"]
+                self.assertEqual(audit["cumulative_change_guard_action"], "reverted_to_source", name)
+                self.assertEqual(audit["combination_quality_guard_action"], "reverted_to_source", name)
+                self.assertEqual(audit["combination_quality_guard_reason_code"], "combined_change_too_large_reverted", name)
+                self.assertIn("combination_quality_guard_reverted_to_source", record["operations"], name)
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    self.assertEqual(output.convert("RGB").tobytes(), pages[name].tobytes(), name)
+                    self.assertEqual(output.size, pages[name].size)
+                    self.assertEqual(_content_bbox(output), _content_bbox(pages[name]))
+                    changed_ratio = _changed_ratio(pages[name], output, rule_boxes[name])
+                    self.assertLessEqual(changed_ratio, 0.005, name)
+                    self.assertGreater(_edge_energy(output.crop(rule_boxes[name])), 8.0, name)
+
+            erased_subtotal = pages[protected_names[0]].copy()
+            ImageDraw.Draw(erased_subtotal).rectangle((58, 82, 206, 94), fill=(246, 246, 242))
+            erased_double = pages[protected_names[1]].copy()
+            ImageDraw.Draw(erased_double).rectangle((58, 112, 206, 124), fill=(246, 246, 242))
+            self.assertGreater(
+                _edge_energy(pages[protected_names[0]].crop(rule_boxes[protected_names[0]]))
+                - _edge_energy(erased_subtotal.crop(rule_boxes[protected_names[0]])),
+                5.0,
+            )
+            self.assertGreater(
+                _edge_energy(pages[protected_names[1]].crop(rule_boxes[protected_names[1]]))
+                - _edge_energy(erased_double.crop(rule_boxes[protected_names[1]])),
+                5.0,
+            )
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertGreaterEqual(audit_summary["counts"]["cumulative_change_guard_reverted_files"], len(protected_names))
+            self.assertGreaterEqual(
+                audit_summary["counts"]["combination_quality_guard_reverted_files"], len(protected_names)
+            )
+            cleanup_signal = audit_summary["quality_signals"]["full_chain_cleanup"]
+            self.assertEqual(cleanup_signal["basis"], "synthetic_full_chain_cleanup")
+            self.assertEqual(cleanup_signal["total_files"], len(pages))
+            self.assertGreaterEqual(cleanup_signal["preserved_files"], len(protected_names))
+            self.assertGreaterEqual(cleanup_signal["reverted_files"], len(protected_names))
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_conservative_combined_cleanup_budget_guard_preserves_faint_evidence(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-conservative-budget-guard-") as temp_dir:
             root = Path(temp_dir)
@@ -19896,6 +20044,38 @@ def _combined_retouch_guard_page(variant: str = "safe") -> Image.Image:
     else:
         raise ValueError(f"unsupported variant: {variant}")
     return image
+
+
+def _ledger_subtotal_underline_guard_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (260, 170), (244, 244, 240))
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default()
+
+    for y in (38, 58, 78, 98, 118):
+        draw.line((22, y, 236, y), fill=(220, 220, 216), width=1)
+    for x in (154, 206):
+        draw.line((x, 26, x, 132), fill=(224, 224, 220), width=1)
+
+    rows = ("ITEM A", "ITEM B", "SUBTOTAL", "TOTAL")
+    amounts = ("12.00", "5.30", "17.30", "17.30")
+    for idx, (label, amount) in enumerate(zip(rows, amounts)):
+        y = 28 + idx * 20
+        draw.text((28, y), label, fill=(64, 64, 64), font=font)
+        draw.text((170, y), amount, fill=(66, 66, 66), font=font)
+
+    draw.ellipse((170, 24, 216, 58), fill=(236, 232, 220))
+
+    if variant == "safe_control":
+        draw.rectangle((38, 142, 220, 146), fill=(238, 238, 234))
+        return image
+    if variant == "subtotal_rule":
+        draw.line((58, 88, 206, 88), fill=(186, 186, 182), width=1)
+        return image
+    if variant == "double_rule_total":
+        draw.line((58, 116, 206, 116), fill=(188, 188, 184), width=1)
+        draw.line((58, 120, 206, 120), fill=(192, 192, 188), width=1)
+        return image
+    raise ValueError(f"unsupported subtotal underline variant: {variant}")
 
 
 def _compound_retouch_page(variant: str) -> Image.Image:
