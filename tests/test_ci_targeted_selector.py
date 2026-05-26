@@ -98,6 +98,29 @@ class TargetedSelectorTests(unittest.TestCase):
         self.assertEqual(selected, set())
         self.assertTrue(fallback)
 
+    def test_deletion_only_hunk_maps_to_existing_method(self) -> None:
+        source = textwrap.dedent(
+            """
+            import unittest
+
+            class Example(unittest.TestCase):
+                def test_existing(self):
+                    value = 2
+                    self.assertEqual(value, 2)
+            """
+        ).strip() + "\n"
+        diff = "@@ -5 +4,0 @@ class Example(unittest.TestCase):\n-        value = 1\n"
+
+        with mock.patch("pathlib.Path.exists", return_value=True), mock.patch(
+            "pathlib.Path.read_text", return_value=source
+        ):
+            selected, fallback = selector.select_test_ids_for_changed_test_file(
+                "tests/test_example.py", diff
+            )
+
+        self.assertEqual(selected, {"tests.test_example.Example.test_existing"})
+        self.assertFalse(fallback)
+
     def test_scan_processing_source_mapping_preserved(self) -> None:
         with mock.patch.object(selector, "_diff_for_path", return_value=""):
             selected = selector.select_targeted_tests(

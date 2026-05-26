@@ -58,16 +58,25 @@ def parse_changed_new_line_numbers(diff_text: str) -> set[int]:
     changed: set[int] = set()
     new_line = 0
     in_hunk = False
+    hunk_has_addition = False
+    hunk_anchor = 0
     for line in diff_text.splitlines():
         match = HUNK_RE.match(line)
         if match:
+            if in_hunk and not hunk_has_addition and hunk_anchor > 0:
+                changed.add(hunk_anchor)
+                if hunk_anchor > 1:
+                    changed.add(hunk_anchor - 1)
             in_hunk = True
             new_line = int(match.group(1))
+            hunk_anchor = new_line
+            hunk_has_addition = False
             continue
         if not in_hunk:
             continue
         if line.startswith("+") and not line.startswith("+++"):
             changed.add(new_line)
+            hunk_has_addition = True
             new_line += 1
             continue
         if line.startswith("-") and not line.startswith("---"):
@@ -75,6 +84,10 @@ def parse_changed_new_line_numbers(diff_text: str) -> set[int]:
         if line.startswith("\\"):
             continue
         new_line += 1
+    if in_hunk and not hunk_has_addition and hunk_anchor > 0:
+        changed.add(hunk_anchor)
+        if hunk_anchor > 1:
+            changed.add(hunk_anchor - 1)
     return changed
 
 
