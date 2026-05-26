@@ -5926,6 +5926,98 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_low_contrast_fax_cleanup_preserves_faint_stamp_and_signature_marks(self) -> None:
+        def _inklike_pixels(image: Image.Image, box: tuple[int, int, int, int], threshold: int = 215) -> int:
+            region = image.convert("L").crop(box)
+            return sum(1 for value in region.getdata() if value <= threshold)
+
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-low-contrast-fax-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "A001_safe_low_contrast_fax_cleanup_control.png": _low_contrast_fax_stamp_guard_page("safe"),
+                "A002_faint_stamp_and_signature_marks.png": _low_contrast_fax_stamp_guard_page("faint_stamp_signature"),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, page in pages.items():
+                source = input_dir / name
+                page.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-low-contrast-fax-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            safe_name = "A001_safe_low_contrast_fax_cleanup_control.png"
+            safe_record = records[safe_name]
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_after:
+                safe_after_rgb = safe_after.convert("RGB")
+            self.assertLessEqual(
+                _changed_ratio(pages[safe_name].convert("RGB"), safe_after_rgb, (36, 38, 320, 220)),
+                0.08,
+            )
+            safe_audit = safe_record["processing_audit"]
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertIn(safe_audit["local_content_change_guard_action"], {"passed", "reverted_to_source"})
+            self.assertIn(safe_audit["cumulative_change_guard_action"], {"passed", "reverted_to_source"})
+            self.assertIn(
+                safe_audit["combination_quality_guard_reason_code"],
+                {
+                    "safe_combination_passed",
+                    "low_confidence_original_preserved",
+                    "combined_change_too_large_reverted",
+                },
+            )
+
+            protected_name = "A002_faint_stamp_and_signature_marks.png"
+            protected_record = records[protected_name]
+            protected_audit = protected_record["processing_audit"]
+            self.assertEqual((input_dir / protected_name).read_bytes(), source_bytes[protected_name])
+            with Image.open(process_dir / protected_record["output_relative_path"]) as protected_after:
+                after = protected_after.convert("RGB")
+            before = pages[protected_name].convert("RGB")
+            self.assertEqual(before.size, after.size)
+            self.assertEqual(_content_bbox(before), _content_bbox(after))
+
+            protected_region = (204, 54, 328, 214)
+            stamp_box = (230, 88, 296, 154)
+            signature_box = (226, 164, 304, 194)
+            self.assertLessEqual(_changed_ratio(before, after, protected_region), 0.08)
+            self.assertLessEqual(abs(_mean_luma(after, protected_region) - _mean_luma(before, protected_region)), 6.0)
+
+            for name, mark_box in (("stamp", stamp_box), ("signature", signature_box)):
+                before_mark_pixels = _inklike_pixels(before, mark_box)
+                after_mark_pixels = _inklike_pixels(after, mark_box)
+                self.assertGreaterEqual(before_mark_pixels, 8, name)
+                self.assertGreaterEqual(after_mark_pixels, max(6, int(math.floor(before_mark_pixels * 0.65))), name)
+
+            self.assertEqual(protected_audit["guardrail_failures"], [])
+            self.assertIn(protected_audit["local_content_change_guard_action"], {"passed", "reverted_to_source"})
+            self.assertIn(protected_audit["cumulative_change_guard_action"], {"passed", "reverted_to_source"})
+            self.assertIn(
+                protected_audit["combination_quality_guard_reason_code"],
+                {
+                    "safe_combination_passed",
+                    "low_confidence_original_preserved",
+                    "protected_content_original_preserved",
+                    "combined_change_too_large_reverted",
+                },
+            )
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_halftone_newsprint_texture_guard_catches_over_smoothing_regression(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-halftone-newsprint-guard-") as temp_dir:
             root = Path(temp_dir)
@@ -19409,6 +19501,38 @@ def _fax_like_banding_page() -> Image.Image:
             for x in range(0, 260):
                 image.putpixel((x, y), (shade, shade, shade))
     return image
+
+
+def _low_contrast_fax_stamp_guard_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (340, 244), (236, 236, 233))
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default()
+
+    for y in (42, 68, 94, 120, 146):
+        draw.rectangle((28, y, 188, y + 3), fill=(122, 122, 120))
+    draw.text((30, 24), "FAX COPY", fill=(132, 132, 130), font=font)
+
+    for y in range(14, 230):
+        if y % 11 in (0, 1):
+            tone = 228 if y % 22 == 0 else 231
+            draw.line((0, y, 339, y), fill=(tone, tone, tone), width=1)
+
+    for index in range(180):
+        x = 202 + ((index * 37 + index * index * 3) % 124)
+        y = 44 + ((index * 19 + index * index * 5) % 176)
+        tone = 224 + (index % 4)
+        image.putpixel((x, y), (tone, tone, tone - 1))
+
+    if variant == "safe":
+        return image
+    if variant == "faint_stamp_signature":
+        draw.ellipse((230, 88, 296, 154), outline=(172, 172, 170), width=1)
+        draw.text((248, 112), "OK", fill=(170, 170, 168), font=font)
+        draw.line((226, 176, 248, 168), fill=(168, 168, 166), width=1)
+        draw.line((248, 168, 266, 178), fill=(168, 168, 166), width=1)
+        draw.line((266, 178, 286, 172), fill=(168, 168, 166), width=1)
+        return image
+    raise ValueError(f"unknown low contrast fax stamp guard variant: {variant}")
 
 
 def _low_resolution_copy_texture_page() -> Image.Image:
