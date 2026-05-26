@@ -3370,6 +3370,120 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_dark_edge_vertical_divider_ledger_lines_remain_detectable(self) -> None:
+        def dark_edge_divider_page(variant: str) -> Image.Image:
+            image = Image.new("RGB", (352, 250), (245, 245, 241))
+            draw = ImageDraw.Draw(image)
+            font = ImageFont.load_default()
+            draw.rectangle((0, 0, 17, 249), fill=(44, 44, 42))
+            for y in range(0, 250, 6):
+                draw.line((6, y, 10, min(249, y + 2)), fill=(62, 62, 60), width=1)
+            draw.text((30, 22), "LEDGER", fill=(98, 98, 95), font=font)
+            draw.text((32, 52), "DATE", fill=(116, 116, 112), font=font)
+            draw.text((32, 74), "DESC", fill=(116, 116, 112), font=font)
+            draw.text((32, 96), "AMOUNT", fill=(116, 116, 112), font=font)
+            for y in (66, 92, 118, 144, 170, 196, 222):
+                draw.line((30, y, 332, y), fill=(206, 206, 202), width=1)
+
+            if variant == "safe_edge_control":
+                return image
+
+            divider_columns = (38, 100, 164, 230, 298)
+            for x in divider_columns:
+                draw.line((x, 48, x, 226), fill=(112, 112, 108), width=1)
+
+            if variant == "protected_vertical_dividers":
+                draw.line((96, 88, 155, 88), fill=(124, 124, 120), width=1)
+                draw.line((96, 140, 214, 140), fill=(124, 124, 120), width=1)
+                return image
+
+            if variant == "protected_thin_dividers_with_faint_rows":
+                for x in (100, 164, 230):
+                    draw.line((x, 48, x, 226), fill=(126, 126, 122), width=1)
+                for y in (80, 106, 132, 158, 184, 210):
+                    draw.line((98, y, 330, y), fill=(214, 214, 210), width=1)
+                draw.text((106, 74), "1", fill=(150, 150, 146), font=font)
+                draw.text((170, 100), "2", fill=(150, 150, 146), font=font)
+                draw.text((236, 126), "3", fill=(150, 150, 146), font=font)
+                return image
+
+            raise ValueError(f"unsupported dark-edge-divider variant: {variant}")
+
+        def _ink_pixels(image: Image.Image, box: tuple[int, int, int, int], threshold: int = 198) -> int:
+            region = image.convert("L").crop(box)
+            return sum(1 for value in region.getdata() if value <= threshold)
+
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-dark-edge-vertical-divider-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            pages = {
+                "A001_safe_dark_edge_streak_control.png": dark_edge_divider_page("safe_edge_control"),
+                "A002_protected_near_edge_vertical_dividers.png": dark_edge_divider_page("protected_vertical_dividers"),
+                "A003_protected_thin_dividers_faint_rows.png": dark_edge_divider_page("protected_thin_dividers_with_faint_rows"),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-dark-edge-vertical-divider-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            protected_line_boxes = {
+                "A002_protected_near_edge_vertical_dividers.png": ((37, 50, 40, 224), (99, 50, 102, 224), (163, 50, 166, 224), (229, 50, 232, 224)),
+                "A003_protected_thin_dividers_faint_rows.png": ((99, 50, 102, 224), (163, 50, 166, 224), (229, 50, 232, 224)),
+            }
+            protected_analysis_box = (26, 44, 336, 230)
+            for name, line_boxes in protected_line_boxes.items():
+                record = records[name]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
+                with Image.open(process_dir / record["output_relative_path"]) as output_image:
+                    after = output_image.convert("RGB")
+                before = pages[name].convert("RGB")
+                self.assertEqual(before.size, after.size, name)
+                self.assertEqual(_content_bbox(before), _content_bbox(after), name)
+                self.assertLessEqual(_changed_ratio(before, after, protected_analysis_box), 0.1, name)
+                self.assertLessEqual(abs(_mean_luma(after, protected_analysis_box) - _mean_luma(before, protected_analysis_box)), 5.5, name)
+                for line_box in line_boxes:
+                    before_ink = _ink_pixels(before, line_box)
+                    after_ink = _ink_pixels(after, line_box)
+                    self.assertGreaterEqual(before_ink, 2, name)
+                    self.assertGreaterEqual(after_ink, max(2, int(math.floor(before_ink * 0.65))), name)
+                self.assertIn(
+                    record["processing_audit"].get("combination_quality_guard_action"),
+                    {"passed", "reverted_to_source", "kept_original"},
+                    name,
+                )
+
+            safe_name = "A001_safe_dark_edge_streak_control.png"
+            safe_record = records[safe_name]
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name], safe_name)
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_output:
+                safe_after = safe_output.convert("RGB")
+            safe_before = pages[safe_name].convert("RGB")
+            self.assertEqual(safe_before.size, safe_after.size, safe_name)
+            self.assertEqual(_content_bbox(safe_before), _content_bbox(safe_after), safe_name)
+            self.assertIn(
+                safe_record["processing_audit"].get("combination_quality_guard_action"),
+                {"passed", "reverted_to_source", "kept_original"},
+            )
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_handwritten_correction_marks_preserved_against_overclean_regression(self) -> None:
         def correction_mark_page(variant: str) -> Image.Image:
             image = Image.new("RGB", (336, 244), (245, 245, 242))
