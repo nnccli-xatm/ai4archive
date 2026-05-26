@@ -11520,6 +11520,86 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*source_bytes.keys(), str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_skewed_dark_marginal_guard_preserves_faint_edge_notes_and_keeps_safe_cleanup_bounded(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-skewed-dark-marginal-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            def skewed_dark_edge_page(with_faint_marginal_note: bool) -> Image.Image:
+                page = Image.new("RGB", (300, 220), (245, 245, 241))
+                draw = ImageDraw.Draw(page)
+                for x in range(14):
+                    shade = 86 + min(18, x * 2)
+                    draw.line((x, 0, x, 219), fill=(shade, shade, shade))
+                draw.rectangle((0, 0, 96, 2), fill=(92, 92, 92))
+                draw.rectangle((52, 40, 256, 176), outline=(76, 76, 76), width=2)
+                for y in (62, 88, 114, 140):
+                    draw.rectangle((72, y, 232, y + 3), fill=(42, 42, 42))
+                if with_faint_marginal_note:
+                    for y in range(58, 168, 7):
+                        x = 12 + ((y // 7) % 3)
+                        draw.point((x, y), fill=(172, 172, 168))
+                        draw.point((x + 1, y + 1), fill=(170, 170, 166))
+                return page.rotate(
+                    -0.8,
+                    resample=Image.Resampling.BICUBIC,
+                    expand=True,
+                    fillcolor=(245, 245, 241),
+                )
+
+            safe_name = "private_full_chain_skewed_dark_marginal_safe.png"
+            protected_name = "private_full_chain_skewed_dark_marginal_protected.png"
+            safe_before = skewed_dark_edge_page(with_faint_marginal_note=False)
+            protected_before = skewed_dark_edge_page(with_faint_marginal_note=True)
+            safe_before.save(input_dir / safe_name, dpi=(300, 300))
+            protected_before.save(input_dir / protected_name, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-skewed-dark-marginal-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            safe_record = records[safe_name]
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertEqual(safe_record["processing_audit"]["guardrail_failures"], [])
+            self.assertLessEqual(safe_record["processing_audit"]["size_change_ratio"], 0.12)
+            self.assertLessEqual(safe_record["processing_audit"]["max_trim_margin_ratio"], 0.08)
+            self.assertEqual(safe_record["processing_audit"]["cumulative_change_guard_action"], "passed")
+
+            protected_record = records[protected_name]
+            self.assertEqual(protected_record["status"], "processed")
+            self.assertEqual(protected_record["processing_audit"]["guardrail_failures"], [])
+            self.assertLessEqual(protected_record["processing_audit"]["size_change_ratio"], 0.12)
+            self.assertLessEqual(protected_record["processing_audit"]["max_trim_margin_ratio"], 0.08)
+            self.assertEqual(protected_record["processing_audit"]["cumulative_change_guard_action"], "passed")
+
+            with Image.open(process_dir / protected_record["output_relative_path"]) as processed:
+                protected_after = processed.convert("RGB")
+            protected_box = (8, 56, 36, 170)
+            self.assertLess(_changed_ratio(protected_before, protected_after, protected_box), 0.48)
+            self.assertGreaterEqual(
+                _edge_energy(protected_after.crop(protected_box)),
+                _edge_energy(protected_before.crop(protected_box)) * 0.78,
+            )
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], 2)
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertGreaterEqual(audit_summary["counts"]["dark_border_skipped_files"], 1)
+            self.assertGreaterEqual(audit_summary["counts"]["deskew_skipped_files"], 1)
+            self.assertIn(
+                protected_record["processing_audit"]["combination_quality_guard_reason_code"],
+                {"safe_combination_passed", "low_confidence_original_preserved", "combined_change_too_large_reverted"},
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (safe_name, protected_name, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_reversal_tone_and_microfilm_frame_originals_stay_preserved_with_safe_control(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-reversal-tone-guard-") as temp_dir:
             root = Path(temp_dir)
