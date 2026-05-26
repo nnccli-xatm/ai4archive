@@ -26118,9 +26118,9 @@ class ScanProcessingNestedBasenameCollisionRegressionTest(unittest.TestCase):
                 draw.text((314, y - 8), "N", fill=(120, 120, 116), font=font)
 
             if variant == "safe_control":
-                for point in ((322, 188), (328, 196), (334, 204), (340, 212), (320, 219), (326, 226)):
-                    draw.point(point, fill=(176, 176, 170))
                 draw.ellipse((302, 186, 346, 232), fill=(236, 233, 226))
+                for point in ((322, 188), (328, 196), (334, 204), (340, 212), (320, 219), (326, 226)):
+                    draw.point(point, fill=(146, 146, 140))
                 return image
 
             if variant == "status_labels_near_amount_rows":
@@ -26249,13 +26249,24 @@ class ScanProcessingNestedBasenameCollisionRegressionTest(unittest.TestCase):
             with Image.open(process_dir / safe_record["output_relative_path"]) as safe_processed:
                 safe_after = safe_processed.convert("RGB")
             safe_before = pages[safe_name].convert("RGB")
-            safe_delta = _changed_ratio(safe_before, safe_after, (302, 178, 344, 232))
+            safe_box = (302, 178, 344, 232)
+            safe_before_pixels = _inklike_pixels(safe_before, safe_box, threshold=214)
+            safe_after_pixels = _inklike_pixels(safe_after, safe_box, threshold=214)
+            self.assertGreaterEqual(safe_before_pixels, 6)
+            safe_delta = _changed_ratio(safe_before, safe_after, safe_box)
             safe_audit = safe_record["processing_audit"]
             reverted_safe = (
                 safe_audit.get("cumulative_change_guard_action") == "reverted_to_source"
                 or safe_audit.get("combination_quality_guard_action") == "reverted_to_source"
             )
-            self.assertTrue(safe_delta <= 0.10 or reverted_safe)
+            kept_original_by_guard = safe_audit.get("combination_quality_guard_action") == "kept_original"
+            if reverted_safe or kept_original_by_guard:
+                self.assertAlmostEqual(safe_delta, 0.0, places=6)
+                self.assertEqual(safe_after_pixels, safe_before_pixels)
+            else:
+                self.assertGreaterEqual(safe_delta, 0.004)
+                self.assertLessEqual(safe_delta, 0.10)
+                self.assertLess(safe_after_pixels, safe_before_pixels)
             self.assertEqual(safe_audit["guardrail_failures"], [])
 
             # Negative-path invariant: emulate over-whitening that erases faint status/qualifier labels.
