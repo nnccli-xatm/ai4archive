@@ -16762,6 +16762,78 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256", "output_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_purple_blue_mimeograph_copy_pencil_guard_preserves_colored_marks(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-purple-blue-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "A001_safe_neutral_stain_cleanup_control.png": _purple_blue_duplicator_guard_page("safe_neutral_stain_control"),
+                "A002_protected_purple_blue_mimeograph_text.png": _purple_blue_duplicator_guard_page(
+                    "mimeograph_text"
+                ),
+                "A003_protected_copy_pencil_signature_strokes.png": _purple_blue_duplicator_guard_page(
+                    "copy_pencil_signature"
+                ),
+                "A004_protected_ditto_form_separator_marks.png": _purple_blue_duplicator_guard_page(
+                    "ditto_form_separator"
+                ),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-purple-blue-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_name = "A001_safe_neutral_stain_cleanup_control.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertEqual(safe_audit["local_content_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed")
+            self.assertIn(safe_audit["combination_quality_guard_action"], {"passed", "kept_original"})
+
+            protected_boxes = {
+                "A002_protected_purple_blue_mimeograph_text.png": (112, 72, 286, 134),
+                "A003_protected_copy_pencil_signature_strokes.png": (126, 138, 300, 182),
+                "A004_protected_ditto_form_separator_marks.png": (88, 84, 294, 194),
+            }
+            for name, protected_box in protected_boxes.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                before = pages[name].convert("RGB")
+                with Image.open(process_dir / record["output_relative_path"]) as output_image:
+                    after = output_image.convert("RGB")
+
+                self.assertEqual(record["status"], "processed", name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertIn(
+                    audit["combination_quality_guard_action"],
+                    {"passed", "kept_original", "reverted_to_source"},
+                    name,
+                )
+                self.assertLess(_changed_ratio(before, after, protected_box), 0.16, name)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256", "output_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_quality_regression_reports_missing_operation_timing_code_without_private_rows(self) -> None:
         quality = _processing_quality_regression(
             {
@@ -19697,6 +19769,50 @@ def _faded_toner_dropout_guard_page(variant: str = "safe_dust_control") -> Image
         raise ValueError(f"unsupported faded toner dropout variant: {variant}")
 
     return image
+
+
+def _purple_blue_duplicator_guard_page(variant: str = "safe_neutral_stain_control") -> Image.Image:
+    image = Image.new("RGB", (320, 220), (245, 245, 241))
+    draw = ImageDraw.Draw(image)
+    for y in (58, 84, 110, 136):
+        draw.rectangle((30, y, 100, y + 3), fill=(56, 56, 56))
+        draw.rectangle((114, y, 286, y + 2), fill=(80, 80, 80))
+
+    if variant == "safe_neutral_stain_control":
+        for x, y in ((20, 20), (34, 28), (52, 34), (70, 42), (58, 52), (42, 64), (66, 74), (30, 94)):
+            draw.point((x, y), fill=(214, 214, 210))
+            draw.point((x + 1, y), fill=(217, 217, 213))
+        mask = Image.new("L", image.size, 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.ellipse((6, 6, 106, 112), fill=120)
+        mask = mask.filter(ImageFilter.GaussianBlur(8))
+        return Image.composite(Image.new("RGB", image.size, (233, 231, 226)), image, mask)
+
+    if variant == "mimeograph_text":
+        mimeograph = (188, 182, 216)
+        draw.text((118, 74), "RETURN COPY", fill=mimeograph, font=ImageFont.load_default())
+        draw.text((118, 92), "ARCHIVE REG", fill=(186, 180, 214), font=ImageFont.load_default())
+        draw.rectangle((118, 112, 268, 114), fill=(190, 184, 218))
+        return image
+
+    if variant == "copy_pencil_signature":
+        pencil = (146, 136, 198)
+        points = ((128, 158), (146, 146), (170, 166), (194, 148), (222, 172), (248, 152), (280, 168))
+        draw.line(points, fill=pencil, width=2, joint="curve")
+        draw.line(((134, 176), (166, 170), (204, 180), (238, 170), (286, 176)), fill=(156, 146, 206), width=1)
+        return image
+
+    if variant == "ditto_form_separator":
+        separator = (184, 180, 214)
+        for x in range(92, 292, 10):
+            draw.point((x, 98), fill=separator)
+            draw.point((x + 3, 150), fill=separator)
+        for y in range(86, 192, 10):
+            draw.point((104, y), fill=(182, 178, 212))
+            draw.point((274, y), fill=(182, 178, 212))
+        return image
+
+    raise ValueError(f"unsupported purple-blue duplicator variant: {variant}")
 
 
 def _sparse_pale_typed_page() -> Image.Image:
