@@ -1455,6 +1455,97 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertNotIn("private_full_chain_dark_rectangular_margin_stamp", audit_summary_text)
             self.assertNotIn("private_full_chain_dark_rectangular_with_faint_rules", audit_summary_text)
 
+    def test_full_chain_rust_stain_cleanup_preserves_physical_evidence(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-rust-stain-physical-evidence-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            safe_name = "private_full_chain_rust_stain_safe_control.png"
+            protected_name = "private_full_chain_rust_stain_protected_attachment_evidence.png"
+            safe = _water_damage_evidence_guard_page("safe_neutral_cleanup_control")
+            protected = _physical_evidence_guard_page("rusty_staple_transfer")
+            safe_input_path = input_dir / safe_name
+            protected_input_path = input_dir / protected_name
+            safe.save(safe_input_path, dpi=(300, 300))
+            protected.save(protected_input_path, dpi=(300, 300))
+            safe_source_bytes = safe_input_path.read_bytes()
+            protected_source_bytes = protected_input_path.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-rust-stain-physical-evidence-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_record = records[safe_name]
+            protected_record = records[protected_name]
+            self.assertEqual(safe_record["processing_audit"]["guardrail_failures"], [])
+            self.assertEqual(protected_record["processing_audit"]["guardrail_failures"], [])
+
+            safe_cleanup_box = (186, 66, 254, 128)
+            protected_evidence_box = (14, 20, 88, 70)
+            protected_geometry_probe = (6, 14, 106, 84)
+            dark_threshold = 155
+            min_keep_ratio = 0.72
+
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_processed:
+                safe_before = safe.convert("RGB")
+                safe_after = safe_processed.convert("RGB")
+                before_luma = _mean_luma(safe_before, safe_cleanup_box)
+                after_luma = _mean_luma(safe_after, safe_cleanup_box)
+                changed_ratio = _changed_ratio(safe_before, safe_after, safe_cleanup_box)
+                self.assertTrue(safe_record["background_stains_lightened"])
+                self.assertGreater(after_luma, before_luma)
+                self.assertGreater(safe_record["processing_audit"]["background_stains_changed_pixel_ratio"], 0.0)
+                self.assertLessEqual(safe_record["processing_audit"]["background_stains_changed_pixel_ratio"], 0.08)
+                self.assertLessEqual(changed_ratio, 0.40)
+
+            with Image.open(process_dir / protected_record["output_relative_path"]) as protected_processed:
+                protected_before = protected.convert("RGB")
+                protected_after = protected_processed.convert("RGB")
+                before_evidence = protected_before.crop(protected_evidence_box).convert("L")
+                after_evidence = protected_after.crop(protected_evidence_box).convert("L")
+                before_dark = sum(1 for value in before_evidence.getdata() if value < dark_threshold)
+                after_dark = sum(1 for value in after_evidence.getdata() if value < dark_threshold)
+                keep_ratio = after_dark / max(1, before_dark)
+                evidence_changed_ratio = _changed_ratio(protected_before, protected_after, protected_evidence_box)
+                self.assertGreaterEqual(keep_ratio, min_keep_ratio)
+                self.assertLess(evidence_changed_ratio, 0.60)
+
+                before_bbox = _content_bbox(protected_before.crop(protected_geometry_probe), threshold=232)
+                after_bbox = _content_bbox(protected_after.crop(protected_geometry_probe), threshold=232)
+                self.assertIsNotNone(before_bbox)
+                self.assertIsNotNone(after_bbox)
+                assert before_bbox is not None
+                assert after_bbox is not None
+                self.assertLessEqual(abs(after_bbox[0] - before_bbox[0]), 8)
+                self.assertLessEqual(abs(after_bbox[1] - before_bbox[1]), 8)
+                self.assertLessEqual(abs(after_bbox[2] - before_bbox[2]), 8)
+                self.assertLessEqual(abs(after_bbox[3] - before_bbox[3]), 8)
+
+                negative_path = protected_after.copy()
+                ImageDraw.Draw(negative_path).rectangle(protected_evidence_box, fill=(246, 244, 238))
+                negative_evidence = negative_path.crop(protected_evidence_box).convert("L")
+                negative_dark = sum(1 for value in negative_evidence.getdata() if value < dark_threshold)
+                negative_keep_ratio = negative_dark / max(1, before_dark)
+                self.assertLess(
+                    negative_keep_ratio,
+                    min_keep_ratio,
+                    "sensitivity check: over-cleaning rust/attachment evidence must fail preservation threshold",
+                )
+
+            self.assertEqual(safe_input_path.read_bytes(), safe_source_bytes)
+            self.assertEqual(protected_input_path.read_bytes(), protected_source_bytes)
+
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            self.assertNotIn("private_full_chain_rust_stain_safe_control", audit_summary_text)
+            self.assertNotIn("private_full_chain_rust_stain_protected_attachment_evidence", audit_summary_text)
+
     def test_full_chain_encoded_derivative_preserves_color_detail_and_icc_profile(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-encoded-color-") as temp_dir:
             root = Path(temp_dir)
