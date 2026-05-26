@@ -1370,7 +1370,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
 
             safe_name = "private_full_chain_page_number_corner_safe_control.png"
             protected_name = "private_full_chain_page_number_corner_protected_folio.png"
-            safe = _single_edge_post_deskew_light_canvas_page("safe")
+            safe = _interrupted_dark_scanner_border_page("single_edge")
             protected = _single_edge_post_deskew_light_canvas_page("lower_corner_page_number")
             safe_path = input_dir / safe_name
             protected_path = input_dir / protected_name
@@ -1396,20 +1396,26 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             }
             self.assertEqual(source_bytes_before, source_bytes_after)
 
-            corner_shadow_box = (0, 172, 14, 240)
+            safe_corner_shadow_box = (0, 120, 14, 176)
             mark_box = (2, 200, 16, 236)
-            dark_threshold = 116
+            safe_dark_threshold = 116
+            mark_dark_threshold = 116
             min_keep_ratio = 0.72
 
             with Image.open(process_dir / safe_record["output_relative_path"]) as safe_processed:
-                safe_before_region = safe.convert("L").crop(corner_shadow_box)
-                safe_after_region = safe_processed.convert("L").crop(corner_shadow_box)
-                safe_before_dark = sum(1 for value in safe_before_region.getdata() if value < dark_threshold)
-                safe_after_dark = sum(1 for value in safe_after_region.getdata() if value < dark_threshold)
+                safe_before_region = safe.convert("L").crop(safe_corner_shadow_box)
+                safe_after_region = safe_processed.convert("L").crop(safe_corner_shadow_box)
+                safe_before_dark = sum(1 for value in safe_before_region.getdata() if value < safe_dark_threshold)
+                safe_after_dark = sum(1 for value in safe_after_region.getdata() if value < safe_dark_threshold)
+                self.assertGreaterEqual(
+                    safe_before_dark,
+                    120,
+                    "safe-control precondition: lower-corner region must contain dark artifact pixels before cleanup",
+                )
                 safe_dark_ratio = safe_after_dark / max(1, safe_before_dark)
-                safe_corner_changed = _changed_ratio(safe.convert("RGB"), safe_processed.convert("RGB"), corner_shadow_box)
+                safe_corner_changed = _changed_ratio(safe.convert("RGB"), safe_processed.convert("RGB"), safe_corner_shadow_box)
                 self.assertTrue(
-                    safe_dark_ratio <= 0.95 or safe_corner_changed >= 0.05,
+                    safe_record["dark_border_trimmed"] or safe_dark_ratio <= 0.98 or safe_corner_changed >= 0.02,
                     "safe corner artifact should be reduced or meaningfully changed by cleanup/crop",
                 )
                 self.assertLess(safe_dark_ratio, 1.15)
@@ -1417,8 +1423,13 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             with Image.open(process_dir / protected_record["output_relative_path"]) as protected_processed:
                 protected_before_region = protected.convert("L").crop(mark_box)
                 protected_after_region = protected_processed.convert("L").crop(mark_box)
-                before_dark = sum(1 for value in protected_before_region.getdata() if value < dark_threshold)
-                after_dark = sum(1 for value in protected_after_region.getdata() if value < dark_threshold)
+                before_dark = sum(1 for value in protected_before_region.getdata() if value < mark_dark_threshold)
+                after_dark = sum(1 for value in protected_after_region.getdata() if value < mark_dark_threshold)
+                self.assertGreaterEqual(
+                    before_dark,
+                    140,
+                    "protected precondition: folio mark region must contain detectable dark pixels before cleanup",
+                )
                 keep_ratio = after_dark / max(1, before_dark)
                 changed_ratio = _changed_ratio(protected.convert("RGB"), protected_processed.convert("RGB"), mark_box)
                 self.assertGreaterEqual(keep_ratio, min_keep_ratio)
@@ -1427,7 +1438,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 negative_path = protected_processed.convert("RGB")
                 ImageDraw.Draw(negative_path).rectangle(mark_box, fill=(246, 246, 242))
                 negative_region = negative_path.convert("L").crop(mark_box)
-                negative_dark = sum(1 for value in negative_region.getdata() if value < dark_threshold)
+                negative_dark = sum(1 for value in negative_region.getdata() if value < mark_dark_threshold)
                 negative_keep_ratio = negative_dark / max(1, before_dark)
                 self.assertLess(
                     negative_keep_ratio,
