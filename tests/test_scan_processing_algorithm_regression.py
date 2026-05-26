@@ -9578,6 +9578,132 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_thin_duplex_show_through_preserves_hairline_rules_and_tiny_ticks(self) -> None:
+        def _ink_pixel_ratio(image: Image.Image, box: tuple[int, int, int, int], threshold: int = 176) -> float:
+            gray = image.crop(box).convert("L")
+            values = gray.tobytes()
+            if not values:
+                return 0.0
+            ink_pixels = sum(1 for value in values if value < threshold)
+            return ink_pixels / len(values)
+
+        with tempfile.TemporaryDirectory(prefix="scan-processing-thin-duplex-hairline-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "synthetic_safe_duplex_reverse_ghost_control.png": _thin_duplex_hairline_show_through_page("safe_control"),
+                "synthetic_protected_hairline_form_rules_crossing_ghost.png": _thin_duplex_hairline_show_through_page(
+                    "hairline_form_rules"
+                ),
+                "synthetic_protected_tiny_ticks_near_ghost.png": _thin_duplex_hairline_show_through_page("tiny_ticks"),
+            }
+            source_bytes = {}
+            for name, page in pages.items():
+                source = input_dir / name
+                page.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-thin-duplex-hairline", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_name = "synthetic_safe_duplex_reverse_ghost_control.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            self.assertIn(
+                safe_record["bleed_through_reason_code"],
+                {
+                    "applied_faint_reverse_ghost",
+                    "low_confidence",
+                    "protected_line_or_annotation",
+                    "conservative_scope_risk",
+                },
+            )
+            self.assertIn(
+                safe_audit["bleed_through_reason_code"],
+                {
+                    "applied_faint_reverse_ghost",
+                    "low_confidence",
+                    "protected_line_or_annotation",
+                    "conservative_scope_risk",
+                },
+            )
+            self.assertLessEqual(safe_audit["bleed_through_changed_pixel_ratio"], 0.045)
+            if safe_record["bleed_through_cleaned"]:
+                self.assertEqual(safe_record["bleed_through_reason_code"], "applied_faint_reverse_ghost")
+                self.assertGreater(safe_audit["bleed_through_changed_pixel_ratio"], 0.003)
+            else:
+                self.assertEqual(safe_audit["bleed_through_changed_pixel_ratio"], 0.0)
+
+            protected_regions = {
+                "synthetic_protected_hairline_form_rules_crossing_ghost.png": {
+                    "box": (108, 62, 266, 148),
+                    "max_luma_delta": 1.6,
+                    "minimum_ratio_retained": 0.78,
+                },
+                "synthetic_protected_tiny_ticks_near_ghost.png": {
+                    "box": (126, 72, 248, 154),
+                    "max_luma_delta": 1.8,
+                    "minimum_ratio_retained": 0.74,
+                },
+            }
+            for name, thresholds in protected_regions.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                processed = Image.open(process_dir / record["output_relative_path"]).convert("RGB")
+                source = pages[name]
+                box = thresholds["box"]
+                before_ratio = _ink_pixel_ratio(source, box)
+                after_ratio = _ink_pixel_ratio(processed, box)
+                self.assertGreater(before_ratio, 0.01, name)
+                self.assertGreaterEqual(after_ratio, before_ratio * thresholds["minimum_ratio_retained"], name)
+                self.assertLessEqual(_mean_luma(processed, box), _mean_luma(source, box) + thresholds["max_luma_delta"], name)
+                self.assertFalse(record["bleed_through_cleaned"], name)
+                self.assertIn(
+                    record["bleed_through_reason_code"],
+                    {"protected_line_or_annotation", "low_confidence", "conservative_scope_risk"},
+                    name,
+                )
+                self.assertIn(
+                    audit["bleed_through_reason_code"],
+                    {"protected_line_or_annotation", "low_confidence", "conservative_scope_risk"},
+                    name,
+                )
+                self.assertEqual(audit["bleed_through_changed_pixel_ratio"], 0.0, name)
+                self.assertIn(audit["local_content_change_guard_action"], {"passed", "reverted_to_source"}, name)
+                self.assertIn(audit["cumulative_change_guard_action"], {"passed", "reverted_to_source"}, name)
+                self.assertIn(
+                    audit["combination_quality_guard_reason_code"],
+                    {"safe_combination_passed", "low_confidence_original_preserved", "combined_change_too_large_reverted"},
+                    name,
+                )
+                self.assertEqual(audit["guardrail_failures"], [], name)
+
+            bleed_guard = audit_summary["guardrails"]["bleed_through"]
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertEqual(bleed_guard["applied_files"] + bleed_guard["skipped_files"], len(pages))
+            self.assertGreaterEqual(bleed_guard["skipped_files"], len(protected_regions))
+            self.assertTrue(
+                any(
+                    code in bleed_guard["skip_reason_code_distribution"]
+                    for code in ("protected_line_or_annotation", "low_confidence")
+                )
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_sparse_bleed_through_cleanup_preserves_real_marks_with_public_skip_codes(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-protected-bleed-through-marks-") as temp_dir:
             root = Path(temp_dir)
@@ -19872,6 +19998,52 @@ def _thin_translucent_show_through_page(variant: str) -> Image.Image:
         draw.line((216, 120, 278, 124), fill=(224, 222, 218), width=1)
         return image
     raise ValueError(f"unknown thin translucent show-through variant: {variant}")
+
+
+def _thin_duplex_hairline_show_through_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (300, 210), (245, 242, 238))
+    draw = ImageDraw.Draw(image)
+    for y in (30, 56, 82, 108, 134):
+        draw.line((30, y, 140, y), fill=(76, 76, 76), width=1)
+
+    ghost_mask = Image.new("L", image.size, 0)
+    ghost_draw = ImageDraw.Draw(ghost_mask)
+    ghost_draw.rectangle((106, 54, 264, 146), fill=118)
+    ghost_draw.text((148, 70), "741", fill=186)
+    ghost_draw.text((166, 98), "852", fill=186)
+    ghost_draw.text((154, 126), "963", fill=186)
+    ghost_mask = ghost_mask.filter(ImageFilter.GaussianBlur(6.2))
+    ghost_overlay = Image.new("RGB", image.size, (236, 233, 226))
+    image.paste(ghost_overlay, (0, 0), ghost_mask)
+
+    if variant == "safe_control":
+        draw.rectangle((40, 38, 128, 42), fill=(66, 66, 66))
+        draw.rectangle((40, 92, 128, 96), fill=(66, 66, 66))
+        return image
+    if variant == "hairline_form_rules":
+        for y in (74, 94, 114, 134):
+            draw.line((116, y, 256, y), fill=(152, 152, 148), width=1)
+        for x in (138, 182, 226):
+            draw.line((x, 64, x, 146), fill=(154, 154, 150), width=1)
+        draw.line((112, 64, 260, 64), fill=(148, 148, 144), width=1)
+        draw.line((112, 146, 260, 146), fill=(148, 148, 144), width=1)
+        return image
+    if variant == "tiny_ticks":
+        ticks = (
+            (134, 82),
+            (150, 90),
+            (166, 98),
+            (182, 106),
+            (198, 114),
+            (214, 122),
+            (230, 130),
+        )
+        for x, y in ticks:
+            draw.line((x, y, x + 2, y + 3), fill=(148, 148, 144), width=1)
+            draw.line((x + 2, y + 3, x + 6, y - 2), fill=(148, 148, 144), width=1)
+        draw.line((124, 74, 244, 140), fill=(164, 164, 160), width=1)
+        return image
+    raise ValueError(f"unknown thin duplex hairline show-through variant: {variant}")
 
 
 def _thermal_receipt_vellum_guard_page(variant: str) -> Image.Image:
