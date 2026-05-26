@@ -1087,6 +1087,86 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertNotIn("private_post_deskew_faint_edge_safe", audit_summary_text)
             self.assertNotIn("private_post_deskew_faint_edge_protected", audit_summary_text)
 
+    def test_full_chain_post_deskew_black_wedge_cleanup_preserves_marginal_evidence(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-post-deskew-black-wedge-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            def _deskew_wedge_page(with_marginal_note: bool) -> Image.Image:
+                page = Image.new("RGB", (290, 210), (244, 243, 239))
+                draw = ImageDraw.Draw(page)
+                for y in (54, 78, 102, 126, 150):
+                    draw.rectangle((54, y, 234, y + 4), fill=(40, 40, 40))
+                draw.rectangle((238, 36, 272, 40), fill=(74, 74, 74))
+                if with_marginal_note:
+                    for y in range(62, 162, 4):
+                        draw.rectangle((8, y, 20, y + 1), fill=(212, 212, 208))
+                    draw.rectangle((10, 86, 14, 126), fill=(208, 208, 204))
+                return page.rotate(2.0, resample=Image.Resampling.BICUBIC, expand=True, fillcolor=(0, 0, 0))
+
+            safe_name = "private_full_chain_black_wedge_safe.png"
+            protected_name = "private_full_chain_black_wedge_protected.png"
+            safe = _deskew_wedge_page(with_marginal_note=False)
+            protected = _deskew_wedge_page(with_marginal_note=True)
+            safe.save(input_dir / safe_name, dpi=(300, 300))
+            protected.save(input_dir / protected_name, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-post-deskew-black-wedge", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            self.assertTrue(any("deskew" in op for op in records[safe_name]["operations"]))
+            self.assertTrue(any("deskew" in op for op in records[protected_name]["operations"]))
+
+            safe_record = records[safe_name]
+            safe_output_path = process_dir / safe_record["output_relative_path"]
+            with Image.open(safe_output_path) as safe_processed:
+                safe_before_luma = _mean_luma(safe.convert("L"), (0, 0, 38, 38))
+                safe_after_luma = _mean_luma(safe_processed.convert("L"), (0, 0, 38, 38))
+                safe_corner_changed = _changed_ratio(safe, safe_processed.convert("RGB"), (0, 0, 44, 44))
+                self.assertTrue(
+                    safe_record["dark_border_trimmed"]
+                    or safe_after_luma >= safe_before_luma + 12.0
+                    or safe_corner_changed <= 0.10
+                )
+                self.assertLess(safe_corner_changed, 0.90)
+
+            protected_record = records[protected_name]
+            self.assertEqual(protected_record["processing_audit"]["guardrail_failures"], [])
+            protected_output_path = process_dir / protected_record["output_relative_path"]
+            with Image.open(protected_output_path) as protected_processed:
+                note_box = (8, 66, 22, 164)
+                before_luma = _mean_luma(protected, note_box)
+                after_luma = _mean_luma(protected_processed, note_box)
+                note_changed = _changed_ratio(protected, protected_processed.convert("RGB"), note_box)
+                self.assertLess(after_luma, 238.0)
+                self.assertLessEqual(after_luma - before_luma, 24.0)
+                self.assertLess(note_changed, 0.70)
+
+            if protected_record["dark_border_trimmed"]:
+                self.assertLessEqual(protected_record["processing_audit"]["max_trim_margin_ratio"], 0.03)
+            else:
+                self.assertIn(
+                    protected_record["dark_border_reason_code"],
+                    {
+                        "protected_edge_content_near_dark_border",
+                        "incomplete_dark_edge_border_evidence",
+                        "no_confident_dark_edge_border",
+                        "not_dark_enough_for_trim",
+                    },
+                )
+
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            self.assertNotIn("private_full_chain_black_wedge_safe", audit_summary_text)
+            self.assertNotIn("private_full_chain_black_wedge_protected", audit_summary_text)
+
     def test_full_chain_encoded_derivative_preserves_color_detail_and_icc_profile(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-encoded-color-") as temp_dir:
             root = Path(temp_dir)
