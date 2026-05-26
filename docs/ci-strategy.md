@@ -68,8 +68,9 @@ main 分支触发两个层级：
 `PR targeted tests` 读取 PR 相对 base 的变更文件：
 
 - `tests/test_*.py`
-  - 如果 diff 中新增了 `def test_*`，只运行新增测试方法。
-  - 否则运行整个测试文件。
+  - 如果 diff 命中现有 `test_*` 方法体，运行对应完整 unittest 方法 ID（`tests.test_xxx.Class.test_xxx`）。
+  - 如果 diff 新增了 `def test_*`，继续按方法级选择新增测试。
+  - 仅当改动落在测试方法/测试类外部，或无法安全映射到具体测试方法时，回退到运行整个测试文件。
 
 - `src/archive_scan_qc/*`
   - 默认运行 `tests/test_scan_qc.py`。
