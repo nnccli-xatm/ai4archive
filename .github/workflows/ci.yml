@@ -6,12 +6,24 @@ on:
       - main
   pull_request:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: Validation depth to run
+        required: true
+        default: standard
+        type: choice
+        options:
+          - standard
+          - deep-full
+  schedule:
+    - cron: "0 18 * * *"
 
 jobs:
   pr-smoke:
     name: PR smoke Python ${{ matrix.python-version }}
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -57,6 +69,7 @@ jobs:
     name: PR targeted tests
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Check out repository
@@ -184,10 +197,130 @@ jobs:
         if: steps.targeted.outputs.run_tests != 'true'
         run: echo "No Python source or test changes require targeted unittest coverage."
 
-  full-test-build-smoke:
-    name: Full Python ${{ matrix.python-version }}
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+  main-compat-smoke:
+    name: Main compatibility smoke Python ${{ matrix.python-version }}
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'standard')
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+
+    steps:
+      - name: Check out repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init "$GITHUB_WORKSPACE"
+          cd "$GITHUB_WORKSPACE"
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --prune --depth=1 origin "+${GITHUB_REF}:refs/remotes/ci/ref"
+          git checkout --force refs/remotes/ci/ref
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install package for smoke tests
+        run: python -m pip install -e .
+
+      - name: Validate frontend workbench
+        run: PYTHONPATH=src python scripts/validate_frontend_workbench.py
+
+      - name: Compile source and tests
+        run: PYTHONPATH=src python -m compileall -q src tests
+
+      - name: Build wheel
+        run: python -m pip wheel --no-deps --wheel-dir dist .
+
+      - name: Install wheel and smoke test console script
+        run: |
+          python -m venv /tmp/archive-scan-qc-smoke
+          /tmp/archive-scan-qc-smoke/bin/python -m pip install --upgrade pip
+          /tmp/archive-scan-qc-smoke/bin/python -m pip install dist/ai4archive-*.whl
+          /tmp/archive-scan-qc-smoke/bin/archive-scan-qc --version
+
+  main-full-tests:
+    name: Main full tests Python 3.11 shard ${{ matrix.shard-label }}/4
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'standard')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard-index: 0
+            shard-label: 1
+          - shard-index: 1
+            shard-label: 2
+          - shard-index: 2
+            shard-label: 3
+          - shard-index: 3
+            shard-label: 4
+
+    steps:
+      - name: Check out repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init "$GITHUB_WORKSPACE"
+          cd "$GITHUB_WORKSPACE"
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --prune --depth=1 origin "+${GITHUB_REF}:refs/remotes/ci/ref"
+          git checkout --force refs/remotes/ci/ref
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install package for tests
+        run: python -m pip install -e .
+
+      - name: Select full-test shard
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPATH=src python - <<'PY' > /tmp/test-shard.txt
+          import hashlib
+          import unittest
+
+          shard_index = ${{ matrix.shard-index }}
+          shard_count = 4
+
+          def iter_cases(suite):
+              for item in suite:
+                  if isinstance(item, unittest.TestSuite):
+                      yield from iter_cases(item)
+                  else:
+                      yield item
+
+          suite = unittest.defaultTestLoader.discover("tests")
+          test_ids = sorted(test.id() for test in iter_cases(suite))
+          for test_id in test_ids:
+              digest = hashlib.sha256(test_id.encode("utf-8")).hexdigest()
+              if int(digest[:8], 16) % shard_count == shard_index:
+                  print(test_id)
+          PY
+          test_count="$(wc -l < /tmp/test-shard.txt | tr -d ' ')"
+          if [ "$test_count" -eq 0 ]; then
+            echo "No tests selected for shard ${{ matrix.shard-label }}/4"
+            exit 1
+          fi
+          echo "Selected ${test_count} tests for shard ${{ matrix.shard-label }}/4"
+
+      - name: Run full-test shard
+        run: PYTHONPATH=src python -m unittest $(cat /tmp/test-shard.txt)
+
+  deep-full-test-build-smoke:
+    name: Deep full Python ${{ matrix.python-version }}
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'deep-full')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
