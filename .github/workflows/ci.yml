@@ -5,10 +5,154 @@ on:
     branches:
       - main
   pull_request:
+  workflow_dispatch:
 
 jobs:
-  test-build-smoke:
-    name: Python ${{ matrix.python-version }}
+  pr-smoke:
+    name: PR smoke Python ${{ matrix.python-version }}
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - name: Check out repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init "$GITHUB_WORKSPACE"
+          cd "$GITHUB_WORKSPACE"
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --prune --depth=1 origin "+${GITHUB_REF}:refs/remotes/ci/ref"
+          git checkout --force refs/remotes/ci/ref
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install package for smoke tests
+        run: python -m pip install -e .
+
+      - name: Validate frontend workbench
+        run: PYTHONPATH=src python scripts/validate_frontend_workbench.py
+
+      - name: Compile source and tests
+        run: PYTHONPATH=src python -m compileall -q src tests
+
+      - name: Build wheel
+        run: python -m pip wheel --no-deps --wheel-dir dist .
+
+      - name: Install wheel and smoke test console script
+        run: |
+          python -m venv /tmp/archive-scan-qc-smoke
+          /tmp/archive-scan-qc-smoke/bin/python -m pip install --upgrade pip
+          /tmp/archive-scan-qc-smoke/bin/python -m pip install dist/ai4archive-*.whl
+          /tmp/archive-scan-qc-smoke/bin/archive-scan-qc --version
+
+  pr-targeted-tests:
+    name: PR targeted tests
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init "$GITHUB_WORKSPACE"
+          cd "$GITHUB_WORKSPACE"
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --prune --depth=1 origin "+${GITHUB_REF}:refs/remotes/ci/ref"
+          git checkout --force refs/remotes/ci/ref
+          git fetch --no-tags --prune --depth=1 origin "+${{ github.event.pull_request.base.sha }}:refs/remotes/ci/base"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install package for targeted tests
+        run: python -m pip install -e .
+
+      - name: Select targeted tests
+        id: targeted
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --name-only refs/remotes/ci/base..HEAD > /tmp/changed-files.txt
+          python - <<'PY' > /tmp/targeted-tests.txt
+          from pathlib import Path
+
+          changed = [
+              line.strip()
+              for line in Path("/tmp/changed-files.txt").read_text().splitlines()
+              if line.strip()
+          ]
+          tests = set()
+          for path in changed:
+              if path.startswith("tests/test_") and path.endswith(".py"):
+                  tests.add(path)
+              if path.startswith("src/archive_scan_qc/"):
+                  tests.add("tests/test_scan_qc.py")
+              if "scan_processing" in path:
+                  tests.update(
+                      {
+                          "tests/test_scan_processing_combo.py",
+                          "tests/test_scan_processing_reuse.py",
+                          "tests/test_scan_processing_algorithm_regression.py",
+                      }
+                  )
+              if any(
+                  token in path
+                  for token in (
+                      "background_stains",
+                      "edge_shadow",
+                      "tone_normalization",
+                      "scanline",
+                  )
+              ):
+                  tests.update(
+                      {
+                          "tests/test_scan_background_stains.py",
+                          "tests/test_scan_edge_shadow.py",
+                          "tests/test_scan_tone_normalization.py",
+                          "tests/test_scanline_lightening.py",
+                      }
+                  )
+
+          for test in sorted(tests):
+              if Path(test).exists():
+                  print(test)
+          PY
+          if [ -s /tmp/targeted-tests.txt ]; then
+            echo "run_tests=true" >> "$GITHUB_OUTPUT"
+            tests="$(tr '\n' ' ' < /tmp/targeted-tests.txt | sed 's/[[:space:]]*$//')"
+            echo "tests=${tests}" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_tests=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Changed files:"
+          cat /tmp/changed-files.txt
+          echo "Selected tests:"
+          cat /tmp/targeted-tests.txt
+
+      - name: Run targeted tests
+        if: steps.targeted.outputs.run_tests == 'true'
+        run: |
+          PYTHONPATH=src python -m unittest ${{ steps.targeted.outputs.tests }}
+
+      - name: Skip targeted tests
+        if: steps.targeted.outputs.run_tests != 'true'
+        run: echo "No Python source or test changes require targeted unittest coverage."
+
+  full-test-build-smoke:
+    name: Full Python ${{ matrix.python-version }}
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
