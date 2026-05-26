@@ -1184,7 +1184,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             page_number_name = "private_full_chain_dark_edge_faint_page_number.png"
             binder_name = "private_full_chain_dark_edge_binder_marks.png"
 
-            safe = _interrupted_dark_scanner_border_page("broad_shadow")
+            safe = _interrupted_dark_scanner_border_page("single_edge")
             faint_page_number = _interrupted_dark_scanner_border_page("near_edge_content")
             binder_marks = _interrupted_dark_scanner_border_page("punched_marks")
             safe.save(input_dir / safe_name, dpi=(300, 300))
@@ -1252,6 +1252,113 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertNotIn("private_full_chain_dark_edge_safe_control", audit_summary_text)
             self.assertNotIn("private_full_chain_dark_edge_faint_page_number", audit_summary_text)
             self.assertNotIn("private_full_chain_dark_edge_binder_marks", audit_summary_text)
+
+    def test_full_chain_black_border_cleanup_preserves_dark_marginal_evidence(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-black-border-marginal-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            safe_name = "private_full_chain_black_border_safe_control.png"
+            protected_name = "private_full_chain_black_border_dark_marginal_evidence.png"
+            safe = _interrupted_dark_scanner_border_page("single_edge")
+            protected = _interrupted_dark_scanner_border_page("marginal_text")
+            safe_input_path = input_dir / safe_name
+            protected_input_path = input_dir / protected_name
+            safe.save(safe_input_path, dpi=(300, 300))
+            protected.save(protected_input_path, dpi=(300, 300))
+            safe_source_bytes = safe_input_path.read_bytes()
+            protected_source_bytes = protected_input_path.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-black-border-marginal-evidence-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_record = records[safe_name]
+            protected_record = records[protected_name]
+            self.assertEqual(safe_record["processing_audit"]["guardrail_failures"], [])
+            self.assertEqual(protected_record["processing_audit"]["guardrail_failures"], [])
+
+            safe_output_path = process_dir / safe_record["output_relative_path"]
+            protected_output_path = process_dir / protected_record["output_relative_path"]
+            border_box = (0, 0, 20, 180)
+            evidence_box = (16, 28, 21, 92)
+            dark_threshold = 80
+            min_keep_ratio = 0.70
+
+            with Image.open(safe_output_path) as safe_processed:
+                safe_before = safe.convert("L").crop(border_box)
+                safe_after = safe_processed.convert("L").crop(border_box)
+                safe_before_dark = sum(1 for value in safe_before.getdata() if value < dark_threshold)
+                safe_after_dark = sum(1 for value in safe_after.getdata() if value < dark_threshold)
+                safe_dark_ratio = safe_after_dark / max(1, safe_before_dark)
+                safe_border_change = _changed_ratio(safe.convert("RGB"), safe_processed.convert("RGB"), border_box)
+
+                self.assertTrue(
+                    safe_record["dark_border_trimmed"]
+                    or (safe_dark_ratio <= 0.95 and safe_border_change >= 0.05)
+                )
+                self.assertLess(safe_dark_ratio, 1.15)
+
+            with Image.open(protected_output_path) as protected_processed:
+                before_region = protected.convert("L").crop(evidence_box)
+                after_region = protected_processed.convert("L").crop(evidence_box)
+                before_dark = sum(1 for value in before_region.getdata() if value < dark_threshold)
+                after_dark = sum(1 for value in after_region.getdata() if value < dark_threshold)
+                keep_ratio = after_dark / max(1, before_dark)
+                changed_ratio = _changed_ratio(protected.convert("RGB"), protected_processed.convert("RGB"), evidence_box)
+                self.assertGreaterEqual(keep_ratio, min_keep_ratio)
+                self.assertLess(changed_ratio, 0.70)
+
+                negative_path = protected_processed.convert("RGB")
+                ImageDraw.Draw(negative_path).rectangle(evidence_box, fill=(246, 246, 242))
+                negative_region = negative_path.convert("L").crop(evidence_box)
+                negative_dark = sum(1 for value in negative_region.getdata() if value < dark_threshold)
+                negative_keep_ratio = negative_dark / max(1, before_dark)
+                self.assertLess(
+                    negative_keep_ratio,
+                    min_keep_ratio,
+                    "sensitivity check: over-whitening this marginal evidence region must fail the keep-ratio guard",
+                )
+
+            if safe_record["dark_border_trimmed"]:
+                self.assertLessEqual(safe_record["processing_audit"]["max_trim_margin_ratio"], 0.03)
+            else:
+                self.assertIn(
+                    safe_record["dark_border_reason_code"],
+                    {
+                        "protected_edge_content_near_dark_border",
+                        "incomplete_dark_edge_border_evidence",
+                        "no_confident_dark_edge_border",
+                        "not_dark_enough_for_trim",
+                    },
+                )
+
+            if protected_record["dark_border_trimmed"]:
+                self.assertLessEqual(protected_record["processing_audit"]["max_trim_margin_ratio"], 0.03)
+            else:
+                self.assertIn(
+                    protected_record["dark_border_reason_code"],
+                    {
+                        "protected_edge_content_near_dark_border",
+                        "incomplete_dark_edge_border_evidence",
+                        "no_confident_dark_edge_border",
+                        "not_dark_enough_for_trim",
+                    },
+                )
+
+            self.assertEqual(safe_input_path.read_bytes(), safe_source_bytes)
+            self.assertEqual(protected_input_path.read_bytes(), protected_source_bytes)
+
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            self.assertNotIn("private_full_chain_black_border_safe_control", audit_summary_text)
+            self.assertNotIn("private_full_chain_black_border_dark_marginal_evidence", audit_summary_text)
 
     def test_full_chain_dark_rectangular_margin_stamps_preserved_during_edge_cleanup(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-dark-rectangular-margin-guard-") as temp_dir:
