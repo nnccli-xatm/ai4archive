@@ -23563,3 +23563,137 @@ class ScanProcessingNestedBasenameCollisionRegressionTest(unittest.TestCase):
                 str(input_dir),
             ):
                 self.assertNotIn(forbidden, audit_summary_text)
+
+    def test_full_chain_faint_rubber_date_stamp_over_ledger_rows_remains_detectable(self) -> None:
+        def _ledger_date_stamp_page(variant: str) -> Image.Image:
+            image = Image.new("RGB", (360, 256), (244, 243, 238))
+            pixels = image.load()
+            for y in range(image.height):
+                for x in range(image.width):
+                    shade = int(round(2.8 * math.sin(x * 0.045) + 2.2 * math.cos(y * 0.052)))
+                    cast = int(round(2.0 * (x / max(1, image.width - 1)) + 1.6 * (y / max(1, image.height - 1))))
+                    base = max(0, min(255, 244 + shade - cast))
+                    pixels[x, y] = (base, base, max(0, base - 3))
+
+            draw = ImageDraw.Draw(image)
+            font = ImageFont.load_default()
+            draw.text((24, 18), "LEDGER REGISTER", fill=(112, 112, 108), font=font)
+            draw.text((28, 44), "DATE", fill=(124, 124, 120), font=font)
+            draw.text((96, 44), "DETAIL", fill=(124, 124, 120), font=font)
+            draw.text((278, 44), "AMT", fill=(124, 124, 120), font=font)
+            for y in (64, 88, 112, 136, 160, 184, 208, 232):
+                draw.line((24, y, 336, y), fill=(200, 200, 196), width=1)
+            for x in (86, 262):
+                draw.line((x, 48, x, 236), fill=(198, 198, 194), width=1)
+            for y in (72, 96, 120, 144, 168, 192):
+                draw.text((30, y - 8), "04/27", fill=(118, 118, 114), font=font)
+                draw.text((96, y - 8), "TRANSFER", fill=(122, 122, 118), font=font)
+                draw.text((272, y - 8), "102.30", fill=(112, 112, 108), font=font)
+
+            if variant == "safe_control":
+                draw.ellipse((296, 188, 338, 230), fill=(236, 234, 228))
+                return image
+
+            stamp_color = (164, 74, 74)
+            stroke_color = (176, 84, 84)
+            if variant == "protected_stamp":
+                draw.ellipse((122, 98, 232, 194), outline=stamp_color, width=2)
+                draw.arc((132, 108, 222, 184), start=20, end=344, fill=stroke_color, width=2)
+                draw.line((148, 138, 208, 154), fill=stroke_color, width=2)
+                return image
+            if variant == "protected_low_contrast_overlap":
+                draw.ellipse((112, 90, 244, 202), outline=(182, 122, 122), width=2)
+                draw.arc((126, 104, 230, 192), start=18, end=348, fill=(186, 126, 126), width=1)
+                draw.line((138, 136, 220, 158), fill=(186, 126, 126), width=1)
+                draw.line((136, 159, 228, 159), fill=(188, 128, 128), width=1)
+                return image
+            raise ValueError(f"unsupported variant: {variant}")
+
+        def _stamp_ink_pixels(image: Image.Image, box: tuple[int, int, int, int], threshold: int = 176) -> int:
+            region = image.convert("L").crop(box)
+            return sum(1 for value in region.getdata() if value <= threshold)
+
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-faint-date-stamp-ledger-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "A001_safe_mild_paper_cast_control.png": _ledger_date_stamp_page("safe_control"),
+                "A002_protected_faint_received_stamp.png": _ledger_date_stamp_page("protected_stamp"),
+                "A003_protected_low_contrast_stamp_overlap_rows.png": _ledger_date_stamp_page("protected_low_contrast_overlap"),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-faint-rubber-date-stamp-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            safe_name = "A001_safe_mild_paper_cast_control.png"
+            safe_record = records[safe_name]
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            self.assertEqual(safe_record["processing_audit"]["guardrail_failures"], [])
+            self.assertIn(
+                safe_record["processing_audit"].get("combination_quality_guard_action"),
+                {"passed", "reverted_to_source", "kept_original"},
+            )
+
+            protected_cases = {
+                "A002_protected_faint_received_stamp.png": ((120, 96, 234, 196), (26, 64, 334, 232), ((24, 111, 336, 114), (24, 159, 336, 162)), 0.68, 0.10, 6.0),
+                "A003_protected_low_contrast_stamp_overlap_rows.png": ((110, 90, 246, 204), (26, 64, 334, 232), ((24, 111, 336, 114), (24, 159, 336, 162)), 0.55, 0.12, 7.0),
+            }
+            for name, (stamp_box, analysis_box, row_line_boxes, min_keep_ratio, max_changed_ratio, max_luma_shift) in protected_cases.items():
+                record = records[name]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
+                with Image.open(process_dir / record["output_relative_path"]) as processed:
+                    after = processed.convert("RGB")
+                before = pages[name].convert("RGB")
+                self.assertEqual(before.size, after.size, name)
+                self.assertEqual(_content_bbox(before), _content_bbox(after), name)
+                self.assertLessEqual(_changed_ratio(before, after, analysis_box), max_changed_ratio, name)
+                self.assertLessEqual(abs(_mean_luma(after, analysis_box) - _mean_luma(before, analysis_box)), max_luma_shift, name)
+                before_ink = _stamp_ink_pixels(before, stamp_box)
+                after_ink = _stamp_ink_pixels(after, stamp_box)
+                self.assertGreaterEqual(before_ink, 20, name)
+                self.assertGreaterEqual(after_ink, max(20, int(math.floor(before_ink * min_keep_ratio))), name)
+                for row_line_box in row_line_boxes:
+                    before_row_ink = _stamp_ink_pixels(before, row_line_box, threshold=205)
+                    after_row_ink = _stamp_ink_pixels(after, row_line_box, threshold=205)
+                    self.assertGreaterEqual(after_row_ink, max(8, int(math.floor(before_row_ink * 0.70))), name)
+                self.assertIn(
+                    record["processing_audit"].get("combination_quality_guard_action"),
+                    {"passed", "reverted_to_source", "kept_original"},
+                    name,
+                )
+
+            # Negative-path invariant: this is the type of over-whitening regression the guard must reject.
+            synthetic_erased = pages["A003_protected_low_contrast_stamp_overlap_rows.png"].convert("RGB").copy()
+            synthetic_draw = ImageDraw.Draw(synthetic_erased)
+            synthetic_draw.rectangle((108, 88, 248, 206), fill=(247, 247, 244))
+            erased_ratio = _changed_ratio(
+                pages["A003_protected_low_contrast_stamp_overlap_rows.png"],
+                synthetic_erased,
+                (110, 90, 246, 204),
+            )
+            erased_before_ink = _stamp_ink_pixels(
+                pages["A003_protected_low_contrast_stamp_overlap_rows.png"],
+                (110, 90, 246, 204),
+            )
+            erased_after_ink = _stamp_ink_pixels(synthetic_erased, (110, 90, 246, 204))
+            self.assertGreater(erased_ratio, 0.20)
+            self.assertLess(erased_after_ink, int(math.floor(erased_before_ink * 0.45)))
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
