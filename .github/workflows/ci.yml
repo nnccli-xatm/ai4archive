@@ -281,12 +281,13 @@ jobs:
       - name: Install package for tests
         run: python -m pip install -e .
 
-      - name: Select full-test shard
+      - name: Run full-test shard
         shell: bash
         run: |
           set -euo pipefail
-          PYTHONPATH=src python - <<'PY' > /tmp/test-shard.txt
+          PYTHONPATH=src python - <<'PY'
           import hashlib
+          import sys
           import unittest
 
           shard_index = ${{ matrix.shard-index }}
@@ -300,21 +301,26 @@ jobs:
                       yield item
 
           suite = unittest.defaultTestLoader.discover("tests")
-          test_ids = sorted(test.id() for test in iter_cases(suite))
-          for test_id in test_ids:
+          all_tests = sorted(iter_cases(suite), key=lambda test: test.id())
+          selected = []
+          for test in all_tests:
+              test_id = test.id()
               digest = hashlib.sha256(test_id.encode("utf-8")).hexdigest()
               if int(digest[:8], 16) % shard_count == shard_index:
-                  print(test_id)
-          PY
-          test_count="$(wc -l < /tmp/test-shard.txt | tr -d ' ')"
-          if [ "$test_count" -eq 0 ]; then
-            echo "No tests selected for shard ${{ matrix.shard-label }}/4"
-            exit 1
-          fi
-          echo "Selected ${test_count} tests for shard ${{ matrix.shard-label }}/4"
+                  selected.append(test)
 
-      - name: Run full-test shard
-        run: PYTHONPATH=src python -m unittest $(cat /tmp/test-shard.txt)
+          if not selected:
+              print("No tests selected for shard ${{ matrix.shard-label }}/4")
+              sys.exit(1)
+
+          print(
+              f"Selected {len(selected)} of {len(all_tests)} tests "
+              "for shard ${{ matrix.shard-label }}/4"
+          )
+          result = unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(selected))
+          if not result.wasSuccessful():
+              sys.exit(1)
+          PY
 
   deep-full-test-build-smoke:
     name: Deep full Python ${{ matrix.python-version }}
