@@ -16076,6 +16076,107 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_fold_crease_faint_marks_guard_preserves_typed_stamp_and_ruled_content(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-fold-crease-faint-marks-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            def _fold_crease_faint_page(variant: str) -> Image.Image:
+                image = _full_chain_fold_shadow_page("safe_vertical")
+                draw = ImageDraw.Draw(image)
+                faint = (230, 230, 226)
+                if variant == "safe":
+                    return image
+                if variant == "faint_typed":
+                    draw.text((136, 88), "REF 42", fill=faint, font=ImageFont.load_default())
+                    draw.text((156, 126), "ID7", fill=faint, font=ImageFont.load_default())
+                    return image
+                if variant == "stamp_fragment":
+                    draw.arc((132, 84, 198, 152), 210, 332, fill=(202, 52, 52), width=2)
+                    draw.arc((142, 94, 188, 146), 210, 332, fill=(210, 62, 62), width=1)
+                    return image
+                if variant == "thin_ruled":
+                    draw.line((102, 84, 228, 90), fill=faint, width=1)
+                    draw.line((108, 108, 236, 114), fill=faint, width=1)
+                    draw.line((162, 72, 162, 168), fill=faint, width=1)
+                    return image
+                raise ValueError(f"unsupported fold-crease faint variant: {variant}")
+
+            pages = {
+                "A001_safe_fold_crease_shadow_control.png": _fold_crease_faint_page("safe"),
+                "A002_protected_faint_typed_marks_near_crease.png": _fold_crease_faint_page("faint_typed"),
+                "A003_protected_stamp_fragment_near_crease.png": _fold_crease_faint_page("stamp_fragment"),
+                "A004_protected_thin_ruled_strokes_crossing_crease.png": _fold_crease_faint_page("thin_ruled"),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            safe_name = "A001_safe_fold_crease_shadow_control.png"
+            safe_before = pages[safe_name].convert("L")
+            safe_before_band = _mean_luma(safe_before, (150, 20, 170, 220))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-fold-crease-faint-marks", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            with Image.open(process_dir / safe_record["output_relative_path"]) as output_image:
+                safe_after = output_image.convert("L")
+                safe_after_band = _mean_luma(safe_after, (150, 20, 170, 220))
+            self.assertTrue(safe_record["fold_shadows_lightened"])
+            self.assertGreater(safe_after_band - safe_before_band, 0.5)
+            self.assertGreater(safe_audit["fold_shadows_changed_pixel_ratio"], 0.0)
+            self.assertLessEqual(safe_audit["fold_shadows_changed_pixel_ratio"], 0.06)
+            self.assertGreater(safe_audit["fold_shadows_candidate_pixel_ratio"], 0.0)
+            self.assertLessEqual(safe_audit["fold_shadows_candidate_pixel_ratio"], 0.08)
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+
+            protected_boxes = {
+                "A002_protected_faint_typed_marks_near_crease.png": (118, 84, 188, 140),
+                "A003_protected_stamp_fragment_near_crease.png": (132, 84, 198, 152),
+                "A004_protected_thin_ruled_strokes_crossing_crease.png": (102, 72, 236, 168),
+            }
+            for name, box in protected_boxes.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                before = pages[name].convert("RGB")
+                with Image.open(process_dir / record["output_relative_path"]) as output_image:
+                    after = output_image.convert("RGB")
+                before_l = before.convert("L")
+                after_l = after.convert("L")
+                self.assertEqual(record["status"], "processed", name)
+                self.assertLessEqual(audit["fold_shadows_changed_pixel_ratio"], 0.08, name)
+                self.assertLessEqual(_changed_ratio(before, after, box), 0.035, name)
+                self.assertLessEqual(abs(_mean_luma(after_l, box) - _mean_luma(before_l, box)), 6.0, name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertIn(
+                    audit["combination_quality_guard_action"],
+                    {"passed", "kept_original", "reverted_to_source"},
+                    name,
+                )
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertGreaterEqual(audit_summary["counts"]["fold_shadows_lightened_files"], 1)
+            self.assertGreaterEqual(audit_summary["counts"]["fold_shadows_skipped_files"], 1)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_background_stain_cleanup_preserves_faint_text_and_form_lines(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-background-stain-faint-form-") as temp_dir:
             root = Path(temp_dir)
