@@ -14585,6 +14585,105 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_tape_shadow_marginal_guard_preserves_faint_marks_and_typed_labels(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-tape-shadow-marginal-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            def _with_faint_pencil_ticks() -> Image.Image:
+                image = _attached_pasted_evidence_guard_page("adhesive_shadow_near_margin").copy()
+                draw = ImageDraw.Draw(image)
+                draw.line((16, 72, 24, 82), fill=(146, 140, 132), width=1)
+                draw.line((24, 82, 30, 74), fill=(148, 142, 134), width=1)
+                draw.line((16, 104, 28, 98), fill=(150, 144, 136), width=1)
+                return image
+
+            def _with_typed_marginal_label() -> Image.Image:
+                image = _attached_pasted_evidence_guard_page("adhesive_shadow_near_margin").copy()
+                draw = ImageDraw.Draw(image)
+                draw.text((14, 146), "M-12", fill=(140, 136, 128), font=ImageFont.load_default())
+                return image
+
+            def _with_thin_ruled_strokes() -> Image.Image:
+                image = _attached_pasted_evidence_guard_page("adhesive_shadow_near_margin").copy()
+                draw = ImageDraw.Draw(image)
+                for y in (58, 84, 110):
+                    draw.line((14, y, 110, y), fill=(150, 144, 136), width=1)
+                return image
+
+            pages = {
+                "A001_safe_tape_shadow_cleanup_control.png": _physical_evidence_guard_page("archival_tape_strip_and_halo"),
+                "A002_tape_shadow_faint_pencil_ticks.png": _with_faint_pencil_ticks(),
+                "A003_tape_shadow_typed_marginal_label.png": _with_typed_marginal_label(),
+                "A004_tape_shadow_thin_ruled_strokes.png": _with_thin_ruled_strokes(),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-tape-shadow-marginal-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_name = "A001_safe_tape_shadow_cleanup_control.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            safe_before = pages[safe_name].convert("RGB")
+            with Image.open(process_dir / safe_record["output_relative_path"]) as output_image:
+                safe_after = output_image.convert("RGB")
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertFalse(safe_record["dark_border_trimmed"])
+            self.assertFalse(safe_record["scanner_gutter_trimmed"])
+            self.assertIn(safe_audit["combination_quality_guard_action"], {"passed", "kept_original", "reverted_to_source"})
+            self.assertLessEqual(_changed_ratio(safe_before, safe_after, (8, 18, 64, 202)), 0.18)
+
+            protected_boxes = {
+                "A002_tape_shadow_faint_pencil_ticks.png": (12, 68, 34, 112),
+                "A003_tape_shadow_typed_marginal_label.png": (12, 142, 56, 164),
+                "A004_tape_shadow_thin_ruled_strokes.png": (12, 54, 112, 114),
+            }
+            for name, box in protected_boxes.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                before = pages[name].convert("RGB")
+                with Image.open(process_dir / record["output_relative_path"]) as output_image:
+                    after = output_image.convert("RGB")
+                self.assertEqual(record["status"], "processed", name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertFalse(record["dark_border_trimmed"], name)
+                self.assertFalse(record["scanner_gutter_trimmed"], name)
+                self.assertIn(
+                    audit["combination_quality_guard_action"],
+                    {"passed", "kept_original", "reverted_to_source"},
+                    name,
+                )
+                self.assertLessEqual(audit["size_change_ratio"], 0.12, name)
+                self.assertLessEqual(audit["cumulative_change_crop_ratio"], 0.10, name)
+                self.assertLessEqual(_changed_ratio(before, after, box), 0.07, name)
+                self.assertGreaterEqual(_edge_energy(after.crop(box)), _edge_energy(before.crop(box)) * 0.80, name)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertIn("timing", audit_summary)
+            self.assertIn("operation_timings", audit_summary["timing"])
+            self.assertGreater(len(audit_summary["timing"]["operation_timings"]), 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256", "output_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_attached_slips_and_pasted_labels_stay_preserved_with_safe_cleanup_control(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-attached-pasted-evidence-") as temp_dir:
             root = Path(temp_dir)
