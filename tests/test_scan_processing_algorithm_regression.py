@@ -16931,6 +16931,94 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256", "output_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_low_contrast_dotted_perforation_guide_survives_despeckle_cleanup(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-dotted-perforation-guide-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "A001_safe_dust_cleanup_control.png": _dotted_perforation_despeckle_guard_page("safe_dust_cleanup_control"),
+                "A002_low_contrast_dotted_perforation_guide.png": _dotted_perforation_despeckle_guard_page(
+                    "low_contrast_dotted_perforation_guide"
+                ),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(
+                ScanConfig("synthetic-regression", "full-chain-dotted-perforation-guide-despeckle-guard", input_dir, output_dir)
+            )
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_record = records["A001_safe_dust_cleanup_control.png"]
+            safe_audit = safe_record["processing_audit"]
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertIn(safe_audit["combination_quality_guard_action"], {"passed", "kept_original", "reverted_to_source"})
+
+            protected_name = "A002_low_contrast_dotted_perforation_guide.png"
+            protected_record = records[protected_name]
+            protected_audit = protected_record["processing_audit"]
+            before = pages[protected_name].convert("RGB")
+            with Image.open(process_dir / protected_record["output_relative_path"]) as output_image:
+                after = output_image.convert("RGB")
+
+            self.assertEqual(protected_record["status"], "processed")
+            self.assertEqual(protected_audit["guardrail_failures"], [])
+            self.assertIn(
+                protected_audit["combination_quality_guard_action"],
+                {"passed", "kept_original", "reverted_to_source"},
+            )
+            self.assertLessEqual(protected_audit["size_change_ratio"], 0.12)
+            self.assertLessEqual(protected_audit["cumulative_change_crop_ratio"], 0.12)
+
+            dotted_points = [(x, 156 + (2 if (x // 8) % 2 else 0)) for x in range(42, 286, 8)]
+            dust_points = [(198, 142), (206, 148), (214, 154), (222, 162), (230, 170), (238, 178), (246, 184)]
+
+            def _dark_point_count(image: Image.Image, points: list[tuple[int, int]], threshold: int = 234) -> int:
+                gray = image.convert("L")
+                dark_count = 0
+                for x, y in points:
+                    neighborhood = [
+                        gray.getpixel((max(0, min(gray.width - 1, x + dx)), max(0, min(gray.height - 1, y + dy))))
+                        for dx in (-1, 0, 1)
+                        for dy in (-1, 0, 1)
+                    ]
+                    if min(neighborhood) <= threshold:
+                        dark_count += 1
+                return dark_count
+
+            before_dotted = _dark_point_count(before, dotted_points)
+            after_dotted = _dark_point_count(after, dotted_points)
+            after_dust = _dark_point_count(after, dust_points)
+            self.assertGreaterEqual(before_dotted, 20)
+
+            if protected_audit["combination_quality_guard_action"] == "reverted_to_source":
+                self.assertLess(_changed_ratio(before, after, (30, 140, 292, 188)), 0.01)
+            else:
+                self.assertGreaterEqual(after_dotted, max(14, int(math.floor(before_dotted * 0.70))))
+                self.assertGreaterEqual(after_dotted - after_dust, 8)
+                self.assertLess(_changed_ratio(before, after, (30, 140, 292, 188)), 0.16)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256", "output_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_purple_blue_mimeograph_copy_pencil_guard_preserves_colored_marks(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-purple-blue-guard-") as temp_dir:
             root = Path(temp_dir)
@@ -20031,6 +20119,31 @@ def _faded_toner_dropout_guard_page(variant: str = "safe_dust_control") -> Image
         raise ValueError(f"unsupported faded toner dropout variant: {variant}")
 
     return image
+
+
+def _dotted_perforation_despeckle_guard_page(variant: str = "safe_dust_cleanup_control") -> Image.Image:
+    image = Image.new("RGB", (320, 220), (246, 246, 242))
+    draw = ImageDraw.Draw(image)
+    for y in (74, 98, 122):
+        draw.rectangle((34, y, 288, y + 2), fill=(86, 86, 82))
+
+    if variant == "safe_dust_cleanup_control":
+        for x, y in ((188, 144), (194, 150), (200, 156), (206, 164), (212, 170), (220, 178), (228, 184)):
+            draw.ellipse((x, y, x + 2, y + 2), fill=(214, 214, 210))
+        return image
+
+    if variant == "low_contrast_dotted_perforation_guide":
+        dot_color = (222, 222, 218)
+        for x in range(42, 286, 8):
+            y = 156 + (2 if (x // 8) % 2 else 0)
+            draw.ellipse((x, y, x + 2, y + 2), fill=dot_color)
+        for x, y in ((198, 142), (206, 148), (214, 154), (222, 162), (230, 170), (238, 178), (246, 184)):
+            draw.ellipse((x, y, x + 1, y + 1), fill=(231, 231, 227))
+        draw.line((42, 146, 130, 140), fill=(122, 118, 110), width=1)
+        draw.line((44, 172, 132, 166), fill=(124, 120, 112), width=1)
+        return image
+
+    raise ValueError(f"unsupported dotted perforation guard variant: {variant}")
 
 
 def _purple_blue_duplicator_guard_page(variant: str = "safe_neutral_stain_control") -> Image.Image:
