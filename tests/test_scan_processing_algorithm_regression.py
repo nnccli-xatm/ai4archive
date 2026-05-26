@@ -24594,7 +24594,7 @@ class ScanProcessingNestedBasenameCollisionRegressionTest(unittest.TestCase):
             ):
                 self.assertNotIn(forbidden, audit_summary_text)
 
-    def test_full_chain_faint_rubber_date_stamp_over_ledger_rows_remains_detectable(self) -> None:
+    def test_full_chain_faint_rubber_stamp_date_impressions_over_ledger_rows_remain_detectable(self) -> None:
         def _ledger_date_stamp_page(variant: str) -> Image.Image:
             image = Image.new("RGB", (360, 256), (244, 243, 238))
             pixels = image.load()
@@ -24669,11 +24669,15 @@ class ScanProcessingNestedBasenameCollisionRegressionTest(unittest.TestCase):
             safe_name = "A001_safe_mild_paper_cast_control.png"
             safe_record = records[safe_name]
             self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_processed:
+                safe_after = safe_processed.convert("RGB")
+            safe_before = pages[safe_name].convert("RGB")
+            safe_artifact_box = (296, 188, 338, 230)
+            safe_changed_ratio = _changed_ratio(safe_before, safe_after, safe_artifact_box)
             self.assertEqual(safe_record["processing_audit"]["guardrail_failures"], [])
-            self.assertIn(
-                safe_record["processing_audit"].get("combination_quality_guard_action"),
-                {"passed", "reverted_to_source", "kept_original"},
-            )
+            self.assertEqual(safe_record["processing_audit"].get("combination_quality_guard_action"), "passed")
+            self.assertGreaterEqual(safe_changed_ratio, 0.02)
+            self.assertLessEqual(safe_changed_ratio, 0.35)
 
             protected_cases = {
                 "A002_protected_faint_received_stamp.png": ((120, 96, 234, 196), (26, 64, 334, 232), ((24, 111, 336, 114), (24, 159, 336, 162)), 0.68, 0.10, 6.0),
