@@ -2561,6 +2561,105 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_low_contrast_ledger_negative_parentheses_remain_detectable(self) -> None:
+        def _ink_pixels(image: Image.Image, box: tuple[int, int, int, int], threshold: int = 212) -> int:
+            region = image.convert("L").crop(box)
+            return sum(1 for value in region.getdata() if value <= threshold)
+
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-ledger-negative-parentheses-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            pages = {
+                "A001_safe_mild_cast_dust_control.png": _ledger_negative_parentheses_guard_page("safe_control"),
+                "A002_protected_negative_amount_parentheses.png": _ledger_negative_parentheses_guard_page("negative_parentheses"),
+                "A003_protected_partial_parentheses_near_subtotal.png": _ledger_negative_parentheses_guard_page(
+                    "partial_parentheses_near_subtotal"
+                ),
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-ledger-negative-parentheses-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            self.assertEqual(set(records), set(pages))
+            for name, original in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original)
+
+            safe_name = "A001_safe_mild_cast_dust_control.png"
+            safe_record = records[safe_name]
+            self.assertIn(
+                safe_record["processing_audit"].get("combination_quality_guard_action"),
+                {"passed", "reverted_to_source", "kept_original"},
+            )
+
+            protected_cases = {
+                "A002_protected_negative_amount_parentheses.png": ((198, 64, 214, 82), (236, 64, 252, 82), (188, 58, 258, 86), (24, 58, 276, 86)),
+                "A003_protected_partial_parentheses_near_subtotal.png": (
+                    (198, 86, 214, 104),
+                    (236, 86, 252, 104),
+                    (188, 80, 258, 108),
+                    (24, 80, 276, 108),
+                ),
+            }
+            for name, (left_arc_box, right_arc_box, amount_context_box, row_context_box) in protected_cases.items():
+                before = pages[name].convert("RGB")
+                with Image.open(process_dir / records[name]["output_relative_path"]) as output:
+                    after = output.convert("RGB")
+                self.assertEqual(before.size, after.size, name)
+                self.assertEqual(_content_bbox(before), _content_bbox(after), name)
+                self.assertLessEqual(_changed_ratio(before, after, row_context_box), 0.07, name)
+                self.assertLessEqual(abs(_mean_luma(after, amount_context_box) - _mean_luma(before, amount_context_box)), 7.0, name)
+
+                before_left = _ink_pixels(before, left_arc_box)
+                before_right = _ink_pixels(before, right_arc_box)
+                after_left = _ink_pixels(after, left_arc_box)
+                after_right = _ink_pixels(after, right_arc_box)
+                self.assertGreaterEqual(before_left + before_right, 10, name)
+                self.assertGreaterEqual(after_left + after_right, max(9, int(math.floor((before_left + before_right) * 0.72))), name)
+                self.assertGreater(_edge_energy(after.crop(amount_context_box)), 5.0, name)
+                self.assertIn(
+                    records[name]["processing_audit"].get("combination_quality_guard_action"),
+                    {"passed", "reverted_to_source", "kept_original"},
+                    name,
+                )
+
+            # Negative-path invariant: emulate over-clean erasure that should be caught by this guard.
+            erased = pages["A003_protected_partial_parentheses_near_subtotal.png"].convert("RGB").copy()
+            draw = ImageDraw.Draw(erased)
+            draw.rectangle((198, 84, 252, 106), fill=(246, 246, 242))
+            erased_ratio = _changed_ratio(
+                pages["A003_protected_partial_parentheses_near_subtotal.png"],
+                erased,
+                (188, 80, 258, 108),
+            )
+            erased_before_ink = _ink_pixels(pages["A003_protected_partial_parentheses_near_subtotal.png"], (198, 84, 252, 106))
+            erased_after_ink = _ink_pixels(erased, (198, 84, 252, 106))
+            self.assertGreater(erased_ratio, 0.08)
+            self.assertLess(erased_after_ink, int(math.floor(erased_before_ink * 0.45)))
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            cleanup_signal = audit_summary["quality_signals"]["full_chain_cleanup"]
+            self.assertEqual(cleanup_signal["basis"], "synthetic_full_chain_cleanup")
+            self.assertEqual(cleanup_signal["total_files"], len(pages))
+            self.assertGreaterEqual(cleanup_signal["preserved_files"] + cleanup_signal["improved_files"], 2)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_conservative_combined_cleanup_budget_guard_preserves_faint_evidence(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-conservative-budget-guard-") as temp_dir:
             root = Path(temp_dir)
@@ -20255,6 +20354,54 @@ def _ledger_boxed_total_guard_page(variant: str) -> Image.Image:
         draw.line((160, 134, 222, 134), fill=(192, 192, 188), width=1)
         return image
     raise ValueError(f"unsupported boxed total variant: {variant}")
+
+
+def _ledger_negative_parentheses_guard_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (300, 188), (244, 244, 240))
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default()
+
+    for y in (36, 58, 80, 102, 124, 146):
+        draw.line((24, y, 276, y), fill=(216, 216, 212), width=1)
+    for x in (90, 196, 248):
+        draw.line((x, 24, x, 156), fill=(222, 222, 218), width=1)
+
+    draw.text((30, 20), "DATE", fill=(120, 120, 116), font=font)
+    draw.text((102, 20), "DETAIL", fill=(120, 120, 116), font=font)
+    draw.text((206, 20), "AMOUNT", fill=(120, 120, 116), font=font)
+
+    rows = (
+        ("04/23", "Deposit", "42.10"),
+        ("04/24", "Reversal", "15.30"),
+        ("04/25", "Carry-Back", "17.90"),
+        ("04/26", "Subtotal", "43.70"),
+    )
+    for idx, (date, detail, amount) in enumerate(rows):
+        y = 42 + idx * 22
+        draw.text((30, y), date, fill=(88, 88, 84), font=font)
+        draw.text((102, y), detail, fill=(88, 88, 84), font=font)
+        draw.text((208, y), amount, fill=(86, 86, 82), font=font)
+
+    if variant == "safe_control":
+        draw.ellipse((34, 136, 88, 170), fill=(236, 232, 220))
+        for x in range(30, 274, 17):
+            draw.point((x, 168), fill=(236, 236, 232))
+        return image
+
+    if variant == "negative_parentheses":
+        draw.arc((198, 64, 214, 82), 96, 264, fill=(188, 188, 184), width=1)
+        draw.arc((236, 64, 252, 82), -84, 84, fill=(188, 188, 184), width=1)
+        return image
+
+    if variant == "partial_parentheses_near_subtotal":
+        draw.line((24, 102, 276, 102), fill=(194, 194, 190), width=1)
+        draw.arc((198, 86, 214, 104), 110, 256, fill=(190, 190, 186), width=1)
+        draw.arc((236, 86, 252, 104), -74, 66, fill=(190, 190, 186), width=1)
+        draw.line((198, 96, 201, 100), fill=(192, 192, 188), width=1)
+        draw.line((248, 90, 250, 93), fill=(192, 192, 188), width=1)
+        return image
+
+    raise ValueError(f"unsupported ledger negative-parentheses variant: {variant}")
 
 
 def _compound_retouch_page(variant: str) -> Image.Image:
