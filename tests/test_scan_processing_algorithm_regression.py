@@ -11449,6 +11449,91 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*expected_reason_codes, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_faint_bleed_through_cleanup_preserves_front_side_marks(self) -> None:
+        def _ink_ratio(image: Image.Image, box: tuple[int, int, int, int], threshold: int = 198) -> float:
+            values = image.crop(box).convert("L").tobytes()
+            if not values:
+                return 0.0
+            return sum(1 for value in values if value < threshold) / len(values)
+
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-faint-bleed-through-front-marks-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "A001_safe_thin_paper_bleed_control.png": _low_density_diffuse_bleed_through_page(),
+                "A002_protected_faint_front_marks.png": _thin_translucent_show_through_page("faint_foreground"),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-faint-bleed-through-front-marks", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_name = "A001_safe_thin_paper_bleed_control.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            self.assertTrue(safe_record["bleed_through_cleaned"])
+            self.assertEqual(safe_record["bleed_through_reason_code"], "applied_faint_reverse_ghost")
+            self.assertGreater(safe_audit["bleed_through_delta"], 2.0)
+            self.assertGreater(safe_audit["bleed_through_changed_pixel_ratio"], 0.003)
+            self.assertLessEqual(safe_audit["bleed_through_changed_pixel_ratio"], 0.045)
+            self.assertLessEqual(safe_audit["bleed_through_candidate_pixel_ratio"], 0.065)
+
+            protected_name = "A002_protected_faint_front_marks.png"
+            protected_record = records[protected_name]
+            protected_audit = protected_record["processing_audit"]
+            protected_before = pages[protected_name].convert("RGB")
+            with Image.open(process_dir / protected_record["output_relative_path"]) as output:
+                protected_after = output.convert("RGB")
+            self.assertLessEqual(protected_before.size[0] - protected_after.size[0], 40)
+            self.assertLessEqual(protected_before.size[1] - protected_after.size[1], 40)
+            self.assertFalse(protected_record["bleed_through_cleaned"])
+            self.assertIn(
+                protected_record["bleed_through_reason_code"],
+                {"protected_line_or_annotation", "low_confidence", "conservative_scope_risk"},
+            )
+            self.assertLessEqual(protected_audit["bleed_through_changed_pixel_ratio"], 0.002)
+            marks_box = (38, 74, 150, 154)
+            background_box = (258, 74, 308, 154)
+            before_marks_ratio = _ink_ratio(protected_before, marks_box)
+            after_marks_ratio = _ink_ratio(protected_after, marks_box)
+            self.assertGreater(before_marks_ratio, 0.004)
+            self.assertGreaterEqual(after_marks_ratio, before_marks_ratio * 0.70)
+            self.assertGreaterEqual(
+                abs(_mean_luma(protected_after, marks_box) - _mean_luma(protected_after, background_box)),
+                2.0,
+            )
+            self.assertEqual(protected_audit["guardrail_failures"], [])
+
+            # Negative-path sensitivity: emulate over-whitening that would erase front-side faint evidence.
+            erased = protected_after.copy()
+            draw = ImageDraw.Draw(erased)
+            draw.rectangle((58, 82, 114, 124), fill=(244, 244, 241))
+            draw.rectangle((88, 132, 144, 150), fill=(244, 244, 241))
+            erased_marks_ratio = _ink_ratio(erased, marks_box)
+            self.assertLess(erased_marks_ratio, after_marks_ratio * 0.65)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertGreaterEqual(audit_summary["counts"]["bleed_through_cleaned_files"], 1)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_mild_blue_gray_cast_stays_guarded_and_private(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-blue-gray-cast-") as temp_dir:
             root = Path(temp_dir)
