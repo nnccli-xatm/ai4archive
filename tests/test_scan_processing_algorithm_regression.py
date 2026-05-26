@@ -1360,6 +1360,103 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertNotIn("private_full_chain_black_border_safe_control", audit_summary_text)
             self.assertNotIn("private_full_chain_black_border_dark_marginal_evidence", audit_summary_text)
 
+    def test_full_chain_page_number_corner_marks_preserved_during_cleanup_and_crop(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-page-number-corner-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            safe_name = "private_full_chain_page_number_corner_safe_control.png"
+            protected_name = "private_full_chain_page_number_corner_protected_folio.png"
+            safe = _single_edge_post_deskew_light_canvas_page("safe")
+            protected = _single_edge_post_deskew_light_canvas_page("lower_corner_page_number")
+            safe_path = input_dir / safe_name
+            protected_path = input_dir / protected_name
+            safe.save(safe_path, dpi=(300, 300))
+            protected.save(protected_path, dpi=(300, 300))
+            source_bytes_before = {
+                safe_name: safe_path.read_bytes(),
+                protected_name: protected_path.read_bytes(),
+            }
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-page-number-corner-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_record = records[safe_name]
+            protected_record = records[protected_name]
+            self.assertEqual(safe_record["processing_audit"]["guardrail_failures"], [])
+            self.assertEqual(protected_record["processing_audit"]["guardrail_failures"], [])
+
+            source_bytes_after = {
+                safe_name: safe_path.read_bytes(),
+                protected_name: protected_path.read_bytes(),
+            }
+            self.assertEqual(source_bytes_before, source_bytes_after)
+
+            corner_shadow_box = (0, 172, 14, 240)
+            mark_box = (2, 200, 16, 236)
+            dark_threshold = 116
+            min_keep_ratio = 0.72
+
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_processed:
+                safe_before_region = safe.convert("L").crop(corner_shadow_box)
+                safe_after_region = safe_processed.convert("L").crop(corner_shadow_box)
+                safe_before_dark = sum(1 for value in safe_before_region.getdata() if value < dark_threshold)
+                safe_after_dark = sum(1 for value in safe_after_region.getdata() if value < dark_threshold)
+                safe_dark_ratio = safe_after_dark / max(1, safe_before_dark)
+                safe_corner_changed = _changed_ratio(safe.convert("RGB"), safe_processed.convert("RGB"), corner_shadow_box)
+                self.assertTrue(
+                    safe_dark_ratio <= 0.95 or safe_corner_changed >= 0.05,
+                    "safe corner artifact should be reduced or meaningfully changed by cleanup/crop",
+                )
+                self.assertLess(safe_dark_ratio, 1.15)
+
+            with Image.open(process_dir / protected_record["output_relative_path"]) as protected_processed:
+                protected_before_region = protected.convert("L").crop(mark_box)
+                protected_after_region = protected_processed.convert("L").crop(mark_box)
+                before_dark = sum(1 for value in protected_before_region.getdata() if value < dark_threshold)
+                after_dark = sum(1 for value in protected_after_region.getdata() if value < dark_threshold)
+                keep_ratio = after_dark / max(1, before_dark)
+                changed_ratio = _changed_ratio(protected.convert("RGB"), protected_processed.convert("RGB"), mark_box)
+                self.assertGreaterEqual(keep_ratio, min_keep_ratio)
+                self.assertLess(changed_ratio, 0.70)
+
+                negative_path = protected_processed.convert("RGB")
+                ImageDraw.Draw(negative_path).rectangle(mark_box, fill=(246, 246, 242))
+                negative_region = negative_path.convert("L").crop(mark_box)
+                negative_dark = sum(1 for value in negative_region.getdata() if value < dark_threshold)
+                negative_keep_ratio = negative_dark / max(1, before_dark)
+                self.assertLess(
+                    negative_keep_ratio,
+                    min_keep_ratio,
+                    "sensitivity check: erasing the corner page-number mark must fail the keep-ratio guard",
+                )
+
+            for record in (safe_record, protected_record):
+                if record["dark_border_trimmed"]:
+                    self.assertLessEqual(record["processing_audit"]["max_trim_margin_ratio"], 0.03)
+                else:
+                    self.assertIn(
+                        record["dark_border_reason_code"],
+                        {
+                            "protected_edge_content_near_dark_border",
+                            "incomplete_dark_edge_border_evidence",
+                            "no_confident_dark_edge_border",
+                            "not_dark_enough_for_trim",
+                        },
+                    )
+
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            self.assertNotIn("private_full_chain_page_number_corner_safe_control", audit_summary_text)
+            self.assertNotIn("private_full_chain_page_number_corner_protected_folio", audit_summary_text)
+
     def test_full_chain_dark_rectangular_margin_stamps_preserved_during_edge_cleanup(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-dark-rectangular-margin-guard-") as temp_dir:
             root = Path(temp_dir)
@@ -23218,6 +23315,12 @@ def _single_edge_post_deskew_light_canvas_page(variant: str = "safe") -> Image.I
         draw.line((2, 40, 11, 54, 4, 72, 12, 91, 5, 116), fill=(55, 55, 55), width=2)
     elif variant == "page_number":
         draw.text((2, 12), "12", fill=(55, 55, 55))
+    elif variant == "lower_corner_page_number":
+        draw.rectangle((2, 202, 6, 234), fill=(55, 55, 55))
+        draw.rectangle((8, 202, 12, 234), fill=(55, 55, 55))
+        draw.rectangle((2, 202, 12, 206), fill=(55, 55, 55))
+        draw.rectangle((2, 218, 12, 222), fill=(55, 55, 55))
+        draw.rectangle((2, 230, 12, 234), fill=(55, 55, 55))
     elif variant == "pale_page_number":
         draw.text((2, 12), "12", fill=(232, 232, 232))
     elif variant == "pale_marginal_note":
