@@ -25967,6 +25967,184 @@ class ScanProcessingNestedBasenameCollisionRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_faint_ledger_bracket_grouping_marks_remain_detectable(self) -> None:
+        def _ledger_bracket_grouping_page(variant: str) -> Image.Image:
+            image = Image.new("RGB", (388, 282), (245, 244, 240))
+            pixels = image.load()
+            for y in range(image.height):
+                for x in range(image.width):
+                    wave = int(round(2.2 * math.sin(x * 0.039) + 1.9 * math.cos(y * 0.043)))
+                    cast = int(round(2.0 * (x / max(1, image.width - 1)) + 1.7 * (y / max(1, image.height - 1))))
+                    base = max(0, min(255, 245 + wave - cast))
+                    pixels[x, y] = (base, base, max(0, base - 2))
+
+            draw = ImageDraw.Draw(image)
+            font = ImageFont.load_default()
+            draw.text((24, 20), "LEDGER REGISTER", fill=(110, 110, 106), font=font)
+            draw.text((26, 46), "DATE", fill=(124, 124, 120), font=font)
+            draw.text((90, 46), "DETAIL", fill=(124, 124, 120), font=font)
+            draw.text((264, 46), "AMOUNT", fill=(124, 124, 120), font=font)
+            for y in (70, 94, 118, 142, 166, 190, 214, 238):
+                draw.line((24, y, 360, y), fill=(205, 205, 201), width=1)
+            for x in (82, 254, 360):
+                draw.line((x, 52, x, 242), fill=(203, 203, 199), width=1)
+            for row, y in enumerate((78, 102, 126, 150, 174, 198)):
+                draw.text((28, y - 8), "06/10", fill=(118, 118, 114), font=font)
+                draw.text((92, y - 8), f"ENTRY {row+1}", fill=(122, 122, 118), font=font)
+                draw.text((268, y - 8), "146.20", fill=(116, 116, 112), font=font)
+
+            if variant == "safe_control":
+                for point in ((322, 188), (330, 192), (336, 198), (340, 205), (326, 214), (334, 220)):
+                    draw.point(point, fill=(175, 175, 170))
+                draw.line((326, 194, 334, 203), fill=(175, 175, 170), width=1)
+                draw.ellipse((304, 184, 348, 228), fill=(236, 233, 227))
+                return image
+
+            if variant == "faint_side_bracket_grouping_rows":
+                draw.text((96, 102), "SUPPLIES", fill=(122, 122, 118), font=font)
+                draw.text((96, 126), "POSTAGE", fill=(122, 122, 118), font=font)
+                draw.line((44, 98, 44, 136), fill=(162, 162, 156), width=1)
+                draw.line((44, 98, 54, 98), fill=(162, 162, 156), width=1)
+                draw.line((44, 136, 54, 136), fill=(162, 162, 156), width=1)
+                return image
+
+            if variant == "faint_brace_near_subtotal_rules":
+                draw.text((266, 170), "58.10", fill=(168, 168, 162), font=font)
+                draw.rectangle((256, 192, 352, 220), outline=(186, 186, 182), width=1)
+                draw.line((256, 186, 352, 186), fill=(188, 188, 184), width=1)
+                draw.line((256, 222, 352, 222), fill=(188, 188, 184), width=1)
+                draw.text((270, 200), "SUBTOTAL", fill=(170, 170, 164), font=font)
+                draw.arc((234, 164, 252, 186), start=70, end=292, fill=(160, 160, 154), width=1)
+                draw.arc((234, 186, 252, 208), start=68, end=290, fill=(160, 160, 154), width=1)
+                draw.line((246, 174, 246, 198), fill=(160, 160, 154), width=1)
+                return image
+
+            raise ValueError(f"unsupported ledger-bracket-grouping variant: {variant}")
+
+        def _inklike_pixels(image: Image.Image, box: tuple[int, int, int, int], threshold: int = 212) -> int:
+            region = image.convert("L").crop(box)
+            return sum(1 for value in region.getdata() if value <= threshold)
+
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-ledger-bracket-grouping-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            pages = {
+                "A001_safe_isolated_dust_control.png": _ledger_bracket_grouping_page("safe_control"),
+                "A002_protected_faint_side_bracket_grouping_rows.png": _ledger_bracket_grouping_page(
+                    "faint_side_bracket_grouping_rows"
+                ),
+                "A003_protected_faint_brace_near_subtotal_rules.png": _ledger_bracket_grouping_page(
+                    "faint_brace_near_subtotal_rules"
+                ),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(
+                ScanConfig("synthetic-regression", "full-chain-ledger-bracket-grouping-guard", input_dir, output_dir)
+            )
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(**{**_full_chain_options().__dict__, "deskew": False, "workers": 1}),
+            )
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            marker_boxes = {
+                "A002_protected_faint_side_bracket_grouping_rows.png": ((42, 96, 56, 138),),
+                "A003_protected_faint_brace_near_subtotal_rules.png": ((234, 164, 252, 209), (244, 174, 248, 199)),
+            }
+            analysis_boxes = {
+                "A002_protected_faint_side_bracket_grouping_rows.png": (36, 92, 94, 142),
+                "A003_protected_faint_brace_near_subtotal_rules.png": (228, 158, 356, 226),
+            }
+            rule_boxes = {
+                "A003_protected_faint_brace_near_subtotal_rules.png": (
+                    (256, 186, 352, 188),
+                    (256, 220, 352, 223),
+                    (256, 192, 258, 220),
+                ),
+            }
+
+            for name, boxes in marker_boxes.items():
+                record = records[name]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
+                with Image.open(process_dir / record["output_relative_path"]) as processed:
+                    after = processed.convert("RGB")
+                before = pages[name].convert("RGB")
+                self.assertEqual(before.size, after.size, name)
+                self.assertEqual(_content_bbox(before), _content_bbox(after), name)
+                self.assertLessEqual(_changed_ratio(before, after, analysis_boxes[name]), 0.13, name)
+                self.assertLessEqual(
+                    abs(_mean_luma(after, analysis_boxes[name]) - _mean_luma(before, analysis_boxes[name])), 7.0, name
+                )
+                for box in boxes:
+                    before_pixels = _inklike_pixels(before, box)
+                    after_pixels = _inklike_pixels(after, box)
+                    self.assertGreaterEqual(before_pixels, 10, name)
+                    self.assertGreaterEqual(after_pixels, max(8, int(math.floor(before_pixels * 0.68))), name)
+                for rule_box in rule_boxes.get(name, ()):
+                    before_rule_pixels = _inklike_pixels(before, rule_box, threshold=210)
+                    after_rule_pixels = _inklike_pixels(after, rule_box, threshold=210)
+                    self.assertGreaterEqual(after_rule_pixels, max(8, int(math.floor(before_rule_pixels * 0.70))), name)
+                self.assertIn(
+                    record["processing_audit"].get("combination_quality_guard_action"),
+                    {"passed", "reverted_to_source", "kept_original"},
+                    name,
+                )
+
+            safe_name = "A001_safe_isolated_dust_control.png"
+            safe_record = records[safe_name]
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_processed:
+                safe_after = safe_processed.convert("RGB")
+            safe_before = pages[safe_name].convert("RGB")
+            safe_delta = _changed_ratio(safe_before, safe_after, (308, 182, 350, 230))
+            safe_audit = safe_record["processing_audit"]
+            reverted_safe = (
+                safe_audit.get("cumulative_change_guard_action") == "reverted_to_source"
+                or safe_audit.get("combination_quality_guard_action") == "reverted_to_source"
+            )
+            self.assertTrue(safe_delta <= 0.10 or reverted_safe)
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+
+            # Negative-path invariant: emulate over-cleanup that erases faint bracket/brace grouping marks.
+            erased = pages["A003_protected_faint_brace_near_subtotal_rules.png"].convert("RGB").copy()
+            ImageDraw.Draw(erased).rectangle((230, 160, 256, 214), fill=(247, 247, 244))
+            erased_before = _inklike_pixels(
+                pages["A003_protected_faint_brace_near_subtotal_rules.png"],
+                (230, 160, 256, 214),
+                threshold=212,
+            )
+            erased_after = _inklike_pixels(erased, (230, 160, 256, 214), threshold=212)
+            erased_ratio = _changed_ratio(
+                pages["A003_protected_faint_brace_near_subtotal_rules.png"],
+                erased,
+                (230, 160, 256, 214),
+            )
+            self.assertGreater(erased_ratio, 0.12)
+            self.assertLess(erased_after, int(math.floor(erased_before * 0.45)))
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            self.assertFalse(audit_summary["privacy"].get("contains_thumbnails", False))
+            self.assertFalse(audit_summary["privacy"].get("contains_ocr_text", False))
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_faint_circled_ledger_review_marks_remain_detectable(self) -> None:
         def _ledger_circled_review_page(variant: str) -> Image.Image:
             image = Image.new("RGB", (372, 272), (245, 244, 239))
