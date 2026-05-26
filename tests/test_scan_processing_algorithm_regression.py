@@ -1184,7 +1184,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             page_number_name = "private_full_chain_dark_edge_faint_page_number.png"
             binder_name = "private_full_chain_dark_edge_binder_marks.png"
 
-            safe = _interrupted_dark_scanner_border_page("broad_shadow")
+            safe = _interrupted_dark_scanner_border_page("single_edge")
             faint_page_number = _interrupted_dark_scanner_border_page("near_edge_content")
             binder_marks = _interrupted_dark_scanner_border_page("punched_marks")
             safe.save(input_dir / safe_name, dpi=(300, 300))
@@ -1263,12 +1263,14 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
 
             safe_name = "private_full_chain_black_border_safe_control.png"
             protected_name = "private_full_chain_black_border_dark_marginal_evidence.png"
-            safe = _interrupted_dark_scanner_border_page("broad_shadow")
+            safe = _interrupted_dark_scanner_border_page("single_edge")
             protected = _interrupted_dark_scanner_border_page("marginal_text")
-            safe_source_bytes = safe.tobytes()
-            protected_source_bytes = protected.tobytes()
-            safe.save(input_dir / safe_name, dpi=(300, 300))
-            protected.save(input_dir / protected_name, dpi=(300, 300))
+            safe_input_path = input_dir / safe_name
+            protected_input_path = input_dir / protected_name
+            safe.save(safe_input_path, dpi=(300, 300))
+            protected.save(protected_input_path, dpi=(300, 300))
+            safe_source_bytes = safe_input_path.read_bytes()
+            protected_source_bytes = protected_input_path.read_bytes()
 
             report = scan_batch(ScanConfig("synthetic-regression", "full-chain-black-border-marginal-evidence-guard", input_dir, output_dir))
             manifest = process_images(report, input_dir, process_dir, _full_chain_options())
@@ -1296,8 +1298,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
 
                 self.assertTrue(
                     safe_record["dark_border_trimmed"]
-                    or safe_dark_ratio <= 0.95
-                    or safe_border_change <= 0.08
+                    or (safe_dark_ratio <= 0.95 and safe_border_change >= 0.05)
                 )
                 self.assertLess(safe_dark_ratio, 1.15)
 
@@ -1348,8 +1349,8 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     },
                 )
 
-            self.assertEqual(safe.tobytes(), safe_source_bytes)
-            self.assertEqual(protected.tobytes(), protected_source_bytes)
+            self.assertEqual(safe_input_path.read_bytes(), safe_source_bytes)
+            self.assertEqual(protected_input_path.read_bytes(), protected_source_bytes)
 
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
