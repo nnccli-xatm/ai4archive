@@ -25078,6 +25078,193 @@ class ScanProcessingNestedBasenameCollisionRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_ledger_carry_forward_abbreviation_marks_remain_detectable(self) -> None:
+        def _ledger_carry_forward_abbreviation_page(variant: str) -> Image.Image:
+            image = Image.new("RGB", (376, 276), (245, 244, 239))
+            pixels = image.load()
+            for y in range(image.height):
+                for x in range(image.width):
+                    wave = int(round(2.4 * math.sin(x * 0.040) + 2.0 * math.cos(y * 0.046)))
+                    cast = int(round(1.8 * (x / max(1, image.width - 1)) + 1.5 * (y / max(1, image.height - 1))))
+                    base = max(0, min(255, 245 + wave - cast))
+                    pixels[x, y] = (base, base, max(0, base - 2))
+
+            draw = ImageDraw.Draw(image)
+            font = ImageFont.load_default()
+            draw.text((24, 18), "LEDGER REGISTER", fill=(110, 110, 106), font=font)
+            draw.text((28, 44), "DATE", fill=(124, 124, 120), font=font)
+            draw.text((86, 44), "DETAIL", fill=(124, 124, 120), font=font)
+            draw.text((248, 44), "TOTAL", fill=(124, 124, 120), font=font)
+            draw.text((312, 44), "REF", fill=(124, 124, 120), font=font)
+            for y in (68, 92, 116, 140, 164, 188, 212, 236):
+                draw.line((24, y, 352, y), fill=(204, 204, 200), width=1)
+            for x in (78, 242, 308, 352):
+                draw.line((x, 52, x, 240), fill=(202, 202, 198), width=1)
+            for y in (76, 100, 124, 148, 172, 196):
+                draw.text((28, y - 8), "05/14", fill=(118, 118, 114), font=font)
+                draw.text((88, y - 8), "POSTING", fill=(122, 122, 118), font=font)
+                draw.text((250, y - 8), "108.40", fill=(116, 116, 112), font=font)
+                draw.text((316, y - 8), "L3", fill=(120, 120, 116), font=font)
+
+            if variant == "safe_control":
+                for point in ((320, 186), (325, 194), (332, 202), (338, 211), (317, 218), (324, 224)):
+                    draw.point(point, fill=(176, 176, 170))
+                draw.ellipse((298, 184, 344, 230), fill=(236, 233, 226))
+                return image
+
+            if variant == "carry_forward_near_subtotal":
+                draw.text((248, 146), "96.15", fill=(168, 168, 162), font=font)
+                draw.text((248, 170), "12.30", fill=(168, 168, 162), font=font)
+                draw.line((244, 188, 338, 188), fill=(188, 188, 184), width=1)
+                draw.rectangle((244, 192, 338, 216), outline=(186, 186, 182), width=1)
+                draw.text((248, 198), "108.45", fill=(170, 170, 164), font=font)
+                draw.text((328, 198), "c", fill=(160, 160, 154), font=font)
+                draw.line((334, 202, 338, 198), fill=(158, 158, 152), width=1)
+                draw.text((339, 198), "f", fill=(160, 160, 154), font=font)
+                return image
+
+            if variant == "posting_folio_near_row_refs":
+                draw.text((248, 98), "71.20", fill=(166, 166, 160), font=font)
+                draw.text((248, 122), "36.90", fill=(166, 166, 160), font=font)
+                draw.text((316, 98), "R1", fill=(156, 156, 150), font=font)
+                draw.text((316, 122), "R2", fill=(156, 156, 150), font=font)
+                draw.text((314, 146), "p", fill=(160, 160, 154), font=font)
+                draw.point((320, 151), fill=(158, 158, 152))
+                draw.text((323, 146), "f", fill=(160, 160, 154), font=font)
+                draw.point((329, 151), fill=(158, 158, 152))
+                draw.line((244, 140, 352, 140), fill=(188, 188, 184), width=1)
+                draw.line((244, 164, 352, 164), fill=(188, 188, 184), width=1)
+                return image
+
+            raise ValueError(f"unsupported ledger-carry-forward-abbreviation variant: {variant}")
+
+        def _inklike_pixels(image: Image.Image, box: tuple[int, int, int, int], threshold: int = 212) -> int:
+            region = image.convert("L").crop(box)
+            return sum(1 for value in region.getdata() if value <= threshold)
+
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-ledger-carry-forward-abbreviation-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            pages = {
+                "A001_safe_isolated_dust_control.png": _ledger_carry_forward_abbreviation_page("safe_control"),
+                "A002_protected_carry_forward_abbreviation.png": _ledger_carry_forward_abbreviation_page(
+                    "carry_forward_near_subtotal"
+                ),
+                "A003_protected_posting_folio_abbreviation.png": _ledger_carry_forward_abbreviation_page(
+                    "posting_folio_near_row_refs"
+                ),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(
+                ScanConfig("synthetic-regression", "full-chain-ledger-carry-forward-abbreviation-guard", input_dir, output_dir)
+            )
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(**{**_full_chain_options().__dict__, "deskew": False, "workers": 1}),
+            )
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            marker_boxes = {
+                "A002_protected_carry_forward_abbreviation.png": ((328, 196, 343, 210), (333, 198, 339, 206)),
+                "A003_protected_posting_folio_abbreviation.png": ((312, 144, 332, 155), (319, 149, 322, 153), (328, 149, 331, 153)),
+            }
+            analysis_boxes = {
+                "A002_protected_carry_forward_abbreviation.png": (240, 138, 346, 220),
+                "A003_protected_posting_folio_abbreviation.png": (240, 90, 352, 168),
+            }
+            rule_boxes = {
+                "A002_protected_carry_forward_abbreviation.png": ((244, 187, 338, 190), (244, 192, 247, 216)),
+                "A003_protected_posting_folio_abbreviation.png": ((244, 139, 352, 142), (244, 163, 352, 166), (308, 92, 311, 236)),
+            }
+
+            for name, boxes in marker_boxes.items():
+                record = records[name]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
+                with Image.open(process_dir / record["output_relative_path"]) as processed:
+                    after = processed.convert("RGB")
+                before = pages[name].convert("RGB")
+                self.assertEqual(before.size, after.size, name)
+                self.assertEqual(_content_bbox(before), _content_bbox(after), name)
+                self.assertLessEqual(_changed_ratio(before, after, analysis_boxes[name]), 0.12, name)
+                self.assertLessEqual(
+                    abs(_mean_luma(after, analysis_boxes[name]) - _mean_luma(before, analysis_boxes[name])),
+                    7.0,
+                    name,
+                )
+                for box in boxes:
+                    before_pixels = _inklike_pixels(before, box)
+                    after_pixels = _inklike_pixels(after, box)
+                    self.assertGreaterEqual(before_pixels, 1, name)
+                    self.assertGreaterEqual(after_pixels, max(1, int(math.floor(before_pixels * 0.68))), name)
+                for rule_box in rule_boxes.get(name, ()):
+                    before_rule_pixels = _inklike_pixels(before, rule_box, threshold=210)
+                    after_rule_pixels = _inklike_pixels(after, rule_box, threshold=210)
+                    self.assertGreaterEqual(after_rule_pixels, max(8, int(math.floor(before_rule_pixels * 0.68))), name)
+                self.assertIn(
+                    record["processing_audit"].get("combination_quality_guard_action"),
+                    {"passed", "reverted_to_source", "kept_original"},
+                    name,
+                )
+
+            safe_name = "A001_safe_isolated_dust_control.png"
+            safe_record = records[safe_name]
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_processed:
+                safe_after = safe_processed.convert("RGB")
+            safe_before = pages[safe_name].convert("RGB")
+            safe_delta = _changed_ratio(safe_before, safe_after, (302, 176, 346, 232))
+            safe_audit = safe_record["processing_audit"]
+            reverted_safe = (
+                safe_audit.get("cumulative_change_guard_action") == "reverted_to_source"
+                or safe_audit.get("combination_quality_guard_action") == "reverted_to_source"
+            )
+            self.assertTrue(safe_delta <= 0.10 or reverted_safe)
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+
+            # Negative-path invariant: emulate over-cleanup that erases carry-forward abbreviation strokes.
+            erased = pages["A002_protected_carry_forward_abbreviation.png"].convert("RGB").copy()
+            ImageDraw.Draw(erased).rectangle((326, 194, 343, 210), fill=(247, 247, 244))
+            erased_before = _inklike_pixels(
+                pages["A002_protected_carry_forward_abbreviation.png"],
+                (326, 194, 343, 210),
+                threshold=212,
+            )
+            erased_after = _inklike_pixels(erased, (326, 194, 343, 210), threshold=212)
+            erased_ratio = _changed_ratio(
+                pages["A002_protected_carry_forward_abbreviation.png"],
+                erased,
+                (326, 194, 343, 210),
+            )
+            self.assertGreater(erased_ratio, 0.15)
+            self.assertLess(erased_after, int(math.floor(erased_before * 0.45)))
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (
+                *pages,
+                str(input_dir),
+                "source_relative_path",
+                "source_sha256",
+                "ocr_text",
+            ):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_faint_ledger_thousands_separators_remain_detectable(self) -> None:
         def _ledger_thousands_separator_page(variant: str) -> Image.Image:
             image = Image.new("RGB", (372, 272), (245, 244, 239))
