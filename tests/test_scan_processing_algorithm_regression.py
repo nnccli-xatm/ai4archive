@@ -16834,6 +16834,99 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256", "output_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_aggregate_performance_full_chain_recent_quality_mix_stays_within_runtime_budget(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-recent-quality-performance-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            pages = {
+                "A001_safe_recent_quality_cleanup_control.png": _calibration_ruler_strip_guard_page("safe_neutral_cleanup_control"),
+                "A002_protected_calibration_ticks.png": _calibration_ruler_strip_guard_page("edge_tick_strip_with_tiny_labels"),
+                "A003_protected_faded_toner_text.png": _faded_toner_dropout_guard_page("broken_typed_characters"),
+                "A004_protected_purple_blue_marks.png": _purple_blue_duplicator_guard_page("mimeograph_text"),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-recent-quality-performance-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_name = "A001_safe_recent_quality_cleanup_control.png"
+            safe_audit = records[safe_name]["processing_audit"]
+            self.assertEqual(records[safe_name]["status"], "processed")
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertIn(safe_audit["combination_quality_guard_action"], {"passed", "kept_original", "reverted_to_source"})
+
+            protected_boxes = {
+                "A002_protected_calibration_ticks.png": (0, 16, 66, 208),
+                "A003_protected_faded_toner_text.png": (126, 78, 246, 156),
+                "A004_protected_purple_blue_marks.png": (112, 72, 286, 134),
+            }
+            for name, protected_box in protected_boxes.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                before = pages[name].convert("RGB")
+                with Image.open(process_dir / record["output_relative_path"]) as output_image:
+                    after = output_image.convert("RGB")
+
+                self.assertEqual(record["status"], "processed", name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertIn(
+                    audit["combination_quality_guard_action"],
+                    {"passed", "kept_original", "reverted_to_source"},
+                    name,
+                )
+                self.assertLess(_changed_ratio(before, after, protected_box), 0.18, name)
+
+            timings = audit_summary["timing"]["operation_timings"]
+            representative_operations = (
+                "trim_dark_border",
+                "scanner_gutter_trim",
+                "despeckle",
+                "deskew",
+                "auto_crop",
+                "clean_bleed_through",
+                "lighten_background_stains",
+                "lighten_scanlines",
+                "enhance_faded_text",
+                "sharpen_text_edges",
+            )
+            aggregate_elapsed = 0.0
+            for operation in representative_operations:
+                timing = timings[operation]
+                self.assertTrue(timing["enabled"], operation)
+                self.assertEqual(timing["file_count"], len(pages), operation)
+                self.assertIn("elapsed_seconds", timing)
+                self.assertIn("average_seconds_per_file", timing)
+                aggregate_elapsed += float(timing["elapsed_seconds"])
+
+            self.assertGreater(aggregate_elapsed, 0.0)
+            self.assertLessEqual(
+                aggregate_elapsed,
+                12.0,
+                f"recent full-chain quality mix aggregate elapsed exceeded guard: {aggregate_elapsed:.4f}s for {len(pages)} files",
+            )
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256", "output_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_quality_regression_reports_missing_operation_timing_code_without_private_rows(self) -> None:
         quality = _processing_quality_regression(
             {
