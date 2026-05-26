@@ -1087,6 +1087,154 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertNotIn("private_post_deskew_faint_edge_safe", audit_summary_text)
             self.assertNotIn("private_post_deskew_faint_edge_protected", audit_summary_text)
 
+    def test_full_chain_black_wedge_post_deskew_cleanup_stays_conservative_for_marginal_evidence(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-black-wedge-post-deskew-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            def _black_wedge_page(with_low_contrast_margin_mark: bool) -> Image.Image:
+                page = Image.new("RGB", (300, 220), (244, 244, 240))
+                draw = ImageDraw.Draw(page)
+                for y in (58, 84, 110, 136, 162):
+                    draw.rectangle((62, y, 240, y + 4), fill=(42, 42, 42))
+                draw.polygon(((0, 0), (86, 0), (0, 88)), fill=(6, 6, 6))
+                draw.polygon(((0, 212), (44, 219), (0, 219)), fill=(10, 10, 10))
+                if with_low_contrast_margin_mark:
+                    mark = (196, 196, 192)
+                    draw.line((7, 32, 16, 46, 8, 64, 15, 84, 8, 104), fill=mark, width=2)
+                    draw.text((10, 10), "12", fill=(194, 194, 190))
+                    draw.line((3, 118, 44, 118), fill=mark, width=1)
+                return page.rotate(1.6, resample=Image.Resampling.BICUBIC, expand=True, fillcolor=(8, 8, 8))
+
+            safe_name = "A001_full_chain_black_wedge_safe_control.png"
+            protected_name = "A002_full_chain_black_wedge_low_contrast_margin_mark.png"
+            safe_before = _black_wedge_page(with_low_contrast_margin_mark=False)
+            protected_before = _black_wedge_page(with_low_contrast_margin_mark=True)
+            safe_before.save(input_dir / safe_name, dpi=(300, 300))
+            protected_before.save(input_dir / protected_name, dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-black-wedge-post-deskew", input_dir, output_dir))
+            with mock.patch.object(
+                processing_module,
+                "_safe_deskew_skip_from_scan_record",
+                return_value=None,
+            ), mock.patch.object(
+                processing_module,
+                "_safe_deskew_skip_from_page_evidence",
+                return_value=None,
+            ), mock.patch.object(
+                processing_module,
+                "_deskew_has_edge_content_risk",
+                return_value=False,
+            ), mock.patch.object(
+                processing_module,
+                "_deskew_has_color_or_table_risk",
+                return_value=False,
+            ), mock.patch.object(
+                processing_module,
+                "_detect_skew",
+                return_value=processing_module.SkewDetection(1.6, 1.0, "synthetic black wedge deskew"),
+            ):
+                manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            safe_record = records[safe_name]
+            protected_record = records[protected_name]
+            self.assertTrue(safe_record["status"] == "processed")
+            self.assertTrue(protected_record["status"] == "processed")
+            safe_guard_action = safe_record["processing_audit"]["combination_quality_guard_action"]
+            self.assertIn(safe_guard_action, {"passed", "kept_original", "reverted_to_source"})
+            self.assertIn(protected_record["processing_audit"]["combination_quality_guard_action"], {"passed", "kept_original", "reverted_to_source"})
+            self.assertEqual(protected_record["processing_audit"]["guardrail_failures"], [])
+
+            safe_wedge_box = (0, 0, 78, 78)
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_after:
+                safe_wedge_before = _mean_luma(safe_before, safe_wedge_box)
+                safe_wedge_after = _mean_luma(safe_after, safe_wedge_box)
+                safe_wedge_changed = _changed_ratio(safe_before, safe_after, safe_wedge_box)
+            if safe_record["cropped"] or safe_record["dark_border_trimmed"]:
+                self.assertGreater(safe_wedge_after - safe_wedge_before, 5.0)
+                self.assertGreater(safe_wedge_changed, 0.02)
+            self.assertLess(safe_wedge_changed, 0.35)
+
+            protected_margin_box = (3, 8, 48, 122)
+            with Image.open(process_dir / protected_record["output_relative_path"]) as protected_after:
+                margin_changed_ratio = _changed_ratio(protected_before, protected_after, protected_margin_box)
+            self.assertLess(margin_changed_ratio, 0.40)
+
+            # Unsafe baseline simulation: an aggressive post-deskew wedge crop would destroy the protected margin box.
+            permissive_options = ProcessingOptions(
+                **{
+                    **_full_chain_options().__dict__,
+                    "audit_max_cumulative_change_score": 9.0,
+                    "audit_max_cumulative_pixel_change_ratio": 1.0,
+                    "audit_max_local_content_changed_ratio": 1.0,
+                    "audit_max_local_content_tile_changed_ratio": 1.0,
+                    "audit_max_edge_content_changed_ratio": 1.0,
+                }
+            )
+            with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-black-wedge-regression-sim-") as regression_dir:
+                regression_root = Path(regression_dir)
+                regression_input = regression_root / "input"
+                regression_output = regression_root / "reports"
+                regression_process = regression_root / "processed"
+                regression_input.mkdir()
+                protected_before.save(regression_input / protected_name, dpi=(300, 300))
+                regression_report = scan_batch(
+                    ScanConfig("synthetic-regression", "full-chain-black-wedge-regression-sim", regression_input, regression_output)
+                )
+                aggressive_crop = processing_module.CropDetection((40, 0, protected_before.width, protected_before.height), "regression: aggressive black wedge corner crop")
+                with mock.patch.object(processing_module, "_detect_post_deskew_canvas_crop_bbox", return_value=aggressive_crop), mock.patch.object(
+                    processing_module,
+                    "_safe_deskew_skip_from_scan_record",
+                    return_value=None,
+                ), mock.patch.object(
+                    processing_module,
+                    "_safe_deskew_skip_from_page_evidence",
+                    return_value=None,
+                ), mock.patch.object(
+                    processing_module,
+                    "_deskew_has_edge_content_risk",
+                    return_value=False,
+                ), mock.patch.object(
+                    processing_module,
+                    "_deskew_has_color_or_table_risk",
+                    return_value=False,
+                ), mock.patch.object(
+                    processing_module,
+                    "_detect_skew",
+                    return_value=processing_module.SkewDetection(1.6, 1.0, "synthetic black wedge deskew regression"),
+                ):
+                    regression_manifest = process_images(
+                        regression_report,
+                        regression_input,
+                        regression_process,
+                        ProcessingOptions(**{**permissive_options.__dict__, "deskew": True, "workers": 1}),
+                    )
+
+                regression_record = regression_manifest["files"][0]
+                regression_audit = regression_record["processing_audit"]
+                with Image.open(regression_process / regression_record["output_relative_path"]) as regressed:
+                    regressed_changed = _changed_ratio(protected_before, regressed, protected_margin_box)
+                reverted = regression_audit.get("cumulative_change_guard_action") == "reverted_to_source" or (
+                    regression_audit.get("combination_quality_guard_action") == "reverted_to_source"
+                )
+                if reverted:
+                    self.assertLess(regressed_changed, 0.01)
+                else:
+                    self.assertGreater(regressed_changed, 0.20)
+
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            self.assertNotIn(safe_name, audit_summary_text)
+            self.assertNotIn(protected_name, audit_summary_text)
+
     def test_full_chain_encoded_derivative_preserves_color_detail_and_icc_profile(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-encoded-color-") as temp_dir:
             root = Path(temp_dir)
