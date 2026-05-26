@@ -16151,6 +16151,97 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_gutter_shadow_marginal_guard_keeps_tiny_page_marks_conservative(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-gutter-marginal-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            thin_rule = _mixed_tone_binding_gutter_page("safe")
+            thin_rule_draw = ImageDraw.Draw(thin_rule)
+            thin_rule_draw.line((4, 146, 14, 146), fill=(70, 70, 70), width=1)
+            thin_rule_draw.line((4, 149, 14, 149), fill=(72, 72, 72), width=1)
+
+            pages = {
+                "A001_safe_gutter_shadow_control.png": _mixed_tone_binding_gutter_page("safe"),
+                "A002_protected_marginal_note_strokes.png": _mixed_tone_binding_gutter_page("edge_handwriting"),
+                "A003_protected_page_number_dots.png": _mixed_tone_binding_gutter_page("page_number"),
+                "A004_protected_thin_rule_strokes.png": thin_rule,
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-gutter-marginal-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_name = "A001_safe_gutter_shadow_control.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertIn(safe_audit["combination_quality_guard_action"], {"passed", "kept_original", "reverted_to_source"})
+            self.assertLessEqual(safe_audit["cumulative_change_crop_ratio"], 0.06)
+            if safe_record["scanner_gutter_trimmed"]:
+                self.assertEqual(safe_record["scanner_gutter_reason"], "scanner gutter trim applied")
+                self.assertLess(safe_record["output_size"][0], 260)
+            else:
+                self.assertIn(
+                    safe_record["scanner_gutter_reason"],
+                    {
+                        "scanner gutter skipped: protected edge content",
+                        "scanner gutter skipped: no narrow uniform light band",
+                        "scanner gutter skipped: no inset content evidence",
+                    },
+                )
+
+            protected_names = (
+                "A002_protected_marginal_note_strokes.png",
+                "A003_protected_page_number_dots.png",
+                "A004_protected_thin_rule_strokes.png",
+            )
+            protected_boxes = {
+                "A002_protected_marginal_note_strokes.png": (0, 36, 18, 108),
+                "A003_protected_page_number_dots.png": (0, 10, 22, 42),
+                "A004_protected_thin_rule_strokes.png": (0, 136, 22, 160),
+            }
+            for name in protected_names:
+                record = records[name]
+                audit = record["processing_audit"]
+                self.assertEqual(record["status"], "processed")
+                self.assertFalse(record["scanner_gutter_trimmed"], name)
+                self.assertIn(
+                    record["scanner_gutter_reason"],
+                    {
+                        "scanner gutter skipped: protected edge content",
+                        "scanner gutter skipped: no narrow uniform light band",
+                        "scanner gutter skipped: no inset content evidence",
+                    },
+                )
+                self.assertIn(audit["combination_quality_guard_action"], {"passed", "kept_original", "reverted_to_source"})
+                self.assertEqual(audit["guardrail_failures"], [])
+                with Image.open(process_dir / record["output_relative_path"]) as output:
+                    changed = _changed_ratio(pages[name].convert("RGB"), output.convert("RGB"), protected_boxes[name])
+                self.assertLessEqual(changed, 0.04, name)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertGreaterEqual(audit_summary["counts"]["scanner_gutter_skipped_files"], len(protected_names))
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256", "output_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_fold_out_map_panel_evidence_stays_preserved_with_safe_cleanup_control(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-fold-out-map-panel-") as temp_dir:
             root = Path(temp_dir)
