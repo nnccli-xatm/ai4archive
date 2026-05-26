@@ -25942,9 +25942,9 @@ class ScanProcessingNestedBasenameCollisionRegressionTest(unittest.TestCase):
                 draw.text((252, y - 8), "108.40", fill=(116, 116, 112), font=font)
 
             if variant == "safe_control":
+                draw.ellipse((300, 184, 344, 230), fill=(236, 233, 226))
                 for point in ((320, 186), (326, 193), (332, 201), (338, 209), (318, 217), (324, 224)):
                     draw.point(point, fill=(176, 176, 170))
-                draw.ellipse((300, 184, 344, 230), fill=(236, 233, 226))
                 return image
 
             if variant == "currency_symbol_column":
@@ -26055,13 +26055,24 @@ class ScanProcessingNestedBasenameCollisionRegressionTest(unittest.TestCase):
             with Image.open(process_dir / safe_record["output_relative_path"]) as safe_processed:
                 safe_after = safe_processed.convert("RGB")
             safe_before = pages[safe_name].convert("RGB")
-            safe_delta = _changed_ratio(safe_before, safe_after, (300, 178, 342, 230))
+            safe_box = (300, 178, 342, 230)
+            safe_before_pixels = _inklike_pixels(safe_before, safe_box, threshold=214)
+            safe_after_pixels = _inklike_pixels(safe_after, safe_box, threshold=214)
+            self.assertGreaterEqual(safe_before_pixels, 6)
+            safe_delta = _changed_ratio(safe_before, safe_after, safe_box)
             safe_audit = safe_record["processing_audit"]
             reverted_safe = (
                 safe_audit.get("cumulative_change_guard_action") == "reverted_to_source"
                 or safe_audit.get("combination_quality_guard_action") == "reverted_to_source"
             )
-            self.assertTrue(safe_delta <= 0.10 or reverted_safe)
+            kept_original_by_guard = safe_audit.get("combination_quality_guard_action") == "kept_original"
+            if reverted_safe or kept_original_by_guard:
+                self.assertAlmostEqual(safe_delta, 0.0, places=6)
+                self.assertEqual(safe_after_pixels, safe_before_pixels)
+            else:
+                self.assertGreaterEqual(safe_delta, 0.004)
+                self.assertLessEqual(safe_delta, 0.10)
+                self.assertLess(safe_after_pixels, safe_before_pixels)
             self.assertEqual(safe_audit["guardrail_failures"], [])
 
             # Negative-path invariant: emulate over-whitening that erases faint currency/unit evidence.
