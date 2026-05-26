@@ -98,84 +98,10 @@ jobs:
         run: |
           set -euo pipefail
           git diff --name-only refs/remotes/ci/base..HEAD > /tmp/changed-files.txt
-          python - <<'PY' > /tmp/targeted-tests.txt
-          import ast
-          import subprocess
-          from pathlib import Path
-
-          changed = [
-              line.strip()
-              for line in Path("/tmp/changed-files.txt").read_text().splitlines()
-              if line.strip()
-          ]
-
-          def added_test_ids(path: str) -> set[str]:
-              diff = subprocess.run(
-                  ["git", "diff", "--unified=0", "refs/remotes/ci/base..HEAD", "--", path],
-                  check=True,
-                  capture_output=True,
-                  text=True,
-              ).stdout
-              added_names = {
-                  line.split("def ", 1)[1].split("(", 1)[0].strip()
-                  for line in diff.splitlines()
-                  if line.startswith("+") and "def test_" in line
-              }
-              if not added_names:
-                  return set()
-
-              module = path[:-3].replace("/", ".")
-              tree = ast.parse(Path(path).read_text(encoding="utf-8"))
-              selected = set()
-              for node in ast.walk(tree):
-                  if not isinstance(node, ast.ClassDef):
-                      continue
-                  methods = {
-                      child.name
-                      for child in node.body
-                      if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
-                  }
-                  for name in added_names & methods:
-                      selected.add(f"{module}.{node.name}.{name}")
-              return selected
-
-          tests = set()
-          for path in changed:
-              if path.startswith("tests/test_") and path.endswith(".py"):
-                  tests.update(added_test_ids(path) or {path})
-              if path.startswith("src/archive_scan_qc/"):
-                  tests.add("tests/test_scan_qc.py")
-              if path.startswith("src/archive_scan_qc/") and "scan_processing" in path:
-                  tests.update(
-                      {
-                          "tests/test_scan_processing_combo.py",
-                          "tests/test_scan_processing_reuse.py",
-                          "tests/test_scan_processing_algorithm_regression.py",
-                      }
-                  )
-              if any(
-                  token in path
-                  for token in (
-                      "background_stains",
-                      "edge_shadow",
-                      "tone_normalization",
-                      "scanline",
-                  )
-              ):
-                  tests.update(
-                      {
-                          "tests/test_scan_background_stains.py",
-                          "tests/test_scan_edge_shadow.py",
-                          "tests/test_scan_tone_normalization.py",
-                          "tests/test_scanline_lightening.py",
-                      }
-                  )
-
-          for test in sorted(tests):
-              if test.endswith(".py") and not Path(test).exists():
-                  continue
-              print(test)
-          PY
+          python scripts/ci_targeted_selector.py \
+            --base-ref refs/remotes/ci/base..HEAD \
+            --changed-files-file /tmp/changed-files.txt \
+            > /tmp/targeted-tests.txt
           if [ -s /tmp/targeted-tests.txt ]; then
             echo "run_tests=true" >> "$GITHUB_OUTPUT"
             tests="$(tr '\n' ' ' < /tmp/targeted-tests.txt | sed 's/[[:space:]]*$//')"
