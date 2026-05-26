@@ -16694,6 +16694,74 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256", "output_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_faded_toner_dropout_guard_preserves_broken_text_and_dotted_forms(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-faded-toner-dropout-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "A001_safe_dust_cleanup_control.png": _faded_toner_dropout_guard_page("safe_dust_control"),
+                "A002_protected_broken_typed_characters.png": _faded_toner_dropout_guard_page("broken_typed_characters"),
+                "A003_protected_dotted_form_separator.png": _faded_toner_dropout_guard_page("dotted_form_separator"),
+                "A004_protected_faint_page_number_and_punctuation.png": _faded_toner_dropout_guard_page(
+                    "faint_page_number_and_punctuation"
+                ),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-faded-toner-dropout-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_name = "A001_safe_dust_cleanup_control.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertEqual(safe_audit["local_content_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed")
+            self.assertIn(safe_audit["combination_quality_guard_action"], {"passed", "kept_original"})
+
+            protected_boxes = {
+                "A002_protected_broken_typed_characters.png": (126, 78, 246, 156),
+                "A003_protected_dotted_form_separator.png": (42, 148, 288, 186),
+                "A004_protected_faint_page_number_and_punctuation.png": (12, 14, 96, 70),
+            }
+            for name, protected_box in protected_boxes.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                before = pages[name].convert("RGB")
+                with Image.open(process_dir / record["output_relative_path"]) as output_image:
+                    after = output_image.convert("RGB")
+
+                self.assertEqual(record["status"], "processed", name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertIn(
+                    audit["combination_quality_guard_action"],
+                    {"passed", "kept_original", "reverted_to_source"},
+                    name,
+                )
+                self.assertLess(_changed_ratio(before, after, protected_box), 0.12, name)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256", "output_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_quality_regression_reports_missing_operation_timing_code_without_private_rows(self) -> None:
         quality = _processing_quality_regression(
             {
@@ -19589,6 +19657,45 @@ def _faint_cloud_background_stain_page(variant: str = "safe") -> Image.Image:
             draw.rectangle((26, y, 302, y + 5), fill=(50, 50, 48))
     else:
         raise ValueError(f"unsupported faint cloud stain variant: {variant}")
+    return image
+
+
+def _faded_toner_dropout_guard_page(variant: str = "safe_dust_control") -> Image.Image:
+    image = Image.new("RGB", (320, 220), (246, 246, 242))
+    draw = ImageDraw.Draw(image)
+    for y in (80, 106, 132):
+        draw.rectangle((108, y, 270, y + 2), fill=(72, 72, 72))
+
+    if variant == "safe_dust_control":
+        for x, y in ((20, 18), (44, 26), (60, 30), (76, 42), (58, 58), (28, 72), (40, 94), (74, 108)):
+            draw.point((x, y), fill=(214, 214, 210))
+            if (x + y) % 2 == 0:
+                draw.point((x + 1, y), fill=(217, 217, 213))
+    elif variant == "broken_typed_characters":
+        faint = (230, 230, 227)
+        for x, y in ((130, 82), (138, 84), (145, 86), (154, 88), (166, 90), (174, 92), (182, 94), (195, 96)):
+            draw.rectangle((x, y, x + 3, y + 1), fill=faint)
+        for x, y in ((132, 104), (142, 106), (151, 108), (164, 110), (176, 112), (188, 114), (200, 116)):
+            draw.rectangle((x, y, x + 2, y + 1), fill=faint)
+        draw.rectangle((214, 120, 218, 121), fill=faint)
+        draw.rectangle((224, 124, 227, 125), fill=faint)
+    elif variant == "dotted_form_separator":
+        for x in range(44, 286, 8):
+            draw.point((x, 156), fill=(231, 231, 228))
+            draw.point((x + 2, 164), fill=(232, 232, 229))
+        for y in range(148, 186, 8):
+            draw.point((62, y), fill=(231, 231, 228))
+            draw.point((80, y + 2), fill=(232, 232, 229))
+    elif variant == "faint_page_number_and_punctuation":
+        faint = (231, 231, 228)
+        draw.text((14, 16), "12", fill=faint, font=ImageFont.load_default())
+        draw.rectangle((44, 28, 45, 29), fill=faint)
+        draw.rectangle((52, 34, 53, 35), fill=faint)
+        draw.rectangle((58, 40, 59, 41), fill=faint)
+        draw.rectangle((68, 24, 69, 25), fill=faint)
+    else:
+        raise ValueError(f"unsupported faded toner dropout variant: {variant}")
+
     return image
 
 
