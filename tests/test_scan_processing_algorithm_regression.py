@@ -15771,6 +15771,96 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256", "output_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_carbonless_copy_cleanup_preserves_pale_handwriting_and_marks(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-carbonless-copy-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            pages = {
+                "A001_safe_carbonless_cleanup_control.png": _carbonless_copy_cleanup_guard_page("safe_control"),
+                "A002_carbonless_pale_handwriting_yellow.png": _carbonless_copy_cleanup_guard_page(
+                    "pale_handwriting_yellow"
+                ),
+                "A003_carbonless_pale_handwriting_pink.png": _carbonless_copy_cleanup_guard_page("pale_handwriting_pink"),
+                "A004_carbonless_faint_checkmarks_green.png": _carbonless_copy_cleanup_guard_page("faint_checkmarks_green"),
+                "A005_carbonless_low_confidence_mixed_cast.png": _carbonless_copy_cleanup_guard_page(
+                    "low_confidence_mixed_cast"
+                ),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-carbonless-copy-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_name = "A001_safe_carbonless_cleanup_control.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            safe_before = pages[safe_name].convert("RGB")
+            with Image.open(process_dir / safe_record["output_relative_path"]) as output_image:
+                safe_after = output_image.convert("RGB")
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertIn(safe_audit["combination_quality_guard_action"], {"passed", "kept_original", "reverted_to_source"})
+            self.assertLessEqual(_changed_ratio(safe_before, safe_after, (36, 46, 260, 200)), 0.20)
+
+            protected_specs = {
+                "A002_carbonless_pale_handwriting_yellow.png": (68, 138, 268, 206),
+                "A003_carbonless_pale_handwriting_pink.png": (74, 136, 274, 204),
+                "A004_carbonless_faint_checkmarks_green.png": (176, 124, 292, 214),
+                "A005_carbonless_low_confidence_mixed_cast.png": (70, 136, 286, 206),
+            }
+            for name, box in protected_specs.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                before = pages[name].convert("RGB")
+                with Image.open(process_dir / record["output_relative_path"]) as output_image:
+                    after = output_image.convert("RGB")
+                self.assertEqual(record["status"], "processed", name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertIn(audit["combination_quality_guard_action"], {"passed", "kept_original", "reverted_to_source"}, name)
+                self.assertIn(
+                    audit["combination_quality_guard_reason_code"],
+                    {
+                        "safe_combination_passed",
+                        "low_confidence_original_preserved",
+                        "protected_content_original_preserved",
+                        "combined_change_too_large_reverted",
+                    },
+                    name,
+                )
+                self.assertLessEqual(audit["size_change_ratio"], 0.40, name)
+                self.assertLessEqual(audit["cumulative_change_crop_ratio"], 0.40, name)
+                if audit["combination_quality_guard_action"] == "reverted_to_source":
+                    self.assertLessEqual(_changed_ratio(before, after, box), 0.01, name)
+                else:
+                    self.assertGreaterEqual(_edge_energy(after.crop(box)), _edge_energy(before.crop(box)) * 0.35, name)
+                reason_codes = [record.get("normalize_tone_reason_code"), record.get("faded_text_reason_code")]
+                self.assertTrue(any(isinstance(code, str) and code for code in reason_codes), name)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertIn("timing", audit_summary)
+            self.assertIn("operation_timings", audit_summary["timing"])
+            self.assertGreater(len(audit_summary["timing"]["operation_timings"]), 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256", "output_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_punched_hole_cleanup_guard_preserves_nearby_annotations(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-punched-hole-annotation-") as temp_dir:
             root = Path(temp_dir)
@@ -21518,6 +21608,59 @@ def _multipart_carbon_copy_form_guard_page(variant: str) -> Image.Image:
         return image
 
     raise ValueError(f"unsupported multipart carbon-copy guard variant: {variant}")
+
+
+def _carbonless_copy_cleanup_guard_page(variant: str) -> Image.Image:
+    base_tints = {
+        "safe_control": (242, 238, 228),
+        "pale_handwriting_yellow": (244, 238, 214),
+        "pale_handwriting_pink": (246, 228, 228),
+        "faint_checkmarks_green": (230, 242, 224),
+        "low_confidence_mixed_cast": (239, 235, 224),
+    }
+    if variant not in base_tints:
+        raise ValueError(f"unknown carbonless guard variant: {variant}")
+
+    image = Image.new("RGB", (320, 230), base_tints[variant])
+    draw = ImageDraw.Draw(image)
+    for y in (46, 74, 102):
+        draw.rectangle((40, y, 260, y + 4), fill=(68, 68, 66))
+    draw.rectangle((186, 132, 300, 210), outline=(110, 116, 136), width=1)
+    draw.rectangle((200, 28, 220, 34), fill=(74, 74, 72))
+
+    pixels = image.load()
+    for y in range(image.height):
+        for x in range(image.width):
+            if (x * 11 + y * 7) % 83 == 0:
+                r, g, b = pixels[x, y]
+                pixels[x, y] = (max(0, r - 10), max(0, g - 10), max(0, b - 8))
+
+    if variant == "pale_handwriting_yellow":
+        draw.line((74, 146, 138, 154, 190, 148, 242, 160), fill=(174, 162, 148), width=2)
+        draw.line((78, 168, 150, 176, 228, 170), fill=(176, 164, 150), width=2)
+    elif variant == "pale_handwriting_pink":
+        draw.line((82, 144, 152, 152, 214, 146, 266, 158), fill=(176, 154, 158), width=2)
+        draw.line((84, 166, 158, 174, 232, 170), fill=(178, 156, 160), width=2)
+    elif variant == "faint_checkmarks_green":
+        for x, y in ((196, 140), (224, 156), (252, 174), (210, 192)):
+            draw.line((x, y, x + 8, y + 9, x + 22, y - 8), fill=(150, 164, 146), width=2)
+    elif variant == "low_confidence_mixed_cast":
+        for y in range(image.height):
+            for x in range(image.width):
+                warm = (244, 236, 218)
+                cool = (228, 238, 246)
+                blend = (x / max(1, image.width - 1)) * 0.62 + (y / max(1, image.height - 1)) * 0.38
+                mixed = tuple(round(warm[idx] * (1.0 - blend) + cool[idx] * blend) for idx in range(3))
+                pixels[x, y] = mixed
+        draw = ImageDraw.Draw(image)
+        for y in (46, 74, 102):
+            draw.rectangle((40, y, 260, y + 4), fill=(68, 68, 66))
+        draw.rectangle((186, 132, 300, 210), outline=(110, 116, 136), width=1)
+        draw.ellipse((188, 22, 310, 88), fill=(224, 212, 196))
+        draw.line((76, 146, 142, 154, 204, 148, 260, 160), fill=(172, 166, 158), width=2)
+        draw.line((82, 168, 160, 176, 242, 170), fill=(172, 166, 158), width=2)
+
+    return image
 
 
 def _seal_ribbon_tag_guard_page(variant: str) -> Image.Image:
