@@ -3660,6 +3660,192 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_pale_pencil_checkmarks_inside_ruled_cells_preserved_against_overclean_regression(self) -> None:
+        def ruled_checkmark_page(variant: str) -> Image.Image:
+            image = Image.new("RGB", (340, 252), (245, 244, 240))
+            draw = ImageDraw.Draw(image)
+            font = ImageFont.load_default()
+            for y in (44, 78, 112, 146, 180, 214):
+                draw.line((30, y, 312, y), fill=(220, 220, 216), width=1)
+            for x in (86, 164, 242, 312):
+                draw.line((x, 30, x, 228), fill=(222, 222, 218), width=1)
+            draw.text((36, 20), "INSPECTION CHECKLIST", fill=(95, 95, 91), font=font)
+            draw.text((96, 52), "ROW 1", fill=(108, 108, 104), font=font)
+            draw.text((96, 86), "ROW 2", fill=(108, 108, 104), font=font)
+            draw.text((96, 120), "ROW 3", fill=(108, 108, 104), font=font)
+            if variant == "safe_control":
+                return image
+            if variant == "pale_checkmark_inside_cell":
+                draw.line((52, 94, 58, 102), fill=(164, 163, 158), width=1)
+                draw.line((58, 102, 70, 86), fill=(164, 163, 158), width=1)
+                return image
+            if variant == "checkmark_near_faint_rule_with_dark_text":
+                draw.line((172, 126, 178, 136), fill=(162, 161, 156), width=1)
+                draw.line((178, 136, 192, 118), fill=(162, 161, 156), width=1)
+                draw.text((196, 120), "PAID", fill=(78, 78, 74), font=font)
+                return image
+            raise ValueError(f"unsupported ruled-checkmark variant: {variant}")
+
+        def _ink_pixels(image: Image.Image, box: tuple[int, int, int, int], threshold: int = 205) -> int:
+            region = image.convert("L").crop(box)
+            return sum(1 for value in region.getdata() if value <= threshold)
+
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-pale-checkmark-ruled-cells-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            pages = {
+                "A001_safe_cleanup_control.png": ruled_checkmark_page("safe_control"),
+                "A002_pale_checkmark_inside_cell.png": ruled_checkmark_page("pale_checkmark_inside_cell"),
+                "A003_checkmark_near_faint_rule_with_dark_reference_text.png": ruled_checkmark_page(
+                    "checkmark_near_faint_rule_with_dark_text"
+                ),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-pale-checkmark-ruled-cells-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            checkmark_boxes = {
+                "A002_pale_checkmark_inside_cell.png": (50, 84, 72, 104),
+                "A003_checkmark_near_faint_rule_with_dark_reference_text.png": (170, 116, 194, 138),
+            }
+            ruled_context_box = (30, 44, 312, 216)
+            rule_probe_points = ((86, 112), (164, 146), (242, 180))
+            for name, mark_box in checkmark_boxes.items():
+                record = records[name]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
+                before = pages[name].convert("RGB")
+                with Image.open(process_dir / record["output_relative_path"]) as output_image:
+                    after = output_image.convert("RGB")
+                self.assertEqual(before.size, after.size, name)
+                self.assertEqual(_content_bbox(before), _content_bbox(after), name)
+                self.assertLessEqual(_changed_ratio(before, after, ruled_context_box), 0.07, name)
+                self.assertLessEqual(abs(_mean_luma(after, ruled_context_box) - _mean_luma(before, ruled_context_box)), 4.5, name)
+                before_mark_pixels = _ink_pixels(before, mark_box)
+                after_mark_pixels = _ink_pixels(after, mark_box)
+                self.assertGreaterEqual(before_mark_pixels, 7, name)
+                self.assertGreaterEqual(after_mark_pixels, max(5, int(math.floor(before_mark_pixels * 0.65))), name)
+                before_luma = before.convert("L")
+                after_luma = after.convert("L")
+                for point in rule_probe_points:
+                    self.assertLessEqual(abs(after_luma.getpixel(point) - before_luma.getpixel(point)), 9, name)
+                self.assertEqual(record["processing_audit"]["guardrail_failures"], [], name)
+                self.assertIn(
+                    record["processing_audit"].get("combination_quality_guard_action"),
+                    {"passed", "kept_original", "reverted_to_source"},
+                    name,
+                )
+
+            safe_name = "A001_safe_cleanup_control.png"
+            safe_record = records[safe_name]
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name], safe_name)
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_output:
+                safe_after = safe_output.convert("RGB")
+            safe_before = pages[safe_name].convert("RGB")
+            self.assertEqual(safe_before.size, safe_after.size, safe_name)
+            self.assertEqual(_content_bbox(safe_before), _content_bbox(safe_after), safe_name)
+            self.assertLessEqual(_changed_ratio(safe_before, safe_after, ruled_context_box), 0.05, safe_name)
+            self.assertIn(
+                safe_record["processing_audit"].get("combination_quality_guard_action"),
+                {"passed", "kept_original", "reverted_to_source"},
+            )
+
+            def _aggressive_despeckle(
+                image: Image.Image,
+                *,
+                backend: str = "fallback",
+            ) -> processing_module.DespeckleResult:
+                cleaned = image.convert("RGB").copy()
+                draw = ImageDraw.Draw(cleaned)
+                for box in checkmark_boxes.values():
+                    draw.rectangle(box, fill=(245, 244, 240))
+                changed = sum((box[2] - box[0]) * (box[3] - box[1]) for box in checkmark_boxes.values())
+                return processing_module._despeckle_result(
+                    cleaned,
+                    changed_pixels=changed,
+                    backend_mode=backend,
+                    reason="isolated dark pixels replaced",
+                    candidate_pixels=changed,
+                    candidate_count=changed,
+                    component_count=2,
+                    max_component_size=max((box[2] - box[0]) * (box[3] - box[1]) for box in checkmark_boxes.values()),
+                    replacement_work_performed=True,
+                )
+
+            permissive_options = ProcessingOptions(
+                **{
+                    **_full_chain_options().__dict__,
+                    "audit_max_despeckle_pixel_ratio": 1.0,
+                    "audit_max_cumulative_change_score": 9.0,
+                    "audit_max_cumulative_pixel_change_ratio": 1.0,
+                    "audit_max_local_content_changed_ratio": 1.0,
+                    "audit_max_local_content_tile_changed_ratio": 1.0,
+                    "audit_max_edge_content_changed_ratio": 1.0,
+                }
+            )
+            with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-pale-checkmark-regression-sim-") as regression_dir:
+                regression_root = Path(regression_dir)
+                regression_input = regression_root / "input"
+                regression_output = regression_root / "reports"
+                regression_processed = regression_root / "processed"
+                regression_input.mkdir()
+                for name, image in pages.items():
+                    image.save(regression_input / name, dpi=(300, 300))
+                with mock.patch.object(
+                    processing_module,
+                    "_despeckle_isolated_pixels_with_reason",
+                    side_effect=_aggressive_despeckle,
+                ):
+                    regression_report = scan_batch(
+                        ScanConfig(
+                            "synthetic-regression",
+                            "full-chain-pale-checkmark-ruled-cells-regression-sim",
+                            regression_input,
+                            regression_output,
+                        )
+                    )
+                    regression_manifest = process_images(
+                        regression_report,
+                        regression_input,
+                        regression_processed,
+                        permissive_options,
+                    )
+
+                regression_records = {record["source_relative_path"]: record for record in regression_manifest["files"]}
+                target_name = "A002_pale_checkmark_inside_cell.png"
+                with Image.open(regression_processed / regression_records[target_name]["output_relative_path"]) as regression_output_image:
+                    before_ink = _ink_pixels(pages[target_name], checkmark_boxes[target_name])
+                    after_ink = _ink_pixels(regression_output_image, checkmark_boxes[target_name])
+                    erased_ratio = _changed_ratio(
+                        pages[target_name].convert("RGB"),
+                        regression_output_image.convert("RGB"),
+                        checkmark_boxes[target_name],
+                    )
+                regression_audit = regression_records[target_name]["processing_audit"]
+                reverted_to_source = regression_audit.get("cumulative_change_guard_action") == "reverted_to_source" or (
+                    regression_audit.get("combination_quality_guard_action") == "reverted_to_source"
+                )
+                self.assertTrue(erased_ratio > 0.28 or after_ink <= int(math.floor(before_ink * 0.45)) or reverted_to_source)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_mild_partial_edge_shadow_cleanup_preserves_edge_content(self) -> None:
         def mild_partial_edge_shadow_page(variant: str) -> Image.Image:
             image = Image.new("RGB", (240, 180), (244, 244, 240))
