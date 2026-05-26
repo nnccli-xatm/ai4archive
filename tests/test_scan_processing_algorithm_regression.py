@@ -3660,6 +3660,194 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_ledger_row_linking_arrows_preserved_against_overclean_regression(self) -> None:
+        def ledger_row_link_page(variant: str) -> Image.Image:
+            image = Image.new("RGB", (352, 252), (244, 243, 238))
+            draw = ImageDraw.Draw(image)
+            font = ImageFont.load_default()
+            for y in (42, 74, 106, 138, 170, 202, 234):
+                draw.line((34, y, 324, y), fill=(222, 221, 216), width=1)
+            for x in (96, 188, 274):
+                draw.line((x, 30, x, 236), fill=(223, 222, 217), width=1)
+            draw.text((44, 18), "LEDGER REGISTER", fill=(94, 94, 88), font=font)
+            draw.text((42, 82), "ROW 2  CARRY 17", fill=(108, 108, 102), font=font)
+            draw.text((42, 114), "ROW 3  CREDIT 8", fill=(108, 108, 102), font=font)
+            draw.text((42, 146), "ROW 4  TOTAL 25", fill=(108, 108, 102), font=font)
+
+            if variant == "safe_control":
+                draw.rectangle((8, 34, 14, 220), fill=(232, 231, 226))
+                return image
+            if variant == "edge_arrow_to_row":
+                draw.text((278, 108), "adj", fill=(118, 118, 112), font=font)
+                draw.line((310, 112, 292, 112), fill=(132, 132, 126), width=1)
+                draw.line((292, 112, 284, 106), fill=(132, 132, 126), width=1)
+                draw.line((292, 112, 284, 118), fill=(132, 132, 126), width=1)
+                return image
+            if variant == "pale_brace_near_faint_rules":
+                draw.text((278, 140), "carry", fill=(106, 106, 100), font=font)
+                draw.line((306, 98, 306, 154), fill=(162, 160, 152), width=1)
+                draw.line((306, 98, 296, 106), fill=(162, 160, 152), width=1)
+                draw.line((306, 126, 296, 126), fill=(162, 160, 152), width=1)
+                draw.line((306, 154, 296, 146), fill=(162, 160, 152), width=1)
+                draw.line((274, 138, 318, 138), fill=(84, 84, 80), width=1)
+                return image
+            raise ValueError(f"unsupported ledger-row-link variant: {variant}")
+
+        def _ink_pixels(image: Image.Image, box: tuple[int, int, int, int], threshold: int = 198) -> int:
+            region = image.convert("L").crop(box)
+            return sum(1 for value in region.getdata() if value <= threshold)
+
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-ledger-row-link-arrow-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "A001_safe_edge_dirt_control.png": ledger_row_link_page("safe_control"),
+                "A002_row_linking_arrow_near_margin.png": ledger_row_link_page("edge_arrow_to_row"),
+                "A003_pale_row_link_brace_near_faint_rules.png": ledger_row_link_page("pale_brace_near_faint_rules"),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-ledger-row-link-arrow-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            connector_boxes = {
+                "A002_row_linking_arrow_near_margin.png": (282, 104, 314, 121),
+                "A003_pale_row_link_brace_near_faint_rules.png": (294, 96, 309, 156),
+            }
+            row_boxes = {
+                "A002_row_linking_arrow_near_margin.png": (38, 106, 324, 141),
+                "A003_pale_row_link_brace_near_faint_rules.png": (38, 130, 324, 167),
+            }
+            context_box = (30, 36, 326, 236)
+            for name, connector_box in connector_boxes.items():
+                record = records[name]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
+                with Image.open(process_dir / record["output_relative_path"]) as output_image:
+                    after = output_image.convert("RGB")
+                before = pages[name].convert("RGB")
+
+                self.assertEqual(before.size, after.size, name)
+                self.assertEqual(_content_bbox(before), _content_bbox(after), name)
+                self.assertLessEqual(_changed_ratio(before, after, context_box), 0.09, name)
+                self.assertLessEqual(abs(_mean_luma(after, context_box) - _mean_luma(before, context_box)), 4.5, name)
+
+                before_connector = _ink_pixels(before, connector_box)
+                after_connector = _ink_pixels(after, connector_box)
+                self.assertGreaterEqual(before_connector, 10, name)
+                self.assertGreaterEqual(after_connector, max(7, int(math.floor(before_connector * 0.62))), name)
+
+                row_box = row_boxes[name]
+                before_row_ink = _ink_pixels(before, row_box, threshold=188)
+                after_row_ink = _ink_pixels(after, row_box, threshold=188)
+                self.assertGreaterEqual(after_row_ink, int(math.floor(before_row_ink * 0.75)), name)
+                self.assertEqual(record["processing_audit"]["guardrail_failures"], [], name)
+
+            safe_name = "A001_safe_edge_dirt_control.png"
+            safe_record = records[safe_name]
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name], safe_name)
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_output:
+                safe_after = safe_output.convert("RGB")
+            safe_before = pages[safe_name].convert("RGB")
+            self.assertEqual(safe_before.size, safe_after.size, safe_name)
+            self.assertEqual(_content_bbox(safe_before), _content_bbox(safe_after), safe_name)
+            self.assertLessEqual(_changed_ratio(safe_before, safe_after, context_box), 0.06)
+            self.assertIn(
+                safe_record["processing_audit"].get("combination_quality_guard_action"),
+                {"passed", "reverted_to_source", "kept_original"},
+            )
+
+            def _aggressive_despeckle(
+                image: Image.Image,
+                *,
+                backend: str = "fallback",
+            ) -> processing_module.DespeckleResult:
+                cleaned = image.convert("RGB").copy()
+                draw = ImageDraw.Draw(cleaned)
+                for box in connector_boxes.values():
+                    draw.rectangle(box, fill=(244, 243, 238))
+                changed = sum((box[2] - box[0]) * (box[3] - box[1]) for box in connector_boxes.values())
+                return processing_module._despeckle_result(
+                    cleaned,
+                    changed_pixels=changed,
+                    backend_mode=backend,
+                    reason="isolated dark pixels replaced",
+                    candidate_pixels=changed,
+                    candidate_count=changed,
+                    component_count=4,
+                    max_component_size=max((box[2] - box[0]) * (box[3] - box[1]) for box in connector_boxes.values()),
+                    replacement_work_performed=True,
+                )
+
+            permissive_options = ProcessingOptions(
+                **{
+                    **_full_chain_options().__dict__,
+                    "audit_max_despeckle_pixel_ratio": 1.0,
+                    "audit_max_cumulative_change_score": 9.0,
+                    "audit_max_cumulative_pixel_change_ratio": 1.0,
+                    "audit_max_local_content_changed_ratio": 1.0,
+                    "audit_max_local_content_tile_changed_ratio": 1.0,
+                    "audit_max_edge_content_changed_ratio": 1.0,
+                }
+            )
+            with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-ledger-row-link-arrow-regression-sim-") as regression_dir:
+                regression_root = Path(regression_dir)
+                regression_input = regression_root / "input"
+                regression_output = regression_root / "reports"
+                regression_processed = regression_root / "processed"
+                regression_input.mkdir()
+                for name, image in pages.items():
+                    image.save(regression_input / name, dpi=(300, 300))
+                with mock.patch.object(
+                    processing_module,
+                    "_despeckle_isolated_pixels_with_reason",
+                    side_effect=_aggressive_despeckle,
+                ):
+                    regression_report = scan_batch(
+                        ScanConfig(
+                            "synthetic-regression",
+                            "full-chain-ledger-row-link-arrow-regression-sim",
+                            regression_input,
+                            regression_output,
+                        )
+                    )
+                    regression_manifest = process_images(
+                        regression_report,
+                        regression_input,
+                        regression_processed,
+                        permissive_options,
+                    )
+                regression_records = {record["source_relative_path"]: record for record in regression_manifest["files"]}
+                target_name = "A002_row_linking_arrow_near_margin.png"
+                with Image.open(regression_processed / regression_records[target_name]["output_relative_path"]) as regressed_output:
+                    regressed = regressed_output.convert("RGB")
+                before = pages[target_name].convert("RGB")
+                erased_ratio = _changed_ratio(before, regressed, connector_boxes[target_name])
+                before_ink = _ink_pixels(before, connector_boxes[target_name])
+                after_ink = _ink_pixels(regressed, connector_boxes[target_name])
+                regression_audit = regression_records[target_name]["processing_audit"]
+                reverted_to_source = regression_audit.get("cumulative_change_guard_action") == "reverted_to_source" or (
+                    regression_audit.get("combination_quality_guard_action") == "reverted_to_source"
+                )
+                self.assertTrue(erased_ratio > 0.2 or after_ink <= int(math.floor(before_ink * 0.45)) or reverted_to_source)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_pale_pencil_checkmarks_inside_ruled_cells_preserved_against_overclean_regression(self) -> None:
         def ruled_checkmark_page(variant: str) -> Image.Image:
             image = Image.new("RGB", (340, 252), (245, 244, 240))
