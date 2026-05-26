@@ -12668,6 +12668,142 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (safe_name, protected_name, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_marginal_handwritten_totals_guard_preserves_ledger_edge_figures(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-marginal-handwritten-totals-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            def _ledger_page(variant: str) -> Image.Image:
+                page = Image.new("RGB", (320, 240), (244, 244, 240))
+                draw = ImageDraw.Draw(page)
+                draw.rectangle((24, 20, 286, 218), outline=(76, 76, 76), width=2)
+                for x in (74, 122, 170, 218, 266):
+                    draw.line((x, 30, x, 208), fill=(196, 196, 192), width=1)
+                for y in (48, 74, 100, 126, 152, 178, 204):
+                    draw.line((32, y, 278, y), fill=(206, 206, 202), width=1)
+                for y in (52, 78, 104, 130, 156, 182):
+                    draw.rectangle((40, y, 96, y + 3), fill=(34, 34, 34))
+                    draw.rectangle((132, y, 188, y + 3), fill=(36, 36, 36))
+                    draw.rectangle((226, y, 266, y + 3), fill=(38, 38, 38))
+                if variant == "safe_control":
+                    for y in range(36, 212, 7):
+                        shade = 224 if (y // 7) % 2 else 218
+                        draw.point((14, y), fill=(shade, shade, shade))
+                        draw.point((16, y + 1), fill=(shade, shade, shade))
+                    return page
+                if variant == "marginal_totals":
+                    for y in (62, 90, 118, 146, 174):
+                        draw.text((292, y), "7", fill=(86, 86, 84))
+                        draw.text((299, y - 3), "9", fill=(92, 92, 90))
+                        draw.text((304, y + 3), "4", fill=(90, 90, 88))
+                    return page
+                if variant == "carry_forward":
+                    draw.rectangle((24, 20, 286, 218), outline=(64, 64, 64), width=2)
+                    for y in (62, 88, 114, 140, 166, 192):
+                        draw.rectangle((40, y, 110, y + 3), fill=(28, 28, 28))
+                    for y in (80, 108, 136, 164):
+                        draw.line((280, y, 312, y), fill=(214, 214, 210), width=1)
+                        draw.text((287, y - 7), "1", fill=(92, 92, 90))
+                        draw.text((294, y - 3), "2", fill=(92, 92, 90))
+                        draw.text((301, y + 2), "6", fill=(90, 90, 88))
+                    return page
+                raise ValueError(f"unsupported variant: {variant}")
+
+            pages = {
+                "A001_safe_edge_speckle_control.png": _ledger_page("safe_control"),
+                "A002_protected_marginal_totals.png": _ledger_page("marginal_totals"),
+                "A003_protected_carry_forward_totals.png": _ledger_page("carry_forward"),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source_path = input_dir / name
+                image.save(source_path, dpi=(300, 300))
+                source_bytes[name] = source_path.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-marginal-handwritten-totals-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes, name)
+
+            safe_name = "A001_safe_edge_speckle_control.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertIn(
+                safe_audit["combination_quality_guard_action"],
+                {"passed", "kept_original", "reverted_to_source"},
+            )
+            self.assertLessEqual(safe_audit["cumulative_change_crop_ratio"], 0.35)
+            self.assertLessEqual(safe_audit["size_change_ratio"], 0.35)
+
+            protected_boxes = {
+                "A002_protected_marginal_totals.png": (288, 56, 315, 188),
+                "A003_protected_carry_forward_totals.png": (280, 74, 316, 172),
+            }
+            for name, protected_box in protected_boxes.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                before = pages[name].convert("RGB")
+                with Image.open(process_dir / record["output_relative_path"]) as output_image:
+                    after = output_image.convert("RGB")
+                self.assertEqual(record["status"], "processed", name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertLessEqual(audit["size_change_ratio"], 0.12, name)
+                self.assertLessEqual(audit["max_trim_margin_ratio"], 0.08, name)
+                self.assertIn(
+                    audit["combination_quality_guard_reason_code"],
+                    {"safe_combination_passed", "low_confidence_original_preserved", "combined_change_too_large_reverted"},
+                    name,
+                )
+                self.assertLess(_changed_ratio(before, after, protected_box), 0.18, name)
+                self.assertGreaterEqual(
+                    _edge_energy(after.crop(protected_box)),
+                    _edge_energy(before.crop(protected_box)) * 0.72,
+                    name,
+                )
+                self.assertLessEqual(
+                    _mean_luma(after, protected_box),
+                    _mean_luma(before, protected_box) + 18.0,
+                    name,
+                )
+                before_bbox = _content_bbox(before, threshold=236)
+                after_bbox = _content_bbox(after, threshold=236)
+                self.assertIsNotNone(before_bbox, name)
+                self.assertIsNotNone(after_bbox, name)
+                assert before_bbox is not None
+                assert after_bbox is not None
+                before_w = before_bbox[2] - before_bbox[0]
+                before_h = before_bbox[3] - before_bbox[1]
+                after_w = after_bbox[2] - after_bbox[0]
+                after_h = after_bbox[3] - after_bbox[1]
+                self.assertGreaterEqual(after_w, int(before_w * 0.78), name)
+                self.assertGreaterEqual(after_h, int(before_h * 0.82), name)
+
+                regressed = before.copy()
+                regressed_draw = ImageDraw.Draw(regressed)
+                regressed_draw.rectangle(protected_box, fill=(238, 238, 234))
+                self.assertGreater(_changed_ratio(before, regressed, protected_box), 0.06, name)
+                self.assertLess(
+                    _edge_energy(regressed.crop(protected_box)),
+                    _edge_energy(before.crop(protected_box)) * 0.7,
+                    name,
+                )
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages.keys(), str(input_dir), "source_relative_path", "source_sha256", "output_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_reversal_tone_and_microfilm_frame_originals_stay_preserved_with_safe_control(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-reversal-tone-guard-") as temp_dir:
             root = Path(temp_dir)
