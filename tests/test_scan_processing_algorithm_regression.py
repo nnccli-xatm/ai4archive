@@ -16614,6 +16614,86 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_calibration_ruler_strip_guard_preserves_edge_ticks_and_reference_patches(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-calibration-ruler-strip-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "A001_safe_neutral_cleanup_control.png": _calibration_ruler_strip_guard_page("safe_neutral_cleanup_control"),
+                "A002_edge_tick_strip_with_tiny_labels.png": _calibration_ruler_strip_guard_page(
+                    "edge_tick_strip_with_tiny_labels"
+                ),
+                "A003_gray_patch_and_color_chip_strip.png": _calibration_ruler_strip_guard_page(
+                    "gray_patch_and_color_chip_strip"
+                ),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-calibration-ruler-strip-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_name = "A001_safe_neutral_cleanup_control.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertEqual(safe_audit["local_content_change_guard_action"], "passed")
+            self.assertEqual(safe_audit["cumulative_change_guard_action"], "passed")
+            self.assertIn(safe_audit["combination_quality_guard_action"], {"passed", "kept_original"})
+
+            protected_boxes = {
+                "A002_edge_tick_strip_with_tiny_labels.png": (0, 16, 66, 208),
+                "A003_gray_patch_and_color_chip_strip.png": (0, 16, 80, 208),
+            }
+            for name, protected_box in protected_boxes.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                before = pages[name].convert("RGB")
+                with Image.open(process_dir / record["output_relative_path"]) as output_image:
+                    after = output_image.convert("RGB")
+                self.assertEqual(record["status"], "processed", name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertFalse(record["scanner_gutter_trimmed"], name)
+                self.assertIn(
+                    record["scanner_gutter_reason"],
+                    {
+                        "scanner gutter skipped: protected edge content",
+                        "scanner gutter skipped: no narrow uniform light band",
+                        "scanner gutter skipped: no inset content evidence",
+                        "scanner gutter skipped: page background not light",
+                        "scanner gutter skipped: colored or non-neutral original",
+                    },
+                    name,
+                )
+                self.assertIn(
+                    audit["combination_quality_guard_action"],
+                    {"passed", "kept_original", "reverted_to_source"},
+                    name,
+                )
+                self.assertLess(_changed_ratio(before, after, protected_box), 0.03, name)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertGreaterEqual(audit_summary["counts"]["scanner_gutter_skipped_files"], len(protected_boxes))
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256", "output_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_quality_regression_reports_missing_operation_timing_code_without_private_rows(self) -> None:
         quality = _processing_quality_regression(
             {
@@ -21080,6 +21160,46 @@ def _fold_out_map_panel_guard_page(variant: str) -> Image.Image:
         draw.line((128, 132, 198, 124), fill=(120, 114, 106), width=1)
         return image
     raise ValueError(f"unsupported fold-out map panel variant: {variant}")
+
+
+def _calibration_ruler_strip_guard_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (320, 224), (243, 241, 236))
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default()
+    for y in (42, 66, 90, 114, 138):
+        draw.rectangle((88, y, 288, y + 4), fill=(62, 62, 60))
+    draw.rectangle((92, 164, 286, 184), fill=(236, 234, 228))
+
+    if variant == "safe_neutral_cleanup_control":
+        mask = Image.new("L", image.size, 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.ellipse((204, 62, 286, 142), fill=102)
+        mask_draw.ellipse((212, 88, 304, 170), fill=86)
+        mask = mask.filter(ImageFilter.GaussianBlur(7))
+        return Image.composite(Image.new("RGB", image.size, (231, 229, 223)), image, mask)
+    if variant == "edge_tick_strip_with_tiny_labels":
+        draw.rectangle((6, 16, 54, 208), fill=(216, 214, 208))
+        for y in range(26, 202, 12):
+            tick_end = 44 if (y // 12) % 2 else 50
+            draw.line((10, y, tick_end, y), fill=(86, 84, 80), width=1)
+        for index, y in enumerate((38, 74, 110, 146, 182), start=1):
+            draw.text((56, y - 4), str(index), fill=(92, 90, 86), font=font)
+        draw.line((54, 16, 54, 208), fill=(122, 118, 112), width=1)
+        return image
+    if variant == "gray_patch_and_color_chip_strip":
+        draw.rectangle((6, 16, 62, 208), fill=(210, 208, 202))
+        draw.rectangle((12, 30, 56, 48), fill=(58, 58, 58))
+        draw.rectangle((12, 54, 56, 72), fill=(112, 112, 112))
+        draw.rectangle((12, 78, 56, 96), fill=(166, 166, 166))
+        draw.rectangle((12, 108, 30, 126), fill=(158, 72, 60))
+        draw.rectangle((32, 108, 50, 126), fill=(60, 98, 162))
+        draw.rectangle((12, 132, 30, 150), fill=(88, 128, 80))
+        draw.rectangle((32, 132, 50, 150), fill=(212, 184, 88))
+        draw.text((10, 166), "10CM", fill=(88, 86, 82), font=font)
+        draw.text((10, 182), "REF", fill=(90, 88, 84), font=font)
+        draw.line((62, 16, 62, 208), fill=(124, 120, 114), width=1)
+        return image
+    raise ValueError(f"unsupported calibration/ruler strip variant: {variant}")
 
 
 def _faded_text_page() -> Image.Image:
