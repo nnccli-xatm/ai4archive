@@ -3084,6 +3084,108 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_despeckle_preserves_tiny_punctuation_marks_on_faded_forms(self) -> None:
+        def faded_form_page(variant: str) -> Image.Image:
+            image = Image.new("RGB", (336, 248), (244, 244, 240))
+            draw = ImageDraw.Draw(image)
+            font = ImageFont.load_default()
+            for y in (44, 76, 108, 140, 172, 204):
+                draw.line((28, y, 308, y), fill=(222, 222, 218), width=1)
+            for x in (94, 176, 258):
+                draw.line((x, 30, x, 220), fill=(224, 224, 220), width=1)
+            draw.text((34, 22), "LEDGER ENTRY", fill=(98, 98, 94), font=font)
+            draw.text((36, 54), "TOTAL", fill=(106, 106, 102), font=font)
+            draw.text((116, 54), "12.34", fill=(114, 114, 110), font=font)
+            if variant == "safe":
+                return image
+            if variant == "decimal_marks":
+                draw.text((36, 86), "QTY 3.75", fill=(166, 166, 160), font=font)
+                draw.text((36, 118), "RATE 0.40", fill=(168, 168, 162), font=font)
+                draw.point((127, 92), fill=(156, 156, 150))
+                draw.point((127, 124), fill=(158, 158, 152))
+                draw.point((164, 124), fill=(158, 158, 152))
+                return image
+            if variant == "leaders_and_ticks":
+                draw.text((36, 84), "ITEM", fill=(152, 152, 146), font=font)
+                draw.text((222, 84), "OK", fill=(152, 152, 146), font=font)
+                for x in range(92, 212, 10):
+                    draw.ellipse((x, 90, x + 1, 91), fill=(160, 160, 154))
+                draw.line((122, 122, 125, 126), fill=(158, 158, 152), width=1)
+                draw.line((125, 126, 131, 118), fill=(158, 158, 152), width=1)
+                draw.line((168, 154, 171, 158), fill=(158, 158, 152), width=1)
+                draw.line((171, 158, 177, 150), fill=(158, 158, 152), width=1)
+                return image
+            raise ValueError(f"unsupported faded-form variant: {variant}")
+
+        def _inklike_pixels(image: Image.Image, box: tuple[int, int, int, int], threshold: int = 214) -> int:
+            region = image.convert("L").crop(box)
+            return sum(1 for value in region.getdata() if value <= threshold)
+
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-despeckle-tiny-punctuation-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "A001_safe_isolated_speckle_control.png": faded_form_page("safe"),
+                "A002_faded_decimal_marks.png": faded_form_page("decimal_marks"),
+                "A003_faded_dotted_leader_and_ticks.png": faded_form_page("leaders_and_ticks"),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-despeckle-tiny-punctuation-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            mark_boxes = {
+                "A002_faded_decimal_marks.png": ((124, 88, 130, 96), (124, 120, 130, 128), (161, 120, 167, 128)),
+                "A003_faded_dotted_leader_and_ticks.png": ((90, 88, 214, 94), (120, 118, 132, 128), (166, 150, 178, 160)),
+            }
+            analysis_box = (28, 70, 308, 178)
+            for name, boxes in mark_boxes.items():
+                record = records[name]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
+                with Image.open(process_dir / record["output_relative_path"]) as output_image:
+                    after = output_image.convert("RGB")
+                before = pages[name].convert("RGB")
+                self.assertEqual(before.size, after.size, name)
+                self.assertEqual(_content_bbox(before), _content_bbox(after), name)
+                self.assertLessEqual(_changed_ratio(before, after, analysis_box), 0.08, name)
+                self.assertLessEqual(abs(_mean_luma(after, analysis_box) - _mean_luma(before, analysis_box)), 4.5, name)
+                for box in boxes:
+                    before_mark_pixels = _inklike_pixels(before, box)
+                    after_mark_pixels = _inklike_pixels(after, box)
+                    self.assertGreaterEqual(before_mark_pixels, 1, name)
+                    self.assertGreaterEqual(after_mark_pixels, max(1, int(math.floor(before_mark_pixels * 0.7))), name)
+                self.assertEqual(record["processing_audit"]["guardrail_failures"], [], name)
+
+            safe_record = records["A001_safe_isolated_speckle_control.png"]
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_after:
+                safe_after_rgb = safe_after.convert("RGB")
+            safe_before_rgb = pages["A001_safe_isolated_speckle_control.png"].convert("RGB")
+            safe_delta = _changed_ratio(safe_before_rgb, safe_after_rgb, analysis_box)
+            safe_audit = safe_record["processing_audit"]
+            reverted_safe = (
+                safe_audit.get("cumulative_change_guard_action") == "reverted_to_source"
+                or safe_audit.get("combination_quality_guard_action") == "reverted_to_source"
+            )
+            self.assertTrue(safe_delta <= 0.06 or reverted_safe)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_thin_ruled_form_lines_preserved_during_cleanup(self) -> None:
         def thin_ruled_form_page(variant: str) -> Image.Image:
             image = Image.new("RGB", (336, 248), (245, 245, 242))
