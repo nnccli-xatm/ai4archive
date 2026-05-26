@@ -15503,6 +15503,78 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256", "output_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_punched_hole_cleanup_guard_preserves_nearby_annotations(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-punched-hole-annotation-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            pages = {
+                "A001_safe_punched_cleanup_control.png": _punched_hole_annotation_guard_page("safe_cleanup_control"),
+                "A002_punched_hole_ring_shadow_with_tick.png": _punched_hole_annotation_guard_page("ring_shadow_with_tick"),
+                "A003_tiny_page_number_dots_near_hole.png": _punched_hole_annotation_guard_page("page_number_dots_near_hole"),
+                "A004_thin_ruled_stroke_near_punched_hole.png": _punched_hole_annotation_guard_page("thin_ruled_stroke_near_hole"),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-punched-hole-annotation-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_name = "A001_safe_punched_cleanup_control.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            safe_before = pages[safe_name].convert("RGB")
+            with Image.open(process_dir / safe_record["output_relative_path"]) as output_image:
+                safe_after = output_image.convert("RGB")
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertIn(safe_audit["combination_quality_guard_action"], {"passed", "kept_original", "reverted_to_source"})
+            self.assertLessEqual(_changed_ratio(safe_before, safe_after, (186, 68, 262, 152)), 0.10)
+
+            protected_specs = {
+                "A002_punched_hole_ring_shadow_with_tick.png": {"box": (6, 40, 92, 224)},
+                "A003_tiny_page_number_dots_near_hole.png": {"box": (6, 52, 98, 220)},
+                "A004_thin_ruled_stroke_near_punched_hole.png": {"box": (6, 46, 106, 222)},
+            }
+            for name, spec in protected_specs.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                before = pages[name].convert("RGB")
+                with Image.open(process_dir / record["output_relative_path"]) as output_image:
+                    after = output_image.convert("RGB")
+                self.assertEqual(record["status"], "processed", name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertIn(audit["combination_quality_guard_action"], {"passed", "kept_original", "reverted_to_source"}, name)
+                self.assertFalse(record["dark_border_trimmed"], name)
+                self.assertFalse(record["scanner_gutter_trimmed"], name)
+                self.assertLessEqual(audit["size_change_ratio"], 0.12, name)
+                self.assertLessEqual(audit["cumulative_change_crop_ratio"], 0.10, name)
+                self.assertLessEqual(_changed_ratio(before, after, spec["box"]), 0.06, name)
+                self.assertGreaterEqual(_edge_energy(after.crop(spec["box"])), _edge_energy(before.crop(spec["box"])) * 0.82, name)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertIn("timing", audit_summary)
+            self.assertIn("operation_timings", audit_summary["timing"])
+            self.assertGreater(len(audit_summary["timing"]["operation_timings"]), 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256", "output_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_brittle_chipped_edge_and_missing_corner_stay_preserved_with_safe_cleanup_control(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-brittle-edge-corner-loss-") as temp_dir:
             root = Path(temp_dir)
@@ -20423,6 +20495,54 @@ def _tractor_feed_edge_guard_page(variant: str) -> Image.Image:
         return image
 
     raise ValueError(f"unsupported tractor-feed edge guard variant: {variant}")
+
+
+def _punched_hole_annotation_guard_page(variant: str) -> Image.Image:
+    image = Image.new("RGB", (320, 240), (243, 241, 236))
+    draw = ImageDraw.Draw(image)
+    for y in (56, 84, 112, 140):
+        draw.rectangle((84, y, 286, y + 4), fill=(64, 64, 62))
+    draw.rectangle((94, 166, 288, 190), fill=(236, 234, 228))
+
+    if variant == "safe_cleanup_control":
+        for x, y in ((208, 72), (226, 86), (244, 98), (220, 114), (238, 128), (254, 140)):
+            draw.ellipse((x, y, x + 3, y + 3), fill=(124, 120, 112))
+        return image
+
+    if variant == "ring_shadow_with_tick":
+        draw.rectangle((6, 38, 16, 224), fill=(230, 226, 218))
+        for y in (46, 86, 126, 166, 206):
+            draw.ellipse((16, y, 29, y + 12), outline=(116, 110, 100), width=2)
+            draw.ellipse((18, y + 2, 27, y + 10), outline=(204, 198, 188), width=1)
+        draw.line((30, 58, 152, 50), fill=(124, 118, 108), width=1)
+        draw.line((32, 84, 154, 78), fill=(124, 118, 108), width=1)
+        draw.line((34, 110, 156, 104), fill=(124, 118, 108), width=1)
+        draw.line((44, 136, 56, 146), fill=(102, 96, 88), width=1)
+        draw.line((56, 146, 72, 128), fill=(102, 96, 88), width=1)
+        return image
+
+    if variant == "page_number_dots_near_hole":
+        draw.rectangle((6, 50, 16, 220), fill=(230, 226, 218))
+        for y in (60, 96, 132, 168, 204):
+            draw.ellipse((16, y, 29, y + 12), outline=(118, 112, 102), width=2)
+        draw.text((32, 182), "12.", fill=(108, 102, 94), font=ImageFont.load_default())
+        draw.ellipse((58, 176, 61, 179), fill=(106, 100, 92))
+        draw.ellipse((62, 176, 65, 179), fill=(106, 100, 92))
+        draw.line((30, 76, 146, 70), fill=(126, 120, 110), width=1)
+        draw.line((30, 102, 146, 96), fill=(126, 120, 110), width=1)
+        return image
+
+    if variant == "thin_ruled_stroke_near_hole":
+        draw.rectangle((6, 44, 16, 222), fill=(230, 226, 218))
+        for y in (52, 88, 124, 160, 196):
+            draw.ellipse((16, y, 29, y + 12), outline=(118, 112, 102), width=2)
+        for y in (70, 92, 114):
+            draw.line((32, y, 168, y - 6), fill=(118, 112, 104), width=1)
+        draw.line((34, 136, 96, 130), fill=(112, 106, 98), width=1)
+        draw.line((36, 156, 104, 150), fill=(112, 106, 98), width=1)
+        return image
+
+    raise ValueError(f"unsupported punched-hole annotation guard variant: {variant}")
 
 
 def _brittle_chipped_edge_guard_page(variant: str) -> Image.Image:
