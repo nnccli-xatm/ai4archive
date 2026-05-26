@@ -17201,6 +17201,120 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256", "output_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_greenbar_fanfold_forms_preserve_faint_dot_matrix_text_and_rules(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-greenbar-fanfold-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "A001_safe_haze_and_speckle_cleanup_control.png": _greenbar_fanfold_guard_page("safe_haze_speckle_control"),
+                "A002_protected_faint_dot_matrix_body_text.png": _greenbar_fanfold_guard_page("faint_dot_matrix_body_text"),
+                "A003_protected_faint_numeric_columns.png": _greenbar_fanfold_guard_page("faint_numeric_columns"),
+                "A004_protected_form_rules_with_greenbar_bands.png": _greenbar_fanfold_guard_page(
+                    "form_rules_with_greenbar_bands"
+                ),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-greenbar-fanfold-guard", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_name = "A001_safe_haze_and_speckle_cleanup_control.png"
+            safe_record = records[safe_name]
+            safe_audit = safe_record["processing_audit"]
+            self.assertEqual(safe_record["status"], "processed")
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertIn(safe_audit["combination_quality_guard_action"], {"passed", "kept_original", "reverted_to_source"})
+            self.assertLessEqual(safe_audit["size_change_ratio"], 0.30)
+
+            dot_matrix_points = [(x, y) for y in (62, 78, 94, 110, 126) for x in range(88, 264, 11)]
+            numeric_column_points = [(x, y) for y in range(54, 172, 14) for x in (214, 228, 242, 256, 270)]
+            rule_points = [(x, y) for y in (42, 84, 126, 168) for x in range(34, 286, 14)] + [
+                (x, y) for x in (82, 162, 242) for y in range(44, 170, 10)
+            ]
+
+            def _dark_point_count(image: Image.Image, points: list[tuple[int, int]], threshold: int = 228) -> int:
+                gray = image.convert("L")
+                dark_count = 0
+                for x, y in points:
+                    neighborhood = [
+                        gray.getpixel((max(0, min(gray.width - 1, x + dx)), max(0, min(gray.height - 1, y + dy))))
+                        for dx in (-1, 0, 1)
+                        for dy in (-1, 0, 1)
+                    ]
+                    if min(neighborhood) <= threshold:
+                        dark_count += 1
+                return dark_count
+
+            protected_specs = {
+                "A002_protected_faint_dot_matrix_body_text.png": {
+                    "box": (80, 48, 276, 146),
+                    "points": dot_matrix_points,
+                    "min_keep_ratio": 0.24,
+                    "min_points": 18,
+                    "max_change_ratio": 0.72,
+                },
+                "A003_protected_faint_numeric_columns.png": {
+                    "box": (198, 44, 282, 178),
+                    "points": numeric_column_points,
+                    "min_keep_ratio": 0.24,
+                    "min_points": 14,
+                    "max_change_ratio": 0.68,
+                },
+                "A004_protected_form_rules_with_greenbar_bands.png": {
+                    "box": (28, 34, 290, 176),
+                    "points": rule_points,
+                    "min_keep_ratio": 0.05,
+                    "min_points": 8,
+                    "max_change_ratio": 0.75,
+                },
+            }
+
+            for name, spec in protected_specs.items():
+                record = records[name]
+                audit = record["processing_audit"]
+                before = pages[name].convert("RGB")
+                with Image.open(process_dir / record["output_relative_path"]) as output_image:
+                    after = output_image.convert("RGB")
+
+                self.assertEqual(record["status"], "processed", name)
+                self.assertEqual(audit["guardrail_failures"], [], name)
+                self.assertIn(
+                    audit["combination_quality_guard_action"],
+                    {"passed", "kept_original", "reverted_to_source"},
+                    name,
+                )
+
+                before_count = _dark_point_count(before, spec["points"])
+                after_count = _dark_point_count(after, spec["points"])
+                self.assertGreaterEqual(before_count, spec["min_points"], name)
+
+                if audit["combination_quality_guard_action"] == "reverted_to_source":
+                    self.assertLess(_changed_ratio(before, after, spec["box"]), 0.02, name)
+                else:
+                    self.assertGreaterEqual(after_count, max(spec["min_points"] - 6, int(math.floor(before_count * spec["min_keep_ratio"]))), name)
+                    self.assertLess(_changed_ratio(before, after, spec["box"]), spec["max_change_ratio"], name)
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256", "output_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_purple_blue_mimeograph_copy_pencil_guard_preserves_colored_marks(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-purple-blue-guard-") as temp_dir:
             root = Path(temp_dir)
@@ -20358,6 +20472,58 @@ def _dotted_perforation_despeckle_guard_page(variant: str = "safe_dust_cleanup_c
         return image
 
     raise ValueError(f"unsupported dotted perforation guard variant: {variant}")
+
+
+def _greenbar_fanfold_guard_page(variant: str = "safe_haze_speckle_control") -> Image.Image:
+    image = Image.new("RGB", (320, 220), (236, 241, 230))
+    draw = ImageDraw.Draw(image)
+
+    for y0 in range(18, 206, 24):
+        band_fill = (228, 236, 214) if ((y0 // 24) % 2 == 0) else (238, 243, 232)
+        draw.rectangle((18, y0, 302, min(206, y0 + 23)), fill=band_fill)
+    draw.rectangle((18, 18, 302, 206), outline=(176, 186, 166), width=1)
+
+    for y in range(42, 187, 42):
+        draw.line((24, y, 296, y), fill=(154, 162, 144), width=1)
+    for x in (82, 162, 242):
+        draw.line((x, 24, x, 198), fill=(162, 170, 152), width=1)
+
+    for x, y, shade in ((44, 36, 206), (116, 146, 210), (272, 112, 208), (248, 186, 212), (62, 172, 207)):
+        draw.ellipse((x, y, x + 2, y + 2), fill=(shade, shade + 2, shade - 2))
+
+    for y in range(26, 202, 14):
+        haze = 232 + ((y // 14) % 3)
+        draw.line((20, y, 300, y), fill=(haze, haze + 2, haze - 2), width=1)
+
+    if variant == "safe_haze_speckle_control":
+        return image.filter(ImageFilter.GaussianBlur(0.4))
+
+    if variant == "faint_dot_matrix_body_text":
+        for y in (62, 78, 94, 110, 126):
+            for x in range(88, 264, 11):
+                jitter = ((x + y) // 11) % 2
+                draw.rectangle((x, y + jitter, x + 1, y + 1 + jitter), fill=(124, 132, 116))
+        return image.filter(ImageFilter.GaussianBlur(0.45))
+
+    if variant == "faint_numeric_columns":
+        for y in range(54, 172, 14):
+            for x in (214, 228, 242, 256, 270):
+                jitter = (x + y) % 3
+                draw.rectangle((x, y + jitter, x + 1, y + 1 + jitter), fill=(126, 134, 118))
+                draw.point((x + 3, y + 2), fill=(130, 138, 122))
+        return image.filter(ImageFilter.GaussianBlur(0.5))
+
+    if variant == "form_rules_with_greenbar_bands":
+        for y in (42, 84, 126, 168):
+            draw.line((34, y, 286, y), fill=(138, 146, 132), width=1)
+        for x in (82, 162, 242):
+            draw.line((x, 44, x, 170), fill=(142, 150, 136), width=1)
+        for y in (56, 72, 98, 114, 140, 156):
+            for x in (94, 108, 124, 140, 176, 190, 206, 222, 258, 272):
+                draw.point((x, y), fill=(126, 134, 120))
+        return image.filter(ImageFilter.GaussianBlur(0.45))
+
+    raise ValueError(f"unsupported greenbar fanfold guard variant: {variant}")
 
 
 def _purple_blue_duplicator_guard_page(variant: str = "safe_neutral_stain_control") -> Image.Image:
