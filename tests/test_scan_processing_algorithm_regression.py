@@ -24594,7 +24594,7 @@ class ScanProcessingNestedBasenameCollisionRegressionTest(unittest.TestCase):
             ):
                 self.assertNotIn(forbidden, audit_summary_text)
 
-    def test_full_chain_faint_rubber_date_stamp_over_ledger_rows_remains_detectable(self) -> None:
+    def test_full_chain_faint_rubber_stamp_date_impressions_over_ledger_rows_remain_detectable(self) -> None:
         def _ledger_date_stamp_page(variant: str) -> Image.Image:
             image = Image.new("RGB", (360, 256), (244, 243, 238))
             pixels = image.load()
