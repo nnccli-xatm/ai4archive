@@ -25177,9 +25177,12 @@ class ScanProcessingNestedBasenameCollisionRegressionTest(unittest.TestCase):
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
 
-            marker_boxes = {
+            stroke_boxes = {
                 "A002_protected_carry_forward_abbreviation.png": ((328, 196, 343, 210), (333, 198, 339, 206)),
-                "A003_protected_posting_folio_abbreviation.png": ((312, 144, 332, 155), (319, 149, 322, 153), (328, 149, 331, 153)),
+                "A003_protected_posting_folio_abbreviation.png": ((312, 144, 332, 155),),
+            }
+            dot_only_boxes = {
+                "A003_protected_posting_folio_abbreviation.png": ((319, 149, 322, 153), (328, 149, 331, 153)),
             }
             analysis_boxes = {
                 "A002_protected_carry_forward_abbreviation.png": (240, 138, 346, 220),
@@ -25190,7 +25193,7 @@ class ScanProcessingNestedBasenameCollisionRegressionTest(unittest.TestCase):
                 "A003_protected_posting_folio_abbreviation.png": ((244, 139, 352, 142), (244, 163, 352, 166), (308, 92, 311, 236)),
             }
 
-            for name, boxes in marker_boxes.items():
+            for name, boxes in stroke_boxes.items():
                 record = records[name]
                 self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
                 with Image.open(process_dir / record["output_relative_path"]) as processed:
@@ -25207,8 +25210,13 @@ class ScanProcessingNestedBasenameCollisionRegressionTest(unittest.TestCase):
                 for box in boxes:
                     before_pixels = _inklike_pixels(before, box)
                     after_pixels = _inklike_pixels(after, box)
+                    self.assertGreaterEqual(before_pixels, 4, name)
+                    self.assertGreaterEqual(after_pixels, max(3, int(math.floor(before_pixels * 0.68))), name)
+                for box in dot_only_boxes.get(name, ()):
+                    before_pixels = _inklike_pixels(before, box)
+                    after_pixels = _inklike_pixels(after, box)
                     self.assertGreaterEqual(before_pixels, 1, name)
-                    self.assertGreaterEqual(after_pixels, max(1, int(math.floor(before_pixels * 0.68))), name)
+                    self.assertGreaterEqual(after_pixels, 1, name)
                 for rule_box in rule_boxes.get(name, ()):
                     before_rule_pixels = _inklike_pixels(before, rule_box, threshold=210)
                     after_rule_pixels = _inklike_pixels(after, rule_box, threshold=210)
@@ -25256,6 +25264,8 @@ class ScanProcessingNestedBasenameCollisionRegressionTest(unittest.TestCase):
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertFalse(audit_summary["privacy"]["contains_paths"])
             self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            self.assertFalse(audit_summary["privacy"]["contains_thumbnails"])
+            self.assertFalse(audit_summary["privacy"].get("contains_ocr_text", False))
             for forbidden in (
                 *pages,
                 str(input_dir),
