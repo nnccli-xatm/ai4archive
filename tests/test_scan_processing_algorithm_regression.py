@@ -24372,7 +24372,7 @@ class ScanProcessingNestedBasenameCollisionRegressionTest(unittest.TestCase):
                 erased,
                 (264, 145, 276, 208),
             )
-            self.assertGreater(erased_ratio, 0.15)
+            self.assertGreater(erased_ratio, 0.25)
             self.assertLess(erased_after, int(math.floor(erased_before * 0.45)))
 
             self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
@@ -24537,7 +24537,7 @@ class ScanProcessingNestedBasenameCollisionRegressionTest(unittest.TestCase):
                 erased,
                 (252, 145, 263, 208),
             )
-            self.assertGreater(erased_ratio, 0.15)
+            self.assertGreater(erased_ratio, 0.25)
             self.assertLess(erased_after, int(math.floor(erased_before * 0.45)))
 
             self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
