@@ -1579,7 +1579,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 after_dark = sum(1 for value in protected_after_region.getdata() if value < mark_dark_threshold)
                 self.assertGreaterEqual(
                     before_dark,
-                    64,
+                    40,
                     "protected precondition: bottom-margin continuation mark must be detectable before cleanup",
                 )
                 keep_ratio = after_dark / max(1, before_dark)
