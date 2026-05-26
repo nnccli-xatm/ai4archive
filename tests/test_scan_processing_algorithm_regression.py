@@ -1285,10 +1285,16 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 safe_wedge_before = _mean_luma(safe_before, safe_wedge_box)
                 safe_wedge_after = _mean_luma(safe_after, safe_wedge_box)
                 safe_wedge_changed = _changed_ratio(safe_before, safe_after, safe_wedge_box)
-            if safe_record["cropped"] or safe_record["dark_border_trimmed"]:
-                self.assertGreater(safe_wedge_after - safe_wedge_before, 5.0)
+            safe_wedge_luma_gain = safe_wedge_after - safe_wedge_before
+            safe_wedge_cleanup_applied = safe_record["cropped"] or safe_record["dark_border_trimmed"]
+            if safe_guard_action == "reverted_to_source":
+                self.assertLess(safe_wedge_changed, 0.01)
+            elif safe_wedge_cleanup_applied:
+                self.assertGreater(safe_wedge_luma_gain, 5.0)
                 self.assertGreater(safe_wedge_changed, 0.02)
-            self.assertLess(safe_wedge_changed, 0.35)
+                self.assertLess(safe_wedge_changed, 0.35)
+            else:
+                self.assertLess(safe_wedge_changed, 0.30)
 
             protected_margin_box = (3, 8, 48, 122)
             with Image.open(process_dir / protected_record["output_relative_path"]) as protected_after:
