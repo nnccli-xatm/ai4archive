@@ -1855,6 +1855,145 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertNotIn("private_full_chain_top_margin_safe_control", audit_summary_text)
             self.assertNotIn("private_full_chain_top_margin_reference_code", audit_summary_text)
 
+    def test_full_chain_side_margin_index_label_preserved_during_cleanup_and_crop(self) -> None:
+        def _side_margin_index_label_page(variant: str) -> Image.Image:
+            image = Image.new("RGB", (336, 248), (245, 244, 239))
+            pixels = image.load()
+            for y in range(image.height):
+                for x in range(image.width):
+                    wave = int(round(2.3 * math.sin(x * 0.039) + 1.7 * math.cos(y * 0.047)))
+                    cast = int(round(2.0 * (x / max(1, image.width - 1)) + 1.4 * (y / max(1, image.height - 1))))
+                    base = max(0, min(255, 245 + wave - cast))
+                    pixels[x, y] = (base, base, max(0, base - 2))
+
+            draw = ImageDraw.Draw(image)
+            font = ImageFont.load_default()
+            draw.text((26, 20), "SECTION REGISTER", fill=(116, 116, 112), font=font)
+            for y in (64, 88, 112, 136, 160, 184, 208, 232):
+                draw.line((24, y, 314, y), fill=(204, 204, 200), width=1)
+            for x in (84, 214, 314):
+                draw.line((x, 48, x, 234), fill=(202, 202, 198), width=1)
+
+            if variant == "protected_index_label":
+                draw.rectangle((302, 106, 332, 150), fill=(228, 228, 222))
+                draw.rectangle((304, 108, 331, 149), outline=(168, 168, 162), width=1)
+                draw.text((307, 116), "I7", fill=(156, 156, 150), font=font)
+                draw.line((304, 138, 330, 138), fill=(170, 170, 164), width=1)
+                draw.line((296, 120, 302, 120), fill=(176, 176, 170), width=1)
+                return image
+
+            raise ValueError(f"unsupported variant: {variant}")
+
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-side-margin-index-label-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            safe_name = "private_full_chain_side_margin_safe_control.png"
+            protected_name = "private_full_chain_side_margin_index_label.png"
+            safe = _interrupted_dark_scanner_border_page("single_edge")
+            protected = _side_margin_index_label_page("protected_index_label")
+            safe_path = input_dir / safe_name
+            protected_path = input_dir / protected_name
+            safe.save(safe_path, dpi=(300, 300))
+            protected.save(protected_path, dpi=(300, 300))
+            source_bytes_before = {
+                safe_name: safe_path.read_bytes(),
+                protected_name: protected_path.read_bytes(),
+            }
+
+            report = scan_batch(
+                ScanConfig("synthetic-regression", "full-chain-side-margin-index-label-guard", input_dir, output_dir)
+            )
+            manifest = process_images(report, input_dir, process_dir, _full_chain_options())
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            safe_record = records[safe_name]
+            protected_record = records[protected_name]
+            self.assertEqual(safe_record["processing_audit"]["guardrail_failures"], [])
+            self.assertEqual(protected_record["processing_audit"]["guardrail_failures"], [])
+
+            source_bytes_after = {
+                safe_name: safe_path.read_bytes(),
+                protected_name: protected_path.read_bytes(),
+            }
+            self.assertEqual(source_bytes_before, source_bytes_after)
+
+            safe_side_artifact_box = (0, 34, 14, 214)
+            side_label_box = (303, 106, 332, 150)
+            safe_dark_threshold = 116
+            label_dark_threshold = 178
+
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_processed:
+                safe_before = safe.convert("RGB")
+                safe_after = safe_processed.convert("RGB")
+                safe_before_region = safe_before.convert("L").crop(safe_side_artifact_box)
+                safe_after_region = safe_after.convert("L").crop(safe_side_artifact_box)
+                safe_before_dark = sum(1 for value in safe_before_region.getdata() if value < safe_dark_threshold)
+                safe_after_dark = sum(1 for value in safe_after_region.getdata() if value < safe_dark_threshold)
+                self.assertGreaterEqual(
+                    safe_before_dark,
+                    160,
+                    "safe-control precondition: side-edge artifact region must contain dark pixels before cleanup",
+                )
+                safe_dark_ratio = safe_after_dark / max(1, safe_before_dark)
+                safe_changed_ratio = _changed_ratio(safe_before, safe_after, safe_side_artifact_box)
+                self.assertTrue(
+                    safe_record["dark_border_trimmed"] or safe_dark_ratio <= 0.98 or safe_changed_ratio >= 0.02,
+                    "safe side-edge artifact should be reduced or meaningfully changed by cleanup/crop",
+                )
+                self.assertLess(safe_dark_ratio, 1.15)
+
+            with Image.open(process_dir / protected_record["output_relative_path"]) as protected_processed:
+                _assert_full_chain_region_preservation(
+                    self,
+                    before=protected.convert("RGB"),
+                    after=protected_processed.convert("RGB"),
+                    box=side_label_box,
+                    dark_threshold=label_dark_threshold,
+                    min_source_dark_pixels=72,
+                    min_keep_ratio=0.68,
+                    max_changed_ratio=0.74,
+                    negative_fill_rgb=(247, 247, 244),
+                    label="the side-margin index label",
+                )
+                protected_before = protected.convert("RGB")
+                protected_after = protected_processed.convert("RGB")
+                self.assertEqual(protected_before.size, protected_after.size)
+                before_bbox = _content_bbox(protected_before)
+                after_bbox = _content_bbox(protected_after)
+                self.assertIsNotNone(before_bbox)
+                self.assertIsNotNone(after_bbox)
+                assert before_bbox is not None and after_bbox is not None
+                self.assertLessEqual(abs(after_bbox[0] - before_bbox[0]), 8)
+                self.assertLessEqual(abs(after_bbox[1] - before_bbox[1]), 8)
+                self.assertLessEqual(abs(after_bbox[2] - before_bbox[2]), 8)
+                self.assertLessEqual(abs(after_bbox[3] - before_bbox[3]), 8)
+
+            for record in (safe_record, protected_record):
+                if record["dark_border_trimmed"]:
+                    self.assertLessEqual(record["processing_audit"]["max_trim_margin_ratio"], 0.03)
+                else:
+                    self.assertIn(
+                        record["dark_border_reason_code"],
+                        {
+                            "protected_edge_content_near_dark_border",
+                            "incomplete_dark_edge_border_evidence",
+                            "no_confident_dark_edge_border",
+                            "not_dark_enough_for_trim",
+                        },
+                    )
+
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            self.assertNotIn("private_full_chain_side_margin_safe_control", audit_summary_text)
+            self.assertNotIn("private_full_chain_side_margin_index_label", audit_summary_text)
+
     def test_full_chain_rust_stain_cleanup_preserves_physical_evidence(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-rust-stain-physical-evidence-guard-") as temp_dir:
             root = Path(temp_dir)
