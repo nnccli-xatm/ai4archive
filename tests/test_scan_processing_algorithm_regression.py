@@ -26782,9 +26782,14 @@ class ScanProcessingNestedBasenameCollisionRegressionTest(unittest.TestCase):
                 self.assertAlmostEqual(safe_delta, 0.0, places=6)
                 self.assertEqual(safe_after_pixels, safe_before_pixels)
             else:
-                self.assertGreaterEqual(safe_delta, 0.004)
+                self.assertGreaterEqual(safe_delta, 0.006)
                 self.assertLessEqual(safe_delta, 0.10)
                 self.assertLess(safe_after_pixels, safe_before_pixels)
+                self.assertGreaterEqual(safe_before_pixels - safe_after_pixels, 2)
+                self.assertLessEqual(
+                    safe_after_pixels / max(1, safe_before_pixels),
+                    0.80,
+                )
             self.assertEqual(safe_audit["guardrail_failures"], [])
 
             # Negative-path invariant: emulate over-cleanup that erases faint ledger reference marks.
