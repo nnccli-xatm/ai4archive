@@ -2536,6 +2536,7 @@
       els.readinessRiskTitle.textContent = riskPrompt.title;
       els.readinessRiskMessage.textContent = riskPrompt.message;
       const mode = readiness.selected_processing_mode || {};
+      const outputSpace = outputSpaceCheckSummary(readiness);
       const facts = [
         ["可处理图片", `${toNumber(readiness.supported_image_count)} 张`],
         ["原图文件夹", readiness.input_empty ? "没有发现图片" : "已发现图片"],
@@ -2544,6 +2545,9 @@
         ["方式说明", mode.purpose_zh || state.processingModePurpose],
         ["输出结果", mode.output_zh || state.processingModeOutput]
       ];
+      if (outputSpace.statusLabel) facts.push(["输出空间", outputSpace.statusLabel]);
+      if (outputSpace.availableLabel) facts.push(["可用空间", outputSpace.availableLabel]);
+      if (outputSpace.estimatedLabel) facts.push(["预计需求", outputSpace.estimatedLabel]);
       els.readinessFacts.innerHTML = facts.map((item) => `<span>${item[0]}：${escapeHtml(item[1])}</span>`).join("");
       const steps = Array.isArray(readiness.next_steps_zh) ? readiness.next_steps_zh : [];
       els.readinessSteps.innerHTML = steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("");
@@ -2580,11 +2584,15 @@
     function preflightSummaryMessage(readiness) {
       if (!readiness) return "请先保存扫描原图文件夹和处理后输出文件夹。";
       const count = toNumber(readiness.supported_image_count);
+      const outputSpace = outputSpaceCheckSummary(readiness);
+      const outputSpaceNotice = outputSpace.noticeMessage;
       if (readiness.ready_to_start === true) {
         const processingSummary = preflightProcessingSummaryMessage(readiness.preflight_processing_summary);
-        if (processingSummary) return processingSummary;
-        return readiness.message_zh || `本批预检结果：已识别到 ${count} 张可处理图片，输出文件夹可以写入。`;
+        if (processingSummary) return outputSpaceNotice ? `${processingSummary} ${outputSpaceNotice}` : processingSummary;
+        const fallbackReadyMessage = readiness.message_zh || `本批预检结果：已识别到 ${count} 张可处理图片，输出文件夹可以写入。`;
+        return outputSpaceNotice ? `${fallbackReadyMessage} ${outputSpaceNotice}` : fallbackReadyMessage;
       }
+      if (outputSpace.blocking && outputSpace.noticeMessage) return outputSpace.noticeMessage;
       if (readiness.status === "not_configured") return "本批预检未通过：请先选择扫描原图文件夹和输出文件夹。";
       if (readiness.status === "empty") return "本批预检未通过：已识别到 0 张可处理图片，请确认是否选错原图文件夹。";
       if (readiness.status === "unsupported") return "本批预检未通过：已识别到 0 张可处理图片，请确认原图格式是否支持。";
@@ -2628,6 +2636,45 @@
 
     function toNumber(value) {
       return Number.isFinite(Number(value)) ? Number(value) : 0;
+    }
+
+    function formatAggregateBytes(bytes) {
+      if (!Number.isFinite(Number(bytes)) || Number(bytes) <= 0) return "";
+      const gib = Number(bytes) / (1024 ** 3);
+      return `${gib.toFixed(1)} GB`;
+    }
+
+    function outputSpaceStatusLabel(status) {
+      if (status === "ready") return "空间充足";
+      if (status === "blocked") return "空间不足（阻塞）";
+      if (status === "estimate_unavailable") return "暂无法估算（可继续）";
+      return "";
+    }
+
+    function outputSpaceCheckSummary(readiness) {
+      const check = readiness && readiness.output_space_check ? readiness.output_space_check : null;
+      if (!check || typeof check !== "object") {
+        return { blocking: false, statusLabel: "", availableLabel: "", estimatedLabel: "", noticeMessage: "" };
+      }
+      const status = typeof check.status === "string" ? check.status : "";
+      const statusLabel = outputSpaceStatusLabel(status);
+      const availableLabel = formatAggregateBytes(check.available_bytes);
+      const estimatedLabel = formatAggregateBytes(check.estimated_required_bytes);
+      const message = typeof check.message_zh === "string" ? check.message_zh.trim() : "";
+      const nextSteps = Array.isArray(check.next_steps_zh)
+        ? check.next_steps_zh.filter((step) => typeof step === "string" && step.trim())
+        : [];
+      const nextStep = nextSteps[0] || "";
+      if (status === "blocked") {
+        const fallback = "本批预检未通过：输出空间不足，请释放空间后重新保存文件夹。";
+        const noticeMessage = message || fallback;
+        return { blocking: true, statusLabel, availableLabel, estimatedLabel, noticeMessage: nextStep ? `${noticeMessage} ${nextStep}` : noticeMessage };
+      }
+      if (status === "estimate_unavailable") {
+        const fallback = "提示：暂时无法估算输出空间，允许开始处理，请关注磁盘可用空间。";
+        return { blocking: false, statusLabel, availableLabel, estimatedLabel, noticeMessage: message || fallback };
+      }
+      return { blocking: false, statusLabel, availableLabel, estimatedLabel, noticeMessage: "" };
     }
 
     function localReuseMessage(panel) {
