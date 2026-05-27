@@ -772,8 +772,8 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
     await expect(page.locator("#inputPath")).toBeEnabled();
     await expect(page.locator("#outputPath")).toBeEnabled();
-    await expect(page.locator("#inputFolder")).toBeEnabled();
-    await expect(page.locator("#outputFolder")).toBeEnabled();
+    await expect(page.locator("#pickInputButton, #inputFolder").first()).toBeEnabled();
+    await expect(page.locator("#pickOutputButton, #outputFolder").first()).toBeEnabled();
     await expectProcessingModeRadiosDisabled(page, false);
     await expect.poll(() => resetRequested).toBe(true);
 
