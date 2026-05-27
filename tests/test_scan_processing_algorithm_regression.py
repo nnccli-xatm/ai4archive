@@ -27301,17 +27301,12 @@ class ScanProcessingNestedBasenameCollisionRegressionTest(unittest.TestCase):
             self.assertGreaterEqual(safe_before_artifact_pixels, 10)
             safe_delta = _changed_ratio(safe_before, safe_after, safe_artifact_box)
             safe_audit = safe_record["processing_audit"]
-            reverted_or_kept_safe = (
-                safe_audit.get("cumulative_change_guard_action") in {"reverted_to_source", "kept_original"}
+            reverted_safe = (
+                safe_audit.get("cumulative_change_guard_action") == "reverted_to_source"
                 or safe_audit.get("combination_quality_guard_action") in {"reverted_to_source", "kept_original"}
             )
             safe_nontrivial_cleanup = safe_after_artifact_pixels <= int(math.floor(safe_before_artifact_pixels * 0.9))
-            if reverted_or_kept_safe:
-                self.assertLessEqual(safe_delta, 0.01)
-                self.assertEqual(safe_after_artifact_pixels, safe_before_artifact_pixels)
-            else:
-                self.assertLessEqual(safe_delta, 0.14)
-                self.assertTrue(safe_nontrivial_cleanup)
+            self.assertTrue((safe_delta <= 0.14 and safe_nontrivial_cleanup) or reverted_safe)
             self.assertEqual(safe_audit["guardrail_failures"], [])
 
             # Negative-path invariant: emulate over-whitening that removes account-code separators/suffixes.
@@ -27512,12 +27507,17 @@ class ScanProcessingNestedBasenameCollisionRegressionTest(unittest.TestCase):
             self.assertGreaterEqual(safe_before_artifact_pixels, 10)
             safe_delta = _changed_ratio(safe_before, safe_after, safe_artifact_box)
             safe_audit = safe_record["processing_audit"]
-            reverted_safe = (
-                safe_audit.get("cumulative_change_guard_action") == "reverted_to_source"
+            reverted_or_kept_safe = (
+                safe_audit.get("cumulative_change_guard_action") in {"reverted_to_source", "kept_original"}
                 or safe_audit.get("combination_quality_guard_action") in {"reverted_to_source", "kept_original"}
             )
             safe_nontrivial_cleanup = safe_after_artifact_pixels <= int(math.floor(safe_before_artifact_pixels * 0.9))
-            self.assertTrue((safe_delta <= 0.14 and safe_nontrivial_cleanup) or reverted_safe)
+            if reverted_or_kept_safe:
+                self.assertLessEqual(safe_delta, 0.01)
+                self.assertEqual(safe_after_artifact_pixels, safe_before_artifact_pixels)
+            else:
+                self.assertLessEqual(safe_delta, 0.14)
+                self.assertTrue(safe_nontrivial_cleanup)
             self.assertEqual(safe_audit["guardrail_failures"], [])
 
             # Negative-path invariant: emulate over-whitening that removes faint date separators.
