@@ -92,6 +92,8 @@ SAFE_STAGE_TIMING_STATUS_LABELS_ZH = {
     "pending": "未开始",
     "failed": "未完成",
 }
+DISK_SPACE_ESTIMATE_OVERHEAD_NUMERATOR = 6
+DISK_SPACE_ESTIMATE_OVERHEAD_DENOMINATOR = 5
 
 
 class WorkbenchPreflightError(ValueError):
@@ -2060,6 +2062,25 @@ def _folder_readiness_summary_with_snapshot(
         selected_mode,
         snapshot,
     )
+    output_space_check = _aggregate_output_space_check(
+        output_path,
+        snapshot=snapshot,
+        processing_precheck=processing_precheck,
+    )
+    summary["output_space_check"] = output_space_check
+    summary["available_bytes"] = output_space_check.get("available_bytes")
+    summary["estimated_required_bytes"] = output_space_check.get("estimated_required_bytes")
+    if output_space_check.get("status") == "blocked":
+        message_zh = str(output_space_check.get("message_zh") or "输出磁盘空间明显不足，当前不能开始处理。")
+        return {
+            **summary,
+            "status": "blocked",
+            "title_zh": "输出磁盘空间不足",
+            "message_zh": message_zh,
+            "blocking_reasons_zh": [message_zh],
+            "next_steps_zh": list(output_space_check.get("next_steps_zh") or ["更换可写且空间更充足的输出文件夹后再开始处理。"]),
+            "preflight_processing_summary": processing_precheck,
+        }, snapshot
     existing_output_risk = _existing_output_artifact_risk(output_path, metadata_path, processing_precheck)
     ready_title = "文件夹可以开始处理"
     ready_message = (
@@ -2087,6 +2108,9 @@ def _folder_readiness_summary_with_snapshot(
         "existing_output_risk": existing_output_risk,
         "preflight_processing_summary": processing_precheck,
     }
+    if output_space_check.get("status") == "warning":
+        ready_summary["message_zh"] = f"{ready_summary['message_zh']} {output_space_check.get('message_zh') or ''}".strip()
+        ready_summary["next_steps_zh"] = list(dict.fromkeys([*ready_summary["next_steps_zh"], *(output_space_check.get("next_steps_zh") or [])]))
     if snapshot is not None:
         snapshot["ready_to_start"] = True
     return ready_summary, snapshot
@@ -2119,6 +2143,95 @@ def _aggregate_processing_precheck_from_snapshot(
             reuse_scan_measurements=True,
         ),
     )
+
+
+def _aggregate_output_space_check(
+    output_dir: Path,
+    *,
+    snapshot: dict[str, Any] | None,
+    processing_precheck: dict[str, Any] | None,
+) -> dict[str, Any]:
+    available_bytes: int | None = None
+    try:
+        available_bytes = max(0, int(shutil.disk_usage(output_dir).free))
+    except OSError:
+        available_bytes = None
+
+    records = snapshot.get("supported_file_snapshots") if isinstance(snapshot, dict) else None
+    if not isinstance(records, list) or not records:
+        return _output_space_check_payload(
+            "warning",
+            available_bytes=available_bytes,
+            estimated_required_bytes=None,
+            message_zh="暂时无法可靠估算本批所需空间，建议先确认输出磁盘空间后再开始处理。",
+            next_steps_zh=["先确认输出磁盘剩余空间。", "如空间紧张，请先清理磁盘或更换输出文件夹。"],
+        )
+
+    source_bytes_total = 0
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        source_bytes_total += _safe_nonnegative_int(record.get("size"))
+    if source_bytes_total <= 0:
+        return _output_space_check_payload(
+            "warning",
+            available_bytes=available_bytes,
+            estimated_required_bytes=None,
+            message_zh="暂时无法可靠估算本批所需空间，建议先确认输出磁盘空间后再开始处理。",
+            next_steps_zh=["先确认输出磁盘剩余空间。", "如空间紧张，请先清理磁盘或更换输出文件夹。"],
+        )
+
+    supported_count = max(1, _safe_nonnegative_int(snapshot.get("supported_image_count")))
+    effective_source_bytes = source_bytes_total
+    if isinstance(processing_precheck, dict) and processing_precheck.get("retry_scope_safe") is True:
+        needs_processing = _safe_nonnegative_int(processing_precheck.get("needs_processing_files"))
+        capped_needs = min(supported_count, needs_processing)
+        effective_source_bytes = int((source_bytes_total * capped_needs) / supported_count)
+    estimated_required_bytes = (
+        effective_source_bytes * DISK_SPACE_ESTIMATE_OVERHEAD_NUMERATOR + DISK_SPACE_ESTIMATE_OVERHEAD_DENOMINATOR - 1
+    ) // DISK_SPACE_ESTIMATE_OVERHEAD_DENOMINATOR
+
+    if available_bytes is None:
+        return _output_space_check_payload(
+            "warning",
+            available_bytes=None,
+            estimated_required_bytes=estimated_required_bytes,
+            message_zh="当前无法读取输出磁盘剩余空间；建议先确认空间后再开始处理。",
+            next_steps_zh=["确认输出文件夹所在磁盘可读写。", "确认磁盘剩余空间后再开始处理。"],
+        )
+    if estimated_required_bytes <= 0:
+        return _output_space_check_payload("ok", available_bytes=available_bytes, estimated_required_bytes=0)
+    if available_bytes < estimated_required_bytes:
+        return _output_space_check_payload(
+            "blocked",
+            available_bytes=available_bytes,
+            estimated_required_bytes=estimated_required_bytes,
+            message_zh="输出磁盘空间明显不足，按本批聚合预估暂时不能开始处理。",
+            next_steps_zh=[
+                "先清理输出磁盘空间，或更换剩余空间更充足的输出文件夹。",
+                "重新保存文件夹后再开始处理。",
+            ],
+        )
+    return _output_space_check_payload("ok", available_bytes=available_bytes, estimated_required_bytes=estimated_required_bytes)
+
+
+def _output_space_check_payload(
+    status: str,
+    *,
+    available_bytes: int | None,
+    estimated_required_bytes: int | None,
+    message_zh: str = "",
+    next_steps_zh: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "schema_version": "scan-qc.local-output-space-check.v1",
+        "aggregate_only": True,
+        "status": status,
+        "available_bytes": available_bytes,
+        "estimated_required_bytes": estimated_required_bytes,
+        "message_zh": message_zh,
+        "next_steps_zh": list(next_steps_zh or []),
+    }
 
 
 def _existing_output_artifact_risk(
