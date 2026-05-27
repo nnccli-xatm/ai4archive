@@ -325,6 +325,17 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
                 Path("/home/ps/scan batch"),
             )
 
+    def test_normalize_native_windows_keeps_drive_paths_native(self) -> None:
+        with patch.object(local_workbench_module, "_running_on_native_windows", return_value=True):
+            self.assertEqual(
+                _normalize_operator_path(r"C:\Users\PS\scan batch"),
+                Path(r"C:\Users\PS\scan batch"),
+            )
+            self.assertEqual(
+                _normalize_operator_path("file:///C:/Users/PS/scan%20batch"),
+                Path(r"C:\Users\PS\scan batch"),
+            )
+
     def test_configure_rejects_windows_network_share_with_operator_guidance(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

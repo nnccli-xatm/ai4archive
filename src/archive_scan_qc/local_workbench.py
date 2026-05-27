@@ -951,6 +951,10 @@ def _running_under_wsl() -> bool:
         return False
 
 
+def _running_on_native_windows() -> bool:
+    return sys.platform.startswith("win") and not _running_under_wsl()
+
+
 def _pick_windows_folder_via_powershell(title_zh: str) -> str | None:
     powershell = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
     if not Path(powershell).exists():
@@ -1106,6 +1110,9 @@ def _normalize_operator_path(path: Path | str) -> Path:
     wsl_unc_path = _windows_wsl_unc_path_to_linux(raw)
     if wsl_unc_path is not None:
         return wsl_unc_path
+    native_windows_path = _windows_drive_path_to_native(raw)
+    if native_windows_path is not None:
+        return native_windows_path
     drive_path = _windows_drive_path_to_wsl(raw)
     if drive_path is not None:
         return drive_path
@@ -1119,6 +1126,8 @@ def _operator_display_path(path: Path | str, resolved_path: Path) -> str:
     raw = _decode_file_url_path(raw)
     raw = _strip_windows_extended_prefix(raw)
     if _windows_wsl_unc_path_to_linux(raw) is not None:
+        return raw
+    if _windows_drive_path_to_native(raw) is not None:
         return raw
     if _windows_drive_path_to_wsl(raw) is not None:
         return raw
@@ -1178,6 +1187,24 @@ def _windows_wsl_unc_path_to_linux(value: str) -> Path | None:
 
 
 def _windows_drive_path_to_wsl(value: str) -> Path | None:
+    parsed = _parse_windows_drive_path(value)
+    if parsed is None or _running_on_native_windows():
+        return None
+    drive, tail = parsed
+    parts = [part for part in re.split(r"[\\/]+", tail) if part]
+    return WINDOWS_DRIVE_MOUNT_ROOT / drive / Path(*parts)
+
+
+def _windows_drive_path_to_native(value: str) -> Path | None:
+    if not _running_on_native_windows():
+        return None
+    parsed = _parse_windows_drive_path(value)
+    if parsed is None:
+        return None
+    return Path(value.replace("/", "\\"))
+
+
+def _parse_windows_drive_path(value: str) -> tuple[str, str] | None:
     match = re.match(r"^([A-Za-z]):(?:[\\/](.*))?$", value)
     if match is None:
         if re.match(r"^[A-Za-z]:", value):
@@ -1185,8 +1212,7 @@ def _windows_drive_path_to_wsl(value: str) -> Path | None:
         return None
     drive = match.group(1).lower()
     tail = match.group(2) or ""
-    parts = [part for part in re.split(r"[\\/]+", tail) if part]
-    return WINDOWS_DRIVE_MOUNT_ROOT / drive / Path(*parts)
+    return drive, tail
 
 
 def _looks_like_windows_unc_path(value: str) -> bool:
