@@ -116,7 +116,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator(".mode-selector")).toContainText("只做质量检查，不生成处理后优化图片。");
 
     await expect(page.locator(".maintenance-loader")).not.toHaveAttribute("open", "");
-    await expect(page.getByText("选择维护示例")).toBeHidden();
+    await expect(page.locator("#fixtureSelect")).not.toBeVisible();
     await page.getByText("维护入口").click();
     await expect(page.getByText("管理员排查、演练或查看本机状态时使用；这不是正常加工步骤。")).toBeVisible();
     await expect(page.getByText("只用于查看本机已经生成的处理状态，不会开始处理。")).toBeVisible();
