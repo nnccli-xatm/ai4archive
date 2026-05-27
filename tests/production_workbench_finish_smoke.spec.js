@@ -1614,6 +1614,82 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect.poll(() => startRequested).toBe(true);
   });
 
+  test("shows output space readiness in folder readiness facts", async ({ page }) => {
+    let scenario = "blocked";
+    await page.route("**/api/status", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ schema_version: "scan-qc.local-production-workbench.v1", running: false }),
+      });
+    });
+    await page.route("**/api/configure", async (route) => {
+      const payload = JSON.parse(route.request().postData() || "{}");
+      const blocked = scenario === "blocked";
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema_version: "scan-qc.local-production-workbench.v1",
+          running: false,
+          configured: true,
+          folders: {
+            input: payload.input_dir,
+            derivatives: payload.derivatives_dir,
+            metadata: `${payload.derivatives_dir}/_production_workbench`,
+          },
+          processing_mode: { id: "standard", label_zh: "标准优化" },
+          folder_readiness: {
+            schema_version: "scan-qc.local-folder-readiness.v1",
+            aggregate_only: true,
+            status: blocked ? "failed" : "ready",
+            ready_to_start: !blocked,
+            supported_image_count: 3,
+            input_empty: false,
+            output_writable: true,
+            selected_processing_mode: { id: "standard", label_zh: "标准优化" },
+            title_zh: blocked ? "输出空间不足" : "文件夹可以开始处理",
+            message_zh: blocked ? "本批预检未通过：输出空间不足。" : "文件夹已保存，可以开始处理。",
+            next_steps_zh: blocked ? ["释放空间后重新保存文件夹。"] : ["确认处理方式无误。", "点击开始处理。"],
+            output_space_check: blocked
+              ? {
+                  status: "blocked",
+                  available_bytes: 10 * 1024 * 1024 * 1024,
+                  estimated_required_bytes: 20 * 1024 * 1024 * 1024,
+                  message_zh: "本批预检未通过：输出空间不足。",
+                  next_steps_zh: ["请释放空间后重新保存文件夹。"],
+                }
+              : {
+                  status: "estimate_unavailable",
+                  available_bytes: 30 * 1024 * 1024 * 1024,
+                  estimated_required_bytes: null,
+                  message_zh: "提示：暂时无法估算输出空间，允许开始处理。",
+                  next_steps_zh: ["建议处理前确认磁盘可用空间。"],
+                },
+          },
+        }),
+      });
+    });
+
+    await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
+    await page.locator("#inputPath").fill("/tmp/output-space-input");
+    await page.locator("#outputPath").fill("/tmp/output-space-output");
+    await page.getByRole("button", { name: "保存文件夹" }).click();
+
+    await expect(page.locator("#readinessFacts")).toContainText("输出空间：空间不足（阻塞）");
+    await expect(page.locator("#readinessFacts")).toContainText("可用空间：10.0 GB");
+    await expect(page.locator("#readinessFacts")).toContainText("预计需求：20.0 GB");
+    await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
+    await expect(page.locator("#loadStatus")).toContainText("输出空间不足");
+    await expect(page.locator("#loadStatus")).not.toContainText("/tmp/output-space-output");
+
+    scenario = "estimate_unavailable";
+    await page.getByRole("button", { name: "保存文件夹" }).click();
+    await expect(page.locator("#readinessFacts")).toContainText("输出空间：暂无法估算（可继续）");
+    await expect(page.locator("#readinessFacts")).toContainText("可用空间：30.0 GB");
+    await expect(page.locator("#readinessFacts")).not.toContainText("预计需求：");
+    await expect(page.getByRole("button", { name: "开始处理" })).toBeEnabled();
+    await expect(page.locator("#loadStatus")).toContainText("暂时无法估算输出空间");
+  });
+
   test("shows existing output risk prompts without private details", async ({ page }) => {
     const cases = [
       {

@@ -834,6 +834,22 @@ def main() -> int:
         ]:
             if forbidden_token in preflight_summary_body:
                 errors.append(f"preflight processing summary includes private/debug token: {forbidden_token}")
+    for required_token in [
+        "function outputSpaceCheckSummary(readiness)",
+        "output_space_check",
+        "available_bytes",
+        "estimated_required_bytes",
+        "status",
+        "message_zh",
+        "next_steps_zh",
+        "输出空间",
+        "可用空间",
+        "预计需求",
+        "暂时无法估算输出空间",
+        "输出空间不足",
+    ]:
+        if required_token not in html:
+            errors.append(f"output-space readiness anchor missing token: {required_token}")
     prepare_next_batch_start = html.find("async function prepareNextBatch()")
     prepare_next_batch_end = html.find("els.resetButton.addEventListener", prepare_next_batch_start)
     if prepare_next_batch_start == -1 or prepare_next_batch_end == -1:
