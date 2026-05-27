@@ -59,13 +59,11 @@ async function expectProcessingModeRadiosDisabled(page, disabled) {
 async function expectLaunchSetupControlsDisabled(page) {
   await expect(page.locator("#inputPath")).toBeDisabled();
   await expect(page.locator("#outputPath")).toBeDisabled();
-  await expect(page.locator("#inputFolder")).toBeDisabled();
-  await expect(page.locator("#outputFolder")).toBeDisabled();
-  await expect(page.locator('label[for="inputFolder"]')).toHaveAttribute("aria-disabled", "true");
-  await expect(page.locator('label[for="outputFolder"]')).toHaveAttribute("aria-disabled", "true");
+  await expect(page.locator("#pickInputButton")).toBeDisabled();
+  await expect(page.locator("#pickOutputButton")).toBeDisabled();
   await expectProcessingModeRadiosDisabled(page, true);
   await expect(page.getByRole("button", { name: "保存文件夹" })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
+  await expect(page.locator("#startButton")).toBeDisabled();
 }
 
 test.describe("production workbench finish/export browser smoke", () => {
@@ -213,7 +211,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#aggregateProcessingText")).toHaveText("聚合处理速度：2.0 张/分钟；剩余 7 张；预计还需等待 约 4 分钟");
     await expect(page.locator("#stageTimingText")).toHaveText("检查扫描图片 1.2 秒；生成处理后图片 8.5 秒");
     await expect(page.locator("#stageTimingAdviceText")).toHaveText("主要耗时在生成处理后图片，请继续等待；如长时间没有变化再交管理员处理。");
-    await expect(page.locator("#loadStatus")).toHaveText("批次正在运行，请等待。本机正在处理图片，处理完成或失败前不能更改文件夹和处理方式，也不要反复点击开始处理。");
+    await expect(page.locator("#loadStatus")).toHaveText("批次正在运行，请等待。开始前预检摘要暂不能安全用于判断可复用输出。本机会按当前进度继续核对并补齐需要处理的图片。当前聚合进度会继续显示已处理、剩余和预计等待；处理完成或失败前不能更改文件夹和处理方式，也不要反复点击开始处理。");
     await expect(page.locator("#inputStatus")).toHaveText("批次正在运行，完成或失败前不能更改原图文件夹。");
     await expect(page.locator("#outputStatus")).toHaveText("批次正在运行，完成或失败前不能更改输出文件夹。");
     await expectLaunchSetupControlsDisabled(page);
@@ -320,7 +318,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     };
     await page.evaluate(() => pollServerStatus());
     await expect(page.locator("#stateAction")).toHaveText("有图片需要人工确认");
-    await expect(page.locator("#progressText")).toHaveText("阶段：等待人工确认；已处理 12 张 / 共 12 张；状态：需要人工确认");
+    await expect(page.locator("#progressText")).toHaveText("阶段：等待人工确认；已处理 12 张 / 共 12 张；待处理 0 张；状态：需要人工确认");
     await expect(page.locator("#stageTimingText")).toHaveText("检查扫描图片 1.3 秒；生成处理后图片 8.8 秒；整理处理结果 0.4 秒");
     await expect(page.locator("#stageTimingAdviceText")).toHaveText("主要耗时在生成处理后图片，请继续等待；如长时间没有变化再交管理员处理。");
     await expect(page.locator("#remainingWorkText")).toHaveText("还需确认 1 张");
@@ -1308,17 +1306,17 @@ test.describe("production workbench finish/export browser smoke", () => {
 
     await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
     await expect(page.locator("#stateName")).toHaveText("正在处理");
-    await expect(page.locator("#loadStatus")).toHaveText("批次正在运行，请等待。本机正在处理图片，处理完成或失败前不能更改文件夹和处理方式，也不要反复点击开始处理。");
-    await expect(page.locator("#progressText")).toHaveText("阶段：正在生成处理后图片；已处理 48 张 / 共 120 张；状态：正在处理");
+    await expect(page.locator("#loadStatus")).toHaveText("批次正在运行，请等待。开始前预检摘要暂不能安全用于判断可复用输出。本机会按当前进度继续核对并补齐需要处理的图片。当前聚合进度会继续显示已处理、剩余和预计等待；处理完成或失败前不能更改文件夹和处理方式，也不要反复点击开始处理。");
+    await expect(page.locator("#progressText")).toHaveText("阶段：正在生成处理后图片；已处理 48 张 / 共 120 张；待处理 72 张；状态：正在处理");
     await expect(page.locator("#sourceText")).toHaveText("120 张");
     await expect(page.locator("#readyText")).toHaveText("48 张");
     await expect(page.locator("#inputPath")).toBeDisabled();
     await expect(page.locator("#outputPath")).toBeDisabled();
-    await expect(page.locator("#inputFolder")).toBeDisabled();
-    await expect(page.locator("#outputFolder")).toBeDisabled();
+    await expect(page.locator("#pickInputButton")).toBeDisabled();
+    await expect(page.locator("#pickOutputButton")).toBeDisabled();
     await expectProcessingModeRadiosDisabled(page, true);
     await expect(page.getByRole("button", { name: "保存文件夹" })).toBeDisabled();
-    await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
+    await expect(page.locator("#startButton")).toBeDisabled();
     await expect(page.getByRole("button", { name: "完成并导出结果" })).toBeDisabled();
     await expectOperatorStatusHidesPaths(page, ["/tmp/running-input", "/tmp/running-output"]);
   });
@@ -1421,12 +1419,12 @@ test.describe("production workbench finish/export browser smoke", () => {
     });
 
     await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
-    await expect(page.locator("#loadStatus")).toHaveText("批次正在运行，请等待。本机正在处理图片，处理完成或失败前不能更改文件夹和处理方式，也不要反复点击开始处理。");
+    await expect(page.locator("#loadStatus")).toHaveText("批次正在运行，请等待。开始前预检摘要暂不能安全用于判断可复用输出。本机会按当前进度继续核对并补齐需要处理的图片。当前聚合进度会继续显示已处理、剩余和预计等待；处理完成或失败前不能更改文件夹和处理方式，也不要反复点击开始处理。");
     await expect(page.locator("#inputPath")).toBeDisabled();
     await expect(page.locator("#outputPath")).toBeDisabled();
     await expectProcessingModeRadiosDisabled(page, true);
     await expect(page.getByRole("button", { name: "保存文件夹" })).toBeDisabled();
-    await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
+    await expect(page.locator("#startButton")).toBeDisabled();
 
     statusState = "needs_review";
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
@@ -1451,7 +1449,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#outputPath")).toBeEnabled();
     await expectProcessingModeRadiosDisabled(page, false);
     await expect(page.getByRole("button", { name: "保存文件夹" })).toBeEnabled();
-    await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
+    await expect(page.locator("#startButton")).toBeDisabled();
     await expect(page.getByRole("button", { name: "完成并导出结果" })).toBeDisabled();
     await expectOperatorStatusHidesPaths(page, ["/tmp/transition-input", "/tmp/transition-output"]);
   });
@@ -1885,7 +1883,7 @@ test.describe("production workbench finish/export browser smoke", () => {
 
     await page.getByRole("button", { name: "开始处理" }).click();
     await expect.poll(() => startRequested).toBe(true);
-    await expect(page.locator("#loadStatus")).toHaveText("批次正在运行，请等待。本机正在处理图片，处理完成或失败前不能更改文件夹和处理方式，也不要反复点击开始处理。");
+    await expect(page.locator("#loadStatus")).toHaveText("批次正在运行，请等待。开始前预检摘要暂不能安全用于判断可复用输出。本机会按当前进度继续核对并补齐需要处理的图片。当前聚合进度会继续显示已处理、剩余和预计等待；处理完成或失败前不能更改文件夹和处理方式，也不要反复点击开始处理。");
     await expect(page.locator("#stateName")).toHaveText("准备完成");
     await expect(page.locator("#readinessFacts")).toContainText("可处理图片：4 张");
     await expectLaunchSetupControlsDisabled(page);
