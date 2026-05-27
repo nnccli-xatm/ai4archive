@@ -26575,18 +26575,29 @@ class ScanProcessingNestedBasenameCollisionRegressionTest(unittest.TestCase):
             self.assertGreaterEqual(safe_before_pixels, 6)
             safe_delta = _changed_ratio(safe_before, safe_after, safe_box)
             safe_audit = safe_record["processing_audit"]
+            cumulative_guard_action = safe_audit.get("cumulative_change_guard_action")
+            combination_guard_action = safe_audit.get("combination_quality_guard_action")
             reverted_safe = (
-                safe_audit.get("cumulative_change_guard_action") == "reverted_to_source"
-                or safe_audit.get("combination_quality_guard_action") == "reverted_to_source"
+                cumulative_guard_action == "reverted_to_source"
+                or combination_guard_action == "reverted_to_source"
             )
-            kept_original_by_guard = safe_audit.get("combination_quality_guard_action") == "kept_original"
+            kept_original_by_guard = combination_guard_action == "kept_original"
             if reverted_safe or kept_original_by_guard:
+                self.assertIn(
+                    combination_guard_action,
+                    {"reverted_to_source", "kept_original"},
+                )
                 self.assertAlmostEqual(safe_delta, 0.0, places=6)
                 self.assertEqual(safe_after_pixels, safe_before_pixels)
+                if combination_guard_action == "reverted_to_source":
+                    self.assertIn("combination_quality_guard_reverted_to_source", safe_record["operations"])
             else:
                 self.assertGreaterEqual(safe_delta, 0.004)
                 self.assertLessEqual(safe_delta, 0.10)
-                self.assertLess(safe_after_pixels, safe_before_pixels)
+                self.assertLessEqual(
+                    safe_after_pixels,
+                    max(0, int(math.floor(safe_before_pixels * 0.80))),
+                )
             self.assertEqual(safe_audit["guardrail_failures"], [])
 
             # Negative-path invariant: emulate over-whitening that erases faint tax/fee/net/gross qualifiers.
