@@ -1177,7 +1177,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     });
 
     await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
-    await expect(page.locator("#progressText")).toHaveText("阶段：需要管理员处理；已处理 2 张 / 共 4 张；有 2 张需要管理员处理；状态：需要处理");
+    await expect(page.locator("#progressText")).toHaveText("阶段：需要管理员处理；已处理 2 张 / 共 4 张；待处理 2 张；有 2 张需要管理员处理；状态：需要处理");
     await expect(page.locator("#stageTimingText")).toHaveText("生成处理后图片 35.2 秒");
     await expect(page.locator("#stageTimingAdviceText")).toHaveClass(/hidden/);
     await expect(page.locator("#recoveryTitle")).toHaveText("处理没有全部完成");
@@ -1239,7 +1239,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     });
 
     await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
-    await expect(page.locator("#progressText")).toHaveText("阶段：需要管理员处理；已处理 0 张 / 共 2 张；有 2 张需要管理员处理；状态：需要处理");
+    await expect(page.locator("#progressText")).toHaveText("阶段：需要管理员处理；已处理 0 张 / 共 2 张；待处理 2 张；有 2 张需要管理员处理；状态：需要处理");
     await expect(page.locator("#recoveryTitle")).toHaveText("处理没有全部完成");
     await expect(page.locator("#recoveryMessage")).toHaveText("本批次没有处理完，当前不能直接重试。");
     await expect(page.getByRole("button", { name: "重试本批次" })).toBeHidden();
