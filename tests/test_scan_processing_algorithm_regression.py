@@ -2972,6 +2972,14 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "A002_protected_faint_ditto_in_repeated_detail.png": (78, 88, 180, 140),
                 "A003_protected_double_stroke_ditto_near_subtotal.png": (78, 140, 180, 220),
             }
+            row_text_boxes = {
+                "A002_protected_faint_ditto_in_repeated_detail.png": ((84, 90, 138, 114), (84, 114, 138, 138)),
+                "A003_protected_double_stroke_ditto_near_subtotal.png": ((84, 138, 142, 162), (84, 162, 142, 186)),
+            }
+            amount_boxes = {
+                "A002_protected_faint_ditto_in_repeated_detail.png": ((252, 90, 298, 114), (252, 114, 298, 138)),
+                "A003_protected_double_stroke_ditto_near_subtotal.png": ((252, 138, 298, 162), (252, 162, 298, 186)),
+            }
             rule_boxes = {
                 "A003_protected_double_stroke_ditto_near_subtotal.png": (
                     (82, 146, 102, 186),
@@ -2995,6 +3003,12 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     after_pixels = _inklike_pixels(after, box)
                     self.assertGreaterEqual(before_pixels, 1, name)
                     self.assertGreaterEqual(after_pixels, max(1, int(math.floor(before_pixels * 0.70))), name)
+                for row_box in row_text_boxes[name]:
+                    self.assertLessEqual(_changed_ratio(before, after, row_box), 0.14, name)
+                    self.assertLessEqual(abs(_mean_luma(after, row_box) - _mean_luma(before, row_box)), 8.0, name)
+                for amount_box in amount_boxes[name]:
+                    self.assertLessEqual(_changed_ratio(before, after, amount_box), 0.14, name)
+                    self.assertLessEqual(abs(_mean_luma(after, amount_box) - _mean_luma(before, amount_box)), 8.0, name)
                 for rule_box in rule_boxes.get(name, ()):
                     before_rule_pixels = _inklike_pixels(before, rule_box, threshold=210)
                     after_rule_pixels = _inklike_pixels(after, rule_box, threshold=210)
