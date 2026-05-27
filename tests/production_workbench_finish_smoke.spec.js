@@ -1610,7 +1610,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#readinessFacts")).toContainText("方式说明：推荐用于正常批量生产");
     await expectOperatorStatusHidesPaths(page, ["/tmp/ready-input", "/tmp/ready-output", "ready-input", "ready-output"]);
     await page.getByRole("button", { name: "开始处理" }).click();
-    await expect(page.locator("#loadStatus")).toHaveText("批次正在运行，请等待。开始前预检摘要暂不能安全用于判断可复用输出。本机会按当前进度继续核对并补齐需要处理的图片。当前聚合进度会继续显示已处理、剩余和预计等待；处理完成或失败前不能更改文件夹和处理方式，也不要反复点击开始处理。");
+    await expect(page.locator("#loadStatus")).toHaveText("批次正在运行，请等待。本机正在处理图片，处理完成或失败前不能更改文件夹和处理方式，也不要反复点击开始处理。");
     await expect.poll(() => startRequested).toBe(true);
   });
 
@@ -1885,7 +1885,7 @@ test.describe("production workbench finish/export browser smoke", () => {
 
     await page.getByRole("button", { name: "开始处理" }).click();
     await expect.poll(() => startRequested).toBe(true);
-    await expect(page.locator("#loadStatus")).toHaveText("批次正在运行，请等待。本机正在处理图片，处理完成或失败前不能更改文件夹和处理方式，也不要反复点击开始处理。");
+    await expect(page.locator("#loadStatus")).toHaveText("批次正在运行，请等待。开始前预检摘要暂不能安全用于判断可复用输出。本机会按当前进度继续核对并补齐需要处理的图片。当前聚合进度会继续显示已处理、剩余和预计等待；处理完成或失败前不能更改文件夹和处理方式，也不要反复点击开始处理。");
     await expect(page.locator("#stateName")).toHaveText("准备完成");
     await expect(page.locator("#readinessFacts")).toContainText("可处理图片：4 张");
     await expectLaunchSetupControlsDisabled(page);
