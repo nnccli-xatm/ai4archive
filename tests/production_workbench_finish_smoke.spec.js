@@ -119,7 +119,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#fixtureSelect")).not.toBeVisible();
     await page.getByText("维护入口").click();
     await expect(page.getByText("管理员排查、演练或查看本机状态时使用；这不是正常加工步骤。")).toBeVisible();
-    await expect(page.getByText("只用于查看本机已经生成的处理状态，不会开始处理。")).toBeVisible();
+    await expect(page.getByText("只用于查看内置状态示例，不会开始处理。")).toBeVisible();
   });
 
   test("shows aggregate Chinese running progress and keeps setup locked until review", async ({ page }) => {
