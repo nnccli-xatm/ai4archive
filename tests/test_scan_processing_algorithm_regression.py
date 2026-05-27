@@ -27062,6 +27062,194 @@ class ScanProcessingNestedBasenameCollisionRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_faint_ledger_account_code_separators_and_suffixes_remain_detectable(self) -> None:
+        def _ledger_account_code_page(variant: str) -> Image.Image:
+            image = Image.new("RGB", (392, 286), (245, 244, 240))
+            pixels = image.load()
+            for y in range(image.height):
+                for x in range(image.width):
+                    wave = int(round(2.3 * math.sin(x * 0.041) + 2.0 * math.cos(y * 0.045)))
+                    cast = int(round(2.1 * (x / max(1, image.width - 1)) + 1.8 * (y / max(1, image.height - 1))))
+                    base = max(0, min(255, 245 + wave - cast))
+                    pixels[x, y] = (base, base, max(0, base - 2))
+
+            draw = ImageDraw.Draw(image)
+            font = ImageFont.load_default()
+            draw.text((22, 18), "LEDGER SUBJECT CODES", fill=(110, 110, 106), font=font)
+            draw.text((24, 44), "DATE", fill=(124, 124, 120), font=font)
+            draw.text((84, 44), "ACCOUNT", fill=(124, 124, 120), font=font)
+            draw.text((248, 44), "AMOUNT", fill=(124, 124, 120), font=font)
+            draw.text((332, 44), "REF", fill=(124, 124, 120), font=font)
+            for y in (68, 92, 116, 140, 164, 188, 212, 236):
+                draw.line((22, y, 366, y), fill=(204, 204, 200), width=1)
+            for x in (80, 240, 328, 366):
+                draw.line((x, 52, x, 240), fill=(202, 202, 198), width=1)
+            for row, y in enumerate((76, 100, 124, 148, 172, 196)):
+                draw.text((26, y - 8), "06/11", fill=(118, 118, 114), font=font)
+                draw.text((90, y - 8), f"SUBJECT {row+1}", fill=(122, 122, 118), font=font)
+                draw.text((250, y - 8), "146.20", fill=(116, 116, 112), font=font)
+                draw.text((334, y - 8), "R3", fill=(120, 120, 116), font=font)
+
+            if variant == "safe_control":
+                draw.ellipse((314, 186, 330, 202), fill=(186, 184, 178))
+                draw.ellipse((336, 196, 350, 210), fill=(182, 180, 174))
+                draw.ellipse((322, 210, 338, 224), fill=(188, 186, 180))
+                draw.line((324, 194, 340, 208), fill=(174, 172, 166), width=1)
+                draw.line((318, 216, 330, 205), fill=(176, 174, 168), width=1)
+                draw.point((344, 220), fill=(170, 168, 162))
+                return image
+
+            if variant == "account_code_with_slash_suffix":
+                draw.text((90, 100), "A-17/2", fill=(164, 164, 158), font=font)
+                draw.text((250, 100), "302.40", fill=(164, 164, 158), font=font)
+                draw.text((332, 100), "X1", fill=(160, 160, 154), font=font)
+                draw.line((86, 118, 326, 118), fill=(188, 188, 184), width=1)
+                return image
+
+            if variant == "account_code_dotted_and_letter_suffix":
+                draw.text((90, 148), "302.B", fill=(166, 166, 160), font=font)
+                draw.text((90, 172), "COST-1A", fill=(166, 166, 160), font=font)
+                draw.text((250, 148), "78.20", fill=(166, 166, 160), font=font)
+                draw.text((250, 172), "18.05", fill=(166, 166, 160), font=font)
+                draw.rectangle((246, 190, 336, 218), outline=(186, 186, 182), width=1)
+                draw.line((246, 184, 336, 184), fill=(188, 188, 184), width=1)
+                draw.line((246, 220, 336, 220), fill=(188, 188, 184), width=1)
+                draw.text((250, 198), "96.25", fill=(168, 168, 162), font=font)
+                draw.text((332, 198), "A3", fill=(160, 160, 154), font=font)
+                return image
+
+            raise ValueError(f"unsupported ledger-account-code variant: {variant}")
+
+        def _inklike_pixels(image: Image.Image, box: tuple[int, int, int, int], threshold: int = 212) -> int:
+            region = image.convert("L").crop(box)
+            return sum(1 for value in region.getdata() if value <= threshold)
+
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-ledger-account-code-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            pages = {
+                "A001_safe_isolated_dust_control.png": _ledger_account_code_page("safe_control"),
+                "A002_protected_account_code_with_slash_suffix.png": _ledger_account_code_page(
+                    "account_code_with_slash_suffix"
+                ),
+                "A003_protected_account_code_dotted_and_letter_suffix.png": _ledger_account_code_page(
+                    "account_code_dotted_and_letter_suffix"
+                ),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "full-chain-ledger-account-code-guard", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(**{**_full_chain_options().__dict__, "deskew": False, "workers": 1}),
+            )
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            code_boxes = {
+                "A002_protected_account_code_with_slash_suffix.png": ((89, 100, 122, 109), (105, 100, 113, 109)),
+                "A003_protected_account_code_dotted_and_letter_suffix.png": ((89, 148, 119, 157), (89, 172, 127, 181)),
+            }
+            amount_boxes = {
+                "A002_protected_account_code_with_slash_suffix.png": ((248, 100, 286, 109),),
+                "A003_protected_account_code_dotted_and_letter_suffix.png": ((248, 148, 286, 157), (248, 172, 286, 181)),
+            }
+            analysis_boxes = {
+                "A002_protected_account_code_with_slash_suffix.png": (82, 92, 336, 132),
+                "A003_protected_account_code_dotted_and_letter_suffix.png": (82, 140, 342, 224),
+            }
+            rule_boxes = {
+                "A002_protected_account_code_with_slash_suffix.png": ((86, 117, 326, 120),),
+                "A003_protected_account_code_dotted_and_letter_suffix.png": ((246, 184, 336, 187), (246, 219, 336, 222)),
+            }
+
+            for name, boxes in code_boxes.items():
+                record = records[name]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
+                with Image.open(process_dir / record["output_relative_path"]) as processed:
+                    after = processed.convert("RGB")
+                before = pages[name].convert("RGB")
+                self.assertEqual(before.size, after.size, name)
+                self.assertEqual(_content_bbox(before), _content_bbox(after), name)
+                self.assertLessEqual(_changed_ratio(before, after, analysis_boxes[name]), 0.12, name)
+                self.assertLessEqual(abs(_mean_luma(after, analysis_boxes[name]) - _mean_luma(before, analysis_boxes[name])), 7.0, name)
+                for box in boxes:
+                    before_pixels = _inklike_pixels(before, box)
+                    after_pixels = _inklike_pixels(after, box)
+                    self.assertGreaterEqual(before_pixels, 4, name)
+                    self.assertGreaterEqual(after_pixels, max(3, int(math.floor(before_pixels * 0.68))), name)
+                for amount_box in amount_boxes.get(name, ()):
+                    before_amount_pixels = _inklike_pixels(before, amount_box)
+                    after_amount_pixels = _inklike_pixels(after, amount_box)
+                    self.assertGreaterEqual(after_amount_pixels, max(5, int(math.floor(before_amount_pixels * 0.68))), name)
+                for rule_box in rule_boxes.get(name, ()):
+                    before_rule_pixels = _inklike_pixels(before, rule_box, threshold=210)
+                    after_rule_pixels = _inklike_pixels(after, rule_box, threshold=210)
+                    self.assertGreaterEqual(after_rule_pixels, max(8, int(math.floor(before_rule_pixels * 0.68))), name)
+                self.assertIn(
+                    record["processing_audit"].get("combination_quality_guard_action"),
+                    {"passed", "reverted_to_source", "kept_original"},
+                    name,
+                )
+
+            safe_name = "A001_safe_isolated_dust_control.png"
+            safe_record = records[safe_name]
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_processed:
+                safe_after = safe_processed.convert("RGB")
+            safe_before = pages[safe_name].convert("RGB")
+            safe_artifact_box = (308, 182, 352, 228)
+            safe_before_artifact_pixels = _inklike_pixels(safe_before, safe_artifact_box, threshold=210)
+            safe_after_artifact_pixels = _inklike_pixels(safe_after, safe_artifact_box, threshold=210)
+            self.assertGreaterEqual(safe_before_artifact_pixels, 10)
+            safe_delta = _changed_ratio(safe_before, safe_after, safe_artifact_box)
+            safe_audit = safe_record["processing_audit"]
+            reverted_safe = (
+                safe_audit.get("cumulative_change_guard_action") == "reverted_to_source"
+                or safe_audit.get("combination_quality_guard_action") in {"reverted_to_source", "kept_original"}
+            )
+            safe_nontrivial_cleanup = safe_after_artifact_pixels <= int(math.floor(safe_before_artifact_pixels * 0.9))
+            self.assertTrue((safe_delta <= 0.14 and safe_nontrivial_cleanup) or reverted_safe)
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+
+            # Negative-path invariant: emulate over-whitening that removes account-code separators/suffixes.
+            erased = pages["A003_protected_account_code_dotted_and_letter_suffix.png"].convert("RGB").copy()
+            ImageDraw.Draw(erased).rectangle((86, 146, 132, 183), fill=(247, 247, 244))
+            erased_before = _inklike_pixels(
+                pages["A003_protected_account_code_dotted_and_letter_suffix.png"],
+                (86, 146, 132, 183),
+                threshold=212,
+            )
+            erased_after = _inklike_pixels(erased, (86, 146, 132, 183), threshold=212)
+            erased_ratio = _changed_ratio(
+                pages["A003_protected_account_code_dotted_and_letter_suffix.png"],
+                erased,
+                (86, 146, 132, 183),
+            )
+            self.assertGreater(erased_ratio, 0.15)
+            self.assertLess(erased_after, int(math.floor(erased_before * 0.45)))
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            self.assertFalse(audit_summary["privacy"].get("contains_thumbnails", False))
+            self.assertFalse(audit_summary["privacy"].get("contains_ocr_text", False))
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256", "ocr_text"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_faint_ledger_minus_amount_markers_remain_detectable(self) -> None:
         def _ledger_minus_marker_page(variant: str) -> Image.Image:
             image = Image.new("RGB", (372, 272), (245, 244, 239))
