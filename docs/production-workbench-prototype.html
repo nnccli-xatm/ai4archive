@@ -2207,7 +2207,9 @@
       els.queueText.textContent = state.reviewQueueText || (reviewMode ? `已决定 ${reviewedCount()} 项，待决定 ${pending} 项` : "等待处理开始。");
       els.remainingWorkText.textContent = remainingWorkLabel();
       els.reviewMovementText.textContent = reviewMovementLabel();
-      els.currentIssue.textContent = activeItem ? activeItem.issue : (state.operatorMessage || (pending ? "处理开始后在这里显示问题原因。" : "已经没有待确认图片。"));
+      els.currentIssue.textContent = activeItem
+        ? activeItem.issue
+        : (pending ? (state.operatorMessage || "处理开始后在这里显示问题原因。") : "已经没有待确认图片。");
       els.currentFocusHints.textContent = activeItem ? activeItem.focusHints : (pending ? "处理开始后在这里显示查看重点。" : "已经没有待确认图片。");
       els.currentRecommendation.textContent = activeItem ? recommendationLabel(activeItem) : "建议：等待处理";
       els.currentRecommendationReason.textContent = activeItem ? recommendationReason(activeItem) : "等待处理开始后，这里会说明为什么建议这样选择。";
