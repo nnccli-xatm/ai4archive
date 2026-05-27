@@ -25974,7 +25974,12 @@ class ScanProcessingNestedBasenameCollisionRegressionTest(unittest.TestCase):
                 or safe_audit.get("combination_quality_guard_action") in {"reverted_to_source", "kept_original"}
             )
             safe_nontrivial_cleanup = safe_after_artifact_pixels <= int(math.floor(safe_before_artifact_pixels * 0.90))
-            self.assertTrue((safe_delta <= 0.14 and safe_nontrivial_cleanup) or reverted_safe)
+            if reverted_safe:
+                self.assertLessEqual(safe_delta, 0.01)
+                self.assertEqual(safe_after_artifact_pixels, safe_before_artifact_pixels)
+            else:
+                self.assertLessEqual(safe_delta, 0.14)
+                self.assertTrue(safe_nontrivial_cleanup)
             self.assertEqual(safe_audit["guardrail_failures"], [])
 
             # Negative-path invariant: this is the over-cleaning regression the guard must reject.
