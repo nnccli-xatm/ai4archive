@@ -27991,10 +27991,13 @@ class ScanProcessingNestedBasenameCollisionRegressionTest(unittest.TestCase):
                 draw.text((268, y - 8), "146.20", fill=(116, 116, 112), font=font)
 
             if variant == "safe_control":
-                for point in ((322, 188), (330, 192), (336, 198), (340, 205), (326, 214), (334, 220)):
-                    draw.point(point, fill=(175, 175, 170))
-                draw.line((326, 194, 334, 203), fill=(175, 175, 170), width=1)
-                draw.ellipse((304, 184, 348, 228), fill=(236, 233, 227))
+                draw.ellipse((308, 188, 324, 202), fill=(186, 184, 178))
+                draw.ellipse((330, 196, 344, 210), fill=(182, 180, 174))
+                draw.ellipse((316, 210, 332, 224), fill=(188, 186, 180))
+                draw.line((320, 194, 336, 208), fill=(174, 172, 166), width=1)
+                draw.line((314, 216, 326, 205), fill=(176, 174, 168), width=1)
+                draw.point((338, 220), fill=(170, 168, 162))
+                draw.point((342, 214), fill=(172, 170, 164))
                 return image
 
             if variant == "faint_correction_near_amount_row":
@@ -28111,13 +28114,18 @@ class ScanProcessingNestedBasenameCollisionRegressionTest(unittest.TestCase):
             with Image.open(process_dir / safe_record["output_relative_path"]) as safe_processed:
                 safe_after = safe_processed.convert("RGB")
             safe_before = pages[safe_name].convert("RGB")
-            safe_delta = _changed_ratio(safe_before, safe_after, (304, 182, 346, 230))
+            safe_artifact_box = (304, 182, 346, 230)
+            safe_before_artifact_pixels = _inklike_pixels(safe_before, safe_artifact_box, threshold=210)
+            safe_after_artifact_pixels = _inklike_pixels(safe_after, safe_artifact_box, threshold=210)
+            self.assertGreaterEqual(safe_before_artifact_pixels, 10)
+            safe_delta = _changed_ratio(safe_before, safe_after, safe_artifact_box)
             safe_audit = safe_record["processing_audit"]
             reverted_safe = (
                 safe_audit.get("cumulative_change_guard_action") == "reverted_to_source"
-                or safe_audit.get("combination_quality_guard_action") == "reverted_to_source"
+                or safe_audit.get("combination_quality_guard_action") in {"reverted_to_source", "kept_original"}
             )
-            self.assertTrue(safe_delta <= 0.11 or reverted_safe)
+            safe_nontrivial_cleanup = safe_after_artifact_pixels <= int(math.floor(safe_before_artifact_pixels * 0.9))
+            self.assertTrue((safe_delta <= 0.14 and safe_nontrivial_cleanup) or reverted_safe)
             self.assertEqual(safe_audit["guardrail_failures"], [])
 
             # Negative-path invariant: emulate over-cleanup that erases correction/carry-forward mark evidence.
