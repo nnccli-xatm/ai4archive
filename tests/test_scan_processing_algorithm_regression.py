@@ -26305,6 +26305,211 @@ class ScanProcessingNestedBasenameCollisionRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_full_chain_faint_ledger_tax_and_fee_amount_qualifiers_remain_detectable(self) -> None:
+        def _ledger_tax_fee_qualifier_page(variant: str) -> Image.Image:
+            image = Image.new("RGB", (386, 284), (245, 244, 239))
+            pixels = image.load()
+            for y in range(image.height):
+                for x in range(image.width):
+                    wave = int(round(2.5 * math.sin(x * 0.040) + 2.0 * math.cos(y * 0.046)))
+                    cast = int(round(1.9 * (x / max(1, image.width - 1)) + 1.7 * (y / max(1, image.height - 1))))
+                    base = max(0, min(255, 245 + wave - cast))
+                    pixels[x, y] = (base, base, max(0, base - 2))
+
+            draw = ImageDraw.Draw(image)
+            font = ImageFont.load_default()
+            draw.text((24, 18), "LEDGER TAX FEE REGISTER", fill=(110, 110, 106), font=font)
+            draw.text((26, 44), "DATE", fill=(124, 124, 120), font=font)
+            draw.text((86, 44), "DETAIL", fill=(124, 124, 120), font=font)
+            draw.text((246, 44), "AMOUNT", fill=(124, 124, 120), font=font)
+            draw.text((314, 44), "QF", fill=(124, 124, 120), font=font)
+            for y in (68, 92, 116, 140, 164, 188, 212, 236):
+                draw.line((24, y, 362, y), fill=(204, 204, 200), width=1)
+            for x in (78, 242, 308, 362):
+                draw.line((x, 52, x, 242), fill=(202, 202, 198), width=1)
+            for y in (76, 100, 124, 148, 172, 196):
+                draw.text((28, y - 8), "06/15", fill=(118, 118, 114), font=font)
+                draw.text((90, y - 8), "POSTING", fill=(122, 122, 118), font=font)
+                draw.text((252, y - 8), "108.40", fill=(116, 116, 112), font=font)
+                draw.text((318, y - 8), "N", fill=(120, 120, 116), font=font)
+
+            if variant == "safe_control":
+                draw.ellipse((306, 186, 350, 232), fill=(236, 233, 226))
+                for point in ((326, 188), (332, 195), (338, 203), (344, 211), (324, 219), (330, 226)):
+                    draw.point(point, fill=(146, 146, 140))
+                return image
+
+            if variant == "tax_fee_near_amount_rows":
+                draw.text((252, 98), "98.20", fill=(166, 166, 160), font=font)
+                draw.text((252, 122), "44.80", fill=(166, 166, 160), font=font)
+                draw.text((314, 98), "TAX", fill=(158, 158, 152), font=font)
+                draw.text((314, 122), "FEE", fill=(158, 158, 152), font=font)
+                draw.point((328, 102), fill=(156, 156, 150))
+                draw.point((329, 126), fill=(156, 156, 150))
+                return image
+
+            if variant == "net_gross_near_subtotal_rules":
+                draw.text((252, 146), "76.00", fill=(168, 168, 162), font=font)
+                draw.text((252, 170), "18.50", fill=(168, 168, 162), font=font)
+                draw.rectangle((246, 190, 344, 216), outline=(186, 186, 182), width=1)
+                draw.line((246, 184, 344, 184), fill=(188, 188, 184), width=1)
+                draw.line((246, 218, 344, 218), fill=(188, 188, 184), width=1)
+                draw.text((252, 198), "94.50", fill=(170, 170, 164), font=font)
+                draw.text((314, 146), "NET", fill=(158, 158, 152), font=font)
+                draw.text((314, 170), "GR", fill=(158, 158, 152), font=font)
+                draw.point((320, 151), fill=(156, 156, 150))
+                draw.point((320, 175), fill=(156, 156, 150))
+                return image
+
+            raise ValueError(f"unsupported ledger-tax-fee qualifier variant: {variant}")
+
+        def _inklike_pixels(image: Image.Image, box: tuple[int, int, int, int], threshold: int = 212) -> int:
+            region = image.convert("L").crop(box)
+            return sum(1 for value in region.getdata() if value <= threshold)
+
+        with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-ledger-tax-fee-qualifier-guard-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            pages = {
+                "A001_safe_isolated_dust_control.png": _ledger_tax_fee_qualifier_page("safe_control"),
+                "A002_protected_faint_tax_fee_near_amount.png": _ledger_tax_fee_qualifier_page(
+                    "tax_fee_near_amount_rows"
+                ),
+                "A003_protected_faint_net_gross_near_rules.png": _ledger_tax_fee_qualifier_page(
+                    "net_gross_near_subtotal_rules"
+                ),
+            }
+            source_bytes: dict[str, bytes] = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            report = scan_batch(
+                ScanConfig("synthetic-regression", "full-chain-ledger-tax-fee-qualifier-guard", input_dir, output_dir)
+            )
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(**{**_full_chain_options().__dict__, "deskew": False, "workers": 1}),
+            )
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            marker_boxes = {
+                "A002_protected_faint_tax_fee_near_amount.png": ((314, 98, 336, 106), (314, 122, 336, 130)),
+                "A003_protected_faint_net_gross_near_rules.png": ((314, 146, 334, 154), (314, 170, 328, 178)),
+            }
+            analysis_boxes = {
+                "A002_protected_faint_tax_fee_near_amount.png": (246, 90, 350, 136),
+                "A003_protected_faint_net_gross_near_rules.png": (246, 140, 350, 220),
+            }
+            rule_boxes = {
+                "A003_protected_faint_net_gross_near_rules.png": (
+                    (246, 184, 344, 186),
+                    (246, 216, 344, 219),
+                    (246, 190, 248, 216),
+                ),
+            }
+            amount_boxes = {
+                "A002_protected_faint_tax_fee_near_amount.png": ((252, 98, 287, 106), (252, 122, 287, 130)),
+                "A003_protected_faint_net_gross_near_rules.png": (
+                    (252, 146, 287, 154),
+                    (252, 170, 287, 178),
+                    (252, 198, 287, 206),
+                ),
+            }
+
+            for name, boxes in marker_boxes.items():
+                record = records[name]
+                self.assertEqual((input_dir / name).read_bytes(), source_bytes[name], name)
+                with Image.open(process_dir / record["output_relative_path"]) as processed:
+                    after = processed.convert("RGB")
+                before = pages[name].convert("RGB")
+                self.assertEqual(before.size, after.size, name)
+                self.assertEqual(_content_bbox(before), _content_bbox(after), name)
+                self.assertLessEqual(_changed_ratio(before, after, analysis_boxes[name]), 0.12, name)
+                self.assertLessEqual(
+                    abs(_mean_luma(after, analysis_boxes[name]) - _mean_luma(before, analysis_boxes[name])),
+                    7.0,
+                    name,
+                )
+                for box in boxes:
+                    before_pixels = _inklike_pixels(before, box)
+                    after_pixels = _inklike_pixels(after, box)
+                    self.assertGreaterEqual(before_pixels, 4, name)
+                    self.assertGreaterEqual(after_pixels, max(3, int(math.floor(before_pixels * 0.68))), name)
+                for amount_box in amount_boxes[name]:
+                    before_amount = _inklike_pixels(before, amount_box, threshold=214)
+                    after_amount = _inklike_pixels(after, amount_box, threshold=214)
+                    self.assertGreaterEqual(after_amount, max(8, int(math.floor(before_amount * 0.70))), name)
+                for rule_box in rule_boxes.get(name, ()):
+                    before_rule_pixels = _inklike_pixels(before, rule_box, threshold=210)
+                    after_rule_pixels = _inklike_pixels(after, rule_box, threshold=210)
+                    self.assertGreaterEqual(after_rule_pixels, max(8, int(math.floor(before_rule_pixels * 0.68))), name)
+                self.assertIn(
+                    record["processing_audit"].get("combination_quality_guard_action"),
+                    {"passed", "reverted_to_source", "kept_original"},
+                    name,
+                )
+
+            safe_name = "A001_safe_isolated_dust_control.png"
+            safe_record = records[safe_name]
+            self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
+            with Image.open(process_dir / safe_record["output_relative_path"]) as safe_processed:
+                safe_after = safe_processed.convert("RGB")
+            safe_before = pages[safe_name].convert("RGB")
+            safe_box = (306, 178, 348, 232)
+            safe_before_pixels = _inklike_pixels(safe_before, safe_box, threshold=214)
+            safe_after_pixels = _inklike_pixels(safe_after, safe_box, threshold=214)
+            self.assertGreaterEqual(safe_before_pixels, 6)
+            safe_delta = _changed_ratio(safe_before, safe_after, safe_box)
+            safe_audit = safe_record["processing_audit"]
+            reverted_safe = (
+                safe_audit.get("cumulative_change_guard_action") == "reverted_to_source"
+                or safe_audit.get("combination_quality_guard_action") == "reverted_to_source"
+            )
+            kept_original_by_guard = safe_audit.get("combination_quality_guard_action") == "kept_original"
+            if reverted_safe or kept_original_by_guard:
+                self.assertAlmostEqual(safe_delta, 0.0, places=6)
+                self.assertEqual(safe_after_pixels, safe_before_pixels)
+            else:
+                self.assertGreaterEqual(safe_delta, 0.004)
+                self.assertLessEqual(safe_delta, 0.10)
+                self.assertLess(safe_after_pixels, safe_before_pixels)
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+
+            # Negative-path invariant: emulate over-whitening that erases faint tax/fee/net/gross qualifiers.
+            erased = pages["A003_protected_faint_net_gross_near_rules.png"].convert("RGB").copy()
+            ImageDraw.Draw(erased).rectangle((312, 144, 338, 180), fill=(247, 247, 244))
+            erased_before = _inklike_pixels(
+                pages["A003_protected_faint_net_gross_near_rules.png"],
+                (312, 144, 338, 180),
+                threshold=212,
+            )
+            erased_after = _inklike_pixels(erased, (312, 144, 338, 180), threshold=212)
+            erased_ratio = _changed_ratio(
+                pages["A003_protected_faint_net_gross_near_rules.png"],
+                erased,
+                (312, 144, 338, 180),
+            )
+            self.assertGreater(erased_ratio, 0.15)
+            self.assertLess(erased_after, int(math.floor(erased_before * 0.45)))
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], len(pages))
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_faint_ledger_reference_and_footnote_markers_remain_detectable(self) -> None:
         def _ledger_reference_footnote_page(variant: str) -> Image.Image:
             image = Image.new("RGB", (372, 272), (245, 244, 239))
