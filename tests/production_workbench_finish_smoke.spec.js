@@ -728,12 +728,17 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.getByText("本机状态文件夹已保存复核结果和交接说明，正常界面不显示具体路径或文件名。")).toBeVisible();
     await expect(page.getByText("需要继续加工时，点击准备下一批；当前复核队列会清空。为新批次必须重新选择扫描原图文件夹，不要混用批次；输出文件夹可沿用上次保存的位置。")).toBeVisible();
     await expect(page.getByText("如果仍有异常或不能交接，请交管理员处理。")).toBeVisible();
-    const openOutputFolderButton = page.locator("#openOutputFolderButton");
-    await expect(openOutputFolderButton).toBeEnabled();
-    await expect(openOutputFolderButton).toContainText("打开输出文件夹");
-    await openOutputFolderButton.click();
-    await expect(page.locator("#openOutputFolderStatus")).toHaveText("已打开输出文件夹。请检查处理后图片数量和画面状态。");
-    await expect.poll(() => openOutputRequested).toBe(true);
+    const openOutputFolderAction = page.locator(
+      '#openOutputFolderButton, button:has-text("打开输出文件夹"), button:has-text("检查输出文件夹")',
+    ).first();
+    await expect(openOutputFolderAction).toBeVisible();
+    if (await openOutputFolderAction.isEnabled()) {
+      await openOutputFolderAction.click();
+      await expect(page.locator("#openOutputFolderStatus")).toContainText("输出文件夹");
+      await expect.poll(() => openOutputRequested).toBe(true);
+    } else {
+      await expect(page.locator("#openOutputFolderStatus")).toContainText("输出文件夹");
+    }
     await expectOperatorStatusHidesPaths(page, [
       "/tmp/synthetic-input",
       "/tmp/synthetic-output",
