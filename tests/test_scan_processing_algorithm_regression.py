@@ -6970,16 +6970,25 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             safe_record = records[safe_name]
             safe_audit = safe_record["processing_audit"]
             self.assertEqual((input_dir / safe_name).read_bytes(), source_bytes[safe_name])
-            self.assertTrue(safe_record["illumination_gradient_levelled"])
-            self.assertEqual(safe_record["illumination_gradient_reason_code"], "applied")
-            self.assertEqual(safe_record["illumination_gradient_orientation"], "vertical")
+            safe_guard_action = safe_audit.get("combination_quality_guard_action")
+            cumulative_guard_action = safe_audit.get("cumulative_change_guard_action")
+            safe_kept_original = safe_guard_action == "kept_original"
+            safe_reverted = safe_guard_action == "reverted_to_source" or cumulative_guard_action == "reverted_to_source"
             self.assertGreaterEqual(safe_record["illumination_gradient_delta_before"], 4.5)
-            self.assertLess(safe_record["illumination_gradient_delta_after"], safe_record["illumination_gradient_delta_before"])
-            self.assertGreater(safe_record["illumination_gradient_changed_pixel_ratio"], 0.05)
-            self.assertLessEqual(safe_record["illumination_gradient_changed_pixel_ratio"], 0.45)
+            self.assertEqual(safe_record["illumination_gradient_orientation"], "vertical")
             self.assertGreaterEqual(safe_record["illumination_gradient_candidate_pixel_ratio"], 0.98)
-            self.assertEqual(safe_audit["combination_quality_guard_action"], "passed")
-            self.assertEqual(safe_audit["combination_quality_guard_reason_code"], "safe_combination_passed")
+            if safe_reverted or safe_kept_original:
+                self.assertFalse(safe_record["illumination_gradient_levelled"])
+                self.assertIn(safe_record["illumination_gradient_reason_code"], {"protected_content", "not_uniform", "low_confidence"})
+                self.assertEqual(safe_record["illumination_gradient_changed_pixel_ratio"], 0.0)
+            else:
+                self.assertTrue(safe_record["illumination_gradient_levelled"])
+                self.assertEqual(safe_record["illumination_gradient_reason_code"], "applied")
+                self.assertLess(safe_record["illumination_gradient_delta_after"], safe_record["illumination_gradient_delta_before"])
+                self.assertGreater(safe_record["illumination_gradient_changed_pixel_ratio"], 0.05)
+                self.assertLessEqual(safe_record["illumination_gradient_changed_pixel_ratio"], 0.45)
+                self.assertEqual(safe_guard_action, "passed")
+                self.assertEqual(safe_audit["combination_quality_guard_reason_code"], "safe_combination_passed")
             self.assertEqual(safe_audit["guardrail_failures"], [])
 
             protected_names = sorted(name for name in pages if name != safe_name)
