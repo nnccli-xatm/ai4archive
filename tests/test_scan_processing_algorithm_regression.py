@@ -2841,13 +2841,24 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             with Image.open(process_dir / safe_record["output_relative_path"]) as safe_processed:
                 safe_after = safe_processed.convert("RGB")
             safe_before = pages[safe_name].convert("RGB")
-            safe_delta = _changed_ratio(safe_before, safe_after, (300, 178, 342, 230))
+            safe_box = (300, 178, 342, 230)
+            safe_before_pixels = _inklike_pixels(safe_before, safe_box, threshold=214)
+            safe_after_pixels = _inklike_pixels(safe_after, safe_box, threshold=214)
+            self.assertGreaterEqual(safe_before_pixels, 6)
+            safe_delta = _changed_ratio(safe_before, safe_after, safe_box)
             safe_audit = safe_record["processing_audit"]
             reverted_safe = (
                 safe_audit.get("cumulative_change_guard_action") == "reverted_to_source"
                 or safe_audit.get("combination_quality_guard_action") == "reverted_to_source"
             )
-            self.assertTrue(safe_delta <= 0.10 or reverted_safe)
+            kept_original_by_guard = safe_audit.get("combination_quality_guard_action") == "kept_original"
+            if reverted_safe or kept_original_by_guard:
+                self.assertAlmostEqual(safe_delta, 0.0, places=6)
+                self.assertEqual(safe_after_pixels, safe_before_pixels)
+            else:
+                self.assertGreaterEqual(safe_delta, 0.004)
+                self.assertLessEqual(safe_delta, 0.10)
+                self.assertLess(safe_after_pixels, safe_before_pixels)
             self.assertEqual(safe_audit["guardrail_failures"], [])
 
             # Negative-path invariant: emulate over-despeckle/over-whitening that erases faint ledger ticks/check marks.
