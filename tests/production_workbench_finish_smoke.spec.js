@@ -758,7 +758,10 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#completionTitle")).toHaveText("等待完成本批");
     await expect(page.locator("#completionReuseMessage")).toBeHidden();
     await expect(page.locator("#completionStatusFact")).toHaveText("未完成");
-    await expect(page.getByRole("button", { name: "打开输出文件夹" })).toBeDisabled();
+    const postCompletionOutputAction = page
+      .locator('#openOutputFolderButton, button:has-text("打开输出文件夹"), button:has-text("检查输出文件夹")')
+      .first();
+    await expect(postCompletionOutputAction).toBeDisabled();
     await expect(page.locator("#openOutputFolderStatus")).toHaveText("完成本批并保存输出文件夹后可以打开检查。");
     await expect(page.locator("#outputPlace")).toHaveText("已选择的处理后输出文件夹");
     await expect(page.locator("#pendingText")).toHaveText("0 个");
