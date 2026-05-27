@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -962,6 +963,79 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             public_json = json.dumps(readiness, ensure_ascii=False, sort_keys=True)
             for forbidden in [str(root), str(input_dir), str(output_dir), "page.png", "sha256", "OCR", "thumbnail", "data:image"]:
                 self.assertNotIn(forbidden, public_json)
+
+    def test_configure_readiness_blocks_when_aggregate_disk_space_is_clearly_insufficient(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            (input_dir / "page_1.png").write_bytes(b"a" * 200)
+            (input_dir / "page_2.png").write_bytes(b"b" * 200)
+            controller = WorkbenchController()
+
+            with patch(
+                "archive_scan_qc.local_workbench._aggregate_processing_precheck_from_snapshot",
+                return_value={"retry_scope_safe": False, "needs_processing_files": 2},
+            ), patch("archive_scan_qc.local_workbench.shutil.disk_usage") as disk_usage_mock:
+                disk_usage_mock.return_value = shutil._ntuple_diskusage(total=10_000, used=9_900, free=100)
+                readiness = controller.configure(input_dir, output_dir, metadata_dir)["folder_readiness"]
+
+            self.assertEqual(readiness["status"], "blocked")
+            self.assertFalse(readiness["ready_to_start"])
+            self.assertEqual(readiness["output_space_check"]["status"], "blocked")
+            self.assertLess(readiness["available_bytes"], readiness["estimated_required_bytes"])
+            self.assertIn("空间明显不足", readiness["message_zh"])
+            self.assertIn("清理输出磁盘空间", " ".join(readiness["next_steps_zh"]))
+
+    def test_configure_readiness_keeps_ready_with_warning_when_space_estimate_is_unreliable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            (input_dir / "page.png").write_bytes(b"image")
+            controller = WorkbenchController()
+
+            with patch("archive_scan_qc.local_workbench._scan_input_folder_preflight") as scan_mock:
+                scan_mock.return_value = {
+                    "input_empty": False,
+                    "supported_image_count": 1,
+                    "directory_snapshots": [{"relative_path": ".", "mtime_ns": 1, "ctime_ns": 1, "size": 1}],
+                    "supported_file_snapshots": [{"relative_path": "page.png", "mtime_ns": 1, "ctime_ns": 1, "size": 0}],
+                }
+                readiness = controller.configure(input_dir, output_dir, metadata_dir)["folder_readiness"]
+
+            self.assertEqual(readiness["status"], "ready")
+            self.assertTrue(readiness["ready_to_start"])
+            self.assertEqual(readiness["output_space_check"]["status"], "warning")
+            self.assertIsNone(readiness["estimated_required_bytes"])
+            self.assertIn("无法可靠估算", readiness["output_space_check"]["message_zh"])
+
+    def test_configure_readiness_space_estimate_respects_retry_scope_safe_reuse(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            (input_dir / "page_1.png").write_bytes(b"a" * 100)
+            (input_dir / "page_2.png").write_bytes(b"b" * 100)
+            controller = WorkbenchController()
+
+            with patch(
+                "archive_scan_qc.local_workbench._aggregate_processing_precheck_from_snapshot",
+                return_value={"retry_scope_safe": True, "needs_processing_files": 1, "reusable_files": 1},
+            ), patch("archive_scan_qc.local_workbench.shutil.disk_usage") as disk_usage_mock:
+                disk_usage_mock.return_value = shutil._ntuple_diskusage(total=10_000, used=5_000, free=5_000)
+                readiness = controller.configure(input_dir, output_dir, metadata_dir)["folder_readiness"]
+
+            self.assertEqual(readiness["status"], "ready")
+            self.assertEqual(readiness["output_space_check"]["status"], "ok")
+            self.assertEqual(readiness["estimated_required_bytes"], 120)
+            self.assertEqual(readiness["available_bytes"], 5_000)
 
     def test_configure_readiness_guides_empty_folder(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
