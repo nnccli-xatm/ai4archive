@@ -59,10 +59,8 @@ async function expectProcessingModeRadiosDisabled(page, disabled) {
 async function expectLaunchSetupControlsDisabled(page) {
   await expect(page.locator("#inputPath")).toBeDisabled();
   await expect(page.locator("#outputPath")).toBeDisabled();
-  await expect(page.locator("#inputFolder")).toBeDisabled();
-  await expect(page.locator("#outputFolder")).toBeDisabled();
-  await expect(page.locator('label[for="inputFolder"]')).toHaveAttribute("aria-disabled", "true");
-  await expect(page.locator('label[for="outputFolder"]')).toHaveAttribute("aria-disabled", "true");
+  await expect(page.locator("#pickInputButton")).toBeDisabled();
+  await expect(page.locator("#pickOutputButton")).toBeDisabled();
   await expectProcessingModeRadiosDisabled(page, true);
   await expect(page.getByRole("button", { name: "保存文件夹" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
@@ -1314,8 +1312,8 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#readyText")).toHaveText("48 张");
     await expect(page.locator("#inputPath")).toBeDisabled();
     await expect(page.locator("#outputPath")).toBeDisabled();
-    await expect(page.locator("#inputFolder")).toBeDisabled();
-    await expect(page.locator("#outputFolder")).toBeDisabled();
+    await expect(page.locator("#pickInputButton")).toBeDisabled();
+    await expect(page.locator("#pickOutputButton")).toBeDisabled();
     await expectProcessingModeRadiosDisabled(page, true);
     await expect(page.getByRole("button", { name: "保存文件夹" })).toBeDisabled();
     await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
