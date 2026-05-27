@@ -1610,7 +1610,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     await page.locator("#outputPath").fill("/tmp/ready-output");
     await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
     await page.getByRole("button", { name: "保存文件夹" }).click();
-    await expect(page.locator("#loadStatus")).toHaveText("文件夹已保存，可以开始处理。原图不会被覆盖，处理后图片会准备到输出文件夹。");
+    await expect(page.locator("#loadStatus")).toHaveText("发现 3 张可处理图片，输出文件夹可以写入。 可以开始处理，原图不会被覆盖。");
     await expect(page.locator("#readinessTitle")).toHaveText("文件夹可以开始处理");
     await expect(page.locator("#readinessFacts")).toContainText("可处理图片：3 张");
     await expect(page.locator("#readinessFacts")).toContainText("输出文件夹：可以写入");
@@ -1618,7 +1618,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#readinessFacts")).toContainText("方式说明：推荐用于正常批量生产");
     await expectOperatorStatusHidesPaths(page, ["/tmp/ready-input", "/tmp/ready-output", "ready-input", "ready-output"]);
     await page.getByRole("button", { name: "开始处理" }).click();
-    await expect(page.locator("#loadStatus")).toHaveText("批次正在运行，请等待。本机正在处理图片，处理完成或失败前不能更改文件夹和处理方式，也不要反复点击开始处理。");
+    await expect(page.locator("#loadStatus")).toHaveText("批次正在运行，请等待。开始前预检摘要暂不能安全用于判断可复用输出。本机会按当前进度继续核对并补齐需要处理的图片。当前聚合进度会继续显示已处理、剩余和预计等待；处理完成或失败前不能更改文件夹和处理方式，也不要反复点击开始处理。");
     await expect.poll(() => startRequested).toBe(true);
   });
 
