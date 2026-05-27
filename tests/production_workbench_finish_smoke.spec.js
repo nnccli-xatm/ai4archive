@@ -318,7 +318,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     };
     await page.evaluate(() => pollServerStatus());
     await expect(page.locator("#stateAction")).toHaveText("有图片需要人工确认");
-    await expect(page.locator("#progressText")).toHaveText("阶段：等待人工确认；已处理 12 张 / 共 12 张；状态：需要人工确认");
+    await expect(page.locator("#progressText")).toHaveText("阶段：等待人工确认；已处理 12 张 / 共 12 张；待处理 0 张；状态：需要人工确认");
     await expect(page.locator("#stageTimingText")).toHaveText("检查扫描图片 1.3 秒；生成处理后图片 8.8 秒；整理处理结果 0.4 秒");
     await expect(page.locator("#stageTimingAdviceText")).toHaveText("主要耗时在生成处理后图片，请继续等待；如长时间没有变化再交管理员处理。");
     await expect(page.locator("#remainingWorkText")).toHaveText("还需确认 1 张");
