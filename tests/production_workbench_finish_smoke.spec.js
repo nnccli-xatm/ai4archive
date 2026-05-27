@@ -675,7 +675,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#remainingWorkText")).toHaveText("还需确认 0 张");
     await expect(page.locator("#reviewMovementText")).toHaveText("所有待确认图片都已确认，可以点击完成并导出结果。");
     await expect(page.locator("#decisionSummary")).toHaveText("已决定 3 项，待决定 0 项。");
-    await expect(page.locator("#currentIssue")).toHaveText("有图片需要人工确认。");
+    await expect(page.locator("#currentIssue")).toHaveText("已经没有待确认图片。");
     await expect(page.locator("#currentFocusHints")).toHaveText("已经没有待确认图片。");
     await expect(page.locator("#currentAdvice")).toHaveText("可以完成并导出结果。");
     await expect(page.locator("#previewSourceText")).toHaveText("图片查看：等待本机处理结果。");
@@ -691,7 +691,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     await page.locator("#previewFrame").focus();
     await page.keyboard.press("4");
     await expect(page.locator("#decisionSummary")).toHaveText("已决定 3 项，待决定 0 项。");
-    await expect(page.locator("#currentIssue")).toHaveText("有图片需要人工确认。");
+    await expect(page.locator("#currentIssue")).toHaveText("已经没有待确认图片。");
 
     await page.getByRole("button", { name: "完成并导出结果" }).click();
     await expect(page.locator("#finishConfirmPanel")).toBeVisible();
