@@ -8,15 +8,18 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Validation depth to run
+        description: Explicit deep validation depth to run
         required: true
-        default: standard
+        default: deep-full
         type: choice
         options:
-          - standard
           - deep-full
   schedule:
     - cron: "0 18 * * *"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
 
 jobs:
   pr-smoke:
@@ -125,7 +128,7 @@ jobs:
 
   main-compat-smoke:
     name: Main compatibility smoke Python ${{ matrix.python-version }}
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'standard')
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
@@ -171,7 +174,7 @@ jobs:
 
   main-full-tests:
     name: Main full tests Python 3.11 shard ${{ matrix.shard-label }}/4
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'standard')
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
