@@ -27509,7 +27509,14 @@ class ScanProcessingNestedBasenameCollisionRegressionTest(unittest.TestCase):
             safe_artifact_box = (308, 182, 352, 228)
             safe_before_artifact_pixels = _inklike_pixels(safe_before, safe_artifact_box, threshold=210)
             safe_after_artifact_pixels = _inklike_pixels(safe_after, safe_artifact_box, threshold=210)
-            self.assertGreaterEqual(safe_before_artifact_pixels, 10)
+            self.assertGreaterEqual(safe_before_artifact_pixels, 20)
+            # Precondition: safe control contains removable-looking artifact pixels, not a vacuous clean patch.
+            safe_erased = safe_before.copy()
+            ImageDraw.Draw(safe_erased).rectangle(safe_artifact_box, fill=(246, 245, 241))
+            safe_erased_artifact_pixels = _inklike_pixels(safe_erased, safe_artifact_box, threshold=210)
+            safe_erased_delta = _changed_ratio(safe_before, safe_erased, safe_artifact_box)
+            self.assertGreater(safe_erased_delta, 0.2)
+            self.assertLess(safe_erased_artifact_pixels, int(math.floor(safe_before_artifact_pixels * 0.45)))
             safe_delta = _changed_ratio(safe_before, safe_after, safe_artifact_box)
             safe_audit = safe_record["processing_audit"]
             reverted_safe = (
@@ -27517,7 +27524,14 @@ class ScanProcessingNestedBasenameCollisionRegressionTest(unittest.TestCase):
                 or safe_audit.get("combination_quality_guard_action") in {"reverted_to_source", "kept_original"}
             )
             safe_nontrivial_cleanup = safe_after_artifact_pixels <= int(math.floor(safe_before_artifact_pixels * 0.9))
-            self.assertTrue((safe_delta <= 0.14 and safe_nontrivial_cleanup) or reverted_safe)
+            if reverted_safe:
+                self.assertLessEqual(safe_delta, 0.02)
+                self.assertGreaterEqual(safe_after_artifact_pixels, int(math.floor(safe_before_artifact_pixels * 0.95)))
+            else:
+                self.assertGreaterEqual(safe_delta, 0.02)
+                self.assertLessEqual(safe_delta, 0.14)
+                self.assertTrue(safe_nontrivial_cleanup)
+                self.assertGreaterEqual(safe_after_artifact_pixels, int(math.floor(safe_before_artifact_pixels * 0.45)))
             self.assertEqual(safe_audit["guardrail_failures"], [])
 
             # Negative-path invariant: emulate over-whitening that removes faint date separators.
