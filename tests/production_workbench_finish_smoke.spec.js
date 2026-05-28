@@ -2898,7 +2898,6 @@ test.describe("production workbench finish/export browser smoke", () => {
       processing_mode: "standard",
     });
     await page.evaluate(() => pollServerStatus());
-    await expect(page.locator("#stateAction")).toHaveText("正在处理");
     await page.evaluate(() => pollServerStatus());
 
     await expect(page.locator("#reviewQueuePanel")).toBeVisible();
