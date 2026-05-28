@@ -1000,7 +1000,20 @@ def _add_processing_quality_findings(
     skew_angle = item.get("quality_skew_angle_degrees")
     skew_confidence = item.get("quality_skew_confidence")
     if isinstance(skew_angle, int | float) and isinstance(skew_confidence, int | float):
-        if 0.5 <= abs(skew_angle) <= 5.0 and skew_confidence >= 0.08:
+        if abs(skew_angle) > 5.0 and skew_confidence >= 0.08:
+            _append_finding(
+                item,
+                findings,
+                "quality_skew_large_angle",
+                "P1",
+                (
+                    f"Conservative scan-time skew estimate is {round(skew_angle, 2)} degrees "
+                    f"with confidence {round(skew_confidence, 3)}; exceeds auto-deskew threshold, "
+                    f"requires manual review."
+                ),
+                profile,
+            )
+        elif 0.5 <= abs(skew_angle) <= 5.0 and skew_confidence >= 0.08:
             _append_finding(
                 item,
                 findings,

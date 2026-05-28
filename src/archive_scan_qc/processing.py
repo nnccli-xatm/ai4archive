@@ -831,6 +831,7 @@ def _process_record(
         "skew_confidence": 0.0,
         "deskewed": False,
         "deskew_reason": None,
+        "deskew_residual_degrees": None,
         "dark_border_trimmed": False,
         "dark_border_bbox": None,
         "dark_border_reason": None,
@@ -995,6 +996,7 @@ def _process_record(
                 "skew_confidence": process_info["skew_confidence"],
                 "deskewed": process_info["deskewed"],
                 "deskew_reason": process_info["deskew_reason"],
+                "deskew_residual_degrees": process_info["deskew_residual_degrees"],
                 "dark_border_trimmed": process_info["dark_border_trimmed"],
                 "dark_border_bbox": process_info["dark_border_bbox"],
                 "dark_border_reason": process_info["dark_border_reason"],
@@ -1137,6 +1139,7 @@ def _process_record(
                     "skew_confidence": process_info["skew_confidence"],
                     "deskewed": process_info["deskewed"],
                     "deskew_reason": process_info["deskew_reason"],
+                    "deskew_residual_degrees": process_info["deskew_residual_degrees"],
                     "dark_border_trimmed": process_info["dark_border_trimmed"],
                     "dark_border_bbox": process_info["dark_border_bbox"],
                     "dark_border_reason": process_info["dark_border_reason"],
@@ -3577,6 +3580,11 @@ def _process_image(
             post_deskew_size = list(processed.size)
             deskewed = True
             deskew_reason = "deskew applied"
+    deskew_residual_degrees = None
+    if deskewed:
+        residual = _detect_skew(processed)
+        if residual.angle_degrees is not None:
+            deskew_residual_degrees = round(abs(residual.angle_degrees), 4)
 
     dark_border = DarkBorderDetection(
         None,
@@ -4096,6 +4104,7 @@ def _process_image(
         "skew_confidence": skew.confidence,
         "deskewed": False if guard_reverted else deskewed,
         "deskew_reason": guard_reason if guard_reverted else deskew_reason,
+        "deskew_residual_degrees": None if guard_reverted else deskew_residual_degrees,
         "dark_border_trimmed": False if guard_reverted else dark_border_trimmed,
         "dark_border_bbox": None if guard_reverted else (list(dark_border.bbox) if dark_border.bbox else None),
         "dark_border_reason": guard_reason if guard_reverted else dark_border.reason,

@@ -47,6 +47,7 @@ class RulesProfile:
     blank_edge_coverage_max: float = 0.002
     blank_dark_pixel_ratio_max: float = 0.0005
     despeckle_max_pixel_change_ratio: float = 0.01
+    deskew_residual_threshold: float = 0.5
     rules: dict[str, RuleSetting] = field(default_factory=dict)
 
     def effective_min_dpi(self) -> int:
@@ -77,6 +78,7 @@ class RulesProfile:
                 "blank_edge_coverage_max": self.blank_edge_coverage_max,
                 "blank_dark_pixel_ratio_max": self.blank_dark_pixel_ratio_max,
                 "despeckle_max_pixel_change_ratio": self.despeckle_max_pixel_change_ratio,
+                "deskew_residual_threshold": self.deskew_residual_threshold,
             },
         }
 
@@ -156,6 +158,11 @@ def _profile_from_mapping(raw: dict[str, Any], *, source: str) -> RulesProfile:
             quality,
             "despeckle_max_pixel_change_ratio",
             profile.despeckle_max_pixel_change_ratio,
+        ),
+        deskew_residual_threshold=_optional_float(
+            quality,
+            "deskew_residual_threshold",
+            profile.deskew_residual_threshold,
         ),
         rules=_rules_from_mapping(rules),
     )
