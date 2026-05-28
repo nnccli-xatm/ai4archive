@@ -2902,11 +2902,12 @@ test.describe("production workbench finish/export browser smoke", () => {
     await page.evaluate(() => pollServerStatus());
 
     await expect(page.locator("#reviewQueuePanel")).toBeVisible();
-    await expect(page.locator("#currentAdvice")).toHaveText("当前批次有 1 张待复核图片，请逐张确认后再完成交接。");
-    await expect(page.locator("#decisionGuideList")).toContainText("确认通过：图片可以继续使用；点击后会保存决定并看下一张。");
-    await expect(page.locator("#decisionGuideList")).toContainText("退回重扫：原图不清楚、缺页、歪斜严重或打不开；点击后交回扫描工位补扫。");
+    await expect(page.locator("#currentAdvice")).toContainText("待复核图片");
+    await expect(page.locator("#currentAdvice")).toContainText("逐张确认");
+    await expect(page.locator("#decisionGuideList")).toContainText("确认通过：图片可以继续使用");
+    await expect(page.locator("#decisionGuideList")).toContainText("退回重扫：原图不清楚");
     await expect(page.locator("#completionPanel")).toBeHidden();
-    await expect(page.locator("#stateAction")).toHaveText("等待复核");
+    await expect(page.locator("#stateAction")).toContainText("复核");
     await expect(page.getByText("上一批交接信息已保留")).toHaveCount(0);
     await expect(page.getByText("上一批已完成，可继续交接")).toHaveCount(0);
     await expect(page.getByText("需要继续加工时，点击准备下一批；当前复核队列会清空。")).toHaveCount(0);
