@@ -1319,7 +1319,15 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (metadata_dir / REVIEW_DECISION_SUMMARY_JSON).write_text(
-                json.dumps(decision_summary([("PRQ000001", "false_positive")]), ensure_ascii=False),
+                json.dumps(
+                    decision_summary(
+                        [
+                            ("PRQ000001", "false_positive"),
+                            ("PRQ000002", "keep_original_trace"),
+                        ]
+                    ),
+                    ensure_ascii=False,
+                ),
                 encoding="utf-8",
             )
 
@@ -1335,6 +1343,8 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertFalse(status["restored_batch"]["auto_started"])
             self.assertEqual(status["completion_panel"]["title_zh"], "已恢复本批完成状态")
             self.assertEqual(status["completion_panel"]["processed_output_images"], 3)
+            self.assertEqual(status["completion_panel"]["keep_original_images"], 1)
+            self.assertIn("确认保留原貌 1 张。", status["completion_panel"]["next_steps_zh"])
             self.assertEqual(status["completion_panel"]["local_reuse_summary"]["reused_files"], 1)
             assert_public_restore_payload_is_private(
                 self,

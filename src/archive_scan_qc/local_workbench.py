@@ -537,7 +537,7 @@ class WorkbenchController:
             final_decisions=final_decisions,
             final_verification=final_verification,
         )
-        completion_panel = _restored_completion_panel(restored_batch, summary, processing_mode)
+        completion_panel = _restored_completion_panel(restored_batch, summary, final_decisions, processing_mode)
         recovery_guidance = _status_recovery_guidance(
             configured=bool(input_path and derivatives_path and metadata_path),
             running=running,
@@ -1704,12 +1704,14 @@ def _review_completion_counts(decisions: dict[str, Any] | None) -> dict[str, Any
 def _restored_completion_panel(
     restored_batch: dict[str, Any] | None,
     summary: dict[str, Any] | None,
+    final_decisions: dict[str, Any] | None,
     processing_mode: str,
 ) -> dict[str, Any] | None:
     if not isinstance(restored_batch, dict) or restored_batch.get("kind") != "completed":
         return None
     counts = summary.get("counts") if isinstance(summary, dict) and isinstance(summary.get("counts"), dict) else {}
     reuse_handoff_summary = _local_reuse_handoff_summary(summary)
+    keep_original_images = _restored_keep_original_count(final_decisions)
     panel = {
         "schema_version": "scan-qc.local-restored-completion-panel.v1",
         "aggregate_only": True,
@@ -1724,10 +1726,12 @@ def _restored_completion_panel(
         "processed_output_images": _safe_nonnegative_int(restored_batch.get("derivative_images_ready")),
         "needs_rescan_images": 0,
         "needs_reprocess_images": 0,
+        "keep_original_images": keep_original_images,
         "processing_mode": _processing_mode_payload(processing_mode),
         "open_output_folder_available": True,
         "next_steps_zh": [
             f"打开输出文件夹，检查 {_safe_nonnegative_int(restored_batch.get('derivative_images_ready'))} 张处理后图片的数量和画面状态。",
+            f"确认保留原貌 {keep_original_images} 张。",
             "本机状态文件夹已保存本批处理状态，正常界面不显示具体路径或文件名。",
             "需要继续加工时，点击准备下一批；当前复核队列会清空。",
             "如果仍有异常或不能交接，请交管理员处理。",
@@ -1736,6 +1740,33 @@ def _restored_completion_panel(
     if reuse_handoff_summary is not None:
         panel["local_reuse_summary"] = reuse_handoff_summary
     return panel
+
+
+def _restored_keep_original_count(final_decisions: dict[str, Any] | None) -> int:
+    if not isinstance(final_decisions, dict):
+        return 0
+    review_counts = final_decisions.get("review_counts")
+    if isinstance(review_counts, dict):
+        keep_original = _optional_nonnegative_int(review_counts, "keep_original_trace")
+        if keep_original is not None:
+            return keep_original
+    completion_counts = (
+        final_decisions.get("aggregate_counts", {}).get("review_completion", {}).get("counts")
+        if isinstance(final_decisions.get("aggregate_counts"), dict)
+        else None
+    )
+    if isinstance(completion_counts, dict):
+        keep_original = _optional_nonnegative_int(completion_counts, "keep_original_trace")
+        if keep_original is not None:
+            return keep_original
+    decisions = final_decisions.get("decisions")
+    if isinstance(decisions, list):
+        return sum(
+            1
+            for item in decisions
+            if isinstance(item, dict) and str(item.get("decision") or "").strip().lower() == "keep_original_trace"
+        )
+    return 0
 
 
 def _path_is_existing_dir(path: Path) -> bool:
