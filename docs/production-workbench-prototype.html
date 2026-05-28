@@ -3170,6 +3170,8 @@
       }
       if (inRunStatus()) {
         els.loadStatus.textContent = runningGuidanceText(summary);
+      } else if (nextStatus === "needs_review") {
+        els.loadStatus.textContent = state.operatorMessage || "当前批次有待复核图片，请逐张确认。";
       }
       render();
     }
