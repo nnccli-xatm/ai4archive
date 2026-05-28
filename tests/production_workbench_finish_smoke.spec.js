@@ -2701,6 +2701,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     const startPayloads = [];
     let saveDraftRequests = 0;
     let finishDecisionRequests = 0;
+    let reviewStatusReady = false;
     let statusPayload = {
       schema_version: "scan-qc.local-production-workbench.v1",
       running: false,
@@ -2743,6 +2744,44 @@ test.describe("production workbench finish/export browser smoke", () => {
       },
     };
     await page.route("**/api/status", async (route) => {
+      if (reviewStatusReady) {
+        statusPayload = {
+          schema_version: "scan-qc.local-production-workbench.v1",
+          running: false,
+          configured: true,
+          summary: {
+            schema_version: "scan-qc.production-run.v1",
+            status: "needs_review",
+            operator_summary: {
+              message_zh: "当前批次有待复核图片，请逐张确认。",
+              total_source_images: 4,
+              derivative_images_ready: 4,
+              files_needing_attention: 1,
+            },
+            counts: { total_files: 4, processed_files: 4, failed_files: 0, retry_list_files: 0 },
+          },
+          progress: {
+            schema_version: "scan-qc.production-run-progress.v1",
+            state: "needs_review",
+            current_step: "review",
+            steps: [{ id: "review", state: "running", completed_items: 4, total_items: 4 }],
+          },
+          queue: {
+            schema_version: "scan-qc.production-review-queue.v1",
+            items: [
+              {
+                local_id: "PRQ-NEXT-BATCH-1",
+                reason_zh: "页面边缘有阴影，需人工确认。",
+                focus_hints_zh: ["确认是否影响阅读", "判断是否需要重扫"],
+                suggested_action: "rescan",
+                severity: "P1",
+                preview_source: "comparison",
+                preview_sources: { original: true, processed: true },
+              },
+            ],
+          },
+        };
+      }
       await route.fulfill({ contentType: "application/json", body: JSON.stringify(statusPayload) });
     });
     await page.route("**/api/reset-batch", async (route) => {
@@ -2794,78 +2833,31 @@ test.describe("production workbench finish/export browser smoke", () => {
       startPayloads.push(payload);
       statusPayload = {
         schema_version: "scan-qc.local-production-workbench.v1",
-        running: false,
+        running: true,
         configured: true,
         summary: {
           schema_version: "scan-qc.production-run.v1",
-          status: "needs_review",
+          status: "running",
           operator_summary: {
-            message_zh: "当前批次有待复核图片，请逐张确认。",
+            message_zh: "批次正在运行，请等待。",
             total_source_images: 4,
-            derivative_images_ready: 4,
-            files_needing_attention: 1,
+            derivative_images_ready: 1,
+            files_needing_attention: 0,
           },
-          counts: { total_files: 4, processed_files: 4, failed_files: 0, retry_list_files: 0 },
+          counts: { total_files: 4, processed_files: 1, failed_files: 0, retry_list_files: 0 },
         },
         progress: {
           schema_version: "scan-qc.production-run-progress.v1",
-          state: "needs_review",
-          current_step: "review",
-          steps: [{ id: "review", state: "running", completed_items: 4, total_items: 4 }],
+          state: "running",
+          current_step: "quality_check",
+          steps: [{ id: "quality_check", state: "running", completed_items: 1, total_items: 4 }],
         },
-        queue: {
-          schema_version: "scan-qc.production-review-queue.v1",
-          items: [
-            {
-              local_id: "PRQ-NEXT-BATCH-1",
-              reason_zh: "页面边缘有阴影，需人工确认。",
-              focus_hints_zh: ["确认是否影响阅读", "判断是否需要重扫"],
-              suggested_action: "rescan",
-              severity: "P1",
-              preview_source: "comparison",
-              preview_sources: { original: true, processed: true },
-            },
-          ],
-        },
+        queue: { schema_version: "scan-qc.production-review-queue.v1", items: [] },
       };
+      reviewStatusReady = true;
       await route.fulfill({
         contentType: "application/json",
-        body: JSON.stringify({
-          schema_version: "scan-qc.local-production-workbench.v1",
-          running: false,
-          configured: true,
-          summary: {
-            schema_version: "scan-qc.production-run.v1",
-            status: "needs_review",
-            operator_summary: {
-              message_zh: "当前批次有待复核图片，请逐张确认。",
-              total_source_images: 4,
-              derivative_images_ready: 4,
-              files_needing_attention: 1,
-            },
-            counts: { total_files: 4, processed_files: 4, failed_files: 0, retry_list_files: 0 },
-          },
-          progress: {
-            schema_version: "scan-qc.production-run-progress.v1",
-            state: "needs_review",
-            current_step: "review",
-            steps: [{ id: "review", state: "running", completed_items: 4, total_items: 4 }],
-          },
-          queue: {
-            schema_version: "scan-qc.production-review-queue.v1",
-            items: [
-              {
-                local_id: "PRQ-NEXT-BATCH-1",
-                reason_zh: "页面边缘有阴影，需人工确认。",
-                focus_hints_zh: ["确认是否影响阅读", "判断是否需要重扫"],
-                suggested_action: "rescan",
-                severity: "P1",
-                preview_source: "comparison",
-                preview_sources: { original: true, processed: true },
-              },
-            ],
-          },
-        }),
+        body: JSON.stringify(statusPayload),
       });
     });
     await page.route("**/api/save-draft-decisions", async (route) => {
@@ -2905,6 +2897,8 @@ test.describe("production workbench finish/export browser smoke", () => {
       derivatives_dir: "/tmp/new-next-batch-output",
       processing_mode: "standard",
     });
+    await page.evaluate(() => pollServerStatus());
+    await expect(page.locator("#stateAction")).toHaveText("正在处理");
     await page.evaluate(() => pollServerStatus());
 
     await expect(page.locator("#reviewQueuePanel")).toBeVisible();
