@@ -2170,77 +2170,78 @@ test.describe("production workbench finish/export browser smoke", () => {
     ]);
   });
 
-  test("shows clean running state after next-batch start without stale restored details", async ({ page }) => {
+  test("shows clean review queue after next-batch processing without stale restored details", async ({ page }) => {
     let resetRequests = 0;
     const configurePayloads = [];
     const startPayloads = [];
+    let statusPayload = {
+      schema_version: "scan-qc.local-production-workbench.v1",
+      running: false,
+      configured: true,
+      folders: {
+        input: "/tmp/restored-setup-input",
+        derivatives: "/tmp/restored-setup-output",
+        metadata: "/tmp/restored-setup-output/_production_workbench",
+      },
+      summary: {
+        schema_version: "scan-qc.production-run.v1",
+        status: "finished",
+        ready_for_operator_handoff: true,
+        operator_summary: {
+          message_zh: "已恢复上一批完成交接状态，请先核对交接摘要。",
+          total_source_images: 6,
+          openable_source_images: 6,
+          derivative_images_ready: 5,
+          files_needing_attention: 1,
+        },
+        counts: {
+          total_files: 6,
+          openable_files: 6,
+          processed_files: 5,
+          failed_files: 0,
+          retry_list_files: 0,
+        },
+      },
+      progress: { schema_version: "scan-qc.production-run-progress.v1", state: "finished" },
+      queue: { schema_version: "scan-qc.production-review-queue.v1", items: [] },
+      restored_batch: {
+        kind: "completed",
+        title_zh: "已恢复上一批交接状态",
+        message_zh: "恢复到已完成交接面板，请先核对摘要再决定是否开始下一批。",
+        private_path: "/tmp/private-restored-status-path",
+        row_evidence: "PRIVATE_ROW_DETAIL",
+      },
+      completion_panel: {
+        title_zh: "已恢复：上一批已完成",
+        message_zh: "系统已恢复上一批交接摘要，请核对后再继续。",
+        completion_status_zh: "上一批已完成，可继续交接",
+        total_review_items: 6,
+        reviewed_items: 6,
+        pending_items: 0,
+        processed_output_images: 5,
+        needs_rescan_images: 1,
+        needs_reprocess_images: 0,
+        manual_work_zh: "确认保留原貌 1 张",
+        admin_handoff_zh: "不需要",
+        next_steps_zh: [
+          "打开输出文件夹，核对 5 张处理后图片。",
+          "需要重扫 1 张；需要重新处理 0 张。",
+          "确认保留原貌 1 张。",
+          "需要继续加工时，点击准备下一批；当前复核队列会清空。",
+          "为新批次必须重新选择扫描原图文件夹，不要混用批次；输出文件夹可沿用上次保存的位置。",
+        ],
+        source_path: "/tmp/private-restored-status-path/handoff.json",
+        source_filename: "private-handoff.json",
+        source_hash: "PRIVATE_HASH",
+        ocr_snippet: "PRIVATE_OCR_SNIPPET",
+        thumbnail_data: "data:image/png;base64,PRIVATE_THUMBNAIL",
+        stack_trace: "PRIVATE_STACK_TRACE",
+      },
+    };
     await page.route("**/api/status", async (route) => {
       await route.fulfill({
         contentType: "application/json",
-        body: JSON.stringify({
-          schema_version: "scan-qc.local-production-workbench.v1",
-          running: false,
-          configured: true,
-          folders: {
-            input: "/tmp/restored-setup-input",
-            derivatives: "/tmp/restored-setup-output",
-            metadata: "/tmp/restored-setup-output/_production_workbench",
-          },
-          summary: {
-            schema_version: "scan-qc.production-run.v1",
-            status: "finished",
-            ready_for_operator_handoff: true,
-            operator_summary: {
-              message_zh: "已恢复上一批完成交接状态，请先核对交接摘要。",
-              total_source_images: 6,
-              openable_source_images: 6,
-              derivative_images_ready: 5,
-              files_needing_attention: 1,
-            },
-            counts: {
-              total_files: 6,
-              openable_files: 6,
-              processed_files: 5,
-              failed_files: 0,
-              retry_list_files: 0,
-            },
-          },
-          progress: { schema_version: "scan-qc.production-run-progress.v1", state: "finished" },
-          queue: { schema_version: "scan-qc.production-review-queue.v1", items: [] },
-          restored_batch: {
-            kind: "completed",
-            title_zh: "已恢复上一批交接状态",
-            message_zh: "恢复到已完成交接面板，请先核对摘要再决定是否开始下一批。",
-            private_path: "/tmp/private-restored-status-path",
-            row_evidence: "PRIVATE_ROW_DETAIL",
-          },
-          completion_panel: {
-            title_zh: "已恢复：上一批已完成",
-            message_zh: "系统已恢复上一批交接摘要，请核对后再继续。",
-            completion_status_zh: "上一批已完成，可继续交接",
-            total_review_items: 6,
-            reviewed_items: 6,
-            pending_items: 0,
-            processed_output_images: 5,
-            needs_rescan_images: 1,
-            needs_reprocess_images: 0,
-            manual_work_zh: "确认保留原貌 1 张",
-            admin_handoff_zh: "不需要",
-            next_steps_zh: [
-              "打开输出文件夹，核对 5 张处理后图片。",
-              "需要重扫 1 张；需要重新处理 0 张。",
-              "确认保留原貌 1 张。",
-              "需要继续加工时，点击准备下一批；当前复核队列会清空。",
-              "为新批次必须重新选择扫描原图文件夹，不要混用批次；输出文件夹可沿用上次保存的位置。",
-            ],
-            source_path: "/tmp/private-restored-status-path/handoff.json",
-            source_filename: "private-handoff.json",
-            source_hash: "PRIVATE_HASH",
-            ocr_snippet: "PRIVATE_OCR_SNIPPET",
-            thumbnail_data: "data:image/png;base64,PRIVATE_THUMBNAIL",
-            stack_trace: "PRIVATE_STACK_TRACE",
-          },
-        }),
+        body: JSON.stringify(statusPayload),
       });
     });
     await page.route("**/api/reset-batch", async (route) => {
@@ -2299,6 +2300,47 @@ test.describe("production workbench finish/export browser smoke", () => {
     await page.route("**/api/start", async (route) => {
       const payload = JSON.parse(route.request().postData() || "{}");
       startPayloads.push(payload);
+      statusPayload = {
+        schema_version: "scan-qc.local-production-workbench.v1",
+        running: true,
+        configured: true,
+        summary: {
+          schema_version: "scan-qc.production-run.v1",
+          status: "needs_review",
+          operator_summary: {
+            message_zh: "当前批次有待复核图片，请逐张确认。",
+            total_source_images: 4,
+            derivative_images_ready: 4,
+            files_needing_attention: 1,
+          },
+          counts: {
+            total_files: 4,
+            processed_files: 4,
+            failed_files: 0,
+            retry_list_files: 0,
+          },
+        },
+        progress: {
+          schema_version: "scan-qc.production-run-progress.v1",
+          state: "needs_review",
+          current_step: "quality_check",
+          steps: [{ id: "quality_check", state: "running", completed_items: 4, total_items: 4 }],
+        },
+        queue: {
+          schema_version: "scan-qc.production-review-queue.v1",
+          items: [
+            {
+              local_id: "PRQ-NEXT-BATCH-1",
+              reason_zh: "页面边缘有阴影，需人工确认。",
+              focus_hints_zh: ["确认是否影响阅读", "判断是否需要重扫"],
+              suggested_action: "rescan",
+              severity: "P1",
+              preview_source: "comparison",
+              preview_sources: { original: true, processed: true },
+            },
+          ],
+        },
+      };
       await route.fulfill({
         contentType: "application/json",
         body: JSON.stringify({
@@ -2409,6 +2451,30 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.getByText("上一批已完成，可继续交接")).toHaveCount(0);
     await expect(page.getByText("需要继续加工时，点击准备下一批；当前复核队列会清空。")).toHaveCount(0);
     await expectOperatorStatusHidesPaths(page, ["/tmp/private-start-path", "PRIVATE_START_HASH", "PRIVATE_START_OCR"]);
+
+    await page.evaluate(() => pollServerStatus());
+    await expect(page.locator("#stateAction")).toHaveText("有图片需要人工确认");
+    await expect(page.locator("#progressText")).toHaveText("阶段：等待人工确认；待确认 1 张；状态：待复核图片");
+    await expect(page.locator("#currentAdvice")).toHaveText("当前批次有 1 张待复核图片，请逐张确认后再完成交接。");
+    await expect(page.locator("#reviewPositionText")).toHaveText("当前第 1 张 / 共 1 张；还需确认 1 张。");
+    await expect(page.locator("#previewSourceText")).toHaveText("图片查看：正在对比原图和处理后图片。");
+    await expect(page.locator("#activePreviewModeText")).toHaveText("当前查看：对比查看。可切换原图、处理后图片或对比查看。");
+    await expect(page.getByRole("button", { name: "退回重扫" })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "重新处理图片" })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "确认保留原貌" })).toBeEnabled();
+    await expect(page.locator("#completionPanel")).toBeHidden();
+    await expect(page.getByText("上一批交接信息已保留")).toHaveCount(0);
+    await expect(page.getByText("上一批已完成，可继续交接")).toHaveCount(0);
+    await expect(page.getByText("需要继续加工时，点击准备下一批；当前复核队列会清空。")).toHaveCount(0);
+    await expectOperatorStatusHidesPaths(page, [
+      "PRQ-NEXT-BATCH-1",
+      "PRIVATE_ROW_DETAIL",
+      "PRIVATE_STACK_TRACE",
+      "/tmp/private-restored-status-path",
+      "/tmp/private-reset-path",
+      "/tmp/private-configure-path",
+      "/tmp/private-start-path",
+    ]);
   });
 
   test("saved-ready then processing mode edit disables Start until folders are saved again", async ({ page }) => {
