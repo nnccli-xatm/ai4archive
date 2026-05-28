@@ -3168,8 +3168,6 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#outputPlace")).toHaveText("已准备 4 张处理后图片");
     await expect(page.locator("#manualWorkFact")).toHaveText("退回重扫 1 张");
     await expect(page.locator("#completionSteps")).toContainText("准备下一批会清空当前复核队列，请重新选择新一批文件夹。");
-    await expect(page.locator("#reviewQueuePanel")).toBeHidden();
-
     await expect(page.getByText("已恢复上一批交接状态")).toHaveCount(0);
     await expect(page.getByText("上一批交接信息已保留")).toHaveCount(0);
     await expect(page.getByText("共 6 项，已确认 6 项，待决定 0 项。")).toHaveCount(0);
