@@ -2454,6 +2454,7 @@ test.describe("production workbench finish/export browser smoke", () => {
       ["fixtures/production-run-needs-review", "#stateAction", "有图片需要人工确认"],
       ["fixtures/production-run-finished", "#stateAction", "没有需要人工确认"],
       ["fixtures/production-run-retryable", "#recoveryTitle", "处理没有全部完成"],
+      ["fixtures/production-run-interrupted", "#recoveryTitle", "本批次未正常完成"],
       ["fixtures/production-run-blocked", "#stateAction", "需要管理员处理"],
     ];
 
@@ -2462,6 +2463,21 @@ test.describe("production workbench finish/export browser smoke", () => {
       await expect(page.locator(selector)).toHaveText(visibleText);
       await expect(page.locator("#reviewPositionText")).toContainText("当前第");
       await expect(page.locator("#previewSourceText")).toContainText("图片查看");
+    }
+
+    await page.locator("#fixtureSelect").selectOption("fixtures/production-run-interrupted");
+    await expect(page.locator("#recoveryTitle")).toHaveText("本批次未正常完成");
+    await expect(page.locator("#recoveryMessage")).toHaveText("上一批在本机中断或未正常完成，系统不会自动继续本批处理。");
+    await expect(page.locator("#recoverySteps")).toContainText("请先核对当前批次是否需要重新开始处理。");
+    await expect(page.locator("#recoverySteps")).toContainText("如不继续本批，请点击开始新批次并按流程重新准备文件夹。");
+    await expect(page.locator("#recoverySteps")).toContainText("如需重跑本批，请先完成本机检查后再重新开始。");
+    await expect(page.getByRole("button", { name: "开始新批次" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "重试本批次" })).toBeHidden();
+
+    const interruptedRecoveryText = await page.locator("#recoveryMessage, #recoverySteps").allTextContents();
+    const interruptedCombined = interruptedRecoveryText.join("\n");
+    for (const token of ["/tmp", "/private", "/Users", ".png", ".jpg", ".tif", "sha256", "OCR", "thumbnail", "hash", "local_id"]) {
+      expect(interruptedCombined).not.toContain(token);
     }
 
     expect(consoleProblems).toEqual([]);
