@@ -2900,12 +2900,12 @@ test.describe("production workbench finish/export browser smoke", () => {
     await page.evaluate(() => pollServerStatus());
     await page.evaluate(() => pollServerStatus());
 
-    await expect(page.locator("#reviewQueuePanel")).toBeVisible();
+    await expect(page.locator("#reviewPositionText")).toHaveText("当前第 1 张 / 共 1 张；还需确认 1 张。");
     await expect(page.locator("#currentAdvice")).toContainText("待复核图片");
     await expect(page.locator("#currentAdvice")).toContainText("逐张确认");
     await expect(page.locator("#decisionGuideList")).toContainText("确认通过：图片可以继续使用");
     await expect(page.locator("#decisionGuideList")).toContainText("退回重扫：原图不清楚");
-    await expect(page.locator("#completionPanel")).toBeHidden();
+    await expect(page.locator("#outputPanel")).toBeHidden();
     await expect(page.locator("#stateAction")).toContainText("复核");
     await expect(page.getByText("上一批交接信息已保留")).toHaveCount(0);
     await expect(page.getByText("上一批已完成，可继续交接")).toHaveCount(0);
