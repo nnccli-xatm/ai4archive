@@ -36,6 +36,7 @@ def decision_summary(decisions: list[tuple[str, str]]) -> dict[str, object]:
         "false_positive": 0,
         "fixed_externally": 0,
         "needs_rescan": 0,
+        "keep_original_trace": 0,
         "blocked": 0,
     }
     rows = []
@@ -1808,9 +1809,9 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
                 {
                     "scope": "production_review_queue",
                     "local_id": "PRQ000003",
-                    "decision": "pass",
+                    "decision": "keep_original_trace",
                     "decided_at": "2026-05-13T11:01:00.000Z",
-                    "note_zh": "",
+                    "note_zh": "属于档案原貌，保留即可。",
                 },
             ]
             result = controller.save_review_decisions(summary)
@@ -1832,6 +1833,7 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertEqual(result["completion_panel"]["processed_output_images"], 7)
             self.assertEqual(result["completion_panel"]["needs_rescan_images"], 1)
             self.assertEqual(result["completion_panel"]["needs_reprocess_images"], 1)
+            self.assertEqual(result["completion_panel"]["keep_original_images"], 1)
             self.assertEqual(
                 result["completion_panel"]["local_reuse_summary"],
                 {
@@ -1871,6 +1873,7 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
                 [
                     "打开输出文件夹，检查 7 张处理后图片的数量和画面状态。",
                     "需要重扫 1 张；需要重新处理 1 张。",
+                    "确认保留原貌 1 张。",
                     "本机状态文件夹已保存复核结果和交接说明，正常界面不显示具体路径或文件名。",
                     "需要继续加工时，点击准备下一批；当前复核队列会清空。为新批次必须重新选择扫描原图文件夹，不要混用批次；输出文件夹可沿用上次保存的位置。",
                     "如果仍有异常或不能交接，请交管理员处理。",
@@ -1891,6 +1894,7 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertIn("处理后图片数量：7 张", completion_note)
             self.assertIn("需要重扫：1 张", completion_note)
             self.assertIn("需要重新处理：1 张", completion_note)
+            self.assertIn("确认保留原貌：1 张", completion_note)
             self.assertIn("待决定：0", completion_note)
             self.assertIn(
                 "本批共 8 张：已复用 2 张，实际重新处理 5 张，仍失败 0 张，剩余待处理 0 张。无需整批重跑，检查输出文件夹后交接。",

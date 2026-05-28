@@ -369,7 +369,7 @@ class WorkbenchController:
             json.dumps(verification, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
-        handoff_counts = _completion_handoff_counts(run_summary, decision_summary)
+        handoff_counts = _completion_handoff_counts(run_summary, decision_summary, summary)
         reuse_handoff_summary = _local_reuse_handoff_summary(run_summary)
         conservative_handoff = _conservative_auto_retouch_handoff_zh(run_summary)
         operator_name = str(summary.get("operator_name") or "").strip()
@@ -383,6 +383,7 @@ class WorkbenchController:
             f"处理后图片数量：{handoff_counts['processed_output_images']} 张",
             f"需要重扫：{handoff_counts['needs_rescan_images']} 张",
             f"需要重新处理：{handoff_counts['needs_reprocess_images']} 张",
+            f"确认保留原貌：{handoff_counts['keep_original_images']} 张",
             f"待决定：{pending_decisions}",
             f"复核总数：{total_decisions}",
             f"已确认：{reviewed_decisions}",
@@ -426,6 +427,7 @@ class WorkbenchController:
             "processed_output_images": handoff_counts["processed_output_images"],
             "needs_rescan_images": handoff_counts["needs_rescan_images"],
             "needs_reprocess_images": handoff_counts["needs_reprocess_images"],
+            "keep_original_images": handoff_counts["keep_original_images"],
             "total_source_images": handoff_counts["total_source_images"],
             "next_batch_reminder_zh": handoff_counts["next_batch_reminder_zh"],
             "processing_mode": _processing_mode_payload(processing_mode),
@@ -436,12 +438,14 @@ class WorkbenchController:
             "checklist_zh": [
                 f"打开输出文件夹，检查 {handoff_counts['processed_output_images']} 张处理后图片的数量和画面状态",
                 f"需要重扫 {handoff_counts['needs_rescan_images']} 张，需要重新处理 {handoff_counts['needs_reprocess_images']} 张",
+                f"确认保留原貌 {handoff_counts['keep_original_images']} 张",
                 "复核结果和交接说明已保存到本机状态文件夹",
                 "准备下一批会清空当前复核队列，请重新选择新一批文件夹",
             ],
             "next_steps_zh": [
                 f"打开输出文件夹，检查 {handoff_counts['processed_output_images']} 张处理后图片的数量和画面状态。",
                 f"需要重扫 {handoff_counts['needs_rescan_images']} 张；需要重新处理 {handoff_counts['needs_reprocess_images']} 张。",
+                f"确认保留原貌 {handoff_counts['keep_original_images']} 张。",
                 "本机状态文件夹已保存复核结果和交接说明，正常界面不显示具体路径或文件名。",
                 handoff_counts["next_batch_reminder_zh"],
                 "如果仍有异常或不能交接，请交管理员处理。",
@@ -2558,7 +2562,11 @@ def _processing_mode_completion_label(processing_mode: str) -> str:
     return f"{mode['label_zh']}；{mode['purpose_zh']}；{mode['output_zh']}"
 
 
-def _completion_handoff_counts(run_summary: dict[str, Any] | None, decision_summary: dict[str, Any]) -> dict[str, Any]:
+def _completion_handoff_counts(
+    run_summary: dict[str, Any] | None,
+    decision_summary: dict[str, Any],
+    review_summary: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     operator = run_summary.get("operator_summary") if isinstance(run_summary, dict) else {}
     counts = run_summary.get("counts") if isinstance(run_summary, dict) else {}
     decision_counts = decision_summary.get("decision_counts") if isinstance(decision_summary, dict) else {}
@@ -2580,11 +2588,21 @@ def _completion_handoff_counts(run_summary: dict[str, Any] | None, decision_summ
         )
     needs_rescan_images = _safe_nonnegative_int(decision_counts.get("needs_rescan"))
     needs_reprocess_images = _safe_nonnegative_int(decision_counts.get("fixed_externally"))
+    keep_original_images = _safe_nonnegative_int(decision_counts.get("keep_original_trace"))
+    if keep_original_images == 0 and isinstance(review_summary, dict):
+        operator_decisions = review_summary.get("operator_decisions")
+        if isinstance(operator_decisions, list):
+            keep_original_images = sum(
+                1
+                for item in operator_decisions
+                if isinstance(item, dict) and str(item.get("decision") or "").strip().lower() == "keep_original_trace"
+            )
     return {
         "total_source_images": total_source_images,
         "processed_output_images": processed_output_images,
         "needs_rescan_images": needs_rescan_images,
         "needs_reprocess_images": needs_reprocess_images,
+        "keep_original_images": keep_original_images,
         "next_batch_reminder_zh": (
             "需要继续加工时，点击准备下一批；当前复核队列会清空。"
             "为新批次必须重新选择扫描原图文件夹，不要混用批次；输出文件夹可沿用上次保存的位置。"
