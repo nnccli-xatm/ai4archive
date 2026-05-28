@@ -2378,10 +2378,12 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.getByText("PRIVATE_FINISH_DECISIONS_HASH")).toHaveCount(0);
   });
 
-  test("shows clean review queue after next-batch processing without stale restored details", async ({ page }) => {
+  test("starts a clean next batch after reviewed completion handoff", async ({ page }) => {
     let resetRequests = 0;
     const configurePayloads = [];
     const startPayloads = [];
+    let saveDraftRequests = 0;
+    let finishDecisionRequests = 0;
     let statusPayload = {
       schema_version: "scan-qc.local-production-workbench.v1",
       running: false,
@@ -2502,6 +2504,27 @@ test.describe("production workbench finish/export browser smoke", () => {
           private_path: "/tmp/private-configure-path",
           source_hash: "PRIVATE_CONFIGURE_HASH",
           ocr_snippet: "PRIVATE_CONFIGURE_OCR",
+        }),
+      });
+    });
+    await page.route("**/api/save-draft-decisions", async (route) => {
+      saveDraftRequests += 1;
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema_version: "scan-qc.review-decision-save.v1",
+          saved: true,
+          aggregate_only: true,
+        }),
+      });
+    });
+    await page.route("**/api/finish-decisions", async (route) => {
+      finishDecisionRequests += 1;
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema_version: "scan-qc.production-review-completion.v1",
+          aggregate_only: true,
         }),
       });
     });
@@ -2658,24 +2681,11 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.getByText("上一批交接信息已保留")).toHaveCount(0);
     await expect(page.getByText("上一批已完成，可继续交接")).toHaveCount(0);
     await expect(page.getByText("需要继续加工时，点击准备下一批；当前复核队列会清空。")).toHaveCount(0);
+    await expect.poll(() => saveDraftRequests).toBe(0);
+    await expect.poll(() => finishDecisionRequests).toBe(0);
+    await expect(page.getByText("当前批次有 1 张待复核图片，请逐张确认后再完成交接。")).toHaveCount(0);
     await expectOperatorStatusHidesPaths(page, ["/tmp/private-start-path", "PRIVATE_START_HASH", "PRIVATE_START_OCR"]);
-
-    await page.evaluate(() => pollServerStatus());
-    await expect(page.locator("#stateAction")).toHaveText("有图片需要人工确认");
-    await expect(page.locator("#progressText")).toHaveText("阶段：等待人工确认；待确认 1 张；状态：待复核图片");
-    await expect(page.locator("#currentAdvice")).toHaveText("当前批次有 1 张待复核图片，请逐张确认后再完成交接。");
-    await expect(page.locator("#reviewPositionText")).toHaveText("当前第 1 张 / 共 1 张；还需确认 1 张。");
-    await expect(page.locator("#previewSourceText")).toHaveText("图片查看：正在对比原图和处理后图片。");
-    await expect(page.locator("#activePreviewModeText")).toHaveText("当前查看：对比查看。可切换原图、处理后图片或对比查看。");
-    await expect(page.getByRole("button", { name: "退回重扫" })).toBeEnabled();
-    await expect(page.getByRole("button", { name: "重新处理图片" })).toBeEnabled();
-    await expect(page.getByRole("button", { name: "确认保留原貌" })).toBeEnabled();
-    await expect(page.locator("#completionPanel")).toBeHidden();
-    await expect(page.getByText("上一批交接信息已保留")).toHaveCount(0);
-    await expect(page.getByText("上一批已完成，可继续交接")).toHaveCount(0);
-    await expect(page.getByText("需要继续加工时，点击准备下一批；当前复核队列会清空。")).toHaveCount(0);
     await expectOperatorStatusHidesPaths(page, [
-      "PRQ-NEXT-BATCH-1",
       "PRIVATE_ROW_DETAIL",
       "PRIVATE_STACK_TRACE",
       "/tmp/private-restored-status-path",
