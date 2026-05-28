@@ -1898,6 +1898,9 @@
 
     function currentAdviceText(item) {
       if (!item) return "可以开始处理后再确认。";
+      if (state.status === "needs_review" && pendingCount() > 0) {
+        return `当前批次有 ${pendingCount()} 张待复核图片，请逐张确认后再完成交接。`;
+      }
       if (item.decision) return "如果刚才点错了，可以撤销当前决定后重新选择。";
       return item.advice;
     }
