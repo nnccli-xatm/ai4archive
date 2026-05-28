@@ -2170,7 +2170,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     ]);
   });
 
-  test("starts clean next batch after restored handoff reset without stale private details", async ({ page }) => {
+  test("shows clean running state after next-batch start without stale restored details", async ({ page }) => {
     let resetRequests = 0;
     const configurePayloads = [];
     const startPayloads = [];
@@ -2305,6 +2305,49 @@ test.describe("production workbench finish/export browser smoke", () => {
           schema_version: "scan-qc.local-production-workbench.v1",
           running: true,
           configured: true,
+          summary: {
+            schema_version: "scan-qc.production-run.v1",
+            status: "running",
+            operator_summary: {
+              message_zh: "本机正在处理图片。",
+              total_source_images: 4,
+              derivative_images_ready: 1,
+              files_needing_attention: 0,
+            },
+            counts: {
+              total_files: 4,
+              processed_files: 1,
+              failed_files: 0,
+            },
+            aggregate_processing: {
+              schema_version: "scan-qc.aggregate-processing-rate.v1",
+              aggregate_only: true,
+              total_images: 4,
+              processed_images: 1,
+              remaining_images: 3,
+              elapsed_seconds: 60,
+              images_per_minute: 1,
+              estimated_remaining_seconds: 180,
+              unavailable_reason: null,
+            },
+          },
+          progress: {
+            schema_version: "scan-qc.production-run-progress.v1",
+            state: "running",
+            current_step: "quality_check",
+            aggregate_processing: {
+              schema_version: "scan-qc.aggregate-processing-rate.v1",
+              aggregate_only: true,
+              total_images: 4,
+              processed_images: 1,
+              remaining_images: 3,
+              elapsed_seconds: 60,
+              images_per_minute: 1,
+              estimated_remaining_seconds: 180,
+              unavailable_reason: null,
+            },
+            steps: [{ id: "quality_check", state: "running", completed_items: 1, total_items: 4 }],
+          },
           private_path: "/tmp/private-start-path",
           source_hash: "PRIVATE_START_HASH",
           ocr_snippet: "PRIVATE_START_OCR",
@@ -2357,7 +2400,14 @@ test.describe("production workbench finish/export browser smoke", () => {
     });
     expect(startPayloads[0].input_dir).not.toContain("restored-setup-input");
     expect(startPayloads[0].derivatives_dir).not.toContain("restored-setup-output");
-    await expect(page.locator("#stateName")).toHaveText("正在处理");
+    await expect(page.locator("#stateAction")).toHaveText("正在处理");
+    await expect(page.locator("#progressText")).toHaveText("阶段：正在检查质量；已处理 1 张 / 共 4 张；剩余 3 张；状态：正在处理");
+    await expect(page.locator("#loadStatus")).toHaveText("批次正在运行，请等待。开始前预检摘要暂不能安全用于判断可复用输出。本机会按当前进度继续核对并补齐需要处理的图片。当前聚合进度会继续显示已处理、剩余和预计等待；处理完成或失败前不能更改文件夹和处理方式，也不要反复点击开始处理。");
+    await expectLaunchSetupControlsDisabled(page);
+    await expect(page.locator("#completionPanel")).toBeHidden();
+    await expect(page.getByText("上一批交接信息已保留")).toHaveCount(0);
+    await expect(page.getByText("上一批已完成，可继续交接")).toHaveCount(0);
+    await expect(page.getByText("需要继续加工时，点击准备下一批；当前复核队列会清空。")).toHaveCount(0);
     await expectOperatorStatusHidesPaths(page, ["/tmp/private-start-path", "PRIVATE_START_HASH", "PRIVATE_START_OCR"]);
   });
 
