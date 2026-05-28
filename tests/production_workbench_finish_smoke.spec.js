@@ -2564,8 +2564,8 @@ test.describe("production workbench finish/export browser smoke", () => {
         progress: {
           schema_version: "scan-qc.production-run-progress.v1",
           state: "needs_review",
-          current_step: "quality_check",
-          steps: [{ id: "quality_check", state: "running", completed_items: 4, total_items: 4 }],
+          current_step: "review",
+          steps: [{ id: "review", state: "running", completed_items: 4, total_items: 4 }],
         },
         queue: {
           schema_version: "scan-qc.production-review-queue.v1",
