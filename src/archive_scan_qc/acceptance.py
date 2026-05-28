@@ -273,6 +273,7 @@ def build_acceptance_summary(
             )
 
     passed = not blocking_items
+    verdict = _compute_verdict(blocking_items, remaining_p0, remaining_p1)
     closure_gate_summary = _closure_gate_summary(
         remaining_p0=remaining_p0,
         remaining_p1=remaining_p1,
@@ -284,6 +285,7 @@ def build_acceptance_summary(
         "schema_version": SCHEMA_VERSION,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "status": "pass" if passed else "fail",
+        "verdict": verdict,
         "pass": passed,
         "privacy": {
             "aggregate_only": True,
@@ -775,6 +777,58 @@ def _human_review_summary(review_summary: dict[str, Any] | None) -> dict[str, An
         "status_counts": {str(key): _coerce_int(value) or 0 for key, value in sorted(status_counts.items())},
         "closure_gate_summary": closure if isinstance(closure, dict) else None,
     }
+
+
+_P0_BLOCKING_CODES = {
+    "remaining_p0",
+    "failed_batches",
+    "processing_failed_files",
+    "privacy_self_check_failed",
+    "cleanup_retention_not_enabled",
+    "cleanup_retention_failed",
+    "sample_task_target_not_met",
+    "sampling_review_target_not_met",
+    "scan_throughput_below_threshold",
+    "processing_throughput_below_threshold",
+    "scan_throughput_regressed_vs_main",
+    "processing_throughput_regressed_vs_main",
+}
+
+
+def _compute_verdict(
+    blocking_items: list[dict[str, Any]],
+    remaining_p0: int | None,
+    remaining_p1: int | None,
+) -> str:
+    if not blocking_items:
+        return "pass"
+    has_p0_block = any(item.get("code") in _P0_BLOCKING_CODES for item in blocking_items)
+    if has_p0_block or (isinstance(remaining_p0, int) and remaining_p0 > 0):
+        return "fail"
+    if isinstance(remaining_p1, int) and remaining_p1 > 0:
+        return "conditional_pass"
+    return "fail"
+
+
+def batch_acceptance_verdict(summary: dict[str, Any]) -> dict[str, Any]:
+    verdict = summary.get("verdict", "fail")
+    return {
+        "verdict": verdict,
+        "auto_check_pass_rate": _compute_auto_check_rate(summary),
+        "p0_open_count": summary.get("remaining", {}).get("p0", 0),
+        "p1_open_count": summary.get("remaining", {}).get("p1", 0),
+        "blocked_reasons": [item["code"] for item in summary.get("blocking_items", []) if "code" in item],
+    }
+
+
+def _compute_auto_check_rate(summary: dict[str, Any]) -> float:
+    closure = summary.get("closure_gate_summary", {})
+    open_p0 = closure.get("open_p0_count", 0) or 0
+    open_p1 = closure.get("open_p1_count", 0) or 0
+    total = open_p0 + open_p1
+    if total == 0:
+        return 1.0
+    return 0.0 if open_p0 > 0 else 1.0 - (open_p1 / (total + 1))
 
 
 def _closure_gate_summary(
