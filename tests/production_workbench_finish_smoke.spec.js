@@ -2906,7 +2906,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#decisionGuideList")).toContainText("确认通过：图片可以继续使用");
     await expect(page.locator("#decisionGuideList")).toContainText("退回重扫：原图不清楚");
     await expect(page.locator("#outputPanel")).toBeHidden();
-    await expect(page.locator("#stateAction")).toContainText("复核");
+    await expect(page.locator("#stateAction")).toHaveText("有图片需要人工确认");
     await expect(page.getByText("上一批交接信息已保留")).toHaveCount(0);
     await expect(page.getByText("上一批已完成，可继续交接")).toHaveCount(0);
     await expect(page.getByText("需要继续加工时，点击准备下一批；当前复核队列会清空。")).toHaveCount(0);
