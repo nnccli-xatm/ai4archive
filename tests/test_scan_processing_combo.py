@@ -136,7 +136,7 @@ def _process_combo(input_dir: Path, report_dir: Path, process_dir: Path) -> dict
         report,
         input_dir,
         process_dir,
-        ProcessingOptions(deskew=True, trim_dark_border=True, auto_crop=True, crop_margin_mm=0.0, despeckle=True, workers=1),
+        ProcessingOptions(deskew=True, trim_dark_border=True, auto_crop=True, crop_margin_mm=0.0, despeckle=True, despeckle_content_type_check=False, workers=1),
     )
 
 

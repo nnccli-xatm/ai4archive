@@ -294,6 +294,15 @@ RULE_REGISTRY: dict[str, RuleMetadata] = {
         "automated",
         "The auto-cropped image has less than 2mm margin from the detected page edge, which is below the DA/T 31-2017 10.3 requirement of at least 2-3mm.",
     ),
+    "despeckle_preservation_audit": RuleMetadata(
+        "despeckle_preservation_audit",
+        "Despeckle preservation audit",
+        "P2",
+        ("DA/T 31-2017 10.4 decontaminate while preserving original appearance", "DA/T 31-2017 10.5.1 complete and readable image"),
+        "processing audit despeckle pixel change and content type",
+        "automated",
+        "Despeckle was skipped or rolled back to preserve page content per DA/T 31-2017 10.4, which prohibits removing original paper aging marks, water stains, spots, and binding holes.",
+    ),
 }
 
 PROVIDER_RULE_PATTERN = re.compile(r"^provider\.[a-z0-9][a-z0-9_-]*\.[a-z0-9][a-z0-9_.-]*$")

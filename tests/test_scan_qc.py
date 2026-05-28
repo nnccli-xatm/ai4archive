@@ -6661,6 +6661,7 @@ class ScanQcTest(unittest.TestCase):
                     trim_dark_border=True,
                     scanner_gutter_trim=True,
                     despeckle=True,
+                    despeckle_content_type_check=False,
                     normalize_tones=True,
                     normalize_paper_color_cast=True,
                     lighten_edge_shadow=True,
@@ -11131,6 +11132,7 @@ class ScanQcTest(unittest.TestCase):
                     deskew=True,
                     trim_dark_border=True,
                     despeckle=True,
+                    despeckle_content_type_check=False,
                     normalize_tones=True,
                     lighten_edge_shadow=True,
                     lighten_background_stains=True,
@@ -11329,7 +11331,7 @@ class ScanQcTest(unittest.TestCase):
             image.save(input_dir / "A001_0001.png")
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, despeckle_content_type_check=False))
             audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
 
             record = manifest["files"][0]
@@ -11410,7 +11412,7 @@ class ScanQcTest(unittest.TestCase):
                     report,
                     input_dir,
                     process_dir,
-                    ProcessingOptions(despeckle=True, despeckle_backend="numpy", workers=1),
+                    ProcessingOptions(despeckle=True, despeckle_content_type_check=False, despeckle_backend="numpy", workers=1),
                 )
             audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
             despeckle_timing = audit_summary["timing"]["operation_timings"]["despeckle"]
@@ -11434,7 +11436,7 @@ class ScanQcTest(unittest.TestCase):
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
             with mock.patch("archive_scan_qc.processing._load_numpy", return_value=None):
-                manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, workers=1))
+                manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, despeckle_content_type_check=False, workers=1))
             audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
             despeckle_timing = audit_summary["timing"]["operation_timings"]["despeckle"]
 
@@ -11465,7 +11467,7 @@ class ScanQcTest(unittest.TestCase):
             speckle.save(input_dir / "speckle.png")
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, workers=1))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, despeckle_content_type_check=False, workers=1))
             audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
             despeckle_timing = audit_summary["timing"]["operation_timings"]["despeckle"]
 
@@ -11493,7 +11495,7 @@ class ScanQcTest(unittest.TestCase):
                 image.putpixel((x, y), (0, 0, 0))
 
         with mock.patch("archive_scan_qc.processing._despeckle_replacements_fallback") as replacements:
-            _processed, operations, info = _process_image(image, ProcessingOptions(despeckle=True))
+            _processed, operations, info = _process_image(image, ProcessingOptions(despeckle=True, despeckle_content_type_check=False))
 
         replacements.assert_not_called()
         self.assertIn("despeckle_noop", operations)
@@ -11509,7 +11511,7 @@ class ScanQcTest(unittest.TestCase):
             image.putpixel(point, (0, 0, 0))
 
         with mock.patch("archive_scan_qc.processing._despeckle_candidate_points_with_backend") as candidates:
-            processed, operations, info = _process_image(image, ProcessingOptions(despeckle=True))
+            processed, operations, info = _process_image(image, ProcessingOptions(despeckle=True, despeckle_content_type_check=False))
 
         candidates.assert_not_called()
         self.assertEqual(processed.convert("RGB").tobytes(), image.tobytes())
@@ -11533,7 +11535,7 @@ class ScanQcTest(unittest.TestCase):
             mock.patch("archive_scan_qc.processing._despeckle_edge_short_lint_component_for_cleanup") as short_lint,
             mock.patch("archive_scan_qc.processing._despeckle_candidate_points_with_backend") as candidates,
         ):
-            processed, operations, info = _process_image(image, ProcessingOptions(despeckle=True))
+            processed, operations, info = _process_image(image, ProcessingOptions(despeckle=True, despeckle_content_type_check=False))
 
         tiny_component.assert_not_called()
         short_lint.assert_not_called()
@@ -11563,7 +11565,7 @@ class ScanQcTest(unittest.TestCase):
             image.save(input_dir / "private_noisy_edge_margin.png")
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, workers=1))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, despeckle_content_type_check=False, workers=1))
             audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
             timing = audit_summary["timing"]["operation_timings"]["despeckle"]
 
@@ -11593,7 +11595,7 @@ class ScanQcTest(unittest.TestCase):
                     report,
                     input_dir,
                     process_dir,
-                    ProcessingOptions(despeckle=True, despeckle_backend="numpy", workers=1),
+                    ProcessingOptions(despeckle=True, despeckle_content_type_check=False, despeckle_backend="numpy", workers=1),
                 )
             audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
             despeckle_timing = audit_summary["timing"]["operation_timings"]["despeckle"]
@@ -12467,6 +12469,7 @@ class ScanQcTest(unittest.TestCase):
                     deskew=True,
                     trim_dark_border=True,
                     despeckle=True,
+                    despeckle_content_type_check=False,
                     normalize_tones=True,
                     lighten_edge_shadow=True,
                     lighten_background_stains=True,
@@ -12803,7 +12806,7 @@ class ScanQcTest(unittest.TestCase):
             image.save(source)
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, despeckle_content_type_check=False))
 
             with Image.open(process_dir / "images" / "A001_0001.png") as processed:
                 black_pixels = _dark_pixel_count(processed)
@@ -12829,7 +12832,7 @@ class ScanQcTest(unittest.TestCase):
             image.save(source)
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, despeckle_content_type_check=False))
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
 
@@ -12879,7 +12882,7 @@ class ScanQcTest(unittest.TestCase):
             source_bytes = source.read_bytes()
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, despeckle_content_type_check=False))
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
 
@@ -12919,7 +12922,7 @@ class ScanQcTest(unittest.TestCase):
             source_bytes = source.read_bytes()
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, despeckle_content_type_check=False))
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
 
@@ -12966,7 +12969,7 @@ class ScanQcTest(unittest.TestCase):
             image.save(source)
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, despeckle_content_type_check=False))
 
             with Image.open(process_dir / "images" / "private_despeckle_protected_marks.png") as processed:
                 rgb = processed.convert("RGB")
@@ -12999,7 +13002,7 @@ class ScanQcTest(unittest.TestCase):
             image.save(source)
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, despeckle_content_type_check=False))
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
 
@@ -13032,7 +13035,7 @@ class ScanQcTest(unittest.TestCase):
             image.save(source)
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, despeckle_content_type_check=False))
 
             with Image.open(process_dir / "images" / "A001_0001.png") as processed:
                 self.assertEqual(processed.convert("RGB").tobytes(), image.tobytes())
@@ -13067,7 +13070,7 @@ class ScanQcTest(unittest.TestCase):
             image.save(source)
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, despeckle_content_type_check=False))
 
             with Image.open(process_dir / "images" / "A001_0001.png") as processed:
                 grayscale = processed.convert("L")
@@ -13100,7 +13103,7 @@ class ScanQcTest(unittest.TestCase):
             source_bytes = source.read_bytes()
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, despeckle_content_type_check=False))
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
 
@@ -13140,7 +13143,7 @@ class ScanQcTest(unittest.TestCase):
             source_bytes = source.read_bytes()
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, despeckle_content_type_check=False))
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
             record = manifest["files"][0]
@@ -13227,7 +13230,7 @@ class ScanQcTest(unittest.TestCase):
             source_bytes = source.read_bytes()
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, despeckle_content_type_check=False))
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
             record = manifest["files"][0]
@@ -13471,7 +13474,7 @@ class ScanQcTest(unittest.TestCase):
             image.save(source)
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, despeckle_content_type_check=False))
             audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
             record = manifest["files"][0]
 
@@ -13505,7 +13508,7 @@ class ScanQcTest(unittest.TestCase):
             image.save(source)
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, despeckle_content_type_check=False))
             audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
 
             with Image.open(process_dir / "images" / "private_sparse_i_dot.png") as processed:
@@ -13540,7 +13543,7 @@ class ScanQcTest(unittest.TestCase):
             image.save(source)
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, despeckle_content_type_check=False))
             audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
 
             with Image.open(process_dir / "images" / "private_three_by_three_i_dot.png") as processed:
@@ -13575,7 +13578,7 @@ class ScanQcTest(unittest.TestCase):
             image.save(source)
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, despeckle_content_type_check=False))
             audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
 
             with Image.open(process_dir / "images" / "private_colored_mark_near_dust.png") as processed:
@@ -13607,7 +13610,7 @@ class ScanQcTest(unittest.TestCase):
             image.save(source)
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, despeckle_content_type_check=False))
 
             with Image.open(process_dir / "images" / "A001_0001.png") as processed:
                 grayscale = processed.convert("L")
@@ -13641,7 +13644,7 @@ class ScanQcTest(unittest.TestCase):
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
             with mock.patch("archive_scan_qc.processing._despeckle_has_nearby_content_context", return_value=False):
-                manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+                manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, despeckle_content_type_check=False))
 
             with Image.open(process_dir / "images" / "A001_0001.png") as processed:
                 self.assertEqual(_dark_pixel_count(processed), _dark_pixel_count(image))
@@ -13665,7 +13668,7 @@ class ScanQcTest(unittest.TestCase):
             image.save(source)
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, despeckle_content_type_check=False))
 
             with Image.open(process_dir / "images" / "A001_0001.png") as processed:
                 self.assertEqual(_dark_pixel_count(processed), _dark_pixel_count(image))
@@ -13689,7 +13692,7 @@ class ScanQcTest(unittest.TestCase):
             image.save(source)
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, despeckle_content_type_check=False))
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
 
@@ -13819,7 +13822,7 @@ class ScanQcTest(unittest.TestCase):
             image.save(source)
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, despeckle_content_type_check=False))
 
             with Image.open(process_dir / "images" / "A001_0001.png") as processed:
                 self.assertEqual(processed.convert("RGB").tobytes(), image.tobytes())
@@ -13860,7 +13863,7 @@ class ScanQcTest(unittest.TestCase):
             image.save(source)
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, despeckle_content_type_check=False))
 
             with Image.open(process_dir / "images" / "A001_0001.png") as processed:
                 grayscale = processed.convert("L")
@@ -13886,7 +13889,7 @@ class ScanQcTest(unittest.TestCase):
             image.save(source)
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, despeckle_content_type_check=False))
 
             with Image.open(process_dir / "images" / "A001_0001.png") as processed:
                 grayscale = processed.convert("L")
@@ -13977,6 +13980,7 @@ class ScanQcTest(unittest.TestCase):
                     deskew=True,
                     trim_dark_border=True,
                     despeckle=True,
+                    despeckle_content_type_check=False,
                     normalize_tones=True,
                     lighten_edge_shadow=True,
                     lighten_background_stains=True,
@@ -19293,6 +19297,7 @@ class FaintOfficialMarkRegressionQcTest(unittest.TestCase):
                     auto_crop=True,
                     scanner_gutter_trim=True,
                     despeckle=True,
+                    despeckle_content_type_check=False,
                     normalize_tones=True,
                     normalize_paper_color_cast=True,
                     lighten_edge_shadow=True,

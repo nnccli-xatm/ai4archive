@@ -49,6 +49,7 @@ class ProcessingOptions:
     enhance_faded_text: bool = False
     sharpen_text_edges: bool = False
     scanner_gutter_trim: bool = False
+    despeckle_content_type_check: bool = True
     despeckle_backend: str = "fallback"
     resume_processing: bool = False
     reuse_scan_measurements: bool = False
@@ -277,6 +278,86 @@ class TextEdgeSharpeningResult:
     edge_energy_before: float = 0.0
     edge_energy_after: float = 0.0
     preflight_skipped: bool = False
+
+
+@dataclass(frozen=True)
+class ContentTypeClassification:
+    content_type: str
+    grid_rows: int
+    grid_cols: int
+    high_variance_tiles: int
+    total_tiles: int
+    reason: str
+
+
+@dataclass(frozen=True)
+class DespecklePreservationResult:
+    content_type: str
+    skipped: bool
+    rolled_back: bool
+    pixel_change_ratio: float
+    reason: str
+
+
+def _classify_page_content_type(
+    image: Image.Image,
+    *,
+    grid_size: int = 8,
+    photo_stddev_threshold: float = 25.0,
+) -> ContentTypeClassification:
+    gray = image.convert("L")
+    img_w, img_h = gray.size
+    if img_w < grid_size or img_h < grid_size:
+        return ContentTypeClassification(
+            content_type="text",
+            grid_rows=grid_size,
+            grid_cols=grid_size,
+            high_variance_tiles=0,
+            total_tiles=0,
+            reason="image_too_small",
+        )
+    tile_w = max(1, img_w // grid_size)
+    tile_h = max(1, img_h // grid_size)
+    high_var = 0
+    total = 0
+    for row in range(grid_size):
+        for col in range(grid_size):
+            x0 = col * tile_w
+            y0 = row * tile_h
+            x1 = min(x0 + tile_w, img_w)
+            y1 = min(y0 + tile_h, img_h)
+            tile = gray.crop((x0, y0, x1, y1))
+            pixels = list(tile.getdata())
+            if len(pixels) < 4:
+                continue
+            total += 1
+            mean = sum(pixels) / len(pixels)
+            variance = sum((p - mean) ** 2 for p in pixels) / len(pixels)
+            std = variance ** 0.5
+            if std > photo_stddev_threshold:
+                high_var += 1
+    if total == 0:
+        content_type = "text"
+        reason = "no_tiles"
+    else:
+        ratio = high_var / total
+        if ratio > 0.5:
+            content_type = "photo"
+            reason = f"high_variance_ratio={ratio:.3f}"
+        elif ratio > 0.15:
+            content_type = "mixed"
+            reason = f"moderate_variance_ratio={ratio:.3f}"
+        else:
+            content_type = "text"
+            reason = f"low_variance_ratio={ratio:.3f}"
+    return ContentTypeClassification(
+        content_type=content_type,
+        grid_rows=grid_size,
+        grid_cols=grid_size,
+        high_variance_tiles=high_var,
+        total_tiles=total,
+        reason=reason,
+    )
 
 
 def detect_skew(image: Image.Image) -> SkewDetection:
@@ -768,6 +849,10 @@ def _process_record(
         "despeckle_pixels_changed": 0,
         "despeckle_reason": None,
         "despeckle_backend_mode": None,
+        "despeckle_content_type": None,
+        "despeckle_preservation_skipped": None,
+        "despeckle_preservation_rolled_back": None,
+        "despeckle_preservation_reason": None,
         "tone_normalized": False,
         "tone_reason": None,
         "tone_background_before": None,
@@ -927,6 +1012,10 @@ def _process_record(
                 "despeckle_pixels_changed": process_info["despeckle_pixels_changed"],
                 "despeckle_reason": process_info["despeckle_reason"],
                 "despeckle_backend_mode": process_info["despeckle_backend_mode"],
+                "despeckle_content_type": process_info["despeckle_content_type"],
+                "despeckle_preservation_skipped": process_info["despeckle_preservation_skipped"],
+                "despeckle_preservation_rolled_back": process_info["despeckle_preservation_rolled_back"],
+                "despeckle_preservation_reason": process_info["despeckle_preservation_reason"],
                 "tone_normalized": process_info["tone_normalized"],
                 "tone_reason": process_info["tone_reason"],
                 "tone_background_before": process_info["tone_background_before"],
@@ -3576,32 +3665,73 @@ def _process_image(
     despeckle_pixels_changed = 0
     despeckle_reason = "despeckle disabled"
     despeckle_backend_mode = "disabled"
+    despeckle_content_type = "unknown"
+    despeckle_skipped_preservation = False
+    despeckle_rolled_back = False
+    despeckle_preservation_reason = "not_evaluated"
     with _operation_timer(operation_timings, "despeckle", enabled=options.despeckle):
         if options.despeckle:
-            despeckle_result = _despeckle_isolated_pixels_with_reason(
-                processed,
-                backend=options.despeckle_backend,
-            )
-            processed = despeckle_result.image
-            despeckle_pixels_changed = despeckle_result.changed_pixels
-            despeckle_backend_mode = despeckle_result.backend_mode
-            despeckle_reason = despeckle_result.reason
-            despeckle_timing = operation_timings.setdefault("despeckle", {})
-            despeckle_timing["reason_code"] = despeckle_result.reason_code
-            despeckle_timing["candidate_pixels"] = despeckle_result.candidate_pixels
-            despeckle_timing["candidate_count"] = despeckle_result.candidate_count
-            despeckle_timing["candidate_count_bucket"] = despeckle_result.candidate_count_bucket
-            despeckle_timing["component_count"] = despeckle_result.component_count
-            despeckle_timing["component_count_bucket"] = despeckle_result.component_count_bucket
-            despeckle_timing["max_component_size"] = despeckle_result.max_component_size
-            despeckle_timing["max_component_size_bucket"] = despeckle_result.max_component_size_bucket
-            despeckle_timing["replacement_work_performed"] = despeckle_result.replacement_work_performed
-            despeckle_timing["safe_skip"] = despeckle_result.changed_pixels == 0
-            if despeckle_pixels_changed:
-                operations.append("despeckle_isolated_pixels")
-                despeckled = True
+            pre_despeckle_image = processed.copy()
+            if options.despeckle_content_type_check:
+                content_classification = _classify_page_content_type(processed)
+                despeckle_content_type = content_classification.content_type
             else:
-                operations.append("despeckle_noop")
+                despeckle_content_type = "text"
+                content_classification = None
+            if (
+                options.despeckle_content_type_check
+                and content_classification is not None
+                and content_classification.content_type in ("photo", "mixed")
+            ):
+                despeckle_skipped_preservation = True
+                despeckle_preservation_reason = (
+                    f"preservation_skip_{content_classification.content_type}:"
+                    f" {content_classification.reason}"
+                )
+                despeckle_reason = despeckle_preservation_reason
+                operations.append(f"despeckle_preservation_skip_{content_classification.content_type}")
+            else:
+                despeckle_result = _despeckle_isolated_pixels_with_reason(
+                    processed,
+                    backend=options.despeckle_backend,
+                )
+                processed = despeckle_result.image
+                despeckle_pixels_changed = despeckle_result.changed_pixels
+                despeckle_backend_mode = despeckle_result.backend_mode
+                despeckle_reason = despeckle_result.reason
+                despeckle_timing = operation_timings.setdefault("despeckle", {})
+                despeckle_timing["reason_code"] = despeckle_result.reason_code
+                despeckle_timing["candidate_pixels"] = despeckle_result.candidate_pixels
+                despeckle_timing["candidate_count"] = despeckle_result.candidate_count
+                despeckle_timing["candidate_count_bucket"] = despeckle_result.candidate_count_bucket
+                despeckle_timing["component_count"] = despeckle_result.component_count
+                despeckle_timing["component_count_bucket"] = despeckle_result.component_count_bucket
+                despeckle_timing["max_component_size"] = despeckle_result.max_component_size
+                despeckle_timing["max_component_size_bucket"] = despeckle_result.max_component_size_bucket
+                despeckle_timing["replacement_work_performed"] = despeckle_result.replacement_work_performed
+                despeckle_timing["safe_skip"] = despeckle_result.changed_pixels == 0
+                source_area = max(1, processed.size[0] * processed.size[1])
+                actual_despeckle_ratio = despeckle_pixels_changed / source_area
+                if (
+                    despeckle_pixels_changed > 0
+                    and actual_despeckle_ratio > options.audit_max_despeckle_pixel_ratio
+                ):
+                    processed = pre_despeckle_image
+                    despeckle_rolled_back = True
+                    despeckle_pixels_changed = 0
+                    despeckle_preservation_reason = (
+                        f"rolled_back: ratio {actual_despeckle_ratio:.6f}"
+                        f" > threshold {options.audit_max_despeckle_pixel_ratio}"
+                    )
+                    despeckle_reason = despeckle_preservation_reason
+                    operations.append("despeckle_preservation_rollback")
+                elif despeckle_pixels_changed:
+                    operations.append("despeckle_isolated_pixels")
+                    despeckled = True
+                else:
+                    operations.append("despeckle_noop")
+                if despeckle_rolled_back:
+                    despeckle_preservation_reason = despeckle_preservation_reason
         else:
             operations.append("despeckle_disabled")
     if options.despeckle and "despeckle" in operation_timings:
@@ -3990,6 +4120,10 @@ def _process_image(
         "despeckle_pixels_changed": 0 if guard_reverted else despeckle_pixels_changed,
         "despeckle_reason": guard_reason if guard_reverted else despeckle_reason,
         "despeckle_backend_mode": despeckle_backend_mode,
+        "despeckle_content_type": despeckle_content_type,
+        "despeckle_preservation_skipped": despeckle_skipped_preservation if options.despeckle else None,
+        "despeckle_preservation_rolled_back": despeckle_rolled_back if options.despeckle else None,
+        "despeckle_preservation_reason": despeckle_preservation_reason if options.despeckle else None,
         "tone_normalized": False if guard_reverted else tone.applied,
         "tone_reason": guard_reason if guard_reverted else tone.reason,
         "tone_background_before": None if guard_reverted else tone.background_before,

@@ -10434,7 +10434,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 source_bytes[name] = source.read_bytes()
 
             report = scan_batch(ScanConfig("synthetic-regression", "despeckle-clusters", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, despeckle_content_type_check=False))
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
             records = {record["source_relative_path"]: record for record in manifest["files"]}
@@ -10534,7 +10534,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 source_bytes[name] = source.read_bytes()
 
             report = scan_batch(ScanConfig("synthetic-regression", "despeckle-scattered-dust", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, workers=1))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, despeckle_content_type_check=False, workers=1))
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
             records = {record["source_relative_path"]: record for record in manifest["files"]}
@@ -10619,7 +10619,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 source_bytes[name] = source.read_bytes()
 
             report = scan_batch(ScanConfig("synthetic-regression", "despeckle-pale-clusters", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, workers=1))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, despeckle_content_type_check=False, workers=1))
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
             records = {record["source_relative_path"]: record for record in manifest["files"]}
@@ -10700,7 +10700,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 source_bytes[name] = source.read_bytes()
 
             report = scan_batch(ScanConfig("synthetic-regression", "despeckle-clean-faint-dust", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, workers=1))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, despeckle_content_type_check=False, workers=1))
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
             records = {record["source_relative_path"]: record for record in manifest["files"]}
@@ -10780,7 +10780,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 source_bytes[name] = source.read_bytes()
 
             report = scan_batch(ScanConfig("synthetic-regression", "despeckle-isolated-glass-speck", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, workers=1))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, despeckle_content_type_check=False, workers=1))
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
             records = {record["source_relative_path"]: record for record in manifest["files"]}
@@ -10861,7 +10861,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 source_bytes[name] = source.read_bytes()
 
             report = scan_batch(ScanConfig("synthetic-regression", "despeckle-tiny-margin-dust", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, workers=1))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, despeckle_content_type_check=False, workers=1))
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
             records = {record["source_relative_path"]: record for record in manifest["files"]}
@@ -11328,7 +11328,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 source_bytes[name] = source.read_bytes()
 
             report = scan_batch(ScanConfig("synthetic-regression", "despeckle-short-lint", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, workers=1))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, despeckle_content_type_check=False, workers=1))
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
             records = {record["source_relative_path"]: record for record in manifest["files"]}
@@ -11418,7 +11418,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 source_bytes[name] = source.read_bytes()
 
             report = scan_batch(ScanConfig("synthetic-regression", "despeckle-pale-guards", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, workers=1))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, despeckle_content_type_check=False, workers=1))
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
             records = {record["source_relative_path"]: record for record in manifest["files"]}
@@ -11502,7 +11502,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 source_bytes[name] = source.read_bytes()
 
             report = scan_batch(ScanConfig("synthetic-regression", "despeckle-edge-dust", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, workers=1))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(despeckle=True, despeckle_content_type_check=False, workers=1))
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
             records = {record["source_relative_path"]: record for record in manifest["files"]}
@@ -14071,7 +14071,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 report,
                 input_dir,
                 process_dir,
-                ProcessingOptions(trim_dark_border=True, auto_crop=True, crop_margin_mm=0.0, deskew=True, workers=1),
+                ProcessingOptions(trim_dark_border=True, auto_crop=True, crop_margin_mm=0.0, despeckle_content_type_check=False, deskew=True, workers=1),
             )
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
@@ -14393,7 +14393,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 report,
                 input_dir,
                 process_dir,
-                ProcessingOptions(trim_dark_border=True, auto_crop=True, crop_margin_mm=0.0, deskew=True, workers=1),
+                ProcessingOptions(trim_dark_border=True, auto_crop=True, crop_margin_mm=0.0, despeckle_content_type_check=False, deskew=True, workers=1),
             )
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
@@ -20830,6 +20830,7 @@ def _full_chain_options() -> ProcessingOptions:
         enhance_faded_text=True,
         sharpen_text_edges=True,
         despeckle_backend="fallback",
+        despeckle_content_type_check=False,
         workers=1,
     )
 
