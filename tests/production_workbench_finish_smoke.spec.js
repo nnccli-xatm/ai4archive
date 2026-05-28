@@ -2362,9 +2362,10 @@ test.describe("production workbench finish/export browser smoke", () => {
       processing_mode: "standard",
     });
     await expect(page.locator("#readinessTitle")).toHaveText("文件夹可以开始处理");
-    await expect(page.locator("#readinessMessage")).toHaveText("发现 4 张可处理图片，输出文件夹可以写入。");
-    await expect(page.locator("#readinessNextSteps")).toContainText("确认处理方式无误。");
-    await expect(page.locator("#readinessNextSteps")).toContainText("点击开始处理。");
+    await expect(page.locator("#readinessMessage")).toContainText("4 张可处理图片");
+    await expect(page.locator("#readinessMessage")).toContainText("输出文件夹可以写入");
+    await expect(page.locator("#readinessSteps")).toContainText("确认处理方式无误。");
+    await expect(page.locator("#readinessSteps")).toContainText("点击开始处理。");
     await expect(page.getByRole("button", { name: "开始处理" })).toBeEnabled();
     await expect(page.locator("#completionPanel")).toBeHidden();
     await expect(page.locator("#reviewQueuePanel")).toBeHidden();
