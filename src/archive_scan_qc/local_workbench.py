@@ -1711,6 +1711,7 @@ def _restored_completion_panel(
         return None
     counts = summary.get("counts") if isinstance(summary, dict) and isinstance(summary.get("counts"), dict) else {}
     reuse_handoff_summary = _local_reuse_handoff_summary(summary)
+    restored_rework_counts = _restored_rework_counts(final_decisions)
     keep_original_images = _restored_keep_original_count(final_decisions)
     panel = {
         "schema_version": "scan-qc.local-restored-completion-panel.v1",
@@ -1724,13 +1725,17 @@ def _restored_completion_panel(
         "reviewed_items": _safe_nonnegative_int(restored_batch.get("reviewed_items")),
         "pending_items": _safe_nonnegative_int(restored_batch.get("pending_items")),
         "processed_output_images": _safe_nonnegative_int(restored_batch.get("derivative_images_ready")),
-        "needs_rescan_images": 0,
-        "needs_reprocess_images": 0,
+        "needs_rescan_images": restored_rework_counts["needs_rescan_images"],
+        "needs_reprocess_images": restored_rework_counts["needs_reprocess_images"],
         "keep_original_images": keep_original_images,
         "processing_mode": _processing_mode_payload(processing_mode),
         "open_output_folder_available": True,
         "next_steps_zh": [
             f"打开输出文件夹，检查 {_safe_nonnegative_int(restored_batch.get('derivative_images_ready'))} 张处理后图片的数量和画面状态。",
+            (
+                f"需要重扫 {restored_rework_counts['needs_rescan_images']} 张；"
+                f"需要重新处理 {restored_rework_counts['needs_reprocess_images']} 张。"
+            ),
             f"确认保留原貌 {keep_original_images} 张。",
             "本机状态文件夹已保存本批处理状态，正常界面不显示具体路径或文件名。",
             "需要继续加工时，点击准备下一批；当前复核队列会清空。",
@@ -1767,6 +1772,53 @@ def _restored_keep_original_count(final_decisions: dict[str, Any] | None) -> int
             if isinstance(item, dict) and str(item.get("decision") or "").strip().lower() == "keep_original_trace"
         )
     return 0
+
+
+def _restored_rework_counts(final_decisions: dict[str, Any] | None) -> dict[str, int]:
+    if not isinstance(final_decisions, dict):
+        return {"needs_rescan_images": 0, "needs_reprocess_images": 0}
+
+    def _count_from_bucket(bucket: dict[str, Any] | None) -> tuple[int | None, int | None]:
+        if not isinstance(bucket, dict):
+            return None, None
+        needs_rescan = _optional_nonnegative_int(bucket, "needs_rescan")
+        needs_reprocess = _optional_nonnegative_int(bucket, "needs_reprocess")
+        if needs_reprocess is None:
+            needs_reprocess = _optional_nonnegative_int(bucket, "fixed_externally")
+        return needs_rescan, needs_reprocess
+
+    for bucket in (
+        final_decisions.get("review_counts"),
+        final_decisions.get("aggregate_counts", {}).get("review_completion", {}).get("counts")
+        if isinstance(final_decisions.get("aggregate_counts"), dict)
+        else None,
+    ):
+        needs_rescan, needs_reprocess = _count_from_bucket(bucket)
+        if needs_rescan is not None or needs_reprocess is not None:
+            return {
+                "needs_rescan_images": needs_rescan or 0,
+                "needs_reprocess_images": needs_reprocess or 0,
+            }
+
+    decisions = final_decisions.get("decisions")
+    if isinstance(decisions, list):
+        needs_rescan_images = sum(
+            1
+            for item in decisions
+            if isinstance(item, dict) and str(item.get("decision") or "").strip().lower() in {"needs_rescan", "rescan"}
+        )
+        needs_reprocess_images = sum(
+            1
+            for item in decisions
+            if isinstance(item, dict)
+            and str(item.get("decision") or "").strip().lower() in {"needs_reprocess", "fixed_externally", "reprocess"}
+        )
+        return {
+            "needs_rescan_images": needs_rescan_images,
+            "needs_reprocess_images": needs_reprocess_images,
+        }
+
+    return {"needs_rescan_images": 0, "needs_reprocess_images": 0}
 
 
 def _path_is_existing_dir(path: Path) -> bool:

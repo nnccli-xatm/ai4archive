@@ -1318,16 +1318,16 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
                 json.dumps({"schema_version": "scan-qc.production-run-progress.v1", "state": "finished"}),
                 encoding="utf-8",
             )
+            restored_decisions = decision_summary(
+                [
+                    ("PRQ000001", "needs_rescan"),
+                    ("PRQ000002", "keep_original_trace"),
+                ]
+            )
+            restored_decisions["review_counts"]["needs_reprocess"] = 1
+            restored_decisions["aggregate_counts"]["review_completion"]["counts"]["needs_reprocess"] = 1
             (metadata_dir / REVIEW_DECISION_SUMMARY_JSON).write_text(
-                json.dumps(
-                    decision_summary(
-                        [
-                            ("PRQ000001", "false_positive"),
-                            ("PRQ000002", "keep_original_trace"),
-                        ]
-                    ),
-                    ensure_ascii=False,
-                ),
+                json.dumps(restored_decisions, ensure_ascii=False),
                 encoding="utf-8",
             )
 
@@ -1343,7 +1343,10 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertFalse(status["restored_batch"]["auto_started"])
             self.assertEqual(status["completion_panel"]["title_zh"], "已恢复本批完成状态")
             self.assertEqual(status["completion_panel"]["processed_output_images"], 3)
+            self.assertEqual(status["completion_panel"]["needs_rescan_images"], 1)
+            self.assertEqual(status["completion_panel"]["needs_reprocess_images"], 1)
             self.assertEqual(status["completion_panel"]["keep_original_images"], 1)
+            self.assertIn("需要重扫 1 张；需要重新处理 1 张。", status["completion_panel"]["next_steps_zh"])
             self.assertIn("确认保留原貌 1 张。", status["completion_panel"]["next_steps_zh"])
             self.assertEqual(status["completion_panel"]["local_reuse_summary"]["reused_files"], 1)
             assert_public_restore_payload_is_private(
