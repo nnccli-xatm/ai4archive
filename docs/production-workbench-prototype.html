@@ -3423,7 +3423,11 @@
           render();
           return;
         }
-        const payload = await apiPost("/api/start", {});
+        const payload = await apiPost("/api/start", {
+          input_dir: els.inputPath.value.trim(),
+          derivatives_dir: els.outputPath.value.trim(),
+          processing_mode: selectedProcessingMode()
+        });
         state.launchLocked = false;
         applyServerStatus(payload);
         els.loadStatus.textContent = runningGuidanceText();

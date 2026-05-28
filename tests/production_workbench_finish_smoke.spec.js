@@ -2170,8 +2170,10 @@ test.describe("production workbench finish/export browser smoke", () => {
     ]);
   });
 
-  test("prepares next batch from restored completed handoff without stale private details", async ({ page }) => {
+  test("starts clean next batch after restored handoff reset without stale private details", async ({ page }) => {
     let resetRequests = 0;
+    const configurePayloads = [];
+    const startPayloads = [];
     await page.route("**/api/status", async (route) => {
       await route.fulfill({
         contentType: "application/json",
@@ -2261,6 +2263,54 @@ test.describe("production workbench finish/export browser smoke", () => {
         }),
       });
     });
+    await page.route("**/api/configure", async (route) => {
+      const payload = JSON.parse(route.request().postData() || "{}");
+      configurePayloads.push(payload);
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema_version: "scan-qc.local-production-workbench.v1",
+          running: false,
+          configured: true,
+          folders: {
+            input: payload.input_dir,
+            derivatives: payload.derivatives_dir,
+            metadata: `${payload.derivatives_dir}/_production_workbench`,
+          },
+          folder_readiness: {
+            schema_version: "scan-qc.local-folder-readiness.v1",
+            aggregate_only: true,
+            status: "ready",
+            ready_to_start: true,
+            supported_image_count: 4,
+            input_empty: false,
+            output_writable: true,
+            selected_processing_mode: { id: "standard", label_zh: "标准优化" },
+            title_zh: "文件夹可以开始处理",
+            message_zh: "发现 4 张可处理图片，输出文件夹可以写入。",
+            next_steps_zh: ["确认处理方式无误。", "点击开始处理。"],
+          },
+          private_path: "/tmp/private-configure-path",
+          source_hash: "PRIVATE_CONFIGURE_HASH",
+          ocr_snippet: "PRIVATE_CONFIGURE_OCR",
+        }),
+      });
+    });
+    await page.route("**/api/start", async (route) => {
+      const payload = JSON.parse(route.request().postData() || "{}");
+      startPayloads.push(payload);
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema_version: "scan-qc.local-production-workbench.v1",
+          running: true,
+          configured: true,
+          private_path: "/tmp/private-start-path",
+          source_hash: "PRIVATE_START_HASH",
+          ocr_snippet: "PRIVATE_START_OCR",
+        }),
+      });
+    });
 
     await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
     await page.evaluate(() => pollServerStatus());
@@ -2284,6 +2334,31 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#outputStatus")).toHaveText("已沿用上次保存的输出文件夹提示；如本批要换位置，请重新选择输出文件夹。");
     await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
     await expectOperatorStatusHidesPaths(page, ["/tmp/private-reset-path", "PRIVATE_RESET_HASH", "PRIVATE_RESET_OCR"]);
+
+    await page.locator("#inputPath").fill("/tmp/new-next-batch-input");
+    await page.locator("#outputPath").fill("/tmp/new-next-batch-output");
+    await page.getByRole("button", { name: "保存文件夹" }).click();
+    await expect.poll(() => configurePayloads.length).toBe(1);
+    expect(configurePayloads[0]).toMatchObject({
+      input_dir: "/tmp/new-next-batch-input",
+      derivatives_dir: "/tmp/new-next-batch-output",
+      processing_mode: "standard",
+    });
+    await expect(page.locator("#readinessTitle")).toHaveText("文件夹可以开始处理");
+    await expect(page.getByRole("button", { name: "开始处理" })).toBeEnabled();
+    await expectOperatorStatusHidesPaths(page, ["/tmp/private-configure-path", "PRIVATE_CONFIGURE_HASH", "PRIVATE_CONFIGURE_OCR"]);
+
+    await page.getByRole("button", { name: "开始处理" }).click();
+    await expect.poll(() => startPayloads.length).toBe(1);
+    expect(startPayloads[0]).toMatchObject({
+      input_dir: "/tmp/new-next-batch-input",
+      derivatives_dir: "/tmp/new-next-batch-output",
+      processing_mode: "standard",
+    });
+    expect(startPayloads[0].input_dir).not.toContain("restored-setup-input");
+    expect(startPayloads[0].derivatives_dir).not.toContain("restored-setup-output");
+    await expect(page.locator("#stateName")).toHaveText("正在处理");
+    await expectOperatorStatusHidesPaths(page, ["/tmp/private-start-path", "PRIVATE_START_HASH", "PRIVATE_START_OCR"]);
   });
 
   test("saved-ready then processing mode edit disables Start until folders are saved again", async ({ page }) => {
