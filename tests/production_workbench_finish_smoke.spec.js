@@ -2281,7 +2281,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#completionPanel")).toBeHidden();
     await expect(page.locator("#loadStatus")).toHaveText("已准备下一批：当前复核队列已清空。请重新选择新一批扫描原图文件夹；输出文件夹已保留上次保存的位置提示。");
     await expect(page.locator("#inputStatus")).toHaveText("必须重新选择新一批扫描原图文件夹，不要混用批次。");
-    await expect(page.locator("#outputStatus")).toHaveText("可沿用上次输出文件夹，也可改成新一批输出文件夹。保存后再开始处理。");
+    await expect(page.locator("#outputStatus")).toHaveText("已沿用上次保存的输出文件夹提示；如本批要换位置，请重新选择输出文件夹。");
     await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
     await expectOperatorStatusHidesPaths(page, ["/tmp/private-reset-path", "PRIVATE_RESET_HASH", "PRIVATE_RESET_OCR"]);
   });
