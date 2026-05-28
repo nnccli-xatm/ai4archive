@@ -451,6 +451,7 @@ def _main_production_run(argv: list[str]) -> int:
     parser.add_argument("--project", default="default-project", help="项目编号。")
     parser.add_argument("--batch", default="default-batch", help="批次编号。")
     parser.add_argument("--min-dpi", default=None, type=int, help="最低 DPI 要求。")
+    parser.add_argument("--dpi-purpose", default=None, choices=("standard", "com", "reproduction", "print"), help="按用途分级的最低分辨率：standard=200dpi, com=300dpi, reproduction=600dpi, print=300dpi。")
     parser.add_argument("--name-pattern", default=None, help="可选文件名规则。")
     parser.add_argument("--manifest-csv", default=None, type=Path, help="可选批次清单 CSV，需包含 relative_path 列。")
     parser.add_argument("--rules-profile", default=None, type=Path, help="可选质检规则配置 JSON。")
@@ -1370,6 +1371,8 @@ def _load_rules_profile(parser: argparse.ArgumentParser, args: argparse.Namespac
         parser.error(str(exc))
     if rules_profile and args.min_dpi is not None:
         rules_profile = replace(rules_profile, min_dpi=args.min_dpi)
+    if rules_profile and getattr(args, "dpi_purpose", None) is not None:
+        rules_profile = replace(rules_profile, dpi_purpose=args.dpi_purpose)
     if rules_profile and args.name_pattern is not None:
         rules_profile = replace(rules_profile, name_pattern=args.name_pattern)
     return rules_profile

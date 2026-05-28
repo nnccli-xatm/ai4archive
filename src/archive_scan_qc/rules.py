@@ -9,6 +9,13 @@ from typing import Any
 
 
 VALID_SEVERITIES = {"P0", "P1", "P2"}
+VALID_DPI_PURPOSES = {"standard", "com", "reproduction", "print"}
+DPI_MINIMUM_BY_PURPOSE: dict[str, int] = {
+    "standard": 200,
+    "com": 300,
+    "reproduction": 600,
+    "print": 300,
+}
 
 
 class RulesProfileError(ValueError):
@@ -27,6 +34,7 @@ class RulesProfile:
     version: str = "scan-qc.phase1.v1"
     source: str = "builtin"
     min_dpi: int = 200
+    dpi_purpose: str = "standard"
     name_pattern: str | None = None
     dark_mean_threshold: float = 45.0
     bright_mean_threshold: float = 250.0
@@ -41,6 +49,10 @@ class RulesProfile:
     despeckle_max_pixel_change_ratio: float = 0.01
     rules: dict[str, RuleSetting] = field(default_factory=dict)
 
+    def effective_min_dpi(self) -> int:
+        purpose_dpi = DPI_MINIMUM_BY_PURPOSE.get(self.dpi_purpose, self.min_dpi)
+        return max(purpose_dpi, self.min_dpi)
+
     def is_rule_enabled(self, rule: str) -> bool:
         return self.rules.get(rule, RuleSetting()).enabled
 
@@ -50,6 +62,8 @@ class RulesProfile:
     def threshold_summary(self) -> dict[str, Any]:
         return {
             "min_dpi": self.min_dpi,
+            "dpi_purpose": self.dpi_purpose,
+            "effective_min_dpi": self.effective_min_dpi(),
             "name_pattern": self.name_pattern,
             "quality": {
                 "dark_mean_threshold": self.dark_mean_threshold,
@@ -106,6 +120,7 @@ def _profile_from_mapping(raw: dict[str, Any], *, source: str) -> RulesProfile:
         version=_optional_string(raw, "version", profile.version),
         source=source,
         min_dpi=_optional_int(raw, "min_dpi", profile.min_dpi),
+        dpi_purpose=_optional_dpi_purpose(raw, "dpi_purpose", profile.dpi_purpose),
         name_pattern=_optional_nullable_string(raw, "name_pattern", profile.name_pattern),
         dark_mean_threshold=_optional_float(quality, "dark_mean_threshold", profile.dark_mean_threshold),
         bright_mean_threshold=_optional_float(quality, "bright_mean_threshold", profile.bright_mean_threshold),
@@ -150,6 +165,15 @@ def _optional_object(raw: dict[str, Any], key: str) -> dict[str, Any]:
     value = raw.get(key, {})
     if not isinstance(value, dict):
         raise RulesProfileError(f"Rules profile field '{key}' must be an object.")
+    return value
+
+
+def _optional_dpi_purpose(raw: dict[str, Any], key: str, default: str) -> str:
+    value = raw.get(key, default)
+    if not isinstance(value, str) or value not in VALID_DPI_PURPOSES:
+        raise RulesProfileError(
+            f"Rules profile field '{key}' must be one of {', '.join(sorted(VALID_DPI_PURPOSES))}."
+        )
     return value
 
 
