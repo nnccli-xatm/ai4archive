@@ -2891,8 +2891,20 @@ test.describe("production workbench finish/export browser smoke", () => {
     await page.locator("#outputPath").fill("/tmp/new-next-batch-output");
     await page.getByRole("button", { name: "保存文件夹" }).click();
     await expect.poll(() => configurePayloads.length).toBe(1);
+    expect(configurePayloads[0]).toMatchObject({
+      input_dir: "/tmp/new-next-batch-input",
+      derivatives_dir: "/tmp/new-next-batch-output",
+      processing_mode: "standard",
+    });
+    await expect(page.locator("#readinessTitle")).toHaveText("文件夹可以开始处理");
+    await expect(page.getByRole("button", { name: "开始处理" })).toBeEnabled();
     await page.getByRole("button", { name: "开始处理" }).click();
     await expect.poll(() => startPayloads.length).toBe(1);
+    expect(startPayloads[0]).toMatchObject({
+      input_dir: "/tmp/new-next-batch-input",
+      derivatives_dir: "/tmp/new-next-batch-output",
+      processing_mode: "standard",
+    });
     await page.evaluate(() => pollServerStatus());
 
     await expect(page.locator("#reviewQueuePanel")).toBeVisible();
