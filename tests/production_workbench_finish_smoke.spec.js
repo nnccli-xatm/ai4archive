@@ -2074,6 +2074,101 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.locator("#loadStatus")).toHaveText("扫描原图文件夹已更改，请重新保存文件夹。");
   });
 
+  test("restores completed-batch handoff counts from status without private details", async ({ page }) => {
+    await page.route("**/api/status", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema_version: "scan-qc.local-production-workbench.v1",
+          running: false,
+          configured: true,
+          folders: {
+            input: "/tmp/restored-completed-input",
+            derivatives: "/tmp/restored-completed-output",
+            metadata: "/tmp/restored-completed-output/_production_workbench",
+          },
+          summary: {
+            schema_version: "scan-qc.production-run.v1",
+            status: "finished",
+            ready_for_operator_handoff: true,
+            operator_summary: {
+              message_zh: "已恢复上一批完成交接状态，请先核对交接摘要。",
+              total_source_images: 8,
+              openable_source_images: 8,
+              derivative_images_ready: 6,
+              files_needing_attention: 2,
+            },
+            counts: {
+              total_files: 8,
+              openable_files: 8,
+              processed_files: 6,
+              failed_files: 0,
+              retry_list_files: 0,
+            },
+          },
+          progress: { schema_version: "scan-qc.production-run-progress.v1", state: "finished" },
+          queue: { schema_version: "scan-qc.production-review-queue.v1", items: [] },
+          restored_batch: {
+            kind: "completed",
+            title_zh: "已恢复上一批交接状态",
+            message_zh: "恢复到已完成交接面板，请先核对摘要再决定是否开始下一批。",
+            private_path: "/tmp/private-restored-status",
+            row_evidence: "PRIVATE_ROW_EVIDENCE",
+          },
+          completion_panel: {
+            title_zh: "已恢复：上一批已完成",
+            message_zh: "系统已恢复上一批交接摘要，请核对后再继续。",
+            completion_status_zh: "上一批已完成，可继续交接",
+            total_review_items: 8,
+            reviewed_items: 8,
+            pending_items: 0,
+            processed_output_images: 6,
+            needs_rescan_images: 1,
+            needs_reprocess_images: 1,
+            manual_work_zh: "确认保留原貌 2 张",
+            admin_handoff_zh: "不需要",
+            next_steps_zh: [
+              "打开输出文件夹，核对 6 张处理后图片。",
+              "需要重扫 1 张；需要重新处理 1 张。",
+              "确认保留原貌 2 张。",
+              "需要继续加工时，点击准备下一批；当前复核队列会清空。",
+              "为新批次必须重新选择扫描原图文件夹，不要混用批次；输出文件夹可沿用上次保存的位置。"
+            ],
+            source_path: "/tmp/private-restored-status/handoff.json",
+            source_filename: "private-handoff.json",
+            source_hash: "privatehash",
+            ocr_snippet: "PRIVATE_OCR_SNIPPET",
+            thumbnail_data: "data:image/png;base64,PRIVATE_THUMBNAIL",
+            stack_trace: "Traceback private detail",
+          },
+        }),
+      });
+    });
+
+    await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
+    await expect(page.locator("#completionTitle")).toHaveText("已恢复：上一批已完成");
+    await expect(page.locator("#completionMessage")).toHaveText("系统已恢复上一批交接摘要，请核对后再继续。");
+    await expect(page.locator("#completionStatusFact")).toHaveText("上一批已完成，可继续交接");
+    await expect(page.locator("#completionCounts")).toHaveText("共 8 项，已确认 8 项，待决定 0 项。");
+    await expect(page.locator("#outputPlace")).toHaveText("已准备 6 张处理后图片");
+    await expect(page.locator("#rescanFact")).toHaveText("1 张");
+    await expect(page.locator("#reprocessFact")).toHaveText("1 张");
+    await expect(page.locator("#manualWorkFact")).toHaveText("确认保留原貌 2 张");
+    await expect(page.locator("#completionSteps").getByText("需要重扫 1 张；需要重新处理 1 张。")).toBeVisible();
+    await expect(page.locator("#completionSteps").getByText("确认保留原貌 2 张。")).toBeVisible();
+    await expect(page.locator("#completionSteps").getByText("需要继续加工时，点击准备下一批；当前复核队列会清空。")).toBeVisible();
+    await expect(page.getByRole("button", { name: "准备下一批" })).toBeVisible();
+    await expectOperatorStatusHidesPaths(page, [
+      "/tmp/private-restored-status",
+      "private-handoff.json",
+      "privatehash",
+      "PRIVATE_OCR_SNIPPET",
+      "PRIVATE_THUMBNAIL",
+      "PRIVATE_ROW_EVIDENCE",
+      "Traceback private detail",
+    ]);
+  });
+
   test("saved-ready then processing mode edit disables Start until folders are saved again", async ({ page }) => {
     await page.route("**/api/status", async (route) => {
       await route.fulfill({
