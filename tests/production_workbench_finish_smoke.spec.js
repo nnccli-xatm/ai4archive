@@ -98,8 +98,8 @@ test.describe("production workbench finish/export browser smoke", () => {
     await expect(page.getByLabel("开始处理顺序")).toContainText("填写输出文件夹");
     await expect(page.getByLabel("开始处理顺序")).toContainText("保存文件夹");
     await expect(page.getByLabel("开始处理顺序")).toContainText("开始处理");
-    await expect(page.locator("#inputStatus")).toHaveText("填写本批次扫描原图所在的本机文件夹位置。");
-    await expect(page.locator("#outputStatus")).toHaveText("填写处理后图片保存到的本机文件夹位置。");
+    await expect(page.locator("#inputStatus")).toHaveText("必须重新选择新一批扫描原图文件夹，不要混用批次。");
+    await expect(page.locator("#outputStatus")).toHaveText("可沿用上次输出文件夹，也可改成新一批输出文件夹。保存后再开始处理。");
     await expect(page.getByRole("button", { name: "保存文件夹" })).toBeVisible();
     await expect(page.getByRole("button", { name: "开始处理" })).toBeDisabled();
     await expect(page.locator("#loadStatus")).toHaveText("请先填写原图文件夹和输出文件夹，点击“保存文件夹”，确认可以开始后再点击“开始处理”。");
