@@ -6608,6 +6608,7 @@ class ScanQcTest(unittest.TestCase):
                 process_dir,
                 ProcessingOptions(
                     auto_crop=True,
+                    crop_margin_mm=0.0,
                     deskew=True,
                     trim_dark_border=True,
                     despeckle=True,
@@ -6655,6 +6656,7 @@ class ScanQcTest(unittest.TestCase):
                 process_dir,
                 ProcessingOptions(
                     auto_crop=True,
+                    crop_margin_mm=0.0,
                     deskew=True,
                     trim_dark_border=True,
                     scanner_gutter_trim=True,
@@ -9504,7 +9506,7 @@ class ScanQcTest(unittest.TestCase):
                 report,
                 input_dir,
                 process_dir,
-                ProcessingOptions(resume_processing=True, auto_crop=True, workers=1),
+                ProcessingOptions(resume_processing=True, auto_crop=True, crop_margin_mm=0.0, workers=1),
             )
 
             self.assertEqual(resumed["summary"]["processed_files"], 1)
@@ -10020,8 +10022,8 @@ class ScanQcTest(unittest.TestCase):
                 Image.new("RGB", (40, 30), "white").save(path)
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir, workers=4))
-            first = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, workers=4))
-            second = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, workers=4))
+            first = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, crop_margin_mm=0.0, workers=4))
+            second = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, crop_margin_mm=0.0, workers=4))
 
             self.assertEqual([record["source_relative_path"] for record in first["files"]], [item["relative_path"] for item in report["files"]])
             self.assertEqual(first["files"], second["files"])
@@ -10044,7 +10046,7 @@ class ScanQcTest(unittest.TestCase):
             shutil.copyfile(source, nested_dir / "A001_0002.png")
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir, workers=2))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, workers=2))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, crop_margin_mm=0.0, workers=2))
             records = {record["source_relative_path"]: record for record in manifest["files"]}
 
             first = records["A001_0001.png"]
@@ -10071,9 +10073,9 @@ class ScanQcTest(unittest.TestCase):
             shutil.copyfile(source, nested_dir / "A001_0002.png")
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir, workers=1))
-            process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, workers=1))
+            process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, crop_margin_mm=0.0, workers=1))
             with mock.patch("archive_scan_qc.processing.shutil.copyfile", wraps=shutil.copyfile) as copyfile:
-                repeated = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, workers=1))
+                repeated = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, crop_margin_mm=0.0, workers=1))
 
             records = {record["source_relative_path"]: record for record in repeated["files"]}
             duplicate = records["nested/A001_0002.png"]
@@ -10097,14 +10099,14 @@ class ScanQcTest(unittest.TestCase):
             shutil.copyfile(source, nested_dir / "A001_0002.png")
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir, workers=1))
-            first = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, workers=1))
+            first = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, crop_margin_mm=0.0, workers=1))
             duplicate = {
                 record["source_relative_path"]: record for record in first["files"]
             }["nested/A001_0002.png"]
             Image.new("RGB", (40, 30), "black").save(process_dir / duplicate["output_relative_path"])
 
             with mock.patch("archive_scan_qc.processing.shutil.copyfile", wraps=shutil.copyfile) as copyfile:
-                repeated = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, workers=1))
+                repeated = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, crop_margin_mm=0.0, workers=1))
 
             records = {record["source_relative_path"]: record for record in repeated["files"]}
             self.assertEqual(copyfile.call_count, 1)
@@ -10127,13 +10129,13 @@ class ScanQcTest(unittest.TestCase):
             shutil.copyfile(source, nested_dir / "A001_0002.png")
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir, workers=1))
-            process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, workers=1))
+            process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, crop_margin_mm=0.0, workers=1))
             with mock.patch("archive_scan_qc.processing.shutil.copyfile", wraps=shutil.copyfile) as copyfile:
                 resumed = process_images(
                     report,
                     input_dir,
                     process_dir,
-                    ProcessingOptions(auto_crop=True, resume_processing=True, workers=1),
+                    ProcessingOptions(auto_crop=True, crop_margin_mm=0.0, resume_processing=True, workers=1),
                 )
 
             records = {record["source_relative_path"]: record for record in resumed["files"]}
@@ -10669,7 +10671,7 @@ class ScanQcTest(unittest.TestCase):
             source_bytes = source.read_bytes()
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, crop_margin_mm=0.0))
 
             with Image.open(process_dir / "images" / "A001_0001.png") as processed:
                 processed_size = processed.size
@@ -10699,7 +10701,7 @@ class ScanQcTest(unittest.TestCase):
             image.save(input_dir / "A001_0001.png")
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, crop_margin_mm=0.0))
 
             record = manifest["files"][0]
             self.assertTrue(record["cropped"])
@@ -10722,7 +10724,7 @@ class ScanQcTest(unittest.TestCase):
             image.save(input_dir / "A001_0001.png")
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, crop_margin_mm=0.0))
             audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
 
             record = manifest["files"][0]
@@ -10755,7 +10757,7 @@ class ScanQcTest(unittest.TestCase):
             image.save(input_dir / "private_low_contrast_safe.png")
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, workers=1))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, crop_margin_mm=0.0, workers=1))
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
 
@@ -10795,7 +10797,7 @@ class ScanQcTest(unittest.TestCase):
             image.save(input_dir / "private_low_contrast_uneven_bed.png")
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, workers=1))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, crop_margin_mm=0.0, workers=1))
 
             record = manifest["files"][0]
             self.assertTrue(record["cropped"])
@@ -10827,7 +10829,7 @@ class ScanQcTest(unittest.TestCase):
                 image.save(input_dir / f"private_low_contrast_{name}.png")
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, workers=1))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, crop_margin_mm=0.0, workers=1))
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
 
@@ -10874,7 +10876,7 @@ class ScanQcTest(unittest.TestCase):
             image.save(input_dir / "private_low_contrast_mixed_texture.png")
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, workers=1))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, crop_margin_mm=0.0, workers=1))
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
 
@@ -10914,7 +10916,7 @@ class ScanQcTest(unittest.TestCase):
                 report,
                 input_dir,
                 process_dir,
-                ProcessingOptions(auto_crop=True, deskew=True, workers=1),
+                ProcessingOptions(auto_crop=True, crop_margin_mm=0.0, deskew=True, workers=1),
             )
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
@@ -10965,7 +10967,7 @@ class ScanQcTest(unittest.TestCase):
                 report,
                 input_dir,
                 process_dir,
-                ProcessingOptions(auto_crop=True, deskew=True, workers=1),
+                ProcessingOptions(auto_crop=True, crop_margin_mm=0.0, deskew=True, workers=1),
             )
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
@@ -11016,7 +11018,7 @@ class ScanQcTest(unittest.TestCase):
                 report,
                 input_dir,
                 process_dir,
-                ProcessingOptions(auto_crop=True, deskew=True, workers=1),
+                ProcessingOptions(auto_crop=True, crop_margin_mm=0.0, deskew=True, workers=1),
             )
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
@@ -11076,7 +11078,7 @@ class ScanQcTest(unittest.TestCase):
                 report,
                 input_dir,
                 process_dir,
-                ProcessingOptions(auto_crop=True, deskew=True, workers=1),
+                ProcessingOptions(auto_crop=True, crop_margin_mm=0.0, deskew=True, workers=1),
             )
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
@@ -11125,6 +11127,7 @@ class ScanQcTest(unittest.TestCase):
                 process_dir,
                 ProcessingOptions(
                     auto_crop=True,
+                    crop_margin_mm=0.0,
                     deskew=True,
                     trim_dark_border=True,
                     despeckle=True,
@@ -11220,7 +11223,7 @@ class ScanQcTest(unittest.TestCase):
                 image.save(input_dir / f"A001_{name}.png")
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, crop_margin_mm=0.0))
 
             records = {record["source_relative_path"]: record for record in manifest["files"]}
             for name in cases:
@@ -11276,7 +11279,7 @@ class ScanQcTest(unittest.TestCase):
             local_noise.save(input_dir / "A001_local_noise.png")
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, crop_margin_mm=0.0))
 
             records = {record["source_relative_path"]: record for record in manifest["files"]}
             expected_reasons = {
@@ -11620,7 +11623,7 @@ class ScanQcTest(unittest.TestCase):
                 report,
                 input_dir,
                 process_dir,
-                ProcessingOptions(auto_crop=True, audit_max_crop_ratio=0.10),
+                ProcessingOptions(auto_crop=True, crop_margin_mm=0.0, audit_max_crop_ratio=0.10),
             )
             audit_summary = json.loads((process_dir / "processing_audit_summary.json").read_text(encoding="utf-8"))
 
@@ -11647,7 +11650,7 @@ class ScanQcTest(unittest.TestCase):
             low_contrast.save(input_dir / "A001_0002.png")
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, crop_margin_mm=0.0))
 
             records = {record["source_relative_path"]: record for record in manifest["files"]}
             self.assertFalse(records["A001_0001.png"]["cropped"])
@@ -12414,7 +12417,7 @@ class ScanQcTest(unittest.TestCase):
                 report,
                 input_dir,
                 process_dir,
-                ProcessingOptions(auto_crop=True, deskew=True, trim_dark_border=True, workers=1),
+                ProcessingOptions(auto_crop=True, crop_margin_mm=0.0, deskew=True, trim_dark_border=True, workers=1),
             )
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
@@ -12460,6 +12463,7 @@ class ScanQcTest(unittest.TestCase):
                 process_dir,
                 ProcessingOptions(
                     auto_crop=True,
+                    crop_margin_mm=0.0,
                     deskew=True,
                     trim_dark_border=True,
                     despeckle=True,
@@ -13918,6 +13922,7 @@ class ScanQcTest(unittest.TestCase):
                 process_dir,
                 ProcessingOptions(
                     auto_crop=True,
+                    crop_margin_mm=0.0,
                     deskew=True,
                     trim_dark_border=True,
                     despeckle=True,
@@ -13968,6 +13973,7 @@ class ScanQcTest(unittest.TestCase):
                 process_dir,
                 ProcessingOptions(
                     auto_crop=True,
+                    crop_margin_mm=0.0,
                     deskew=True,
                     trim_dark_border=True,
                     despeckle=True,
@@ -15399,8 +15405,8 @@ class ScanQcTest(unittest.TestCase):
             _synthetic_text_page().save(input_dir / "A001_clean.png")
 
             report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
-            first = build_processing_plan(report, input_dir, ProcessingOptions(auto_crop=True, deskew=True))
-            second = build_processing_plan(report, input_dir, ProcessingOptions(auto_crop=True, deskew=True))
+            first = build_processing_plan(report, input_dir, ProcessingOptions(auto_crop=True, crop_margin_mm=0.0, deskew=True))
+            second = build_processing_plan(report, input_dir, ProcessingOptions(auto_crop=True, crop_margin_mm=0.0, deskew=True))
             self.assertEqual(first, second)
 
     def test_cli_process_out_writes_processing_manifest(self) -> None:

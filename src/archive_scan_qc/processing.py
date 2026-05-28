@@ -86,6 +86,7 @@ class ProcessingOptions:
     audit_max_processed_dark_pixel_loss_ratio: float = 0.45
     audit_max_processed_dark_pixel_lift_ratio: float = 0.35
     audit_max_processed_full_page_change_ratio: float = 0.85
+    crop_margin_mm: float = 2.5
     workers: int | None = None
 
 
@@ -761,6 +762,7 @@ def _process_record(
         "scanner_gutter_trim_margins": {"left": 0.0, "top": 0.0, "right": 0.0, "bottom": 0.0},
         "crop_bbox": None,
         "crop_reason": None,
+        "crop_margin_mm": None,
         "cropped": False,
         "despeckled": False,
         "despeckle_pixels_changed": 0,
@@ -3560,6 +3562,9 @@ def _process_image(
             crop_bbox = crop_detection.bbox
             crop_reason = crop_detection.reason
             if crop_bbox:
+                crop_bbox = _enforce_crop_margin(
+                    crop_bbox, processed.size, options.crop_margin_mm, scan_record
+                )
                 processed = processed.crop(crop_bbox)
                 operations.append("auto_crop_conservative")
             else:
@@ -3979,6 +3984,7 @@ def _process_image(
         ),
         "crop_bbox": None if guard_reverted else (list(crop_bbox) if crop_bbox else None),
         "crop_reason": guard_reason if guard_reverted else crop_reason,
+        "crop_margin_mm": options.crop_margin_mm if crop_bbox and not guard_reverted else None,
         "cropped": False if guard_reverted else crop_bbox is not None,
         "despeckled": False if guard_reverted else despeckled,
         "despeckle_pixels_changed": 0 if guard_reverted else despeckle_pixels_changed,
@@ -13398,6 +13404,32 @@ def _post_deskew_crop_has_page_boundary_evidence(
         image.crop((left, max(top, bottom - band), right, bottom)),
     )
     return all(abs(ImageStat.Stat(boundary).mean[0] - canvas) >= threshold for boundary in boundaries)
+
+
+def _enforce_crop_margin(
+    bbox: tuple[int, int, int, int],
+    image_size: tuple[int, int],
+    margin_mm: float,
+    scan_record: dict[str, Any] | None,
+) -> tuple[int, int, int, int]:
+    if margin_mm <= 0:
+        return bbox
+    dpi: float | None = None
+    if scan_record:
+        dpi_x = scan_record.get("dpi_x")
+        dpi_y = scan_record.get("dpi_y")
+        if isinstance(dpi_x, (int, float)) and isinstance(dpi_y, (int, float)):
+            dpi = (float(dpi_x) + float(dpi_y)) / 2.0
+    if dpi is None or dpi <= 0:
+        dpi = 300.0
+    margin_px = max(1, int(math.ceil(dpi * margin_mm / 25.4)))
+    img_w, img_h = image_size
+    left, top, right, bottom = bbox
+    left = max(0, left - margin_px)
+    top = max(0, top - margin_px)
+    right = min(img_w, right + margin_px)
+    bottom = min(img_h, bottom + margin_px)
+    return (left, top, right, bottom)
 
 
 def _detect_conservative_crop_bbox(image: Image.Image) -> CropDetection:

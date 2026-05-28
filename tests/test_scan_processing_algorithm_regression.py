@@ -788,6 +788,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     trim_dark_border=True,
                     deskew=True,
                     auto_crop=True,
+                    crop_margin_mm=0.0,
                     scanner_gutter_trim=True,
                     despeckle=True,
                     normalize_tones=True,
@@ -6065,6 +6066,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 ProcessingOptions(
                     trim_dark_border=True,
                     auto_crop=True,
+                    crop_margin_mm=0.0,
                     deskew=True,
                     scanner_gutter_trim=True,
                     lighten_edge_shadow=True,
@@ -14069,7 +14071,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 report,
                 input_dir,
                 process_dir,
-                ProcessingOptions(trim_dark_border=True, auto_crop=True, deskew=True, workers=1),
+                ProcessingOptions(trim_dark_border=True, auto_crop=True, crop_margin_mm=0.0, deskew=True, workers=1),
             )
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
@@ -14391,7 +14393,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 report,
                 input_dir,
                 process_dir,
-                ProcessingOptions(trim_dark_border=True, auto_crop=True, deskew=True, workers=1),
+                ProcessingOptions(trim_dark_border=True, auto_crop=True, crop_margin_mm=0.0, deskew=True, workers=1),
             )
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
@@ -15339,7 +15341,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             ).save(input_dir / "synthetic_faint_form_deskew_crop.png", dpi=(300, 300))
 
             report = scan_batch(ScanConfig("synthetic-regression", "faint-form-deskew-crop", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, deskew=True, workers=1))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, crop_margin_mm=0.0, deskew=True, workers=1))
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
             record = manifest["files"][0]
@@ -15417,7 +15419,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 source_bytes[name] = source.read_bytes()
 
             report = scan_batch(ScanConfig("synthetic-regression", "deskew-faint-ruled-form-edge", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, deskew=True, workers=1))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, crop_margin_mm=0.0, deskew=True, workers=1))
             records = {record["source_relative_path"]: record for record in manifest["files"]}
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
@@ -15484,6 +15486,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 process_dir,
                 ProcessingOptions(
                     auto_crop=True,
+                    crop_margin_mm=0.0,
                     deskew=True,
                     trim_dark_border=True,
                     scanner_gutter_trim=True,
@@ -15542,7 +15545,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             )
 
             report = scan_batch(ScanConfig("synthetic-regression", "faint-post-deskew-wedge", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, deskew=True, workers=1))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, crop_margin_mm=0.0, deskew=True, workers=1))
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
             record = manifest["files"][0]
@@ -15592,7 +15595,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             report = scan_batch(
                 ScanConfig("synthetic-regression", "faint-post-deskew-wedge-guard-cases", input_dir, output_dir)
             )
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, deskew=True, workers=1))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, crop_margin_mm=0.0, deskew=True, workers=1))
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
 
@@ -15657,7 +15660,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     report,
                     input_dir,
                     process_dir,
-                    ProcessingOptions(auto_crop=True, deskew=True, workers=1),
+                    ProcessingOptions(auto_crop=True, crop_margin_mm=0.0, deskew=True, workers=1),
                 )
 
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
@@ -15765,7 +15768,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     report,
                     input_dir,
                     process_dir,
-                    ProcessingOptions(auto_crop=True, deskew=True, workers=1),
+                    ProcessingOptions(auto_crop=True, crop_margin_mm=0.0, deskew=True, workers=1),
                 )
 
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
@@ -15871,7 +15874,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     report,
                     input_dir,
                     process_dir,
-                    ProcessingOptions(auto_crop=True, deskew=True, workers=1),
+                    ProcessingOptions(auto_crop=True, crop_margin_mm=0.0, deskew=True, workers=1),
                 )
 
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
@@ -15978,7 +15981,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     report,
                     input_dir,
                     process_dir,
-                    ProcessingOptions(auto_crop=True, deskew=True, workers=1),
+                    ProcessingOptions(auto_crop=True, crop_margin_mm=0.0, deskew=True, workers=1),
                 )
 
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
@@ -16080,7 +16083,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                     report,
                     input_dir,
                     process_dir,
-                    ProcessingOptions(auto_crop=True, deskew=True, workers=1),
+                    ProcessingOptions(auto_crop=True, crop_margin_mm=0.0, deskew=True, workers=1),
                 )
 
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
@@ -16147,7 +16150,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 page.save(input_dir / filename, dpi=(300, 300))
 
             report = scan_batch(ScanConfig("synthetic-regression", "faint-edge-auto-crop", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, workers=1))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, crop_margin_mm=0.0, workers=1))
             audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
             audit_summary = json.loads(audit_summary_text)
             records = {record["source_relative_path"]: record for record in manifest["files"]}
@@ -16215,7 +16218,7 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 page.save(input_dir / filename, dpi=(300, 300))
 
             report = scan_batch(ScanConfig("synthetic-regression", "auto-crop-light-margin-guards", input_dir, output_dir))
-            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, workers=1))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(auto_crop=True, crop_margin_mm=0.0, workers=1))
             records = {record["source_relative_path"]: record for record in manifest["files"]}
 
             safe_record = records["synthetic_auto_crop_light_margin_safe_canvas.png"]
@@ -20810,6 +20813,7 @@ CONSERVATIVE_REPAIR_OPERATIONS = (
 def _full_chain_options() -> ProcessingOptions:
     return ProcessingOptions(
         auto_crop=True,
+        crop_margin_mm=0.0,
         deskew=True,
         trim_dark_border=True,
         scanner_gutter_trim=True,

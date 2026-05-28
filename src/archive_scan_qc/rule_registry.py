@@ -285,6 +285,15 @@ RULE_REGISTRY: dict[str, RuleMetadata] = {
         "automated screening",
         "The batch mixes portrait and landscape page geometry at a material ratio, which may indicate rotated pages or mixed attachments.",
     ),
+    "crop_margin_insufficient": RuleMetadata(
+        "crop_margin_insufficient",
+        "Crop margin below minimum",
+        "P1",
+        ("DA/T 31-2017 10.3 border cropping",),
+        "auto crop output and image DPI",
+        "automated",
+        "The auto-cropped image has less than 2mm margin from the detected page edge, which is below the DA/T 31-2017 10.3 requirement of at least 2-3mm.",
+    ),
 }
 
 PROVIDER_RULE_PATTERN = re.compile(r"^provider\.[a-z0-9][a-z0-9_-]*\.[a-z0-9][a-z0-9_.-]*$")
