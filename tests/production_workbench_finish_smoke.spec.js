@@ -2146,6 +2146,7 @@ test.describe("production workbench finish/export browser smoke", () => {
     });
 
     await page.goto(`${baseUrl}${WORKBENCH_URL_PATH}`);
+    await page.waitForTimeout(1300);
     await expect(page.locator("#completionTitle")).toHaveText("已恢复：上一批已完成");
     await expect(page.locator("#completionMessage")).toHaveText("系统已恢复上一批交接摘要，请核对后再继续。");
     await expect(page.locator("#completionStatusFact")).toHaveText("上一批已完成，可继续交接");
