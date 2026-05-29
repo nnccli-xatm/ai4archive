@@ -2994,6 +2994,14 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 "A002_protected_faint_ditto_in_repeated_detail.png": ((252, 90, 298, 114), (252, 114, 298, 138)),
                 "A003_protected_double_stroke_ditto_near_subtotal.png": ((252, 138, 298, 162), (252, 162, 298, 186)),
             }
+            row_text_region_boxes = {
+                "A002_protected_faint_ditto_in_repeated_detail.png": (82, 92, 168, 134),
+                "A003_protected_double_stroke_ditto_near_subtotal.png": (82, 140, 168, 182),
+            }
+            amount_region_boxes = {
+                "A002_protected_faint_ditto_in_repeated_detail.png": (250, 92, 334, 134),
+                "A003_protected_double_stroke_ditto_near_subtotal.png": (248, 188, 336, 220),
+            }
             rule_boxes = {
                 "A003_protected_double_stroke_ditto_near_subtotal.png": (
                     (82, 146, 102, 186),
@@ -3012,6 +3020,10 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
                 self.assertEqual(_content_bbox(before), _content_bbox(after), name)
                 self.assertLessEqual(_changed_ratio(before, after, analysis_boxes[name]), 0.11, name)
                 self.assertLessEqual(abs(_mean_luma(after, analysis_boxes[name]) - _mean_luma(before, analysis_boxes[name])), 7.0, name)
+                self.assertLessEqual(_changed_ratio(before, after, row_text_region_boxes[name]), 0.10, name)
+                self.assertLessEqual(abs(_mean_luma(after, row_text_region_boxes[name]) - _mean_luma(before, row_text_region_boxes[name])), 6.0, name)
+                self.assertLessEqual(_changed_ratio(before, after, amount_region_boxes[name]), 0.10, name)
+                self.assertLessEqual(abs(_mean_luma(after, amount_region_boxes[name]) - _mean_luma(before, amount_region_boxes[name])), 6.0, name)
                 for box in boxes:
                     before_pixels = _inklike_pixels(before, box)
                     after_pixels = _inklike_pixels(after, box)
