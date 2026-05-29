@@ -13080,7 +13080,28 @@ def _deskew_candidate_scores(sample: Image.Image) -> dict[float, float]:
 
 
 def _deskew_projection_score(image: Image.Image) -> float:
+    np = _load_numpy()
+    if np is not None:
+        return _deskew_projection_score_numpy(image, np)
     return _horizontal_projection_variance(image) + _vertical_projection_variance(image)
+
+
+def _deskew_projection_score_numpy(image: Image.Image, np: Any) -> float:
+    grayscale = image.convert("L")
+    width, height = grayscale.size
+    try:
+        arr = np.asarray(grayscale, dtype=np.float64)
+    except (TypeError, ValueError):
+        return _horizontal_projection_variance(image) + _vertical_projection_variance(image)
+    if arr.shape != (height, width):
+        return _horizontal_projection_variance(image) + _vertical_projection_variance(image)
+    row_sums = arr.sum(axis=1)
+    row_mean = row_sums.mean()
+    h_var = float(((row_sums - row_mean) ** 2).mean())
+    col_sums = arr.sum(axis=0)
+    col_mean = col_sums.mean()
+    v_var = float(((col_sums - col_mean) ** 2).mean())
+    return h_var + v_var
 
 
 def _horizontal_projection_variance(image: Image.Image) -> float:
