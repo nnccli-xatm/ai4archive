@@ -39,6 +39,14 @@ def _load_opencv() -> Any | None:
     return cv2
 
 
+def _load_vips() -> Any | None:
+    try:
+        import pyvips  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    return pyvips
+
+
 @dataclass(frozen=True)
 class ProcessingOptions:
     auto_crop: bool = False
@@ -59,6 +67,7 @@ class ProcessingOptions:
     scanner_gutter_trim: bool = False
     despeckle_content_type_check: bool = True
     despeckle_backend: str = "fallback"
+    image_io_backend: str = "fallback"
     resume_processing: bool = False
     reuse_scan_measurements: bool = False
     deskew_max_degrees: float = 5.0
@@ -991,7 +1000,9 @@ def _process_record(
             if guardrail_failures:
                 raise ValueError("processing guardrail exceeded: " + "; ".join(guardrail_failures))
             target.parent.mkdir(parents=True, exist_ok=True)
-            _save_image(processed, target, image)
+            save_meta = _save_image_with_backend(processed, target, image, io_backend=options.image_io_backend)
+            if save_meta.get("io_backend_mode"):
+                base["image_io_backend_mode"] = save_meta["io_backend_mode"]
         base.update(
             {
                 "output_relative_path": target.relative_to(image_root.parent).as_posix(),
@@ -16950,6 +16961,53 @@ def _corner_background_value(image: Image.Image) -> int:
         total = sum(value * count for value, count in enumerate(histogram))
         values.append(int(round(total / (sample * sample))))
     return sorted(values)[len(values) // 2]
+
+
+_VIPS_STREAM_THRESHOLD_BYTES = 50 * 1024 * 1024
+
+
+def _open_image(source: Path, *, io_backend: str = "fallback") -> tuple[Image.Image, dict[str, str]]:
+    if io_backend not in {"fallback", "vips"}:
+        raise ValueError("image_io_backend must be fallback or vips")
+    if io_backend == "vips" and source.stat().st_size >= _VIPS_STREAM_THRESHOLD_BYTES:
+        pyvips = _load_vips()
+        if pyvips is not None:
+            try:
+                vimg = pyvips.Image.new_from_file(str(source), access="sequential")
+                np = _load_numpy()
+                if np is not None:
+                    arr = np.asarray(vimg)
+                    mode = "RGB" if arr.shape[2] == 3 else "RGBA" if arr.shape[2] == 4 else "L"
+                    return Image.fromarray(arr, mode=mode), {"io_backend_mode": "vips"}
+            except Exception:
+                pass
+    return Image.open(source), {"io_backend_mode": "fallback"}
+
+
+def _save_image_with_backend(
+    image: Image.Image, target: Path, source_image: Image.Image, *, io_backend: str = "fallback"
+) -> dict[str, str]:
+    if io_backend == "vips":
+        pyvips = _load_vips()
+        np = _load_numpy()
+        if pyvips is not None and np is not None:
+            try:
+                suffix = target.suffix.lower()
+                rgb = image.convert("RGB") if image.mode != "RGB" else image
+                arr = np.array(rgb, dtype=np.uint8)
+                vimg = pyvips.Image.new_from_array(arr)
+                save_opts: dict[str, Any] = {}
+                if suffix in {".jpg", ".jpeg", ".jpe", ".jfif"}:
+                    save_opts["Q"] = 95
+                    save_opts["subsampling_mode"] = "off"
+                elif suffix in {".png"}:
+                    save_opts["compression"] = 6
+                vimg.write_to_file(str(target), **save_opts)
+                return {"io_backend_mode": "vips"}
+            except Exception:
+                pass
+    _save_image(image, target, source_image)
+    return {"io_backend_mode": "fallback"}
 
 
 def _save_image(image: Image.Image, target: Path, source_image: Image.Image) -> None:

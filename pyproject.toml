@@ -31,7 +31,8 @@ dependencies = [
 [project.optional-dependencies]
 numpy = ["numpy>=1.21"]
 opencv = ["opencv-python-headless>=4.5"]
-perf = ["numpy>=1.21", "opencv-python-headless>=4.5"]
+vips = ["pyvips>=2.2"]
+perf = ["numpy>=1.21", "opencv-python-headless>=4.5", "pyvips>=2.2"]
 
 [project.scripts]
 archive-scan-qc = "archive_scan_qc.cli:main"
