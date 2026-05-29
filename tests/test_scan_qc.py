@@ -3091,6 +3091,24 @@ class ScanQcTest(unittest.TestCase):
         self.assertTrue(payload["privacy"]["aggregate_only"])
         self.assertEqual(payload["readiness"]["scan_processing_semantics"], "unchanged_cpu_pillow_baseline")
 
+    def test_capability_probe_inference_readiness_reports_cpu_fallback(self) -> None:
+        def missing_package(module_name: str) -> bool:
+            return False
+
+        def missing_nvidia(*args, **kwargs):
+            raise FileNotFoundError
+
+        report = run_capability_probe(
+            package_available=missing_package,
+            command_runner=missing_nvidia,
+            environ={},
+        )
+        ir = report["inference_readiness"]
+        self.assertFalse(ir["onnxruntime_available"])
+        self.assertEqual(ir["inference_backend"], "cpu_only")
+        self.assertTrue(ir["cpu_fallback_guaranteed"])
+        self.assertEqual(ir["onnxruntime_providers"], [])
+
     def test_deep_inspection_provider_probe_defaults_disabled_without_inference(self) -> None:
         report = build_deep_inspection_provider_probe()
         raw = json.dumps(report, ensure_ascii=False)

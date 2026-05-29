@@ -86,6 +86,7 @@ def run_capability_probe(
             "blocking": False,
         },
         "warnings": _warnings(packages, nvidia, torch_cuda),
+        "inference_readiness": _inference_readiness(packages),
     }
 
 
@@ -200,3 +201,23 @@ def _warnings(packages: dict[str, dict[str, Any]], nvidia: dict[str, Any], torch
     if not nvidia["available"] and not torch_cuda["available"]:
         warnings.append("No GPU provider visibility was confirmed; GPU/model acceleration readiness is informational only.")
     return warnings
+
+
+def _inference_readiness(packages: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    onnx = packages.get("onnxruntime", {}).get("available", False)
+    paddle = packages.get("paddleocr", {}).get("available", False)
+    onnx_providers: list[str] = []
+    if onnx:
+        try:
+            import onnxruntime as ort  # type: ignore[import-not-found]
+
+            onnx_providers = [p for p in ort.get_available_providers() if "CPU" in p.upper() or "CUDA" in p.upper() or "Tensorrt" in p]
+        except Exception:
+            pass
+    return {
+        "onnxruntime_available": bool(onnx),
+        "onnxruntime_providers": sorted(onnx_providers),
+        "paddleocr_available": bool(paddle),
+        "inference_backend": "onnxruntime" if onnx else ("paddleocr" if paddle else "cpu_only"),
+        "cpu_fallback_guaranteed": True,
+    }

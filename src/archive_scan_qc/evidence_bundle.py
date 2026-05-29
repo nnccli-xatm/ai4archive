@@ -64,6 +64,7 @@ _ALLOWED_KEY_EXCEPTIONS = {
     "openable_files",
     "optional_packages",
     "paddleocr",
+    "paddleocr_available",
     "private_image_paths",
     "provider_packages_found",
     "provider_packages_found_count",
