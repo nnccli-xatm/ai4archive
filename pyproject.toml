@@ -28,6 +28,11 @@ dependencies = [
   "Pillow>=10,<13",
 ]
 
+[project.optional-dependencies]
+numpy = ["numpy>=1.21"]
+opencv = ["opencv-python-headless>=4.5"]
+perf = ["numpy>=1.21", "opencv-python-headless>=4.5"]
+
 [project.scripts]
 archive-scan-qc = "archive_scan_qc.cli:main"
 

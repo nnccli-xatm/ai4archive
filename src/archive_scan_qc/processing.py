@@ -31,6 +31,14 @@ def _load_numpy() -> Any | None:
     return np
 
 
+def _load_opencv() -> Any | None:
+    try:
+        import cv2  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    return cv2
+
+
 @dataclass(frozen=True)
 class ProcessingOptions:
     auto_crop: bool = False
@@ -3744,7 +3752,8 @@ def _process_image(
             operations.append("despeckle_disabled")
     if options.despeckle and "despeckle" in operation_timings:
         operation_timings["despeckle"]["backend_mode"] = despeckle_backend_mode
-        operation_timings["despeckle"]["numpy_available"] = despeckle_backend_mode == "numpy"
+        operation_timings["despeckle"]["numpy_available"] = despeckle_backend_mode in {"numpy", "opencv"}
+        operation_timings["despeckle"]["opencv_available"] = despeckle_backend_mode == "opencv"
 
     tone = ToneNormalizationResult(processed, False, "tone normalization disabled", None, None, None, None)
     with _operation_timer(operation_timings, "normalize_tones", enabled=options.normalize_tones):
@@ -14955,8 +14964,8 @@ def _despeckle_isolated_pixels(image: Image.Image, *, backend: str = "fallback")
 
 
 def _despeckle_isolated_pixels_with_reason(image: Image.Image, *, backend: str = "fallback") -> DespeckleResult:
-    if backend not in {"fallback", "numpy"}:
-        raise ValueError("despeckle backend must be fallback or numpy")
+    if backend not in {"fallback", "numpy", "opencv"}:
+        raise ValueError("despeckle backend must be fallback, numpy, or opencv")
 
     grayscale = image.convert("L")
     width, height = grayscale.size
@@ -15081,6 +15090,11 @@ def _despeckle_isolated_pixels_with_reason(image: Image.Image, *, backend: str =
 
     replacements: list[tuple[int, int, tuple[int, int, int]]] | None = None
     replacement_work_performed = True
+    if backend_mode == "opencv":
+        if max(component_sizes, default=0) <= 4:
+            replacements = _despeckle_replacements_opencv(image, grayscale, candidates)
+        if replacements is None:
+            backend_mode = "numpy"
     if backend_mode == "numpy":
         if max(component_sizes, default=0) <= 4:
             replacements = _despeckle_replacements_numpy(image, grayscale, candidates)
@@ -15422,6 +15436,51 @@ def _despeckle_numpy_context_counts(np: Any, mask: Any, candidate_x: Any, candid
     outer = _despeckle_numpy_rect_counts(np, mask, candidate_x, candidate_y, radius=radius)
     inner = _despeckle_numpy_rect_counts(np, mask, candidate_x, candidate_y, radius=2)
     return outer - inner
+
+
+def _despeckle_replacements_opencv(
+    image: Image.Image,
+    grayscale: Image.Image,
+    candidates: list[tuple[int, int]],
+) -> list[tuple[int, int, tuple[int, int, int]]] | None:
+    cv2 = _load_opencv()
+    if cv2 is None:
+        return None
+    np = _load_numpy()
+    if np is None:
+        return None
+    if not candidates:
+        return []
+    width, height = grayscale.size
+    source = image if image.mode == "RGB" else image.convert("RGB")
+    try:
+        rgb_array = np.asarray(source, dtype=np.uint8)
+    except (TypeError, ValueError):
+        return None
+    if rgb_array.shape[:2] != (height, width):
+        return None
+    filtered = cv2.medianBlur(rgb_array, 3)
+    candidate_set = set(candidates)
+    replacements: list[tuple[int, int, tuple[int, int, int]]] = []
+    gray_pixels = grayscale.load()
+    for x, y in candidates:
+        if x <= 0 or y <= 0 or x >= width - 1 or y >= height - 1:
+            continue
+        component = _despeckle_candidate_component(candidate_set, x, y)
+        if len(component) > 4:
+            continue
+        dark_neighbors = 0
+        for offset_x, offset_y in _DESPECKLE_NEIGHBOR_OFFSETS:
+            nx, ny = x + offset_x, y + offset_y
+            if gray_pixels[nx, ny] <= _DESPECKLE_NEAR_DARK_THRESHOLD and (nx, ny) not in candidate_set:
+                dark_neighbors += 1
+        if dark_neighbors > 1:
+            continue
+        replacement = tuple(int(v) for v in filtered[y, x])
+        original = tuple(int(v) for v in rgb_array[y, x])
+        if replacement != original:
+            replacements.append((x, y, replacement))
+    return replacements
 
 
 def _despeckle_replacements_fallback(
@@ -16536,8 +16595,13 @@ def _despeckle_candidate_points(dark_mask: Image.Image, *, backend: str = "fallb
 
 
 def _despeckle_candidate_points_with_backend(dark_mask: Image.Image, *, backend: str = "fallback") -> tuple[list[tuple[int, int]], str]:
-    if backend not in {"fallback", "numpy"}:
-        raise ValueError("despeckle backend must be fallback or numpy")
+    if backend not in {"fallback", "numpy", "opencv"}:
+        raise ValueError("despeckle backend must be fallback, numpy, or opencv")
+    if backend == "opencv":
+        opencv_candidates = _despeckle_candidate_points_numpy(dark_mask)
+        if opencv_candidates is not None:
+            return opencv_candidates, "opencv"
+        return _despeckle_candidate_points_fallback(dark_mask), "fallback"
     if backend == "numpy":
         numpy_candidates = _despeckle_candidate_points_numpy(dark_mask)
         if numpy_candidates is not None:

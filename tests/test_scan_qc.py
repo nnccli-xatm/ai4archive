@@ -13846,7 +13846,7 @@ class ScanQcTest(unittest.TestCase):
     def test_despeckle_still_validates_backend_on_no_dark_fast_path(self) -> None:
         image = Image.new("RGB", (80, 60), "white")
 
-        with self.assertRaisesRegex(ValueError, "despeckle backend must be fallback or numpy"):
+        with self.assertRaisesRegex(ValueError, "despeckle backend must be fallback, numpy, or opencv"):
             _despeckle_isolated_pixels(image, backend="invalid")
 
     def test_despeckle_fast_path_preserves_border_dark_pixels(self) -> None:
