@@ -2548,6 +2548,9 @@ def _preflight_snapshot_matches(
         return False, "input_folder_changed"
     if _safe_nonnegative_int(snapshot.get("supported_image_count")) != len(supported_file_snapshots):
         return False, "incomplete_preflight_snapshot"
+    actual_supported_count = _supported_image_count(input_path)
+    if actual_supported_count != len(supported_file_snapshots):
+        return False, "input_folder_changed"
     return True, "preflight_snapshot_matched"
 
 
