@@ -10,6 +10,8 @@ from math import ceil
 from pathlib import Path
 from typing import Any
 
+ALLOWED_REVIEW_DECISIONS = ("pending", "accepted_issue", "false_positive", "fixed_externally", "needs_rescan", "blocked")
+
 
 SAMPLING_JSON = "acceptance_sampling_review.json"
 SAMPLING_CSV = "acceptance_sampling_review.csv"
@@ -47,6 +49,29 @@ CSV_FIELDS = [
 
 SEVERITY_RANK = {"P0": 0, "P1": 1, "P2": 2}
 RISK_TIER_BY_SEVERITY = {"P0": "p0", "P1": "p1", "P2": "p2"}
+RISK_ESCALATION_P0_THRESHOLD = 0.05
+RISK_ESCALATION_P0_SAMPLE_RATIO = 0.10
+RISK_ESCALATION_P1_THRESHOLD = 0.15
+RISK_ESCALATION_P1_SAMPLE_RATIO = 0.20
+
+
+def _compute_effective_sample_ratio(report: dict[str, Any], base_ratio: float) -> float:
+    files = report.get("files", [])
+    if not isinstance(files, list) or not files:
+        return base_ratio
+    total = len(files)
+    findings = report.get("findings", [])
+    if not isinstance(findings, list):
+        return base_ratio
+    p0_count = sum(1 for f in findings if isinstance(f, dict) and f.get("severity") == "P0")
+    p1_count = sum(1 for f in findings if isinstance(f, dict) and f.get("severity") == "P1")
+    p0_ratio = p0_count / total
+    p1_ratio = p1_count / total
+    if p0_ratio > RISK_ESCALATION_P0_THRESHOLD:
+        return max(base_ratio, RISK_ESCALATION_P0_SAMPLE_RATIO)
+    if p1_ratio > RISK_ESCALATION_P1_THRESHOLD:
+        return max(base_ratio, RISK_ESCALATION_P1_SAMPLE_RATIO)
+    return base_ratio
 
 
 def write_acceptance_sampling_export(report_path: Path, output_dir: Path, *, sample_ratio: float = DEFAULT_SAMPLE_RATIO) -> tuple[Path, Path, dict[str, Any]]:
@@ -61,6 +86,75 @@ def write_acceptance_sampling_export(report_path: Path, output_dir: Path, *, sam
         writer.writeheader()
         writer.writerows(payload["samples"])
     return json_path, csv_path, payload
+
+
+def generate_sampling_checklist(
+    report_path: Path,
+    output_dir: Path,
+    *,
+    base_sample_ratio: float = DEFAULT_SAMPLE_RATIO,
+) -> tuple[Path, dict[str, Any]]:
+    report = _load_json_object(report_path, "Scan QC report")
+    effective_ratio = _compute_effective_sample_ratio(report, base_sample_ratio)
+    payload = build_acceptance_sampling_export(report, source_report=report_path, sample_ratio=effective_ratio)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    checklist_path = output_dir / "sampling_checklist.csv"
+    with checklist_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=CSV_FIELDS, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(payload["samples"])
+    json_path = output_dir / SAMPLING_JSON
+    json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return checklist_path, payload
+
+
+def record_sampling_review(
+    sampling_json_path: Path,
+    reviews: list[dict[str, str]],
+) -> dict[str, Any]:
+    if not sampling_json_path.exists():
+        raise FileNotFoundError(f"Sampling review file not found: {sampling_json_path}")
+    payload = json.loads(sampling_json_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or "samples" not in payload:
+        raise ValueError("Invalid sampling review JSON structure.")
+    samples = payload["samples"]
+    review_map = {str(r.get("sample_id", "")): r for r in reviews if isinstance(r, dict)}
+    updated = 0
+    for sample in samples:
+        sid = str(sample.get("sample_id", ""))
+        if sid in review_map:
+            review = review_map[sid]
+            new_status = str(review.get("review_status", "")).strip().lower()
+            if new_status in ALLOWED_REVIEW_DECISIONS:
+                sample["review_status"] = new_status
+                if review.get("reviewer_notes"):
+                    sample["reviewer_notes"] = str(review["reviewer_notes"])
+                updated += 1
+    counts = _aggregate_counts_from_samples(samples, payload.get("selection", {}).get("sample_ratio", DEFAULT_SAMPLE_RATIO))
+    payload["aggregate_sampling_counts"] = counts
+    sampling_json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return {"updated": updated, "total_samples": len(samples), "aggregate_sampling_counts": counts}
+
+
+def _aggregate_counts_from_samples(samples: list[dict[str, Any]], sample_ratio: float) -> dict[str, Any]:
+    target_count = min(len(samples), ceil(len(samples) / sample_ratio)) if samples and sample_ratio > 0 else 0
+    reviewed = sum(1 for s in samples if str(s.get("review_status", "")).strip().lower() != "pending")
+    pending = len(samples) - reviewed
+    return {
+        "schema_version": "scan-qc.acceptance-sampling-counts.v1",
+        "privacy": {"aggregate_only": True},
+        "total_records": len(samples),
+        "target_sample_ratio": sample_ratio,
+        "minimum_sample_ratio": MIN_SAMPLE_RATIO,
+        "target_sample_count": target_count,
+        "generated_sample_task_count": len(samples),
+        "sample_task_target_met": len(samples) >= target_count,
+        "reviewed_sample_count": reviewed,
+        "pending_sample_count": pending,
+        "sampling_target_met": reviewed >= target_count,
+        "sampled_records": len(samples),
+        "sample_ratio": sample_ratio,
+    }
 
 
 def build_acceptance_sampling_export(report: dict[str, Any], *, source_report: Path | None = None, sample_ratio: float = DEFAULT_SAMPLE_RATIO) -> dict[str, Any]:

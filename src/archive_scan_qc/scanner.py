@@ -338,6 +338,8 @@ def _effective_profile(config: ScanConfig) -> RulesProfile:
         blank_foreground_coverage_max=profile.blank_foreground_coverage_max,
         blank_edge_coverage_max=profile.blank_edge_coverage_max,
         blank_dark_pixel_ratio_max=profile.blank_dark_pixel_ratio_max,
+        dpi_purpose=profile.dpi_purpose,
+        despeckle_max_pixel_change_ratio=profile.despeckle_max_pixel_change_ratio,
         rules=profile.rules,
     )
 
@@ -886,8 +888,8 @@ def _add_per_file_findings(
                 "Image does not expose horizontal and vertical DPI metadata.",
                 profile,
             )
-        elif item["dpi_x"] < profile.min_dpi or item["dpi_y"] < profile.min_dpi:
-            _append_finding(item, findings, "dpi_minimum", "P0", f"Image DPI is below minimum {profile.min_dpi}.", profile)
+        elif item["dpi_x"] < profile.effective_min_dpi() or item["dpi_y"] < profile.effective_min_dpi():
+            _append_finding(item, findings, "dpi_minimum", "P0", f"Image DPI is below minimum {profile.effective_min_dpi()} ({profile.dpi_purpose}).", profile)
         if not item["width"] or not item["height"]:
             _append_finding(item, findings, "dimensions", "P0", "Image width or height is missing.", profile)
         frame_count = item.get("frame_count")
@@ -998,7 +1000,20 @@ def _add_processing_quality_findings(
     skew_angle = item.get("quality_skew_angle_degrees")
     skew_confidence = item.get("quality_skew_confidence")
     if isinstance(skew_angle, int | float) and isinstance(skew_confidence, int | float):
-        if 0.5 <= abs(skew_angle) <= 5.0 and skew_confidence >= 0.08:
+        if abs(skew_angle) > 5.0 and skew_confidence >= 0.08:
+            _append_finding(
+                item,
+                findings,
+                "quality_skew_large_angle",
+                "P1",
+                (
+                    f"Conservative scan-time skew estimate is {round(skew_angle, 2)} degrees "
+                    f"with confidence {round(skew_confidence, 3)}; exceeds auto-deskew threshold, "
+                    f"requires manual review."
+                ),
+                profile,
+            )
+        elif 0.5 <= abs(skew_angle) <= 5.0 and skew_confidence >= 0.08:
             _append_finding(
                 item,
                 findings,

@@ -31,6 +31,14 @@ def _load_numpy() -> Any | None:
     return np
 
 
+def _load_opencv() -> Any | None:
+    try:
+        import cv2  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    return cv2
+
+
 @dataclass(frozen=True)
 class ProcessingOptions:
     auto_crop: bool = False
@@ -49,6 +57,7 @@ class ProcessingOptions:
     enhance_faded_text: bool = False
     sharpen_text_edges: bool = False
     scanner_gutter_trim: bool = False
+    despeckle_content_type_check: bool = True
     despeckle_backend: str = "fallback"
     resume_processing: bool = False
     reuse_scan_measurements: bool = False
@@ -86,6 +95,7 @@ class ProcessingOptions:
     audit_max_processed_dark_pixel_loss_ratio: float = 0.45
     audit_max_processed_dark_pixel_lift_ratio: float = 0.35
     audit_max_processed_full_page_change_ratio: float = 0.85
+    crop_margin_mm: float = 2.5
     workers: int | None = None
 
 
@@ -276,6 +286,86 @@ class TextEdgeSharpeningResult:
     edge_energy_before: float = 0.0
     edge_energy_after: float = 0.0
     preflight_skipped: bool = False
+
+
+@dataclass(frozen=True)
+class ContentTypeClassification:
+    content_type: str
+    grid_rows: int
+    grid_cols: int
+    high_variance_tiles: int
+    total_tiles: int
+    reason: str
+
+
+@dataclass(frozen=True)
+class DespecklePreservationResult:
+    content_type: str
+    skipped: bool
+    rolled_back: bool
+    pixel_change_ratio: float
+    reason: str
+
+
+def _classify_page_content_type(
+    image: Image.Image,
+    *,
+    grid_size: int = 8,
+    photo_stddev_threshold: float = 25.0,
+) -> ContentTypeClassification:
+    gray = image.convert("L")
+    img_w, img_h = gray.size
+    if img_w < grid_size or img_h < grid_size:
+        return ContentTypeClassification(
+            content_type="text",
+            grid_rows=grid_size,
+            grid_cols=grid_size,
+            high_variance_tiles=0,
+            total_tiles=0,
+            reason="image_too_small",
+        )
+    tile_w = max(1, img_w // grid_size)
+    tile_h = max(1, img_h // grid_size)
+    high_var = 0
+    total = 0
+    for row in range(grid_size):
+        for col in range(grid_size):
+            x0 = col * tile_w
+            y0 = row * tile_h
+            x1 = min(x0 + tile_w, img_w)
+            y1 = min(y0 + tile_h, img_h)
+            tile = gray.crop((x0, y0, x1, y1))
+            pixels = list(tile.getdata())
+            if len(pixels) < 4:
+                continue
+            total += 1
+            mean = sum(pixels) / len(pixels)
+            variance = sum((p - mean) ** 2 for p in pixels) / len(pixels)
+            std = variance ** 0.5
+            if std > photo_stddev_threshold:
+                high_var += 1
+    if total == 0:
+        content_type = "text"
+        reason = "no_tiles"
+    else:
+        ratio = high_var / total
+        if ratio > 0.5:
+            content_type = "photo"
+            reason = f"high_variance_ratio={ratio:.3f}"
+        elif ratio > 0.15:
+            content_type = "mixed"
+            reason = f"moderate_variance_ratio={ratio:.3f}"
+        else:
+            content_type = "text"
+            reason = f"low_variance_ratio={ratio:.3f}"
+    return ContentTypeClassification(
+        content_type=content_type,
+        grid_rows=grid_size,
+        grid_cols=grid_size,
+        high_variance_tiles=high_var,
+        total_tiles=total,
+        reason=reason,
+    )
 
 
 def detect_skew(image: Image.Image) -> SkewDetection:
@@ -749,6 +839,7 @@ def _process_record(
         "skew_confidence": 0.0,
         "deskewed": False,
         "deskew_reason": None,
+        "deskew_residual_degrees": None,
         "dark_border_trimmed": False,
         "dark_border_bbox": None,
         "dark_border_reason": None,
@@ -761,11 +852,16 @@ def _process_record(
         "scanner_gutter_trim_margins": {"left": 0.0, "top": 0.0, "right": 0.0, "bottom": 0.0},
         "crop_bbox": None,
         "crop_reason": None,
+        "crop_margin_mm": None,
         "cropped": False,
         "despeckled": False,
         "despeckle_pixels_changed": 0,
         "despeckle_reason": None,
         "despeckle_backend_mode": None,
+        "despeckle_content_type": None,
+        "despeckle_preservation_skipped": None,
+        "despeckle_preservation_rolled_back": None,
+        "despeckle_preservation_reason": None,
         "tone_normalized": False,
         "tone_reason": None,
         "tone_background_before": None,
@@ -908,6 +1004,7 @@ def _process_record(
                 "skew_confidence": process_info["skew_confidence"],
                 "deskewed": process_info["deskewed"],
                 "deskew_reason": process_info["deskew_reason"],
+                "deskew_residual_degrees": process_info["deskew_residual_degrees"],
                 "dark_border_trimmed": process_info["dark_border_trimmed"],
                 "dark_border_bbox": process_info["dark_border_bbox"],
                 "dark_border_reason": process_info["dark_border_reason"],
@@ -925,6 +1022,10 @@ def _process_record(
                 "despeckle_pixels_changed": process_info["despeckle_pixels_changed"],
                 "despeckle_reason": process_info["despeckle_reason"],
                 "despeckle_backend_mode": process_info["despeckle_backend_mode"],
+                "despeckle_content_type": process_info["despeckle_content_type"],
+                "despeckle_preservation_skipped": process_info["despeckle_preservation_skipped"],
+                "despeckle_preservation_rolled_back": process_info["despeckle_preservation_rolled_back"],
+                "despeckle_preservation_reason": process_info["despeckle_preservation_reason"],
                 "tone_normalized": process_info["tone_normalized"],
                 "tone_reason": process_info["tone_reason"],
                 "tone_background_before": process_info["tone_background_before"],
@@ -1046,6 +1147,7 @@ def _process_record(
                     "skew_confidence": process_info["skew_confidence"],
                     "deskewed": process_info["deskewed"],
                     "deskew_reason": process_info["deskew_reason"],
+                    "deskew_residual_degrees": process_info["deskew_residual_degrees"],
                     "dark_border_trimmed": process_info["dark_border_trimmed"],
                     "dark_border_bbox": process_info["dark_border_bbox"],
                     "dark_border_reason": process_info["dark_border_reason"],
@@ -3486,6 +3588,11 @@ def _process_image(
             post_deskew_size = list(processed.size)
             deskewed = True
             deskew_reason = "deskew applied"
+    deskew_residual_degrees = None
+    if deskewed:
+        residual = _detect_skew(processed)
+        if residual.angle_degrees is not None:
+            deskew_residual_degrees = round(abs(residual.angle_degrees), 4)
 
     dark_border = DarkBorderDetection(
         None,
@@ -3560,6 +3667,9 @@ def _process_image(
             crop_bbox = crop_detection.bbox
             crop_reason = crop_detection.reason
             if crop_bbox:
+                crop_bbox = _enforce_crop_margin(
+                    crop_bbox, processed.size, options.crop_margin_mm, scan_record
+                )
                 processed = processed.crop(crop_bbox)
                 operations.append("auto_crop_conservative")
             else:
@@ -3571,37 +3681,79 @@ def _process_image(
     despeckle_pixels_changed = 0
     despeckle_reason = "despeckle disabled"
     despeckle_backend_mode = "disabled"
+    despeckle_content_type = "unknown"
+    despeckle_skipped_preservation = False
+    despeckle_rolled_back = False
+    despeckle_preservation_reason = "not_evaluated"
     with _operation_timer(operation_timings, "despeckle", enabled=options.despeckle):
         if options.despeckle:
-            despeckle_result = _despeckle_isolated_pixels_with_reason(
-                processed,
-                backend=options.despeckle_backend,
-            )
-            processed = despeckle_result.image
-            despeckle_pixels_changed = despeckle_result.changed_pixels
-            despeckle_backend_mode = despeckle_result.backend_mode
-            despeckle_reason = despeckle_result.reason
-            despeckle_timing = operation_timings.setdefault("despeckle", {})
-            despeckle_timing["reason_code"] = despeckle_result.reason_code
-            despeckle_timing["candidate_pixels"] = despeckle_result.candidate_pixels
-            despeckle_timing["candidate_count"] = despeckle_result.candidate_count
-            despeckle_timing["candidate_count_bucket"] = despeckle_result.candidate_count_bucket
-            despeckle_timing["component_count"] = despeckle_result.component_count
-            despeckle_timing["component_count_bucket"] = despeckle_result.component_count_bucket
-            despeckle_timing["max_component_size"] = despeckle_result.max_component_size
-            despeckle_timing["max_component_size_bucket"] = despeckle_result.max_component_size_bucket
-            despeckle_timing["replacement_work_performed"] = despeckle_result.replacement_work_performed
-            despeckle_timing["safe_skip"] = despeckle_result.changed_pixels == 0
-            if despeckle_pixels_changed:
-                operations.append("despeckle_isolated_pixels")
-                despeckled = True
+            pre_despeckle_image = processed.copy()
+            if options.despeckle_content_type_check:
+                content_classification = _classify_page_content_type(processed)
+                despeckle_content_type = content_classification.content_type
             else:
-                operations.append("despeckle_noop")
+                despeckle_content_type = "text"
+                content_classification = None
+            if (
+                options.despeckle_content_type_check
+                and content_classification is not None
+                and content_classification.content_type in ("photo", "mixed")
+            ):
+                despeckle_skipped_preservation = True
+                despeckle_preservation_reason = (
+                    f"preservation_skip_{content_classification.content_type}:"
+                    f" {content_classification.reason}"
+                )
+                despeckle_reason = despeckle_preservation_reason
+                operations.append(f"despeckle_preservation_skip_{content_classification.content_type}")
+            else:
+                despeckle_result = _despeckle_isolated_pixels_with_reason(
+                    processed,
+                    backend=options.despeckle_backend,
+                )
+                processed = despeckle_result.image
+                despeckle_pixels_changed = despeckle_result.changed_pixels
+                despeckle_backend_mode = despeckle_result.backend_mode
+                despeckle_reason = despeckle_result.reason
+                despeckle_timing = operation_timings.setdefault("despeckle", {})
+                despeckle_timing["reason_code"] = despeckle_result.reason_code
+                despeckle_timing["candidate_pixels"] = despeckle_result.candidate_pixels
+                despeckle_timing["candidate_count"] = despeckle_result.candidate_count
+                despeckle_timing["candidate_count_bucket"] = despeckle_result.candidate_count_bucket
+                despeckle_timing["component_count"] = despeckle_result.component_count
+                despeckle_timing["component_count_bucket"] = despeckle_result.component_count_bucket
+                despeckle_timing["max_component_size"] = despeckle_result.max_component_size
+                despeckle_timing["max_component_size_bucket"] = despeckle_result.max_component_size_bucket
+                despeckle_timing["replacement_work_performed"] = despeckle_result.replacement_work_performed
+                despeckle_timing["safe_skip"] = despeckle_result.changed_pixels == 0
+                source_area = max(1, processed.size[0] * processed.size[1])
+                actual_despeckle_ratio = despeckle_pixels_changed / source_area
+                if (
+                    despeckle_pixels_changed > 0
+                    and actual_despeckle_ratio > options.audit_max_despeckle_pixel_ratio
+                ):
+                    processed = pre_despeckle_image
+                    despeckle_rolled_back = True
+                    despeckle_pixels_changed = 0
+                    despeckle_preservation_reason = (
+                        f"rolled_back: ratio {actual_despeckle_ratio:.6f}"
+                        f" > threshold {options.audit_max_despeckle_pixel_ratio}"
+                    )
+                    despeckle_reason = despeckle_preservation_reason
+                    operations.append("despeckle_preservation_rollback")
+                elif despeckle_pixels_changed:
+                    operations.append("despeckle_isolated_pixels")
+                    despeckled = True
+                else:
+                    operations.append("despeckle_noop")
+                if despeckle_rolled_back:
+                    despeckle_preservation_reason = despeckle_preservation_reason
         else:
             operations.append("despeckle_disabled")
     if options.despeckle and "despeckle" in operation_timings:
         operation_timings["despeckle"]["backend_mode"] = despeckle_backend_mode
-        operation_timings["despeckle"]["numpy_available"] = despeckle_backend_mode == "numpy"
+        operation_timings["despeckle"]["numpy_available"] = despeckle_backend_mode in {"numpy", "opencv"}
+        operation_timings["despeckle"]["opencv_available"] = despeckle_backend_mode == "opencv"
 
     tone = ToneNormalizationResult(processed, False, "tone normalization disabled", None, None, None, None)
     with _operation_timer(operation_timings, "normalize_tones", enabled=options.normalize_tones):
@@ -3961,6 +4113,7 @@ def _process_image(
         "skew_confidence": skew.confidence,
         "deskewed": False if guard_reverted else deskewed,
         "deskew_reason": guard_reason if guard_reverted else deskew_reason,
+        "deskew_residual_degrees": None if guard_reverted else deskew_residual_degrees,
         "dark_border_trimmed": False if guard_reverted else dark_border_trimmed,
         "dark_border_bbox": None if guard_reverted else (list(dark_border.bbox) if dark_border.bbox else None),
         "dark_border_reason": guard_reason if guard_reverted else dark_border.reason,
@@ -3979,11 +4132,16 @@ def _process_image(
         ),
         "crop_bbox": None if guard_reverted else (list(crop_bbox) if crop_bbox else None),
         "crop_reason": guard_reason if guard_reverted else crop_reason,
+        "crop_margin_mm": options.crop_margin_mm if crop_bbox and not guard_reverted else None,
         "cropped": False if guard_reverted else crop_bbox is not None,
         "despeckled": False if guard_reverted else despeckled,
         "despeckle_pixels_changed": 0 if guard_reverted else despeckle_pixels_changed,
         "despeckle_reason": guard_reason if guard_reverted else despeckle_reason,
         "despeckle_backend_mode": despeckle_backend_mode,
+        "despeckle_content_type": despeckle_content_type,
+        "despeckle_preservation_skipped": despeckle_skipped_preservation if options.despeckle else None,
+        "despeckle_preservation_rolled_back": despeckle_rolled_back if options.despeckle else None,
+        "despeckle_preservation_reason": despeckle_preservation_reason if options.despeckle else None,
         "tone_normalized": False if guard_reverted else tone.applied,
         "tone_reason": guard_reason if guard_reverted else tone.reason,
         "tone_background_before": None if guard_reverted else tone.background_before,
@@ -12922,7 +13080,28 @@ def _deskew_candidate_scores(sample: Image.Image) -> dict[float, float]:
 
 
 def _deskew_projection_score(image: Image.Image) -> float:
+    np = _load_numpy()
+    if np is not None:
+        return _deskew_projection_score_numpy(image, np)
     return _horizontal_projection_variance(image) + _vertical_projection_variance(image)
+
+
+def _deskew_projection_score_numpy(image: Image.Image, np: Any) -> float:
+    grayscale = image.convert("L")
+    width, height = grayscale.size
+    try:
+        arr = np.asarray(grayscale, dtype=np.float64)
+    except (TypeError, ValueError):
+        return _horizontal_projection_variance(image) + _vertical_projection_variance(image)
+    if arr.shape != (height, width):
+        return _horizontal_projection_variance(image) + _vertical_projection_variance(image)
+    row_sums = arr.sum(axis=1)
+    row_mean = row_sums.mean()
+    h_var = float(((row_sums - row_mean) ** 2).mean())
+    col_sums = arr.sum(axis=0)
+    col_mean = col_sums.mean()
+    v_var = float(((col_sums - col_mean) ** 2).mean())
+    return h_var + v_var
 
 
 def _horizontal_projection_variance(image: Image.Image) -> float:
@@ -13398,6 +13577,32 @@ def _post_deskew_crop_has_page_boundary_evidence(
         image.crop((left, max(top, bottom - band), right, bottom)),
     )
     return all(abs(ImageStat.Stat(boundary).mean[0] - canvas) >= threshold for boundary in boundaries)
+
+
+def _enforce_crop_margin(
+    bbox: tuple[int, int, int, int],
+    image_size: tuple[int, int],
+    margin_mm: float,
+    scan_record: dict[str, Any] | None,
+) -> tuple[int, int, int, int]:
+    if margin_mm <= 0:
+        return bbox
+    dpi: float | None = None
+    if scan_record:
+        dpi_x = scan_record.get("dpi_x")
+        dpi_y = scan_record.get("dpi_y")
+        if isinstance(dpi_x, (int, float)) and isinstance(dpi_y, (int, float)):
+            dpi = (float(dpi_x) + float(dpi_y)) / 2.0
+    if dpi is None or dpi <= 0:
+        dpi = 300.0
+    margin_px = max(1, int(math.ceil(dpi * margin_mm / 25.4)))
+    img_w, img_h = image_size
+    left, top, right, bottom = bbox
+    left = max(0, left - margin_px)
+    top = max(0, top - margin_px)
+    right = min(img_w, right + margin_px)
+    bottom = min(img_h, bottom + margin_px)
+    return (left, top, right, bottom)
 
 
 def _detect_conservative_crop_bbox(image: Image.Image) -> CropDetection:
@@ -14780,8 +14985,8 @@ def _despeckle_isolated_pixels(image: Image.Image, *, backend: str = "fallback")
 
 
 def _despeckle_isolated_pixels_with_reason(image: Image.Image, *, backend: str = "fallback") -> DespeckleResult:
-    if backend not in {"fallback", "numpy"}:
-        raise ValueError("despeckle backend must be fallback or numpy")
+    if backend not in {"fallback", "numpy", "opencv"}:
+        raise ValueError("despeckle backend must be fallback, numpy, or opencv")
 
     grayscale = image.convert("L")
     width, height = grayscale.size
@@ -14906,6 +15111,11 @@ def _despeckle_isolated_pixels_with_reason(image: Image.Image, *, backend: str =
 
     replacements: list[tuple[int, int, tuple[int, int, int]]] | None = None
     replacement_work_performed = True
+    if backend_mode == "opencv":
+        if max(component_sizes, default=0) <= 4:
+            replacements = _despeckle_replacements_opencv(image, grayscale, candidates)
+        if replacements is None:
+            backend_mode = "numpy"
     if backend_mode == "numpy":
         if max(component_sizes, default=0) <= 4:
             replacements = _despeckle_replacements_numpy(image, grayscale, candidates)
@@ -15247,6 +15457,51 @@ def _despeckle_numpy_context_counts(np: Any, mask: Any, candidate_x: Any, candid
     outer = _despeckle_numpy_rect_counts(np, mask, candidate_x, candidate_y, radius=radius)
     inner = _despeckle_numpy_rect_counts(np, mask, candidate_x, candidate_y, radius=2)
     return outer - inner
+
+
+def _despeckle_replacements_opencv(
+    image: Image.Image,
+    grayscale: Image.Image,
+    candidates: list[tuple[int, int]],
+) -> list[tuple[int, int, tuple[int, int, int]]] | None:
+    cv2 = _load_opencv()
+    if cv2 is None:
+        return None
+    np = _load_numpy()
+    if np is None:
+        return None
+    if not candidates:
+        return []
+    width, height = grayscale.size
+    source = image if image.mode == "RGB" else image.convert("RGB")
+    try:
+        rgb_array = np.asarray(source, dtype=np.uint8)
+    except (TypeError, ValueError):
+        return None
+    if rgb_array.shape[:2] != (height, width):
+        return None
+    filtered = cv2.medianBlur(rgb_array, 3)
+    candidate_set = set(candidates)
+    replacements: list[tuple[int, int, tuple[int, int, int]]] = []
+    gray_pixels = grayscale.load()
+    for x, y in candidates:
+        if x <= 0 or y <= 0 or x >= width - 1 or y >= height - 1:
+            continue
+        component = _despeckle_candidate_component(candidate_set, x, y)
+        if len(component) > 4:
+            continue
+        dark_neighbors = 0
+        for offset_x, offset_y in _DESPECKLE_NEIGHBOR_OFFSETS:
+            nx, ny = x + offset_x, y + offset_y
+            if gray_pixels[nx, ny] <= _DESPECKLE_NEAR_DARK_THRESHOLD and (nx, ny) not in candidate_set:
+                dark_neighbors += 1
+        if dark_neighbors > 1:
+            continue
+        replacement = tuple(int(v) for v in filtered[y, x])
+        original = tuple(int(v) for v in rgb_array[y, x])
+        if replacement != original:
+            replacements.append((x, y, replacement))
+    return replacements
 
 
 def _despeckle_replacements_fallback(
@@ -16361,8 +16616,13 @@ def _despeckle_candidate_points(dark_mask: Image.Image, *, backend: str = "fallb
 
 
 def _despeckle_candidate_points_with_backend(dark_mask: Image.Image, *, backend: str = "fallback") -> tuple[list[tuple[int, int]], str]:
-    if backend not in {"fallback", "numpy"}:
-        raise ValueError("despeckle backend must be fallback or numpy")
+    if backend not in {"fallback", "numpy", "opencv"}:
+        raise ValueError("despeckle backend must be fallback, numpy, or opencv")
+    if backend == "opencv":
+        opencv_candidates = _despeckle_candidate_points_numpy(dark_mask)
+        if opencv_candidates is not None:
+            return opencv_candidates, "opencv"
+        return _despeckle_candidate_points_fallback(dark_mask), "fallback"
     if backend == "numpy":
         numpy_candidates = _despeckle_candidate_points_numpy(dark_mask)
         if numpy_candidates is not None:
