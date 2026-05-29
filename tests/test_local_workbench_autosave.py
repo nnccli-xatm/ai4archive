@@ -1326,6 +1326,10 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             )
             restored_decisions["review_counts"]["needs_reprocess"] = 1
             restored_decisions["aggregate_counts"]["review_completion"]["counts"]["needs_reprocess"] = 1
+            restored_decisions["review_counts"]["needs_rescan"] = 0
+            restored_decisions["review_counts"]["needs_reprocess"] = 0
+            restored_decisions["aggregate_counts"]["review_completion"]["counts"]["needs_rescan"] = 1
+            restored_decisions["aggregate_counts"]["review_completion"]["counts"]["needs_reprocess"] = 1
             (metadata_dir / REVIEW_DECISION_SUMMARY_JSON).write_text(
                 json.dumps(restored_decisions, ensure_ascii=False),
                 encoding="utf-8",

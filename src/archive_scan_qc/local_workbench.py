@@ -1788,10 +1788,10 @@ def _restored_rework_counts(final_decisions: dict[str, Any] | None) -> dict[str,
         return needs_rescan, needs_reprocess
 
     for bucket in (
-        final_decisions.get("review_counts"),
         final_decisions.get("aggregate_counts", {}).get("review_completion", {}).get("counts")
         if isinstance(final_decisions.get("aggregate_counts"), dict)
         else None,
+        final_decisions.get("review_counts"),
     ):
         needs_rescan, needs_reprocess = _count_from_bucket(bucket)
         if needs_rescan is not None or needs_reprocess is not None:
@@ -2670,7 +2670,9 @@ def _completion_handoff_counts(
             counts.get("resumed_files")
         )
     needs_rescan_images = _safe_nonnegative_int(decision_counts.get("needs_rescan"))
-    needs_reprocess_images = _safe_nonnegative_int(decision_counts.get("fixed_externally"))
+    needs_reprocess_images = _safe_nonnegative_int(decision_counts.get("needs_reprocess"))
+    if needs_reprocess_images == 0:
+        needs_reprocess_images = _safe_nonnegative_int(decision_counts.get("fixed_externally"))
     keep_original_images = _safe_nonnegative_int(decision_counts.get("keep_original_trace"))
     if keep_original_images == 0 and isinstance(review_summary, dict):
         operator_decisions = review_summary.get("operator_decisions")
