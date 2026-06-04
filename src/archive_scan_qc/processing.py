@@ -12862,7 +12862,63 @@ def _faint_low_contrast_ink(
     return ink, ink.getbbox()
 
 
+
 def _deskew_faint_row_group_count(ink: Image.Image, bbox: tuple[int, int, int, int]) -> int:
+    np = _load_numpy()
+    if np is not None:
+        result = _deskew_faint_row_group_count_numpy(ink, bbox, np)
+        if result is not None:
+            return result
+    return _deskew_faint_row_group_count_fallback(ink, bbox)
+
+
+def _deskew_faint_row_group_count_numpy(
+    ink: Image.Image, bbox: tuple[int, int, int, int], np: Any
+) -> int | None:
+    try:
+        sample = ink.crop(bbox)
+        sample.thumbnail((700, 700), Image.Resampling.BILINEAR)
+        width, height = sample.size
+        if width <= 0 or height <= 0:
+            return 0
+        
+        grayscale = sample.convert('L')
+        arr = np.asarray(grayscale, dtype=np.uint8)
+        
+        if arr.shape != (height, width):
+            return None
+        
+        active_threshold = max(8.0, width * 0.08)
+        
+        # Vectorized row sums
+        row_sums = np.sum(arr > 0, axis=1)
+        
+        # Find groups using numpy
+        active_mask = row_sums >= active_threshold
+        
+        # Find group boundaries
+        groups = []
+        in_group = False
+        start = None
+        
+        for y, is_active in enumerate(active_mask):
+            if is_active and not in_group:
+                start = y
+                in_group = True
+            elif not is_active and in_group:
+                groups.append((start, y))
+                start = None
+                in_group = False
+        
+        if in_group and start is not None:
+            groups.append((start, height))
+        
+        return len(_merge_close_row_groups(groups, max_gap=2))
+    except (TypeError, ValueError, AttributeError, IndexError):
+        return None
+
+
+def _deskew_faint_row_group_count_fallback(ink: Image.Image, bbox: tuple[int, int, int, int]) -> int:
     sample = ink.crop(bbox)
     sample.thumbnail((700, 700), Image.Resampling.BILINEAR)
     width, height = sample.size
@@ -12888,6 +12944,9 @@ def _deskew_faint_row_group_count(ink: Image.Image, bbox: tuple[int, int, int, i
     return len(_merge_close_row_groups(groups, max_gap=2))
 
 
+
+
+
 def _deskew_has_faint_ruled_line_risk(ink: Image.Image, bbox: tuple[int, int, int, int]) -> bool:
     sample = ink.crop(bbox)
     sample.thumbnail((700, 700), Image.Resampling.BILINEAR)
@@ -12895,10 +12954,92 @@ def _deskew_has_faint_ruled_line_risk(ink: Image.Image, bbox: tuple[int, int, in
 
 
 def _deskew_sample_has_faint_ruled_line_risk(sample: Image.Image) -> bool:
+    np = _load_numpy()
+    if np is not None:
+        result = _deskew_sample_has_faint_ruled_line_risk_numpy(sample, np)
+        if result is not None:
+            return result
+    return _deskew_sample_has_faint_ruled_line_risk_fallback(sample)
+
+
+def _deskew_sample_has_faint_ruled_line_risk_numpy(sample: Image.Image, np: Any) -> bool | None:
+    try:
+        width, height = sample.size
+        if width <= 0 or height <= 0:
+            return False
+        
+        grayscale = sample.convert('L')
+        arr = np.asarray(grayscale, dtype=np.uint8)
+        
+        if arr.shape != (height, width):
+            return None
+        
+        active_threshold = max(8.0, width * 0.08)
+        max_band_height = max(8, int(round(height * 0.04)))
+        long_run_threshold = max(80, int(round(width * 0.72)))
+        
+        # Vectorized row sums
+        row_sums = np.sum(arr > 0, axis=1)
+        active_mask = row_sums >= active_threshold
+        
+        # Find group boundaries
+        groups = []
+        in_group = False
+        start = None
+        
+        for y, is_active in enumerate(active_mask):
+            if is_active and not in_group:
+                start = y
+                in_group = True
+            elif not is_active and in_group:
+                groups.append((start, y))
+                start = None
+                in_group = False
+        
+        if in_group and start is not None:
+            groups.append((start, height))
+        
+        row_groups = _merge_close_row_groups(groups, max_gap=2)
+        
+        long_rule_groups = 0
+        for top, bottom in row_groups:
+            if bottom - top > max_band_height:
+                continue
+            
+            # Check for long run using vectorized operations
+            group_arr = arr[top:bottom, :]
+            group_has_long_run = False
+            
+            for y in range(group_arr.shape[0]):
+                # Find consecutive runs using numpy
+                row = group_arr[y, :]
+                max_run = 0
+                current_run = 0
+                
+                for x in range(len(row)):
+                    if row[x] > 0:
+                        current_run += 1
+                        max_run = max(max_run, current_run)
+                    else:
+                        current_run = 0
+                
+                if max_run >= long_run_threshold:
+                    group_has_long_run = True
+                    break
+            
+            if group_has_long_run:
+                long_rule_groups += 1
+        
+        return long_rule_groups >= 8
+    except (TypeError, ValueError, AttributeError, IndexError):
+        return None
+
+
+def _deskew_sample_has_faint_ruled_line_risk_fallback(sample: Image.Image) -> bool:
     width, height = sample.size
     if width <= 0 or height <= 0:
         return False
-
+    
     pixels = sample.load()
     row_groups: list[tuple[int, int]] = []
     start: int | None = None
@@ -12917,7 +13058,7 @@ def _deskew_sample_has_faint_ruled_line_risk(sample: Image.Image) -> bool:
     if start is not None:
         row_groups.append((start, height))
     row_groups = _merge_close_row_groups(row_groups, max_gap=2)
-
+    
     long_rule_groups = 0
     max_band_height = max(8, int(round(height * 0.04)))
     long_run_threshold = max(80, int(round(width * 0.72)))
@@ -12936,7 +13077,7 @@ def _deskew_sample_has_faint_ruled_line_risk(sample: Image.Image) -> bool:
                 break
         if group_has_long_run:
             long_rule_groups += 1
-
+    
     return long_rule_groups >= 8
 
 
