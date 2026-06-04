@@ -1,4 +1,4 @@
-"""Local derivative-image processing for scanned-image batches.
+﻿"""Local derivative-image processing for scanned-image batches.
 
 The processing layer never modifies source images. It writes derivative files
 and a manifest that links each output back to the original scan record.
@@ -13239,6 +13239,15 @@ def _deskew_projection_score(image: Image.Image) -> float:
 
 
 def _deskew_projection_score_numpy(image: Image.Image, np: Any) -> float:
+    """Vectorized projection score matching the fallback implementation.
+    
+    Uses NumPy to compute horizontal and vertical projection variances
+    without PIL resize, providing better performance for deskew scoring.
+    
+    The fallback uses PIL resize with BOX resampling which computes averages,
+    then scales by width/255 or height/255. This is equivalent to dividing
+    the NumPy sum by 255.
+    """
     grayscale = image.convert("L")
     width, height = grayscale.size
     try:
@@ -13247,12 +13256,20 @@ def _deskew_projection_score_numpy(image: Image.Image, np: Any) -> float:
         return _horizontal_projection_variance(image) + _vertical_projection_variance(image)
     if arr.shape != (height, width):
         return _horizontal_projection_variance(image) + _vertical_projection_variance(image)
+    
+    # Horizontal projection: variance of row pixel sums
+    # Net effect: (sum/width) * width/255 = sum/255
     row_sums = arr.sum(axis=1)
-    row_mean = row_sums.mean()
-    h_var = float(((row_sums - row_mean) ** 2).mean())
+    row_counts = row_sums / 255.0
+    row_mean = row_counts.mean()
+    h_var = float(((row_counts - row_mean) ** 2).mean())
+    
+    # Vertical projection: variance of column pixel sums
     col_sums = arr.sum(axis=0)
-    col_mean = col_sums.mean()
-    v_var = float(((col_sums - col_mean) ** 2).mean())
+    col_counts = col_sums / 255.0
+    col_mean = col_counts.mean()
+    v_var = float(((col_counts - col_mean) ** 2).mean())
+    
     return h_var + v_var
 
 
