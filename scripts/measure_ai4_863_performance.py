@@ -7,6 +7,7 @@ and resume processing optimizations.
 
 import argparse
 import json
+import shutil
 import time
 from pathlib import Path
 from typing import Any
@@ -135,7 +136,13 @@ def measure_resume_processing(
 ) -> dict[str, Any]:
     """Measure resume processing performance."""
     print("Measuring resume processing performance...")
-    
+
+    previous_process_dir = initial_manifest.parent
+    if not initial_manifest.exists():
+        raise FileNotFoundError(f"Initial processing manifest not found: {initial_manifest}")
+    if previous_process_dir.resolve() != output_dir.resolve():
+        shutil.copytree(previous_process_dir, output_dir, dirs_exist_ok=True)
+
     report = json.loads(scan_report.read_text(encoding="utf-8"))
     options = ProcessingOptions(
         deskew=True,

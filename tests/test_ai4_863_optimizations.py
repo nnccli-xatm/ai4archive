@@ -1,5 +1,6 @@
 ﻿"""AI4-863 performance optimization tests - Simple validation."""
 
+import importlib.util
 import json
 from pathlib import Path
 from PIL import Image
@@ -108,8 +109,74 @@ class TestAI4863Optimizations(unittest.TestCase):
             previous_record["processing_options_fingerprint"] = options_fingerprint
             
             # Should be reusable
-            result = _can_reuse_derivative(source, previous_record, options)
+            result = _can_reuse_derivative(source, previous_record, options, process_dir=tmp_path)
             self.assertTrue(result)
+
+    def test_can_reuse_derivative_missing_output_file(self):
+        """Verify derivative reuse validation fails when the derivative is missing."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            source = tmp_path / "source.png"
+            Image.new("RGB", (2000, 3000), color="white").save(source)
+            missing_derivative = tmp_path / "missing.png"
+
+            options = ProcessingOptions()
+            previous_record = {
+                "status": "processed",
+                "source_sha256": _compute_sha256_if_exists(source),
+                "processing_options_fingerprint": _processing_options_fingerprint(options),
+                "output_relative_path": missing_derivative.name,
+                "output_sha256": hashlib.sha256(b"not-present").hexdigest(),
+            }
+
+            result = _can_reuse_derivative(source, previous_record, options, process_dir=tmp_path)
+            self.assertFalse(result)
+
+    def test_can_reuse_derivative_output_hash_mismatch(self):
+        """Verify derivative reuse validation fails when the derivative digest changed."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            source = tmp_path / "source.png"
+            derivative = tmp_path / "derivative.png"
+            Image.new("RGB", (2000, 3000), color="white").save(source)
+            Image.new("RGB", (2000, 3000), color="gray").save(derivative)
+
+            options = ProcessingOptions()
+            previous_record = {
+                "status": "processed",
+                "source_sha256": _compute_sha256_if_exists(source),
+                "processing_options_fingerprint": _processing_options_fingerprint(options),
+                "output_relative_path": derivative.name,
+                "output_sha256": hashlib.sha256(b"different-output").hexdigest(),
+            }
+
+            result = _can_reuse_derivative(source, previous_record, options, process_dir=tmp_path)
+            self.assertFalse(result)
+
+    def test_can_reuse_derivative_rejects_output_outside_process_dir(self):
+        """Verify derivative reuse validation rejects paths outside the processing directory."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            process_dir = tmp_path / "processed"
+            outside_dir = tmp_path / "processed-other"
+            process_dir.mkdir()
+            outside_dir.mkdir()
+            source = tmp_path / "source.png"
+            derivative = outside_dir / "derivative.png"
+            Image.new("RGB", (2000, 3000), color="white").save(source)
+            Image.new("RGB", (2000, 3000), color="white").save(derivative)
+
+            options = ProcessingOptions()
+            previous_record = {
+                "status": "processed",
+                "source_sha256": _compute_sha256_if_exists(source),
+                "processing_options_fingerprint": _processing_options_fingerprint(options),
+                "output_relative_path": "../processed-other/derivative.png",
+                "output_sha256": _compute_sha256_if_exists(derivative),
+            }
+
+            result = _can_reuse_derivative(source, previous_record, options, process_dir=process_dir)
+            self.assertFalse(result)
     
     def test_can_reuse_derivative_invalid_status(self):
         """Verify derivative reuse validation fails for invalid status."""
@@ -286,6 +353,56 @@ class TestAI4863Optimizations(unittest.TestCase):
             self.assertIn("scan_measurements_reused", csv_content)
             self.assertIn("scan_measurement_reuse_reason", csv_content)
             self.assertIn("existing_derivative_reused", csv_content)
+
+    def test_measure_resume_processing_seeds_output_from_initial_manifest(self):
+        """Verify resume benchmark measures reuse from the prior processing output."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            previous_dir = tmp_path / "previous"
+            previous_images = previous_dir / "images"
+            previous_images.mkdir(parents=True)
+            initial_manifest = previous_dir / "processing_manifest.json"
+            initial_manifest.write_text(
+                json.dumps({"schema_version": "scan-qc.processing.v1", "files": []}),
+                encoding="utf-8",
+            )
+            (previous_images / "derivative.png").write_bytes(b"synthetic derivative")
+
+            scan_report = tmp_path / "scan_report.json"
+            scan_report.write_text(json.dumps({"files": []}), encoding="utf-8")
+            input_dir = tmp_path / "input"
+            input_dir.mkdir()
+            output_dir = tmp_path / "resume"
+
+            script_path = Path(__file__).parent.parent / "scripts" / "measure_ai4_863_performance.py"
+            spec = importlib.util.spec_from_file_location("measure_ai4_863_performance_for_test", script_path)
+            self.assertIsNotNone(spec)
+            self.assertIsNotNone(spec.loader)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+
+            def fake_process_images(report, passed_input_dir, passed_output_dir, options):
+                self.assertEqual(report, {"files": []})
+                self.assertEqual(passed_input_dir, input_dir)
+                self.assertEqual(passed_output_dir, output_dir)
+                self.assertTrue(options.resume_processing)
+                self.assertTrue((output_dir / "processing_manifest.json").exists())
+                self.assertTrue((output_dir / "images" / "derivative.png").exists())
+                return {
+                    "summary": {
+                        "processed_files": 0,
+                        "resumed_files": 1,
+                        "existing_derivative_reused_files": 1,
+                        "performance": {"processed_files_per_minute": 0.0},
+                        "workers": 2,
+                    }
+                }
+
+            module.process_images = fake_process_images
+            result = module.measure_resume_processing(initial_manifest, scan_report, input_dir, output_dir, workers=2)
+
+            self.assertEqual(result["files_resumed"], 1)
+            self.assertEqual(result["existing_derivative_reused_files"], 1)
 
 
 if __name__ == "__main__":

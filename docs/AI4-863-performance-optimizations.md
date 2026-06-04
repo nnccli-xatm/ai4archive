@@ -53,9 +53,10 @@ Before AI4-863, the processing pipeline performed several redundant operations:
    - Comparing source file hash (changes if source file was modified)
    - Comparing processing options fingerprint (changes if any option was modified)
    - Verifying output file existence and hash match
-3. If both match, the derivative is marked as reusable and processing is skipped
-4. The derivative reuse status is recorded as `resumed` status in processing manifest
-5. Processing audit tracks `skipped_due_to_resume` and `existing_derivative_reused_files` counts
+3. Dry-run processing plans also require the referenced derivative path to resolve under the supplied process directory before it can be marked reusable
+4. If all checks match, the derivative is marked as reusable and processing is skipped
+5. The derivative reuse status is recorded as `resumed` status in processing manifest
+6. Processing audit tracks `skipped_due_to_resume` and `existing_derivative_reused_files` counts
 
 **Expected Impact**:
 - 30-50% reduction in derivative writes during resume processing
@@ -78,9 +79,10 @@ Before AI4-863, the processing pipeline performed several redundant operations:
 
 **How It Works**:
 1. Processing plan generation can now validate derivative freshness when `process_dir` is provided
-2. Audit fields track both scan measurement and derivative reuse decisions
-3. CSV output includes new columns for comprehensive tracking
-4. Maintains full backward compatibility when new parameters are not provided
+2. Existing derivative reuse is rejected unless the previous manifest entry has a valid relative output path, a recorded output digest, an output file under `process_dir`, and a matching current digest
+3. Audit fields track both scan measurement and derivative reuse decisions
+4. CSV output includes new columns for comprehensive tracking
+5. Maintains full backward compatibility when new parameters are not provided
 
 ## Backward Compatibility
 
@@ -177,14 +179,17 @@ archive-scan-qc preflight \
    - Processing option change detection
    - Fallback behavior verification
 
-2. **test_ai4_863_optimizations.py** (9 tests):
+2. **test_ai4_863_optimizations.py** (13 tests):
    - Processing options fingerprint validation
    - Derivative reuse validation
+   - Missing, changed, or out-of-directory derivative rejection
+   - Resume benchmark seeding from the prior processing manifest
    - Hash computation testing
    - New functionality integration tests
 
 3. **Performance Measurement**:
    - Run `scripts/measure_ai4_863_performance.py` with private image data
+   - Full benchmark resume measurement seeds the resume output directory from the first processing manifest before timing
    - Run `scripts/run_aggregate_baseline.py` with optimizations enabled
    - Compare against the approved aggregate baseline
    - Document actual performance improvements
@@ -203,6 +208,11 @@ archive-scan-qc preflight \
 - Future: Consider similar optimizations for other processing phases
 
 ## Changelog
+
+### Version 1.0.1 (AI4-863 review hardening)
+- Tightened processing plan derivative reuse so stale manifest entries cannot be reused unless the derivative still exists under the process directory and matches the recorded digest
+- Updated the AI4-863 benchmark resume measurement to seed the resume output from the prior processing manifest before timing
+- Added regression coverage for missing, mismatched, and out-of-directory derivative outputs plus benchmark resume seeding
 
 ### Version 1.0.0 (AI4-863)
 - Enhanced scan measurement reuse in processing.py with comprehensive validation

@@ -43,7 +43,16 @@ def build_processing_plan(
     input_dir = input_dir.resolve()
     previous_records = _load_previous_records(process_dir) if (process_dir and options.resume_processing) else {}
     
-    records = [_plan_record(item, input_dir, options, previous_records.get(item.get("relative_path"))) for item in report.get("files", [])]
+    records = [
+        _plan_record(
+            item,
+            input_dir,
+            options,
+            process_dir=process_dir,
+            previous_record=previous_records.get(item.get("relative_path")),
+        )
+        for item in report.get("files", [])
+    ]
     planned_files = sum(1 for record in records if record["status"] == "planned")
     skipped_files = sum(1 for record in records if record["status"] == "skipped")
     unopenable_files = sum(1 for record in records if record["status"] == "unopenable")
@@ -155,6 +164,7 @@ def _plan_record(
     item: dict[str, Any],
     input_dir: Path,
     options: ProcessingOptions,
+    process_dir: Path | None = None,
     previous_record: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     relative_path = item.get("relative_path")
@@ -239,7 +249,7 @@ def _plan_record(
     
     # Check if existing derivative can be reused when resume_processing is enabled
     if options.resume_processing and previous_record:
-        if _can_reuse_derivative(source, previous_record, options):
+        if _can_reuse_derivative(source, previous_record, options, process_dir=process_dir):
             record["status"] = "planned"
             record["existing_derivative_reused"] = True
             record["proposed_operations"] = previous_record.get("proposed_operations", [])
@@ -355,6 +365,7 @@ def _can_reuse_derivative(
     source: Path,
     previous_record: dict[str, Any],
     options: ProcessingOptions,
+    process_dir: Path | None = None,
 ) -> bool:
     if previous_record.get("status") not in {"processed", "resumed"}:
         return False
@@ -366,7 +377,17 @@ def _can_reuse_derivative(
     output_sha256 = previous_record.get("output_sha256")
     if not isinstance(output_relative_path, str) or not isinstance(output_sha256, str) or not output_sha256:
         return False
-    return True
+    if process_dir is None:
+        return False
+
+    process_root = process_dir.resolve()
+    output_path = (process_root / output_relative_path).resolve()
+    try:
+        output_path.relative_to(process_root)
+    except ValueError:
+        return False
+
+    return _compute_sha256_if_exists(output_path) == output_sha256
 
 
 def _compute_sha256_if_exists(path: Path) -> str | None:
