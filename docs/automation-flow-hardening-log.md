@@ -192,3 +192,13 @@
   - `C:\Users\PS\code\symphony-zy\run_symphony_zy_windows.ps1`
   - `C:\Users\PS\code\symphony-zy\docs\git-handoff-hardening.md`
 - Reusable rule: after runtime-source hardening, a healthy state API is not enough proof that the fix is active. Confirm the escript timestamp or use the controlled launcher restart before resuming the same issue.
+
+### 2026-06-04: AI4-865 active run failed to converge before handoff
+
+- Trigger: AI4-865 ran for more than 13 minutes and consumed more than 2.6M tokens while compact health still returned `ok=true`. The workspace remained dirty and the session kept issuing ad hoc inline Python probes instead of converging to a commit/PR handoff.
+- Root cause: the active-runaway guard was too narrow. It required a 20 minute age and notification-only last event, so high-token dirty work with active tool output was treated as healthy. The session also showed a malformed tool call, a safe-git block for a destructive checkout, and then a shell-level binary rewrite of a source file, which corrupted unrelated localized strings into mojibake.
+- Fix location:
+  - `C:\Users\PS\.codex\skills\ai4archive-symphony-delivery\scripts\check_ai4_symphony.py`
+  - `docs/ai4archive-webhook-symphony-migration-kit/resources/ai4archive-symphony-delivery/scripts/check_ai4_symphony.py`
+- Reusable rule: an active issue that exceeds the configured token budget with a dirty workspace is not a healthy long run, even before 20 minutes. Current-session markers such as safe-git destructive-command blocks, tool-argument parse failures, or Unicode encoding failures must make compact health fail so the watchdog investigates before a bad commit or PR handoff.
+- Remaining risk: safe-git can block destructive git commands, but it cannot stop arbitrary shell scripts from rewriting files. A future stronger guard should reject commits or review handoffs that include broad unrelated encoding changes.
