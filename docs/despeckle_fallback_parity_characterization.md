@@ -211,8 +211,24 @@ _DESPECKLE_DENSE_FULL_COMPONENT_MAX_DARK_PIXELS = 50000
 # min(5, max(1, min(width, height) // 12))
 ```
 
+## NumPy Backend Implementation Status (AI4-867)
+
+AI4-867 validates the first narrow NumPy-backed candidate selection slice with
+full parity to the fallback behavior described here.
+
+- 11 NumPy backend parity tests pass.
+- All 27 AI4-866 fallback parity tests continue to pass.
+- Backend dispatch reports `numpy` when the OpenCV option delegates to the NumPy implementation.
+- Implementation notes are documented in `docs/numpy_backend_implementation_notes.md`.
+
+The NumPy backend uses `np.nonzero()` for dark pixel extraction and delegates to
+`_despeckle_candidate_points_from_dark_points()`, keeping candidate behavior
+identical to the fallback path.
+
+
 ## Related Issues
 
 - AI4-865: vectorized despeckle implementation, parked pending this characterization.
 - AI4-866: fallback parity characterization.
-- Future: NumPy/OpenCV optimization using these parity anchors.
+- AI4-867: NumPy backend slice implementation and validation.
+- Future: OpenCV backend and comprehensive performance benchmarking.

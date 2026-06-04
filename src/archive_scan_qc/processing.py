@@ -16790,7 +16790,7 @@ def _despeckle_candidate_points_with_backend(dark_mask: Image.Image, *, backend:
     if backend == "opencv":
         opencv_candidates = _despeckle_candidate_points_numpy(dark_mask)
         if opencv_candidates is not None:
-            return opencv_candidates, "opencv"
+            return opencv_candidates, "numpy"
         return _despeckle_candidate_points_fallback(dark_mask), "fallback"
     if backend == "numpy":
         numpy_candidates = _despeckle_candidate_points_numpy(dark_mask)
