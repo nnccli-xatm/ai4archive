@@ -112,9 +112,10 @@
 - 触发场景：`AI4-863` 多轮运行后已到测试通过阶段，但提交准备阶段先尝试了被本机策略拒绝的递归删除/强制删除命令，随后 `git add` 因 `.git/index.lock` 创建权限错误失败；未形成 commit、push 或 PR，issue 却被移到 `In Review`，导致 Symphony 释放 claim 后留下 idle dirty workspace。
 - 修复位置：
   - 本次恢复中停止了挂起的只读 git 查询进程，确认 issue 无关联 PR，将 `AI4-863` 移回 `In Progress`，写入聚合恢复说明，并触发 Symphony refresh。
+  - 实时跟踪时确认 `.git/index.lock` 可被手工创建并移除，说明故障更像 Git 进程/监控竞争，而不是永久目录权限损坏；恢复期间删除了误导性的 Linear 完成状态评论。
   - 当前不直接接管产品代码实现；由 Symphony 继续同一 issue 的提交、推送和 PR 交接。
-- 复用规则：测试通过不等于可进入评审态。只有 `git add/commit/push` 成功、PR 已创建或关联，并且工作区没有实质未提交变更时，agent 才能把 issue 移到 `In Review`；任何提交/推送失败都必须保持 `In Progress` 并记录失败原因。Windows 环境下避免使用会被策略拒绝的递归强制删除清理命令，临时构建缓存不应阻塞最小可提交差异。
-- 剩余风险：如果下一轮仍因 GitHub Desktop、fsmonitor 或后台 git 查询造成 index lock 权限异常，需要进一步收敛工作区 git 监控来源，或在 portable health/recovery 中加入“提交前发现挂起只读 git 进程时先清理”的检查。
+- 复用规则：测试通过不等于可进入评审态。只有 `git add/commit/push` 成功、PR 已创建或关联，并且工作区没有实质未提交变更时，agent 才能把 issue 移到 `In Review`；任何提交/推送失败都必须保持 `In Progress` 并记录失败原因。Windows 环境下避免使用会被策略拒绝的递归强制删除清理命令，临时构建缓存不应阻塞最小可提交差异。实时监控同一 issue 时避免频繁在该工作区运行 `git status`，优先使用 Symphony state、session log、Linear/GitHub 元数据，防止监控本身参与 index 竞争。
+- 剩余风险：如果下一轮仍因 GitHub Desktop、fsmonitor 或后台 git 查询造成 index lock 权限异常，需要进一步收敛工作区 git 监控来源，或在 portable health/recovery 中加入“提交前发现挂起只读 git 进程时先清理”的检查；如果验证阶段继续找不到 `pytest` 或无法导入包，需要把 Windows 环境验证命令固化为项目可用的最小命令。
 
 ## 后续记录模板
 
