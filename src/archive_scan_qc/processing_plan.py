@@ -21,9 +21,10 @@ def write_processing_plan(
     input_dir: Path,
     out_dir: Path,
     options: ProcessingOptions | None = None,
+    process_dir: Path | None = None,
 ) -> tuple[Path, Path, dict[str, Any]]:
     report = _load_report(report_path)
-    plan = build_processing_plan(report, input_dir, options)
+    plan = build_processing_plan(report, input_dir, options, process_dir=process_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     json_path = out_dir / PROCESSING_PLAN_JSON
     csv_path = out_dir / PROCESSING_PLAN_CSV
@@ -36,10 +37,22 @@ def build_processing_plan(
     report: dict[str, Any],
     input_dir: Path,
     options: ProcessingOptions | None = None,
+    process_dir: Path | None = None,
 ) -> dict[str, Any]:
     options = options or ProcessingOptions()
     input_dir = input_dir.resolve()
-    records = [_plan_record(item, input_dir, options) for item in report.get("files", [])]
+    previous_records = _load_previous_records(process_dir) if (process_dir and options.resume_processing) else {}
+    
+    records = [
+        _plan_record(
+            item,
+            input_dir,
+            options,
+            process_dir=process_dir,
+            previous_record=previous_records.get(item.get("relative_path")),
+        )
+        for item in report.get("files", [])
+    ]
     planned_files = sum(1 for record in records if record["status"] == "planned")
     skipped_files = sum(1 for record in records if record["status"] == "skipped")
     unopenable_files = sum(1 for record in records if record["status"] == "unopenable")
@@ -98,7 +111,7 @@ def build_processing_plan(
             "lighten_scanlines": options.lighten_scanlines,
             "enhance_faded_text": options.enhance_faded_text,
             "sharpen_text_edges": options.sharpen_text_edges,
-            "resume_processing": False,
+            "resume_processing": options.resume_processing,
             "reuse_scan_measurements": options.reuse_scan_measurements,
         },
         "summary": counts,
@@ -128,7 +141,32 @@ def _load_report(path: Path) -> dict[str, Any]:
     return payload
 
 
-def _plan_record(item: dict[str, Any], input_dir: Path, options: ProcessingOptions) -> dict[str, Any]:
+def _load_previous_records(process_dir: Path | None) -> dict[str, dict[str, Any]]:
+    if process_dir is None:
+        return {}
+    manifest_path = process_dir / "processing_manifest.json"
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return {}
+    if payload.get("schema_version") != "scan-qc.processing.v1" or not isinstance(payload.get("files"), list):
+        return {}
+    records: dict[str, dict[str, Any]] = {}
+    for record in payload["files"]:
+        if isinstance(record, dict):
+            source_relative_path = record.get("source_relative_path")
+            if isinstance(source_relative_path, str) and source_relative_path:
+                records[source_relative_path] = record
+    return records
+
+
+def _plan_record(
+    item: dict[str, Any],
+    input_dir: Path,
+    options: ProcessingOptions,
+    process_dir: Path | None = None,
+    previous_record: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     relative_path = item.get("relative_path")
     record = {
         "source_relative_path": relative_path,
@@ -195,6 +233,9 @@ def _plan_record(item: dict[str, Any], input_dir: Path, options: ProcessingOptio
         "processing_audit": None,
         "processing_warnings": [],
         "failure_reason": None,
+        "scan_measurements_reused": False,
+        "scan_measurement_reuse_reason": None,
+        "existing_derivative_reused": False,
     }
     if not isinstance(relative_path, str) or not relative_path:
         record["failure_reason"] = "missing relative_path"
@@ -205,6 +246,29 @@ def _plan_record(item: dict[str, Any], input_dir: Path, options: ProcessingOptio
         return record
 
     source = input_dir / relative_path
+    
+    # Check if existing derivative can be reused when resume_processing is enabled
+    if options.resume_processing and previous_record:
+        if _can_reuse_derivative(source, previous_record, options, process_dir=process_dir):
+            record["status"] = "planned"
+            record["existing_derivative_reused"] = True
+            record["proposed_operations"] = previous_record.get("proposed_operations", [])
+            # Reuse metadata from previous successful processing
+            for key in [
+                "original_size", "planned_output_size", "deskew_candidate", "deskew_reason",
+                "dark_border_trim_candidate", "auto_crop_candidate", "despeckle_candidate",
+                "tone_normalization_candidate", "paper_color_cast_normalization_candidate",
+                "edge_shadow_lightening_candidate", "corner_shadow_cleanup_candidate",
+                "background_stain_lightening_candidate", "illumination_gradient_leveling_candidate",
+                "scanline_lightening_candidate", "faded_text_enhancement_candidate",
+                "text_edge_sharpening_candidate"
+            ]:
+                if key in previous_record:
+                    record[key] = previous_record[key]
+            return record
+
+    # Always call _process_image for compatibility with existing tests
+    # The reuse_scan_measurements optimization happens inside _process_image
     try:
         with Image.open(source) as image:
             _processed, operations, process_info = _process_image(image, options, scan_record=item)
@@ -212,7 +276,21 @@ def _plan_record(item: dict[str, Any], input_dir: Path, options: ProcessingOptio
         record["status"] = "unopenable"
         record["failure_reason"] = str(exc)
         return record
-
+    
+    # Track scan measurement reuse for audit purposes
+    if options.reuse_scan_measurements:
+        # Check if the operations indicate scan measurements were reused
+        scan_measurements_reused = any(
+            op in operations 
+            for op in [
+                "skew_detect_reused_scan_measurement",
+                "dark_border_detect_reused_scan_measurement"
+            ]
+        )
+        record["scan_measurements_reused"] = scan_measurements_reused
+        if scan_measurements_reused:
+            record["scan_measurement_reuse_reason"] = "scan_measurements_available"
+    
     record.update(
         {
             "status": "planned",
@@ -283,6 +361,74 @@ def _plan_record(item: dict[str, Any], input_dir: Path, options: ProcessingOptio
     return record
 
 
+def _can_reuse_derivative(
+    source: Path,
+    previous_record: dict[str, Any],
+    options: ProcessingOptions,
+    process_dir: Path | None = None,
+) -> bool:
+    if previous_record.get("status") not in {"processed", "resumed"}:
+        return False
+    if previous_record.get("source_sha256") != _compute_sha256_if_exists(source):
+        return False
+    if previous_record.get("processing_options_fingerprint") != _processing_options_fingerprint(options):
+        return False
+    output_relative_path = previous_record.get("output_relative_path")
+    output_sha256 = previous_record.get("output_sha256")
+    if not isinstance(output_relative_path, str) or not isinstance(output_sha256, str) or not output_sha256:
+        return False
+    if process_dir is None:
+        return False
+
+    process_root = process_dir.resolve()
+    output_path = (process_root / output_relative_path).resolve()
+    try:
+        output_path.relative_to(process_root)
+    except ValueError:
+        return False
+
+    return _compute_sha256_if_exists(output_path) == output_sha256
+
+
+def _compute_sha256_if_exists(path: Path) -> str | None:
+    if not path.exists() or not path.is_file():
+        return None
+    import hashlib
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError:
+        return None
+
+
+def _processing_options_fingerprint(options: ProcessingOptions) -> str:
+    import hashlib
+    key_data = json.dumps({
+        "auto_crop": options.auto_crop,
+        "deskew": options.deskew,
+        "trim_dark_border": options.trim_dark_border,
+        "scanner_gutter_trim": options.scanner_gutter_trim,
+        "despeckle": options.despeckle,
+        "normalize_tones": options.normalize_tones,
+        "normalize_paper_color_cast": options.normalize_paper_color_cast,
+        "lighten_edge_shadow": options.lighten_edge_shadow,
+        "lighten_corner_shadows": options.lighten_corner_shadows,
+        "lighten_background_stains": options.lighten_background_stains,
+        "lighten_fold_shadows": options.lighten_fold_shadows,
+        "level_illumination_gradient": options.level_illumination_gradient,
+        "clean_bleed_through": options.clean_bleed_through,
+        "lighten_scanlines": options.lighten_scanlines,
+        "enhance_faded_text": options.enhance_faded_text,
+        "sharpen_text_edges": options.sharpen_text_edges,
+        "deskew_max_degrees": options.deskew_max_degrees,
+        "deskew_min_confidence": options.deskew_min_confidence,
+    }, sort_keys=True)
+    return hashlib.sha256(key_data.encode()).hexdigest()[:16]
+
+
 def _operation_count(records: list[dict[str, Any]], operation: str) -> int:
     return sum(1 for record in records if operation in record.get("proposed_operations", []))
 
@@ -344,6 +490,9 @@ def _write_plan_csv(plan: dict[str, Any], path: Path) -> None:
         "text_edges_candidate_pixel_ratio",
         "processing_warnings",
         "failure_reason",
+        "scan_measurements_reused",
+        "scan_measurement_reuse_reason",
+        "existing_derivative_reused",
     ]
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
