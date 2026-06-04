@@ -202,3 +202,10 @@
   - `docs/ai4archive-webhook-symphony-migration-kit/resources/ai4archive-symphony-delivery/scripts/check_ai4_symphony.py`
 - Reusable rule: an active issue that exceeds the configured token budget with a dirty workspace is not a healthy long run, even before 20 minutes. Current-session markers such as safe-git destructive-command blocks, tool-argument parse failures, or Unicode encoding failures must make compact health fail so the watchdog investigates before a bad commit or PR handoff.
 - Remaining risk: safe-git can block destructive git commands, but it cannot stop arbitrary shell scripts from rewriting files. A future stronger guard should reject commits or review handoffs that include broad unrelated encoding changes.
+
+### 2026-06-04: AI4-865 parked after repeated non-convergent attempts
+
+- Trigger: a second clean AI4-865 attempt again exceeded the active-run budget, left temporary files, and kept debugging backend parity instead of reaching a commit/PR handoff.
+- Root cause: the issue scope asked for vectorization and fallback parity at once, but the current agent repeatedly expanded into backend redesign probes. Retrying the same broad issue produced more token burn without a stable handoff.
+- Recovery: moved AI4-865 back to `Backlog`, quarantined the dirty workspace for inspection, and created AI4-866 as a narrower replacement focused only on fallback parity characterization before any future vectorization attempt.
+- Reusable rule: after two quarantined non-convergent attempts on the same implementation issue, do not automatically retry the same issue. Park it, document the blocker, and dispatch a narrower prerequisite issue that constrains the agent to tests or one explicit anchor.
