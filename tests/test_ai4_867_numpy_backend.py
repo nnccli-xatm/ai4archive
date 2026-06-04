@@ -20,7 +20,10 @@ from archive_scan_qc.processing import (
     _load_numpy,
 )
 
+NUMPY_AVAILABLE = _load_numpy() is not None
 
+
+@unittest.skipUnless(NUMPY_AVAILABLE, "NumPy optional fast path unavailable")
 class TestNumPyBackendAvailability(unittest.TestCase):
     """Test NumPy backend availability and loading."""
 
@@ -30,6 +33,7 @@ class TestNumPyBackendAvailability(unittest.TestCase):
         self.assertIsNotNone(np, "NumPy is required for AI4-867 backend tests")
 
 
+@unittest.skipUnless(NUMPY_AVAILABLE, "NumPy optional fast path unavailable")
 class TestNumPyBackendParity(unittest.TestCase):
     """Verify NumPy backend produces identical results to fallback."""
 
