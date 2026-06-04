@@ -129,7 +129,22 @@
   - `C:\Users\PS\code\symphony-zy\tmp\ai4archive-local-run\WORKFLOW.md`
   - `C:\Users\PS\code\symphony-zy\docs\git-handoff-hardening.md`
 - 复用规则：Windows runtime 启动时把 safe-git 放到 PATH 前缀；issue workspace 内的 git 命令自动使用 `.git-meta`，并阻断 `reset --hard`、`clean`、`stash`、path checkout/restore；缺少已认证 `gh` 或缺少 PR 时必须保持 `In Progress`，不得进入 `In Review`。
+- 追加修复：实时复测发现仅在启动脚本中添加 safe-git PATH 不足够；`mise exec` 启动链和 Codex 命令执行环境重建都会导致 worker 内 `Get-Command git` 仍解析到系统 Git，从而继续触发 `.git/index.lock` 权限错误。`symphony-zy` 启动脚本已改为通过 `mise which escript` 解析真实 `escript.exe` 并直接启动，同时在 WORKFLOW 的 Codex command 中用 `shell_environment_policy.set.*` 显式设置 `PATH`、`AI4_REAL_GIT`、`AI4_SAFE_GIT_BIN`、`AI4_SAFE_GIT_WORKSPACE_ROOT`。文档要求恢复后必须在 worker 内验证 `Get-Command git` 指向 `bin\safe-git\git.cmd`。
+- 二次修复：继续复测发现不能把 Git Bash 的 `${PATH}` 直接传给 Codex；该值会被转换为 POSIX 冒号分隔路径，Windows worker 随后找不到 `powershell.exe`、`python` 和 `git.exe`，导致 863 再次空转。启动脚本现在生成 `AI4_CODEX_WINDOWS_PATH`，保留 Windows 原生分号 PATH，并显式补齐 System32、WindowsPowerShell、Python、safe-git、GitHub CLI 等关键目录；WORKFLOW 的 `shell_environment_policy.set.PATH` 改为使用该变量。
+- 三次修复：同一轮复测中，`git add` 和本地 commit 已成功，但 `git push` 两次被 Codex shell 默认 10 秒超时杀掉，表现为 `Exit code: 124`，不能误判为实现失败或凭证失败。WORKFLOW 现在要求 `git push`、`gh pr create`、性能/集成验证命令显式设置较长 shell timeout；默认 10 秒超时只表示命令预算不足。
 - 剩余风险：GitHub CLI 已安装但仍需非交互认证才能让 Symphony 自主 `gh pr create`；在认证完成前，Symphony 可以继续实现和提交本地分支，但 PR 创建仍可能需要 Codex/GitHub connector 兜底。
+
+### 2026-06-04: AI4-863 push timeout recovery and safe-git health probes
+
+- 触发场景：AI4-863 已通过 safe-git 成功建分支、`git add`、本地 commit，但 worker 仍用默认 shell timeout 执行 `git push`，连续以 10 秒 `Exit code: 124` 失败并停在 `In Progress`。
+- 修复位置：
+  - `C:\Users\PS\.codex\skills\ai4archive-symphony-delivery\scripts\check_ai4_symphony.py`
+  - `C:\Users\PS\code\symphony-zy\docs\git-handoff-hardening.md`
+  - `C:\Users\PS\code\symphony-zy\WORKFLOW.md`
+  - `C:\Users\PS\code\symphony-zy\WORKFLOW.zy.example.md`
+  - `C:\Users\PS\code\symphony-zy\tmp\ai4archive-local-run\WORKFLOW.md`
+- 复用规则：当 issue workspace 存在 `.git-meta` 时，health checker 必须用 `GIT_DIR=.git-meta` 和 `GIT_WORK_TREE=<workspace>` 判断真实 worker git 状态，不能用普通 `.git` 视图误报脏工作区。`git push` 和 PR 创建必须使用长超时；10 秒超时只代表 shell 预算不足。若 Symphony 已完成本地提交但发布交接失败，orchestrator 可只接管 push/PR/comment/state handoff，不接管产品实现。
+- 剩余风险：GitHub CLI 仍未登录，当前 PR 创建依赖 GitHub connector 兜底；若后续要完全无人值守，需要配置非交互式 `gh` 认证或把 PR 创建能力下沉到 Symphony 的受控工具层。
 
 ```text
 ### YYYY-MM-DD: 标题
