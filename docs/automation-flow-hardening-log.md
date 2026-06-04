@@ -117,6 +117,16 @@
 - 复用规则：测试通过不等于可进入评审态。只有 `git add/commit/push` 成功、PR 已创建或关联，并且工作区没有实质未提交变更时，agent 才能把 issue 移到 `In Review`；任何提交/推送失败都必须保持 `In Progress` 并记录失败原因。Windows 环境下避免使用会被策略拒绝的递归强制删除清理命令，临时构建缓存不应阻塞最小可提交差异。实时监控同一 issue 时避免频繁在该工作区运行 `git status`，优先使用 Symphony state、session log、Linear/GitHub 元数据，防止监控本身参与 index 竞争。
 - 剩余风险：如果下一轮仍因 GitHub Desktop、fsmonitor 或后台 git 查询造成 index lock 权限异常，需要进一步收敛工作区 git 监控来源，或在 portable health/recovery 中加入“提交前发现挂起只读 git 进程时先清理”的检查；如果验证阶段继续找不到 `pytest` 或无法导入包，需要把 Windows 环境验证命令固化为项目可用的最小命令。
 
+### 2026-06-04: AI4-863 多轮 rework 仍无有效 diff 的接管阈值
+
+- 触发场景：`AI4-863` 的 PR #735 已有明确 blocking review 和直接 patch targets，但 Symphony worker 多次重启后仍反复读文件、使用错误 shell 参数或脆弱的内联字符串替换，最终只留下半截/无效 diff，未修复性能脚本 blocker，也未完成测试和 PR 更新。继续重派同一 worker 会继续消耗 token 且延误合并。
+- 修复位置：
+  - 本次恢复中停止当前 worker，保留同一 Linear issue 和 PR 分支，由 orchestrator 在 issue workspace 上完成最小 review-fix patch、专项验证、提交、推送、PR 合并和 main CI finalizer。
+  - `C:\Users\PS\.codex\skills\ai4archive-symphony-delivery\SKILL.md`
+  - `C:\Users\PS\.codex\skills\ai4archive-symphony-delivery\state\orchestration-state.json`
+- 复用规则：同一 blocking PR rework 如果已经重启三次以上，且 worker 仍无有效 diff 或只留下破坏性半截 diff，watchdog 不应继续无限重派。应停止当前 worker、保留同一 PR/issue，允许 orchestrator 做最小 review-fix patch 和验证/合并交接，并在 Linear 与本日志记录升级原因。该规则只适用于已有明确 PR blocker 且修复范围小而可验证的场景，不应绕过 Symphony 去接管新功能开发。
+- 剩余风险：这是人工接管阈值，不是自动实现替代方案。后续仍需改进 Symphony worker 的编辑工具选择和 rework 执行能力，例如避免用内联 `python -c` 做复杂多行源码替换，优先使用结构化 patch 工具。
+
 ## 后续记录模板
 
 ### 2026-06-04: AI4-863 长时间停滞的 git/PR 交接硬化
