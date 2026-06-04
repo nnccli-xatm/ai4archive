@@ -173,3 +173,13 @@
   - `docs/ai4archive-webhook-symphony-migration-kit/resources/ai4archive-symphony-delivery/scripts/check_ai4_symphony.py`
 - Reusable rule: compact health now flags `active_runaway` when an active issue exceeds the configured runtime threshold, token threshold, and still reports only notification/rate-limit activity. This makes the watchdog investigate and recover instead of treating a runaway active turn as healthy.
 - Remaining risk: this is a watchdog-level detector, not a native Symphony cancellation API. A proper single-issue pause/cancel/restart endpoint would make recovery cleaner than using Linear state transitions or full runtime restart.
+
+### 2026-06-04: Invalid In Review handoff bypassed after_run recovery
+
+- Trigger: AI4-865's agent saw an untracked temporary file and had not pushed a branch or linked a PR, but still moved the Linear issue to `In Review`. Symphony treated `In Review` as non-active and terminated the worker immediately, leaving a dirty idle workspace.
+- Fix location:
+  - `C:\Users\PS\code\symphony-zy\lib\symphony_elixir\orchestrator.ex`
+  - `C:\Users\PS\code\symphony-zy\test\symphony_elixir\core_test.exs`
+  - `C:\Users\PS\code\symphony-zy\docs\git-handoff-hardening.md`
+- Reusable rule: prompt rules are not enough for review handoff. When a running issue transitions to a non-active state without workspace cleanup, Symphony must still execute the configured `after_run` hook so the invalid-review recovery script can move dirty or PR-less handoffs back to `In Progress`.
+- Remaining risk: the current guard still relies on local Linear GraphQL and workspace inspection. A future native handoff gate should reject `In Review` transitions before they are written when no PR link, clean status, and validation evidence are present.
