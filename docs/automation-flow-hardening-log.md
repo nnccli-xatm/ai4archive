@@ -164,3 +164,12 @@
 - 复用规则：
 - 剩余风险：
 ```
+
+### 2026-06-04: Active runaway detection for notification-only long runs
+
+- Trigger: AI4-865 stayed `In Progress` for more than 20 minutes while token usage exceeded several million. Symphony state kept updating only with notification/rate-limit events, so the compact health check still returned `ok=true` even though the issue had not committed, pushed, or opened a PR.
+- Fix location:
+  - `C:\Users\PS\.codex\skills\ai4archive-symphony-delivery\scripts\check_ai4_symphony.py`
+  - `docs/ai4archive-webhook-symphony-migration-kit/resources/ai4archive-symphony-delivery/scripts/check_ai4_symphony.py`
+- Reusable rule: compact health now flags `active_runaway` when an active issue exceeds the configured runtime threshold, token threshold, and still reports only notification/rate-limit activity. This makes the watchdog investigate and recover instead of treating a runaway active turn as healthy.
+- Remaining risk: this is a watchdog-level detector, not a native Symphony cancellation API. A proper single-issue pause/cancel/restart endpoint would make recovery cleaner than using Linear state transitions or full runtime restart.
