@@ -104,14 +104,14 @@ All changes are fully backward compatible:
 
 ## Performance Measurements
 
-### Baseline Metrics (from AI4-862)
-- Processing throughput: 111.61 files/minute
-- Baseline measurement established on private validation sample
+### Baseline Metrics
+- Compare against the current approved aggregate baseline from the operator environment.
+- Keep private validation set details out of public artifacts.
 
 ### Expected Improvements
 - **Processing with reuse_scan_measurements**: 1.5-2x speedup (30-50% fewer detection operations)
 - **Resume Processing**: 1.5-2x speedup (30-50% fewer derivative writes)
-- **Overall Throughput**: Measurable improvement above 111.61 files/minute
+- **Overall Throughput**: Measurable improvement above the approved aggregate baseline
 
 ### Validation Requirements
 1. Processing failures remain zero on private validation sample
@@ -186,7 +186,7 @@ archive-scan-qc preflight \
 3. **Performance Measurement**:
    - Run `scripts/measure_ai4_863_performance.py` with private image data
    - Run `scripts/run_aggregate_baseline.py` with optimizations enabled
-   - Compare against 111.61 files/minute baseline
+   - Compare against the approved aggregate baseline
    - Document actual performance improvements
 
 ## Maintenance Notes

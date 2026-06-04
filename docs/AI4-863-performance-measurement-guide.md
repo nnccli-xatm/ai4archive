@@ -3,7 +3,7 @@
 ## Quick Start for Private Validation
 
 ### Prerequisites
-- Access to private image samples (20-image test set, 149-image baseline)
+- Access to an operator-approved private validation set
 - Python environment with archive_scan_qc installed
 - Writeable output directory for generated artifacts
 
@@ -11,8 +11,12 @@
 
 #### 1. Run Performance Script with Private Data
 ```bash
-# Set environment variable for proper module loading
-$env:PYTHONPATH = "c:\Users\PS\code\ai4archive-symphony-workspaces\AI4-863\src"
+# From the repository root, set module loading to the local src directory.
+# PowerShell:
+$env:PYTHONPATH = (Resolve-Path .\src).Path
+
+# Bash:
+export PYTHONPATH="$(pwd)/src"
 
 # Run comprehensive performance measurement
 python scripts/measure_ai4_863_performance.py `
@@ -37,7 +41,7 @@ python scripts/run_aggregate_baseline.py `
 
 #### 3. Compare Against Baseline
 - Review `aggregate_baseline_summary.json` for throughput metrics
-- Compare `files_per_minute` against the 111.61 files/minute baseline
+- Compare `files_per_minute` against the current approved aggregate baseline
 - Check `scan_measurement_reuse` and `existing_derivative_reused` counts
 
 ### Privacy Requirements
@@ -72,7 +76,7 @@ python scripts/run_aggregate_baseline.py `
 
 #### Success Indicators:
 1. **Zero Processing Failures**: All files processed successfully
-2. **Measurable Throughput Improvement**: >111.61 files/minute or documented reason
+2. **Measurable Throughput Improvement**: Above the approved aggregate baseline or documented reason
 3. **Audit Trail Completeness**: All optimization decisions logged
 4. **Backward Compatibility**: Existing workflows unchanged
 5. **Privacy Compliance**: No private data in public artifacts
@@ -107,7 +111,7 @@ After performance measurement, update this documentation:
 
 1. **Actual Performance Numbers**: Replace expected ranges with measured values
 2. **Reuse Statistics**: Document actual scan measurement and derivative reuse ratios
-3. **Baseline Comparison**: Document comparison against 111.61 files/minute baseline
+3. **Baseline Comparison**: Document comparison against the approved aggregate baseline
 4. **Privacy Compliance**: Confirm all privacy requirements were met
 
 ### Next Steps
