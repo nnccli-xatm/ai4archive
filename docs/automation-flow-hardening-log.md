@@ -219,3 +219,16 @@
   - `docs/ai4archive-webhook-symphony-migration-kit/resources/ai4archive-symphony-delivery/scripts/recover_invalid_review_handoff.py`
 - Reusable rule: invalid-review recovery must use the same privacy-safe PR evidence as orchestration: GitHub PR attachments or recent Linear comments containing a PR URL. Runtime-only artifacts such as `.git-meta`, `__pycache__`, pytest caches, and build caches must not reopen an otherwise valid PR handoff.
 - Remaining risk: a future worker could still leave stale alternate git metadata with unpublished useful commits. The safe default is to require missing-PR recovery when no PR evidence exists, but not to reopen a valid PR only because runtime caches remain.
+
+### 2026-06-05: AI4-867 total issue age was hidden by restart-level health checks
+
+- Trigger: AI4-867 consumed several hours while repeated Symphony restarts kept the current `attempt_age` short. Compact health later reported idle/healthy even though the local scope lock was still active and PR #738 required CI action.
+- Root cause: health checks did not treat an idle active scope lock as actionable, and issue age was read only from the `issues` state map, not from `issue_scope_locks`. The invalid-review recovery script also used the ordinary `.git` view instead of `.git-meta`, so valid safe-git workspaces could be classified as dirty. Separately, PR #738 failed CI because the new NumPy tests assumed the optional NumPy extra was installed in the base CI environment.
+- Fix location:
+  - `C:\Users\PS\.codex\skills\ai4archive-symphony-delivery\scripts\check_ai4_symphony.py`
+  - `C:\Users\PS\.codex\skills\ai4archive-symphony-delivery\scripts\recover_invalid_review_handoff.py`
+  - `C:\Users\PS\.codex\skills\ai4archive-symphony-delivery\SKILL.md`
+  - `docs/ai4archive-webhook-symphony-migration-kit/resources/ai4archive-symphony-delivery/`
+  - PR #738 test update on `AI4-867`
+- Reusable rule: watchdogs must judge stale work by total issue/scope-lock age, not only current attempt age. If Symphony is idle but a scope lock remains active, check the same issue's PR/CI and resolve it before creating new work. Optional-backend tests must either install the optional extra in CI or skip optional-fast-path assertions when the optional package is unavailable.
+- Remaining risk: target-alignment still depends on an authenticated `gh` CLI when run locally; the GitHub connector can verify changed files, but a future hardening pass should make the alignment gate use connector data or a configured token.
