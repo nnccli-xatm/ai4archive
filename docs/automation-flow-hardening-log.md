@@ -183,3 +183,12 @@
   - `C:\Users\PS\code\symphony-zy\docs\git-handoff-hardening.md`
 - Reusable rule: prompt rules are not enough for review handoff. When a running issue transitions to a non-active state without workspace cleanup, Symphony must still execute the configured `after_run` hook so the invalid-review recovery script can move dirty or PR-less handoffs back to `In Progress`.
 - Remaining risk: the current guard still relies on local Linear GraphQL and workspace inspection. A future native handoff gate should reject `In Review` transitions before they are written when no PR link, clean status, and validation evidence are present.
+
+### 2026-06-04: Restart recovery served an old Symphony escript
+
+- Trigger: after the forced-stop `after_run` patch was committed, the local state API could still be healthy while the running service was an older `bin/symphony` escript built before the patch.
+- Root cause: the Windows launcher rebuilt `bin/symphony` only when the file was missing, and another launcher invocation could treat an already-listening old process as success.
+- Fix location:
+  - `C:\Users\PS\code\symphony-zy\run_symphony_zy_windows.ps1`
+  - `C:\Users\PS\code\symphony-zy\docs\git-handoff-hardening.md`
+- Reusable rule: after runtime-source hardening, a healthy state API is not enough proof that the fix is active. Confirm the escript timestamp or use the controlled launcher restart before resuming the same issue.
