@@ -1,4 +1,4 @@
-﻿"""Local derivative-image processing for scanned-image batches.
+"""Local derivative-image processing for scanned-image batches.
 
 The processing layer never modifies source images. It writes derivative files
 and a manifest that links each output back to the original scan record.
