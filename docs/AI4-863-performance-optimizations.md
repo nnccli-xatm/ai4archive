@@ -1,107 +1,115 @@
-# AI4-863: Performance Optimizations - Reduce Repeated Image Decode and Low-Value Derivative Writes
+﻿# AI4-863: Performance Optimizations - Reduce Repeated Image Decode and Low-Value Derivative Writes
 
 ## Summary
 
-This document describes the performance optimizations implemented in AI4-863 to reduce redundant image decoding and derivative writes during scan-QC processing. The improvements primarily target processing plan generation and resume processing scenarios.
+This document describes the performance optimizations implemented in AI4-863 to reduce redundant image decoding and derivative writes during scan-QC processing. The improvements primarily target scan measurement reuse during processing and resume processing scenarios.
 
 ## Problem Statement
 
 Before AI4-863, the processing pipeline performed several redundant operations:
 
-1. **Redundant Image Decoding**: The processing plan phase always opened and decoded images, even when the same measurements (skew, dark_border) were already captured during the scan phase.
+1. **Redundant Image Decoding**: The processing phase always opened and decoded images, even when the same measurements (skew, dark_border) were already captured during the scan phase.
 
-2. **Redundant Detection Operations**: Skew detection, dark border detection, and other measurements were re-computed during processing plan generation, even though they were available in the scan report.
+2. **Redundant Detection Operations**: Skew detection, dark border detection, and other measurements were re-computed during processing, even though they were available in the scan report.
 
 3. **Unnecessary Derivative Re-writes**: During resume processing, derivative files were rewritten even when the source image and processing options had not changed.
-
-4. **Redundant Hash Computations**: File hashes were computed multiple times across scan, plan, and processing phases.
 
 ## Solution Implementation
 
 ### 1. Scan Measurement Reuse
 
-**File Modified**: `src/archive_scan_qc/processing_plan.py`
+**File Modified**: `src/archive_scan_qc/processing.py`
 
-**Key Functions Added**:
-- `_extract_scan_measurements()`: Extracts skew angle, confidence, dark_border bbox, and other measurements from scan report
-- `_populate_from_scan_measurements()`: Populates plan records with scan measurements without image decode
-- Conditional image decode in `_plan_record()`: Skips decode when measurements are valid
+**Key Functions Modified/Enhanced**:
+- `_scan_measurements_for_processing()`: Extracts skew angle, confidence, dark_border bbox, and other measurements from scan report
+- `_safe_deskew_skip_from_scan_record()`: Reuses skew detection results when valid
+- `_process_image()`: Integrates scan measurement reuse into main processing flow
 
 **How It Works**:
-1. When `reuse_scan_measurements` is enabled, the processing plan checks if scan measurements are valid
+1. When `reuse_scan_measurements` is enabled in ProcessingOptions, the processing checks if scan measurements are valid
 2. If valid (image is openable, dimensions match, measurements are present), it uses them directly
-3. Only if measurements are missing/invalid does it perform full image decode and re-detection
-4. The scan measurement reuse reason is recorded for audit purposes
+3. Only if measurements are missing/invalid does it perform full detection
+4. The scan measurement reuse is recorded in operation timing and audit logs
+5. Specific operations are tracked: `skew_detect_reused_scan_measurement`, `dark_border_detect_reused_scan_measurement`
 
 **Expected Impact**:
-- 50-80% reduction in image decode operations during dry-run processing plan generation
+- 50-80% reduction in detection operations during processing with scan measurement reuse
 - Significant speedup for large batches with high scan measurement reuse rate
+- Automatic fallback to full detection when measurements are unavailable
 
-### 2. Resume Processing Support
+### 2. Resume Processing with Derivative Reuse
 
-**Key Functions Added**:
+**File Modified**: `src/archive_scan_qc/processing.py`
+
+**Key Functions Enhanced**:
 - `_load_previous_records()`: Loads previous processing manifest from process directory
-- `_can_reuse_derivative()`: Validates derivative freshness by checking source hash and processing options fingerprint
+- `_previous_record_is_current()`: Validates derivative freshness by checking source hash and processing options fingerprint
 - `_processing_options_fingerprint()`: Creates SHA256 fingerprint of processing options to detect changes
-- `_compute_sha256_if_exists()`: Computes hash only when file exists and is readable
-
-**Parameters Added**:
-- `process_dir`: Optional path to previous processing output directory
-- `resume_processing`: Boolean flag to enable derivative reuse
+- `process_images()`: Integrates derivative reuse into main processing flow
 
 **How It Works**:
-1. When `resume_processing` is enabled and `process_dir` is provided, the plan loads previous processing records
+1. When `resume_processing` is enabled in ProcessingOptions, the processing loads previous records
 2. For each file, it checks if the existing derivative is still valid by:
    - Comparing source file hash (changes if source file was modified)
    - Comparing processing options fingerprint (changes if any option was modified)
+   - Verifying output file existence and hash match
 3. If both match, the derivative is marked as reusable and processing is skipped
-4. The derivative reuse status is recorded for audit purposes
+4. The derivative reuse status is recorded as `resumed` status in processing manifest
+5. Processing audit tracks `skipped_due_to_resume` and `existing_derivative_reused_files` counts
 
 **Expected Impact**:
 - 30-50% reduction in derivative writes during resume processing
 - Faster resume operations for large batches where most files are unchanged
+- Automatic detection of source file or processing option changes
 
-### 3. Hash Computation Optimization
+### 3. Processing Plan Audit Enhancement
 
-**Key Function Added**:
-- `_compute_sha256_if_exists()`: Computes hash only when file exists and is readable
+**File Modified**: `src/archive_scan_qc/processing_plan.py`
+
+**Key Functions Enhanced**:
+- `write_processing_plan()`: Added `process_dir` parameter for derivative reuse validation
+- `build_processing_plan()`: Added support for loading previous records and derivative reuse checking
+- `_write_plan_csv()`: Added new audit fields to CSV output
+
+**New Audit Fields**:
+- `scan_measurements_reused`: Boolean flag indicating scan measurement reuse
+- `scan_measurement_reuse_reason`: Reason code when reuse occurs
+- `existing_derivative_reused`: Boolean flag indicating derivative reuse during planning
 
 **How It Works**:
-- Returns `None` if file doesn't exist or isn't readable (instead of raising exception)
-- Avoids redundant hash computations by caching results where possible
-- Used for both source and derivative hash validation
-
-**Expected Impact**:
-- Reduced overhead in derivative reuse checks
-- Fewer exceptions and error handling overhead
+1. Processing plan generation can now validate derivative freshness when `process_dir` is provided
+2. Audit fields track both scan measurement and derivative reuse decisions
+3. CSV output includes new columns for comprehensive tracking
+4. Maintains full backward compatibility when new parameters are not provided
 
 ## Backward Compatibility
 
 All changes are fully backward compatible:
 
 1. **New Parameters Have Defaults**:
-   - `process_dir` defaults to `None`
+   - `process_dir` defaults to `None` in processing_plan functions
    - `resume_processing` defaults to `False` in ProcessingOptions
    - `reuse_scan_measurements` defaults to `False` in ProcessingOptions
 
 2. **Existing Behavior Preserved**:
-   - Callers that don't provide new parameters maintain existing behavior
-   - Image decode still happens when measurements are invalid
-   - Processing still runs normally when resume is disabled
+   - Callers that don't enable new flags maintain existing behavior
+   - Processing still runs normally when reuse flags are disabled
+   - Derivative reuse only activates when explicitly enabled
 
 3. **CLI Unchanged**:
-   - `--reuse-scan-measurements` flag already exists and is reused
+   - `--reuse-scan-measurements` flag already exists and works as expected
+   - `--resume-processing` flag already exists and works as expected
    - No new CLI arguments required
-   - Existing workflows continue to work
+   - Existing workflows continue to work without modification
 
 ## Performance Measurements
 
 ### Baseline Metrics (from AI4-862)
 - Processing throughput: 111.61 files/minute
-- Baseline measurement to be established
+- Baseline measurement established on private validation sample
 
 ### Expected Improvements
-- **Processing Plan with reuse_scan_measurements**: 2-4x speedup (50-80% fewer decodes)
+- **Processing with reuse_scan_measurements**: 1.5-2x speedup (30-50% fewer detection operations)
 - **Resume Processing**: 1.5-2x speedup (30-50% fewer derivative writes)
 - **Overall Throughput**: Measurable improvement above 111.61 files/minute
 
@@ -116,31 +124,34 @@ All changes are fully backward compatible:
 All optimizations preserve the audit trail:
 
 1. **Scan Measurement Reuse**:
-   - Records `scan_measurements_reused: true` when reuse occurs
-   - Records `scan_measurement_reuse_reason` with specific reason
-   - Reason codes include: `scan_measurements_available`, `scan_record_not_openable`, `scan_dimensions_missing`
+   - Operations tracking: `skew_detect_reused_scan_measurement`, `dark_border_detect_reused_scan_measurement`
+   - Operation timing includes `reused_scan_measurement` flag
+   - Fallback reasons tracked when reuse is not possible
+   - Aggregate summary includes `scan_measurement_reuse` counts
 
 2. **Derivative Reuse**:
-   - Records `existing_derivative_reused: true` when derivative is reused
-   - Processing audit shows skip reason
+   - Processing manifest status changes to `resumed` for reused derivatives
+   - Processing audit shows `skipped_due_to_resume` count
    - Processing summary includes `existing_derivative_reused_files` count
+   - Detailed operation timing maintains full transparency
 
 3. **CSV Export**:
-   - Added fields: `scan_measurements_reused`, `scan_measurement_reuse_reason`, `existing_derivative_reused`
+   - Processing plan CSV includes `scan_measurements_reused`, `scan_measurement_reuse_reason`, `existing_derivative_reused`
    - Maintains compatibility with existing CSV consumers
+   - New fields are additive only
 
 ## Usage Examples
 
-### Enable Scan Measurement Reuse in Processing Plan
+### Enable Scan Measurement Reuse in Processing
 
 ```bash
-archive-scan-qc processing-plan \
-  --report /path/to/scan_qc_report.json \
+archive-scan-qc preflight \
   --input /path/to/images \
-  --out /path/to/processing-plan \
+  --process-out /path/to/derivatives \
+  --reuse-scan-measurements \
   --deskew \
   --trim-dark-border \
-  --reuse-scan-measurements
+  # ... other flags
 ```
 
 ### Enable Resume Processing in Production Run
@@ -152,6 +163,7 @@ archive-scan-qc preflight \
   --input /path/to/images \
   --process-out /path/to/derivatives \
   --resume-processing \
+  --reuse-scan-measurements \
   # ... other flags
 ```
 
@@ -159,26 +171,30 @@ archive-scan-qc preflight \
 
 ### Key Tests to Validate
 
-1. **test_scan_processing_reuse.py**:
-   - `test_processing_plan_reuses_scan_measurements_when_enabled`
-   - `test_processing_plan_cli_accepts_reuse_scan_measurements`
+1. **test_scan_processing_reuse.py** (18 tests):
+   - Comprehensive coverage of scan measurement reuse
+   - Derivative reuse validation
+   - Processing option change detection
+   - Fallback behavior verification
 
-2. **Regression Tests**:
-   - Verify all existing tests pass
-   - Check that processing plans are deterministic
-   - Verify backward compatibility with existing workflows
+2. **test_ai4_863_optimizations.py** (9 tests):
+   - Processing options fingerprint validation
+   - Derivative reuse validation
+   - Hash computation testing
+   - New functionality integration tests
 
-3. **Performance Tests**:
-   - Measure processing plan time with and without `reuse_scan_measurements`
-   - Measure resume processing time with and without derivative reuse
-   - Compare overall throughput against baseline
+3. **Performance Measurement**:
+   - Run `scripts/measure_ai4_863_performance.py` with private image data
+   - Run `scripts/run_aggregate_baseline.py` with optimizations enabled
+   - Compare against 111.61 files/minute baseline
+   - Document actual performance improvements
 
 ## Maintenance Notes
 
 1. **When Adding New Operations**: Consider if measurements can be reused from scan report
-2. **When Modifying ProcessingOptions**: Update `_processing_options_fingerprint()` to include new fields
-3. **When Changing Scan Report Schema**: Update `_extract_scan_measurements()` to extract new fields
-4. **Monitoring**: Track `scan_measurements_reused` and `existing_derivative_reused` counts in production
+2. **When Modifying ProcessingOptions**: Update `_processing_options_fingerprint()` in processing.py to include new fields
+3. **When Changing Scan Report Schema**: Update `_scan_measurements_for_processing()` to extract new fields
+4. **Monitoring**: Track `scan_measurement_reuse` and `existing_derivative_reused` counts in production
 
 ## Related Issues
 
@@ -189,10 +205,10 @@ archive-scan-qc preflight \
 ## Changelog
 
 ### Version 1.0.0 (AI4-863)
-- Added scan measurement reuse to processing plan generation
-- Added resume processing support with derivative freshness checking
-- Added hash computation optimization
+- Enhanced scan measurement reuse in processing.py with comprehensive validation
+- Improved derivative reuse in processing.py with robust freshness checking
+- Added processing plan audit enhancements in processing_plan.py
 - Maintained full backward compatibility
-- Added audit trail for optimization decisions
-- Updated CSV export with new fields
-- Documentation created
+- Added comprehensive audit trail for optimization decisions
+- Added performance measurement scripts and unit tests
+- Documentation created and updated to reflect actual implementation
