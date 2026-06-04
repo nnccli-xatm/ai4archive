@@ -12881,26 +12881,26 @@ def _deskew_faint_row_group_count_numpy(
         width, height = sample.size
         if width <= 0 or height <= 0:
             return 0
-        
+
         grayscale = sample.convert('L')
         arr = np.asarray(grayscale, dtype=np.uint8)
-        
+
         if arr.shape != (height, width):
             return None
-        
+
         active_threshold = max(8.0, width * 0.08)
-        
+
         # Vectorized row sums
         row_sums = np.sum(arr > 0, axis=1)
-        
+
         # Find groups using numpy
         active_mask = row_sums >= active_threshold
-        
+
         # Find group boundaries
         groups = []
         in_group = False
         start = None
-        
+
         for y, is_active in enumerate(active_mask):
             if is_active and not in_group:
                 start = y
@@ -12909,10 +12909,10 @@ def _deskew_faint_row_group_count_numpy(
                 groups.append((start, y))
                 start = None
                 in_group = False
-        
+
         if in_group and start is not None:
             groups.append((start, height))
-        
+
         return len(_merge_close_row_groups(groups, max_gap=2))
     except (TypeError, ValueError, AttributeError, IndexError):
         return None
@@ -12967,26 +12967,26 @@ def _deskew_sample_has_faint_ruled_line_risk_numpy(sample: Image.Image, np: Any)
         width, height = sample.size
         if width <= 0 or height <= 0:
             return False
-        
+
         grayscale = sample.convert('L')
         arr = np.asarray(grayscale, dtype=np.uint8)
-        
+
         if arr.shape != (height, width):
             return None
-        
+
         active_threshold = max(8.0, width * 0.08)
         max_band_height = max(8, int(round(height * 0.04)))
         long_run_threshold = max(80, int(round(width * 0.72)))
-        
+
         # Vectorized row sums
         row_sums = np.sum(arr > 0, axis=1)
         active_mask = row_sums >= active_threshold
-        
+
         # Find group boundaries
         groups = []
         in_group = False
         start = None
-        
+
         for y, is_active in enumerate(active_mask):
             if is_active and not in_group:
                 start = y
@@ -12995,41 +12995,41 @@ def _deskew_sample_has_faint_ruled_line_risk_numpy(sample: Image.Image, np: Any)
                 groups.append((start, y))
                 start = None
                 in_group = False
-        
+
         if in_group and start is not None:
             groups.append((start, height))
-        
+
         row_groups = _merge_close_row_groups(groups, max_gap=2)
-        
+
         long_rule_groups = 0
         for top, bottom in row_groups:
             if bottom - top > max_band_height:
                 continue
-            
+
             # Check for long run using vectorized operations
             group_arr = arr[top:bottom, :]
             group_has_long_run = False
-            
+
             for y in range(group_arr.shape[0]):
                 # Find consecutive runs using numpy
                 row = group_arr[y, :]
                 max_run = 0
                 current_run = 0
-                
+
                 for x in range(len(row)):
                     if row[x] > 0:
                         current_run += 1
                         max_run = max(max_run, current_run)
                     else:
                         current_run = 0
-                
+
                 if max_run >= long_run_threshold:
                     group_has_long_run = True
                     break
-            
+
             if group_has_long_run:
                 long_rule_groups += 1
-        
+
         return long_rule_groups >= 8
     except (TypeError, ValueError, AttributeError, IndexError):
         return None
@@ -13039,7 +13039,7 @@ def _deskew_sample_has_faint_ruled_line_risk_fallback(sample: Image.Image) -> bo
     width, height = sample.size
     if width <= 0 or height <= 0:
         return False
-    
+
     pixels = sample.load()
     row_groups: list[tuple[int, int]] = []
     start: int | None = None
@@ -13058,7 +13058,7 @@ def _deskew_sample_has_faint_ruled_line_risk_fallback(sample: Image.Image) -> bo
     if start is not None:
         row_groups.append((start, height))
     row_groups = _merge_close_row_groups(row_groups, max_gap=2)
-    
+
     long_rule_groups = 0
     max_band_height = max(8, int(round(height * 0.04)))
     long_run_threshold = max(80, int(round(width * 0.72)))
@@ -13077,7 +13077,7 @@ def _deskew_sample_has_faint_ruled_line_risk_fallback(sample: Image.Image) -> bo
                 break
         if group_has_long_run:
             long_rule_groups += 1
-    
+
     return long_rule_groups >= 8
 
 
@@ -13240,10 +13240,10 @@ def _deskew_projection_score(image: Image.Image) -> float:
 
 def _deskew_projection_score_numpy(image: Image.Image, np: Any) -> float:
     """Vectorized projection score matching the fallback implementation.
-    
+
     Uses NumPy to compute horizontal and vertical projection variances
     without PIL resize, providing better performance for deskew scoring.
-    
+
     The fallback uses PIL resize with BOX resampling which computes averages,
     then scales by width/255 or height/255. This is equivalent to dividing
     the NumPy sum by 255.
@@ -13256,20 +13256,20 @@ def _deskew_projection_score_numpy(image: Image.Image, np: Any) -> float:
         return _horizontal_projection_variance(image) + _vertical_projection_variance(image)
     if arr.shape != (height, width):
         return _horizontal_projection_variance(image) + _vertical_projection_variance(image)
-    
+
     # Horizontal projection: variance of row pixel sums
     # Net effect: (sum/width) * width/255 = sum/255
     row_sums = arr.sum(axis=1)
     row_counts = row_sums / 255.0
     row_mean = row_counts.mean()
     h_var = float(((row_counts - row_mean) ** 2).mean())
-    
+
     # Vertical projection: variance of column pixel sums
     col_sums = arr.sum(axis=0)
     col_counts = col_sums / 255.0
     col_mean = col_counts.mean()
     v_var = float(((col_counts - col_mean) ** 2).mean())
-    
+
     return h_var + v_var
 
 
