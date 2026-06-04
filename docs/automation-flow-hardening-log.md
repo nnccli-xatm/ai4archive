@@ -119,6 +119,18 @@
 
 ## 后续记录模板
 
+### 2026-06-04: AI4-863 长时间停滞的 git/PR 交接硬化
+
+- 触发场景：AI4-863 多次生成本地实现和验证结果后，始终无法形成 commit、push 和 PR；worker 反复在 sandbox 只读 `.git` 上执行 direct git 写操作，并尝试 destructive recovery 命令，导致 token 大量消耗、无 PR 进入 Review、再由 watchdog 拉回的循环。
+- 修复位置：
+  - `C:\Users\PS\code\symphony-zy\bin\safe-git\`
+  - `C:\Users\PS\code\symphony-zy\run_symphony_zy_windows.ps1`
+  - `C:\Users\PS\code\symphony-zy\WORKFLOW.md`
+  - `C:\Users\PS\code\symphony-zy\tmp\ai4archive-local-run\WORKFLOW.md`
+  - `C:\Users\PS\code\symphony-zy\docs\git-handoff-hardening.md`
+- 复用规则：Windows runtime 启动时把 safe-git 放到 PATH 前缀；issue workspace 内的 git 命令自动使用 `.git-meta`，并阻断 `reset --hard`、`clean`、`stash`、path checkout/restore；缺少已认证 `gh` 或缺少 PR 时必须保持 `In Progress`，不得进入 `In Review`。
+- 剩余风险：GitHub CLI 已安装但仍需非交互认证才能让 Symphony 自主 `gh pr create`；在认证完成前，Symphony 可以继续实现和提交本地分支，但 PR 创建仍可能需要 Codex/GitHub connector 兜底。
+
 ```text
 ### YYYY-MM-DD: 标题
 
