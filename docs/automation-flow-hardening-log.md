@@ -209,3 +209,13 @@
 - Root cause: the issue scope asked for vectorization and fallback parity at once, but the current agent repeatedly expanded into backend redesign probes. Retrying the same broad issue produced more token burn without a stable handoff.
 - Recovery: moved AI4-865 back to `Backlog`, quarantined the dirty workspace for inspection, and created AI4-866 as a narrower replacement focused only on fallback parity characterization before any future vectorization attempt.
 - Reusable rule: after two quarantined non-convergent attempts on the same implementation issue, do not automatically retry the same issue. Park it, document the blocker, and dispatch a narrower prerequisite issue that constrains the agent to tests or one explicit anchor.
+
+### 2026-06-04: Valid PR handoff was re-opened by stale workspace artifacts
+
+- Trigger: AI4-866 had a valid PR (#737), passing PR CI, and a clean real Git branch, but the invalid-review recovery hook moved it back to `In Progress` twice because the workspace still contained `.git-meta` and Python cache artifacts.
+- Root cause: recovery used a narrower PR detector than the orchestrator handoff. It only trusted Linear attachments, while the PR link was present in Linear comments. It also treated `.git-meta` as meaningful dirt even after the real branch had been pushed and the alternate safe-git state was stale.
+- Fix location:
+  - `C:\Users\PS\.codex\skills\ai4archive-symphony-delivery\scripts\recover_invalid_review_handoff.py`
+  - `docs/ai4archive-webhook-symphony-migration-kit/resources/ai4archive-symphony-delivery/scripts/recover_invalid_review_handoff.py`
+- Reusable rule: invalid-review recovery must use the same privacy-safe PR evidence as orchestration: GitHub PR attachments or recent Linear comments containing a PR URL. Runtime-only artifacts such as `.git-meta`, `__pycache__`, pytest caches, and build caches must not reopen an otherwise valid PR handoff.
+- Remaining risk: a future worker could still leave stale alternate git metadata with unpublished useful commits. The safe default is to require missing-PR recovery when no PR evidence exists, but not to reopen a valid PR only because runtime caches remain.
