@@ -17006,6 +17006,43 @@ def _despeckle_dense_connected_content_candidates(
         candidates.extend(absolute_points)
     return sorted(candidates, key=lambda point: (point[1], point[0]))
 
+# AI4-869: Optional NumPy filtering helper
+def _despeckle_component_passes_edge_checks_numpy(
+    component: list[tuple[int, int]],
+    *,
+    width: int,
+    height: int,
+    left: int,
+    top: int,
+) -> bool:
+    """Check if a component passes all edge protection checks using NumPy.
+    
+    Returns True if the component passes all edge checks, False otherwise.
+    This is a vectorized equivalent of the edge protection checks in
+    _despeckle_candidate_points_from_dark_points().
+    """
+    np = _load_numpy()
+    if np is None:
+        return True
+    
+    margin = _despeckle_protected_edge_margin(width, height)
+    
+    component_array = np.array(component, dtype=np.int32)
+    absolute_x = component_array[:, 0] + left
+    absolute_y = component_array[:, 1] + top
+    
+    touches_absolute_edge = (
+        (absolute_x == 0) | (absolute_y == 0) |
+        (absolute_x == width - 1) | (absolute_y == height - 1)
+    )
+    touches_protected_margin = (
+        (absolute_x < margin) | (absolute_y < margin) |
+        (absolute_x >= width - margin) | (absolute_y >= height - margin)
+    )
+    
+    return not np.any(touches_absolute_edge | touches_protected_margin)
+
+
 
 def _despeckle_candidate_points_from_dark_points(
     dark_points: set[tuple[int, int]],
