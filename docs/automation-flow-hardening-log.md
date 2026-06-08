@@ -232,3 +232,16 @@
   - PR #738 test update on `AI4-867`
 - Reusable rule: watchdogs must judge stale work by total issue/scope-lock age, not only current attempt age. If Symphony is idle but a scope lock remains active, check the same issue's PR/CI and resolve it before creating new work. Optional-backend tests must either install the optional extra in CI or skip optional-fast-path assertions when the optional package is unavailable.
 - Remaining risk: target-alignment still depends on an authenticated `gh` CLI when run locally; the GitHub connector can verify changed files, but a future hardening pass should make the alignment gate use connector data or a configured token.
+
+### 2026-06-08: AI4-868 publication handoff and benchmark runtime bounds
+
+- Trigger: AI4-868 completed local implementation and validation, but the worker could not publish through git transport because `github.com:443` was unreachable while `api.github.com:443` was still reachable. The issue also consumed excessive runtime before handoff because the synthetic benchmark default included large masks and repeated fallback scans.
+- Root cause: the workflow treated git transport failure as something the worker should keep retrying, rather than escalating to an API-based PR handoff when local commits and validation were already complete. The benchmark command also lacked bounded defaults, so an unattended worker could spend disproportionate time re-running large synthetic cases.
+- Fix location:
+  - PR #739 on `codex/ai4-868-bounded-benchmark`
+  - `scripts/measure_ai4_868_despeckle_performance.py`
+  - `tests/test_ai4_867_numpy_backend.py`
+  - `docs/numpy_backend_implementation_notes.md`
+  - `C:\Users\PS\.codex\skills\ai4archive-symphony-delivery\state\orchestration-state.json`
+- Reusable rule: when a worker has local commits and validation evidence but git push is blocked by transport connectivity, the orchestrator may take over only the publication handoff through an authenticated GitHub API path. Synthetic performance tools used by unattended workers must default to quick bounded cases; large or deep runs must require an explicit opt-in flag and have tests guarding that default.
+- Remaining risk: the runtime still needs a durable GitHub publication path for Symphony itself, because GitHub CLI is not logged in and raw git transport can fail independently from the GitHub API. Future hardening should make the worker use either a configured API publication helper or a validated non-interactive `gh` login before it attempts repeated push retries.
