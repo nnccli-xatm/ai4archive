@@ -263,3 +263,11 @@
   - `docs/ai4archive-webhook-symphony-migration-kit/resources/ai4archive-symphony-delivery/scripts/check_ai4_symphony.py`
 - Reusable rule: compact health must flag an active issue whose total issue/scope-lock age exceeds the configured threshold, has multiple turns, and still has zero tokens with only empty/error-like events. A healthy Zhipu adapter check must include a streaming `/responses` smoke test that completes and closes, not only `/health` or non-streaming requests. Startup helpers must force local proxy bypass with `NO_PROXY=127.0.0.1,localhost`.
 - Remaining risk: Symphony still needs a native guard that fails an agent run immediately when a Codex turn has no final assistant message and zero token usage, instead of spending all configured turns on empty continuations.
+
+### 2026-06-08: API publication handoff did not stop the active worker turn
+
+- Trigger: after AI4-869 was published through the GitHub API as PR #740 and moved to `In Review`, the original Codex worker kept running inside the same turn and continued consuming tokens even though the PR had already passed PR checks and was ready to merge.
+- Root cause: Linear state transitions are observed by Symphony between turns, not as an interrupt for an already-running Codex process. Moving the issue to `In Review` stopped future useful work, but it did not cancel the in-flight runaway turn.
+- Recovery: merged PR #740 after target alignment and PR CI passed, then used the approved ZY launcher restart to stop the stale worker before waiting for main CI. Main CI succeeded and AI4-869 was marked Done.
+- Reusable rule: when the orchestrator takes over publication for an already-running issue, treat the old worker as stale after the PR is created or merged. If compact health still shows that issue running after the Linear handoff, recover with the configured ZY startup script instead of waiting for the worker to self-converge.
+- Remaining risk: a native single-issue cancel endpoint would be cleaner than a full runtime restart and should be preferred if Symphony adds one.
