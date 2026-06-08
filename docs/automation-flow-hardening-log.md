@@ -245,3 +245,21 @@
   - `C:\Users\PS\.codex\skills\ai4archive-symphony-delivery\state\orchestration-state.json`
 - Reusable rule: when a worker has local commits and validation evidence but git push is blocked by transport connectivity, the orchestrator may take over only the publication handoff through an authenticated GitHub API path. Synthetic performance tools used by unattended workers must default to quick bounded cases; large or deep runs must require an explicit opt-in flag and have tests guarding that default.
 - Remaining risk: the runtime still needs a durable GitHub publication path for Symphony itself, because GitHub CLI is not logged in and raw git transport can fail independently from the GitHub API. Future hardening should make the worker use either a configured API publication helper or a validated non-interactive `gh` login before it attempts repeated push retries.
+
+### 2026-06-08: AI4-869 zero-token Codex/Zhipu stream stall
+
+- Trigger: AI4-869 stayed active for nearly two hours while every Codex turn completed with zero input/output tokens, no workspace changes, and repeated `error` notifications. Compact health returned `ok=true` because the existing runaway rule only detected high-token active runs.
+- Root cause: two local-provider defects combined. Codex did not have `NO_PROXY`/`no_proxy` entries for `127.0.0.1,localhost`, so some local proxy calls were sent through the system HTTP proxy and returned 502 without reaching the Zhipu proxy. When bypassing the system proxy, the Zhipu Responses proxy emitted valid SSE events including `response.completed` but kept the HTTP connection open with `Connection: keep-alive`, making streaming clients wait until timeout/reset. Symphony then treated the empty turn as a normal continuation and retried the same issue.
+- Fix location:
+  - `C:\Users\PS\code\symphony-zy\integrations\zhipu\zhipu_responses_proxy.py`
+  - `C:\Users\PS\code\symphony-zy\run_symphony_zy_windows.ps1`
+  - `C:\Users\PS\code\symphony-zy\run_symphony_zy.sh`
+  - `C:\Users\PS\code\symphony-zy\run_ai4archive_symphony.sh`
+  - `C:\Users\PS\code\symphony-zy\integrations\zhipu\run_symphony_zhipu_windows.ps1`
+  - `C:\Users\PS\code\symphony-zy\integrations\zhipu\run_symphony_zhipu.sh`
+  - `C:\Users\PS\code\symphony-zy\docs\zhipu-adapter.md`
+  - `C:\Users\PS\code\symphony-zy\integrations\zhipu\README.md`
+  - `C:\Users\PS\.codex\skills\ai4archive-symphony-delivery\scripts\check_ai4_symphony.py`
+  - `docs/ai4archive-webhook-symphony-migration-kit/resources/ai4archive-symphony-delivery/scripts/check_ai4_symphony.py`
+- Reusable rule: compact health must flag an active issue whose total issue/scope-lock age exceeds the configured threshold, has multiple turns, and still has zero tokens with only empty/error-like events. A healthy Zhipu adapter check must include a streaming `/responses` smoke test that completes and closes, not only `/health` or non-streaming requests. Startup helpers must force local proxy bypass with `NO_PROXY=127.0.0.1,localhost`.
+- Remaining risk: Symphony still needs a native guard that fails an agent run immediately when a Codex turn has no final assistant message and zero token usage, instead of spending all configured turns on empty continuations.
