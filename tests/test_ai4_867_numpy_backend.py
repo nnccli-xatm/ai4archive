@@ -20,6 +20,9 @@ from archive_scan_qc.processing import (
     _load_numpy,
 )
 
+sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+from measure_ai4_868_despeckle_performance import benchmark_configs
+
 NUMPY_AVAILABLE = _load_numpy() is not None
 
 
@@ -190,6 +193,78 @@ class TestNumPyBackendFallback(unittest.TestCase):
 
         # Should always produce candidates regardless of backend
         self.assertEqual(len(candidates), 1)
+
+
+class TestSyntheticPerformanceBenchmarkConfiguration(unittest.TestCase):
+    """Guard the AI4-868 benchmark against runaway default runtimes."""
+
+    def test_default_benchmark_configs_exclude_large_masks(self):
+        configs = benchmark_configs(include_large=False)
+
+        self.assertEqual(len(configs), 6)
+        for name, width, height, *_ in configs:
+            self.assertNotIn("Large", name)
+            self.assertLessEqual(width * height, 1600 * 2200)
+
+    def test_large_benchmark_configs_are_explicit_opt_in(self):
+        configs = benchmark_configs(include_large=True)
+
+        self.assertGreater(len(configs), len(benchmark_configs(include_large=False)))
+        self.assertTrue(any(width == 4000 and height == 6000 for _, width, height, *_ in configs))
+
+
+@unittest.skipUnless(NUMPY_AVAILABLE, "NumPy optional fast path unavailable")
+class TestSyntheticPerformanceBenchmark(unittest.TestCase):
+    """Test synthetic performance benchmark for AI4-868."""
+
+    def test_synthetic_mask_consistency(self):
+        """Both backends should produce identical results on synthetic masks."""
+        # Create a synthetic dark mask similar to the performance benchmark
+        mask = Image.new("L", (640, 900), 0)
+        for i in range(80):
+            x = (i * 37 + 13) % 640
+            y = (i * 53 + 19) % 900
+            mask.putpixel((x, y), 255)
+
+        # Add some clusters
+        for cx, cy in [(100, 100), (540, 100), (100, 850)]:
+            for dx in range(0, 20):
+                for dy in range(0, 20):
+                    if (dx + dy) % 3 == 0:
+                        mask.putpixel((cx + dx, cy + dy), 255)
+
+        # Both backends should produce identical results
+        fallback_candidates, _ = _despeckle_candidate_points_with_backend(mask, backend="fallback")
+        numpy_candidates, backend_mode = _despeckle_candidate_points_with_backend(mask, backend="numpy")
+
+        self.assertEqual(backend_mode, "numpy")
+        self.assertEqual(set(fallback_candidates), set(numpy_candidates))
+        # Verify we have a reasonable number of candidates for this mask
+        self.assertGreater(len(fallback_candidates), 50)
+        self.assertLess(len(fallback_candidates), 300)
+
+    def test_synthetic_medium_mask_consistency(self):
+        """Both backends should produce identical results on medium synthetic masks."""
+        mask = Image.new("L", (1600, 2200), 0)
+        for i in range(200):
+            x = (i * 37 + 13) % 1600
+            y = (i * 53 + 19) % 2200
+            mask.putpixel((x, y), 255)
+
+        # Add some clusters
+        for cx, cy in [(500, 500), (1400, 500), (500, 2000)]:
+            for dx in range(0, 30):
+                for dy in range(0, 30):
+                    if (dx + dy) % 4 == 0:
+                        mask.putpixel((cx + dx, cy + dy), 255)
+
+        fallback_candidates, _ = _despeckle_candidate_points_with_backend(mask, backend="fallback")
+        numpy_candidates, backend_mode = _despeckle_candidate_points_with_backend(mask, backend="numpy")
+
+        self.assertEqual(backend_mode, "numpy")
+        self.assertEqual(set(fallback_candidates), set(numpy_candidates))
+        self.assertGreater(len(fallback_candidates), 100)
+        self.assertLess(len(fallback_candidates), 600)
 
 
 if __name__ == "__main__":
