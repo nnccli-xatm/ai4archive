@@ -38,7 +38,7 @@ SERVICE_JOB_PUBLIC_SUMMARY_JSON = "service_job_public_summary.json"
 SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON = "service_job_index_public_summary.json"
 SERVICE_JOBS_DIRNAME = "jobs"
 JOB_ID_PATTERN = re.compile(r"^job-[A-Za-z0-9][A-Za-z0-9_-]{2,80}$")
-TERMINAL_STATES = {"finished", "needs_review", "failed", "interrupted"}
+TERMINAL_STATES = {"finished", "needs_review", "failed", "interrupted", "cancelled"}
 
 
 @dataclass(frozen=True)
@@ -117,6 +117,8 @@ def run_service_job(service_root: Path, job_id: str) -> dict[str, Any]:
     record = load_service_job_record(service_root, job_id)
     if record.get("state") == "running":
         raise RuntimeError("Service job is already running.")
+    if str(record.get("state") or "") in TERMINAL_STATES:
+        raise RuntimeError("Service job is already terminal.")
     _update_record_state(record, "running", recovery_status="running")
     _write_job_record(_job_root_from_record(record), record)
     _write_public_summary(_job_root_from_record(record), _public_summary_from_record(record))
@@ -131,6 +133,16 @@ def run_service_job(service_root: Path, job_id: str) -> dict[str, Any]:
             _write_public_summary(_job_root_from_record(record), _public_summary_from_record(record))
         raise
     return recover_service_job(service_root, job_id)
+
+
+def cancel_service_job(service_root: Path, job_id: str) -> dict[str, Any]:
+    """Mark a non-terminal service job as cancelled and refresh its public summary."""
+
+    record = load_service_job_record(service_root, job_id)
+    if str(record.get("state") or "") not in TERMINAL_STATES:
+        _update_record_state(record, "cancelled", recovery_status="cancelled_by_service_request")
+        _write_job_record(_job_root_from_record(record), record)
+    return _write_public_summary(_job_root_from_record(record), _public_summary_from_record(record))
 
 
 def recover_service_job(service_root: Path, job_id: str) -> dict[str, Any]:
@@ -519,6 +531,7 @@ def _state_label_zh(state: str) -> str:
         "needs_review": "等待复核",
         "failed": "失败",
         "interrupted": "已中断",
+        "cancelled": "已取消",
         "needs_recovery": "需要恢复",
     }.get(state, state)
 

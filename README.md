@@ -1479,6 +1479,8 @@ booleans.
 Recovery revalidates the checkpoint input path against the service root and
 marks stale `running` records without progress as `needs_recovery`, so a service
 restart does not leave an orphaned job looking active.
+The core also supports a public-safe `cancelled` terminal state for jobs that
+are stopped before completion; terminal jobs cannot be run again accidentally.
 Recovering the whole service root also writes
 `service_job_index_public_summary.json`, a public-safe aggregate index of job
 states and per-job public summaries for service polling.

@@ -153,6 +153,8 @@ marks `running` records without progress as `needs_recovery` after restart.
 Root-level recovery now writes `service_job_index_public_summary.json` so an
 external scheduler can poll aggregate job state without reading private
 checkpoints.
+The core now supports a `cancelled` terminal state and rejects attempts to rerun
+terminal service jobs.
 
 ## 6. 阶段 2：图像处理规则模板系统
 

@@ -12,6 +12,7 @@ from archive_scan_qc.service_jobs import (
     SERVICE_JOB_PUBLIC_SUMMARY_JSON,
     SERVICE_JOB_RECORD_JSON,
     ServiceJobConfig,
+    cancel_service_job,
     create_service_job,
     recover_service_job,
     recover_service_jobs,
@@ -107,6 +108,31 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertTrue((job_root / "derivatives" / PROCESSING_QUALITY_SUMMARY_JSON).is_file())
             _assert_public_text_omits(self, public_raw, str(root.resolve()), "private_page_001")
             self.assertFalse(summary["private_paths_exposed"])
+
+    def test_cancel_job_marks_terminal_public_summary_without_private_paths(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-job-cancel-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-source"
+            service_root = root / "service-root"
+            input_dir.mkdir()
+            _write_page(input_dir / "private_page_001.png")
+            create_service_job(
+                ServiceJobConfig(input_dir=input_dir, service_root=service_root, workers=1),
+                job_id="job-testcancel001",
+            )
+
+            summary = cancel_service_job(service_root, "job-testcancel001")
+            job_root = service_root / "jobs" / "job-testcancel001"
+            record = json.loads((job_root / SERVICE_JOB_RECORD_JSON).read_text(encoding="utf-8"))
+            public_raw = (job_root / SERVICE_JOB_PUBLIC_SUMMARY_JSON).read_text(encoding="utf-8")
+
+            self.assertEqual(summary["state"], "cancelled")
+            self.assertEqual(summary["state_label_zh"], "已取消")
+            self.assertEqual(summary["recovery"]["status"], "cancelled_by_service_request")
+            self.assertEqual(record["state"], "cancelled")
+            _assert_public_text_omits(self, public_raw, str(root.resolve()), "private_page_001")
+            with self.assertRaisesRegex(RuntimeError, "already terminal"):
+                run_service_job(service_root, "job-testcancel001")
 
     def test_recover_marks_stale_running_progress_without_leaking_paths(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-job-recover-") as temp_dir:
