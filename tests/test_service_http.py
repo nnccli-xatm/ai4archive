@@ -83,6 +83,7 @@ class ServiceHttpTransportTests(unittest.TestCase):
                 ("POST", "/api/jobs/{job_id}/start"),
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
+            self.assertGreaterEqual(capabilities["resource_limits"]["max_active_workers"], 1)
             self.assertEqual(created["state"], "created")
             self.assertEqual(status["state"], "created")
             self.assertEqual(cancelled["state"], "cancelled")

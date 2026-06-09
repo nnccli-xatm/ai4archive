@@ -15,6 +15,7 @@ from PIL import Image, ImageDraw
 from archive_scan_qc import service_jobs as service_jobs_module
 from archive_scan_qc.service_jobs import (
     SERVICE_JOB_MAX_WORKERS,
+    SERVICE_JOB_MAX_ACTIVE_WORKERS,
     SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON,
     SERVICE_JOB_PUBLIC_SUMMARY_JSON,
     SERVICE_JOB_RECORD_JSON,
@@ -59,6 +60,7 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertTrue(summary["isolation"]["tmp_isolated"])
             self.assertTrue(summary["isolation"]["review_isolated"])
             self.assertEqual(summary["resource_limits"]["max_workers_per_job"], SERVICE_JOB_MAX_WORKERS)
+            self.assertEqual(summary["resource_limits"]["max_active_workers"], SERVICE_JOB_MAX_ACTIVE_WORKERS)
             self.assertEqual(summary["resource_limits"]["workers_requested"], 1)
             self.assertEqual(Path(record["paths"]["metadata_dir"]).parent, job_root)
             self.assertEqual(Path(record["paths"]["derivatives_dir"]).parent, job_root)
@@ -66,6 +68,7 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertEqual(Path(record["paths"]["review_dir"]).parent, job_root)
             self.assertTrue((job_root / "review").is_dir())
             self.assertEqual(record["resource_limits"]["max_workers_per_job"], SERVICE_JOB_MAX_WORKERS)
+            self.assertEqual(record["resource_limits"]["max_active_workers"], SERVICE_JOB_MAX_ACTIVE_WORKERS)
             self.assertEqual(record["resource_limits"]["workers_requested"], 1)
             self.assertEqual(record["paths"]["input_dir"], str(input_dir.resolve()))
             _assert_public_text_omits(
@@ -431,6 +434,45 @@ class ServiceJobBoundaryTests(unittest.TestCase):
                 )
 
             self.assertEqual(running["state"], "running")
+            self.assertEqual(second_status["state"], "created")
+
+    def test_start_job_async_enforces_active_worker_limit_before_marking_running(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-job-async-worker-limit-") as temp_dir:
+            root = Path(temp_dir)
+            service_root = root / "service-root"
+            for index, workers in ((1, 2), (2, 1)):
+                input_dir = root / f"private-source-workers-{index}"
+                input_dir.mkdir()
+                _write_page(input_dir / f"private_page_{index:03d}.png")
+                create_service_job(
+                    ServiceJobConfig(input_dir=input_dir, service_root=service_root, workers=workers),
+                    job_id=f"job-testworkerlimit00{index}",
+                )
+            started = threading.Event()
+            release = threading.Event()
+
+            def _blocking_runner(config):  # type: ignore[no-untyped-def]
+                started.set()
+                release.wait(timeout=5)
+
+            with (
+                mock.patch("archive_scan_qc.service_jobs.SERVICE_JOB_MAX_ACTIVE_WORKERS", 2),
+                mock.patch("archive_scan_qc.service_jobs.run_production_folder", side_effect=_blocking_runner),
+            ):
+                running = start_service_job_async(service_root, "job-testworkerlimit001")
+                self.assertTrue(started.wait(timeout=5))
+                with self.assertRaisesRegex(RuntimeError, "active worker limit"):
+                    start_service_job_async(service_root, "job-testworkerlimit002")
+                second_status = recover_service_job(service_root, "job-testworkerlimit002")
+                release.set()
+                _wait_for_state(
+                    self,
+                    lambda: recover_service_job(service_root, "job-testworkerlimit001"),
+                    {"needs_recovery", "failed", "finished"},
+                )
+
+            self.assertEqual(running["state"], "running")
+            self.assertEqual(running["resource_limits"]["max_active_workers"], SERVICE_JOB_MAX_ACTIVE_WORKERS)
             self.assertEqual(second_status["state"], "created")
 
     def test_cancel_job_marks_terminal_public_summary_without_private_paths(self) -> None:

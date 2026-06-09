@@ -334,6 +334,9 @@ Follow-up, 2026-06-09: async service start now enforces an in-process
 `max_active_async_jobs` limit before marking a job `running`, and the service
 capabilities response exposes that non-sensitive limit alongside the per-job
 worker limit.
+Follow-up, 2026-06-09: async service reservation now also enforces a
+non-sensitive `max_active_workers` limit before marking a job `running`; jobs
+rejected by the global active-worker quota remain in their prior public state.
 Follow-up, 2026-06-09: the same local HTTP transport now exposes
 `GET /api/rule-templates` and `GET /api/rule-templates/{template_id}` for
 public-safe template catalog/detail responses without reading scan reports or

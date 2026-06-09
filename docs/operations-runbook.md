@@ -249,9 +249,9 @@ summary immediately and executes the same production runner in a background
 thread. While the service process is alive, polling keeps active jobs in
 `running`; after a service restart, stale `running` checkpoints still recover as
 `needs_recovery`. The service capabilities response publishes the current
-`max_active_async_jobs` and per-job worker limits. Async `start` checks the
-active-job limit before marking a job `running`, so rejected jobs remain in
-their prior public state.
+`max_active_async_jobs`, `max_active_workers`, and per-job worker limits. Async
+`start` checks both active-job and active-worker limits before marking a job
+`running`, so rejected jobs remain in their prior public state.
 `service_job.json` is private checkpoint state because it contains local paths
 and the template snapshot needed for recovery. Each job root includes isolated
 `metadata`, `derivatives`, `tmp`, `checkpoints`, `review`, and `logs`
@@ -287,8 +287,9 @@ current synchronous runner cannot interrupt an in-flight image operation from a
 separate request, but it records `cancelled` as a terminal public-safe state and
 prevents accidental reruns.
 Service job creation rejects worker counts below 1 or above the configured
-per-job limit; the public summary includes only the requested worker count and
-the limit, not local paths or process details.
+per-job limit; the public summary includes only the requested worker count,
+per-job limit, and global active-worker limit, not local paths or process
+details.
 When recovering the full service root, read
 `service_job_index_public_summary.json` for aggregate job state counts and
 per-job public summaries; it is designed for polling without exposing local

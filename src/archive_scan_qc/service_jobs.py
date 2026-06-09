@@ -48,6 +48,7 @@ JOB_ID_PATTERN = re.compile(r"^job-[A-Za-z0-9][A-Za-z0-9_-]{2,80}$")
 TERMINAL_STATES = {"finished", "needs_review", "failed", "interrupted", "cancelled"}
 SERVICE_JOB_MAX_WORKERS = 8
 SERVICE_JOB_MAX_ACTIVE_JOBS = 2
+SERVICE_JOB_MAX_ACTIVE_WORKERS = 8
 PUBLIC_STAGE_TIMING_IDS = ("scan", "process", "summarize")
 PUBLIC_AGGREGATE_PROCESSING_UNAVAILABLE_REASONS = (
     "missing_total_images",
@@ -82,6 +83,7 @@ PUBLIC_OPERATION_TIMING_IDS = (
 )
 _ASYNC_JOB_LOCK = threading.Lock()
 _ASYNC_JOB_KEYS: set[str] = set()
+_ASYNC_JOB_WORKERS: dict[str, int] = {}
 
 
 @dataclass(frozen=True)
@@ -147,6 +149,7 @@ def create_service_job(config: ServiceJobConfig, *, job_id: str | None = None) -
         },
         "resource_limits": {
             "max_workers_per_job": SERVICE_JOB_MAX_WORKERS,
+            "max_active_workers": SERVICE_JOB_MAX_ACTIVE_WORKERS,
             "workers_requested": workers,
         },
         "production_artifacts": _production_artifact_paths(directories["metadata"], directories["derivatives"]),
@@ -568,6 +571,9 @@ def _public_resource_limits(resource_limits: Any) -> dict[str, int | None]:
     resource_limits = resource_limits if isinstance(resource_limits, dict) else {}
     return {
         "max_workers_per_job": _safe_int(resource_limits.get("max_workers_per_job")),
+        "max_active_workers": (
+            _safe_int(resource_limits.get("max_active_workers")) or SERVICE_JOB_MAX_ACTIVE_WORKERS
+        ),
         "workers_requested": _safe_int(resource_limits.get("workers_requested")),
     }
 
@@ -1010,18 +1016,23 @@ def _public_local_review_payload(local_review: Any) -> dict[str, Any]:
 
 def _reserve_async_job(record: dict[str, Any]) -> str:
     key = _async_job_key(record)
+    requested_workers = _async_worker_units(record)
     with _ASYNC_JOB_LOCK:
         if key in _ASYNC_JOB_KEYS:
             raise RuntimeError("Service job is already running.")
         if len(_ASYNC_JOB_KEYS) >= SERVICE_JOB_MAX_ACTIVE_JOBS:
             raise RuntimeError("Service active job limit reached.")
+        if sum(_ASYNC_JOB_WORKERS.values()) + requested_workers > SERVICE_JOB_MAX_ACTIVE_WORKERS:
+            raise RuntimeError("Service active worker limit reached.")
         _ASYNC_JOB_KEYS.add(key)
+        _ASYNC_JOB_WORKERS[key] = requested_workers
     return key
 
 
 def _unregister_async_job_key(key: str) -> None:
     with _ASYNC_JOB_LOCK:
         _ASYNC_JOB_KEYS.discard(key)
+        _ASYNC_JOB_WORKERS.pop(key, None)
 
 
 def _async_job_is_active(record: dict[str, Any]) -> bool:
@@ -1035,6 +1046,14 @@ def _async_job_key(record: dict[str, Any]) -> str:
 
 def _async_job_key_from_parts(service_root: Path, job_id: str) -> str:
     return f"{service_root.resolve()}::{job_id}"
+
+
+def _async_worker_units(record: dict[str, Any]) -> int:
+    limits = record.get("resource_limits") if isinstance(record.get("resource_limits"), dict) else {}
+    workers = _safe_int(limits.get("workers_requested")) if isinstance(limits, dict) else None
+    if workers is None:
+        return SERVICE_JOB_MAX_WORKERS
+    return min(max(1, workers), SERVICE_JOB_MAX_WORKERS)
 
 
 def _isolation_payload(service_root: Path, job_root: Path, directories: dict[str, Path]) -> dict[str, Any]:

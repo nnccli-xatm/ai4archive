@@ -120,7 +120,7 @@ in-process async MVP that returns `running` immediately, publishes only
 aggregate public summaries, and relies on checkpoint recovery to mark stale
 running jobs as `needs_recovery` after service restart. The capabilities
 response publishes non-sensitive resource limits, including
-`max_active_async_jobs` and the per-job worker limit.
+`max_active_async_jobs`, `max_active_workers`, and the per-job worker limit.
 Terminal service job summaries also expose public-safe quality context:
 blocking codes, processing warning and retry counts, per-category changed-file
 counts, quality-operation category booleans, and aggregate guardrail status.

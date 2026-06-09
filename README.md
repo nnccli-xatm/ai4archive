@@ -1521,7 +1521,7 @@ file list, paths, or filenames.
 The core also supports a public-safe `cancelled` terminal state for jobs that
 are stopped before completion; terminal jobs cannot be run again accidentally.
 Job creation enforces a per-job worker limit and reports the non-sensitive
-worker quota in public summaries.
+per-job and global active-worker quotas in public summaries.
 Recovering the whole service root also writes
 `service_job_index_public_summary.json`, a public-safe aggregate index of job
 states and per-job public summaries for service polling.
@@ -1549,9 +1549,10 @@ local in-process async MVP: it returns a running public summary immediately,
 executes the same production runner in a background thread, and relies on
 checkpoint recovery so a service restart can still mark orphaned running jobs as
 `needs_recovery`. The service capabilities response publishes the current
-non-sensitive `max_active_async_jobs` and per-job worker limits; async `start`
-refuses new jobs before marking them `running` when the active-job limit is
-reached. This transport is not yet a stable public network API.
+non-sensitive `max_active_async_jobs`, `max_active_workers`, and per-job worker
+limits; async `start` refuses new jobs before marking them `running` when the
+active-job or active-worker limit is reached. This transport is not yet a
+stable public network API.
 
 See `docs/operations-runbook.md` for production installation, directory,
 privacy, troubleshooting, exit-code, and tuning guidance. See
