@@ -4455,7 +4455,9 @@ def _normalize_tones_conservative(image: Image.Image) -> ToneNormalizationResult
             contrast_before,
             contrast_before,
         )
-    if not (45 <= contrast_before <= 135 and 145 <= p95 <= 225):
+    gray_low_contrast_range = 45 <= contrast_before <= 135 and 145 <= p95 <= 225
+    light_paper_low_contrast_range = 35 <= contrast_before <= 85 and 218 <= p95 <= 235 and p05 >= 115
+    if not (gray_low_contrast_range or light_paper_low_contrast_range):
         return ToneNormalizationResult(
             image,
             False,
@@ -4490,6 +4492,17 @@ def _normalize_tones_conservative(image: Image.Image) -> ToneNormalizationResult
             contrast_before,
         )
 
+    if light_paper_low_contrast_range and _tone_edge_shadow_risk(grayscale):
+        return ToneNormalizationResult(
+            image,
+            False,
+            "tone normalization skipped: edge shadow should use local shadow cleanup",
+            background_before,
+            background_before,
+            contrast_before,
+            contrast_before,
+        )
+
     local_noise_ratio = _tone_local_noise_ratio(grayscale)
     if local_noise_ratio > 0.008:
         return ToneNormalizationResult(
@@ -4514,8 +4527,20 @@ def _normalize_tones_conservative(image: Image.Image) -> ToneNormalizationResult
             contrast_before,
             contrast_before,
         )
-    target_low = 70
-    target_high = 224
+    if light_paper_low_contrast_range:
+        target_low = 122
+        target_high = 245
+        min_background_delta = 6
+        min_contrast_delta = 35
+        max_background_delta = 36
+        max_contrast_delta = 65
+    else:
+        target_low = 70
+        target_high = 224
+        min_background_delta = 12
+        min_contrast_delta = 12
+        max_background_delta = 75
+        max_contrast_delta = 75
     scale = (target_high - target_low) / (source_high - source_low)
 
     def map_value(value: int) -> int:
@@ -4529,7 +4554,9 @@ def _normalize_tones_conservative(image: Image.Image) -> ToneNormalizationResult
         - _histogram_percentile(normalized_histogram, total, 0.05)
     )
     changed_pixel_ratio = _tone_changed_pixel_ratio(grayscale, normalized_l)
-    if background_after - background_before < 12 or contrast_after - contrast_before < 12:
+    background_delta = background_after - background_before
+    contrast_delta = contrast_after - contrast_before
+    if background_delta < min_background_delta or contrast_delta < min_contrast_delta:
         return ToneNormalizationResult(
             image,
             False,
@@ -4540,7 +4567,7 @@ def _normalize_tones_conservative(image: Image.Image) -> ToneNormalizationResult
             contrast_after,
             changed_pixel_ratio,
         )
-    if background_after - background_before > 75 or contrast_after - contrast_before > 75:
+    if background_delta > max_background_delta or contrast_delta > max_contrast_delta:
         return ToneNormalizationResult(
             image,
             False,
@@ -4563,6 +4590,24 @@ def _normalize_tones_conservative(image: Image.Image) -> ToneNormalizationResult
         contrast_after,
         changed_pixel_ratio,
     )
+
+
+def _tone_edge_shadow_risk(grayscale: Image.Image) -> bool:
+    width, height = grayscale.size
+    if width < 60 or height < 60:
+        return False
+    band = max(6, int(round(min(width, height) * 0.12)))
+    if width <= band * 2 or height <= band * 2:
+        return False
+    interior = grayscale.crop((band, band, width - band, height - band))
+    interior_mean = ImageStat.Stat(interior).mean[0]
+    edge_means = (
+        ImageStat.Stat(grayscale.crop((0, 0, band, height))).mean[0],
+        ImageStat.Stat(grayscale.crop((width - band, 0, width, height))).mean[0],
+        ImageStat.Stat(grayscale.crop((0, 0, width, band))).mean[0],
+        ImageStat.Stat(grayscale.crop((0, height - band, width, height))).mean[0],
+    )
+    return interior_mean - min(edge_means) >= 18.0
 
 
 def _tone_local_noise_ratio(grayscale: Image.Image) -> float:

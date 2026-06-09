@@ -362,11 +362,12 @@ privacy flags. Use it when validating whether synthetic or private aggregate
 runs actually improved quality without sharing manifests, filenames, paths,
 hashes, thumbnails, OCR text, or image content.
 `--normalize-tones` is default-off and should only be enabled for batches with
-neutral gray or dark low-contrast text pages. It no-ops when it detects normal
-exposure, obvious color content, red stamps, light color annotations, faint
-marks, dense foreground, or too little tonal separation. Review
-`tone_normalized_files`, tone delta metrics, and row-level local reasons before
-accepting derivatives for archival packages.
+neutral gray, dark low-contrast text pages, or neutral light-paper low-contrast
+text pages. It no-ops when it detects normal exposure, obvious color content,
+red stamps, light color annotations, faint marks, dense foreground, too little
+tonal separation, or a clear edge-shadow case that should be handled by local
+shadow cleanup. Review `tone_normalized_files`, tone delta metrics, and
+row-level local reasons before accepting derivatives for archival packages.
 When `--deskew --trim-dark-border --auto-crop --despeckle --normalize-tones
 --lighten-edge-shadow --lighten-background-stains` are combined, size change,
 crop ratio, trim margin, deskew angle, despeckle pixel ratio, bounded tone
@@ -673,6 +674,8 @@ scan and derivative-processing path, and writes
 source images remain unmodified, derivative processing executes, guardrail
 failures are zero or explained, requested stable despeckle backend is
 represented in backend counts, and before/after quality signals are measurable.
+The smoke also checks that guarded tone normalization improves at least one
+neutral light-paper low-contrast fixture without exposing image content.
 Both JSON files are public-safe aggregate evidence and must not contain paths,
 filenames, hashes, OCR text, thumbnails, or image content.
 

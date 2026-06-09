@@ -758,8 +758,9 @@ schema `scan-qc.image-processing-capability-smoke.v1` plus
 `processing_quality_summary.json` with schema
 `scan-qc.processing-quality-summary.v1`. The summaries record aggregate fixture
 counts, processing counts, guardrail counts, operation counts, timing summaries,
-backend counts, and public-safe before/after quality signals. They do not
-publish paths, filenames, hashes, thumbnails, OCR text, image content, or
+backend counts, and public-safe before/after quality signals, including guarded
+tone-normalization evidence for a neutral light-paper low-contrast fixture. They
+do not publish paths, filenames, hashes, thumbnails, OCR text, image content, or
 environment values.
 
 ### Review and rule calibration
@@ -890,6 +891,9 @@ exposing private row-level data. The initial processing pipeline applies EXIF
 orientation normalization, safe RGB/L color conversion, and light automatic
 contrast normalization. Add `--auto-crop` with `--process-out` to enable
 conservative Pillow-only page-border cropping for derivative images.
+For text-clean batches, tone normalization also covers neutral light-paper
+low-contrast text pages, while skipping pages with clear edge shadows so local
+shadow cleanup can handle them without full-page tone shifts.
 
 By default, rerunning the same command preserves the previous overwrite/rerun
 semantics and processes every scanned record again. Add `--resume-processing`

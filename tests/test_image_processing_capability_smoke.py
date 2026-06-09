@@ -49,6 +49,7 @@ class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
             self.assertEqual(payload["counts"]["retry_list_files"], 0)
             self.assertEqual(payload["counts"]["guardrail_failed_files"], 0)
             self.assertGreaterEqual(payload["operation_counts"]["despeckled_files"], 1)
+            self.assertGreaterEqual(payload["operation_counts"]["tone_normalized_files"], 1)
             self.assertGreater(payload["backend_summary"]["despeckle_backend_modes"]["fallback"], 0)
             self.assertEqual(payload["quality_baseline"]["schema_version"], QUALITY_SCHEMA_VERSION)
             self.assertEqual(payload["quality_baseline"]["status"], "pass")
@@ -62,6 +63,8 @@ class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
             self.assertIn("bleed_through_page", quality_payload["fixture_context"]["fixture_groups"])
             self.assertEqual(quality_payload["counts"]["processed_files"], EXPECTED_SYNTHETIC_FIXTURES)
             self.assertEqual(quality_payload["counts"]["failed_files"], 0)
+            self.assertGreaterEqual(quality_payload["quality_metrics"]["tone_background_delta"]["max"], 6)
+            self.assertGreaterEqual(quality_payload["quality_metrics"]["tone_contrast_delta"]["max"], 40)
             self.assertGreaterEqual(
                 quality_payload["quality_signal"]["any_quality_operation_changed_files"],
                 1,

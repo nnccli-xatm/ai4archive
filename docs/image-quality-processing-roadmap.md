@@ -221,6 +221,14 @@ the manifest still records the final applied processing options separately.
 - 处理失败为 0，或失败原因可解释且可复核。
 - 彩色内容、印章、批注和表格线误处理率低于约定阈值。
 
+Implementation note, 2026-06-09: `normalize_tones` now has a guarded light-paper
+low-contrast path. It raises neutral light-paper backgrounds modestly while
+darkening low-contrast printed text enough to improve aggregate contrast, and it
+skips obvious edge-shadow pages so localized shadow cleanup remains responsible
+for those cases. The synthetic smoke now requires at least one tone-normalized
+fixture with public-safe `tone_background_delta` and `tone_contrast_delta`
+evidence.
+
 ### M3：Photo/mixed-safe 管线 v1
 
 目标：让照片、图文混排、印章和批注不会被文字清洁策略误伤。

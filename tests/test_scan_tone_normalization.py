@@ -55,6 +55,35 @@ class ScanToneNormalizationTest(unittest.TestCase):
             self.assertGreaterEqual(audit["metrics"]["tone_background_delta"]["max"], 20)
             self.assertGreaterEqual(audit["metrics"]["tone_contrast_delta"]["max"], 35)
 
+    def test_normalize_tones_improves_light_paper_low_contrast_text_page(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-tone-light-paper-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            input_dir.mkdir()
+            source = _light_paper_low_contrast_text_page()
+            source.save(input_dir / "page.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("project", "batch", input_dir, root / "scan", workers=1))
+            manifest = process_images(
+                report,
+                input_dir,
+                root / "processed",
+                ProcessingOptions(normalize_tones=True, workers=1),
+            )
+
+            record = manifest["files"][0]
+            with Image.open(root / "processed" / "images" / "page.png") as processed:
+                before_background, before_contrast = _background_and_contrast(source)
+                after_background, after_contrast = _background_and_contrast(processed)
+
+            self.assertEqual(record["status"], "processed")
+            self.assertTrue(record["tone_normalized"])
+            self.assertIn("normalize_tones_conservative", record["operations"])
+            self.assertGreaterEqual(after_background, before_background + 6)
+            self.assertGreaterEqual(after_contrast, before_contrast + 40)
+            self.assertEqual(record["processing_warnings"], [])
+            self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
+
     def test_normalize_tones_protects_color_stamp_and_light_annotations(self) -> None:
         cases = {
             "red_stamp.png": (_gray_low_contrast_text_page(red_stamp=True), "red stamp or red annotation risk"),
@@ -90,6 +119,26 @@ class ScanToneNormalizationTest(unittest.TestCase):
                 self.assertIn("normalize_tones_noop", record["operations"], name)
                 with Image.open(root / "processed" / "images" / name) as processed:
                     self.assertEqual(processed.convert("RGB").tobytes(), before_bytes[name], name)
+
+    def test_normalize_tones_skips_light_paper_edge_shadow_for_local_cleanup(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-tone-edge-shadow-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            input_dir.mkdir()
+            source = _light_paper_low_contrast_edge_shadow_page()
+            source.save(input_dir / "page.png", dpi=(300, 300))
+
+            report = scan_batch(ScanConfig("project", "batch", input_dir, root / "scan", workers=1))
+            manifest = process_images(
+                report,
+                input_dir,
+                root / "processed",
+                ProcessingOptions(normalize_tones=True, workers=1),
+            )
+
+            record = manifest["files"][0]
+            self.assertFalse(record["tone_normalized"])
+            self.assertIn("edge shadow should use local shadow cleanup", record["tone_reason"])
 
     def test_normalize_tones_noops_for_normal_exposure_and_default_off(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-tone-normal-") as temp_dir:
@@ -181,6 +230,25 @@ def _normal_exposure_text_page() -> Image.Image:
     draw = ImageDraw.Draw(image)
     for y in (28, 48, 68):
         draw.rectangle((28, y, 150, y + 5), fill=(25, 25, 25))
+    return image
+
+
+def _light_paper_low_contrast_text_page() -> Image.Image:
+    image = Image.new("RGB", (180, 120), (226, 226, 222))
+    draw = ImageDraw.Draw(image)
+    for y in (28, 48, 68):
+        draw.rectangle((28, y, 150, y + 5), fill=(164, 164, 160))
+    return image
+
+
+def _light_paper_low_contrast_edge_shadow_page() -> Image.Image:
+    image = Image.new("RGB", (180, 120), (232, 232, 228))
+    draw = ImageDraw.Draw(image)
+    for y in (28, 48, 68):
+        draw.rectangle((28, y, 150, y + 5), fill=(168, 168, 164))
+    for x in range(0, 28):
+        shade = 174 + int(x * 1.6)
+        draw.line((x, 0, x, 119), fill=(shade, shade, shade))
     return image
 
 
