@@ -8,7 +8,7 @@ from pathlib import Path
 import tempfile
 from typing import Any
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, ImageStat
 
 from .processing import ProcessingOptions, process_images
 from .processing_quality_summary import (
@@ -56,6 +56,10 @@ _SYNTHETIC_FIXTURE_GROUPS = (
     "ultra_pale_typed_text_page",
     "mixed_photo_stamp_table_page",
 )
+
+_MIXED_CONTENT_MAX_CHANGED_PIXEL_RATIO = 0.01
+_MIXED_CONTENT_MAX_COLOR_MEAN_ABS_DELTA = 1.0
+_MIXED_CONTENT_MAX_EDGE_ENERGY_DELTA_RATIO = 0.02
 
 
 def run_image_processing_capability_smoke(
@@ -113,6 +117,13 @@ def run_image_processing_capability_smoke(
         manifest = process_images(report, input_dir, process_dir, options)
         source_images_modified = source_bytes_before != _source_bytes(input_dir)
         audit_summary = _load_json(process_dir / "processing_audit_summary.json")
+        protected_content_checks = [
+            _mixed_content_protection_check(
+                input_dir=input_dir,
+                process_dir=process_dir,
+                fixture_index=fixture_count,
+            )
+        ]
         quality_summary = build_processing_quality_summary(
             manifest=manifest,
             audit_summary=audit_summary,
@@ -121,6 +132,7 @@ def run_image_processing_capability_smoke(
                 "synthetic_inputs_only": True,
                 "fixture_count": fixture_count,
                 "fixture_groups": list(_SYNTHETIC_FIXTURE_GROUPS),
+                "protected_content_checks": protected_content_checks,
             },
             generated_at=generated_at,
         )
@@ -130,6 +142,7 @@ def run_image_processing_capability_smoke(
             manifest=manifest,
             audit_summary=audit_summary,
             quality_summary=quality_summary,
+            protected_content_checks=protected_content_checks,
             source_images_modified=source_images_modified,
             despeckle_backend=despeckle_backend,
             workers=workers,
@@ -155,6 +168,7 @@ def _build_summary(
     manifest: dict[str, Any],
     audit_summary: dict[str, Any],
     quality_summary: dict[str, Any],
+    protected_content_checks: list[dict[str, Any]],
     source_images_modified: bool,
     despeckle_backend: str,
     workers: int,
@@ -171,6 +185,7 @@ def _build_summary(
         processing_summary=processing_summary,
         audit_counts=audit_counts,
         audit_privacy=audit_privacy,
+        protected_content_checks=protected_content_checks,
         source_images_modified=source_images_modified,
     )
 
@@ -208,6 +223,7 @@ def _build_summary(
             "private_source_images_required": False,
         },
         "quality_baseline": quality_summary,
+        "protected_content_checks": protected_content_checks,
         "related_public_safe_artifacts": {
             "image_processing_capability_smoke": IMAGE_PROCESSING_CAPABILITY_SMOKE_JSON,
             "processing_quality_summary": PROCESSING_QUALITY_SUMMARY_JSON,
@@ -251,6 +267,7 @@ def _blocking_codes(
     processing_summary: dict[str, Any],
     audit_counts: dict[str, Any],
     audit_privacy: dict[str, Any],
+    protected_content_checks: list[dict[str, Any]],
     source_images_modified: bool,
 ) -> list[str]:
     blockers: list[str] = []
@@ -273,6 +290,8 @@ def _blocking_codes(
     for field in ("contains_paths", "contains_hashes", "contains_thumbnails", "contains_ocr_text"):
         if audit_privacy.get(field) is True:
             blockers.append(f"audit_privacy_{field}")
+    if any(check.get("status") != "pass" for check in protected_content_checks):
+        blockers.append("protected_content_check_failed")
     return blockers
 
 
@@ -335,6 +354,76 @@ def _despeckle_backend_counts(operation_timings: dict[str, Any]) -> dict[str, in
     if not isinstance(counts, dict):
         return {}
     return {str(key): _safe_int(value) for key, value in counts.items()}
+
+
+def _mixed_content_protection_check(*, input_dir: Path, process_dir: Path, fixture_index: int) -> dict[str, Any]:
+    source_path = input_dir / f"synthetic_fixture_{fixture_index:03d}.png"
+    processed_path = process_dir / "images" / source_path.name
+    limits = {
+        "max_changed_pixel_ratio": _MIXED_CONTENT_MAX_CHANGED_PIXEL_RATIO,
+        "max_color_mean_abs_delta": _MIXED_CONTENT_MAX_COLOR_MEAN_ABS_DELTA,
+        "max_edge_energy_delta_ratio": _MIXED_CONTENT_MAX_EDGE_ENERGY_DELTA_RATIO,
+    }
+    if not source_path.exists() or not processed_path.exists():
+        return {
+            "fixture_group": "mixed_photo_stamp_table_page",
+            "checked": False,
+            "status": "fail",
+            "fail_codes": ["protected_fixture_missing"],
+            "changed_pixel_ratio": 1.0,
+            "color_mean_abs_delta": 255.0,
+            "edge_energy_before": 0.0,
+            "edge_energy_after": 0.0,
+            "edge_energy_delta_ratio": 1.0,
+            **limits,
+        }
+
+    source = Image.open(source_path).convert("RGB")
+    processed = Image.open(processed_path).convert("RGB")
+    comparable = processed.resize(source.size, Image.Resampling.BILINEAR) if processed.size != source.size else processed
+    changed_pixel_ratio = _changed_pixel_ratio(source, comparable)
+    color_mean_abs_delta = _color_mean_abs_delta(source, comparable)
+    edge_energy_before = _edge_energy(source)
+    edge_energy_after = _edge_energy(comparable)
+    edge_energy_delta_ratio = abs(edge_energy_after - edge_energy_before) / max(edge_energy_before, 1.0)
+
+    fail_codes: list[str] = []
+    if changed_pixel_ratio > _MIXED_CONTENT_MAX_CHANGED_PIXEL_RATIO:
+        fail_codes.append("protected_changed_pixel_ratio_exceeded")
+    if color_mean_abs_delta > _MIXED_CONTENT_MAX_COLOR_MEAN_ABS_DELTA:
+        fail_codes.append("protected_color_delta_exceeded")
+    if edge_energy_delta_ratio > _MIXED_CONTENT_MAX_EDGE_ENERGY_DELTA_RATIO:
+        fail_codes.append("protected_edge_energy_delta_exceeded")
+
+    return {
+        "fixture_group": "mixed_photo_stamp_table_page",
+        "checked": True,
+        "status": "pass" if not fail_codes else "fail",
+        "fail_codes": fail_codes,
+        "changed_pixel_ratio": round(changed_pixel_ratio, 6),
+        "color_mean_abs_delta": round(color_mean_abs_delta, 6),
+        "edge_energy_before": round(edge_energy_before, 6),
+        "edge_energy_after": round(edge_energy_after, 6),
+        "edge_energy_delta_ratio": round(edge_energy_delta_ratio, 6),
+        **limits,
+    }
+
+
+def _changed_pixel_ratio(source: Image.Image, processed: Image.Image) -> float:
+    diff = ImageChops.difference(source, processed).convert("L")
+    changed = diff.point(lambda value: 255 if value > 8 else 0).histogram()[255]
+    return changed / max(1, source.width * source.height)
+
+
+def _color_mean_abs_delta(source: Image.Image, processed: Image.Image) -> float:
+    diff = ImageChops.difference(source, processed)
+    mean = ImageStat.Stat(diff).mean
+    return sum(mean[:3]) / 3.0
+
+
+def _edge_energy(image: Image.Image) -> float:
+    edges = image.convert("L").filter(ImageFilter.FIND_EDGES)
+    return ImageStat.Stat(edges).mean[0]
 
 
 def _write_synthetic_fixtures(input_dir: Path) -> int:

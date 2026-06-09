@@ -48,8 +48,9 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   `scan-qc.processing-quality-summary.v1`, reports a passing public-safe
   quality baseline with tone, fold-shadow, bleed-through, scanline, faded-text,
   ultra-pale typed-glyph, and text-edge aggregate deltas from synthetic
-  fixtures, and contains no paths, filenames, hashes, OCR text, thumbnails, or
-  image content.
+  fixtures, includes protected mixed photo/stamp/table changed-pixel,
+  color-delta, and edge-energy drift checks within limits, and contains no
+  paths, filenames, hashes, OCR text, thumbnails, or image content.
 - Confirm `archive-scan-qc rule-template-catalog --out
   /placeholder/private-validation-output/rule-template-catalog` and
   `archive-scan-qc rule-template-dry-run --rule-template text-clean-readable-v1 --out

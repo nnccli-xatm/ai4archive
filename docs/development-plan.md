@@ -226,8 +226,9 @@ public-safe 聚合质量基线。
 M3 的第一片保护契约也已补齐：`photo-mixed-safe-v1` 通过生产 CLI 端到端测试覆盖
 合成照片/印章/表格混排页，要求 production summary 和 processing manifest 明确保持
 强背景清理、透印清理、褪色文字增强和文字边缘锐化关闭，同时确认源图不变并仍输出
-public-safe 质量摘要。后续 M3 继续补区域级色彩/结构漂移阈值和按风险分组的本地
-review package。
+public-safe 质量摘要。`image-processing-capability-smoke` 也已把混排保护变成
+public-safe 聚合质量证据：输出该 fixture 的像素变化率、颜色均值漂移和边缘能量漂移
+及对应阈值。后续 M3 继续补按风险分组的本地 review package。
 
 ## 7. 阶段 3：前端改为 API Client
 

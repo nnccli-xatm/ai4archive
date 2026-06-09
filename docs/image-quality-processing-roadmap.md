@@ -274,9 +274,12 @@ production CLI contract test using a synthetic mixed photo/stamp/table page.
 The test proves that production summaries and processing manifests keep
 normalize-tones, strong background cleanup, bleed-through cleanup, faded-text
 enhancement, and text-edge sharpening disabled for the mixed-safe template while
-still preserving source bytes and writing a public-safe quality summary. Region
-level color/structure drift limits and risk-grouped review packaging remain M3
-follow-up work.
+still preserving source bytes and writing a public-safe quality summary.
+Follow-up, 2026-06-09: `image-processing-capability-smoke` now also publishes a
+protected mixed-content fixture check in the public-safe quality baseline. It
+reports aggregate changed-pixel ratio, color mean absolute delta, and edge
+energy delta ratio with limits, without paths or filenames. Risk-grouped review
+packaging remains M3 follow-up work.
 
 ### M4：服务 API 和状态恢复
 

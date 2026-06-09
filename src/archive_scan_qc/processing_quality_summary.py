@@ -124,8 +124,9 @@ def build_processing_quality_summary(
     metrics = _quality_metrics(audit_summary.get("metrics"))
     guardrails = _guardrail_summary(audit_summary.get("guardrails"), counts)
     quality_signal = _quality_signal(counts)
+    fixture_context_payload = _fixture_context(fixture_context)
     privacy = _privacy_payload()
-    blockers = _blocking_codes(counts, guardrails, audit_summary.get("privacy"))
+    blockers = _blocking_codes(counts, guardrails, audit_summary.get("privacy"), fixture_context_payload)
     status = "pass" if not blockers else "fail"
 
     return {
@@ -141,7 +142,7 @@ def build_processing_quality_summary(
             "row_level_evidence_included": False,
             "image_content_included": False,
         },
-        "fixture_context": _fixture_context(fixture_context),
+        "fixture_context": fixture_context_payload,
         "counts": counts,
         "quality_signal": quality_signal,
         "quality_metrics": metrics,
@@ -236,15 +237,51 @@ def _fixture_context(raw_context: dict[str, Any] | None) -> dict[str, Any]:
     groups = raw_context.get("fixture_groups")
     if not isinstance(groups, list):
         groups = []
+    protected_content_checks = raw_context.get("protected_content_checks")
+    if not isinstance(protected_content_checks, list):
+        protected_content_checks = []
     return {
         "source": str(raw_context.get("source") or "unspecified"),
         "synthetic_inputs_only": bool(raw_context.get("synthetic_inputs_only", False)),
         "fixture_count": _safe_int(raw_context.get("fixture_count")),
         "fixture_groups": [str(group) for group in groups if isinstance(group, str)],
+        "protected_content_checks": [
+            _protected_content_check_payload(check)
+            for check in protected_content_checks
+            if isinstance(check, dict)
+        ],
     }
 
 
-def _blocking_codes(counts: dict[str, int], guardrails: dict[str, Any], audit_privacy: Any) -> list[str]:
+def _protected_content_check_payload(check: dict[str, Any]) -> dict[str, Any]:
+    fail_codes = check.get("fail_codes")
+    if not isinstance(fail_codes, list):
+        fail_codes = []
+    status = check.get("status")
+    if status not in {"pass", "fail", "not_checked"}:
+        status = "pass" if check.get("checked") is True and not fail_codes else "fail"
+    return {
+        "fixture_group": str(check.get("fixture_group") or "unspecified"),
+        "checked": check.get("checked") is True,
+        "status": status,
+        "fail_codes": [str(code) for code in fail_codes if isinstance(code, str)],
+        "changed_pixel_ratio": _safe_float_or_zero(check.get("changed_pixel_ratio")),
+        "color_mean_abs_delta": _safe_float_or_zero(check.get("color_mean_abs_delta")),
+        "edge_energy_before": _safe_float_or_zero(check.get("edge_energy_before")),
+        "edge_energy_after": _safe_float_or_zero(check.get("edge_energy_after")),
+        "edge_energy_delta_ratio": _safe_float_or_zero(check.get("edge_energy_delta_ratio")),
+        "max_changed_pixel_ratio": _safe_float_or_zero(check.get("max_changed_pixel_ratio")),
+        "max_color_mean_abs_delta": _safe_float_or_zero(check.get("max_color_mean_abs_delta")),
+        "max_edge_energy_delta_ratio": _safe_float_or_zero(check.get("max_edge_energy_delta_ratio")),
+    }
+
+
+def _blocking_codes(
+    counts: dict[str, int],
+    guardrails: dict[str, Any],
+    audit_privacy: Any,
+    fixture_context: dict[str, Any],
+) -> list[str]:
     blockers: list[str] = []
     if counts["processed_files"] <= 0:
         blockers.append("no_processed_files")
@@ -260,6 +297,11 @@ def _blocking_codes(counts: dict[str, int], guardrails: dict[str, Any], audit_pr
         for field in ("contains_paths", "contains_hashes", "contains_thumbnails", "contains_ocr_text", "contains_image_content"):
             if audit_privacy.get(field) is True:
                 blockers.append(f"audit_privacy_{field}")
+    protected_content_checks = fixture_context.get("protected_content_checks")
+    if isinstance(protected_content_checks, list) and any(
+        isinstance(check, dict) and check.get("status") != "pass" for check in protected_content_checks
+    ):
+        blockers.append("protected_content_check_failed")
     return blockers
 
 
@@ -294,3 +336,8 @@ def _safe_float(value: Any) -> float | None:
     if not isinstance(value, int | float):
         return None
     return round(float(value), 6)
+
+
+def _safe_float_or_zero(value: Any) -> float:
+    safe_value = _safe_float(value)
+    return safe_value if safe_value is not None else 0.0

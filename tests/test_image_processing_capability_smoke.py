@@ -67,6 +67,17 @@ class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
             self.assertIn("mixed_photo_stamp_table_page", quality_payload["fixture_context"]["fixture_groups"])
             self.assertIn("bleed_through_page", quality_payload["fixture_context"]["fixture_groups"])
             self.assertIn("ultra_pale_typed_text_page", quality_payload["fixture_context"]["fixture_groups"])
+            protected_checks = quality_payload["fixture_context"]["protected_content_checks"]
+            self.assertEqual(payload["protected_content_checks"], protected_checks)
+            self.assertEqual(len(protected_checks), 1)
+            mixed_check = protected_checks[0]
+            self.assertEqual(mixed_check["fixture_group"], "mixed_photo_stamp_table_page")
+            self.assertTrue(mixed_check["checked"])
+            self.assertEqual(mixed_check["status"], "pass")
+            self.assertEqual(mixed_check["fail_codes"], [])
+            self.assertLessEqual(mixed_check["changed_pixel_ratio"], mixed_check["max_changed_pixel_ratio"])
+            self.assertLessEqual(mixed_check["color_mean_abs_delta"], mixed_check["max_color_mean_abs_delta"])
+            self.assertLessEqual(mixed_check["edge_energy_delta_ratio"], mixed_check["max_edge_energy_delta_ratio"])
             self.assertEqual(quality_payload["counts"]["processed_files"], EXPECTED_SYNTHETIC_FIXTURES)
             self.assertEqual(quality_payload["counts"]["failed_files"], 0)
             self.assertGreaterEqual(quality_payload["quality_metrics"]["tone_background_delta"]["max"], 6)
