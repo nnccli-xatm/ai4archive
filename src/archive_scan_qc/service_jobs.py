@@ -39,6 +39,7 @@ SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON = "service_job_index_public_summary.json"
 SERVICE_JOBS_DIRNAME = "jobs"
 JOB_ID_PATTERN = re.compile(r"^job-[A-Za-z0-9][A-Za-z0-9_-]{2,80}$")
 TERMINAL_STATES = {"finished", "needs_review", "failed", "interrupted", "cancelled"}
+SERVICE_JOB_MAX_WORKERS = 8
 
 
 @dataclass(frozen=True)
@@ -58,6 +59,7 @@ def create_service_job(config: ServiceJobConfig, *, job_id: str | None = None) -
     input_dir = config.input_dir.resolve()
     service_root = config.service_root.resolve()
     _validate_service_paths(input_dir, service_root)
+    workers = _validate_worker_limit(config.workers)
     job_id = _validate_job_id(job_id or _new_job_id())
     job_root = (service_root / SERVICE_JOBS_DIRNAME / job_id).resolve()
     _require_within(job_root, service_root)
@@ -98,7 +100,11 @@ def create_service_job(config: ServiceJobConfig, *, job_id: str | None = None) -
             "rule_template": profile.metadata().get("template"),
             "processing_mode": config.processing_mode,
             "processing_defaults": processing_defaults,
-            "workers": config.workers,
+            "workers": workers,
+        },
+        "resource_limits": {
+            "max_workers_per_job": SERVICE_JOB_MAX_WORKERS,
+            "workers_requested": workers,
         },
         "production_artifacts": _production_artifact_paths(directories["metadata"], directories["derivatives"]),
         "recovery": {
@@ -230,6 +236,16 @@ def _validate_job_id(job_id: str) -> str:
     if not JOB_ID_PATTERN.match(job_id):
         raise ValueError("Invalid service job id.")
     return job_id
+
+
+def _validate_worker_limit(workers: int | None) -> int | None:
+    if workers is None:
+        return None
+    if workers < 1:
+        raise ValueError("Service job workers must be a positive integer.")
+    if workers > SERVICE_JOB_MAX_WORKERS:
+        raise ValueError(f"Service job workers exceed the per-job limit of {SERVICE_JOB_MAX_WORKERS}.")
+    return workers
 
 
 def _new_job_id() -> str:
@@ -378,6 +394,7 @@ def _public_summary_from_record(
             "rule_template_id": record["template_snapshot"]["rule_template"]["id"],
             "processing_mode": record["template_snapshot"]["processing_mode"],
         },
+        "resource_limits": _public_resource_limits(record.get("resource_limits")),
         "isolation": {
             "job_root_isolated": bool(record["isolation"]["job_root_isolated"]),
             "metadata_isolated": bool(record["isolation"]["metadata_isolated"]),
@@ -425,6 +442,14 @@ def _public_recovery_payload(recovery: Any) -> dict[str, Any]:
     return {
         "status": str(recovery.get("status") or "unknown"),
         "resume_supported": bool(recovery.get("resume_supported")),
+    }
+
+
+def _public_resource_limits(resource_limits: Any) -> dict[str, int | None]:
+    resource_limits = resource_limits if isinstance(resource_limits, dict) else {}
+    return {
+        "max_workers_per_job": _safe_int(resource_limits.get("max_workers_per_job")),
+        "workers_requested": _safe_int(resource_limits.get("workers_requested")),
     }
 
 

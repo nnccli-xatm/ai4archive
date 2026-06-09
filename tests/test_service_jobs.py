@@ -8,6 +8,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 from archive_scan_qc.service_jobs import (
+    SERVICE_JOB_MAX_WORKERS,
     SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON,
     SERVICE_JOB_PUBLIC_SUMMARY_JSON,
     SERVICE_JOB_RECORD_JSON,
@@ -49,9 +50,13 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertTrue(summary["isolation"]["metadata_isolated"])
             self.assertTrue(summary["isolation"]["derivatives_isolated"])
             self.assertTrue(summary["isolation"]["tmp_isolated"])
+            self.assertEqual(summary["resource_limits"]["max_workers_per_job"], SERVICE_JOB_MAX_WORKERS)
+            self.assertEqual(summary["resource_limits"]["workers_requested"], 1)
             self.assertEqual(Path(record["paths"]["metadata_dir"]).parent, job_root)
             self.assertEqual(Path(record["paths"]["derivatives_dir"]).parent, job_root)
             self.assertEqual(Path(record["paths"]["tmp_dir"]).parent, job_root)
+            self.assertEqual(record["resource_limits"]["max_workers_per_job"], SERVICE_JOB_MAX_WORKERS)
+            self.assertEqual(record["resource_limits"]["workers_requested"], 1)
             self.assertEqual(record["paths"]["input_dir"], str(input_dir.resolve()))
             _assert_public_text_omits(
                 self,
@@ -71,6 +76,28 @@ class ServiceJobBoundaryTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "must not overlap"):
                 create_service_job(ServiceJobConfig(input_dir=input_dir, service_root=service_root))
+
+    def test_create_rejects_invalid_worker_limits(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-job-workers-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            input_dir.mkdir()
+            _write_page(input_dir / "private_page_001.png")
+
+            with self.assertRaisesRegex(ValueError, "positive integer"):
+                create_service_job(
+                    ServiceJobConfig(input_dir=input_dir, service_root=root / "service-root-low", workers=0),
+                    job_id="job-testworkers001",
+                )
+            with self.assertRaisesRegex(ValueError, "per-job limit"):
+                create_service_job(
+                    ServiceJobConfig(
+                        input_dir=input_dir,
+                        service_root=root / "service-root-high",
+                        workers=SERVICE_JOB_MAX_WORKERS + 1,
+                    ),
+                    job_id="job-testworkers002",
+                )
 
     def test_run_job_writes_terminal_public_summary_without_private_paths(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-job-run-") as temp_dir:

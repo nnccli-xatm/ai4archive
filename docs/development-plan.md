@@ -155,6 +155,8 @@ external scheduler can poll aggregate job state without reading private
 checkpoints.
 The core now supports a `cancelled` terminal state and rejects attempts to rerun
 terminal service jobs.
+It also enforces a per-job worker limit during job creation and reports the
+non-sensitive worker quota in the public summary.
 
 ## 6. 阶段 2：图像处理规则模板系统
 

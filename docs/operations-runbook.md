@@ -239,6 +239,9 @@ Use service-job cancellation only to mark a non-terminal job as stopped; the
 current synchronous runner cannot interrupt an in-flight image operation from a
 separate request, but it records `cancelled` as a terminal public-safe state and
 prevents accidental reruns.
+Service job creation rejects worker counts below 1 or above the configured
+per-job limit; the public summary includes only the requested worker count and
+the limit, not local paths or process details.
 When recovering the full service root, read
 `service_job_index_public_summary.json` for aggregate job state counts and
 per-job public summaries; it is designed for polling without exposing local
