@@ -379,7 +379,7 @@ content.
 任务：
 
 - 扩展 `core-image-processing` CI：快速 synthetic quality regression。
-- 保留 350 秒级深度图像回归为 main/deep-full 或手动发布门禁。
+- 保留 350 秒级深度图像回归为 `DEEP_FULL_ONLY_TESTS`，只在定时 deep-full、手动 deep-full 或本地发布门禁运行。
 - 增加 private validation 聚合报告：只公开分组指标和风险代码。
 - release checklist 增加质量收益、过处理风险、源文件安全、恢复和 public-safe 检查。
 

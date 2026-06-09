@@ -15,7 +15,7 @@ class CiRegressionGroupsTests(unittest.TestCase):
             test
             for tests in groups.REGRESSION_GROUPS.values()
             for test in tests
-        }
+        } | set(groups.DEEP_FULL_ONLY_TESTS)
 
         self.assertEqual(existing, assigned)
 
@@ -34,13 +34,17 @@ class CiRegressionGroupsTests(unittest.TestCase):
         external = set(groups.REGRESSION_GROUPS["external-validation"])
         core = set(groups.REGRESSION_GROUPS["core-image-processing"])
         production = set(groups.REGRESSION_GROUPS["production-cli"])
+        deep = set(groups.DEEP_FULL_ONLY_TESTS)
 
         self.assertIn("test_delivery_tooling", external)
         self.assertIn("test_ci_targeted_selector", external)
-        self.assertIn("test_scan_processing_algorithm_regression", core)
+        self.assertIn("test_scan_qc", deep)
+        self.assertIn("test_scan_processing_algorithm_regression", deep)
         self.assertIn("test_service_api", production)
         self.assertIn("test_service_http", production)
         self.assertIn("test_service_jobs", production)
+        self.assertNotIn("test_scan_qc", core)
+        self.assertNotIn("test_scan_processing_algorithm_regression", core)
         self.assertNotIn("test_service_api", core)
         self.assertNotIn("test_service_http", core)
         self.assertNotIn("test_service_jobs", core)

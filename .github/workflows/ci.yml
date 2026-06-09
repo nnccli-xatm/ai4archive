@@ -283,3 +283,36 @@ jobs:
           /tmp/archive-scan-qc-smoke/bin/python -m pip install --upgrade pip
           /tmp/archive-scan-qc-smoke/bin/python -m pip install dist/ai4archive-*.whl
           /tmp/archive-scan-qc-smoke/bin/archive-scan-qc --version
+
+  deep-full-only-regression:
+    name: Deep full-only image regression Python ${{ matrix.python-version }}
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'deep-full')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - name: Check out repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init "$GITHUB_WORKSPACE"
+          cd "$GITHUB_WORKSPACE"
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --prune --depth=1 origin "+${GITHUB_REF}:refs/remotes/ci/ref"
+          git checkout --force refs/remotes/ci/ref
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install package for deep full-only regression
+        run: python -m pip install -e .
+
+      - name: Run deep full-only regression
+        run: PYTHONPATH=src:tests python scripts/ci_regression_groups.py run-deep-full-only

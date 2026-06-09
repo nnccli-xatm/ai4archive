@@ -42,10 +42,10 @@ main 分支触发两个层级：
    - 不跑完整单元测试。
 
 2. `Main regression <group> Python 3.11`
-   - Python 3.11 按语义分组跑完整回归。
+   - Python 3.11 按语义分组跑常规回归。
    - 四组为 `core-image-processing`、`production-cli`、`privacy-boundary` 和 `external-validation`。
-   - 每组启动前由 `scripts/ci_regression_groups.py verify-coverage` 等价校验确保所有 `tests/test_*.py` 正好归入一个组。
-   - 这样保留 main 的完整测试兜底，同时把高耗时图像处理、生产 CLI、隐私边界和外部验证失败面拆开定位。
+   - 每组启动前由 `scripts/ci_regression_groups.py verify-coverage` 等价校验确保所有常规 `tests/test_*.py` 正好归入一个组，350 秒级深度图像回归只允许出现在 `DEEP_FULL_ONLY_TESTS`。
+   - 这样保留 main 的常规测试兜底，同时把高耗时图像处理、生产 CLI、隐私边界和外部验证失败面拆开定位。
 
 ### workflow_dispatch
 
@@ -53,6 +53,7 @@ main 分支触发两个层级：
 
 - `deep-full`
   - Python 3.10、3.11、3.12 都运行四组语义回归。
+  - Python 3.10、3.11、3.12 额外运行 `DEEP_FULL_ONLY_TESTS`，覆盖 `tests/test_scan_qc.py` 和 `tests/test_scan_processing_algorithm_regression.py`。
   - `production-cli` 组额外运行前端工作台校验、编译、wheel 构建和 CLI smoke。
   - 适合发布前、重大算法改动后、或怀疑跨版本差异时使用。
 
@@ -103,7 +104,7 @@ main 分支触发两个层级：
 
 - 路径包含背景污渍、边缘阴影、色调归一、扫描线相关关键词时，额外运行对应专项测试文件。
 
-这些规则仍然保守，但把 PR 默认目标从“拉起巨型回归文件”改为“先跑快速合同和相关专项”。深度图像回归继续由 main 四组语义回归、定时 deep-full 和手动 deep-full 兜底。
+这些规则仍然保守，但把 PR 默认目标从“拉起巨型回归文件”改为“先跑快速合同和相关专项”。深度图像回归继续由定时 deep-full 和手动 deep-full 的 `DEEP_FULL_ONLY_TESTS` 兜底。
 
 ## 本地测试分层入口
 
@@ -127,8 +128,12 @@ main 分支触发两个层级：
   - `tests/test_scan_qc.py` 和 `tests/test_scan_processing_algorithm_regression.py`。
   - 用于发布前、重大算法改动后或专门排查历史深度回归；处理流程类回归已下沉到 `make test-image`。
 
+- `make test-deep-full-only`
+  - 通过 `scripts/ci_regression_groups.py run-deep-full-only` 运行 deep-full-only 模块。
+  - 和 GitHub Actions 的定时/手动 deep-full 深度图像回归入口保持一致。
+
 - `make test-core-image-processing`
-  - 运行核心图像处理组，包括合成图像能力 smoke、扫描/处理算法回归、后端一致性、NumPy/deskew/despeckle 快路径奇偶性、质量套件和性能/worker 推荐测试。
+  - 运行核心图像处理组，包括合成图像能力 smoke、后端一致性、NumPy/deskew/despeckle 快路径奇偶性、专项质量套件、性能/worker 推荐和快速 synthetic quality regression；不运行 deep-full-only 巨型回归文件。
 
 - `make test-production-cli`
   - 运行生产 CLI 组，包括稳定 CLI 合同、preflight/run-plan、production-run/review queue、规则、manifest、sampling、service API/HTTP/job boundary 和生产工作台 guard。
@@ -150,7 +155,7 @@ main 分支触发两个层级：
 main push 的完整回归在 Python 3.11 上按 4 个语义组并行：
 
 - `core-image-processing`
-  - 覆盖实际图像读写、扫描 QC、处理算法、后端一致性、NumPy/deskew/despeckle 快路径奇偶性、质量套件、性能和 worker 推荐。
+  - 覆盖实际图像读写、扫描 QC、处理算法专项、后端一致性、NumPy/deskew/despeckle 快路径奇偶性、质量套件、性能和 worker 推荐。`tests/test_scan_qc.py` 和 `tests/test_scan_processing_algorithm_regression.py` 只在 deep-full-only 入口运行。
 - `production-cli`
   - 覆盖稳定 CLI、生产运行、preflight/run-plan、规则/manifest/sampling、报告合同和生产工作台。
 - `privacy-boundary`
@@ -162,8 +167,9 @@ main push 的完整回归在 Python 3.11 上按 4 个语义组并行：
 
 - `list-groups`：列出四个 CI 组。
 - `list-tests <group>`：列出某组的 unittest 模块。
-- `verify-coverage`：检查所有 `tests/test_*.py` 正好被分配一次，发现缺失、重复或已删除测试时失败。
+- `verify-coverage`：检查所有 `tests/test_*.py` 要么正好属于一个常规语义组，要么显式列入 `DEEP_FULL_ONLY_TESTS`，发现缺失、重复或已删除测试时失败。
 - `run <group>`：先做覆盖校验，再运行该组测试；`external-validation` 还会运行合成外部 CLI smoke。
+- `list-deep-tests` / `run-deep-full-only`：列出或运行只属于定时/手动 deep-full 的巨型深度回归模块。
 
 这种方式的优点：
 
@@ -182,7 +188,7 @@ main push 的完整回归在 Python 3.11 上按 4 个语义组并行：
 
 - PR 必须通过三版本 smoke 和 targeted tests。
 - main 必须通过 Python 3.11 四组语义回归，以及 Python 3.10/3.12 compatibility smoke。
-- 每日定时和手动 `deep-full` 提供三版本四组语义回归兜底。
+- 每日定时和手动 `deep-full` 提供三版本四组语义回归，并额外运行 deep-full-only 图像深度回归。
 
 不再要求每个 PR 或每个 main push 都跑三版本完整测试。三版本完整测试用于发现跨版本慢性问题，而不是阻塞每个小 PR。
 
@@ -192,8 +198,8 @@ main push 的完整回归在 Python 3.11 上按 4 个语义组并行：
 
 - PR smoke：通常几十秒。
 - PR targeted tests：秒级到数分钟，取决于变更范围。
-- main regression groups：目标 7-10 分钟级，取决于核心图像处理组中的算法深度回归耗时。
-- deep-full：仍可能是 10-20 分钟级，用于定时和手动深度验证，取决于三版本四组矩阵的最慢组合。
+- main regression groups：目标 7-10 分钟级，不包含 deep-full-only 巨型图像回归文件。
+- deep-full：仍可能是 10-20 分钟级，用于定时和手动深度验证，取决于三版本四组矩阵和 deep-full-only 图像回归的最慢组合。
 
 实际耗时应以 GitHub Actions run 记录为准。
 
@@ -202,6 +208,7 @@ main push 的完整回归在 Python 3.11 上按 4 个语义组并行：
 新增测试或模块时，按下面规则维护 CI：
 
 - 新增普通测试文件：必须加入 `scripts/ci_regression_groups.py` 的一个语义组；`verify-coverage` 会阻断未归组测试。
+- 新增 350 秒级或只能作为发布门禁的深度图像测试：必须加入 `DEEP_FULL_ONLY_TESTS`，不能放入常规四组。
 - 新增高价值 PR 阶段测试：确认文件名符合 `tests/test_*.py`。
 - 新增新的图像处理子模块：在 `PR targeted tests` 的路径映射里增加对应专项测试文件。
 - 某个语义组长期明显变慢：考虑继续按能力或历史耗时拆分该组。
@@ -220,4 +227,4 @@ main push 的完整回归在 Python 3.11 上按 4 个语义组并行：
 
 4. deep-full 失败
    - 如果只有某个 Python 版本失败，优先判断跨版本兼容性。
-   - 如果三版本都失败，优先按失败语义组处理。
+   - 如果三版本都失败，优先按失败语义组或 deep-full-only 模块处理。

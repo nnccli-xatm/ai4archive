@@ -7,9 +7,10 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 - Run `PYTHONPATH=src python3 -m unittest discover -s tests`.
 - Run `PYTHONPATH=src python3 -m compileall -q src tests`.
 - Run `PYTHONPATH=src:tests python3 scripts/ci_regression_groups.py
-  verify-coverage` and confirm every `tests/test_*.py` module is assigned to
-  exactly one of `core-image-processing`, `production-cli`,
-  `privacy-boundary`, or `external-validation`.
+  verify-coverage` and confirm every normal `tests/test_*.py` module is
+  assigned to exactly one of `core-image-processing`, `production-cli`,
+  `privacy-boundary`, or `external-validation`; deep image files must appear
+  only in `DEEP_FULL_ONLY_TESTS` and run through `run-deep-full-only`.
 - Run `PYTHONPATH=src python3 scripts/check_offline_dependencies.py`.
 - Run `python3 scripts/validate_release.py`.
 - Confirm `archive-scan-qc --version` matches the package version.

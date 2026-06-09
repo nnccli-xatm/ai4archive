@@ -68,7 +68,7 @@ DEEP_REGRESSION_TESTS := \
 	test_scan_qc \
 	test_scan_processing_algorithm_regression
 
-.PHONY: test test-fast test-image test-platform test-perf test-deep-regression \
+.PHONY: test test-fast test-image test-platform test-perf test-deep-regression test-deep-full-only \
 	test-core-image-processing test-production-cli test-privacy-boundary \
 	test-external-validation test-regression-groups compile validate-release
 
@@ -89,6 +89,9 @@ test-perf:
 
 test-deep-regression:
 	PYTHONPATH=$(TEST_PYTHONPATH) $(PYTHON) -m unittest $(DEEP_REGRESSION_TESTS)
+
+test-deep-full-only:
+	PYTHONPATH=$(TEST_PYTHONPATH) $(PYTHON) scripts/ci_regression_groups.py run-deep-full-only
 
 test-core-image-processing:
 	PYTHONPATH=$(TEST_PYTHONPATH) $(PYTHON) scripts/ci_regression_groups.py run core-image-processing

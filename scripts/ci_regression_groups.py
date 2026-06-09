@@ -33,14 +33,17 @@ CORE_IMAGE_PROCESSING_TESTS = (
     "test_quality_suite",
     "test_scan_background_stains",
     "test_scan_edge_shadow",
-    "test_scan_processing_algorithm_regression",
     "test_scan_processing_combo",
     "test_scan_processing_reuse",
     "test_scan_processing_workflow_regression",
-    "test_scan_qc",
     "test_scan_tone_normalization",
     "test_scanline_lightening",
     "test_worker_recommendation",
+)
+
+DEEP_FULL_ONLY_TESTS = (
+    "test_scan_qc",
+    "test_scan_processing_algorithm_regression",
 )
 
 PRODUCTION_CLI_TESTS = (
@@ -105,16 +108,22 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("list-groups", help="Print group names.")
+    subparsers.add_parser("list-deep-tests", help="Print unittest modules reserved for deep-full validation.")
     list_tests = subparsers.add_parser("list-tests", help="Print unittest modules for a group.")
     list_tests.add_argument("group", choices=sorted(REGRESSION_GROUPS))
     run = subparsers.add_parser("run", help="Run one regression group.")
     run.add_argument("group", choices=sorted(REGRESSION_GROUPS))
+    subparsers.add_parser("run-deep-full-only", help="Run deep-full-only unittest modules.")
     subparsers.add_parser("verify-coverage", help="Fail if any test module is ungrouped or duplicated.")
     args = parser.parse_args(argv)
 
     if args.command == "list-groups":
         for group in sorted(REGRESSION_GROUPS):
             print(group)
+        return 0
+    if args.command == "list-deep-tests":
+        for test in DEEP_FULL_ONLY_TESTS:
+            print(test)
         return 0
     if args.command == "list-tests":
         for test in REGRESSION_GROUPS[args.group]:
@@ -127,6 +136,10 @@ def main(argv: list[str] | None = None) -> int:
         verify_group_coverage()
         run_group(args.group)
         return 0
+    if args.command == "run-deep-full-only":
+        verify_group_coverage()
+        run_deep_full_only()
+        return 0
     raise AssertionError(f"Unhandled command: {args.command}")
 
 
@@ -137,10 +150,12 @@ def verify_group_coverage() -> None:
         for test in tests:
             assigned.setdefault(test, []).append(group)
 
-    missing = sorted(existing - set(assigned))
-    stale = sorted(set(assigned) - existing)
+    deep_full_only = set(DEEP_FULL_ONLY_TESTS)
+    missing = sorted(existing - set(assigned) - deep_full_only)
+    stale = sorted((set(assigned) | deep_full_only) - existing)
     duplicates = {test: groups for test, groups in sorted(assigned.items()) if len(groups) > 1}
-    if missing or stale or duplicates:
+    deep_group_overlap = sorted(set(assigned) & deep_full_only)
+    if missing or stale or duplicates or deep_group_overlap:
         lines = ["CI regression group coverage is not exact."]
         if missing:
             lines.append("Ungrouped tests: " + ", ".join(missing))
@@ -151,6 +166,8 @@ def verify_group_coverage() -> None:
                 "Tests assigned to multiple groups: "
                 + ", ".join(f"{test}={','.join(groups)}" for test, groups in duplicates.items())
             )
+        if deep_group_overlap:
+            lines.append("Deep-full-only tests also assigned to regular groups: " + ", ".join(deep_group_overlap))
         raise SystemExit("\n".join(lines))
 
 
@@ -161,6 +178,12 @@ def run_group(group: str) -> None:
     run_command([sys.executable, "-m", "unittest", *tests])
     if group == "external-validation":
         run_external_validation_commands()
+
+
+def run_deep_full_only() -> None:
+    print("Running deep-full-only regression tests", flush=True)
+    print("Unit test modules: " + " ".join(DEEP_FULL_ONLY_TESTS), flush=True)
+    run_command([sys.executable, "-m", "unittest", *DEEP_FULL_ONLY_TESTS])
 
 
 def run_external_validation_commands() -> None:
