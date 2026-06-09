@@ -58,6 +58,7 @@ class ServiceApiCoreTests(unittest.TestCase):
             )
             self.assertEqual(capabilities["schemas"]["rule_template_catalog"], "scan-qc.rule-template-catalog.v1")
             self.assertEqual(capabilities["schemas"]["rule_template_dry_run"], "scan-qc.rule-template-dry-run.v1")
+            self.assertGreaterEqual(capabilities["resource_limits"]["max_active_async_jobs"], 1)
             self.assertTrue(capabilities["privacy"]["public_safe"])
             self.assertNotIn(str(root), raw)
 

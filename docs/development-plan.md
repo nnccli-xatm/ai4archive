@@ -171,7 +171,9 @@ fields. The new `POST /api/jobs/{job_id}/start` endpoint is an in-process async
 MVP: it returns `running` immediately, runs the same production runner in a
 background thread, keeps active jobs `running` while the service process is
 alive, and still marks stale running checkpoints as `needs_recovery` after
-restart.
+restart. Async start now enforces a non-sensitive `max_active_async_jobs`
+service limit before marking a job `running`; the capabilities response exposes
+both that limit and the per-job worker limit.
 
 ## 6. 阶段 2：图像处理规则模板系统
 

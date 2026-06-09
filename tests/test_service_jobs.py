@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import time
 import tempfile
+import threading
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from PIL import Image, ImageDraw
@@ -165,6 +167,44 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertEqual(terminal["quality"]["status"], "pass")
             self.assertEqual(terminal["counts"]["processed_files"], 1)
             _assert_public_text_omits(self, public_raw, str(root.resolve()), "private_page_001")
+
+    def test_start_job_async_enforces_active_job_limit_before_marking_running(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-job-async-limit-") as temp_dir:
+            root = Path(temp_dir)
+            service_root = root / "service-root"
+            for index in (1, 2):
+                input_dir = root / f"private-source-{index}"
+                input_dir.mkdir()
+                _write_page(input_dir / f"private_page_{index:03d}.png")
+                create_service_job(
+                    ServiceJobConfig(input_dir=input_dir, service_root=service_root, workers=1),
+                    job_id=f"job-testasynclimit00{index}",
+                )
+            started = threading.Event()
+            release = threading.Event()
+
+            def _blocking_runner(config):  # type: ignore[no-untyped-def]
+                started.set()
+                release.wait(timeout=5)
+
+            with (
+                mock.patch("archive_scan_qc.service_jobs.SERVICE_JOB_MAX_ACTIVE_JOBS", 1),
+                mock.patch("archive_scan_qc.service_jobs.run_production_folder", side_effect=_blocking_runner),
+            ):
+                running = start_service_job_async(service_root, "job-testasynclimit001")
+                self.assertTrue(started.wait(timeout=5))
+                with self.assertRaisesRegex(RuntimeError, "active job limit"):
+                    start_service_job_async(service_root, "job-testasynclimit002")
+                second_status = recover_service_job(service_root, "job-testasynclimit002")
+                release.set()
+                _wait_for_state(
+                    self,
+                    lambda: recover_service_job(service_root, "job-testasynclimit001"),
+                    {"needs_recovery", "failed", "finished"},
+                )
+
+            self.assertEqual(running["state"], "running")
+            self.assertEqual(second_status["state"], "created")
 
     def test_cancel_job_marks_terminal_public_summary_without_private_paths(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-job-cancel-") as temp_dir:
@@ -341,14 +381,22 @@ def _write_page(path: Path) -> None:
 
 
 def _wait_for_terminal_summary(testcase: unittest.TestCase, read_summary) -> dict:  # type: ignore[no-untyped-def]
+    return _wait_for_state(
+        testcase,
+        read_summary,
+        {"finished", "needs_review", "failed", "interrupted", "cancelled"},
+    )
+
+
+def _wait_for_state(testcase: unittest.TestCase, read_summary, states: set[str]) -> dict:  # type: ignore[no-untyped-def]
     deadline = time.monotonic() + 10
     last_summary = None
     while time.monotonic() < deadline:
         last_summary = read_summary()
-        if last_summary.get("state") in {"finished", "needs_review", "failed", "interrupted", "cancelled"}:
+        if last_summary.get("state") in states:
             return last_summary
         time.sleep(0.05)
-    testcase.fail(f"service job did not reach a terminal state: {last_summary}")
+    testcase.fail(f"service job did not reach one of {sorted(states)}: {last_summary}")
 
 
 def _assert_public_text_omits(testcase: unittest.TestCase, raw: str, *private_values: str) -> None:

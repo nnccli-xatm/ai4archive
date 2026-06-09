@@ -41,6 +41,7 @@ SERVICE_JOBS_DIRNAME = "jobs"
 JOB_ID_PATTERN = re.compile(r"^job-[A-Za-z0-9][A-Za-z0-9_-]{2,80}$")
 TERMINAL_STATES = {"finished", "needs_review", "failed", "interrupted", "cancelled"}
 SERVICE_JOB_MAX_WORKERS = 8
+SERVICE_JOB_MAX_ACTIVE_JOBS = 2
 _ASYNC_JOB_LOCK = threading.Lock()
 _ASYNC_JOB_KEYS: set[str] = set()
 
@@ -130,16 +131,20 @@ def run_service_job(service_root: Path, job_id: str) -> dict[str, Any]:
 def start_service_job_async(service_root: Path, job_id: str) -> dict[str, Any]:
     """Start a service job in a local background thread and return running state."""
 
-    summary = _mark_service_job_running(service_root, job_id, recovery_status="async_running")
     record = load_service_job_record(service_root, job_id)
-    _register_async_job(record)
-    worker = threading.Thread(
-        target=_async_service_job_worker,
-        args=(service_root.resolve(), job_id),
-        name=f"archive-scan-qc-{job_id}",
-        daemon=True,
-    )
-    worker.start()
+    key = _reserve_async_job(record)
+    try:
+        summary = _mark_service_job_running(service_root, job_id, recovery_status="async_running")
+        worker = threading.Thread(
+            target=_async_service_job_worker,
+            args=(service_root.resolve(), job_id),
+            name=f"archive-scan-qc-{job_id}",
+            daemon=True,
+        )
+        worker.start()
+    except Exception:
+        _unregister_async_job_key(key)
+        raise
     return summary
 
 
@@ -527,9 +532,15 @@ def _public_quality_payload(production_summary: dict[str, Any] | None) -> dict[s
     }
 
 
-def _register_async_job(record: dict[str, Any]) -> None:
+def _reserve_async_job(record: dict[str, Any]) -> str:
+    key = _async_job_key(record)
     with _ASYNC_JOB_LOCK:
-        _ASYNC_JOB_KEYS.add(_async_job_key(record))
+        if key in _ASYNC_JOB_KEYS:
+            raise RuntimeError("Service job is already running.")
+        if len(_ASYNC_JOB_KEYS) >= SERVICE_JOB_MAX_ACTIVE_JOBS:
+            raise RuntimeError("Service active job limit reached.")
+        _ASYNC_JOB_KEYS.add(key)
+    return key
 
 
 def _unregister_async_job_key(key: str) -> None:

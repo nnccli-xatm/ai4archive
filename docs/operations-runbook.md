@@ -248,7 +248,10 @@ endpoint is the first local in-process async MVP: it returns a `running` public
 summary immediately and executes the same production runner in a background
 thread. While the service process is alive, polling keeps active jobs in
 `running`; after a service restart, stale `running` checkpoints still recover as
-`needs_recovery`.
+`needs_recovery`. The service capabilities response publishes the current
+`max_active_async_jobs` and per-job worker limits. Async `start` checks the
+active-job limit before marking a job `running`, so rejected jobs remain in
+their prior public state.
 `service_job.json` is private checkpoint state because it contains local paths
 and the template snapshot needed for recovery. `service_job_public_summary.json`
 is the public-safe polling/handoff shape: aggregate state, counts, isolation

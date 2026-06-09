@@ -110,7 +110,9 @@ The prototype local service job API exposes public-safe job polling through
 `POST /api/jobs/{job_id}/cancel`. `run` is synchronous. `start` is a local
 in-process async MVP that returns `running` immediately, publishes only
 aggregate public summaries, and relies on checkpoint recovery to mark stale
-running jobs as `needs_recovery` after service restart.
+running jobs as `needs_recovery` after service restart. The capabilities
+response publishes non-sensitive resource limits, including
+`max_active_async_jobs` and the per-job worker limit.
 
 ## Image Processing Capability Smoke
 

@@ -1523,7 +1523,10 @@ keeps the existing synchronous production-run behavior. `start` is the first
 local in-process async MVP: it returns a running public summary immediately,
 executes the same production runner in a background thread, and relies on
 checkpoint recovery so a service restart can still mark orphaned running jobs as
-`needs_recovery`. This transport is not yet a stable public network API.
+`needs_recovery`. The service capabilities response publishes the current
+non-sensitive `max_active_async_jobs` and per-job worker limits; async `start`
+refuses new jobs before marking them `running` when the active-job limit is
+reached. This transport is not yet a stable public network API.
 
 See `docs/operations-runbook.md` for production installation, directory,
 privacy, troubleshooting, exit-code, and tuning guidance. See

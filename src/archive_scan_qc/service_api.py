@@ -14,6 +14,7 @@ from .rule_templates import (
 )
 from .service_jobs import (
     SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON,
+    SERVICE_JOB_MAX_ACTIVE_JOBS,
     SERVICE_JOB_MAX_WORKERS,
     ServiceJobConfig,
     cancel_service_job,
@@ -68,6 +69,7 @@ def service_capabilities() -> dict[str, Any]:
         ],
         "resource_limits": {
             "max_workers_per_job": SERVICE_JOB_MAX_WORKERS,
+            "max_active_async_jobs": SERVICE_JOB_MAX_ACTIVE_JOBS,
         },
         "schemas": {
             "service_api": SERVICE_API_SCHEMA_VERSION,

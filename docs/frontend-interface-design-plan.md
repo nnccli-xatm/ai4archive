@@ -226,7 +226,10 @@ The same prototype service now exposes job boundary endpoints `POST /api/jobs`,
 `GET /api/jobs`, `GET /api/jobs/{job_id}`, `POST /api/jobs/{job_id}/run`,
 `POST /api/jobs/{job_id}/start`, and `POST /api/jobs/{job_id}/cancel`.
 `start` is a local in-process async MVP that returns `running` immediately and
-supports public-safe polling through the job status/index responses.
+supports public-safe polling through the job status/index responses. Frontend
+queue controls should also read `GET /api/capabilities` for
+`max_active_async_jobs` and per-job worker limits before enabling concurrent
+starts.
 
 后续对外接口应补充：
 

@@ -313,6 +313,10 @@ background thread and returns a `running` public summary immediately. Active
 in-process async jobs stay `running` while the service is alive; stale running
 checkpoints after restart still recover as `needs_recovery`. Serving local-only
 review resources remains M4 follow-up work.
+Follow-up, 2026-06-09: async service start now enforces an in-process
+`max_active_async_jobs` limit before marking a job `running`, and the service
+capabilities response exposes that non-sensitive limit alongside the per-job
+worker limit.
 Follow-up, 2026-06-09: the same local HTTP transport now exposes
 `GET /api/rule-templates` and `GET /api/rule-templates/{template_id}` for
 public-safe template catalog/detail responses without reading scan reports or
