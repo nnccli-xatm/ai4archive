@@ -348,6 +348,11 @@ processing review package and production review queue into that isolated
 `review` directory. Public summaries expose only review availability and
 aggregate queue counts, so API clients do not need to open path-bearing review
 files to know whether operator review material exists.
+Follow-up, 2026-06-09: the local processing review package now separates
+background cleanup, readability improvement, defect cleanup, and original
+appearance risk groups. Service public summaries expose only aggregate group
+counts so operator review planning does not require reading row-level package
+content.
 
 ### M5：性能和后端实现
 

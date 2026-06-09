@@ -34,9 +34,15 @@ class ProcessingReviewPackageTests(unittest.TestCase):
                         "dark_border_trimmed": True,
                         "dark_border_reason": "trimmed",
                         "cropped": False,
+                        "tone_normalized": True,
+                        "background_stains_lightened": True,
                         "despeckled": True,
                         "despeckle_reason": "isolated dark pixels",
                         "despeckle_pixels_changed": 3,
+                        "bleed_through_cleaned": True,
+                        "scanlines_lightened": True,
+                        "faded_text_enhanced": True,
+                        "text_edges_sharpened": True,
                         "processing_warnings": ["pixel_change_ratio exceeds review threshold"],
                         "processing_audit": {
                             "pixel_change_ratio": 0.2,
@@ -87,8 +93,14 @@ class ProcessingReviewPackageTests(unittest.TestCase):
             self.assertEqual(package["groups"]["dark_border_trimmed"]["count"], 1)
             self.assertEqual(package["groups"]["cropped"]["count"], 1)
             self.assertEqual(package["groups"]["despeckled"]["count"], 1)
+            self.assertEqual(package["groups"]["background_cleanup"]["count"], 1)
+            self.assertEqual(package["groups"]["readability_improvement"]["count"], 2)
+            self.assertEqual(package["groups"]["defect_cleanup"]["count"], 1)
+            self.assertEqual(package["groups"]["original_appearance_risk"]["count"], 1)
             self.assertEqual(package["groups"]["failed"]["count"], 1)
             self.assertEqual(package["groups"]["guardrail_warnings"]["count"], 1)
+            self.assertTrue(package["files"][0]["faded_text_enhanced"])
+            self.assertTrue(package["files"][0]["text_edges_sharpened"])
             self.assertIsNone(package["files"][0]["before_href"])
             self.assertEqual(package["files"][0]["after_href"], "images/page_001.png")
             self.assertIsNone(package["files"][3]["before_href"])

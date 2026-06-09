@@ -46,7 +46,8 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   review, and log directories while public summaries expose only isolation
   booleans. Confirm service runs write local-only processing review package and
   production review queue files inside the isolated review directory while the
-  public summary exposes only review availability and aggregate queue counts.
+  public summary exposes only review availability, aggregate queue counts, and
+  processing review group counts.
   Confirm `service_job_public_summary.json` and
   `service_job_index_public_summary.json` stay free of paths, filenames, hashes,
   OCR text, thumbnails, and image content. Treat `service_job.json` as private

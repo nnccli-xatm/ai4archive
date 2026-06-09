@@ -1495,7 +1495,10 @@ When a service job reaches production processing, it also writes local-only
 `processing_review_package.json`, `processing_review_package.html`, and
 `production_review_queue.json` files inside the isolated `review` directory.
 The public summary reports only whether those local review files were written
-and aggregate review queue counts.
+and aggregate review queue counts. The local processing review package groups
+background cleanup, readability improvement, defect cleanup, and original
+appearance risk separately so operators can distinguish quality gains from
+preservation-risk checks.
 Recovery revalidates the checkpoint input path against the service root and
 marks stale `running` records without progress as `needs_recovery`, so a service
 restart does not leave an orphaned job looking active.

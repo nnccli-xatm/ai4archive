@@ -21,9 +21,39 @@ GROUP_DEFINITIONS = {
     "dark_border_trimmed": "Dark Border Trimmed",
     "cropped": "Cropped",
     "despeckled": "Despeckled",
+    "background_cleanup": "Background Cleanup",
+    "readability_improvement": "Readability Improvement",
+    "defect_cleanup": "Defect Cleanup",
+    "original_appearance_risk": "Original Appearance Risk",
     "failed": "Failed",
     "guardrail_warnings": "Guardrail Warnings",
 }
+BACKGROUND_CLEANUP_FIELDS = (
+    "tone_normalized",
+    "paper_color_cast_normalized",
+    "edge_shadow_lightened",
+    "corner_shadows_lightened",
+    "background_stains_lightened",
+    "fold_shadows_lightened",
+    "illumination_gradient_levelled",
+)
+TEXT_READABILITY_FIELDS = (
+    "faded_text_enhanced",
+    "text_edges_sharpened",
+)
+DEFECT_CLEANUP_FIELDS = (
+    "despeckled",
+    "bleed_through_cleaned",
+    "scanlines_lightened",
+)
+READABILITY_IMPROVEMENT_FIELDS = (
+    "deskewed",
+    "dark_border_trimmed",
+    "cropped",
+    *BACKGROUND_CLEANUP_FIELDS,
+    *TEXT_READABILITY_FIELDS,
+    *DEFECT_CLEANUP_FIELDS,
+)
 
 
 def write_processing_review_package(manifest_path: Path, out_dir: Path) -> tuple[Path, Path]:
@@ -98,9 +128,20 @@ def _review_record(record: dict[str, Any], manifest_dir: Path, out_dir: Path | N
         "dark_border_bbox": record.get("dark_border_bbox"),
         "cropped": bool(record.get("cropped")),
         "crop_bbox": record.get("crop_bbox"),
+        "tone_normalized": bool(record.get("tone_normalized")),
+        "paper_color_cast_normalized": bool(record.get("paper_color_cast_normalized")),
+        "edge_shadow_lightened": bool(record.get("edge_shadow_lightened")),
+        "corner_shadows_lightened": bool(record.get("corner_shadows_lightened")),
+        "background_stains_lightened": bool(record.get("background_stains_lightened")),
+        "fold_shadows_lightened": bool(record.get("fold_shadows_lightened")),
+        "illumination_gradient_levelled": bool(record.get("illumination_gradient_levelled")),
         "despeckled": bool(record.get("despeckled")),
         "despeckle_reason": record.get("despeckle_reason"),
         "despeckle_pixels_changed": record.get("despeckle_pixels_changed"),
+        "bleed_through_cleaned": bool(record.get("bleed_through_cleaned")),
+        "scanlines_lightened": bool(record.get("scanlines_lightened")),
+        "faded_text_enhanced": bool(record.get("faded_text_enhanced")),
+        "text_edges_sharpened": bool(record.get("text_edges_sharpened")),
         "processing_warnings": record.get("processing_warnings", []),
         "guardrail_failures": audit.get("guardrail_failures", []),
         "failure_reason": record.get("failure_reason"),
@@ -148,6 +189,14 @@ def _relative_href(target: Path, base: Path) -> str:
 
 
 def _record_in_group(record: dict[str, Any], group: str) -> bool:
+    if group == "background_cleanup":
+        return any(record.get(field) for field in BACKGROUND_CLEANUP_FIELDS)
+    if group == "readability_improvement":
+        return any(record.get(field) for field in READABILITY_IMPROVEMENT_FIELDS)
+    if group == "defect_cleanup":
+        return any(record.get(field) for field in DEFECT_CLEANUP_FIELDS)
+    if group == "original_appearance_risk":
+        return bool(record.get("processing_warnings")) or bool(record.get("guardrail_failures"))
     if group == "failed":
         return record.get("status") == "failed"
     if group == "guardrail_warnings":

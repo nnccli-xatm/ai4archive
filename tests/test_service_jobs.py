@@ -156,6 +156,11 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertTrue(summary["local_review"]["processing_review_package_written"])
             self.assertTrue(summary["local_review"]["production_review_queue_written"])
             self.assertIsInstance(summary["local_review"]["review_item_count"], int)
+            self.assertIn("readability_improvement", summary["local_review"]["processing_review_group_counts"])
+            self.assertIsInstance(
+                summary["local_review"]["processing_review_group_counts"]["readability_improvement"],
+                int,
+            )
             self.assertFalse(summary["local_review"]["privacy"]["contains_paths"])
             _assert_public_text_omits(self, public_raw, str(root.resolve()), "private_page_001")
             self.assertFalse(summary["private_paths_exposed"])

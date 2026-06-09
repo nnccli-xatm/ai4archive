@@ -187,6 +187,8 @@ counts, per-category changed-file counts, operation category booleans, and
 aggregate guardrail status. These fields give the frontend or an external
 scheduler enough quality state to poll without reading private production
 summaries or path-bearing checkpoints.
+本地 processing review package 已按背景清理、可读性提升、缺陷清理和原貌风险
+分组；service public summary 只透出这些分组的聚合计数，仍不暴露行级路径。
 
 ## 6. 阶段 2：图像处理规则模板系统
 

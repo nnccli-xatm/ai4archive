@@ -266,7 +266,9 @@ After production processing, service jobs write local-only
 `production_review_queue.json` into the isolated `review` directory. These files
 can contain row-level paths and operator context. The public summary exposes
 only review availability, aggregate item counts, source-category counts, and
-action counts.
+action counts. The local processing review package also groups background
+cleanup, readability improvement, defect cleanup, and original appearance risk
+separately; public service summaries may expose only those group counts.
 Recovery also treats a private `service_job.json` checkpoint that still says
 `running` but has no progress file as `needs_recovery`, and it rejects a tampered
 checkpoint whose `input_dir` now overlaps the service root.

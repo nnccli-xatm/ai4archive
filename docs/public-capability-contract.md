@@ -59,8 +59,9 @@ subject to local policy review. Service-job rehearsal cores also write
 `prototype_or_validation` until the HTTP service/API surface is promoted. The
 service job public summary may expose aggregate quality category counts,
 blocking codes, and guardrail summaries from `processing_quality_summary.json`,
-plus aggregate local review availability and queue counts, but not source paths,
-filenames, hashes, thumbnails, OCR text, image content, or row-level evidence.
+plus aggregate local review availability, queue counts, and processing-review
+group counts, but not source paths, filenames, hashes, thumbnails, OCR text,
+image content, or row-level evidence.
 
 Stable local operational outputs such as `production_run_summary.json`,
 `production_run_progress.json`, scan reports, processing manifests, review

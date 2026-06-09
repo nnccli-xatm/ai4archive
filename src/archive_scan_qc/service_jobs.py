@@ -596,6 +596,7 @@ def _refresh_service_job_review_artifacts(record: dict[str, Any], production_sum
             return
 
         review_json_path, review_html_path = write_processing_review_package(manifest_path, review_dir)
+        review_package = _read_json(review_json_path) or {}
         queue_path = review_dir / PRODUCTION_REVIEW_QUEUE_JSON
         queue_inputs: dict[str, Path] = {"processing_review_package_path": review_json_path}
         if scan_report_path.is_file():
@@ -612,7 +613,7 @@ def _refresh_service_job_review_artifacts(record: dict[str, Any], production_sum
                 "processing_review_package_html": str(review_html_path),
                 "production_review_queue": str(queue_path),
             },
-            "summary": _local_review_summary(queue),
+            "summary": _local_review_summary(queue, review_package),
         }
     except Exception:
         record["local_review"] = _local_review_unavailable("review_artifact_generation_failed")
@@ -641,7 +642,7 @@ def _local_review_unavailable(reason_code: str) -> dict[str, Any]:
     }
 
 
-def _local_review_summary(queue: dict[str, Any]) -> dict[str, Any]:
+def _local_review_summary(queue: dict[str, Any], processing_review_package: dict[str, Any]) -> dict[str, Any]:
     summary = queue.get("summary") if isinstance(queue, dict) else {}
     summary = summary if isinstance(summary, dict) else {}
     return {
@@ -649,7 +650,19 @@ def _local_review_summary(queue: dict[str, Any]) -> dict[str, Any]:
         "ready_for_operator_review": bool(summary.get("ready_for_operator_review")),
         "items_by_source_category": _int_dict(summary.get("items_by_source_category")),
         "items_by_suggested_action": _int_dict(summary.get("items_by_suggested_action")),
+        "processing_review_group_counts": _processing_review_group_counts(processing_review_package),
     }
+
+
+def _processing_review_group_counts(package: dict[str, Any]) -> dict[str, int]:
+    groups = package.get("groups") if isinstance(package, dict) else {}
+    if not isinstance(groups, dict):
+        return {}
+    counts: dict[str, int] = {}
+    for group_id, payload in groups.items():
+        if isinstance(group_id, str) and isinstance(payload, dict):
+            counts[group_id] = _safe_int(payload.get("count")) or 0
+    return dict(sorted(counts.items()))
 
 
 def _public_local_review_payload(local_review: Any) -> dict[str, Any]:
@@ -676,6 +689,7 @@ def _public_local_review_payload(local_review: Any) -> dict[str, Any]:
         "ready_for_operator_review": bool(summary.get("ready_for_operator_review")),
         "items_by_source_category": _int_dict(summary.get("items_by_source_category")),
         "items_by_suggested_action": _int_dict(summary.get("items_by_suggested_action")),
+        "processing_review_group_counts": _int_dict(summary.get("processing_review_group_counts")),
         "privacy": {
             "contains_paths": False,
             "contains_filenames": False,
