@@ -158,8 +158,12 @@ terminal service jobs.
 It also enforces a per-job worker limit during job creation and reports the
 non-sensitive worker quota in the public summary.
 `archive_scan_qc.service_api` now provides endpoint-shaped health,
-capabilities, create, status, cancel, and recover responses for a future HTTP
-wrapper while keeping path-bearing request data out of public responses.
+capabilities, create, status, cancel, and recover responses while keeping
+path-bearing request data out of public responses. The prototype
+`archive_scan_qc.service_http` transport exposes the core as local-only HTTP
+endpoints for `curl`/frontend integration tests; it uses the configured
+service root instead of accepting a client-provided service-root path and still
+returns only public-safe aggregate JSON.
 
 ## 6. 阶段 2：图像处理规则模板系统
 

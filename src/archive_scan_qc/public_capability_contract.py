@@ -237,6 +237,12 @@ def build_public_capability_contract(generated_at: str | None = None) -> dict[st
                     "scan-qc.local-production-workbench.v1",
                     sensitive_outputs=True,
                 ),
+                _command(
+                    "archive-scan-qc service-api",
+                    "Run the prototype local HTTP service API with public-safe aggregate responses and local-only job state.",
+                    "scan-qc.service-api.v1",
+                    sensitive_outputs=True,
+                ),
             ],
         },
         "output_artifacts": [

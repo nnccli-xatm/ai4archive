@@ -34,6 +34,8 @@ class PublicCapabilityContractTests(unittest.TestCase):
         public_safe_commands = {item["command"] for item in contract["public_cli"]["public_safe_aggregate_commands"]}
         self.assertIn("archive-scan-qc rule-template-catalog", public_safe_commands)
         self.assertIn("archive-scan-qc rule-template-dry-run", public_safe_commands)
+        prototype_commands = {item["command"] for item in contract["public_cli"]["prototype_or_validation_commands"]}
+        self.assertIn("archive-scan-qc service-api", prototype_commands)
 
         artifacts = {item["name"]: item for item in contract["output_artifacts"]}
         self.assertEqual(artifacts["scan_qc_report.json"]["stability"], "stable_sensitive_local")

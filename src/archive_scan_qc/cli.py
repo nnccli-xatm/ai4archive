@@ -285,6 +285,8 @@ def main(argv: list[str] | None = None) -> int:
         return _main_image_processing_capability_smoke(argv[1:])
     if argv and argv[0] == "public-capability-contract":
         return _main_public_capability_contract(argv[1:])
+    if argv and argv[0] == "service-api":
+        return _main_service_api(argv[1:])
     if argv and argv[0] == "rule-template-catalog":
         return _main_rule_template_catalog(argv[1:])
     if argv and argv[0] == "rule-template-dry-run":
@@ -741,6 +743,27 @@ def _main_public_capability_contract(argv: list[str]) -> int:
     print("Image processing run: no")
     print("Provider commands run: no")
     print("Privacy: public-safe aggregate contract; no image paths, filenames, hashes, OCR text, thumbnails, or image content.")
+    return 0
+
+
+def _main_service_api(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="archive-scan-qc service-api",
+        description="Run the prototype local HTTP service API.",
+    )
+    parser.add_argument("--service-root", required=True, type=Path, help="Root directory for isolated service jobs.")
+    parser.add_argument("--host", default="127.0.0.1", help="Bind host. Defaults to 127.0.0.1.")
+    parser.add_argument("--port", default=8765, type=int, help="Bind port. Defaults to 8765.")
+    args = parser.parse_args(argv)
+
+    from .service_http import serve_service_api
+
+    print(f"Service API listening on http://{args.host}:{args.port}")
+    print("Local-only prototype; JSON responses are public-safe aggregates.")
+    try:
+        serve_service_api(service_root=args.service_root, host=args.host, port=args.port)
+    except KeyboardInterrupt:
+        return 0
     return 0
 
 

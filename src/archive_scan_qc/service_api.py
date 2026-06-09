@@ -41,6 +41,7 @@ def service_capabilities() -> dict[str, Any]:
             {"method": "GET", "path": "/api/health", "implemented_by_core": True},
             {"method": "GET", "path": "/api/capabilities", "implemented_by_core": True},
             {"method": "POST", "path": "/api/jobs", "implemented_by_core": True},
+            {"method": "GET", "path": "/api/jobs", "implemented_by_core": True},
             {"method": "GET", "path": "/api/jobs/{job_id}", "implemented_by_core": True},
             {"method": "POST", "path": "/api/jobs/{job_id}/cancel", "implemented_by_core": True},
             {"method": "GET", "path": "/api/production/session", "implemented_by_core": False},
@@ -59,7 +60,7 @@ def service_capabilities() -> dict[str, Any]:
             "service_job_public_summary": "scan-qc.service-job-public-summary.v1",
             "service_job_index_public_summary": "scan-qc.service-job-index-public-summary.v1",
         },
-        "privacy": _public_privacy(),
+        "privacy": service_api_privacy(),
     }
 
 
@@ -78,6 +79,10 @@ def cancel_job_response(*, service_root: Path, job_id: str) -> dict[str, Any]:
 
 def recover_jobs_response(*, service_root: Path) -> dict[str, Any]:
     return recover_service_jobs(service_root)
+
+
+def service_api_privacy() -> dict[str, bool]:
+    return _public_privacy()
 
 
 def _service_job_config_from_request(request: dict[str, Any]) -> ServiceJobConfig:

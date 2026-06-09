@@ -175,6 +175,7 @@ class TargetedSelectorTests(unittest.TestCase):
                     "src/archive_scan_qc/rework.py",
                     "src/archive_scan_qc/reports.py",
                     "src/archive_scan_qc/service_api.py",
+                    "src/archive_scan_qc/service_http.py",
                     "src/archive_scan_qc/service_jobs.py",
                     "src/archive_scan_qc/validation_index.py",
                     "src/archive_scan_qc/workbench_summary.py",
@@ -201,6 +202,7 @@ class TargetedSelectorTests(unittest.TestCase):
         self.assertIn("test_rework_actions", selected)
         self.assertIn("test_reports_contract", selected)
         self.assertIn("test_service_api", selected)
+        self.assertIn("test_service_http", selected)
         self.assertIn("test_service_jobs", selected)
         self.assertIn("test_validation_index", selected)
         self.assertIn("test_workbench_summary", selected)

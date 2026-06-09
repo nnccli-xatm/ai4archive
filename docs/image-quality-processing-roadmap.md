@@ -273,6 +273,15 @@ text-edge sharpening deltas, including increased aggregate text-edge energy.
 - 服务重启后 public summary 与 checkpoint 一致。
 - 并发 job 的路径、模板、状态和输出完全隔离。
 
+Implementation note, 2026-06-09: `archive_scan_qc.service_api` provides the
+endpoint-shaped core for health, capabilities, job create, job index, job
+status, and cancellation. `archive_scan_qc.service_http` now exposes the first
+local-only HTTP transport behind `archive-scan-qc service-api`. The transport
+keeps `service_root` server-owned, returns sanitized public-safe errors, and is
+covered by HTTP tests for create/status/cancel/index responses without leaking
+paths or filenames. Running jobs asynchronously and serving local-only review
+resources remain M4 follow-up work.
+
 ### M5：性能和后端实现
 
 目标：在质量提升成立后，再优化速度和依赖。
