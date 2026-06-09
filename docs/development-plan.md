@@ -221,6 +221,8 @@ Follow-up, 2026-06-09: 路线图中的 `archival-safe-v1`,
 聚合增益。
 最新补充：褪色正文增强已增加极浅打印字形窄路径，只在稳定小组件数量足够、
 候选面积受控时放宽到极浅文字；过淡条状页、手写、表格、印章、照片和纹理仍保持跳过。
+`image-processing-capability-smoke` 同步加入极浅打印字形 fixture，要求该能力进入
+public-safe 聚合质量基线。
 
 ## 7. 阶段 3：前端改为 API Client
 

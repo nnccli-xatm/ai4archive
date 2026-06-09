@@ -120,7 +120,8 @@ The command creates synthetic images in a temporary directory, runs
 fixture counts, processing counts, guardrail counts, operation counts, timing
 summaries, backend counts, and the embedded public-safe quality baseline. The
 quality summary records aggregate before/after quality signals, changed-file
-counts, guardrails, and metric averages/maxima. Neither file includes paths,
+counts, guardrails, and metric averages/maxima, including the ultra-pale typed
+glyph fixture group. Neither file includes paths,
 filenames, hashes, thumbnails, OCR text, image content, or environment values.
 
 ## Processing Backend Boundary

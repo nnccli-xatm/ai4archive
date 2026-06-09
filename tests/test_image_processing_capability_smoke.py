@@ -18,7 +18,7 @@ from archive_scan_qc.processing_quality_summary import (
     SCHEMA_VERSION as QUALITY_SCHEMA_VERSION,
 )
 
-EXPECTED_SYNTHETIC_FIXTURES = 12
+EXPECTED_SYNTHETIC_FIXTURES = 13
 
 
 class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
@@ -66,6 +66,7 @@ class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
             self.assertEqual(quality_payload["fixture_context"]["fixture_count"], EXPECTED_SYNTHETIC_FIXTURES)
             self.assertIn("mixed_photo_stamp_table_page", quality_payload["fixture_context"]["fixture_groups"])
             self.assertIn("bleed_through_page", quality_payload["fixture_context"]["fixture_groups"])
+            self.assertIn("ultra_pale_typed_text_page", quality_payload["fixture_context"]["fixture_groups"])
             self.assertEqual(quality_payload["counts"]["processed_files"], EXPECTED_SYNTHETIC_FIXTURES)
             self.assertEqual(quality_payload["counts"]["failed_files"], 0)
             self.assertGreaterEqual(quality_payload["quality_metrics"]["tone_background_delta"]["max"], 6)

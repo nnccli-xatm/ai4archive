@@ -53,6 +53,7 @@ _SYNTHETIC_FIXTURE_GROUPS = (
     "corner_shadow_page",
     "fold_shadow_page",
     "blurred_text_edges_page",
+    "ultra_pale_typed_text_page",
     "mixed_photo_stamp_table_page",
 )
 
@@ -350,6 +351,7 @@ def _write_synthetic_fixtures(input_dir: Path) -> int:
         _corner_shadow_page(),
         _fold_shadow_page(),
         _blurred_text_edges_page(),
+        _ultra_pale_typed_text_page(),
         _mixed_photo_stamp_table_page(),
     )
     for index, image in enumerate(fixtures, start=1):
@@ -468,6 +470,24 @@ def _blurred_text_edges_page() -> Image.Image:
     for index, line in enumerate(lines):
         draw.text((64, 100 + index * 34), line, fill=(72, 72, 72), font=font)
     return image.filter(ImageFilter.GaussianBlur(radius=0.75))
+
+
+def _ultra_pale_typed_text_page() -> Image.Image:
+    image = Image.new("RGB", (420, 560), (244, 244, 244))
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default()
+    lines = (
+        "ARCHIVE REGISTER 1948",
+        "TYPED PAGE SAMPLE",
+        "PAGE HAS VERY PALE PRINT",
+        "LOW CONTRAST TEXT",
+        "SMALL STABLE GLYPHS",
+        "SYNTHETIC VALIDATION",
+        "PUBLIC SAFE FIXTURE",
+    )
+    for index, line in enumerate(lines):
+        draw.text((64, 104 + index * 34), line, fill=(232, 232, 232), font=font)
+    return image
 
 
 def _mixed_photo_stamp_table_page() -> Image.Image:

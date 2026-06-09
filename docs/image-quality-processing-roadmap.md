@@ -249,7 +249,8 @@ Follow-up, 2026-06-09: faded-text enhancement now has a narrow ultra-pale typed
 glyph path. The candidate threshold extends only to very light printed glyphs,
 requires many stable small components and a tight changed area, and keeps broad
 line-like low-confidence pages, handwriting, tables, stamps, photos, and texture
-risks on the skip path.
+risks on the skip path. The public-safe `image-processing-capability-smoke`
+fixture set now includes this ultra-pale typed-glyph case.
 
 ### M3：Photo/mixed-safe 管线 v1
 
