@@ -154,6 +154,8 @@ class ServiceApiCoreTests(unittest.TestCase):
             self.assertTrue(summary["quality"]["guardrails"]["enabled"])
             self.assertEqual(summary["quality"]["guardrails"]["failed_files"], 0)
             _assert_public_timing_summary(self, summary["timings"], expected_processed_files=1)
+            _assert_public_source_integrity(self, summary["source_integrity"], checked_files=1)
+            self.assertFalse(summary["source_images_modified"])
             self.assertTrue(summary["local_review"]["provided"])
             self.assertTrue(summary["local_review"]["production_review_queue_written"])
             self.assertFalse(summary["local_review"]["privacy"]["contains_paths"])
@@ -237,6 +239,20 @@ def _assert_public_timing_summary(
     testcase.assertIn("auto_crop", timings["operation_timings"])
     testcase.assertEqual(timings["operation_count"], len(timings["operation_timings"]))
     testcase.assertFalse(timings["privacy"]["contains_paths"])
+
+
+def _assert_public_source_integrity(
+    testcase: unittest.TestCase,
+    source_integrity: dict,
+    *,
+    checked_files: int,
+) -> None:
+    testcase.assertEqual(source_integrity["schema_version"], "scan-qc.service-job-source-integrity.v1")
+    testcase.assertTrue(source_integrity["provided"])
+    testcase.assertEqual(source_integrity["checked_files"], checked_files)
+    testcase.assertEqual(source_integrity["modified_files"], 0)
+    testcase.assertFalse(source_integrity["privacy"]["contains_paths"])
+    testcase.assertFalse(source_integrity["privacy"]["contains_hashes"])
 
 
 if __name__ == "__main__":

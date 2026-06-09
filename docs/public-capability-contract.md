@@ -61,8 +61,10 @@ service job public summary may expose aggregate quality category counts,
 blocking codes, and guardrail summaries from `processing_quality_summary.json`,
 plus aggregate local review availability, queue counts, processing-review group
 counts, and nested timing context with schema
-`scan-qc.service-job-public-timings.v1`, but not source paths, filenames,
-hashes, thumbnails, OCR text, image content, or row-level evidence.
+`scan-qc.service-job-public-timings.v1`, plus nested source-integrity aggregate
+counts with schema `scan-qc.service-job-source-integrity.v1`, but not source
+paths, filenames, hashes, thumbnails, OCR text, image content, or row-level
+evidence.
 
 Stable local operational outputs such as `production_run_summary.json`,
 `production_run_progress.json`, scan reports, processing manifests, review
@@ -130,6 +132,11 @@ operation timing fields such as enabled state, file count, elapsed seconds,
 average seconds per file, files per minute, and reused scan measurement count.
 Unknown stage or operation names and arbitrary unavailable-reason text are not
 echoed into the API response.
+Service summaries also expose public-safe `source_integrity` context from an
+in-memory before/after source hash comparison. The API returns only aggregate
+checked, unchanged, modified, missing, and added file totals plus source-change
+booleans; the hash values and source file list are never written to the public
+summary.
 
 ## Image Processing Capability Smoke
 

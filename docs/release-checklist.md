@@ -47,6 +47,10 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   `scan-qc.service-job-public-timings.v1` timing context with only whitelisted
   stage IDs, aggregate processing throughput, whitelisted operation timing
   fields, and no arbitrary operation names or reason text.
+  Confirm service runs include nested
+  `scan-qc.service-job-source-integrity.v1` source-integrity counts, report zero
+  modified/missing source files on synthetic runs, and do not publish hashes,
+  filenames, or file lists.
   Confirm each job root has isolated metadata, derivatives, temp, checkpoint,
   review, and log directories while public summaries expose only isolation
   booleans. Confirm service runs write local-only processing review package and

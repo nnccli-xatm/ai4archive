@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 import tempfile
@@ -112,7 +113,9 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             input_dir = root / "private-source"
             service_root = root / "service-root"
             input_dir.mkdir()
-            _write_page(input_dir / "private_page_001.png")
+            source_path = input_dir / "private_page_001.png"
+            _write_page(source_path)
+            source_sha_before = _sha256_for_test(source_path)
             create_service_job(
                 ServiceJobConfig(input_dir=input_dir, service_root=service_root, workers=1),
                 job_id="job-testrun001",
@@ -134,6 +137,9 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertEqual(summary["quality"]["processed_files"], 1)
             _assert_public_quality_summary(self, summary["quality"])
             _assert_public_timing_summary(self, summary["timings"], expected_processed_files=1)
+            _assert_public_source_integrity(self, summary["source_integrity"], checked_files=1)
+            self.assertFalse(summary["source_images_modified"])
+            self.assertEqual(_sha256_for_test(source_path), source_sha_before)
             self.assertEqual(processing_manifest["rule_template"]["id"], "dat-31-2017-standard")
             self.assertEqual(
                 processing_manifest["rule_template"]["processing_defaults"]["reuse_scan_measurements"],
@@ -165,6 +171,31 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertFalse(summary["local_review"]["privacy"]["contains_paths"])
             _assert_public_text_omits(self, public_raw, str(root.resolve()), "private_page_001")
             self.assertFalse(summary["private_paths_exposed"])
+
+    def test_run_job_preserves_chinese_source_hash_with_public_integrity_summary(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-job-source-integrity-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "输入 目录"
+            service_root = root / "service-root"
+            input_dir.mkdir()
+            source_path = input_dir / "私有 页面001.png"
+            _write_page(source_path)
+            source_sha_before = _sha256_for_test(source_path)
+            create_service_job(
+                ServiceJobConfig(input_dir=input_dir, service_root=service_root, workers=1),
+                job_id="job-testsource001",
+            )
+
+            summary = run_service_job(service_root, "job-testsource001")
+            public_raw = (
+                service_root / "jobs" / "job-testsource001" / SERVICE_JOB_PUBLIC_SUMMARY_JSON
+            ).read_text(encoding="utf-8")
+
+            self.assertEqual(summary["state"], "finished")
+            self.assertEqual(_sha256_for_test(source_path), source_sha_before)
+            _assert_public_source_integrity(self, summary["source_integrity"], checked_files=1)
+            self.assertFalse(summary["source_images_modified"])
+            _assert_public_text_omits(self, public_raw, str(root.resolve()), "输入 目录", "私有 页面001")
 
     def test_start_job_async_returns_running_then_terminal_public_summary(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-job-async-") as temp_dir:
@@ -533,6 +564,38 @@ def _assert_public_progress_timing_summary(
     testcase.assertEqual(timings["aggregate_processing"]["processed_images"], expected_processed_files)
     testcase.assertEqual(timings["operation_timings"], {})
     testcase.assertFalse(timings["privacy"]["contains_paths"])
+
+
+def _assert_public_source_integrity(
+    testcase: unittest.TestCase,
+    source_integrity: dict,
+    *,
+    checked_files: int,
+) -> None:
+    testcase.assertEqual(source_integrity["schema_version"], "scan-qc.service-job-source-integrity.v1")
+    testcase.assertTrue(source_integrity["provided"])
+    testcase.assertEqual(source_integrity["status"], "pass")
+    testcase.assertTrue(source_integrity["aggregate_only"])
+    testcase.assertTrue(source_integrity["public_safe"])
+    testcase.assertEqual(source_integrity["checked_files"], checked_files)
+    testcase.assertEqual(source_integrity["unchanged_files"], checked_files)
+    testcase.assertEqual(source_integrity["modified_files"], 0)
+    testcase.assertEqual(source_integrity["missing_files"], 0)
+    testcase.assertEqual(source_integrity["added_files"], 0)
+    testcase.assertFalse(source_integrity["source_images_modified"])
+    testcase.assertFalse(source_integrity["source_tree_changed"])
+    testcase.assertFalse(source_integrity["hashes_recorded_in_public_summary"])
+    testcase.assertFalse(source_integrity["privacy"]["contains_paths"])
+    testcase.assertFalse(source_integrity["privacy"]["contains_filenames"])
+    testcase.assertFalse(source_integrity["privacy"]["contains_hashes"])
+
+
+def _sha256_for_test(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 if __name__ == "__main__":

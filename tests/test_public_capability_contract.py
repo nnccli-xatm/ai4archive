@@ -73,6 +73,14 @@ class PublicCapabilityContractTests(unittest.TestCase):
             "prototype_or_validation",
         )
         self.assertEqual(
+            nested_schemas["service_job_public_summary.source_integrity"]["schema_version"],
+            "scan-qc.service-job-source-integrity.v1",
+        )
+        self.assertEqual(
+            nested_schemas["service_job_public_summary.source_integrity"]["stability"],
+            "prototype_or_validation",
+        )
+        self.assertEqual(
             artifacts["image_processing_capability_smoke.json"]["schema_version"],
             "scan-qc.image-processing-capability-smoke.v1",
         )

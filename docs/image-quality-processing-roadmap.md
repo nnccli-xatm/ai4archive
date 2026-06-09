@@ -367,6 +367,11 @@ filters production-run stage timings, aggregate processing throughput, and
 per-operation timings through fixed public allowlists so API clients can monitor
 quality work cost without opening private production summaries or echoing
 unknown strings from checkpoint/progress files.
+Follow-up, 2026-06-09: service job runs now perform an in-memory source-image
+hash snapshot before and after production processing. Public summaries expose
+only nested `scan-qc.service-job-source-integrity.v1` aggregate counts and
+source modification booleans; they do not store or return hashes, filenames, or
+file lists.
 
 ### M5：性能和后端实现
 

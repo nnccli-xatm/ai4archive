@@ -194,6 +194,12 @@ throughput, and whitelisted operation timing fields (`enabled`, file count,
 elapsed seconds, average seconds per file, files per minute, and reused scan
 measurement count). Unknown stage/operation names and arbitrary reason text are
 not echoed into the public response.
+Service job runs also perform an in-memory before/after hash snapshot of
+supported source images and publish only nested
+`scan-qc.service-job-source-integrity.v1` aggregate counts. The service
+checkpoint and public summary do not store source hashes, filenames, or file
+lists; public responses expose only checked/unchanged/modified/missing/added
+totals and booleans for source-image modification/source-tree change.
 本地 processing review package 已按背景清理、可读性提升、缺陷清理和原貌风险
 分组；service public summary 只透出这些分组的聚合计数，仍不暴露行级路径。
 终态 service job 的恢复现在会在本地 review artifact 缺失时，基于已有

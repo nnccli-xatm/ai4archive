@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -25,6 +26,7 @@ from .production_runner import (
 from .processing_review import write_processing_review_package
 from .processing_quality_summary import PROCESSING_QUALITY_SUMMARY_JSON
 from .production_review_queue import PRODUCTION_REVIEW_QUEUE_JSON, write_production_review_queue
+from .scanner import SUPPORTED_EXTENSIONS
 from .rules import (
     BUILTIN_RULE_TEMPLATE_IDS,
     RulesProfileError,
@@ -37,6 +39,7 @@ SERVICE_JOB_SCHEMA_VERSION = "scan-qc.service-job.v1"
 SERVICE_JOB_PUBLIC_SUMMARY_SCHEMA_VERSION = "scan-qc.service-job-public-summary.v1"
 SERVICE_JOB_INDEX_PUBLIC_SUMMARY_SCHEMA_VERSION = "scan-qc.service-job-index-public-summary.v1"
 SERVICE_JOB_PUBLIC_TIMINGS_SCHEMA_VERSION = "scan-qc.service-job-public-timings.v1"
+SERVICE_JOB_SOURCE_INTEGRITY_SCHEMA_VERSION = "scan-qc.service-job-source-integrity.v1"
 SERVICE_JOB_RECORD_JSON = "service_job.json"
 SERVICE_JOB_PUBLIC_SUMMARY_JSON = "service_job_public_summary.json"
 SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON = "service_job_index_public_summary.json"
@@ -52,6 +55,12 @@ PUBLIC_AGGREGATE_PROCESSING_UNAVAILABLE_REASONS = (
     "no_total_images",
     "no_processed_images",
     "no_elapsed_seconds",
+)
+PUBLIC_SOURCE_INTEGRITY_REASON_CODES = (
+    "not_checked",
+    "pre_run_snapshot_failed",
+    "pre_run_snapshot_unavailable",
+    "post_run_snapshot_failed",
 )
 PUBLIC_OPERATION_TIMING_IDS = (
     "auto_crop",
@@ -193,12 +202,15 @@ def _execute_running_service_job(service_root: Path, job_id: str, *, raise_error
     record = load_service_job_record(service_root, job_id)
     if record.get("state") != "running":
         return recover_service_job(service_root, job_id)
+    source_snapshot = _capture_source_integrity_start(record)
     try:
         production_summary = run_production_folder(_production_config_from_record(record))
         latest = load_service_job_record(service_root, job_id)
+        _refresh_source_integrity(latest, source_snapshot)
         _refresh_service_job_review_artifacts(latest, production_summary)
     except BaseException:
         latest = load_service_job_record(service_root, job_id)
+        _refresh_source_integrity(latest, source_snapshot)
         if latest.get("state") == "cancelled":
             _write_public_summary(_job_root_from_record(latest), _public_summary_from_record(latest))
         else:
@@ -474,6 +486,7 @@ def _public_summary_from_record(
     production_progress: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     counts = _public_counts(production_summary, production_progress)
+    source_integrity = _public_source_integrity_payload(record.get("source_integrity"))
     return {
         "schema_version": SERVICE_JOB_PUBLIC_SUMMARY_SCHEMA_VERSION,
         "generated_at": _utc_now(),
@@ -499,8 +512,9 @@ def _public_summary_from_record(
         "recovery": _public_recovery_payload(record.get("recovery")),
         "quality": _public_quality_payload(production_summary),
         "timings": _public_timings_payload(production_summary, production_progress),
+        "source_integrity": source_integrity,
         "local_review": _public_local_review_payload(record.get("local_review")),
-        "source_images_modified": False,
+        "source_images_modified": bool(source_integrity.get("source_images_modified")),
         "network_services_called": False,
         "private_paths_exposed": False,
         "privacy": _public_summary_privacy(),
@@ -713,6 +727,143 @@ def _public_operation_timings(operation_timings: Any) -> dict[str, dict[str, Any
             "reused_scan_measurement_files": _safe_int(raw.get("reused_scan_measurement_files")),
         }
     return public_timings
+
+
+def _capture_source_integrity_start(record: dict[str, Any]) -> dict[str, dict[str, Any]] | None:
+    try:
+        return _source_integrity_snapshot(Path(record["paths"]["input_dir"]))
+    except Exception:
+        record["source_integrity"] = _source_integrity_unavailable("pre_run_snapshot_failed")
+        _write_job_record(_job_root_from_record(record), record)
+        return None
+
+
+def _refresh_source_integrity(
+    record: dict[str, Any],
+    before_snapshot: dict[str, dict[str, Any]] | None,
+) -> None:
+    if before_snapshot is None:
+        if not isinstance(record.get("source_integrity"), dict):
+            record["source_integrity"] = _source_integrity_unavailable("pre_run_snapshot_unavailable")
+        _write_job_record(_job_root_from_record(record), record)
+        return
+    try:
+        after_snapshot = _source_integrity_snapshot(Path(record["paths"]["input_dir"]))
+        record["source_integrity"] = _source_integrity_result(before_snapshot, after_snapshot)
+    except Exception:
+        record["source_integrity"] = _source_integrity_unavailable("post_run_snapshot_failed")
+    _write_job_record(_job_root_from_record(record), record)
+
+
+def _source_integrity_snapshot(input_dir: Path) -> dict[str, dict[str, Any]]:
+    root = input_dir.resolve()
+    snapshot: dict[str, dict[str, Any]] = {}
+    for path in sorted(root.rglob("*"), key=lambda item: item.as_posix()):
+        if not path.is_file() or path.suffix.lower() not in SUPPORTED_EXTENSIONS:
+            continue
+        relative_path = path.relative_to(root).as_posix()
+        snapshot[relative_path] = {
+            "size": path.stat().st_size,
+            "sha256": _sha256(path),
+        }
+    return snapshot
+
+
+def _source_integrity_result(
+    before_snapshot: dict[str, dict[str, Any]],
+    after_snapshot: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    before_paths = set(before_snapshot)
+    after_paths = set(after_snapshot)
+    shared_paths = before_paths & after_paths
+    modified_files = sum(1 for path in shared_paths if before_snapshot[path] != after_snapshot[path])
+    missing_files = len(before_paths - after_paths)
+    added_files = len(after_paths - before_paths)
+    source_images_modified = modified_files > 0 or missing_files > 0
+    source_tree_changed = source_images_modified or added_files > 0
+    return {
+        "schema_version": SERVICE_JOB_SOURCE_INTEGRITY_SCHEMA_VERSION,
+        "provided": True,
+        "status": "pass" if not source_tree_changed else "fail",
+        "aggregate_only": True,
+        "public_safe": True,
+        "checked_files": len(before_paths),
+        "unchanged_files": max(0, len(shared_paths) - modified_files),
+        "modified_files": modified_files,
+        "missing_files": missing_files,
+        "added_files": added_files,
+        "source_images_modified": source_images_modified,
+        "source_tree_changed": source_tree_changed,
+        "hashes_recorded_in_public_summary": False,
+        "privacy": _source_integrity_privacy(),
+    }
+
+
+def _source_integrity_unavailable(reason_code: str) -> dict[str, Any]:
+    return {
+        "schema_version": SERVICE_JOB_SOURCE_INTEGRITY_SCHEMA_VERSION,
+        "provided": False,
+        "status": "not_available",
+        "reason_code": reason_code,
+        "aggregate_only": True,
+        "public_safe": True,
+        "checked_files": None,
+        "unchanged_files": None,
+        "modified_files": None,
+        "missing_files": None,
+        "added_files": None,
+        "source_images_modified": False,
+        "source_tree_changed": False,
+        "hashes_recorded_in_public_summary": False,
+        "privacy": _source_integrity_privacy(),
+    }
+
+
+def _public_source_integrity_payload(source_integrity: Any) -> dict[str, Any]:
+    source_integrity = source_integrity if isinstance(source_integrity, dict) else {}
+    if source_integrity.get("provided") is not True:
+        return _source_integrity_unavailable(_public_source_integrity_reason(source_integrity.get("reason_code")))
+    return {
+        "schema_version": SERVICE_JOB_SOURCE_INTEGRITY_SCHEMA_VERSION,
+        "provided": True,
+        "status": "pass" if source_integrity.get("status") == "pass" else "fail",
+        "aggregate_only": True,
+        "public_safe": True,
+        "checked_files": _safe_int(source_integrity.get("checked_files")),
+        "unchanged_files": _safe_int(source_integrity.get("unchanged_files")),
+        "modified_files": _safe_int(source_integrity.get("modified_files")),
+        "missing_files": _safe_int(source_integrity.get("missing_files")),
+        "added_files": _safe_int(source_integrity.get("added_files")),
+        "source_images_modified": bool(source_integrity.get("source_images_modified")),
+        "source_tree_changed": bool(source_integrity.get("source_tree_changed")),
+        "hashes_recorded_in_public_summary": False,
+        "privacy": _source_integrity_privacy(),
+    }
+
+
+def _source_integrity_privacy() -> dict[str, bool]:
+    return {
+        "contains_paths": False,
+        "contains_filenames": False,
+        "contains_hashes": False,
+        "contains_thumbnails": False,
+        "contains_ocr_text": False,
+        "contains_image_content": False,
+    }
+
+
+def _public_source_integrity_reason(value: Any) -> str:
+    if not isinstance(value, str):
+        return "not_checked"
+    return value if value in PUBLIC_SOURCE_INTEGRITY_REASON_CODES else "not_checked"
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _string_list(value: Any) -> list[str]:
