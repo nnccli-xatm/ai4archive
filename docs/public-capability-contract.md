@@ -62,9 +62,11 @@ blocking codes, and guardrail summaries from `processing_quality_summary.json`,
 plus aggregate local review availability, queue counts, processing-review group
 counts, and nested timing context with schema
 `scan-qc.service-job-public-timings.v1`, plus nested source-integrity aggregate
-counts with schema `scan-qc.service-job-source-integrity.v1`, but not source
-paths, filenames, hashes, thumbnails, OCR text, image content, or row-level
-evidence.
+counts with schema `scan-qc.service-job-source-integrity.v1`. Its public
+`counts` block may also expose aggregate retry/reuse counts such as
+`resumed_files`, `reused_files`, `reprocessed_files`, and `retry_list_files`,
+but not source paths, filenames, hashes, thumbnails, OCR text, image content,
+processing manifest rows, retry manifest rows, or row-level evidence.
 
 Stable local operational outputs such as `production_run_summary.json`,
 `production_run_progress.json`, scan reports, processing manifests, review

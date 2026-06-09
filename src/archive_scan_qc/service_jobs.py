@@ -577,7 +577,11 @@ def _public_counts(
     return {
         "total_files": _safe_int(summary_counts.get("total_files", progress.get("total_images"))),
         "processed_files": _safe_int(summary_counts.get("processed_files", progress.get("processed_images"))),
+        "resumed_files": _safe_int(summary_counts.get("resumed_files")),
+        "reused_files": _safe_int(summary_counts.get("reused_files")),
+        "reprocessed_files": _safe_int(summary_counts.get("reprocessed_files")),
         "failed_files": _safe_int(summary_counts.get("failed_files")),
+        "retry_list_files": _safe_int(summary_counts.get("retry_list_files")),
         "remaining_files": _safe_int(summary_counts.get("remaining_files", progress.get("remaining_images"))),
         "p0_findings": _safe_int(summary_counts.get("p0_findings")),
         "p1_findings": _safe_int(summary_counts.get("p1_findings")),

@@ -1494,6 +1494,9 @@ settings for recovery. The shareable `service_job_public_summary.json` records
 only aggregate status, counts, quality category signals, guardrail summary,
 public-safe timing summaries, source-integrity counts, isolation flags,
 recovery status, and privacy booleans.
+The public `counts` block includes aggregate retry/reuse fields such as
+`resumed_files`, `reused_files`, `reprocessed_files`, and `retry_list_files`
+without exposing processing manifest rows or retry lists.
 When a service job reaches production processing, it also writes local-only
 `processing_review_package.json`, `processing_review_package.html`, and
 `production_review_queue.json` files inside the isolated `review` directory.

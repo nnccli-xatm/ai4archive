@@ -344,6 +344,9 @@ against `max_tmp_bytes_per_job` before entering `running`.
 Follow-up, 2026-06-09: `POST /api/jobs/{job_id}/retry` now provides a
 synchronous explicit retry boundary for `failed`, `interrupted`, and
 `needs_recovery` jobs while keeping ordinary terminal reruns rejected.
+Public service summaries now also expose aggregate retry/reuse counts so
+external schedulers can verify resume behavior without reading private
+processing or retry manifests.
 Follow-up, 2026-06-09: the same local HTTP transport now exposes
 `GET /api/rule-templates` and `GET /api/rule-templates/{template_id}` for
 public-safe template catalog/detail responses without reading scan reports or

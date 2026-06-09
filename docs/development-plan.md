@@ -190,6 +190,9 @@ The new `POST /api/jobs/{job_id}/retry` endpoint is an explicit synchronous
 retry boundary for `failed`, `interrupted`, and `needs_recovery` jobs. It keeps
 the same job root and relies on production resume semantics so completed
 derivatives and manifests are reused instead of silently overwritten.
+Service job public `counts` now expose aggregate retry/reuse totals
+(`resumed_files`, `reused_files`, `reprocessed_files`, and `retry_list_files`)
+without exposing processing or retry manifest rows.
 Service job terminal public summaries now also carry public-safe quality
 context from `processing_quality_summary.json`: blocking codes, warning/retry
 counts, per-category changed-file counts, operation category booleans, and

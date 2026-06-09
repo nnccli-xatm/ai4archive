@@ -264,7 +264,10 @@ and the template snapshot needed for recovery. Each job root includes isolated
 subdirectories. `service_job_public_summary.json` is the public-safe
 polling/handoff shape: aggregate state, counts, quality category signals,
 guardrail summary, timing summaries, source-integrity counts, isolation
-booleans, recovery status, and explicit privacy flags only. Its nested
+booleans, recovery status, and explicit privacy flags only. Its public `counts`
+block includes aggregate retry/reuse fields (`resumed_files`, `reused_files`,
+`reprocessed_files`, and `retry_list_files`) so schedulers can confirm resume
+behavior without opening private manifests. Its nested
 `timings` block uses schema
 `scan-qc.service-job-public-timings.v1` and includes only whitelisted stage IDs,
 aggregate processing throughput, and whitelisted operation timing fields. Its
