@@ -258,6 +258,12 @@ baseline must show at least one illumination-gradient leveling operation plus
 aggregate correction-delta and changed-pixel-ratio evidence, without publishing
 paths, filenames, or image content.
 
+Follow-up, 2026-06-09: the smoke fixture set now includes a light-paper page
+with localized neutral background stains away from printed text. The public-safe
+baseline must show at least one background-stain cleanup operation plus aggregate
+stain-delta and changed-pixel-ratio evidence, keeping the same no-path,
+no-filename, no-image-content boundary.
+
 ### M3：Photo/mixed-safe 管线 v1
 
 目标：让照片、图文混排、印章和批注不会被文字清洁策略误伤。

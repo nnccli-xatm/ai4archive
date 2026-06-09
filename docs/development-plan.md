@@ -232,6 +232,9 @@ public-safe 聚合质量基线。
 最新补充：`image-processing-capability-smoke` 已加入低幅度照明梯度 fixture，要求
 全链路产生至少一次照明梯度校正，并在 public-safe 聚合质量基线中输出校正幅度和
 像素变化比例指标。
+最新补充：`image-processing-capability-smoke` 已加入浅色纸面局部背景污渍 fixture，
+要求全链路产生至少一次保守背景污渍弱化，并在 public-safe 聚合质量基线中输出污渍
+亮化幅度和像素变化比例指标。
 M3 的第一片保护契约也已补齐：`photo-mixed-safe-v1` 通过生产 CLI 端到端测试覆盖
 合成照片/印章/表格混排页，要求 production summary 和 processing manifest 明确保持
 强背景清理、透印清理、褪色文字增强和文字边缘锐化关闭，同时确认源图不变并仍输出

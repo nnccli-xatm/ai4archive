@@ -52,6 +52,7 @@ _SYNTHETIC_FIXTURE_GROUPS = (
     "scanline_page",
     "bleed_through_page",
     "corner_shadow_page",
+    "background_stain_page",
     "fold_shadow_page",
     "blurred_text_edges_page",
     "ultra_pale_typed_text_page",
@@ -440,6 +441,7 @@ def _write_synthetic_fixtures(input_dir: Path) -> int:
         _scanline_page(),
         _bleed_through_page(),
         _corner_shadow_page(),
+        _background_stain_page(),
         _fold_shadow_page(),
         _blurred_text_edges_page(),
         _ultra_pale_typed_text_page(),
@@ -548,6 +550,17 @@ def _corner_shadow_page() -> Image.Image:
     for radius in range(62, 0, -4):
         shade = 160 + radius
         draw.pieslice((-radius, -radius, radius, radius), 0, 360, fill=(shade, shade, shade))
+    return image
+
+
+def _background_stain_page() -> Image.Image:
+    image = Image.new("RGB", (240, 170), (240, 240, 236))
+    draw = ImageDraw.Draw(image)
+    for y in (42, 66, 90):
+        draw.rectangle((48, y, 178, y + 5), fill=(38, 38, 38))
+    draw.ellipse((58, 116, 80, 134), fill=(216, 216, 211))
+    draw.ellipse((188, 18, 210, 34), fill=(218, 218, 214))
+    draw.rectangle((196, 112, 208, 124), fill=(214, 214, 210))
     return image
 
 

@@ -715,11 +715,12 @@ source images remain unmodified, derivative processing executes, guardrail
 failures are zero or explained, requested stable despeckle backend is
 represented in backend counts, and before/after quality signals are measurable.
 The smoke also checks that guarded tone normalization improves at least one
-neutral light-paper low-contrast fixture, and that fold-shadow cleanup,
-illumination-gradient leveling, conservative bleed-through cleanup, and scanline
-lightening each produce at least one public-safe aggregate delta. It also
-requires faded-text enhancement and text-edge sharpening evidence from a
-synthetic mildly blurred typed-text fixture, without exposing image content.
+neutral light-paper low-contrast fixture, and that localized background-stain
+cleanup, fold-shadow cleanup, illumination-gradient leveling, conservative
+bleed-through cleanup, and scanline lightening each produce at least one
+public-safe aggregate delta. It also requires faded-text enhancement and
+text-edge sharpening evidence from a synthetic mildly blurred typed-text fixture,
+without exposing image content.
 Both JSON files are public-safe aggregate evidence and must not contain paths,
 filenames, hashes, OCR text, thumbnails, or image content.
 
