@@ -84,6 +84,8 @@ class ServiceHttpTransportTests(unittest.TestCase):
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
             self.assertGreaterEqual(capabilities["resource_limits"]["max_active_workers"], 1)
+            self.assertGreaterEqual(capabilities["resource_limits"]["min_free_space_bytes"], 1)
+            self.assertGreaterEqual(capabilities["resource_limits"]["max_tmp_bytes_per_job"], 1)
             self.assertEqual(created["state"], "created")
             self.assertEqual(status["state"], "created")
             self.assertEqual(cancelled["state"], "cancelled")

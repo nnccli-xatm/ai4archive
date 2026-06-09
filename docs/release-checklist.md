@@ -32,8 +32,10 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   recover `running` checkpoints without progress as `needs_recovery`, reject
   tampered checkpoint input paths that overlap the service root, mark cancelled
   jobs as terminal and not rerunnable, enforce the per-job worker limit and
-  global active-worker limit, and keep endpoint-shaped service API and
-  prototype local HTTP responses
+  global active-worker limit, reject service roots below the configured minimum
+  free-space threshold, reject jobs whose temp directory exceeds the per-job
+  temp quota before entering `running`, and keep endpoint-shaped service API
+  and prototype local HTTP responses
   public-safe, including `GET /api/rule-templates`,
   `GET /api/rule-templates/{template_id}`, and synchronous
   `POST /api/jobs/{job_id}/run` quality summaries. Confirm async
@@ -42,7 +44,9 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   stale `running` checkpoints that must recover as `needs_recovery`. Confirm
   `max_active_async_jobs` and `max_active_workers` are published in
   capabilities and enforced before a second async job is marked `running` when
-  either limit is reached. Confirm
+  either limit is reached. Confirm `min_free_space_bytes` and
+  `max_tmp_bytes_per_job` are published in capabilities and public job resource
+  limits. Confirm
   terminal service summaries include public-safe quality category counts,
   operation category booleans, blocking codes, and aggregate guardrail status.
   Confirm terminal and recoverable running service summaries include nested

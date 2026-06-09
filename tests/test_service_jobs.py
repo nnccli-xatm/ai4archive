@@ -16,6 +16,8 @@ from archive_scan_qc import service_jobs as service_jobs_module
 from archive_scan_qc.service_jobs import (
     SERVICE_JOB_MAX_WORKERS,
     SERVICE_JOB_MAX_ACTIVE_WORKERS,
+    SERVICE_JOB_MAX_TMP_BYTES,
+    SERVICE_JOB_MIN_FREE_SPACE_BYTES,
     SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON,
     SERVICE_JOB_PUBLIC_SUMMARY_JSON,
     SERVICE_JOB_RECORD_JSON,
@@ -61,6 +63,8 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertTrue(summary["isolation"]["review_isolated"])
             self.assertEqual(summary["resource_limits"]["max_workers_per_job"], SERVICE_JOB_MAX_WORKERS)
             self.assertEqual(summary["resource_limits"]["max_active_workers"], SERVICE_JOB_MAX_ACTIVE_WORKERS)
+            self.assertEqual(summary["resource_limits"]["min_free_space_bytes"], SERVICE_JOB_MIN_FREE_SPACE_BYTES)
+            self.assertEqual(summary["resource_limits"]["max_tmp_bytes_per_job"], SERVICE_JOB_MAX_TMP_BYTES)
             self.assertEqual(summary["resource_limits"]["workers_requested"], 1)
             self.assertEqual(Path(record["paths"]["metadata_dir"]).parent, job_root)
             self.assertEqual(Path(record["paths"]["derivatives_dir"]).parent, job_root)
@@ -69,6 +73,8 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertTrue((job_root / "review").is_dir())
             self.assertEqual(record["resource_limits"]["max_workers_per_job"], SERVICE_JOB_MAX_WORKERS)
             self.assertEqual(record["resource_limits"]["max_active_workers"], SERVICE_JOB_MAX_ACTIVE_WORKERS)
+            self.assertEqual(record["resource_limits"]["min_free_space_bytes"], SERVICE_JOB_MIN_FREE_SPACE_BYTES)
+            self.assertEqual(record["resource_limits"]["max_tmp_bytes_per_job"], SERVICE_JOB_MAX_TMP_BYTES)
             self.assertEqual(record["resource_limits"]["workers_requested"], 1)
             self.assertEqual(record["paths"]["input_dir"], str(input_dir.resolve()))
             _assert_public_text_omits(
@@ -111,6 +117,47 @@ class ServiceJobBoundaryTests(unittest.TestCase):
                     ),
                     job_id="job-testworkers002",
                 )
+
+    def test_create_rejects_service_root_below_free_space_minimum(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-job-disk-quota-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            service_root = root / "service-root"
+            input_dir.mkdir()
+            _write_page(input_dir / "private_page_001.png")
+
+            with (
+                mock.patch("archive_scan_qc.service_jobs.SERVICE_JOB_MIN_FREE_SPACE_BYTES", 10**30),
+                self.assertRaisesRegex(RuntimeError, "free space"),
+            ):
+                create_service_job(
+                    ServiceJobConfig(input_dir=input_dir, service_root=service_root, workers=1),
+                    job_id="job-testdiskquota001",
+                )
+
+            self.assertFalse((service_root / "jobs" / "job-testdiskquota001").exists())
+
+    def test_run_job_rejects_tmp_quota_before_marking_running(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-job-tmp-quota-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-source"
+            service_root = root / "service-root"
+            input_dir.mkdir()
+            _write_page(input_dir / "private_page_001.png")
+            with mock.patch("archive_scan_qc.service_jobs.SERVICE_JOB_MAX_TMP_BYTES", 4):
+                created = create_service_job(
+                    ServiceJobConfig(input_dir=input_dir, service_root=service_root, workers=1),
+                    job_id="job-testtmpquota001",
+                )
+            job_root = service_root / "jobs" / "job-testtmpquota001"
+            (job_root / "tmp" / "overflow.bin").write_bytes(b"overflow")
+
+            with self.assertRaisesRegex(RuntimeError, "temporary directory quota"):
+                run_service_job(service_root, "job-testtmpquota001")
+            status = recover_service_job(service_root, "job-testtmpquota001")
+
+            self.assertEqual(created["resource_limits"]["max_tmp_bytes_per_job"], 4)
+            self.assertEqual(status["state"], "created")
 
     def test_run_job_writes_terminal_public_summary_without_private_paths(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-job-run-") as temp_dir:

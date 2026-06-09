@@ -163,7 +163,8 @@ checkpoints.
 The core now supports a `cancelled` terminal state and rejects attempts to rerun
 terminal service jobs.
 It also enforces a per-job worker limit during job creation and reports the
-non-sensitive per-job and global active-worker quotas in the public summary.
+non-sensitive per-job worker, global active-worker, minimum free-space, and
+per-job temp quotas in the public summary.
 `archive_scan_qc.service_api` now provides endpoint-shaped health,
 capabilities, rule-template catalog/detail, create, status, run, start, cancel,
 and recover responses while keeping path-bearing request data out of public
@@ -181,6 +182,9 @@ alive, and still marks stale running checkpoints as `needs_recovery` after
 restart. Async start now enforces non-sensitive `max_active_async_jobs` and
 `max_active_workers` service limits before marking a job `running`; the
 capabilities response exposes both global limits and the per-job worker limit.
+Job creation checks configured minimum service-root free space, and job start
+checks the isolated temp directory against the per-job temp quota before the job
+can enter `running`.
 Service job terminal public summaries now also carry public-safe quality
 context from `processing_quality_summary.json`: blocking codes, warning/retry
 counts, per-category changed-file counts, operation category booleans, and

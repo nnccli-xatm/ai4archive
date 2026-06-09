@@ -16,7 +16,9 @@ from .service_jobs import (
     SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON,
     SERVICE_JOB_MAX_ACTIVE_JOBS,
     SERVICE_JOB_MAX_ACTIVE_WORKERS,
+    SERVICE_JOB_MAX_TMP_BYTES,
     SERVICE_JOB_MAX_WORKERS,
+    SERVICE_JOB_MIN_FREE_SPACE_BYTES,
     ServiceJobConfig,
     cancel_service_job,
     create_service_job,
@@ -72,6 +74,8 @@ def service_capabilities() -> dict[str, Any]:
             "max_workers_per_job": SERVICE_JOB_MAX_WORKERS,
             "max_active_async_jobs": SERVICE_JOB_MAX_ACTIVE_JOBS,
             "max_active_workers": SERVICE_JOB_MAX_ACTIVE_WORKERS,
+            "min_free_space_bytes": SERVICE_JOB_MIN_FREE_SPACE_BYTES,
+            "max_tmp_bytes_per_job": SERVICE_JOB_MAX_TMP_BYTES,
         },
         "schemas": {
             "service_api": SERVICE_API_SCHEMA_VERSION,

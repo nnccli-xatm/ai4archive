@@ -13,6 +13,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import shutil
 import threading
 from typing import Any
 import uuid
@@ -49,6 +50,8 @@ TERMINAL_STATES = {"finished", "needs_review", "failed", "interrupted", "cancell
 SERVICE_JOB_MAX_WORKERS = 8
 SERVICE_JOB_MAX_ACTIVE_JOBS = 2
 SERVICE_JOB_MAX_ACTIVE_WORKERS = 8
+SERVICE_JOB_MIN_FREE_SPACE_BYTES = 64 * 1024 * 1024
+SERVICE_JOB_MAX_TMP_BYTES = 1024 * 1024 * 1024
 PUBLIC_STAGE_TIMING_IDS = ("scan", "process", "summarize")
 PUBLIC_AGGREGATE_PROCESSING_UNAVAILABLE_REASONS = (
     "missing_total_images",
@@ -103,6 +106,7 @@ def create_service_job(config: ServiceJobConfig, *, job_id: str | None = None) -
     input_dir = config.input_dir.resolve()
     service_root = config.service_root.resolve()
     _validate_service_paths(input_dir, service_root)
+    _validate_service_root_capacity(service_root)
     workers = _validate_worker_limit(config.workers)
     job_id = _validate_job_id(job_id or _new_job_id())
     job_root = (service_root / SERVICE_JOBS_DIRNAME / job_id).resolve()
@@ -150,6 +154,8 @@ def create_service_job(config: ServiceJobConfig, *, job_id: str | None = None) -
         "resource_limits": {
             "max_workers_per_job": SERVICE_JOB_MAX_WORKERS,
             "max_active_workers": SERVICE_JOB_MAX_ACTIVE_WORKERS,
+            "min_free_space_bytes": SERVICE_JOB_MIN_FREE_SPACE_BYTES,
+            "max_tmp_bytes_per_job": SERVICE_JOB_MAX_TMP_BYTES,
             "workers_requested": workers,
         },
         "production_artifacts": _production_artifact_paths(directories["metadata"], directories["derivatives"]),
@@ -196,6 +202,7 @@ def _mark_service_job_running(service_root: Path, job_id: str, *, recovery_statu
         raise RuntimeError("Service job is already running.")
     if str(record.get("state") or "") in TERMINAL_STATES:
         raise RuntimeError("Service job is already terminal.")
+    _validate_job_tmp_quota(record)
     _update_record_state(record, "running", recovery_status=recovery_status)
     _write_job_record(_job_root_from_record(record), record)
     return _write_public_summary(_job_root_from_record(record), _public_summary_from_record(record))
@@ -323,6 +330,15 @@ def _validate_service_paths(input_dir: Path, service_root: Path) -> None:
     service_root.mkdir(parents=True, exist_ok=True)
     jobs_dir = service_root / SERVICE_JOBS_DIRNAME
     jobs_dir.mkdir(parents=True, exist_ok=True)
+
+
+def _validate_service_root_capacity(service_root: Path) -> None:
+    try:
+        free_bytes = shutil.disk_usage(service_root).free
+    except OSError as exc:
+        raise RuntimeError("Service root free space could not be checked.") from exc
+    if free_bytes < SERVICE_JOB_MIN_FREE_SPACE_BYTES:
+        raise RuntimeError("Service root free space is below the configured minimum.")
 
 
 def _paths_overlap(left: Path, right: Path) -> bool:
@@ -573,6 +589,12 @@ def _public_resource_limits(resource_limits: Any) -> dict[str, int | None]:
         "max_workers_per_job": _safe_int(resource_limits.get("max_workers_per_job")),
         "max_active_workers": (
             _safe_int(resource_limits.get("max_active_workers")) or SERVICE_JOB_MAX_ACTIVE_WORKERS
+        ),
+        "min_free_space_bytes": (
+            _safe_int(resource_limits.get("min_free_space_bytes")) or SERVICE_JOB_MIN_FREE_SPACE_BYTES
+        ),
+        "max_tmp_bytes_per_job": (
+            _safe_int(resource_limits.get("max_tmp_bytes_per_job")) or SERVICE_JOB_MAX_TMP_BYTES
         ),
         "workers_requested": _safe_int(resource_limits.get("workers_requested")),
     }
@@ -1054,6 +1076,32 @@ def _async_worker_units(record: dict[str, Any]) -> int:
     if workers is None:
         return SERVICE_JOB_MAX_WORKERS
     return min(max(1, workers), SERVICE_JOB_MAX_WORKERS)
+
+
+def _validate_job_tmp_quota(record: dict[str, Any]) -> None:
+    paths = record.get("paths") if isinstance(record.get("paths"), dict) else {}
+    tmp_dir = Path(str(paths.get("tmp_dir", ""))).resolve() if isinstance(paths, dict) else Path()
+    _require_within(tmp_dir, _job_root_from_record(record))
+    limit = _job_tmp_quota(record)
+    used = _directory_size(tmp_dir)
+    if used > limit:
+        raise RuntimeError("Service job temporary directory quota exceeded.")
+
+
+def _job_tmp_quota(record: dict[str, Any]) -> int:
+    limits = record.get("resource_limits") if isinstance(record.get("resource_limits"), dict) else {}
+    configured = _safe_int(limits.get("max_tmp_bytes_per_job")) if isinstance(limits, dict) else None
+    return configured if configured is not None else SERVICE_JOB_MAX_TMP_BYTES
+
+
+def _directory_size(root: Path) -> int:
+    total = 0
+    if not root.exists():
+        return total
+    for path in root.rglob("*"):
+        if path.is_file():
+            total += path.stat().st_size
+    return total
 
 
 def _isolation_payload(service_root: Path, job_root: Path, directories: dict[str, Path]) -> dict[str, Any]:

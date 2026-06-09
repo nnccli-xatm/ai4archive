@@ -337,6 +337,9 @@ worker limit.
 Follow-up, 2026-06-09: async service reservation now also enforces a
 non-sensitive `max_active_workers` limit before marking a job `running`; jobs
 rejected by the global active-worker quota remain in their prior public state.
+Follow-up, 2026-06-09: service job creation now checks configured minimum
+service-root free space, and job start checks the isolated temp directory
+against `max_tmp_bytes_per_job` before entering `running`.
 Follow-up, 2026-06-09: the same local HTTP transport now exposes
 `GET /api/rule-templates` and `GET /api/rule-templates/{template_id}` for
 public-safe template catalog/detail responses without reading scan reports or
