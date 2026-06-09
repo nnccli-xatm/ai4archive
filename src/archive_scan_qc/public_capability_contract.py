@@ -301,6 +301,13 @@ def build_public_capability_contract(generated_at: str | None = None) -> dict[st
             ),
             _artifact(PUBLIC_CAPABILITY_CONTRACT_JSON, SCHEMA_VERSION, "stable_public_safe_aggregate"),
         ],
+        "nested_public_schemas": [
+            _nested_schema(
+                "service_job_public_summary.timings",
+                "scan-qc.service-job-public-timings.v1",
+                "prototype_or_validation",
+            ),
+        ],
         "processing_contract": {
             "source_images_modified": False,
             "derivative_processing_requires_process_out": True,
@@ -405,6 +412,14 @@ def _command(
 
 
 def _artifact(name: str, schema_version: str, stability: str) -> dict[str, str]:
+    return {
+        "name": name,
+        "schema_version": schema_version,
+        "stability": stability,
+    }
+
+
+def _nested_schema(name: str, schema_version: str, stability: str) -> dict[str, str]:
     return {
         "name": name,
         "schema_version": schema_version,

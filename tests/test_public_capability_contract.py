@@ -63,6 +63,15 @@ class PublicCapabilityContractTests(unittest.TestCase):
             "scan-qc.service-job-index-public-summary.v1",
         )
         self.assertEqual(artifacts["service_job_index_public_summary.json"]["stability"], "prototype_or_validation")
+        nested_schemas = {item["name"]: item for item in contract["nested_public_schemas"]}
+        self.assertEqual(
+            nested_schemas["service_job_public_summary.timings"]["schema_version"],
+            "scan-qc.service-job-public-timings.v1",
+        )
+        self.assertEqual(
+            nested_schemas["service_job_public_summary.timings"]["stability"],
+            "prototype_or_validation",
+        )
         self.assertEqual(
             artifacts["image_processing_capability_smoke.json"]["schema_version"],
             "scan-qc.image-processing-capability-smoke.v1",

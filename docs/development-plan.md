@@ -187,6 +187,13 @@ counts, per-category changed-file counts, operation category booleans, and
 aggregate guardrail status. These fields give the frontend or an external
 scheduler enough quality state to poll without reading private production
 summaries or path-bearing checkpoints.
+Service job public summaries now also carry nested
+`scan-qc.service-job-public-timings.v1` timing context. The payload is
+public-safe: it keeps only whitelisted stage IDs, aggregate processing
+throughput, and whitelisted operation timing fields (`enabled`, file count,
+elapsed seconds, average seconds per file, files per minute, and reused scan
+measurement count). Unknown stage/operation names and arbitrary reason text are
+not echoed into the public response.
 本地 processing review package 已按背景清理、可读性提升、缺陷清理和原貌风险
 分组；service public summary 只透出这些分组的聚合计数，仍不暴露行级路径。
 终态 service job 的恢复现在会在本地 review artifact 缺失时，基于已有

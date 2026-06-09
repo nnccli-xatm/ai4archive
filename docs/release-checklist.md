@@ -43,6 +43,10 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   second async job is marked `running` when the limit is reached. Confirm
   terminal service summaries include public-safe quality category counts,
   operation category booleans, blocking codes, and aggregate guardrail status.
+  Confirm terminal and recoverable running service summaries include nested
+  `scan-qc.service-job-public-timings.v1` timing context with only whitelisted
+  stage IDs, aggregate processing throughput, whitelisted operation timing
+  fields, and no arbitrary operation names or reason text.
   Confirm each job root has isolated metadata, derivatives, temp, checkpoint,
   review, and log directories while public summaries expose only isolation
   booleans. Confirm service runs write local-only processing review package and

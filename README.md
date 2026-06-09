@@ -1492,7 +1492,8 @@ HTTP transport for prototype `curl` or frontend integration.
 `service_job.json` checkpoint records authorized local paths and template
 settings for recovery. The shareable `service_job_public_summary.json` records
 only aggregate status, counts, quality category signals, guardrail summary,
-isolation flags, recovery status, and privacy booleans.
+public-safe timing summaries, isolation flags, recovery status, and privacy
+booleans.
 When a service job reaches production processing, it also writes local-only
 `processing_review_package.json`, `processing_review_package.html`, and
 `production_review_queue.json` files inside the isolated `review` directory.
@@ -1506,6 +1507,12 @@ marks stale `running` records without progress as `needs_recovery`, so a service
 restart does not leave an orphaned job looking active.
 Terminal recovery also rebuilds missing local review artifacts from the existing
 production summary and processing manifest when possible.
+Service public summaries include a nested `timings` payload with schema
+`scan-qc.service-job-public-timings.v1`. It exposes only whitelisted stage IDs,
+aggregate processing throughput, and whitelisted per-operation timing fields
+such as enabled state, file count, elapsed seconds, average seconds per file,
+and files per minute. It does not expose local paths, filenames, hashes,
+thumbnails, OCR text, image content, or arbitrary operation names.
 The core also supports a public-safe `cancelled` terminal state for jobs that
 are stopped before completion; terminal jobs cannot be run again accidentally.
 Job creation enforces a per-job worker limit and reports the non-sensitive

@@ -257,10 +257,13 @@ and the template snapshot needed for recovery. Each job root includes isolated
 `metadata`, `derivatives`, `tmp`, `checkpoints`, `review`, and `logs`
 subdirectories. `service_job_public_summary.json` is the public-safe
 polling/handoff shape: aggregate state, counts, quality category signals,
-guardrail summary, isolation booleans, recovery status, and explicit privacy
-flags only. If recovery sees a stale `running` progress file after a service
-restart, it reports `needs_recovery` instead of leaking paths or leaving the job
-silently running.
+guardrail summary, timing summaries, isolation booleans, recovery status, and
+explicit privacy flags only. Its nested `timings` block uses schema
+`scan-qc.service-job-public-timings.v1` and includes only whitelisted stage IDs,
+aggregate processing throughput, and whitelisted operation timing fields. If
+recovery sees a stale `running` progress file after a service restart, it
+reports `needs_recovery` instead of leaking paths or leaving the job silently
+running.
 After production processing, service jobs write local-only
 `processing_review_package.json`, `processing_review_package.html`, and
 `production_review_queue.json` into the isolated `review` directory. These files

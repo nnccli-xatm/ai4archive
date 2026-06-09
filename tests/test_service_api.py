@@ -153,6 +153,7 @@ class ServiceApiCoreTests(unittest.TestCase):
             self.assertIn("background_cleanup", summary["quality"]["quality_operations_applied"])
             self.assertTrue(summary["quality"]["guardrails"]["enabled"])
             self.assertEqual(summary["quality"]["guardrails"]["failed_files"], 0)
+            _assert_public_timing_summary(self, summary["timings"], expected_processed_files=1)
             self.assertTrue(summary["local_review"]["provided"])
             self.assertTrue(summary["local_review"]["production_review_queue_written"])
             self.assertFalse(summary["local_review"]["privacy"]["contains_paths"])
@@ -189,6 +190,7 @@ class ServiceApiCoreTests(unittest.TestCase):
             self.assertEqual(terminal["quality"]["processed_files"], 1)
             self.assertIn("text_enhancement", terminal["quality"]["quality_operations_applied"])
             self.assertEqual(terminal["quality"]["guardrails"]["failure_reasons"], {})
+            _assert_public_timing_summary(self, terminal["timings"], expected_processed_files=1)
             self.assertTrue(terminal["local_review"]["processing_review_package_written"])
             _assert_public_text_omits(self, raw, str(root.resolve()), "private_page_001")
 
@@ -220,6 +222,21 @@ def _assert_public_text_omits(testcase: unittest.TestCase, raw: str, *private_va
     for value in private_values:
         testcase.assertNotIn(value, raw)
         testcase.assertNotIn(value, normalized)
+
+
+def _assert_public_timing_summary(
+    testcase: unittest.TestCase,
+    timings: dict,
+    *,
+    expected_processed_files: int,
+) -> None:
+    testcase.assertEqual(timings["schema_version"], "scan-qc.service-job-public-timings.v1")
+    testcase.assertTrue(timings["provided"])
+    testcase.assertEqual(timings["aggregate_processing"]["processed_images"], expected_processed_files)
+    testcase.assertIn("scan", {stage["id"] for stage in timings["stage_timings"]["stages"]})
+    testcase.assertIn("auto_crop", timings["operation_timings"])
+    testcase.assertEqual(timings["operation_count"], len(timings["operation_timings"]))
+    testcase.assertFalse(timings["privacy"]["contains_paths"])
 
 
 if __name__ == "__main__":

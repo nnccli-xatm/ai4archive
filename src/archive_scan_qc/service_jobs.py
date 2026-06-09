@@ -36,6 +36,7 @@ from .rules import (
 SERVICE_JOB_SCHEMA_VERSION = "scan-qc.service-job.v1"
 SERVICE_JOB_PUBLIC_SUMMARY_SCHEMA_VERSION = "scan-qc.service-job-public-summary.v1"
 SERVICE_JOB_INDEX_PUBLIC_SUMMARY_SCHEMA_VERSION = "scan-qc.service-job-index-public-summary.v1"
+SERVICE_JOB_PUBLIC_TIMINGS_SCHEMA_VERSION = "scan-qc.service-job-public-timings.v1"
 SERVICE_JOB_RECORD_JSON = "service_job.json"
 SERVICE_JOB_PUBLIC_SUMMARY_JSON = "service_job_public_summary.json"
 SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON = "service_job_index_public_summary.json"
@@ -44,6 +45,32 @@ JOB_ID_PATTERN = re.compile(r"^job-[A-Za-z0-9][A-Za-z0-9_-]{2,80}$")
 TERMINAL_STATES = {"finished", "needs_review", "failed", "interrupted", "cancelled"}
 SERVICE_JOB_MAX_WORKERS = 8
 SERVICE_JOB_MAX_ACTIVE_JOBS = 2
+PUBLIC_STAGE_TIMING_IDS = ("scan", "process", "summarize")
+PUBLIC_AGGREGATE_PROCESSING_UNAVAILABLE_REASONS = (
+    "missing_total_images",
+    "missing_processed_images",
+    "no_total_images",
+    "no_processed_images",
+    "no_elapsed_seconds",
+)
+PUBLIC_OPERATION_TIMING_IDS = (
+    "auto_crop",
+    "deskew",
+    "trim_dark_border",
+    "scanner_gutter_trim",
+    "despeckle",
+    "normalize_tones",
+    "normalize_paper_color_cast",
+    "lighten_edge_shadow",
+    "lighten_corner_shadows",
+    "lighten_background_stains",
+    "lighten_fold_shadows",
+    "level_illumination_gradient",
+    "clean_bleed_through",
+    "lighten_scanlines",
+    "enhance_faded_text",
+    "sharpen_text_edges",
+)
 _ASYNC_JOB_LOCK = threading.Lock()
 _ASYNC_JOB_KEYS: set[str] = set()
 
@@ -471,6 +498,7 @@ def _public_summary_from_record(
         },
         "recovery": _public_recovery_payload(record.get("recovery")),
         "quality": _public_quality_payload(production_summary),
+        "timings": _public_timings_payload(production_summary, production_progress),
         "local_review": _public_local_review_payload(record.get("local_review")),
         "source_images_modified": False,
         "network_services_called": False,
@@ -501,6 +529,15 @@ def _safe_int(value: Any) -> int | None:
         return None
     try:
         return max(0, int(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return max(0.0, round(float(value), 6))
     except (TypeError, ValueError):
         return None
 
@@ -564,6 +601,118 @@ def _public_quality_payload(production_summary: dict[str, Any] | None) -> dict[s
             "failure_reasons": _int_dict(guardrails.get("failure_reasons")),
         },
     }
+
+
+def _public_timings_payload(
+    production_summary: dict[str, Any] | None,
+    production_progress: dict[str, Any] | None,
+) -> dict[str, Any]:
+    summary = production_summary if isinstance(production_summary, dict) else {}
+    progress = production_progress if isinstance(production_progress, dict) else {}
+    stage_source = summary.get("stage_timings") if isinstance(summary.get("stage_timings"), dict) else None
+    if stage_source is None:
+        stage_source = progress.get("stage_timings") if isinstance(progress.get("stage_timings"), dict) else None
+    aggregate_source = (
+        summary.get("aggregate_processing")
+        if isinstance(summary.get("aggregate_processing"), dict)
+        else progress.get("aggregate_processing")
+    )
+    operation_timings = _public_operation_timings(_operation_timings_from_summary(summary))
+    provided = bool(stage_source or aggregate_source or operation_timings)
+    return {
+        "schema_version": SERVICE_JOB_PUBLIC_TIMINGS_SCHEMA_VERSION,
+        "provided": provided,
+        "status": "available" if provided else "not_available",
+        "aggregate_only": True,
+        "public_safe": True,
+        "stage_timings": _public_stage_timings(stage_source),
+        "aggregate_processing": _public_aggregate_processing(aggregate_source),
+        "operation_timings": operation_timings,
+        "operation_count": len(operation_timings),
+        "privacy": {
+            "contains_paths": False,
+            "contains_filenames": False,
+            "contains_hashes": False,
+            "contains_thumbnails": False,
+            "contains_ocr_text": False,
+            "contains_image_content": False,
+        },
+    }
+
+
+def _operation_timings_from_summary(summary: dict[str, Any]) -> dict[str, Any]:
+    performance = summary.get("performance") if isinstance(summary.get("performance"), dict) else {}
+    processing = performance.get("processing") if isinstance(performance.get("processing"), dict) else {}
+    timings = processing.get("operation_timings") if isinstance(processing.get("operation_timings"), dict) else {}
+    return timings
+
+
+def _public_stage_timings(stage_timings: Any) -> dict[str, Any]:
+    stage_timings = stage_timings if isinstance(stage_timings, dict) else {}
+    raw_stages = stage_timings.get("stages") if isinstance(stage_timings.get("stages"), list) else []
+    raw_by_id = {stage.get("id"): stage for stage in raw_stages if isinstance(stage, dict)}
+    stages: list[dict[str, Any]] = []
+    for stage_id in PUBLIC_STAGE_TIMING_IDS:
+        raw = raw_by_id.get(stage_id)
+        if not isinstance(raw, dict):
+            continue
+        stages.append(
+            {
+                "id": stage_id,
+                "elapsed_seconds": _safe_float(raw.get("elapsed_seconds")),
+                "status": _public_stage_status(raw.get("status")),
+            }
+        )
+    return {
+        "schema_version": "scan-qc.production-stage-timings.v1",
+        "aggregate_only": True,
+        "stages": stages,
+    }
+
+
+def _public_stage_status(value: Any) -> str:
+    if not isinstance(value, str):
+        return "unknown"
+    return value if value in {"pending", "running", "completed", "failed", "interrupted"} else "unknown"
+
+
+def _public_aggregate_processing(aggregate_processing: Any) -> dict[str, Any]:
+    aggregate_processing = aggregate_processing if isinstance(aggregate_processing, dict) else {}
+    return {
+        "schema_version": "scan-qc.aggregate-processing-rate.v1",
+        "aggregate_only": True,
+        "total_images": _safe_int(aggregate_processing.get("total_images")),
+        "processed_images": _safe_int(aggregate_processing.get("processed_images")),
+        "remaining_images": _safe_int(aggregate_processing.get("remaining_images")),
+        "elapsed_seconds": _safe_float(aggregate_processing.get("elapsed_seconds")),
+        "images_per_minute": _safe_float(aggregate_processing.get("images_per_minute")),
+        "estimated_remaining_seconds": _safe_float(aggregate_processing.get("estimated_remaining_seconds")),
+        "unavailable_reason": _public_unavailable_reason(aggregate_processing.get("unavailable_reason")),
+    }
+
+
+def _public_unavailable_reason(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    return value if value in PUBLIC_AGGREGATE_PROCESSING_UNAVAILABLE_REASONS else "unknown"
+
+
+def _public_operation_timings(operation_timings: Any) -> dict[str, dict[str, Any]]:
+    operation_timings = operation_timings if isinstance(operation_timings, dict) else {}
+    public_timings: dict[str, dict[str, Any]] = {}
+    for operation_id in PUBLIC_OPERATION_TIMING_IDS:
+        raw = operation_timings.get(operation_id)
+        if not isinstance(raw, dict):
+            continue
+        public_timings[operation_id] = {
+            "enabled": bool(raw.get("enabled")),
+            "file_count": _safe_int(raw.get("file_count")),
+            "elapsed_seconds": _safe_float(raw.get("elapsed_seconds")),
+            "average_seconds_per_file": _safe_float(raw.get("average_seconds_per_file")),
+            "files_per_minute": _safe_float(raw.get("files_per_minute")),
+            "reused_scan_measurement_files": _safe_int(raw.get("reused_scan_measurement_files")),
+        }
+    return public_timings
 
 
 def _string_list(value: Any) -> list[str]:

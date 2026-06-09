@@ -133,6 +133,7 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertEqual(summary["quality"]["status"], "pass")
             self.assertEqual(summary["quality"]["processed_files"], 1)
             _assert_public_quality_summary(self, summary["quality"])
+            _assert_public_timing_summary(self, summary["timings"], expected_processed_files=1)
             self.assertEqual(processing_manifest["rule_template"]["id"], "dat-31-2017-standard")
             self.assertEqual(
                 processing_manifest["rule_template"]["processing_defaults"]["reuse_scan_measurements"],
@@ -192,6 +193,7 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertEqual(terminal["quality"]["status"], "pass")
             self.assertEqual(terminal["counts"]["processed_files"], 1)
             _assert_public_quality_summary(self, terminal["quality"])
+            _assert_public_timing_summary(self, terminal["timings"], expected_processed_files=1)
             self.assertTrue(terminal["local_review"]["provided"])
             self.assertTrue(terminal["local_review"]["processing_review_package_html_written"])
             _assert_public_text_omits(self, public_raw, str(root.resolve()), "private_page_001")
@@ -226,6 +228,7 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertTrue((job_root / "review" / "production_review_queue.json").is_file())
             self.assertTrue(summary["local_review"]["provided"])
             self.assertIn("readability_improvement", summary["local_review"]["processing_review_group_counts"])
+            _assert_public_timing_summary(self, summary["timings"], expected_processed_files=1)
             _assert_public_text_omits(self, public_raw, str(root.resolve()), "private_page_001")
 
     def test_start_job_async_enforces_active_job_limit_before_marking_running(self) -> None:
@@ -330,6 +333,7 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertEqual(summary["counts"]["total_files"], 8)
             self.assertEqual(summary["counts"]["processed_files"], 3)
             self.assertEqual(summary["counts"]["remaining_files"], 5)
+            _assert_public_progress_timing_summary(self, summary["timings"], expected_processed_files=3)
             _assert_public_text_omits(self, public_raw, str(root.resolve()), "private_page_001")
 
     def test_recover_marks_running_record_without_progress_as_needs_recovery(self) -> None:
@@ -488,6 +492,47 @@ def _assert_public_quality_summary(testcase: unittest.TestCase, quality: dict) -
     testcase.assertEqual(quality["guardrails"]["warning_files"], 0)
     testcase.assertEqual(quality["guardrails"]["failed_files"], 0)
     testcase.assertEqual(quality["guardrails"]["failure_reasons"], {})
+
+
+def _assert_public_timing_summary(
+    testcase: unittest.TestCase,
+    timings: dict,
+    *,
+    expected_processed_files: int,
+) -> None:
+    testcase.assertEqual(timings["schema_version"], "scan-qc.service-job-public-timings.v1")
+    testcase.assertTrue(timings["provided"])
+    testcase.assertEqual(timings["status"], "available")
+    testcase.assertTrue(timings["aggregate_only"])
+    testcase.assertTrue(timings["public_safe"])
+    testcase.assertEqual(
+        {stage["id"] for stage in timings["stage_timings"]["stages"]},
+        {"scan", "process", "summarize"},
+    )
+    testcase.assertEqual(timings["aggregate_processing"]["processed_images"], expected_processed_files)
+    testcase.assertIn("deskew", timings["operation_timings"])
+    testcase.assertIn("despeckle", timings["operation_timings"])
+    testcase.assertEqual(timings["operation_count"], len(timings["operation_timings"]))
+    for operation in timings["operation_timings"].values():
+        testcase.assertIn("enabled", operation)
+        testcase.assertIsInstance(operation["file_count"], int)
+        testcase.assertIsInstance(operation["elapsed_seconds"], float)
+        testcase.assertIn("average_seconds_per_file", operation)
+        testcase.assertIn("files_per_minute", operation)
+    testcase.assertFalse(timings["privacy"]["contains_paths"])
+    testcase.assertFalse(timings["privacy"]["contains_filenames"])
+
+
+def _assert_public_progress_timing_summary(
+    testcase: unittest.TestCase,
+    timings: dict,
+    *,
+    expected_processed_files: int,
+) -> None:
+    testcase.assertTrue(timings["provided"])
+    testcase.assertEqual(timings["aggregate_processing"]["processed_images"], expected_processed_files)
+    testcase.assertEqual(timings["operation_timings"], {})
+    testcase.assertFalse(timings["privacy"]["contains_paths"])
 
 
 if __name__ == "__main__":
