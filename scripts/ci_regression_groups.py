@@ -62,6 +62,7 @@ PRODUCTION_CLI_TESTS = (
     "test_rule_registry",
     "test_rules",
     "test_sampling",
+    "test_service_api",
     "test_service_jobs",
 )
 

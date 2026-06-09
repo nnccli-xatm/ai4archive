@@ -31,9 +31,10 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   recover `running` checkpoints without progress as `needs_recovery`, reject
   tampered checkpoint input paths that overlap the service root, mark cancelled
   jobs as terminal and not rerunnable, enforce the per-job worker limit, and
-  keep `service_job_public_summary.json` and
-  `service_job_index_public_summary.json` free of paths, filenames, hashes, OCR
-  text, thumbnails, and image content. Treat `service_job.json` as private
+  keep endpoint-shaped service API responses public-safe before adding HTTP
+  transport. Confirm `service_job_public_summary.json` and
+  `service_job_index_public_summary.json` stay free of paths, filenames, hashes,
+  OCR text, thumbnails, and image content. Treat `service_job.json` as private
   checkpoint state.
 - Confirm `archive-scan-qc image-processing-capability-smoke --out
   /placeholder/private-validation-output/image-processing-capability-smoke`

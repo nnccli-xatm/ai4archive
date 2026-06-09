@@ -1,0 +1,122 @@
+"""Endpoint-shaped service API core for service job orchestration."""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from .service_jobs import (
+    SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON,
+    SERVICE_JOB_MAX_WORKERS,
+    ServiceJobConfig,
+    cancel_service_job,
+    create_service_job,
+    recover_service_job,
+    recover_service_jobs,
+)
+
+
+SERVICE_API_SCHEMA_VERSION = "scan-qc.service-api.v1"
+
+
+def service_health(*, service_root: Path | None = None) -> dict[str, Any]:
+    root = service_root.resolve() if service_root is not None else None
+    return {
+        "schema_version": SERVICE_API_SCHEMA_VERSION,
+        "status": "pass",
+        "generated_at": _utc_now(),
+        "service_root_configured": root is not None,
+        "job_index_available": bool(root and (root / SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON).is_file()),
+        "privacy": _public_privacy(),
+    }
+
+
+def service_capabilities() -> dict[str, Any]:
+    return {
+        "schema_version": SERVICE_API_SCHEMA_VERSION,
+        "status": "pass",
+        "generated_at": _utc_now(),
+        "endpoints": [
+            {"method": "GET", "path": "/api/health", "implemented_by_core": True},
+            {"method": "GET", "path": "/api/capabilities", "implemented_by_core": True},
+            {"method": "POST", "path": "/api/jobs", "implemented_by_core": True},
+            {"method": "GET", "path": "/api/jobs/{job_id}", "implemented_by_core": True},
+            {"method": "POST", "path": "/api/jobs/{job_id}/cancel", "implemented_by_core": True},
+            {"method": "GET", "path": "/api/production/session", "implemented_by_core": False},
+            {"method": "POST", "path": "/api/production/setup", "implemented_by_core": False},
+            {"method": "POST", "path": "/api/production/start", "implemented_by_core": False},
+            {"method": "GET", "path": "/api/production/progress", "implemented_by_core": False},
+            {"method": "GET", "path": "/api/production/review-queue", "implemented_by_core": False},
+            {"method": "POST", "path": "/api/production/review-actions", "implemented_by_core": False},
+            {"method": "POST", "path": "/api/production/finish-export", "implemented_by_core": False},
+        ],
+        "resource_limits": {
+            "max_workers_per_job": SERVICE_JOB_MAX_WORKERS,
+        },
+        "schemas": {
+            "service_api": SERVICE_API_SCHEMA_VERSION,
+            "service_job_public_summary": "scan-qc.service-job-public-summary.v1",
+            "service_job_index_public_summary": "scan-qc.service-job-index-public-summary.v1",
+        },
+        "privacy": _public_privacy(),
+    }
+
+
+def create_job_response(request: dict[str, Any], *, job_id: str | None = None) -> dict[str, Any]:
+    config = _service_job_config_from_request(request)
+    return create_service_job(config, job_id=job_id)
+
+
+def get_job_response(*, service_root: Path, job_id: str) -> dict[str, Any]:
+    return recover_service_job(service_root, job_id)
+
+
+def cancel_job_response(*, service_root: Path, job_id: str) -> dict[str, Any]:
+    return cancel_service_job(service_root, job_id)
+
+
+def recover_jobs_response(*, service_root: Path) -> dict[str, Any]:
+    return recover_service_jobs(service_root)
+
+
+def _service_job_config_from_request(request: dict[str, Any]) -> ServiceJobConfig:
+    return ServiceJobConfig(
+        input_dir=Path(str(_required(request, "input_dir"))),
+        service_root=Path(str(_required(request, "service_root"))),
+        project_id=str(request.get("project_id") or "default-project"),
+        batch_id=str(request.get("batch_id") or "default-batch"),
+        rule_template=str(request.get("rule_template") or "dat-31-2017-standard"),
+        processing_mode=str(request.get("processing_mode") or "standard"),
+        workers=_optional_int(request.get("workers")),
+    )
+
+
+def _required(request: dict[str, Any], key: str) -> Any:
+    value = request.get(key)
+    if value in {None, ""}:
+        raise ValueError(f"Missing service API request field: {key}.")
+    return value
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    return int(value)
+
+
+def _public_privacy() -> dict[str, bool]:
+    return {
+        "public_safe": True,
+        "aggregate_only": True,
+        "contains_paths": False,
+        "contains_filenames": False,
+        "contains_hashes": False,
+        "contains_thumbnails": False,
+        "contains_ocr_text": False,
+        "contains_image_content": False,
+    }
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()

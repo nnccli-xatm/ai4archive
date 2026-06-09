@@ -131,7 +131,7 @@ main 分支触发两个层级：
   - 运行核心图像处理组，包括合成图像能力 smoke、扫描/处理算法回归、后端一致性、NumPy/deskew/despeckle 快路径奇偶性、质量套件和性能/worker 推荐测试。
 
 - `make test-production-cli`
-  - 运行生产 CLI 组，包括稳定 CLI 合同、preflight/run-plan、production-run/review queue、规则、manifest、sampling 和生产工作台 guard。
+  - 运行生产 CLI 组，包括稳定 CLI 合同、preflight/run-plan、production-run/review queue、规则、manifest、sampling、service API/job boundary 和生产工作台 guard。
 
 - `make test-privacy-boundary`
   - 运行隐私边界组，包括公共能力合同、能力探测、分析 provider、aggregate baseline public-safe 自检、聚合证据、最终交接、复核决策、校准摘要和 public-safe 索引。

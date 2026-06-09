@@ -1468,8 +1468,10 @@ Unsupported explicit inputs are rejected or summarized by code/count only.
 ### Service job boundary core
 
 The current service work is focused on job boundaries rather than adding more
-image-processing switches. `archive_scan_qc.service_jobs` provides the backend
-core for a future HTTP API: it creates one isolated
+image-processing switches. `archive_scan_qc.service_api` provides endpoint-shaped
+health, capabilities, create, status, cancel, and recover responses for a future
+HTTP wrapper. `archive_scan_qc.service_jobs` provides the backend core: it
+creates one isolated
 `service_root/jobs/<job_id>/` directory per job, with separate `metadata`,
 `derivatives`, `tmp`, `checkpoints`, and `logs` subdirectories. The private
 `service_job.json` checkpoint records authorized local paths and template
@@ -1493,8 +1495,8 @@ sensitive state. Treat `service_job_public_summary.json` as public-safe
 prototype/validation evidence after local policy review; it must not contain
 source paths, filenames, hashes, OCR text, thumbnails, or image content. The
 service-root index follows the same public-safe boundary. The
-service core currently reuses the production runner synchronously and is not yet
-a stable public CLI or HTTP API surface.
+service core currently reuses the production runner synchronously; the API core
+is an in-process contract and is not yet a stable public HTTP transport.
 
 See `docs/operations-runbook.md` for production installation, directory,
 privacy, troubleshooting, exit-code, and tuning guidance. See

@@ -226,6 +226,10 @@ For the service-oriented job boundary MVP, keep each externally submitted job
 inside its own `service_root/jobs/<job_id>/` directory. The service core creates
 separate `metadata`, `derivatives`, `tmp`, `checkpoints`, and `logs`
 subdirectories and rejects service roots that overlap the input directory.
+The in-process `archive_scan_qc.service_api` module mirrors the future
+`/api/health`, `/api/capabilities`, `/api/jobs`, `/api/jobs/{job_id}`, and
+`/api/jobs/{job_id}/cancel` response shapes, but it is not yet a network
+listener.
 `service_job.json` is private checkpoint state because it contains local paths
 and the template snapshot needed for recovery. `service_job_public_summary.json`
 is the public-safe polling/handoff shape: aggregate state, counts, isolation

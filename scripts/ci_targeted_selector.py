@@ -142,6 +142,7 @@ SOURCE_TEST_MAP: dict[str, set[str]] = {
         "tests/test_scan_tone_normalization.py",
         "tests/test_scanline_lightening.py",
     },
+    "service_api.py": {"tests/test_service_api.py"},
     "service_jobs.py": {"tests/test_service_jobs.py"},
     "validation_index.py": {"tests/test_validation_index.py"},
     "workbench_summary.py": {"tests/test_workbench_summary.py"},

@@ -157,6 +157,9 @@ The core now supports a `cancelled` terminal state and rejects attempts to rerun
 terminal service jobs.
 It also enforces a per-job worker limit during job creation and reports the
 non-sensitive worker quota in the public summary.
+`archive_scan_qc.service_api` now provides endpoint-shaped health,
+capabilities, create, status, cancel, and recover responses for a future HTTP
+wrapper while keeping path-bearing request data out of public responses.
 
 ## 6. 阶段 2：图像处理规则模板系统
 

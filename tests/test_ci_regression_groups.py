@@ -38,7 +38,9 @@ class CiRegressionGroupsTests(unittest.TestCase):
         self.assertIn("test_delivery_tooling", external)
         self.assertIn("test_ci_targeted_selector", external)
         self.assertIn("test_scan_processing_algorithm_regression", core)
+        self.assertIn("test_service_api", production)
         self.assertIn("test_service_jobs", production)
+        self.assertNotIn("test_service_api", core)
         self.assertNotIn("test_service_jobs", core)
         self.assertNotIn("test_scan_processing_algorithm_regression", external)
 
