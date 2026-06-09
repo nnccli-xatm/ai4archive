@@ -129,6 +129,12 @@ expose local manifest rows or retry lists in the public response. The capabiliti
 response publishes non-sensitive resource limits, including
 `max_active_async_jobs`, `max_active_workers`, `min_free_space_bytes`,
 `max_tmp_bytes_per_job`, and the per-job worker limit.
+The service template-validation endpoint `POST /api/rule-templates/validate`
+accepts only an inline custom template draft and returns schema
+`scan-qc.rule-template-custom-validation.v1` with aggregate validation counts,
+risk codes, and privacy flags. It must not write templates, accept local profile
+paths, or echo name patterns, rule rows, paths, filenames, hashes, or file
+identifiers.
 Terminal service job summaries also expose public-safe quality context:
 blocking codes, processing warning and retry counts, per-category changed-file
 counts, quality-operation category booleans, and aggregate guardrail status.

@@ -12,8 +12,10 @@ from .rules import (
     CUSTOM_RULE_TEMPLATE_ID,
     RULE_TEMPLATE_VERSION,
     RulesProfileError,
+    attach_rule_template,
     builtin_rules_profile,
     processing_defaults_for_rule_template,
+    rules_profile_from_mapping,
 )
 
 
@@ -21,6 +23,7 @@ RULE_TEMPLATE_CATALOG_JSON = "rule_template_catalog.json"
 RULE_TEMPLATE_DRY_RUN_JSON = "rule_template_dry_run.json"
 CATALOG_SCHEMA_VERSION = "scan-qc.rule-template-catalog.v1"
 DRY_RUN_SCHEMA_VERSION = "scan-qc.rule-template-dry-run.v1"
+CUSTOM_TEMPLATE_VALIDATION_SCHEMA_VERSION = "scan-qc.rule-template-custom-validation.v1"
 
 _TEMPLATE_DESCRIPTIONS: dict[str, dict[str, Any]] = {
     "dat-31-2017-standard": {
@@ -144,6 +147,47 @@ def build_rule_template_dry_run(
     }
 
 
+def build_custom_rule_template_validation(
+    *,
+    template_draft: dict[str, Any],
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    profile = attach_rule_template(
+        rules_profile_from_mapping(template_draft, source="service-inline-template-draft"),
+        CUSTOM_RULE_TEMPLATE_ID,
+    )
+    rule_settings = profile.rules
+    quality_thresholds = profile.threshold_summary()["quality"]
+    disabled_rules = sum(1 for setting in rule_settings.values() if not setting.enabled)
+    severity_overrides = sum(1 for setting in rule_settings.values() if setting.severity is not None)
+    return {
+        "schema_version": CUSTOM_TEMPLATE_VALIDATION_SCHEMA_VERSION,
+        "generated_at": generated_at or _utc_now(),
+        "status": "pass",
+        "valid": True,
+        "aggregate_only": True,
+        "public_safe": True,
+        "derivative_images_written": False,
+        "template": {
+            "id": CUSTOM_RULE_TEMPLATE_ID,
+            "schema_version": RULE_TEMPLATE_VERSION,
+            "stable": False,
+            "customizable": True,
+        },
+        "validation": {
+            "rule_count": len(rule_settings),
+            "disabled_rule_count": disabled_rules,
+            "severity_override_count": severity_overrides,
+            "min_dpi": profile.min_dpi,
+            "dpi_purpose": profile.dpi_purpose,
+            "effective_min_dpi": profile.effective_min_dpi(),
+            "quality_threshold_count": len(quality_thresholds),
+        },
+        "risk_codes": _custom_validation_warnings(profile),
+        "privacy": _privacy_payload(reads_scan_report=False),
+    }
+
+
 def load_scan_report(path: Path | None) -> dict[str, Any] | None:
     if path is None:
         return None
@@ -262,6 +306,17 @@ def _dry_run_warnings(rule_template: str, scan_summary: dict[str, Any], *, scan_
         warnings.append("print_clean_requires_overprocessing_review")
     if rule_template in {"high-fidelity-original", "photo-mixed-safe-v1"}:
         warnings.append("strong_cleanup_disabled_by_high_fidelity_goal")
+    return warnings
+
+
+def _custom_validation_warnings(profile) -> list[str]:  # type: ignore[no-untyped-def]
+    warnings = ["custom_template_requires_local_review_before_production"]
+    if profile.template_id != CUSTOM_RULE_TEMPLATE_ID:
+        warnings.append("custom_template_id_was_normalized")
+    if profile.effective_min_dpi() < 300:
+        warnings.append("custom_template_effective_dpi_below_print_recommendation")
+    if not profile.rules:
+        warnings.append("custom_template_has_no_rule_overrides")
     return warnings
 
 

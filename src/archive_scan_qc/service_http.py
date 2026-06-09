@@ -21,6 +21,7 @@ from .service_api import (
     service_capabilities,
     service_health,
     start_job_response,
+    validate_rule_template_response,
 )
 
 
@@ -70,6 +71,9 @@ class ServiceApiRequestHandler(BaseHTTPRequestHandler):
         try:
             path = _normalized_path(self.path)
             segments = _path_segments(path)
+            if path == "/api/rule-templates/validate":
+                self._send_json(200, validate_rule_template_response(self._read_json_body()))
+                return
             if path == "/api/jobs":
                 payload = self._read_json_body()
                 if "service_root" in payload:

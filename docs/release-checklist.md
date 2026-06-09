@@ -37,8 +37,12 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   temp quota before entering `running`, and keep endpoint-shaped service API
   and prototype local HTTP responses
   public-safe, including `GET /api/rule-templates`,
-  `GET /api/rule-templates/{template_id}`, and synchronous
+  `GET /api/rule-templates/{template_id}`,
+  `POST /api/rule-templates/validate`, and synchronous
   `POST /api/jobs/{job_id}/run` quality summaries. Confirm synchronous
+  rule-template validation accepts only inline drafts, writes no templates, and
+  does not echo name patterns, rule rows, local paths, or file identifiers.
+  Confirm synchronous
   `POST /api/jobs/{job_id}/retry` only accepts failed, interrupted, or
   recoverable jobs, keeps ordinary terminal reruns rejected, and reuses existing
   derivatives/manifests through resume semantics. Confirm public job `counts`

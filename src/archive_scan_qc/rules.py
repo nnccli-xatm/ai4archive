@@ -297,6 +297,12 @@ def load_rules_profile(path: Path) -> RulesProfile:
     return _profile_from_mapping(raw, source=str(path.resolve()))
 
 
+def rules_profile_from_mapping(raw: dict[str, Any], *, source: str = "inline") -> RulesProfile:
+    if not isinstance(raw, dict):
+        raise RulesProfileError("Rules profile JSON must be an object.")
+    return _profile_from_mapping(raw, source=source)
+
+
 def _profile_from_mapping(raw: dict[str, Any], *, source: str) -> RulesProfile:
     profile = default_rules_profile()
     quality = _optional_object(raw, "quality_thresholds")

@@ -254,17 +254,39 @@ class ServiceHttpTransportTests(unittest.TestCase):
                     "GET",
                     "/api/rule-templates/text-clean-readable-v1",
                 )
+                validate_status, validation = _json_request(
+                    base_url,
+                    "POST",
+                    "/api/rule-templates/validate",
+                    {
+                        "template": {
+                            "name": "http-custom-template",
+                            "min_dpi": 300,
+                            "dpi_purpose": "print",
+                            "name_pattern": str(root / "private-pattern"),
+                            "rules": {
+                                "dpi_missing": {"enabled": False, "severity": "P2"},
+                            },
+                        }
+                    },
+                )
                 custom_status, custom_error = _json_request(base_url, "GET", "/api/rule-templates/custom")
             raw = json.dumps(
-                {"catalog": catalog, "detail": detail, "custom_error": custom_error},
+                {"catalog": catalog, "detail": detail, "validation": validation, "custom_error": custom_error},
                 ensure_ascii=False,
             )
 
             self.assertEqual(catalog_status, 200)
             self.assertEqual(detail_status, 200)
+            self.assertEqual(validate_status, 200)
             self.assertEqual(custom_status, 400)
             self.assertEqual(catalog["schema_version"], "scan-qc.rule-template-catalog.v1")
             self.assertEqual(detail["schema_version"], "scan-qc.rule-template-dry-run.v1")
+            self.assertEqual(validation["schema_version"], "scan-qc.rule-template-custom-validation.v1")
+            self.assertTrue(validation["valid"])
+            self.assertEqual(validation["template"]["id"], "custom")
+            self.assertEqual(validation["validation"]["rule_count"], 1)
+            self.assertFalse(validation["privacy"]["contains_paths"])
             self.assertIn("print-clean-v1", {template["id"] for template in catalog["templates"]})
             self.assertEqual(detail["template"]["id"], "text-clean-readable-v1")
             self.assertIn("text_clean_requires_pure_text_batch_confirmation", detail["risk_codes"])
@@ -272,7 +294,7 @@ class ServiceHttpTransportTests(unittest.TestCase):
             self.assertEqual(custom_error["schema_version"], "scan-qc.service-api-error.v1")
             self.assertEqual(custom_error["error"]["code"], "invalid_request")
             self.assertFalse(custom_error["private_paths_exposed"])
-            _assert_public_text_omits(self, raw, str(root.resolve()))
+            _assert_public_text_omits(self, raw, str(root.resolve()), "private-pattern")
 
 
 class _running_server:

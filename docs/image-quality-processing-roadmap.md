@@ -195,8 +195,11 @@ and `rule-template-dry-run` writes `rule_template_dry_run.json` with schema
 planned operation stages, and risk codes without running image processing or
 writing derivative images. Read-only HTTP template APIs are now exposed through
 `GET /api/rule-templates` and `GET /api/rule-templates/{template_id}`; full
-custom-template validation and template write APIs remain in M1/M4 follow-up
-work.
+custom-template write APIs remain in M1/M4 follow-up work.
+Follow-up, 2026-06-09: `POST /api/rule-templates/validate` now provides the
+first service-side custom template validation gate for inline drafts. It does
+not write templates and returns only public-safe aggregate validation counts,
+risk codes, and privacy flags.
 
 Follow-up, 2026-06-09: the roadmap template IDs `archival-safe-v1`,
 `text-clean-readable-v1`, `print-clean-v1`, and `photo-mixed-safe-v1` are now

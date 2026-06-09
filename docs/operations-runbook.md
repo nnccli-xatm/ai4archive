@@ -233,12 +233,15 @@ response shapes. The prototype local HTTP transport can be started with
 `archive-scan-qc service-api --service-root <approved-service-root> --host
 127.0.0.1 --port 8765` and serves `GET /api/health`, `GET /api/capabilities`,
 `GET /api/rule-templates`, `GET /api/rule-templates/{template_id}`,
-`POST /api/jobs`, `GET /api/jobs`, `GET /api/jobs/{job_id}`,
+`POST /api/rule-templates/validate`, `POST /api/jobs`, `GET /api/jobs`, `GET /api/jobs/{job_id}`,
 `POST /api/jobs/{job_id}/run`, `POST /api/jobs/{job_id}/start`,
 `POST /api/jobs/{job_id}/retry`, and `POST /api/jobs/{job_id}/cancel`.
 The rule-template endpoints expose the same public-safe catalog and no-image
-dry-run plan as the CLI rule-template commands; custom template write APIs are
-not implemented in the local HTTP transport yet.
+dry-run plan as the CLI rule-template commands. The validate endpoint accepts
+only an inline custom template draft and returns aggregate validation counts and
+risk codes; it does not write templates, accept local profile paths, or echo
+name patterns/rule rows. Custom template write APIs are still not implemented
+in the local HTTP transport yet.
 The HTTP transport is local-only and uses the configured service root; reject
 requests that try to provide their own `service_root`.
 The `run` endpoint is synchronous: clients should expect the request to return

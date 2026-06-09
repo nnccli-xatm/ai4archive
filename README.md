@@ -1547,7 +1547,7 @@ archive-scan-qc service-api --service-root C:\approved\ai4archive-service-root -
 
 Available prototype endpoints are `GET /api/health`, `GET /api/capabilities`,
 `GET /api/rule-templates`, `GET /api/rule-templates/{template_id}`,
-`POST /api/jobs`, `GET /api/jobs`, `GET /api/jobs/{job_id}`,
+`POST /api/rule-templates/validate`, `POST /api/jobs`, `GET /api/jobs`, `GET /api/jobs/{job_id}`,
 `POST /api/jobs/{job_id}/run`, `POST /api/jobs/{job_id}/start`,
 `POST /api/jobs/{job_id}/retry`, and `POST /api/jobs/{job_id}/cancel`. The HTTP layer uses the configured
 `--service-root`; clients must not submit their own service-root path. `run`
@@ -1564,6 +1564,9 @@ refuses new jobs before marking them `running` when the active-job,
 active-worker, or per-job temp limit is reached. Job creation rejects service
 roots below the configured minimum free-space threshold. This transport is not
 yet a stable public network API.
+`POST /api/rule-templates/validate` validates an inline custom template draft
+without writing it, without accepting local profile paths, and without echoing
+name patterns, rule rows, paths, or file identifiers.
 
 See `docs/operations-runbook.md` for production installation, directory,
 privacy, troubleshooting, exit-code, and tuning guidance. See

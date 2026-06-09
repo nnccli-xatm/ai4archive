@@ -19,6 +19,7 @@ from archive_scan_qc.service_api import (
     service_capabilities,
     service_health,
     start_job_response,
+    validate_rule_template_response,
 )
 from archive_scan_qc.service_jobs import SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON
 
@@ -62,6 +63,10 @@ class ServiceApiCoreTests(unittest.TestCase):
             )
             self.assertEqual(capabilities["schemas"]["rule_template_catalog"], "scan-qc.rule-template-catalog.v1")
             self.assertEqual(capabilities["schemas"]["rule_template_dry_run"], "scan-qc.rule-template-dry-run.v1")
+            self.assertEqual(
+                capabilities["schemas"]["rule_template_custom_validation"],
+                "scan-qc.rule-template-custom-validation.v1",
+            )
             self.assertGreaterEqual(capabilities["resource_limits"]["max_active_async_jobs"], 1)
             self.assertGreaterEqual(capabilities["resource_limits"]["max_active_workers"], 1)
             self.assertGreaterEqual(capabilities["resource_limits"]["min_free_space_bytes"], 1)
@@ -86,6 +91,43 @@ class ServiceApiCoreTests(unittest.TestCase):
             self.assertTrue(detail["privacy"]["public_safe"])
             self.assertFalse(detail["privacy"]["contains_paths"])
             _assert_public_text_omits(self, raw, str(root.resolve()))
+
+    def test_rule_template_validation_accepts_inline_custom_draft_without_paths(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-api-template-validate-") as temp_dir:
+            root = Path(temp_dir)
+            payload = validate_rule_template_response(
+                {
+                    "template": {
+                        "name": "local-custom-template",
+                        "min_dpi": 300,
+                        "dpi_purpose": "print",
+                        "name_pattern": str(root / "private-name-pattern"),
+                        "quality_thresholds": {
+                            "dark_mean_threshold": 40.0,
+                            "despeckle_max_pixel_change_ratio": 0.005,
+                        },
+                        "rules": {
+                            "dpi_missing": {"enabled": False, "severity": "P2"},
+                            "quality_too_dark": {"enabled": True, "severity": "P1"},
+                        },
+                    }
+                }
+            )
+            raw = json.dumps(payload, ensure_ascii=False)
+
+            self.assertEqual(payload["schema_version"], "scan-qc.rule-template-custom-validation.v1")
+            self.assertEqual(payload["status"], "pass")
+            self.assertTrue(payload["valid"])
+            self.assertFalse(payload["derivative_images_written"])
+            self.assertEqual(payload["template"]["id"], "custom")
+            self.assertEqual(payload["validation"]["rule_count"], 2)
+            self.assertEqual(payload["validation"]["disabled_rule_count"], 1)
+            self.assertEqual(payload["validation"]["severity_override_count"], 2)
+            self.assertIn("custom_template_requires_local_review_before_production", payload["risk_codes"])
+            self.assertTrue(payload["privacy"]["public_safe"])
+            self.assertFalse(payload["privacy"]["contains_paths"])
+            self.assertFalse(payload["privacy"]["contains_row_level_evidence"])
+            _assert_public_text_omits(self, raw, str(root.resolve()), "private-name-pattern")
 
     def test_job_create_status_cancel_and_index_responses_stay_public_safe(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-api-job-") as temp_dir:

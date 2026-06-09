@@ -8,8 +8,10 @@ from typing import Any
 
 from .rule_templates import (
     CATALOG_SCHEMA_VERSION,
+    CUSTOM_TEMPLATE_VALIDATION_SCHEMA_VERSION,
     DRY_RUN_SCHEMA_VERSION,
     build_rule_template_catalog,
+    build_custom_rule_template_validation,
     build_rule_template_dry_run,
 )
 from .service_jobs import (
@@ -55,6 +57,7 @@ def service_capabilities() -> dict[str, Any]:
             {"method": "GET", "path": "/api/capabilities", "implemented_by_core": True},
             {"method": "GET", "path": "/api/rule-templates", "implemented_by_core": True},
             {"method": "GET", "path": "/api/rule-templates/{template_id}", "implemented_by_core": True},
+            {"method": "POST", "path": "/api/rule-templates/validate", "implemented_by_core": True},
             {"method": "POST", "path": "/api/rule-templates", "implemented_by_core": False},
             {"method": "PUT", "path": "/api/rule-templates/{template_id}", "implemented_by_core": False},
             {"method": "POST", "path": "/api/jobs", "implemented_by_core": True},
@@ -85,6 +88,7 @@ def service_capabilities() -> dict[str, Any]:
             "service_job_index_public_summary": "scan-qc.service-job-index-public-summary.v1",
             "rule_template_catalog": CATALOG_SCHEMA_VERSION,
             "rule_template_dry_run": DRY_RUN_SCHEMA_VERSION,
+            "rule_template_custom_validation": CUSTOM_TEMPLATE_VALIDATION_SCHEMA_VERSION,
         },
         "privacy": service_api_privacy(),
     }
@@ -101,6 +105,13 @@ def list_rule_templates_response() -> dict[str, Any]:
 
 def get_rule_template_response(*, template_id: str) -> dict[str, Any]:
     return build_rule_template_dry_run(rule_template=template_id)
+
+
+def validate_rule_template_response(request: dict[str, Any]) -> dict[str, Any]:
+    template_draft = request.get("template")
+    if not isinstance(template_draft, dict):
+        raise ValueError("Rule template validation requires a template object.")
+    return build_custom_rule_template_validation(template_draft=template_draft)
 
 
 def get_job_response(*, service_root: Path, job_id: str) -> dict[str, Any]:
