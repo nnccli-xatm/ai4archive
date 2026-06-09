@@ -272,6 +272,12 @@ fixtures are now formal public-safe gates. The smoke must show at least one
 applied file plus aggregate before/after deltas for paper color-cast
 normalization, edge-shadow cleanup, and corner-shadow cleanup.
 
+Follow-up, 2026-06-09: paired vertical/horizontal dark-edge scanner shadows now
+have a narrow conservative trim path. It requires balanced continuous opposite
+edges, stable light paper immediately inside the edge, and protected-content
+boundary checks. The public-safe smoke now requires at least one dark-border trim
+and aggregate max-trim-margin evidence without publishing paths or filenames.
+
 ### M3：Photo/mixed-safe 管线 v1
 
 目标：让照片、图文混排、印章和批注不会被文字清洁策略误伤。

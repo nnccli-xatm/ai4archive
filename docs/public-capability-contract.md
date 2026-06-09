@@ -173,9 +173,10 @@ fixture counts, processing counts, guardrail counts, operation counts, timing
 summaries, backend counts, and the embedded public-safe quality baseline. The
 quality summary records aggregate before/after quality signals, changed-file
 counts, guardrails, and metric averages/maxima, including localized
-paper color-cast normalization, edge/corner shadow cleanup, background-stain
-cleanup, illumination-gradient leveling, and the ultra-pale typed glyph fixture
-group. It also records a protected mixed photo/stamp/table fixture check as
+paired dark-edge trim, paper color-cast normalization, edge/corner shadow
+cleanup, background-stain cleanup, illumination-gradient leveling, and the
+ultra-pale typed glyph fixture group. It also records a protected mixed
+photo/stamp/table fixture check as
 aggregate changed-pixel, color-delta, and edge-energy drift metrics with
 limits. Neither file includes paths, filenames, hashes, thumbnails, OCR text,
 image content, or environment values.

@@ -291,6 +291,10 @@ public-safe 聚合质量基线。
 最新补充：已有色偏、边缘阴影和角落阴影 synthetic fixture 已升级为正式 smoke
 门槛，要求 public-safe 基线输出纸张色偏归一、边缘阴影清理和角落阴影清理的聚合
 处理次数和 before/after 指标。
+最新补充：双侧竖向/横向扫描黑边已增加窄幅保守裁切路径，只接受连续、宽度平衡、
+内侧纸面稳定且边界内容保护通过的相对边黑边；`image-processing-capability-smoke`
+现在要求 dark-border trim 至少生效一次，并通过 public-safe 聚合
+`max_trim_margin_ratio` 证明几何收益。
 M3 的第一片保护契约也已补齐：`photo-mixed-safe-v1` 通过生产 CLI 端到端测试覆盖
 合成照片/印章/表格混排页，要求 production summary 和 processing manifest 明确保持
 强背景清理、透印清理、褪色文字增强和文字边缘锐化关闭，同时确认源图不变并仍输出

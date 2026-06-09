@@ -7875,6 +7875,72 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn("A001_single_shadow_band", audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
 
+    def test_trim_dark_border_trims_paired_vertical_scanner_shadow_bands_without_touching_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "A001_paired_vertical_shadow_bands.png"
+            image = Image.new("RGB", (180, 120), (244, 244, 240))
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((0, 0, 7, 119), fill=(88, 88, 88))
+            draw.rectangle((172, 0, 179, 119), fill=(88, 88, 88))
+            for y in (42, 58, 74):
+                draw.rectangle((52, y, 128, y + 4), fill=(30, 30, 30))
+            image.save(source, dpi=(300, 300))
+            source_bytes = source.read_bytes()
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(trim_dark_border=True, workers=1))
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            record = manifest["files"][0]
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertTrue(record["dark_border_trimmed"])
+            self.assertEqual(record["dark_border_bbox"], [8, 0, 172, 120])
+            self.assertEqual(record["output_size"], [164, 120])
+            self.assertLessEqual(record["processing_audit"]["max_trim_margin_ratio"], 0.045)
+            self.assertEqual(record["dark_border_reason"], "paired dark edge shadow trimmed")
+            self.assertEqual(record["dark_border_reason_code"], "trimmed_paired_edge_shadow")
+            self.assertEqual(record["dark_border_edge_sides"], ["left", "right"])
+            self.assertEqual(record["dark_border_band_width_bucket"], "5-8px")
+            self.assertEqual(audit_summary["counts"]["dark_border_trimmed_files"], 1)
+            self.assertEqual(
+                audit_summary["guardrails"]["dark_border_trim"]["guardrail_reason_code_distribution"],
+                {"trimmed_paired_edge_shadow": 1},
+            )
+            self.assertEqual(
+                audit_summary["guardrails"]["dark_border_trim"]["edge_side_distribution"],
+                {"left": 1, "right": 1},
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("A001_paired_vertical_shadow_bands", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
+    def test_trim_dark_border_paired_vertical_shadow_noops_for_near_boundary_page_number(self) -> None:
+        image = Image.new("RGB", (180, 120), (244, 244, 240))
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((0, 0, 7, 119), fill=(88, 88, 88))
+        draw.rectangle((172, 0, 179, 119), fill=(88, 88, 88))
+        draw.rectangle((9, 98, 26, 108), fill=(20, 20, 20))
+        draw.rectangle((52, 58, 128, 62), fill=(30, 30, 30))
+
+        detection = detect_dark_border_bbox(image)
+
+        self.assertIsNone(detection.bbox)
+        self.assertIn(
+            detection.reason,
+            {"protected edge content near dark border", "incomplete dark edge border evidence"},
+        )
+        self.assertIn(
+            detection.reason_code,
+            {"protected_edge_content_near_dark_border", "incomplete_dark_edge_border_evidence"},
+        )
+        self.assertEqual(detection.edge_sides, ("left", "right"))
+
     def test_trim_dark_border_trims_interrupted_single_scanner_shadow_band(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

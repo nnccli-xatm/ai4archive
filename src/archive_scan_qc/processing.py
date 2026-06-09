@@ -14589,6 +14589,18 @@ def _detect_dark_border_bbox(image: Image.Image) -> DarkBorderDetection:
         reason = "no confident dark edge border"
         return DarkBorderDetection(None, reason, _dark_border_reason_code(reason), edge_sides, band_width_bucket)
     if min(runs) < 2:
+        paired_edge_shadow = _paired_dark_edge_shadow_trim(
+            grayscale,
+            runs,
+            (left_broken, right_broken, top_broken, bottom_broken),
+        )
+        if paired_edge_shadow is not None:
+            bbox, edge_sides, band_width_bucket = paired_edge_shadow
+            if _has_protected_dark_content_near_trim_boundary(grayscale, bbox):
+                reason = "protected edge content near dark border"
+                return DarkBorderDetection(None, reason, _dark_border_reason_code(reason), edge_sides, band_width_bucket)
+            reason = "paired dark edge shadow trimmed"
+            return DarkBorderDetection(bbox, reason, _dark_border_reason_code(reason), edge_sides, band_width_bucket)
         single_edge_shadow = _single_dark_edge_shadow_trim(
             grayscale,
             runs,
@@ -14665,6 +14677,7 @@ def _dark_border_reason_code(reason: str | None) -> str | None:
         "broken dark edge border trimmed": "trimmed_broken_edge",
         "single dark edge shadow trimmed": "trimmed_single_edge_shadow",
         "broken single dark edge shadow trimmed": "trimmed_broken_single_edge_shadow",
+        "paired dark edge shadow trimmed": "trimmed_paired_edge_shadow",
         "corner-connected dark edge shadow trimmed": "trimmed_corner_connected_edge_shadow",
         "broken corner-connected dark edge shadow trimmed": "trimmed_broken_corner_connected_edge_shadow",
         "dark border trim disabled": "disabled",
@@ -14683,6 +14696,49 @@ def _dark_border_reason_code(reason: str | None) -> str | None:
         "reverted by combined change guard": "reverted_by_combined_change_guard",
         "reverted by cumulative change guard": "reverted_by_cumulative_change_guard",
     }.get(reason, "guardrail_reverted_or_unknown")
+
+
+def _paired_dark_edge_shadow_trim(
+    image: Image.Image,
+    runs: tuple[int, int, int, int],
+    broken_edges: tuple[bool, bool, bool, bool],
+) -> tuple[tuple[int, int, int, int], tuple[str, ...], str | None] | None:
+    width, height = image.size
+    left, right, top, bottom = runs
+    left_broken, right_broken, top_broken, bottom_broken = broken_edges
+    active = tuple(side for side, run in zip(("left", "right", "top", "bottom"), runs) if run >= 2)
+    if active == ("left", "right"):
+        if left_broken or right_broken or top > 1 or bottom > 1:
+            return None
+        if not _paired_dark_edge_runs_are_safe(image, (("left", left), ("right", right))):
+            return None
+        bbox = (left, 0, width - right, height)
+    elif active == ("top", "bottom"):
+        if top_broken or bottom_broken or left > 1 or right > 1:
+            return None
+        if not _paired_dark_edge_runs_are_safe(image, (("top", top), ("bottom", bottom))):
+            return None
+        bbox = (0, top, width, height - bottom)
+    else:
+        return None
+
+    retained_width = bbox[2] - bbox[0]
+    retained_height = bbox[3] - bbox[1]
+    if retained_width < int(width * 0.88) or retained_height < int(height * 0.88):
+        return None
+    if retained_width <= 0 or retained_height <= 0:
+        return None
+    return bbox, active, _dark_border_band_width_bucket(max(runs))
+
+
+def _paired_dark_edge_runs_are_safe(image: Image.Image, edge_runs: tuple[tuple[str, int], ...]) -> bool:
+    max_paired_edge_run = max(2, min(20, int(min(image.size) * 0.08)))
+    run_values = [run for _side, run in edge_runs]
+    if max(run_values) > max_paired_edge_run:
+        return False
+    if max(run_values) > max(min(run_values) * 2, min(run_values) + 4):
+        return False
+    return all(_has_light_stable_background_inside_dark_edge(image, side, run) for side, run in edge_runs)
 
 
 def _single_dark_edge_shadow_trim(
