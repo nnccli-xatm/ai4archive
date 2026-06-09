@@ -372,6 +372,10 @@ hash snapshot before and after production processing. Public summaries expose
 only nested `scan-qc.service-job-source-integrity.v1` aggregate counts and
 source modification booleans; they do not store or return hashes, filenames, or
 file lists.
+Follow-up, 2026-06-09: service-job boundary regression now forces two async
+jobs into the production runner concurrently and verifies per-job isolation for
+state, metadata, derivatives, template snapshots, processing manifests, local
+review artifacts, source-integrity counts, and public-safe summaries.
 
 ### M5：性能和后端实现
 

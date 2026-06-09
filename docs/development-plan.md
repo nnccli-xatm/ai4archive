@@ -200,6 +200,10 @@ supported source images and publish only nested
 checkpoint and public summary do not store source hashes, filenames, or file
 lists; public responses expose only checked/unchanged/modified/missing/added
 totals and booleans for source-image modification/source-tree change.
+Concurrent async service-job regression now forces two real production jobs
+through the runner at the same time and verifies that job state, metadata,
+derivatives, template snapshots, processing manifests, review artifacts, and
+public summaries stay isolated per job.
 本地 processing review package 已按背景清理、可读性提升、缺陷清理和原貌风险
 分组；service public summary 只透出这些分组的聚合计数，仍不暴露行级路径。
 终态 service job 的恢复现在会在本地 review artifact 缺失时，基于已有

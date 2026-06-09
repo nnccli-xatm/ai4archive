@@ -51,6 +51,10 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   `scan-qc.service-job-source-integrity.v1` source-integrity counts, report zero
   modified/missing source files on synthetic runs, and do not publish hashes,
   filenames, or file lists.
+  Confirm two async service jobs can enter the production runner concurrently
+  while their state, metadata, derivatives, template snapshots, processing
+  manifests, review artifacts, source-integrity counts, and public summaries
+  remain isolated per job.
   Confirm each job root has isolated metadata, derivatives, temp, checkpoint,
   review, and log directories while public summaries expose only isolation
   booleans. Confirm service runs write local-only processing review package and

@@ -8,9 +8,11 @@ import threading
 import unittest
 from unittest import mock
 from pathlib import Path
+from typing import Any
 
 from PIL import Image, ImageDraw
 
+from archive_scan_qc import service_jobs as service_jobs_module
 from archive_scan_qc.service_jobs import (
     SERVICE_JOB_MAX_WORKERS,
     SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON,
@@ -228,6 +230,137 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertTrue(terminal["local_review"]["provided"])
             self.assertTrue(terminal["local_review"]["processing_review_package_html_written"])
             _assert_public_text_omits(self, public_raw, str(root.resolve()), "private_page_001")
+
+    def test_two_async_jobs_keep_state_outputs_templates_and_reviews_isolated(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-job-concurrent-isolation-") as temp_dir:
+            root = Path(temp_dir)
+            service_root = root / "service-root"
+            specs = {
+                "job-testconcurrent001": {
+                    "input_dir": root / "\u8f93\u5165-alpha",
+                    "source_name": "\u79c1\u6709_alpha_001.png",
+                    "project_id": "project-alpha",
+                    "batch_id": "batch-alpha",
+                    "rule_template": "text-clean-print",
+                    "processing_mode": "standard",
+                },
+                "job-testconcurrent002": {
+                    "input_dir": root / "\u8f93\u5165-beta",
+                    "source_name": "\u79c1\u6709_beta_001.png",
+                    "project_id": "project-beta",
+                    "batch_id": "batch-beta",
+                    "rule_template": "dat-31-2017-standard",
+                    "processing_mode": "light",
+                },
+            }
+            source_hashes: dict[str, str] = {}
+            for job_id, spec in specs.items():
+                input_dir = spec["input_dir"]
+                input_dir.mkdir()
+                source_path = input_dir / spec["source_name"]
+                _write_page(source_path)
+                source_hashes[job_id] = _sha256_for_test(source_path)
+                create_service_job(
+                    ServiceJobConfig(
+                        input_dir=input_dir,
+                        service_root=service_root,
+                        project_id=spec["project_id"],
+                        batch_id=spec["batch_id"],
+                        rule_template=spec["rule_template"],
+                        processing_mode=spec["processing_mode"],
+                        workers=1,
+                    ),
+                    job_id=job_id,
+                )
+
+            barrier = threading.Barrier(2)
+            runner_entries: list[dict[str, Any]] = []
+            runner_lock = threading.Lock()
+            original_runner = service_jobs_module.run_production_folder
+
+            def _barrier_runner(config):  # type: ignore[no-untyped-def]
+                with runner_lock:
+                    runner_entries.append(
+                        {
+                            "project_id": config.project_id,
+                            "batch_id": config.batch_id,
+                            "metadata_dir": str(config.metadata_output_dir.resolve()),
+                            "derivatives_dir": str(config.derivative_output_dir.resolve()),
+                        }
+                    )
+                barrier.wait(timeout=5)
+                return original_runner(config)
+
+            with mock.patch("archive_scan_qc.service_jobs.run_production_folder", side_effect=_barrier_runner):
+                running_a = start_service_job_async(service_root, "job-testconcurrent001")
+                running_b = start_service_job_async(service_root, "job-testconcurrent002")
+                summaries = {
+                    "job-testconcurrent001": _wait_for_terminal_summary(
+                        self,
+                        lambda: recover_service_job(service_root, "job-testconcurrent001"),
+                    ),
+                    "job-testconcurrent002": _wait_for_terminal_summary(
+                        self,
+                        lambda: recover_service_job(service_root, "job-testconcurrent002"),
+                    ),
+                }
+
+            self.assertEqual(running_a["state"], "running")
+            self.assertEqual(running_b["state"], "running")
+            self.assertEqual(len(runner_entries), 2)
+            self.assertEqual({entry["project_id"] for entry in runner_entries}, {"project-alpha", "project-beta"})
+            self.assertEqual({entry["batch_id"] for entry in runner_entries}, {"batch-alpha", "batch-beta"})
+            self.assertEqual(len({entry["metadata_dir"] for entry in runner_entries}), 2)
+            self.assertEqual(len({entry["derivatives_dir"] for entry in runner_entries}), 2)
+
+            for job_id, spec in specs.items():
+                other_job_ids = set(specs) - {job_id}
+                other_sources = [specs[other_job_id]["source_name"] for other_job_id in other_job_ids]
+                job_root = service_root / "jobs" / job_id
+                record = json.loads((job_root / SERVICE_JOB_RECORD_JSON).read_text(encoding="utf-8"))
+                public_raw = (job_root / SERVICE_JOB_PUBLIC_SUMMARY_JSON).read_text(encoding="utf-8")
+                production_summary = json.loads(
+                    (job_root / "metadata" / "production_run_summary.json").read_text(encoding="utf-8")
+                )
+                processing_manifest_path = job_root / "derivatives" / "processing_manifest.json"
+                processing_manifest = json.loads(processing_manifest_path.read_text(encoding="utf-8"))
+                manifest_raw = processing_manifest_path.read_text(encoding="utf-8")
+
+                summary = summaries[job_id]
+                self.assertEqual(summary["state"], "finished")
+                self.assertEqual(summary["template"]["rule_template_id"], spec["rule_template"])
+                self.assertEqual(summary["template"]["processing_mode"], spec["processing_mode"])
+                self.assertEqual(summary["counts"]["processed_files"], 1)
+                self.assertTrue(summary["quality"]["provided"])
+                self.assertTrue(summary["local_review"]["provided"])
+                self.assertTrue(summary["local_review"]["production_review_queue_written"])
+                _assert_public_source_integrity(self, summary["source_integrity"], checked_files=1)
+                self.assertFalse(summary["source_images_modified"])
+                self.assertEqual(_sha256_for_test(spec["input_dir"] / spec["source_name"]), source_hashes[job_id])
+
+                self.assertEqual(record["template_snapshot"]["rule_template"]["id"], spec["rule_template"])
+                self.assertEqual(record["template_snapshot"]["processing_mode"], spec["processing_mode"])
+                self.assertEqual(record["project"]["project_id"], spec["project_id"])
+                self.assertEqual(record["project"]["batch_id"], spec["batch_id"])
+                self.assertEqual(processing_manifest["rule_template"]["id"], spec["rule_template"])
+                self.assertEqual(production_summary["rule_template"]["id"], spec["rule_template"])
+                self.assertEqual(production_summary["operator_summary"]["processing_mode"], spec["processing_mode"])
+                if spec["processing_mode"] == "standard":
+                    self.assertTrue(processing_manifest["options"]["lighten_scanlines"])
+                    self.assertTrue(processing_manifest["options"]["enhance_faded_text"])
+                else:
+                    self.assertTrue(processing_manifest["options"]["auto_crop"])
+                    self.assertFalse(processing_manifest["options"]["deskew"])
+
+                _assert_job_record_paths_inside_job_root(self, record, job_root)
+                _assert_local_review_artifacts_inside_job_root(self, record, job_root)
+                self.assertIn(spec["source_name"], manifest_raw)
+                _assert_public_text_omits(self, public_raw, str(root.resolve()), spec["source_name"], *other_sources)
+                for other_job_id in other_job_ids:
+                    self.assertNotIn(other_job_id, public_raw)
+                    self.assertNotIn(other_job_id, manifest_raw)
+                for other_source in other_sources:
+                    self.assertNotIn(other_source, manifest_raw)
 
     def test_recover_regenerates_missing_terminal_local_review_artifacts(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-job-review-recover-") as temp_dir:
@@ -564,6 +697,39 @@ def _assert_public_progress_timing_summary(
     testcase.assertEqual(timings["aggregate_processing"]["processed_images"], expected_processed_files)
     testcase.assertEqual(timings["operation_timings"], {})
     testcase.assertFalse(timings["privacy"]["contains_paths"])
+
+
+def _assert_job_record_paths_inside_job_root(
+    testcase: unittest.TestCase,
+    record: dict,
+    job_root: Path,
+) -> None:
+    paths = record["paths"]
+    resolved_job_root = job_root.resolve()
+    for key, dirname in {
+        "metadata_dir": "metadata",
+        "derivatives_dir": "derivatives",
+        "tmp_dir": "tmp",
+        "checkpoint_dir": "checkpoints",
+        "review_dir": "review",
+        "log_dir": "logs",
+    }.items():
+        testcase.assertEqual(Path(paths[key]).resolve(), resolved_job_root / dirname)
+
+
+def _assert_local_review_artifacts_inside_job_root(
+    testcase: unittest.TestCase,
+    record: dict,
+    job_root: Path,
+) -> None:
+    review = record["local_review"]
+    review_dir = job_root.resolve() / "review"
+    testcase.assertEqual(Path(review["review_dir"]).resolve(), review_dir)
+    artifacts = review["artifacts"]
+    for artifact_path in artifacts.values():
+        resolved = Path(artifact_path).resolve()
+        testcase.assertEqual(resolved.parent, review_dir)
+        testcase.assertTrue(resolved.is_file())
 
 
 def _assert_public_source_integrity(
