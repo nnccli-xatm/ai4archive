@@ -1,0 +1,24 @@
+{
+  "command": [
+    "C:\\Users\\PS\\AppData\\Local\\Temp\\ai4archive-dibco-venv\\Scripts\\python.exe",
+    "-m",
+    "archive_scan_qc.cli",
+    "production-run",
+    "--input",
+    "D:\\data-opt\\NoisyOffice\\extracted\\NoisyOffice\\SimulatedNoisyOffice\\simulated_noisy_images_grayscale",
+    "--derivatives-out",
+    "D:\\pic-qc\\ai4archive\\generated\\noisyoffice_external_cli_test\\20260609T080229Z\\derivatives",
+    "--metadata-out",
+    "D:\\pic-qc\\ai4archive\\generated\\noisyoffice_external_cli_test\\20260609T080229Z\\metadata",
+    "--project",
+    "noisyoffice-external-cli-test",
+    "--batch",
+    "simulated-noisy-grayscale",
+    "--rule-template",
+    "text-clean-print",
+    "--workers",
+    "4",
+    "--no-resume-processing"
+  ],
+  "returncode": 0
+}

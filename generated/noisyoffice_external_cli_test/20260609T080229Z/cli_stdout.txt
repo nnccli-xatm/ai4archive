@@ -1,0 +1,9 @@
+生产状态: 已完成 (finished)
+操作提示: 处理后图片已生成，可以完成并导出结果。
+扫描原图数量: 216
+已生成处理后图片: 216
+需要人工处理: 0
+处理后图片文件夹: D:\pic-qc\ai4archive\generated\noisyoffice_external_cli_test\20260609T080229Z\derivatives\images
+生产摘要: D:\pic-qc\ai4archive\generated\noisyoffice_external_cli_test\20260609T080229Z\metadata\production_run_summary.json
+处理进度: D:\pic-qc\ai4archive\generated\noisyoffice_external_cli_test\20260609T080229Z\metadata\production_run_progress.json
+原图是否被修改: 否

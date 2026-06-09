@@ -1,0 +1,1380 @@
+{
+  "schema_version": "scan-qc.noisyoffice-external-cli-test.v1",
+  "run_id": "20260609T080229Z",
+  "generated_at": "2026-06-09T08:05:06.526084+00:00",
+  "started_at": "2026-06-09T08:02:29.189647+00:00",
+  "finished_at": "2026-06-09T08:05:06.526084+00:00",
+  "elapsed_seconds": 157.336437,
+  "run_root": "D:\\pic-qc\\ai4archive\\generated\\noisyoffice_external_cli_test\\20260609T080229Z",
+  "environment": {
+    "python_executable": "C:\\Users\\PS\\AppData\\Local\\Temp\\ai4archive-dibco-venv\\Scripts\\python.exe",
+    "python_version": "3.12.0",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "workers": 4,
+    "rule_template": "text-clean-print",
+    "data_root": "D:\\data-opt\\NoisyOffice",
+    "dataset_root": "D:\\data-opt\\NoisyOffice\\extracted\\NoisyOffice\\SimulatedNoisyOffice",
+    "download_url": "https://archive.ics.uci.edu/static/public/318/noisyoffice.zip",
+    "numpy_version": "2.4.6",
+    "pillow_version": "12.2.0"
+  },
+  "summary": {
+    "stable_cli_passed": true,
+    "image_count": 216,
+    "total_megapixels": 42.6902,
+    "elapsed_seconds": 157.336437,
+    "images_per_minute_end_to_end": 82.37,
+    "megapixels_per_second_end_to_end": 0.2713,
+    "source_modified_files": 0,
+    "processed_output_missing_files": 0,
+    "processed_size_mismatch_files": 0,
+    "quality": {
+      "source": {
+        "image_count": 216,
+        "psnr_db_macro": 15.8252,
+        "ssim_macro": 0.89361,
+        "mse_macro": 1939.028962,
+        "mae_macro": 37.260796,
+        "dark_pixel_f1_macro": 0.895165,
+        "foreground_retention_macro": 0.984674,
+        "mean_delta_macro": -33.639901
+      },
+      "processed": {
+        "image_count": 216,
+        "psnr_db_macro": 15.8241,
+        "ssim_macro": 0.893542,
+        "mse_macro": 1939.36516,
+        "mae_macro": 37.26263,
+        "dark_pixel_f1_macro": 0.895099,
+        "foreground_retention_macro": 0.98454,
+        "mean_delta_macro": -33.63804
+      },
+      "delta": {
+        "psnr_db_macro": -0.0011,
+        "ssim_macro": -6.8e-05,
+        "mse_macro": 0.336198,
+        "mae_macro": 0.001834,
+        "dark_pixel_f1_macro": -6.6e-05,
+        "foreground_retention_macro": -0.000134
+      },
+      "by_noise_type": {
+        "c": {
+          "source": {
+            "image_count": 54,
+            "psnr_db_macro": 13.7643,
+            "ssim_macro": 0.828253,
+            "mse_macro": 2946.109253,
+            "mae_macro": 42.813404,
+            "dark_pixel_f1_macro": 0.793571,
+            "foreground_retention_macro": 0.989586,
+            "mean_delta_macro": -40.548536
+          },
+          "processed": {
+            "image_count": 54,
+            "psnr_db_macro": 13.7636,
+            "ssim_macro": 0.828178,
+            "mse_macro": 2946.467073,
+            "mae_macro": 42.815432,
+            "dark_pixel_f1_macro": 0.793504,
+            "foreground_retention_macro": 0.989445,
+            "mean_delta_macro": -40.546396
+          },
+          "delta": {
+            "psnr_db_macro": -0.0007,
+            "ssim_macro": -7.5e-05,
+            "mse_macro": 0.35782,
+            "mae_macro": 0.002028,
+            "dark_pixel_f1_macro": -6.7e-05,
+            "foreground_retention_macro": -0.000141
+          }
+        },
+        "f": {
+          "source": {
+            "image_count": 54,
+            "psnr_db_macro": 18.4269,
+            "ssim_macro": 0.944545,
+            "mse_macro": 934.433905,
+            "mae_macro": 28.784106,
+            "dark_pixel_f1_macro": 0.943578,
+            "foreground_retention_macro": 0.979608,
+            "mean_delta_macro": -23.97418
+          },
+          "processed": {
+            "image_count": 54,
+            "psnr_db_macro": 18.4251,
+            "ssim_macro": 0.944471,
+            "mse_macro": 934.831967,
+            "mae_macro": 28.786152,
+            "dark_pixel_f1_macro": 0.943497,
+            "foreground_retention_macro": 0.979448,
+            "mean_delta_macro": -23.972134
+          },
+          "delta": {
+            "psnr_db_macro": -0.0018,
+            "ssim_macro": -7.4e-05,
+            "mse_macro": 0.398062,
+            "mae_macro": 0.002046,
+            "dark_pixel_f1_macro": -8.1e-05,
+            "foreground_retention_macro": -0.00016
+          }
+        },
+        "p": {
+          "source": {
+            "image_count": 54,
+            "psnr_db_macro": 14.56,
+            "ssim_macro": 0.905734,
+            "mse_macro": 2435.805102,
+            "mae_macro": 45.23332,
+            "dark_pixel_f1_macro": 0.916642,
+            "foreground_retention_macro": 0.994187,
+            "mean_delta_macro": -43.052919
+          },
+          "processed": {
+            "image_count": 54,
+            "psnr_db_macro": 14.5594,
+            "ssim_macro": 0.905679,
+            "mse_macro": 2436.049844,
+            "mae_macro": 45.234799,
+            "dark_pixel_f1_macro": 0.916592,
+            "foreground_retention_macro": 0.994088,
+            "mean_delta_macro": -43.051439
+          },
+          "delta": {
+            "psnr_db_macro": -0.0006,
+            "ssim_macro": -5.5e-05,
+            "mse_macro": 0.244742,
+            "mae_macro": 0.001479,
+            "dark_pixel_f1_macro": -5e-05,
+            "foreground_retention_macro": -9.9e-05
+          }
+        },
+        "w": {
+          "source": {
+            "image_count": 54,
+            "psnr_db_macro": 16.5494,
+            "ssim_macro": 0.895906,
+            "mse_macro": 1439.767589,
+            "mae_macro": 32.212357,
+            "dark_pixel_f1_macro": 0.92687,
+            "foreground_retention_macro": 0.975315,
+            "mean_delta_macro": -26.983971
+          },
+          "processed": {
+            "image_count": 54,
+            "psnr_db_macro": 16.5483,
+            "ssim_macro": 0.895839,
+            "mse_macro": 1440.111758,
+            "mae_macro": 32.214136,
+            "dark_pixel_f1_macro": 0.926801,
+            "foreground_retention_macro": 0.975181,
+            "mean_delta_macro": -26.982193
+          },
+          "delta": {
+            "psnr_db_macro": -0.0011,
+            "ssim_macro": -6.7e-05,
+            "mse_macro": 0.344169,
+            "mae_macro": 0.001779,
+            "dark_pixel_f1_macro": -6.9e-05,
+            "foreground_retention_macro": -0.000134
+          }
+        }
+      },
+      "size_mismatch_files": 0
+    }
+  },
+  "dataset": {
+    "command_returncode": 0,
+    "cli_wall_seconds": 149.857703,
+    "stable_cli_passed": true,
+    "source_modified_files": [],
+    "image_count": 216,
+    "total_megapixels": 42.6902,
+    "megapixels_per_second_wall": 0.284871575804148,
+    "summary_status": "finished",
+    "progress_state": "finished",
+    "production_counts": {
+      "total_files": 216,
+      "openable_files": 216,
+      "p0_findings": 0,
+      "p1_findings": 216,
+      "p2_findings": 6,
+      "total_findings": 222,
+      "processed_files": 216,
+      "resumed_files": 0,
+      "skipped_files": 0,
+      "failed_files": 0,
+      "retry_list_files": 0,
+      "reused_files": 0,
+      "reprocessed_files": 0,
+      "remaining_files": 0,
+      "retry_total_files": 216
+    },
+    "production_performance": {
+      "scan": {
+        "started_at": "2026-06-09T08:02:31.434745+00:00",
+        "finished_at": "2026-06-09T08:02:52.307316+00:00",
+        "elapsed_seconds": 20.87112,
+        "total_files": 216,
+        "openable_files": 216,
+        "requested_workers": 4,
+        "effective_workers": 4,
+        "worker_cap": 8,
+        "mode": "parallel",
+        "recommendation": null,
+        "files_per_minute": 620.95,
+        "openable_files_per_minute": 620.95
+      },
+      "processing": {
+        "started_at": "2026-06-09T08:02:52.330606+00:00",
+        "finished_at": "2026-06-09T08:05:01.093315+00:00",
+        "elapsed_seconds": 128.760969,
+        "total_files": 216,
+        "processed_files": 216,
+        "skipped_files": 0,
+        "failed_files": 0,
+        "requested_workers": 4,
+        "effective_workers": 4,
+        "worker_cap": 8,
+        "mode": "parallel",
+        "recommendation": null,
+        "processed_files_per_minute": 100.65,
+        "total_files_per_minute": 100.65,
+        "operation_timings": {
+          "auto_crop": {
+            "enabled": true,
+            "file_count": 216,
+            "elapsed_seconds": 6.275275,
+            "files_per_minute": 2065.25,
+            "average_seconds_per_file": 0.029052,
+            "reused_scan_measurement_files": 0
+          },
+          "deskew": {
+            "enabled": true,
+            "file_count": 216,
+            "elapsed_seconds": 22.599716,
+            "files_per_minute": 573.46,
+            "average_seconds_per_file": 0.104628,
+            "reused_scan_measurement_files": 37,
+            "safe_skip_files": 179,
+            "projection_detection_files": 0,
+            "fallback_detection_files": 0,
+            "safe_skip_reason_code_distribution": {
+              "low_line_evidence": 179
+            },
+            "safe_skip_source_distribution": {
+              "page_preflight": 179
+            }
+          },
+          "trim_dark_border": {
+            "enabled": true,
+            "file_count": 216,
+            "elapsed_seconds": 0.000376,
+            "files_per_minute": 34468085.11,
+            "average_seconds_per_file": 2e-06,
+            "reused_scan_measurement_files": 216
+          },
+          "scanner_gutter_trim": {
+            "enabled": true,
+            "file_count": 216,
+            "elapsed_seconds": 12.313643,
+            "files_per_minute": 1052.49,
+            "average_seconds_per_file": 0.057008,
+            "reused_scan_measurement_files": 0
+          },
+          "despeckle": {
+            "enabled": true,
+            "file_count": 216,
+            "elapsed_seconds": 27.009417,
+            "files_per_minute": 479.83,
+            "average_seconds_per_file": 0.125044,
+            "reused_scan_measurement_files": 0,
+            "backend_mode": "fallback",
+            "numpy_available": false,
+            "backend_counts": {
+              "numpy": 0,
+              "fallback": 216,
+              "not_applicable": 0,
+              "unknown": 0
+            },
+            "safe_skip_files": 91,
+            "replacement_work_files": 216,
+            "reason_code_distribution": {
+              "no_isolated_candidates": 91,
+              "applied_isolated_pixels": 125
+            },
+            "candidate_count_bucket_distribution": {
+              "1025+": 76,
+              "257-1024": 81,
+              "65-256": 58,
+              "17-64": 1
+            },
+            "component_count_bucket_distribution": {
+              "257-1024": 103,
+              "1025+": 17,
+              "65-256": 60,
+              "17-64": 36
+            },
+            "max_component_size_bucket_distribution": {
+              "5-16": 124,
+              "1-4": 92
+            },
+            "candidate_pixels": {
+              "count": 216,
+              "max": 22847,
+              "total": 2536449
+            },
+            "candidate_count": {
+              "count": 216,
+              "max": 2737,
+              "total": 186662
+            },
+            "component_count": {
+              "count": 216,
+              "max": 1386,
+              "total": 96755
+            },
+            "max_component_size": {
+              "count": 216,
+              "max": 8,
+              "total": 1077
+            }
+          },
+          "normalize_tones": {
+            "enabled": true,
+            "file_count": 216,
+            "elapsed_seconds": 24.749547,
+            "files_per_minute": 523.65,
+            "average_seconds_per_file": 0.114581,
+            "reused_scan_measurement_files": 0
+          },
+          "normalize_paper_color_cast": {
+            "enabled": true,
+            "file_count": 216,
+            "elapsed_seconds": 47.473568,
+            "files_per_minute": 272.99,
+            "average_seconds_per_file": 0.219785,
+            "reused_scan_measurement_files": 0
+          },
+          "lighten_edge_shadow": {
+            "enabled": true,
+            "file_count": 216,
+            "elapsed_seconds": 24.737816,
+            "files_per_minute": 523.89,
+            "average_seconds_per_file": 0.114527,
+            "reused_scan_measurement_files": 0
+          },
+          "lighten_corner_shadows": {
+            "enabled": true,
+            "file_count": 216,
+            "elapsed_seconds": 9.327689,
+            "files_per_minute": 1389.41,
+            "average_seconds_per_file": 0.043184,
+            "reused_scan_measurement_files": 0
+          },
+          "lighten_background_stains": {
+            "enabled": true,
+            "file_count": 216,
+            "elapsed_seconds": 27.524667,
+            "files_per_minute": 470.85,
+            "average_seconds_per_file": 0.127429,
+            "reused_scan_measurement_files": 0
+          },
+          "lighten_fold_shadows": {
+            "enabled": true,
+            "file_count": 216,
+            "elapsed_seconds": 22.468052,
+            "files_per_minute": 576.82,
+            "average_seconds_per_file": 0.104019,
+            "reused_scan_measurement_files": 0
+          },
+          "level_illumination_gradient": {
+            "enabled": true,
+            "file_count": 216,
+            "elapsed_seconds": 12.480443,
+            "files_per_minute": 1038.42,
+            "average_seconds_per_file": 0.05778,
+            "reused_scan_measurement_files": 0
+          },
+          "clean_bleed_through": {
+            "enabled": true,
+            "file_count": 216,
+            "elapsed_seconds": 24.926642,
+            "files_per_minute": 519.93,
+            "average_seconds_per_file": 0.115401,
+            "reused_scan_measurement_files": 0
+          },
+          "lighten_scanlines": {
+            "enabled": true,
+            "file_count": 216,
+            "elapsed_seconds": 27.17235,
+            "files_per_minute": 476.96,
+            "average_seconds_per_file": 0.125798,
+            "reused_scan_measurement_files": 0
+          },
+          "enhance_faded_text": {
+            "enabled": true,
+            "file_count": 216,
+            "elapsed_seconds": 23.134179,
+            "files_per_minute": 560.21,
+            "average_seconds_per_file": 0.107103,
+            "reused_scan_measurement_files": 0
+          },
+          "sharpen_text_edges": {
+            "enabled": true,
+            "file_count": 216,
+            "elapsed_seconds": 26.642274,
+            "files_per_minute": 486.44,
+            "average_seconds_per_file": 0.123344,
+            "reused_scan_measurement_files": 0,
+            "candidate_preflight_skipped_files": 0
+          }
+        },
+        "scan_measurement_reuse": {
+          "enabled": true,
+          "files_with_any_reuse": 216,
+          "operations_skipped": {
+            "deskew": 37,
+            "trim_dark_border": 216
+          },
+          "fallback_operations": {},
+          "deskew_safe_skip_files": 179,
+          "deskew_projection_detection_files": 0,
+          "deskew_fallback_detection_files": 0,
+          "deskew_safe_skip_reason_code_distribution": {
+            "low_line_evidence": 179
+          }
+        }
+      }
+    },
+    "processing_audit_counts": {
+      "total_files": 216,
+      "processed_files": 216,
+      "resumed_files": 0,
+      "skipped_due_to_resume": 0,
+      "reprocessed_files": 0,
+      "duplicate_reused_files": 0,
+      "existing_derivative_reused_files": 0,
+      "skipped_files": 0,
+      "failed_files": 0,
+      "retry_list_files": 0,
+      "processing_warning_files": 0,
+      "guardrail_failed_files": 0,
+      "pixel_change_guardrail_applied_files": 216,
+      "pixel_change_guardrail_deferred_to_geometric_files": 0,
+      "cumulative_change_guard_checked_files": 216,
+      "cumulative_change_guard_reverted_files": 0,
+      "cumulative_change_guard_warning_files": 0,
+      "local_content_change_guard_checked_files": 0,
+      "local_content_change_guard_reverted_files": 0,
+      "local_content_change_guard_warning_files": 0,
+      "combination_quality_guard_checked_files": 216,
+      "combination_quality_guard_reverted_files": 0,
+      "combination_quality_guard_low_confidence_original_files": 91,
+      "processed_output_safety_guard_checked_files": 216,
+      "processed_output_safety_guard_reverted_files": 0,
+      "processed_output_washout_guard_reverted_files": 0,
+      "processed_output_clipping_guard_reverted_files": 0,
+      "processed_output_foreground_loss_guard_reverted_files": 0,
+      "processed_output_foreground_weakening_guard_reverted_files": 0,
+      "deskew_safe_skip_files": 179,
+      "deskew_projection_detection_files": 0,
+      "deskew_fallback_detection_files": 0,
+      "deskewed_files": 0,
+      "deskew_skipped_files": 216,
+      "dark_border_trimmed_files": 0,
+      "scanner_gutter_trimmed_files": 0,
+      "scanner_gutter_skipped_files": 216,
+      "auto_crop_applied_files": 0,
+      "auto_crop_skipped_files": 216,
+      "auto_crop_low_confidence_skip_files": 0,
+      "dark_border_skipped_files": 216,
+      "despeckled_files": 125,
+      "despeckle_skipped_files": 91,
+      "tone_normalized_files": 0,
+      "tone_skipped_files": 216,
+      "paper_color_cast_normalized_files": 0,
+      "paper_color_cast_skipped_files": 216,
+      "edge_shadow_lightened_files": 0,
+      "edge_shadow_skipped_files": 216,
+      "corner_shadows_lightened_files": 0,
+      "corner_shadows_skipped_files": 216,
+      "background_stains_lightened_files": 0,
+      "background_stains_skipped_files": 216,
+      "fold_shadows_lightened_files": 0,
+      "fold_shadows_skipped_files": 216,
+      "illumination_gradient_levelled_files": 0,
+      "illumination_gradient_skipped_files": 216,
+      "bleed_through_cleaned_files": 0,
+      "bleed_through_skipped_files": 216,
+      "scanlines_lightened_files": 0,
+      "scanlines_skipped_files": 216,
+      "faded_text_enhanced_files": 0,
+      "faded_text_skipped_files": 216,
+      "text_edges_sharpened_files": 0,
+      "text_edges_skipped_files": 216,
+      "text_edges_candidate_preflight_skipped_files": 0
+    },
+    "operation_timings": {
+      "auto_crop": {
+        "enabled": true,
+        "file_count": 216,
+        "elapsed_seconds": 6.275275,
+        "files_per_minute": 2065.25,
+        "average_seconds_per_file": 0.029052,
+        "reused_scan_measurement_files": 0
+      },
+      "deskew": {
+        "enabled": true,
+        "file_count": 216,
+        "elapsed_seconds": 22.599716,
+        "files_per_minute": 573.46,
+        "average_seconds_per_file": 0.104628,
+        "reused_scan_measurement_files": 37,
+        "safe_skip_files": 179,
+        "projection_detection_files": 0,
+        "fallback_detection_files": 0,
+        "safe_skip_reason_code_distribution": {
+          "low_line_evidence": 179
+        },
+        "safe_skip_source_distribution": {
+          "page_preflight": 179
+        }
+      },
+      "trim_dark_border": {
+        "enabled": true,
+        "file_count": 216,
+        "elapsed_seconds": 0.000376,
+        "files_per_minute": 34468085.11,
+        "average_seconds_per_file": 2e-06,
+        "reused_scan_measurement_files": 216
+      },
+      "scanner_gutter_trim": {
+        "enabled": true,
+        "file_count": 216,
+        "elapsed_seconds": 12.313643,
+        "files_per_minute": 1052.49,
+        "average_seconds_per_file": 0.057008,
+        "reused_scan_measurement_files": 0
+      },
+      "despeckle": {
+        "enabled": true,
+        "file_count": 216,
+        "elapsed_seconds": 27.009417,
+        "files_per_minute": 479.83,
+        "average_seconds_per_file": 0.125044,
+        "reused_scan_measurement_files": 0,
+        "backend_mode": "fallback",
+        "numpy_available": false,
+        "backend_counts": {
+          "numpy": 0,
+          "fallback": 216,
+          "not_applicable": 0,
+          "unknown": 0
+        },
+        "safe_skip_files": 91,
+        "replacement_work_files": 216,
+        "reason_code_distribution": {
+          "no_isolated_candidates": 91,
+          "applied_isolated_pixels": 125
+        },
+        "candidate_count_bucket_distribution": {
+          "1025+": 76,
+          "257-1024": 81,
+          "65-256": 58,
+          "17-64": 1
+        },
+        "component_count_bucket_distribution": {
+          "257-1024": 103,
+          "1025+": 17,
+          "65-256": 60,
+          "17-64": 36
+        },
+        "max_component_size_bucket_distribution": {
+          "5-16": 124,
+          "1-4": 92
+        },
+        "candidate_pixels": {
+          "count": 216,
+          "max": 22847,
+          "total": 2536449
+        },
+        "candidate_count": {
+          "count": 216,
+          "max": 2737,
+          "total": 186662
+        },
+        "component_count": {
+          "count": 216,
+          "max": 1386,
+          "total": 96755
+        },
+        "max_component_size": {
+          "count": 216,
+          "max": 8,
+          "total": 1077
+        }
+      },
+      "normalize_tones": {
+        "enabled": true,
+        "file_count": 216,
+        "elapsed_seconds": 24.749547,
+        "files_per_minute": 523.65,
+        "average_seconds_per_file": 0.114581,
+        "reused_scan_measurement_files": 0
+      },
+      "normalize_paper_color_cast": {
+        "enabled": true,
+        "file_count": 216,
+        "elapsed_seconds": 47.473568,
+        "files_per_minute": 272.99,
+        "average_seconds_per_file": 0.219785,
+        "reused_scan_measurement_files": 0
+      },
+      "lighten_edge_shadow": {
+        "enabled": true,
+        "file_count": 216,
+        "elapsed_seconds": 24.737816,
+        "files_per_minute": 523.89,
+        "average_seconds_per_file": 0.114527,
+        "reused_scan_measurement_files": 0
+      },
+      "lighten_corner_shadows": {
+        "enabled": true,
+        "file_count": 216,
+        "elapsed_seconds": 9.327689,
+        "files_per_minute": 1389.41,
+        "average_seconds_per_file": 0.043184,
+        "reused_scan_measurement_files": 0
+      },
+      "lighten_background_stains": {
+        "enabled": true,
+        "file_count": 216,
+        "elapsed_seconds": 27.524667,
+        "files_per_minute": 470.85,
+        "average_seconds_per_file": 0.127429,
+        "reused_scan_measurement_files": 0
+      },
+      "lighten_fold_shadows": {
+        "enabled": true,
+        "file_count": 216,
+        "elapsed_seconds": 22.468052,
+        "files_per_minute": 576.82,
+        "average_seconds_per_file": 0.104019,
+        "reused_scan_measurement_files": 0
+      },
+      "level_illumination_gradient": {
+        "enabled": true,
+        "file_count": 216,
+        "elapsed_seconds": 12.480443,
+        "files_per_minute": 1038.42,
+        "average_seconds_per_file": 0.05778,
+        "reused_scan_measurement_files": 0
+      },
+      "clean_bleed_through": {
+        "enabled": true,
+        "file_count": 216,
+        "elapsed_seconds": 24.926642,
+        "files_per_minute": 519.93,
+        "average_seconds_per_file": 0.115401,
+        "reused_scan_measurement_files": 0
+      },
+      "lighten_scanlines": {
+        "enabled": true,
+        "file_count": 216,
+        "elapsed_seconds": 27.17235,
+        "files_per_minute": 476.96,
+        "average_seconds_per_file": 0.125798,
+        "reused_scan_measurement_files": 0
+      },
+      "enhance_faded_text": {
+        "enabled": true,
+        "file_count": 216,
+        "elapsed_seconds": 23.134179,
+        "files_per_minute": 560.21,
+        "average_seconds_per_file": 0.107103,
+        "reused_scan_measurement_files": 0
+      },
+      "sharpen_text_edges": {
+        "enabled": true,
+        "file_count": 216,
+        "elapsed_seconds": 26.642274,
+        "files_per_minute": 486.44,
+        "average_seconds_per_file": 0.123344,
+        "reused_scan_measurement_files": 0,
+        "candidate_preflight_skipped_files": 0
+      }
+    },
+    "rule_template": {
+      "id": "text-clean-print",
+      "version": "scan-qc.rule-template.v1",
+      "source": "builtin",
+      "processing_defaults": {
+        "auto_crop": true,
+        "deskew": true,
+        "trim_dark_border": true,
+        "scanner_gutter_trim": true,
+        "despeckle": true,
+        "despeckle_content_type_check": false,
+        "normalize_tones": true,
+        "normalize_paper_color_cast": true,
+        "lighten_edge_shadow": true,
+        "lighten_corner_shadows": true,
+        "lighten_background_stains": true,
+        "lighten_fold_shadows": true,
+        "level_illumination_gradient": true,
+        "clean_bleed_through": true,
+        "lighten_scanlines": true,
+        "enhance_faded_text": true,
+        "sharpen_text_edges": true,
+        "reuse_scan_measurements": true
+      }
+    },
+    "quality": {
+      "source": {
+        "image_count": 216,
+        "psnr_db_macro": 15.8252,
+        "ssim_macro": 0.89361,
+        "mse_macro": 1939.028962,
+        "mae_macro": 37.260796,
+        "dark_pixel_f1_macro": 0.895165,
+        "foreground_retention_macro": 0.984674,
+        "mean_delta_macro": -33.639901
+      },
+      "processed": {
+        "image_count": 216,
+        "psnr_db_macro": 15.8241,
+        "ssim_macro": 0.893542,
+        "mse_macro": 1939.36516,
+        "mae_macro": 37.26263,
+        "dark_pixel_f1_macro": 0.895099,
+        "foreground_retention_macro": 0.98454,
+        "mean_delta_macro": -33.63804
+      },
+      "delta": {
+        "psnr_db_macro": -0.0011,
+        "ssim_macro": -6.8e-05,
+        "mse_macro": 0.336198,
+        "mae_macro": 0.001834,
+        "dark_pixel_f1_macro": -6.6e-05,
+        "foreground_retention_macro": -0.000134
+      },
+      "by_noise_type": {
+        "c": {
+          "source": {
+            "image_count": 54,
+            "psnr_db_macro": 13.7643,
+            "ssim_macro": 0.828253,
+            "mse_macro": 2946.109253,
+            "mae_macro": 42.813404,
+            "dark_pixel_f1_macro": 0.793571,
+            "foreground_retention_macro": 0.989586,
+            "mean_delta_macro": -40.548536
+          },
+          "processed": {
+            "image_count": 54,
+            "psnr_db_macro": 13.7636,
+            "ssim_macro": 0.828178,
+            "mse_macro": 2946.467073,
+            "mae_macro": 42.815432,
+            "dark_pixel_f1_macro": 0.793504,
+            "foreground_retention_macro": 0.989445,
+            "mean_delta_macro": -40.546396
+          },
+          "delta": {
+            "psnr_db_macro": -0.0007,
+            "ssim_macro": -7.5e-05,
+            "mse_macro": 0.35782,
+            "mae_macro": 0.002028,
+            "dark_pixel_f1_macro": -6.7e-05,
+            "foreground_retention_macro": -0.000141
+          }
+        },
+        "f": {
+          "source": {
+            "image_count": 54,
+            "psnr_db_macro": 18.4269,
+            "ssim_macro": 0.944545,
+            "mse_macro": 934.433905,
+            "mae_macro": 28.784106,
+            "dark_pixel_f1_macro": 0.943578,
+            "foreground_retention_macro": 0.979608,
+            "mean_delta_macro": -23.97418
+          },
+          "processed": {
+            "image_count": 54,
+            "psnr_db_macro": 18.4251,
+            "ssim_macro": 0.944471,
+            "mse_macro": 934.831967,
+            "mae_macro": 28.786152,
+            "dark_pixel_f1_macro": 0.943497,
+            "foreground_retention_macro": 0.979448,
+            "mean_delta_macro": -23.972134
+          },
+          "delta": {
+            "psnr_db_macro": -0.0018,
+            "ssim_macro": -7.4e-05,
+            "mse_macro": 0.398062,
+            "mae_macro": 0.002046,
+            "dark_pixel_f1_macro": -8.1e-05,
+            "foreground_retention_macro": -0.00016
+          }
+        },
+        "p": {
+          "source": {
+            "image_count": 54,
+            "psnr_db_macro": 14.56,
+            "ssim_macro": 0.905734,
+            "mse_macro": 2435.805102,
+            "mae_macro": 45.23332,
+            "dark_pixel_f1_macro": 0.916642,
+            "foreground_retention_macro": 0.994187,
+            "mean_delta_macro": -43.052919
+          },
+          "processed": {
+            "image_count": 54,
+            "psnr_db_macro": 14.5594,
+            "ssim_macro": 0.905679,
+            "mse_macro": 2436.049844,
+            "mae_macro": 45.234799,
+            "dark_pixel_f1_macro": 0.916592,
+            "foreground_retention_macro": 0.994088,
+            "mean_delta_macro": -43.051439
+          },
+          "delta": {
+            "psnr_db_macro": -0.0006,
+            "ssim_macro": -5.5e-05,
+            "mse_macro": 0.244742,
+            "mae_macro": 0.001479,
+            "dark_pixel_f1_macro": -5e-05,
+            "foreground_retention_macro": -9.9e-05
+          }
+        },
+        "w": {
+          "source": {
+            "image_count": 54,
+            "psnr_db_macro": 16.5494,
+            "ssim_macro": 0.895906,
+            "mse_macro": 1439.767589,
+            "mae_macro": 32.212357,
+            "dark_pixel_f1_macro": 0.92687,
+            "foreground_retention_macro": 0.975315,
+            "mean_delta_macro": -26.983971
+          },
+          "processed": {
+            "image_count": 54,
+            "psnr_db_macro": 16.5483,
+            "ssim_macro": 0.895839,
+            "mse_macro": 1440.111758,
+            "mae_macro": 32.214136,
+            "dark_pixel_f1_macro": 0.926801,
+            "foreground_retention_macro": 0.975181,
+            "mean_delta_macro": -26.982193
+          },
+          "delta": {
+            "psnr_db_macro": -0.0011,
+            "ssim_macro": -6.7e-05,
+            "mse_macro": 0.344169,
+            "mae_macro": 0.001779,
+            "dark_pixel_f1_macro": -6.9e-05,
+            "foreground_retention_macro": -0.000134
+          }
+        }
+      },
+      "size_mismatch_files": 0
+    },
+    "dimensions": {
+      "min_width": 540,
+      "max_width": 540,
+      "min_height": 258,
+      "max_height": 420,
+      "total_pixels": 42690240,
+      "total_megapixels": 42.6902
+    }
+  },
+  "worst_cases": {
+    "largest_psnr_drop": [
+      {
+        "delta_mae": 0.009356,
+        "source_psnr_db": 18.5481,
+        "delta_psnr_db": -0.011,
+        "processed_dark_pixel_f1": 0.934994,
+        "relative_path": "FontLtm_Noisef_TR.png",
+        "noise_type": "f",
+        "delta_dark_pixel_f1": -0.000262,
+        "processed_mae": 28.443708,
+        "processed_psnr_db": 18.5371,
+        "source_dark_pixel_f1": 0.935256,
+        "source_ssim": 0.947815,
+        "delta_ssim": -0.000386,
+        "source_mae": 28.434352,
+        "processed_ssim": 0.947429
+      },
+      {
+        "delta_mae": 0.008038,
+        "source_psnr_db": 18.3698,
+        "delta_psnr_db": -0.0091,
+        "processed_dark_pixel_f1": 0.934972,
+        "relative_path": "FontLtm_Noisef_TE.png",
+        "noise_type": "f",
+        "delta_dark_pixel_f1": -0.000227,
+        "processed_mae": 29.14877,
+        "processed_psnr_db": 18.3607,
+        "source_dark_pixel_f1": 0.935199,
+        "source_ssim": 0.946871,
+        "delta_ssim": -0.00032,
+        "source_mae": 29.140732,
+        "processed_ssim": 0.946551
+      },
+      {
+        "delta_mae": 0.005961,
+        "source_psnr_db": 18.4583,
+        "delta_psnr_db": -0.0061,
+        "processed_dark_pixel_f1": 0.953029,
+        "relative_path": "FontLre_Noisef_VA.png",
+        "noise_type": "f",
+        "delta_dark_pixel_f1": -0.000203,
+        "processed_mae": 28.848642,
+        "processed_psnr_db": 18.4522,
+        "source_dark_pixel_f1": 0.953232,
+        "source_ssim": 0.947566,
+        "delta_ssim": -0.000262,
+        "source_mae": 28.842681,
+        "processed_ssim": 0.947304
+      },
+      {
+        "delta_mae": 0.007566,
+        "source_psnr_db": 16.5913,
+        "delta_psnr_db": -0.0058,
+        "processed_dark_pixel_f1": 0.923833,
+        "relative_path": "FontLtm_Noisew_TR.png",
+        "noise_type": "w",
+        "delta_dark_pixel_f1": -0.000191,
+        "processed_mae": 32.265101,
+        "processed_psnr_db": 16.5855,
+        "source_dark_pixel_f1": 0.924024,
+        "source_ssim": 0.899266,
+        "delta_ssim": -0.000324,
+        "source_mae": 32.257535,
+        "processed_ssim": 0.898942
+      },
+      {
+        "delta_mae": 0.00549,
+        "source_psnr_db": 18.6391,
+        "delta_psnr_db": -0.0052,
+        "processed_dark_pixel_f1": 0.954449,
+        "relative_path": "FontLre_Noisef_TR.png",
+        "noise_type": "f",
+        "delta_dark_pixel_f1": -0.000235,
+        "processed_mae": 28.137271,
+        "processed_psnr_db": 18.6339,
+        "source_dark_pixel_f1": 0.954684,
+        "source_ssim": 0.948609,
+        "delta_ssim": -0.000229,
+        "source_mae": 28.131781,
+        "processed_ssim": 0.94838
+      },
+      {
+        "delta_mae": 0.006265,
+        "source_psnr_db": 16.5751,
+        "delta_psnr_db": -0.0046,
+        "processed_dark_pixel_f1": 0.925787,
+        "relative_path": "FontLtm_Noisew_VA.png",
+        "noise_type": "w",
+        "delta_dark_pixel_f1": -0.000159,
+        "processed_mae": 32.31097,
+        "processed_psnr_db": 16.5705,
+        "source_dark_pixel_f1": 0.925946,
+        "source_ssim": 0.900895,
+        "delta_ssim": -0.000255,
+        "source_mae": 32.304705,
+        "processed_ssim": 0.90064
+      },
+      {
+        "delta_mae": 0.004773,
+        "source_psnr_db": 18.4695,
+        "delta_psnr_db": -0.0046,
+        "processed_dark_pixel_f1": 0.933868,
+        "relative_path": "Fontfrm_Noisef_TE.png",
+        "noise_type": "f",
+        "delta_dark_pixel_f1": -0.000235,
+        "processed_mae": 28.386915,
+        "processed_psnr_db": 18.4649,
+        "source_dark_pixel_f1": 0.934103,
+        "source_ssim": 0.936877,
+        "delta_ssim": -0.0002,
+        "source_mae": 28.382142,
+        "processed_ssim": 0.936677
+      },
+      {
+        "delta_mae": 0.0063,
+        "source_psnr_db": 16.7032,
+        "delta_psnr_db": -0.0044,
+        "processed_dark_pixel_f1": 0.920632,
+        "relative_path": "FontLtm_Noisep_VA.png",
+        "noise_type": "p",
+        "delta_dark_pixel_f1": -0.000156,
+        "processed_mae": 34.940789,
+        "processed_psnr_db": 16.6988,
+        "source_dark_pixel_f1": 0.920788,
+        "source_ssim": 0.951651,
+        "delta_ssim": -0.000234,
+        "source_mae": 34.934489,
+        "processed_ssim": 0.951417
+      },
+      {
+        "delta_mae": 0.005053,
+        "source_psnr_db": 18.5514,
+        "delta_psnr_db": -0.0044,
+        "processed_dark_pixel_f1": 0.931224,
+        "relative_path": "Fontfrm_Noisef_TR.png",
+        "noise_type": "f",
+        "delta_dark_pixel_f1": -0.000282,
+        "processed_mae": 27.953955,
+        "processed_psnr_db": 18.547,
+        "source_dark_pixel_f1": 0.931506,
+        "source_ssim": 0.936351,
+        "delta_ssim": -0.000196,
+        "source_mae": 27.948902,
+        "processed_ssim": 0.936155
+      },
+      {
+        "delta_mae": 0.005481,
+        "source_psnr_db": 18.3935,
+        "delta_psnr_db": -0.0044,
+        "processed_dark_pixel_f1": 0.941248,
+        "relative_path": "Fontnre_Noisef_TE.png",
+        "noise_type": "f",
+        "delta_dark_pixel_f1": -0.000268,
+        "processed_mae": 28.965966,
+        "processed_psnr_db": 18.3891,
+        "source_dark_pixel_f1": 0.941516,
+        "source_ssim": 0.941891,
+        "delta_ssim": -0.000226,
+        "source_mae": 28.960485,
+        "processed_ssim": 0.941665
+      },
+      {
+        "delta_mae": 0.005789,
+        "source_psnr_db": 16.6597,
+        "delta_psnr_db": -0.0038,
+        "processed_dark_pixel_f1": 0.929764,
+        "relative_path": "FontLre_Noisew_VA.png",
+        "noise_type": "w",
+        "delta_dark_pixel_f1": -0.000205,
+        "processed_mae": 31.988263,
+        "processed_psnr_db": 16.6559,
+        "source_dark_pixel_f1": 0.929969,
+        "source_ssim": 0.896093,
+        "delta_ssim": -0.000256,
+        "source_mae": 31.982474,
+        "processed_ssim": 0.895837
+      },
+      {
+        "delta_mae": 0.003312,
+        "source_psnr_db": 18.3611,
+        "delta_psnr_db": -0.0038,
+        "processed_dark_pixel_f1": 0.933459,
+        "relative_path": "FontLtm_Noisef_VA.png",
+        "noise_type": "f",
+        "delta_dark_pixel_f1": -9.1e-05,
+        "processed_mae": 29.163488,
+        "processed_psnr_db": 18.3573,
+        "source_dark_pixel_f1": 0.93355,
+        "source_ssim": 0.946023,
+        "delta_ssim": -0.000134,
+        "source_mae": 29.160176,
+        "processed_ssim": 0.945889
+      },
+      {
+        "delta_mae": 0.006816,
+        "source_psnr_db": 15.5294,
+        "delta_psnr_db": -0.0036,
+        "processed_dark_pixel_f1": 0.871449,
+        "relative_path": "FontLtm_Noisec_TR.png",
+        "noise_type": "c",
+        "delta_dark_pixel_f1": -0.000166,
+        "processed_mae": 35.242632,
+        "processed_psnr_db": 15.5258,
+        "source_dark_pixel_f1": 0.871615,
+        "source_ssim": 0.901743,
+        "delta_ssim": -0.00026,
+        "source_mae": 35.235816,
+        "processed_ssim": 0.901483
+      },
+      {
+        "delta_mae": 0.005771,
+        "source_psnr_db": 16.5032,
+        "delta_psnr_db": -0.0036,
+        "processed_dark_pixel_f1": 0.907182,
+        "relative_path": "Fontfrm_Noisew_TE.png",
+        "noise_type": "w",
+        "delta_dark_pixel_f1": -0.000275,
+        "processed_mae": 31.85473,
+        "processed_psnr_db": 16.4996,
+        "source_dark_pixel_f1": 0.907457,
+        "source_ssim": 0.878814,
+        "delta_ssim": -0.000251,
+        "source_mae": 31.848959,
+        "processed_ssim": 0.878563
+      },
+      {
+        "delta_mae": 0.003329,
+        "source_psnr_db": 18.5325,
+        "delta_psnr_db": -0.0035,
+        "processed_dark_pixel_f1": 0.909711,
+        "relative_path": "FontLrm_Noisef_VA.png",
+        "noise_type": "f",
+        "delta_dark_pixel_f1": -0.000132,
+        "processed_mae": 28.527315,
+        "processed_psnr_db": 18.529,
+        "source_dark_pixel_f1": 0.909843,
+        "source_ssim": 0.946866,
+        "delta_ssim": -0.000138,
+        "source_mae": 28.523986,
+        "processed_ssim": 0.946728
+      }
+    ],
+    "largest_ssim_drop": [
+      {
+        "delta_mae": 0.009356,
+        "source_psnr_db": 18.5481,
+        "delta_psnr_db": -0.011,
+        "processed_dark_pixel_f1": 0.934994,
+        "relative_path": "FontLtm_Noisef_TR.png",
+        "noise_type": "f",
+        "delta_dark_pixel_f1": -0.000262,
+        "processed_mae": 28.443708,
+        "processed_psnr_db": 18.5371,
+        "source_dark_pixel_f1": 0.935256,
+        "source_ssim": 0.947815,
+        "delta_ssim": -0.000386,
+        "source_mae": 28.434352,
+        "processed_ssim": 0.947429
+      },
+      {
+        "delta_mae": 0.008982,
+        "source_psnr_db": 11.309,
+        "delta_psnr_db": -0.0018,
+        "processed_dark_pixel_f1": 0.7385,
+        "relative_path": "FontLtm_Noisec_TE.png",
+        "noise_type": "c",
+        "delta_dark_pixel_f1": -0.000209,
+        "processed_mae": 56.995772,
+        "processed_psnr_db": 11.3072,
+        "source_dark_pixel_f1": 0.738709,
+        "source_ssim": 0.763439,
+        "delta_ssim": -0.000362,
+        "source_mae": 56.98679,
+        "processed_ssim": 0.763077
+      },
+      {
+        "delta_mae": 0.007566,
+        "source_psnr_db": 16.5913,
+        "delta_psnr_db": -0.0058,
+        "processed_dark_pixel_f1": 0.923833,
+        "relative_path": "FontLtm_Noisew_TR.png",
+        "noise_type": "w",
+        "delta_dark_pixel_f1": -0.000191,
+        "processed_mae": 32.265101,
+        "processed_psnr_db": 16.5855,
+        "source_dark_pixel_f1": 0.924024,
+        "source_ssim": 0.899266,
+        "delta_ssim": -0.000324,
+        "source_mae": 32.257535,
+        "processed_ssim": 0.898942
+      },
+      {
+        "delta_mae": 0.008038,
+        "source_psnr_db": 18.3698,
+        "delta_psnr_db": -0.0091,
+        "processed_dark_pixel_f1": 0.934972,
+        "relative_path": "FontLtm_Noisef_TE.png",
+        "noise_type": "f",
+        "delta_dark_pixel_f1": -0.000227,
+        "processed_mae": 29.14877,
+        "processed_psnr_db": 18.3607,
+        "source_dark_pixel_f1": 0.935199,
+        "source_ssim": 0.946871,
+        "delta_ssim": -0.00032,
+        "source_mae": 29.140732,
+        "processed_ssim": 0.946551
+      },
+      {
+        "delta_mae": 0.008029,
+        "source_psnr_db": 11.3128,
+        "delta_psnr_db": -0.0015,
+        "processed_dark_pixel_f1": 0.772153,
+        "relative_path": "Fontntm_Noisec_TE.png",
+        "noise_type": "c",
+        "delta_dark_pixel_f1": -0.000188,
+        "processed_mae": 57.190273,
+        "processed_psnr_db": 11.3113,
+        "source_dark_pixel_f1": 0.772341,
+        "source_ssim": 0.755997,
+        "delta_ssim": -0.000312,
+        "source_mae": 57.182244,
+        "processed_ssim": 0.755685
+      },
+      {
+        "delta_mae": 0.005789,
+        "source_psnr_db": 12.6568,
+        "delta_psnr_db": -0.0011,
+        "processed_dark_pixel_f1": 0.883956,
+        "relative_path": "Fontnre_Noisep_TE.png",
+        "noise_type": "p",
+        "delta_dark_pixel_f1": -0.00029,
+        "processed_mae": 55.420295,
+        "processed_psnr_db": 12.6557,
+        "source_dark_pixel_f1": 0.884246,
+        "source_ssim": 0.84083,
+        "delta_ssim": -0.00029,
+        "source_mae": 55.414506,
+        "processed_ssim": 0.84054
+      },
+      {
+        "delta_mae": 0.006583,
+        "source_psnr_db": 14.5082,
+        "delta_psnr_db": -0.0025,
+        "processed_dark_pixel_f1": 0.761462,
+        "relative_path": "FontLre_Noisec_VA.png",
+        "noise_type": "c",
+        "delta_dark_pixel_f1": -0.00022,
+        "processed_mae": 37.817491,
+        "processed_psnr_db": 14.5057,
+        "source_dark_pixel_f1": 0.761682,
+        "source_ssim": 0.840148,
+        "delta_ssim": -0.000281,
+        "source_mae": 37.810908,
+        "processed_ssim": 0.839867
+      },
+      {
+        "delta_mae": 0.005864,
+        "source_psnr_db": 14.0589,
+        "delta_psnr_db": -0.0017,
+        "processed_dark_pixel_f1": 0.91808,
+        "relative_path": "FontLre_Noisep_TR.png",
+        "noise_type": "p",
+        "delta_dark_pixel_f1": -0.000235,
+        "processed_mae": 47.346997,
+        "processed_psnr_db": 14.0572,
+        "source_dark_pixel_f1": 0.918315,
+        "source_ssim": 0.898048,
+        "delta_ssim": -0.000267,
+        "source_mae": 47.341133,
+        "processed_ssim": 0.897781
+      },
+      {
+        "delta_mae": 0.005961,
+        "source_psnr_db": 18.4583,
+        "delta_psnr_db": -0.0061,
+        "processed_dark_pixel_f1": 0.953029,
+        "relative_path": "FontLre_Noisef_VA.png",
+        "noise_type": "f",
+        "delta_dark_pixel_f1": -0.000203,
+        "processed_mae": 28.848642,
+        "processed_psnr_db": 18.4522,
+        "source_dark_pixel_f1": 0.953232,
+        "source_ssim": 0.947566,
+        "delta_ssim": -0.000262,
+        "source_mae": 28.842681,
+        "processed_ssim": 0.947304
+      },
+      {
+        "delta_mae": 0.006816,
+        "source_psnr_db": 15.5294,
+        "delta_psnr_db": -0.0036,
+        "processed_dark_pixel_f1": 0.871449,
+        "relative_path": "FontLtm_Noisec_TR.png",
+        "noise_type": "c",
+        "delta_dark_pixel_f1": -0.000166,
+        "processed_mae": 35.242632,
+        "processed_psnr_db": 15.5258,
+        "source_dark_pixel_f1": 0.871615,
+        "source_ssim": 0.901743,
+        "delta_ssim": -0.00026,
+        "source_mae": 35.235816,
+        "processed_ssim": 0.901483
+      },
+      {
+        "delta_mae": 0.005789,
+        "source_psnr_db": 16.6597,
+        "delta_psnr_db": -0.0038,
+        "processed_dark_pixel_f1": 0.929764,
+        "relative_path": "FontLre_Noisew_VA.png",
+        "noise_type": "w",
+        "delta_dark_pixel_f1": -0.000205,
+        "processed_mae": 31.988263,
+        "processed_psnr_db": 16.6559,
+        "source_dark_pixel_f1": 0.929969,
+        "source_ssim": 0.896093,
+        "delta_ssim": -0.000256,
+        "source_mae": 31.982474,
+        "processed_ssim": 0.895837
+      },
+      {
+        "delta_mae": 0.006265,
+        "source_psnr_db": 16.5751,
+        "delta_psnr_db": -0.0046,
+        "processed_dark_pixel_f1": 0.925787,
+        "relative_path": "FontLtm_Noisew_VA.png",
+        "noise_type": "w",
+        "delta_dark_pixel_f1": -0.000159,
+        "processed_mae": 32.31097,
+        "processed_psnr_db": 16.5705,
+        "source_dark_pixel_f1": 0.925946,
+        "source_ssim": 0.900895,
+        "delta_ssim": -0.000255,
+        "source_mae": 32.304705,
+        "processed_ssim": 0.90064
+      },
+      {
+        "delta_mae": 0.005771,
+        "source_psnr_db": 16.5032,
+        "delta_psnr_db": -0.0036,
+        "processed_dark_pixel_f1": 0.907182,
+        "relative_path": "Fontfrm_Noisew_TE.png",
+        "noise_type": "w",
+        "delta_dark_pixel_f1": -0.000275,
+        "processed_mae": 31.85473,
+        "processed_psnr_db": 16.4996,
+        "source_dark_pixel_f1": 0.907457,
+        "source_ssim": 0.878814,
+        "delta_ssim": -0.000251,
+        "source_mae": 31.848959,
+        "processed_ssim": 0.878563
+      },
+      {
+        "delta_mae": 0.006984,
+        "source_psnr_db": 15.5957,
+        "delta_psnr_db": -0.0025,
+        "processed_dark_pixel_f1": 0.872503,
+        "relative_path": "Fontnrm_Noisec_TR.png",
+        "noise_type": "c",
+        "delta_dark_pixel_f1": -0.000273,
+        "processed_mae": 34.826345,
+        "processed_psnr_db": 15.5932,
+        "source_dark_pixel_f1": 0.872776,
+        "source_ssim": 0.87924,
+        "delta_ssim": -0.000247,
+        "source_mae": 34.819361,
+        "processed_ssim": 0.878993
+      },
+      {
+        "delta_mae": 0.005587,
+        "source_psnr_db": 16.6544,
+        "delta_psnr_db": -0.0034,
+        "processed_dark_pixel_f1": 0.929652,
+        "relative_path": "FontLre_Noisew_TR.png",
+        "noise_type": "w",
+        "delta_dark_pixel_f1": -0.000238,
+        "processed_mae": 32.01515,
+        "processed_psnr_db": 16.651,
+        "source_dark_pixel_f1": 0.92989,
+        "source_ssim": 0.894693,
+        "delta_ssim": -0.000243,
+        "source_mae": 32.009563,
+        "processed_ssim": 0.89445
+      }
+    ]
+  }
+}

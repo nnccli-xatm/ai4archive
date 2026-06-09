@@ -8,17 +8,22 @@ AI4-148 方向修订：普通生产入口必须是“生产工人批量质检修
 
 本地单机生产流程优先完善。局域网内多扫描电脑 + 一台服务器集中监控处理的部署形态放到后续阶段；国产化适配、OS-specific packaging、UOS/麒麟/openKylin、aarch64、LoongArch 实机适配暂时不进入前端任务范围。
 
+补充架构目标：产品最终形态必须是标准后台服务加前端调用。前端和后端完全解耦，后端专注批量质检、图像处理性能、任务调度、隐私过滤、审计和标准服务接口；前端只通过接口查询状态、预览图片、提交复核动作和触发导出。相同接口应允许外部归档系统、验收工具或其他业务系统调用，不能把前端页面和内部 CLI/Worker 绑定成不可复用的一体化实现。
+
+2026-06-09 目标对齐：前端设计必须服务于“高质量、高性能、可独立运行、可作为外部服务引擎调用”的产品目标。前端不得持有或推断图像处理 Worker 状态，不得把本地绝对路径作为可外传状态，不得跨任务复用复核队列或模板参数；所有生产动作都必须绑定后端返回的 job_id、batch_id、模板快照和授权预览资源。
+
 ## 1. 目标与边界
 
-本阶段目标是为现有扫描图片批量质检程序补充必要的前端访问界面设计，使操作人员能够通过浏览器驱动批次流程、查看任务状态、预览图片和阅读质检结果。前端只作为独立访问层，通过文件、命令或后续 API 调用后端能力，不改变已经完成的 CLI、规则引擎、批处理、报告和处理副本架构。
+本阶段目标是为现有扫描图片批量质检程序补充必要的前端访问界面设计，使操作人员能够通过浏览器驱动批次流程、查看任务状态、预览图片和阅读质检结果。前端只作为独立访问层，通过标准后台服务接口调用后端能力，不改变已经完成的 CLI、规则引擎、批处理、报告和处理副本架构；CLI 可以继续作为开发、验证和离线兜底入口，但不应成为长期前端集成的主要调用方式。
 
-修订后的生产目标是：让计算机经验有限的扫描处理工人，用中文、图片和少量明确动作完成本地批量质检修图。普通生产工作流必须是：
+修订后的生产目标是：让计算机经验有限的扫描处理工人，用中文、图片和少量明确动作完成本地批量质检修图。本地单机首版不设置产品登录页，启动后直接进入生产工作台；后台服务仍保留本机操作员标识、任务 ID、日志和恢复状态。Windows 中文路径、中文文件名、空格路径和源文件只读安全由后台服务保证，前端只展示中文动作语义、聚合状态和授权预览。普通生产工作流必须是：
 
-1. 选择本地“扫描图片文件夹”。
+1. 选择本地“扫描图片文件夹”，或进入单个 JPG 文件质检。
 2. 选择“处理后图片输出文件夹”。
-3. 点击“开始处理”，执行批量质检和安全自动修图。
-4. 只复核系统挑出的少量“待复核图片”。
-5. 点击“完成导出”，得到处理后图片和必要摘要。
+3. 选择需要启用的处理项，例如去黑边、装订孔处理、纠偏、去除背景色。
+4. 点击“开始处理”，执行批量质检和安全自动修图。
+5. 只复核系统挑出的少量“待复核图片”。
+6. 点击“完成导出”，得到处理后图片和必要摘要。
 
 聚合摘要、验证摘要、证据包、性能对比、验收和移交材料继续保留，但它们属于后台/管理员/验收工作台，不属于普通生产工人的第一屏。
 
@@ -26,6 +31,9 @@ AI4-148 方向修订：普通生产入口必须是“生产工人批量质检修
 
 - 不在前端实现图片处理、修图、纠偏、裁边、去污或模型推理。
 - 不把后端流程迁移到前端执行。
+- 不让前端直接调用图像处理 Worker、私有脚本或内部命令行；前端只消费后台服务接口。
+- 不让前端跨 job 复用可变状态、复核队列、模板参数、临时预览 URL 或输出目录。
+- 不让前端把用户选择的本地绝对路径写入可外传摘要；本地受控显示也必须由后端按授权返回。
 - 不引入重量级前端框架作为第一步。
 - 不改变现有 `archive-scan-qc` CLI 参数、报告字段和输出目录约定。
 - 不在公开报告或聚合界面暴露私有样本路径、文件哈希、缩略图或敏感行级证据，除非部署在明确的本地受控环境中。
@@ -85,9 +93,13 @@ AI4-148 方向修订：普通生产入口必须是“生产工人批量质检修
 生产工作台第一屏必须围绕任务设置和动作：
 
 1. 批次设置
-   - 扫描图片文件夹。
+   - 扫描图片文件夹，首期默认递归处理 JPG；同时提供单个 JPG 文件质检入口。
    - 处理后图片输出文件夹。
-   - 规则模板可由管理员预设，普通用户只看到必要选项。
+   - 图像处理规则模板可由管理员预设，普通用户从“DA/T 31-2017 标准模板、纯文本高清晰度模板、原貌高保真模板、用户自定义模板”中选择必要选项。
+   - 模板选择后展示简短用途说明和主要风险提示，例如“严格保留档案原貌”“尽量提高文字洁净度”“照片/绘画核心区域不处理”。
+   - 处理项多选：去黑边、装订孔处理、纠偏、去除背景色；装订孔和强背景处理默认显示原貌保护提示。
+   - 输出模式：默认“生成处理后图片”；如启用“受控覆盖发布”，必须先完成备份、dry-run、确认和可回滚日志。
+   - 线程数量：默认自动，允许高级用户手动设置，显示 CPU/内存/磁盘风险提示。
 
 2. 处理进度
    - 状态：未开始、已准备、正在检查、正在优化图片、等待复核、正在导出、已完成、已阻断。
@@ -104,6 +116,13 @@ AI4-148 方向修订：普通生产入口必须是“生产工人批量质检修
    - 需要重扫数量。
    - 输出文件夹。
    - 面向管理员的摘要入口。
+
+5. 扩展生产工具
+   - 样例图片参数设置：去黑边范围、纠偏、背景色处理等参数由后端保存为处理方案。
+   - TIF 转 JPG、JPG 生成双层 PDF、PDF 转 OFD、批量重命名、批量修改 DPI。
+   - 按 Excel 表格进行案卷分件，并在目标目录不存在时由后端创建。
+   - OCR 自动生成目录表并写入指定 Excel 列，默认提取文件编号和题名，低置信度结果进入人工复核。
+   - 所有批量工具都必须展示 dry-run 预览、冲突/缺页/覆盖风险和可恢复状态。
 
 ### 3.2 后台/管理员工作台入口
 
@@ -144,11 +163,11 @@ AI4-148 方向修订：普通生产入口必须是“生产工人批量质检修
 
 ## 4. 调用边界
 
-前端与后端保持完全调用关系，推荐分两层推进：
+前端与后端保持完全解耦。目标架构固定为标准后台服务对外提供接口，前端、验收工具和外部系统都通过同一类稳定契约调用。静态页面可以作为原型或后台只读入口保留，但生产工作台的长期实现必须迁移到服务接口。
 
 ### 4.1 第一阶段：静态工作台
 
-适用于当前仓库状态。新增一个单文件 HTML 工作台，通过用户选择或嵌入示例数据读取现有 JSON/CSV 产物：
+适用于当前仓库状态和低风险原型验证。单文件 HTML 工作台可以通过用户选择或嵌入示例数据读取现有 JSON/CSV 产物：
 
 - `run_plan_summary.json`
 - `scan_qc_report.json`
@@ -157,11 +176,13 @@ AI4-148 方向修订：普通生产入口必须是“生产工人批量质检修
 - `review_summary.json`
 - `acceptance_summary.json`
 
-浏览器安全限制下，静态页面不能直接遍历本地目录；因此第一阶段应优先支持手动加载 JSON/CSV 文件，或由后端/脚本生成带嵌入数据的 HTML。
+浏览器安全限制下，静态页面不能直接遍历本地目录；因此第一阶段应优先支持手动加载 JSON/CSV 文件，或由后端/脚本生成带嵌入数据的 HTML。该阶段不代表最终架构，只用于验证信息组织、中文动作流和后台/验收视角。
 
-### 4.2 第二阶段：本地控制服务
+### 4.2 第二阶段：标准后台服务
 
-在计划确认后，再评估是否新增轻量本地服务。该服务只封装 CLI 调用和静态资源，不改核心业务模块：
+在计划确认后，建设标准后台服务。服务可以先在本机运行，但接口形态应按可复用后台服务设计，而不是只封装当前页面的临时本地助手。服务负责路径校验、任务创建、任务状态、队列调度、日志、权限、敏感数据过滤、预览资源生命周期和外部系统调用契约；前端只消费接口结果。服务必须按 job 隔离请求上下文，同一时间允许多个外部请求或前端会话提交任务，但每个任务的 job_id、batch_id、模板快照、输入授权、输出目录、metadata、临时文件、复核队列、checkpoint 和日志都必须独立。
+
+建议第一批生产接口：
 
 - `GET /api/production/session`
 - `POST /api/production/setup`
@@ -172,6 +193,11 @@ AI4-148 方向修订：普通生产入口必须是“生产工人批量质检修
 - `GET /api/production/review-queue`
 - `POST /api/production/review-actions`
 - `POST /api/production/finish-export`
+- `GET /api/rule-templates`
+- `GET /api/rule-templates/{template_id}`
+- `POST /api/rule-templates`
+- `PUT /api/rule-templates/{template_id}`
+- `POST /api/rule-templates/{template_id}/dry-run`
 - `POST /api/preflight`
 - `POST /api/scan`
 - `POST /api/run-plan`
@@ -179,22 +205,57 @@ AI4-148 方向修订：普通生产入口必须是“生产工人批量质检修
 - `GET /api/batches/{batch_id}/report`
 - `GET /api/batches/{batch_id}/preview?relative_path=...`
 - `POST /api/review-summary`
+- `POST /api/processing-parameters/from-sample`
+- `POST /api/documents/tif-to-jpg`
+- `POST /api/documents/pdf`
+- `POST /api/documents/ofd-conversion`
+- `POST /api/files/rename-plan`
+- `POST /api/files/rename-apply`
+- `POST /api/files/dpi-plan`
+- `POST /api/files/dpi-apply`
+- `POST /api/fonds/split-plan`
+- `POST /api/fonds/split-apply`
+- `POST /api/catalog/ocr-extract`
+- `POST /api/catalog/export`
 
-服务端负责路径校验、进程管理、日志、权限和敏感数据过滤；前端只消费接口结果。
+后续对外接口应补充：
+
+- 批次任务创建、取消、暂停、恢复、重试和幂等提交。
+- 按任务 ID 查询阶段状态、进度事件、阻断原因和聚合性能。
+- 按授权令牌读取原图/处理后图预览，不暴露真实本地路径给非本机调用方。
+- 查询 job 级资源配额和排队状态，包括 requested_workers、effective_workers、全局并发上限、当前限流原因和磁盘空间阻断原因。
+- 提交复核动作、读取复核历史、生成验收摘要和移交摘要。
+- 管理图像处理规则模板，支持内置模板查询、用户自定义模板保存、参数校验、样例图片 dry-run、模板版本和审批状态。
+- 提交样例参数、TIF 转 JPG、JPG 生成双层 PDF、PDF/OFD 转换、批量重命名、DPI 修改、分件拷贝和 OCR 目录提取任务；所有写操作都应支持 dry-run、冲突检查、执行确认、任务恢复和回滚/补救清单。
+- 输出 OpenAPI/接口文档，声明字段版本、错误码、隐私边界和外部系统调用限制。
 
 ## 5. 数据契约
 
 生产工作台使用最小本地契约；后台/管理员工作台继续直接复用现有报告字段。前端展示字段以可选读取为原则，缺失时显示空状态。
+
+所有生产数据契约必须包含后端分配的 job_id 或 task_id。前端可以在当前会话中缓存 job_id，用于查询进度、预览和提交复核动作；不得用输入目录、输出目录、文件名或模板名称推断任务身份。多个任务同时存在时，前端列表、轮询、预览 URL 和复核提交必须按 job_id 分组。
 
 ### 5.1 生产批次设置状态
 
 ```json
 {
   "schema_version": "scan-qc.production-workbench.v1",
+  "job_id": "job-20260609-0001",
   "batch_id": "batch-20260512-001",
+  "input_mode": "folder|single_file",
   "input_folder": "/local/private/source",
+  "input_file": "/local/private/source/page-0001.jpg",
   "output_folder": "/local/private/output",
-  "rules_profile": "production-default",
+  "metadata_folder": "/local/private/output/_production_workbench",
+  "template_snapshot_id": "tpl-snap-20260609-0001",
+  "rule_template_id": "dat-31-2017-standard",
+  "rule_template_name": "DA/T 31-2017 标准模板",
+  "selected_processing": ["trim_dark_border", "binding_hole_review", "deskew", "background_balance"],
+  "output_mode": "copy_only|controlled_publish",
+  "thread_count": "auto|1|2|4|8",
+  "requested_workers": "auto|1|2|4|8",
+  "effective_workers": 4,
+  "login_required": false,
   "status": "not_started|ready|running|paused|needs_review|exporting|finished|blocked",
   "operator_id": "local-user",
   "created_at": "2026-05-12T09:00:00+08:00"
@@ -206,6 +267,7 @@ AI4-148 方向修订：普通生产入口必须是“生产工人批量质检修
 ```json
 {
   "event_id": "evt-000001",
+  "job_id": "job-20260609-0001",
   "batch_id": "batch-20260512-001",
   "stage": "checking|optimizing|review_waiting|exporting|finished|blocked",
   "message_zh": "正在优化图片",
@@ -223,6 +285,7 @@ AI4-148 方向修订：普通生产入口必须是“生产工人批量质检修
 ```json
 {
   "review_item_id": "rev-0001",
+  "job_id": "job-20260609-0001",
   "batch_id": "batch-20260512-001",
   "display_name": "第 0012 张",
   "severity": "needs_rescan|needs_decision|warning",
@@ -242,6 +305,7 @@ AI4-148 方向修订：普通生产入口必须是“生产工人批量质检修
 ```json
 {
   "action_id": "act-0001",
+  "job_id": "job-20260609-0001",
   "review_item_id": "rev-0001",
   "action": "pass|rescan|reprocess|keep_original_mark|pause_batch|resume_batch|finish_export",
   "note_zh": "保留装订孔，属于档案原貌",
@@ -254,6 +318,7 @@ AI4-148 方向修订：普通生产入口必须是“生产工人批量质检修
 
 ```json
 {
+  "job_id": "job-20260609-0001",
   "batch_id": "batch-20260512-001",
   "status": "finished|blocked",
   "input_count": 300,
@@ -310,12 +375,71 @@ AI4-148 方向修订：普通生产入口必须是“生产工人批量质检修
 
 ```json
 {
+  "job_id": "job-20260609-0001",
   "batch_id": "batch-001",
   "relative_path": "A001_0001.jpg",
   "preview_url": "/api/batches/batch-001/preview?token=...",
   "source": "original",
   "width": 1600,
   "height": 2400
+}
+```
+
+### 5.9 批量工具任务
+
+批量重命名、DPI 修改、TIF/JPG/PDF/OFD 转换、按 Excel 分件、OCR 目录提取等扩展工具统一走后台任务模型。前端只展示计划、风险、进度和结果，不直接改文件。
+
+```json
+{
+  "schema_version": "scan-qc.batch-tool-task.v1",
+  "task_id": "tool-20260602-001",
+  "task_type": "rename|dpi_update|tif_to_jpg|pdf_generate|ofd_convert|fonds_split|ocr_catalog",
+  "status": "planned|running|paused|finished|blocked|failed",
+  "dry_run": true,
+  "input_count": 100,
+  "planned_output_count": 100,
+  "conflict_count": 0,
+  "manual_review_count": 8,
+  "log_export_formats": ["xlsx", "csv", "json"],
+  "overwrite_mode": "copy_only|controlled_publish",
+  "can_apply": true,
+  "resume_supported": true
+}
+```
+
+### 5.10 图像处理规则模板
+
+规则模板由后台服务维护，前端负责展示、选择、编辑和提交 dry-run。内置模板只允许查看和克隆，用户自定义模板允许编辑、版本化和停用。模板参数最终由后台服务解释并传递给图像处理 Worker。
+
+默认模板：
+
+- `dat-31-2017-standard`：严格按照 DA/T 31-2017 和项目验收规则处理，原貌保护优先。
+- `text-clean-print`：面向确认无照片、绘画、印章密集页的纯文本扫描件，尽量提高洁净度和文字清晰度，接近干净打印效果；后台可关闭去污点前的照片/混合内容保护判断。
+- `high-fidelity-original`：面向照片、绘画、珍贵档案等，核心区域尽量不处理，只处理边框外或指定区域。
+- `custom`：用户自定义模板，必须通过参数校验和样例 dry-run 后才能用于正式批次。
+
+```json
+{
+  "schema_version": "scan-qc.rule-template.v1",
+  "template_id": "text-clean-print",
+  "name_zh": "纯文本高清晰度模板",
+  "type": "built_in|custom",
+  "version": "2026.1",
+  "status": "active|draft|disabled",
+  "description_zh": "适用于纯文本扫描件，尽量提升洁净度和文字清晰度。",
+  "processing_parameters": {
+    "crop_policy": "standard_margin|aggressive_text|edge_only",
+    "deskew_strength": "conservative|standard|strong",
+    "background_cleanup": "off|conservative|strong",
+    "despeckle_strength": "off|conservative|strong",
+    "text_enhancement": "off|conservative|strong",
+    "core_region_protection": "standard|strict|edge_only"
+  },
+  "review_policy": {
+    "manual_review_threshold": "standard|low|high",
+    "protect_original_marks": true,
+    "require_sample_dry_run": true
+  }
 }
 ```
 
@@ -413,6 +537,8 @@ AI4-148 方向修订：普通生产入口必须是“生产工人批量质检修
 - 完成页是否强调已输出数量、需要重扫数量和输出文件夹。
 - 当前静态聚合工作台是否被标注为后台/管理员/验收入口。
 - 是否没有把验证摘要、证据包、性能统计或移交摘要放入普通生产入口第一屏。
+- 是否所有前端状态、轮询、预览 URL 和复核动作都绑定 job_id，多个任务同时存在时不会串用输出目录、模板参数或复核队列。
+- 是否 Windows 中文路径和真实文件名只在本地受控授权范围内展示，未进入可外传摘要或浏览器持久化状态。
 - 公开材料是否不含私有路径、真实文件名、哈希、缩略图、OCR 文本或行级证据。
 - 是否没有新增统计优先 dashboard 面板作为生产工作台主体验收内容。
 
