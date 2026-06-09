@@ -1492,9 +1492,9 @@ HTTP transport for prototype `curl` or frontend integration.
 `derivatives`, `tmp`, `checkpoints`, `review`, and `logs` subdirectories. The private
 `service_job.json` checkpoint records authorized local paths and template
 settings for recovery. The shareable `service_job_public_summary.json` records
-only aggregate status, counts, quality category signals, guardrail summary,
-public-safe timing summaries, source-integrity counts, isolation flags,
-recovery status, and privacy booleans.
+only aggregate status, counts, quality category signals, whitelisted
+`quality_metrics`, guardrail summary, public-safe timing summaries,
+source-integrity counts, isolation flags, recovery status, and privacy booleans.
 The public `counts` block includes aggregate retry/reuse fields such as
 `resumed_files`, `reused_files`, `reprocessed_files`, and `retry_list_files`
 without exposing processing manifest rows or retry lists.

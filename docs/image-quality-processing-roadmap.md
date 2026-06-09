@@ -168,8 +168,8 @@ Production-run update, 2026-06-09: `production-run` now writes
 `processing_quality_summary.json` beside the processing manifest and audit
 summary for every completed derivative-processing batch. The production summary
 stores a public-safe aggregate excerpt, and service job public summaries expose
-only quality status, processed/failed counts, guardrail failed counts, and
-changed-file counts.
+only quality status, processed/failed counts, guardrail failed counts,
+changed-file counts, and whitelisted aggregate quality metrics.
 
 ### M1：模板 schema 和 dry-run
 
@@ -371,7 +371,8 @@ writing derivative images.
 Follow-up, 2026-06-09: terminal service job public summaries now carry
 public-safe quality context copied from `processing_quality_summary.json`,
 including blocking codes, warning/retry counts, per-category changed-file
-counts, quality-operation category booleans, and aggregate guardrail status.
+counts, quality-operation category booleans, whitelisted aggregate quality
+metrics, and aggregate guardrail status.
 This lets API clients judge completion quality without opening private
 production summaries or path-bearing checkpoints.
 Follow-up, 2026-06-09: service job roots now reserve an isolated `review`

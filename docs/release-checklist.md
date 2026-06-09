@@ -60,7 +60,8 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   `max_tmp_bytes_per_job` are published in capabilities and public job resource
   limits. Confirm
   terminal service summaries include public-safe quality category counts,
-  operation category booleans, blocking codes, and aggregate guardrail status.
+  operation category booleans, whitelisted aggregate quality metrics, blocking
+  codes, and aggregate guardrail status.
   Confirm terminal and recoverable running service summaries include nested
   `scan-qc.service-job-public-timings.v1` timing context with only whitelisted
   stage IDs, aggregate processing throughput, whitelisted operation timing

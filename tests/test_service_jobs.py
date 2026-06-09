@@ -829,6 +829,18 @@ def _assert_public_quality_summary(testcase: unittest.TestCase, quality: dict) -
         set(quality["quality_operations_applied"]),
         {"geometry", "background_cleanup", "text_enhancement", "defect_cleanup"},
     )
+    testcase.assertIn("quality_metrics", quality)
+    for metric_id in (
+        "max_trim_margin_ratio",
+        "scanner_gutter_max_trim_margin_ratio",
+        "tone_background_delta",
+        "processed_output_brightness_increase",
+    ):
+        testcase.assertIn(metric_id, quality["quality_metrics"])
+        metric = quality["quality_metrics"][metric_id]
+        testcase.assertIsInstance(metric["count"], int)
+        testcase.assertIn("average", metric)
+        testcase.assertIn("max", metric)
     testcase.assertTrue(quality["guardrails"]["enabled"])
     testcase.assertEqual(quality["guardrails"]["warning_files"], 0)
     testcase.assertEqual(quality["guardrails"]["failed_files"], 0)

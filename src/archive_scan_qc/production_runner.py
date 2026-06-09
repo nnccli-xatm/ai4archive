@@ -380,6 +380,7 @@ def _production_quality_summary_payload(processing_quality_summary: dict[str, An
     quality_signal = processing_quality_summary.get("quality_signal")
     counts = processing_quality_summary.get("counts")
     guardrails = processing_quality_summary.get("guardrails")
+    quality_metrics = processing_quality_summary.get("quality_metrics")
     return {
         "provided": True,
         "schema_version": processing_quality_summary.get("schema_version"),
@@ -388,6 +389,7 @@ def _production_quality_summary_payload(processing_quality_summary: dict[str, An
         "public_safe": bool(processing_quality_summary.get("public_safe")),
         "counts": counts if isinstance(counts, dict) else {},
         "quality_signal": quality_signal if isinstance(quality_signal, dict) else {},
+        "quality_metrics": quality_metrics if isinstance(quality_metrics, dict) else {},
         "guardrails": guardrails if isinstance(guardrails, dict) else {},
     }
 

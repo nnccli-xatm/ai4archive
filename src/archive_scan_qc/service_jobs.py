@@ -85,6 +85,32 @@ PUBLIC_OPERATION_TIMING_IDS = (
     "enhance_faded_text",
     "sharpen_text_edges",
 )
+PUBLIC_QUALITY_METRIC_IDS = (
+    "crop_ratio",
+    "max_trim_margin_ratio",
+    "scanner_gutter_max_trim_margin_ratio",
+    "despeckle_pixel_ratio",
+    "tone_background_delta",
+    "tone_contrast_delta",
+    "paper_color_cast_delta",
+    "paper_color_cast_changed_pixel_ratio",
+    "edge_shadow_delta",
+    "corner_shadows_delta",
+    "background_stains_delta",
+    "fold_shadows_delta",
+    "illumination_gradient_correction_delta",
+    "bleed_through_delta",
+    "scanlines_delta",
+    "faded_text_delta",
+    "text_edges_delta",
+    "text_edges_edge_energy_before",
+    "text_edges_edge_energy_after",
+    "processed_output_brightness_increase",
+    "processed_output_near_white_delta",
+    "processed_output_highlight_clip_delta",
+    "processed_output_dark_pixel_loss_ratio",
+    "processed_output_dark_pixel_lift_ratio",
+)
 _ASYNC_JOB_LOCK = threading.Lock()
 _ASYNC_JOB_KEYS: set[str] = set()
 _ASYNC_JOB_WORKERS: dict[str, int] = {}
@@ -663,6 +689,7 @@ def _public_quality_payload(production_summary: dict[str, Any] | None) -> dict[s
             "public_safe": True,
             "blocking_codes": [],
             "quality_operations_applied": {},
+            "quality_metrics": {},
             "guardrails": {
                 "enabled": True,
                 "warning_files": None,
@@ -672,6 +699,7 @@ def _public_quality_payload(production_summary: dict[str, Any] | None) -> dict[s
         }
     counts = quality.get("counts") if isinstance(quality.get("counts"), dict) else {}
     signal = quality.get("quality_signal") if isinstance(quality.get("quality_signal"), dict) else {}
+    metrics = quality.get("quality_metrics") if isinstance(quality.get("quality_metrics"), dict) else {}
     guardrails = quality.get("guardrails") if isinstance(quality.get("guardrails"), dict) else {}
     return {
         "provided": True,
@@ -690,6 +718,7 @@ def _public_quality_payload(production_summary: dict[str, Any] | None) -> dict[s
         "text_enhancement_changed_files": _safe_int(signal.get("text_enhancement_changed_files")),
         "defect_cleanup_changed_files": _safe_int(signal.get("defect_cleanup_changed_files")),
         "quality_operations_applied": _bool_dict(signal.get("quality_operations_applied")),
+        "quality_metrics": _public_quality_metrics(metrics),
         "guardrails": {
             "enabled": bool(guardrails.get("enabled", True)),
             "warning_files": _safe_int(guardrails.get("warning_files")),
@@ -697,6 +726,21 @@ def _public_quality_payload(production_summary: dict[str, Any] | None) -> dict[s
             "failure_reasons": _int_dict(guardrails.get("failure_reasons")),
         },
     }
+
+
+def _public_quality_metrics(metrics: Any) -> dict[str, dict[str, float | int | None]]:
+    metrics = metrics if isinstance(metrics, dict) else {}
+    public_metrics: dict[str, dict[str, float | int | None]] = {}
+    for metric_id in PUBLIC_QUALITY_METRIC_IDS:
+        payload = metrics.get(metric_id)
+        if not isinstance(payload, dict):
+            continue
+        public_metrics[metric_id] = {
+            "count": _safe_int(payload.get("count")) or 0,
+            "average": _safe_float(payload.get("average")),
+            "max": _safe_float(payload.get("max")),
+        }
+    return public_metrics
 
 
 def _public_timings_payload(

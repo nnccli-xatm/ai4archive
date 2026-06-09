@@ -58,9 +58,9 @@ subject to local policy review. Service-job rehearsal cores also write
 `scan-qc.service-job-index-public-summary.v1`; both are classified as
 `prototype_or_validation` until the HTTP service/API surface is promoted. The
 service job public summary may expose aggregate quality category counts,
-blocking codes, and guardrail summaries from `processing_quality_summary.json`,
-plus aggregate local review availability, queue counts, processing-review group
-counts, and nested timing context with schema
+whitelisted aggregate `quality_metrics`, blocking codes, and guardrail summaries
+from `processing_quality_summary.json`, plus aggregate local review availability,
+queue counts, processing-review group counts, and nested timing context with schema
 `scan-qc.service-job-public-timings.v1`, plus nested source-integrity aggregate
 counts with schema `scan-qc.service-job-source-integrity.v1`. Its public
 `counts` block may also expose aggregate retry/reuse counts such as
@@ -137,7 +137,8 @@ paths, or echo name patterns, rule rows, paths, filenames, hashes, or file
 identifiers.
 Terminal service job summaries also expose public-safe quality context:
 blocking codes, processing warning and retry counts, per-category changed-file
-counts, quality-operation category booleans, and aggregate guardrail status.
+counts, quality-operation category booleans, whitelisted aggregate quality
+metrics, and aggregate guardrail status.
 These fields are copied only from the public-safe production quality summary and
 remain free of local paths and filenames.
 Terminal and recoverable running summaries also expose public-safe `timings`
