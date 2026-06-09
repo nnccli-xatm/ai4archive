@@ -136,7 +136,10 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   reject `--rule-template custom` without `--rules-profile`. Confirm
   `text-clean-readable-v1` and legacy `text-clean-print` record the disabled
   despeckle content-type preservation gate in processing manifests and
-  production-run options.
+  production-run options. Confirm `photo-mixed-safe-v1` production runs on a
+  mixed photo/stamp/table fixture keep strong cleanup, faded-text enhancement,
+  and text-edge sharpening disabled while still writing a public-safe quality
+  summary.
 - Confirm `archive-scan-qc rule-template-dry-run --rule-template custom`
   rejects the request with a public-safe operator error unless a future
   validated custom-template dry-run path is added.

@@ -269,6 +269,15 @@ fixture set now includes this ultra-pale typed-glyph case.
 - 被保护区域的色彩偏移和结构变化受限。
 - 本地 review package 能按风险分组展示候选。
 
+Implementation note, 2026-06-09: `photo-mixed-safe-v1` now has an end-to-end
+production CLI contract test using a synthetic mixed photo/stamp/table page.
+The test proves that production summaries and processing manifests keep
+normalize-tones, strong background cleanup, bleed-through cleanup, faded-text
+enhancement, and text-edge sharpening disabled for the mixed-safe template while
+still preserving source bytes and writing a public-safe quality summary. Region
+level color/structure drift limits and risk-grouped review packaging remain M3
+follow-up work.
+
 ### M4：服务 API 和状态恢复
 
 目标：把质量处理从 CLI 能力演进到稳定后台任务。

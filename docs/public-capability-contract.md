@@ -93,6 +93,10 @@ derivative images. `rule-template-dry-run` may read a local sensitive scan
 report when `--scan-report` is provided, but its output remains aggregate-only
 and excludes paths, filenames, hashes, thumbnails, OCR text, image content, and
 row-level evidence.
+For actual production runs, `photo-mixed-safe-v1` must keep strong cleanup,
+faded-text enhancement, and text-edge sharpening disabled in the production
+summary and processing manifest while still emitting the public-safe
+`processing_quality_summary.json` aggregate.
 
 The prototype local service API exposes the same public-safe read-only surfaces
 through `GET /api/rule-templates` and `GET /api/rule-templates/{template_id}`.

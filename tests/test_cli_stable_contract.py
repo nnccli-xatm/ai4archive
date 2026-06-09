@@ -139,6 +139,70 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         self.assertTrue(summary["options"]["enhance_faded_text"])
         self.assertTrue(summary["options"]["sharpen_text_edges"])
 
+    def test_production_run_photo_mixed_safe_template_keeps_strong_cleanup_disabled(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-cli-photo-safe-template-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            source = input_dir / "MIXED001_PAGE_0001.png"
+            _write_mixed_photo_safe_page(source)
+            source_bytes = source.read_bytes()
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "production-run",
+                        "--input",
+                        str(input_dir),
+                        "--derivatives-out",
+                        str(derivatives_dir),
+                        "--metadata-out",
+                        str(metadata_dir),
+                        "--rule-template",
+                        "photo-mixed-safe-v1",
+                        "--workers",
+                        "1",
+                    ]
+                )
+
+            summary = json.loads((metadata_dir / "production_run_summary.json").read_text(encoding="utf-8"))
+            processing_manifest = json.loads(
+                (derivatives_dir / "processing_manifest.json").read_text(encoding="utf-8")
+            )
+            quality_summary = json.loads(
+                (derivatives_dir / PROCESSING_QUALITY_SUMMARY_JSON).read_text(encoding="utf-8")
+            )
+            source_unchanged = source.read_bytes() == source_bytes
+
+        record = processing_manifest["files"][0]
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(source_unchanged)
+        self.assertEqual(summary["rule_template"]["id"], "photo-mixed-safe-v1")
+        self.assertEqual(processing_manifest["rule_template"]["id"], "photo-mixed-safe-v1")
+        self.assertTrue(summary["options"]["trim_dark_border"])
+        self.assertTrue(summary["options"]["scanner_gutter_trim"])
+        self.assertTrue(summary["options"]["reuse_scan_measurements"])
+        self.assertFalse(summary["options"]["normalize_tones"])
+        self.assertFalse(summary["options"]["lighten_background_stains"])
+        self.assertFalse(summary["options"]["clean_bleed_through"])
+        self.assertFalse(summary["options"]["enhance_faded_text"])
+        self.assertFalse(summary["options"]["sharpen_text_edges"])
+        self.assertFalse(processing_manifest["options"]["normalize_tones"])
+        self.assertFalse(processing_manifest["options"]["lighten_background_stains"])
+        self.assertFalse(processing_manifest["options"]["enhance_faded_text"])
+        self.assertFalse(processing_manifest["options"]["sharpen_text_edges"])
+        self.assertIn("normalize_tones_disabled", record["operations"])
+        self.assertIn("lighten_background_stains_disabled", record["operations"])
+        self.assertIn("enhance_faded_text_disabled", record["operations"])
+        self.assertIn("sharpen_text_edges_disabled", record["operations"])
+        self.assertTrue(summary["processing_quality_summary"]["public_safe"])
+        self.assertEqual(quality_summary["schema_version"], QUALITY_SCHEMA_VERSION)
+        self.assertFalse(quality_summary["privacy"]["contains_paths"])
+        self.assertFalse(summary["source_images_modified"])
+
     def test_run_plan_accepts_rule_template_and_records_public_batch_choice(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-cli-run-plan-template-") as temp_dir:
             root = Path(temp_dir)
@@ -375,6 +439,31 @@ def _write_clean_page(path: Path) -> None:
         y = 140 + index * 45
         draw.line((100, y, 540, y), fill=(40, 40, 40), width=2)
     image.save(path, dpi=(300, 300))
+
+
+def _write_mixed_photo_safe_page(path: Path) -> None:
+    image = Image.new("RGB", (640, 900), (246, 244, 238))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((60, 60, 580, 840), outline=(208, 204, 194), width=2)
+    pixels = image.load()
+    for y in range(130, 430):
+        for x in range(80, 360):
+            red = 82 + (x - 80) // 3
+            green = 92 + (y - 130) // 4
+            blue = 118 + ((x + y) % 34)
+            pixels[x, y] = (min(red, 182), min(green, 174), min(blue, 190))
+    draw.ellipse((410, 140, 540, 260), outline=(190, 34, 30), width=8)
+    draw.line((430, 200, 520, 200), fill=(190, 34, 30), width=3)
+    for row in range(0, 6):
+        y = 520 + row * 34
+        draw.line((90, y, 550, y), fill=(72, 72, 72), width=1)
+    for column in range(0, 5):
+        x = 90 + column * 115
+        draw.line((x, 520, x, 690), fill=(72, 72, 72), width=1)
+    for index in range(5):
+        y = 740 + index * 24
+        draw.rectangle((100, y, 420, y + 7), fill=(74, 74, 74))
+    image.save(path, dpi=(600, 600))
 
 
 if __name__ == "__main__":

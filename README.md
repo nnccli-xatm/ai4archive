@@ -740,6 +740,10 @@ Built-ins include the v1 templates `archival-safe-v1`,
 `text-clean-readable-v1`, `print-clean-v1`, and `photo-mixed-safe-v1`. The
 legacy IDs `dat-31-2017-standard`, `text-clean-print`, and
 `high-fidelity-original` remain supported for existing run plans.
+`photo-mixed-safe-v1` is covered by a production-run contract test with a
+synthetic mixed photo/stamp/table page; the production summary and processing
+manifest must keep strong background cleanup, faded-text enhancement, and text
+edge sharpening disabled while still writing a public-safe quality summary.
 The dry-run can optionally read a local `scan_qc_report.json`, but the output is
 aggregate-only: it reports file/finding counts, planned operation stages, and
 risk codes without paths, filenames, hashes, thumbnails, OCR text, image
