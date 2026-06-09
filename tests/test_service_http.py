@@ -299,7 +299,10 @@ class ServiceHttpTransportTests(unittest.TestCase):
     def test_http_rule_template_catalog_and_detail_are_public_safe(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-http-templates-") as temp_dir:
             root = Path(temp_dir)
+            input_dir = root / "private-input"
             service_root = root / "service-root"
+            input_dir.mkdir()
+            _write_page(input_dir / "private_page_001.png")
             with _running_server(service_root) as base_url:
                 catalog_status, catalog = _json_request(base_url, "GET", "/api/rule-templates")
                 detail_status, detail = _json_request(
@@ -378,6 +381,22 @@ class ServiceHttpTransportTests(unittest.TestCase):
                 )
                 catalog_after_status, catalog_after = _json_request(base_url, "GET", "/api/rule-templates")
                 custom_status, custom_error = _json_request(base_url, "GET", "/api/rule-templates/custom")
+                missing_detail_status, missing_detail_error = _json_request(
+                    base_url,
+                    "GET",
+                    "/api/rule-templates/custom-missing001",
+                )
+                missing_job_status, missing_job_error = _json_request(
+                    base_url,
+                    "POST",
+                    "/api/jobs",
+                    {
+                        "job_id": "job-missingtemplate001",
+                        "input_dir": str(input_dir),
+                        "rule_template": "custom-missing001",
+                        "workers": 1,
+                    },
+                )
             raw = json.dumps(
                 {
                     "catalog": catalog,
@@ -390,6 +409,8 @@ class ServiceHttpTransportTests(unittest.TestCase):
                     "duplicate_error": duplicate_error,
                     "managed_root_error": managed_root_error,
                     "custom_error": custom_error,
+                    "missing_detail_error": missing_detail_error,
+                    "missing_job_error": missing_job_error,
                 },
                 ensure_ascii=False,
             )
@@ -404,6 +425,8 @@ class ServiceHttpTransportTests(unittest.TestCase):
             self.assertEqual(managed_root_status, 400)
             self.assertEqual(catalog_after_status, 200)
             self.assertEqual(custom_status, 400)
+            self.assertEqual(missing_detail_status, 404)
+            self.assertEqual(missing_job_status, 404)
             self.assertEqual(catalog["schema_version"], "scan-qc.rule-template-catalog.v1")
             self.assertEqual(detail["schema_version"], "scan-qc.rule-template-dry-run.v1")
             self.assertEqual(validation["schema_version"], "scan-qc.rule-template-custom-validation.v1")
@@ -426,7 +449,18 @@ class ServiceHttpTransportTests(unittest.TestCase):
             self.assertEqual(custom_error["schema_version"], "scan-qc.service-api-error.v1")
             self.assertEqual(custom_error["error"]["code"], "invalid_request")
             self.assertFalse(custom_error["private_paths_exposed"])
-            _assert_public_text_omits(self, raw, str(root.resolve()), "private-pattern", "private-template-pattern")
+            self.assertEqual(missing_detail_error["error"]["code"], "rule_template_not_found")
+            self.assertEqual(missing_job_error["error"]["code"], "rule_template_not_found")
+            self.assertFalse((service_root / "jobs" / "job-missingtemplate001").exists())
+            _assert_public_text_omits(
+                self,
+                raw,
+                str(root.resolve()),
+                "private-pattern",
+                "private-template-pattern",
+                "private-input",
+                "private_page_001",
+            )
 
 
 class _running_server:

@@ -114,8 +114,11 @@ summary and processing manifest while still emitting the public-safe
 The prototype local service API exposes the same public-safe read-only surfaces
 through `GET /api/rule-templates` and `GET /api/rule-templates/{template_id}`.
 The detail endpoint returns the no-image dry-run plan without reading local scan
-reports. Custom template `POST`/`PUT` APIs remain unimplemented until validation,
-authorization, and recovery semantics are defined.
+reports. Service-managed custom template validation and writes are available
+through `POST /api/rule-templates/validate`, `POST /api/rule-templates`, and
+`PUT /api/rule-templates/{template_id}`; those responses expose only public-safe
+validation counts, risk codes, processing-default booleans, and service template
+IDs.
 
 The prototype local service job API exposes public-safe job polling through
 `POST /api/jobs`, `GET /api/jobs`, `GET /api/jobs/{job_id}`,
@@ -162,7 +165,11 @@ artifact IDs, validates the resolved artifact path inside the job's isolated
 `review` directory, and returns payloads marked `local_only`, `sensitive`, and
 `public_safe=false`. The HTTP service rejects non-loopback bind hosts.
 Missing job checkpoints return a public-safe 404 `job_not_found` response,
-distinct from 400 `input_dir_missing` during job creation.
+distinct from 400 `input_dir_missing` during job creation. Missing
+service-managed custom template IDs return public-safe 404
+`rule_template_not_found`; invalid template IDs or unsupported `custom` dry-run
+requests remain 400 validation errors. A job creation request that references a
+missing custom template must fail before writing a partial job checkpoint.
 
 ## Image Processing Capability Smoke
 

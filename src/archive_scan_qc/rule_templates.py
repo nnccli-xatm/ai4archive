@@ -35,6 +35,11 @@ _ALLOWED_CUSTOM_PROCESSING_DEFAULTS = tuple(
     sorted({key for defaults in RULE_TEMPLATE_PROCESSING_DEFAULTS.values() for key in defaults})
 )
 
+
+class RuleTemplateNotFoundError(FileNotFoundError):
+    """Raised when a service-managed rule template id has no stored template."""
+
+
 _TEMPLATE_DESCRIPTIONS: dict[str, dict[str, Any]] = {
     "dat-31-2017-standard": {
         "name_zh": "DA/T 31-2017 标准模板",
@@ -266,7 +271,7 @@ def load_service_rule_template(service_root: Path, template_id: str) -> dict[str
     service_template_id = _validate_service_rule_template_id(template_id)
     path = _service_rule_template_path(service_root, service_template_id)
     if not path.is_file():
-        raise RulesProfileError("Service rule template does not exist.")
+        raise RuleTemplateNotFoundError("Service rule template does not exist.")
     stored = _read_service_rule_template(path)
     if not isinstance(stored, dict) or stored.get("schema_version") != SERVICE_RULE_TEMPLATE_SCHEMA_VERSION:
         raise RulesProfileError("Service rule template schema is unsupported.")

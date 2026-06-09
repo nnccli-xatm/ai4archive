@@ -88,7 +88,9 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   bind hosts.
   Confirm missing job status and local-review requests return 404
   `job_not_found`, while missing create-job input directories still return 400
-  `input_dir_missing`.
+  `input_dir_missing`. Confirm missing service-managed custom templates return
+  404 `rule_template_not_found` and do not leave a partial job checkpoint or job
+  directory.
   Confirm `POST /api/rule-templates` and
   `PUT /api/rule-templates/{template_id}` save service-managed custom templates,
   return only public-safe validation counts/risk codes/processing defaults, do

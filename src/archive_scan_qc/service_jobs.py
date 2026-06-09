@@ -168,10 +168,6 @@ def create_service_job(config: ServiceJobConfig, *, job_id: str | None = None) -
     if job_root.exists():
         raise FileExistsError(f"Service job already exists: {job_id}")
 
-    directories = _job_directories(job_root)
-    for path in directories.values():
-        path.mkdir(parents=True, exist_ok=False)
-
     stored_template = _stored_service_template(service_root, config.rule_template)
     profile = _rules_profile_for_template(config.rule_template, service_root, stored_template=stored_template)
     processing_defaults = _processing_options_for_job(
@@ -187,6 +183,9 @@ def create_service_job(config: ServiceJobConfig, *, job_id: str | None = None) -
             "service_template_id": config.rule_template,
             "source": "service-managed-custom-template",
         }
+    directories = _job_directories(job_root)
+    for path in directories.values():
+        path.mkdir(parents=True, exist_ok=False)
     now = _utc_now()
     record = {
         "schema_version": SERVICE_JOB_SCHEMA_VERSION,

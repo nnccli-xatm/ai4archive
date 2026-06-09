@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from .rule_templates import RuleTemplateNotFoundError
 from .service_api import (
     cancel_job_response,
     create_job_response,
@@ -190,6 +191,9 @@ class ServiceApiRequestHandler(BaseHTTPRequestHandler):
             return
         if isinstance(exc, ServiceJobNotFoundError):
             self._send_error_json(404, "job_not_found", "Service job does not exist.")
+            return
+        if isinstance(exc, RuleTemplateNotFoundError):
+            self._send_error_json(404, "rule_template_not_found", "Rule template does not exist.")
             return
         if isinstance(exc, FileNotFoundError):
             self._send_error_json(400, "input_dir_missing", "Input directory does not exist or is not authorized.")

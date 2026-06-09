@@ -1518,7 +1518,9 @@ are explicitly `local_only`, `sensitive`, and not public-safe; the HTTP service
 rejects non-loopback bind hosts.
 HTTP requests for missing jobs return a public-safe 404 `job_not_found` error;
 missing or unauthorized input directories during job creation remain 400
-`input_dir_missing`.
+`input_dir_missing`. Missing service-managed custom rule templates return a
+public-safe 404 `rule_template_not_found`, and job creation rejects that request
+before writing a partial job checkpoint.
 Recovery revalidates the checkpoint input path against the service root and
 marks stale `running` records without progress as `needs_recovery`, so a service
 restart does not leave an orphaned job looking active.

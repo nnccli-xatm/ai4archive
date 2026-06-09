@@ -312,6 +312,10 @@ the service API on a non-loopback host.
 Treat HTTP 404 `job_not_found` as a missing checkpoint/job-id condition. Treat
 400 `input_dir_missing` only as a job creation input authorization or existence
 problem.
+Treat HTTP 404 `rule_template_not_found` as a missing service-managed custom
+template. The service must reject that request before writing a partial job
+checkpoint or job directory; invalid template IDs still use the public-safe
+400 validation path.
 Use service-job cancellation only to mark a non-terminal job as stopped; the
 current synchronous runner cannot interrupt an in-flight image operation from a
 separate request, but it records `cancelled` as a terminal public-safe state and

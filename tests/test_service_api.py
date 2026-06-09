@@ -23,6 +23,7 @@ from archive_scan_qc.service_api import (
     start_job_response,
     validate_rule_template_response,
 )
+from archive_scan_qc.rule_templates import RuleTemplateNotFoundError
 from archive_scan_qc.service_jobs import SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON, ServiceJobNotFoundError
 
 
@@ -196,6 +197,29 @@ class ServiceApiCoreTests(unittest.TestCase):
             self.assertEqual(updated["action"], "updated")
             self.assertFalse(updated["storage"]["path_returned"])
             _assert_public_text_omits(self, raw, str(root.resolve()), "private-name-pattern")
+
+    def test_missing_service_rule_template_raises_not_found_without_job_dirs(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-api-template-missing-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-input"
+            service_root = root / "service-root"
+            input_dir.mkdir()
+            _write_page(input_dir / "private_page_001.png")
+
+            with self.assertRaises(RuleTemplateNotFoundError):
+                get_rule_template_response(service_root=service_root, template_id="custom-missing001")
+            with self.assertRaises(RuleTemplateNotFoundError):
+                create_job_response(
+                    {
+                        "input_dir": str(input_dir),
+                        "service_root": str(service_root),
+                        "rule_template": "custom-missing001",
+                        "workers": 1,
+                    },
+                    job_id="job-missingtemplate001",
+                )
+
+            self.assertFalse((service_root / "jobs" / "job-missingtemplate001").exists())
 
     def test_job_create_status_cancel_and_index_responses_stay_public_safe(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-api-job-") as temp_dir:

@@ -231,6 +231,9 @@ review artifact 读取通道，只接受 `processing-review-package` 和
 现在拒绝非回环地址绑定。
 缺失的 service job checkpoint 现在通过 public-safe 404 `job_not_found`
 表达，和创建 job 时输入目录缺失或未授权的 400 `input_dir_missing` 明确区分。
+缺失的 service-managed custom rule template 现在通过 public-safe 404
+`rule_template_not_found` 表达；引用缺失模板创建 job 会在写入 job checkpoint
+或 job 目录前失败，避免恢复器看到半成品任务。
 
 ## 6. 阶段 2：图像处理规则模板系统
 

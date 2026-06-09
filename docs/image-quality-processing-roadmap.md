@@ -411,6 +411,10 @@ non-loopback bind hosts.
 Follow-up, 2026-06-09: missing service job checkpoints now return explicit
 public-safe 404 `job_not_found` errors, separate from 400 `input_dir_missing`
 for invalid create-job inputs.
+Follow-up, 2026-06-09: missing service-managed custom rule templates now return
+explicit public-safe 404 `rule_template_not_found` errors. Job creation validates
+the requested custom template before writing job directories or checkpoints, so
+failed template references do not create stale recoverable jobs.
 Follow-up, 2026-06-09: service job public summaries now include nested
 `scan-qc.service-job-public-timings.v1` timing context. The service layer
 filters production-run stage timings, aggregate processing throughput, and
