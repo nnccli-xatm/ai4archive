@@ -235,6 +235,10 @@ stale `running` progress file after a service restart, it reports
 Recovery also treats a private `service_job.json` checkpoint that still says
 `running` but has no progress file as `needs_recovery`, and it rejects a tampered
 checkpoint whose `input_dir` now overlaps the service root.
+When recovering the full service root, read
+`service_job_index_public_summary.json` for aggregate job state counts and
+per-job public summaries; it is designed for polling without exposing local
+paths.
 
 The manifest CSV must contain a `relative_path` column with paths relative to
 `--input`. Keep `--out` and `--process-out` outside the input tree where

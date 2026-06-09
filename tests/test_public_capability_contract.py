@@ -57,6 +57,11 @@ class PublicCapabilityContractTests(unittest.TestCase):
         )
         self.assertEqual(artifacts["service_job_public_summary.json"]["stability"], "prototype_or_validation")
         self.assertEqual(
+            artifacts["service_job_index_public_summary.json"]["schema_version"],
+            "scan-qc.service-job-index-public-summary.v1",
+        )
+        self.assertEqual(artifacts["service_job_index_public_summary.json"]["stability"], "prototype_or_validation")
+        self.assertEqual(
             artifacts["image_processing_capability_smoke.json"]["schema_version"],
             "scan-qc.image-processing-capability-smoke.v1",
         )

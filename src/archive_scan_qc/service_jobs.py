@@ -32,8 +32,10 @@ from .rules import (
 
 SERVICE_JOB_SCHEMA_VERSION = "scan-qc.service-job.v1"
 SERVICE_JOB_PUBLIC_SUMMARY_SCHEMA_VERSION = "scan-qc.service-job-public-summary.v1"
+SERVICE_JOB_INDEX_PUBLIC_SUMMARY_SCHEMA_VERSION = "scan-qc.service-job-index-public-summary.v1"
 SERVICE_JOB_RECORD_JSON = "service_job.json"
 SERVICE_JOB_PUBLIC_SUMMARY_JSON = "service_job_public_summary.json"
+SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON = "service_job_index_public_summary.json"
 SERVICE_JOBS_DIRNAME = "jobs"
 JOB_ID_PATTERN = re.compile(r"^job-[A-Za-z0-9][A-Za-z0-9_-]{2,80}$")
 TERMINAL_STATES = {"finished", "needs_review", "failed", "interrupted"}
@@ -151,6 +153,7 @@ def recover_service_jobs(service_root: Path) -> dict[str, Any]:
     """Recover every job under a service root and return an aggregate public summary."""
 
     root = service_root.resolve()
+    root.mkdir(parents=True, exist_ok=True)
     jobs_dir = root / SERVICE_JOBS_DIRNAME
     summaries: list[dict[str, Any]] = []
     if jobs_dir.is_dir():
@@ -163,8 +166,8 @@ def recover_service_jobs(service_root: Path) -> dict[str, Any]:
     for summary in summaries:
         state = str(summary.get("state") or "unknown")
         state_counts[state] = state_counts.get(state, 0) + 1
-    return {
-        "schema_version": "scan-qc.service-job-index-public-summary.v1",
+    index = {
+        "schema_version": SERVICE_JOB_INDEX_PUBLIC_SUMMARY_SCHEMA_VERSION,
         "generated_at": _utc_now(),
         "aggregate_only": True,
         "public_safe": True,
@@ -173,6 +176,11 @@ def recover_service_jobs(service_root: Path) -> dict[str, Any]:
         "jobs": summaries,
         "privacy": _public_summary_privacy(),
     }
+    (root / SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON).write_text(
+        json.dumps(index, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return index
 
 
 def load_service_job_record(service_root: Path, job_id: str) -> dict[str, Any]:

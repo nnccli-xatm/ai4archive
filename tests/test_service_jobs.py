@@ -8,6 +8,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 from archive_scan_qc.service_jobs import (
+    SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON,
     SERVICE_JOB_PUBLIC_SUMMARY_JSON,
     SERVICE_JOB_RECORD_JSON,
     ServiceJobConfig,
@@ -231,12 +232,19 @@ class ServiceJobBoundaryTests(unittest.TestCase):
                 )
 
             summary = recover_service_jobs(service_root)
+            index_path = service_root / SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON
+            file_summary = json.loads(index_path.read_text(encoding="utf-8"))
             raw = json.dumps(summary, ensure_ascii=False)
+            file_raw = json.dumps(file_summary, ensure_ascii=False)
 
             self.assertEqual(summary["job_count"], 2)
             self.assertEqual(summary["state_counts"], {"created": 2})
+            self.assertEqual(file_summary["schema_version"], "scan-qc.service-job-index-public-summary.v1")
+            self.assertEqual(file_summary["job_count"], 2)
+            self.assertEqual(file_summary["state_counts"], {"created": 2})
             self.assertEqual({job["job_id"] for job in summary["jobs"]}, {"job-testindex001", "job-testindex002"})
             _assert_public_text_omits(self, raw, str(root.resolve()), "private_page_")
+            _assert_public_text_omits(self, file_raw, str(root.resolve()), "private_page_")
 
 
 def _write_page(path: Path) -> None:

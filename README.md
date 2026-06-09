@@ -1479,12 +1479,16 @@ booleans.
 Recovery revalidates the checkpoint input path against the service root and
 marks stale `running` records without progress as `needs_recovery`, so a service
 restart does not leave an orphaned job looking active.
+Recovering the whole service root also writes
+`service_job_index_public_summary.json`, a public-safe aggregate index of job
+states and per-job public summaries for service polling.
 
 Treat `service_job.json`, `production_run_summary.json`, progress files, scan
 reports, processing manifests, derivative images, and review queues as local
 sensitive state. Treat `service_job_public_summary.json` as public-safe
 prototype/validation evidence after local policy review; it must not contain
 source paths, filenames, hashes, OCR text, thumbnails, or image content. The
+service-root index follows the same public-safe boundary. The
 service core currently reuses the production runner synchronously and is not yet
 a stable public CLI or HTTP API surface.
 

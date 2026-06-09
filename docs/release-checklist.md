@@ -30,9 +30,9 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   service-root overlap, recover stale `running` progress as `needs_recovery`,
   recover `running` checkpoints without progress as `needs_recovery`, reject
   tampered checkpoint input paths that overlap the service root, and keep
-  `service_job_public_summary.json` free of paths, filenames, hashes, OCR text,
-  thumbnails, and image content. Treat `service_job.json` as private checkpoint
-  state.
+  `service_job_public_summary.json` and `service_job_index_public_summary.json`
+  free of paths, filenames, hashes, OCR text, thumbnails, and image content.
+  Treat `service_job.json` as private checkpoint state.
 - Confirm `archive-scan-qc image-processing-capability-smoke --out
   /placeholder/private-validation-output/image-processing-capability-smoke`
   creates `image_processing_capability_smoke.json` with schema

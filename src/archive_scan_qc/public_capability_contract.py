@@ -288,6 +288,11 @@ def build_public_capability_contract(generated_at: str | None = None) -> dict[st
             _artifact(RULE_TEMPLATE_CATALOG_JSON, "scan-qc.rule-template-catalog.v1", "stable_public_safe_aggregate"),
             _artifact(RULE_TEMPLATE_DRY_RUN_JSON, "scan-qc.rule-template-dry-run.v1", "stable_public_safe_aggregate"),
             _artifact("service_job_public_summary.json", "scan-qc.service-job-public-summary.v1", "prototype_or_validation"),
+            _artifact(
+                "service_job_index_public_summary.json",
+                "scan-qc.service-job-index-public-summary.v1",
+                "prototype_or_validation",
+            ),
             _artifact(PUBLIC_CAPABILITY_CONTRACT_JSON, SCHEMA_VERSION, "stable_public_safe_aggregate"),
         ],
         "processing_contract": {

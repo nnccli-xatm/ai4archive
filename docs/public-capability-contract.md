@@ -53,7 +53,9 @@ Public-safe aggregate outputs include release and handoff summaries such as
 `artifact_readiness_checklist.json`, and `workbench_public_summary.json`,
 subject to local policy review. Service-job rehearsal cores also write
 `service_job_public_summary.json` with schema
-`scan-qc.service-job-public-summary.v1`; it is classified as
+`scan-qc.service-job-public-summary.v1` and
+`service_job_index_public_summary.json` with schema
+`scan-qc.service-job-index-public-summary.v1`; both are classified as
 `prototype_or_validation` until the HTTP service/API surface is promoted.
 
 Stable local operational outputs such as `production_run_summary.json`,

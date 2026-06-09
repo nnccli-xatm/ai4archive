@@ -150,6 +150,9 @@ without exposing private paths. The HTTP API endpoints remain the next service
 MVP step.
 The checkpoint loader also revalidates `input_dir` against the service root and
 marks `running` records without progress as `needs_recovery` after restart.
+Root-level recovery now writes `service_job_index_public_summary.json` so an
+external scheduler can poll aggregate job state without reading private
+checkpoints.
 
 ## 6. 阶段 2：图像处理规则模板系统
 
