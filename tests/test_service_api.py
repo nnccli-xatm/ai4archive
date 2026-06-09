@@ -153,6 +153,9 @@ class ServiceApiCoreTests(unittest.TestCase):
             self.assertIn("background_cleanup", summary["quality"]["quality_operations_applied"])
             self.assertTrue(summary["quality"]["guardrails"]["enabled"])
             self.assertEqual(summary["quality"]["guardrails"]["failed_files"], 0)
+            self.assertTrue(summary["local_review"]["provided"])
+            self.assertTrue(summary["local_review"]["production_review_queue_written"])
+            self.assertFalse(summary["local_review"]["privacy"]["contains_paths"])
             _assert_public_text_omits(self, raw, str(root.resolve()), "private_page_001")
 
     def test_job_start_response_returns_running_then_terminal_without_paths(self) -> None:
@@ -186,6 +189,7 @@ class ServiceApiCoreTests(unittest.TestCase):
             self.assertEqual(terminal["quality"]["processed_files"], 1)
             self.assertIn("text_enhancement", terminal["quality"]["quality_operations_applied"])
             self.assertEqual(terminal["quality"]["guardrails"]["failure_reasons"], {})
+            self.assertTrue(terminal["local_review"]["processing_review_package_written"])
             _assert_public_text_omits(self, raw, str(root.resolve()), "private_page_001")
 
     def test_create_job_response_requires_paths(self) -> None:

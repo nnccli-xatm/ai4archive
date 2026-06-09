@@ -1491,6 +1491,11 @@ HTTP transport for prototype `curl` or frontend integration.
 settings for recovery. The shareable `service_job_public_summary.json` records
 only aggregate status, counts, quality category signals, guardrail summary,
 isolation flags, recovery status, and privacy booleans.
+When a service job reaches production processing, it also writes local-only
+`processing_review_package.json`, `processing_review_package.html`, and
+`production_review_queue.json` files inside the isolated `review` directory.
+The public summary reports only whether those local review files were written
+and aggregate review queue counts.
 Recovery revalidates the checkpoint input path against the service root and
 marks stale `running` records without progress as `needs_recovery`, so a service
 restart does not leave an orphaned job looking active.

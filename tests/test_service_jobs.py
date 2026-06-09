@@ -141,6 +141,22 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertTrue((job_root / "metadata" / "production_run_summary.json").is_file())
             self.assertTrue((job_root / "derivatives" / "processing_manifest.json").is_file())
             self.assertTrue((job_root / "derivatives" / PROCESSING_QUALITY_SUMMARY_JSON).is_file())
+            self.assertTrue((job_root / "review" / "processing_review_package.json").is_file())
+            self.assertTrue((job_root / "review" / "processing_review_package.html").is_file())
+            self.assertTrue((job_root / "review" / "production_review_queue.json").is_file())
+            review_package = json.loads(
+                (job_root / "review" / "processing_review_package.json").read_text(encoding="utf-8")
+            )
+            review_queue = json.loads(
+                (job_root / "review" / "production_review_queue.json").read_text(encoding="utf-8")
+            )
+            self.assertTrue(review_package["privacy"]["local_only"])
+            self.assertTrue(review_queue["privacy"]["local_only"])
+            self.assertTrue(summary["local_review"]["provided"])
+            self.assertTrue(summary["local_review"]["processing_review_package_written"])
+            self.assertTrue(summary["local_review"]["production_review_queue_written"])
+            self.assertIsInstance(summary["local_review"]["review_item_count"], int)
+            self.assertFalse(summary["local_review"]["privacy"]["contains_paths"])
             _assert_public_text_omits(self, public_raw, str(root.resolve()), "private_page_001")
             self.assertFalse(summary["private_paths_exposed"])
 
@@ -171,6 +187,8 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertEqual(terminal["quality"]["status"], "pass")
             self.assertEqual(terminal["counts"]["processed_files"], 1)
             _assert_public_quality_summary(self, terminal["quality"])
+            self.assertTrue(terminal["local_review"]["provided"])
+            self.assertTrue(terminal["local_review"]["processing_review_package_html_written"])
             _assert_public_text_omits(self, public_raw, str(root.resolve()), "private_page_001")
 
     def test_start_job_async_enforces_active_job_limit_before_marking_running(self) -> None:

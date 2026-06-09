@@ -22,7 +22,9 @@ from .production_runner import (
     ProductionRunConfig,
     run_production_folder,
 )
+from .processing_review import write_processing_review_package
 from .processing_quality_summary import PROCESSING_QUALITY_SUMMARY_JSON
+from .production_review_queue import PRODUCTION_REVIEW_QUEUE_JSON, write_production_review_queue
 from .rules import (
     BUILTIN_RULE_TEMPLATE_IDS,
     RulesProfileError,
@@ -165,7 +167,9 @@ def _execute_running_service_job(service_root: Path, job_id: str, *, raise_error
     if record.get("state") != "running":
         return recover_service_job(service_root, job_id)
     try:
-        run_production_folder(_production_config_from_record(record))
+        production_summary = run_production_folder(_production_config_from_record(record))
+        latest = load_service_job_record(service_root, job_id)
+        _refresh_service_job_review_artifacts(latest, production_summary)
     except BaseException:
         latest = load_service_job_record(service_root, job_id)
         if latest.get("state") == "cancelled":
@@ -465,6 +469,7 @@ def _public_summary_from_record(
         },
         "recovery": _public_recovery_payload(record.get("recovery")),
         "quality": _public_quality_payload(production_summary),
+        "local_review": _public_local_review_payload(record.get("local_review")),
         "source_images_modified": False,
         "network_services_called": False,
         "private_paths_exposed": False,
@@ -575,6 +580,111 @@ def _int_dict(value: Any) -> dict[str, int]:
     if not isinstance(value, dict):
         return {}
     return {str(key): _safe_int(count) or 0 for key, count in sorted(value.items()) if isinstance(key, str)}
+
+
+def _refresh_service_job_review_artifacts(record: dict[str, Any], production_summary: dict[str, Any]) -> None:
+    try:
+        review_dir = _service_job_review_dir(record)
+        review_dir.mkdir(parents=True, exist_ok=True)
+        artifacts = production_summary.get("artifacts") if isinstance(production_summary, dict) else {}
+        artifacts = artifacts if isinstance(artifacts, dict) else {}
+        manifest_path = Path(str(artifacts.get("processing_manifest", "")))
+        scan_report_path = Path(str(artifacts.get("admin_scan_report", "")))
+        if not manifest_path.is_file():
+            record["local_review"] = _local_review_unavailable("missing_processing_manifest")
+            _write_job_record(_job_root_from_record(record), record)
+            return
+
+        review_json_path, review_html_path = write_processing_review_package(manifest_path, review_dir)
+        queue_path = review_dir / PRODUCTION_REVIEW_QUEUE_JSON
+        queue_inputs: dict[str, Path] = {"processing_review_package_path": review_json_path}
+        if scan_report_path.is_file():
+            queue_inputs["scan_qc_report_path"] = scan_report_path
+        _queue_path, queue = write_production_review_queue(queue_path, **queue_inputs)
+        record["local_review"] = {
+            "schema_version": "scan-qc.service-job-local-review.v1",
+            "provided": True,
+            "status": "available",
+            "local_only": True,
+            "review_dir": str(review_dir),
+            "artifacts": {
+                "processing_review_package": str(review_json_path),
+                "processing_review_package_html": str(review_html_path),
+                "production_review_queue": str(queue_path),
+            },
+            "summary": _local_review_summary(queue),
+        }
+    except Exception:
+        record["local_review"] = _local_review_unavailable("review_artifact_generation_failed")
+    _write_job_record(_job_root_from_record(record), record)
+
+
+def _service_job_review_dir(record: dict[str, Any]) -> Path:
+    job_root = _job_root_from_record(record)
+    paths = record.get("paths") if isinstance(record.get("paths"), dict) else {}
+    configured = paths.get("review_dir") if isinstance(paths, dict) else None
+    review_dir = Path(str(configured)) if configured else job_root / "review"
+    review_dir = review_dir.resolve()
+    _require_within(review_dir, job_root)
+    return review_dir
+
+
+def _local_review_unavailable(reason_code: str) -> dict[str, Any]:
+    return {
+        "schema_version": "scan-qc.service-job-local-review.v1",
+        "provided": False,
+        "status": "not_available",
+        "reason_code": reason_code,
+        "local_only": True,
+        "artifacts": {},
+        "summary": {},
+    }
+
+
+def _local_review_summary(queue: dict[str, Any]) -> dict[str, Any]:
+    summary = queue.get("summary") if isinstance(queue, dict) else {}
+    summary = summary if isinstance(summary, dict) else {}
+    return {
+        "review_item_count": _safe_int(summary.get("total_items")) or 0,
+        "ready_for_operator_review": bool(summary.get("ready_for_operator_review")),
+        "items_by_source_category": _int_dict(summary.get("items_by_source_category")),
+        "items_by_suggested_action": _int_dict(summary.get("items_by_suggested_action")),
+    }
+
+
+def _public_local_review_payload(local_review: Any) -> dict[str, Any]:
+    local_review = local_review if isinstance(local_review, dict) else {}
+    summary = local_review.get("summary") if isinstance(local_review.get("summary"), dict) else {}
+    return {
+        "provided": bool(local_review.get("provided")),
+        "status": str(local_review.get("status") or "not_available"),
+        "reason_code": str(local_review.get("reason_code") or "") or None,
+        "local_only": True,
+        "processing_review_package_written": bool(
+            isinstance(local_review.get("artifacts"), dict)
+            and local_review["artifacts"].get("processing_review_package")
+        ),
+        "processing_review_package_html_written": bool(
+            isinstance(local_review.get("artifacts"), dict)
+            and local_review["artifacts"].get("processing_review_package_html")
+        ),
+        "production_review_queue_written": bool(
+            isinstance(local_review.get("artifacts"), dict)
+            and local_review["artifacts"].get("production_review_queue")
+        ),
+        "review_item_count": _safe_int(summary.get("review_item_count")),
+        "ready_for_operator_review": bool(summary.get("ready_for_operator_review")),
+        "items_by_source_category": _int_dict(summary.get("items_by_source_category")),
+        "items_by_suggested_action": _int_dict(summary.get("items_by_suggested_action")),
+        "privacy": {
+            "contains_paths": False,
+            "contains_filenames": False,
+            "contains_hashes": False,
+            "contains_thumbnails": False,
+            "contains_ocr_text": False,
+            "contains_image_content": False,
+        },
+    }
 
 
 def _reserve_async_job(record: dict[str, Any]) -> str:

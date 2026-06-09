@@ -343,6 +343,11 @@ Follow-up, 2026-06-09: service job roots now reserve an isolated `review`
 subdirectory alongside `metadata`, `derivatives`, `tmp`, `checkpoints`, and
 `logs`. Public summaries expose only the review isolation boolean; local review
 packages remain path-bearing local-only artifacts.
+Follow-up, 2026-06-09: completed service jobs now write the local-only
+processing review package and production review queue into that isolated
+`review` directory. Public summaries expose only review availability and
+aggregate queue counts, so API clients do not need to open path-bearing review
+files to know whether operator review material exists.
 
 ### M5：性能和后端实现
 

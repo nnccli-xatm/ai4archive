@@ -151,6 +151,10 @@ async execution and production-specific session endpoints remain follow-up work.
 Per-job roots now include separate `metadata`、`derivatives`、`tmp`、
 `checkpoints`、`review` 和 `logs` 子目录，public summary 只暴露对应隔离
 布尔值，不暴露本地路径。
+服务 job 完成生产处理后会把本地敏感 `processing_review_package.json`、
+`processing_review_package.html` 和 `production_review_queue.json` 写入隔离
+`review` 目录；public summary 只暴露 review 文件是否生成、复核队列总数、来源分类
+和建议动作的聚合计数。
 The checkpoint loader also revalidates `input_dir` against the service root and
 marks `running` records without progress as `needs_recovery` after restart.
 Root-level recovery now writes `service_job_index_public_summary.json` so an
