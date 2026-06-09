@@ -40,7 +40,9 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   stale `running` checkpoints that must recover as `needs_recovery`. Confirm
   `max_active_async_jobs` is published in capabilities and enforced before a
   second async job is marked `running` when the limit is reached. Confirm
-  `service_job_public_summary.json` and
+  terminal service summaries include public-safe quality category counts,
+  operation category booleans, blocking codes, and aggregate guardrail status.
+  Confirm `service_job_public_summary.json` and
   `service_job_index_public_summary.json` stay free of paths, filenames, hashes,
   OCR text, thumbnails, and image content. Treat `service_job.json` as private
   checkpoint state.

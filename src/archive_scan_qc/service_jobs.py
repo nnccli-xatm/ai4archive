@@ -516,6 +516,14 @@ def _public_quality_payload(production_summary: dict[str, Any] | None) -> dict[s
             "provided": False,
             "status": "not_available",
             "public_safe": True,
+            "blocking_codes": [],
+            "quality_operations_applied": {},
+            "guardrails": {
+                "enabled": True,
+                "warning_files": None,
+                "failed_files": None,
+                "failure_reasons": {},
+            },
         }
     counts = quality.get("counts") if isinstance(quality.get("counts"), dict) else {}
     signal = quality.get("quality_signal") if isinstance(quality.get("quality_signal"), dict) else {}
@@ -524,12 +532,44 @@ def _public_quality_payload(production_summary: dict[str, Any] | None) -> dict[s
         "provided": True,
         "schema_version": quality.get("schema_version"),
         "status": quality.get("status"),
+        "blocking_codes": _string_list(quality.get("blocking_codes")),
         "public_safe": bool(quality.get("public_safe", True)),
         "processed_files": _safe_int(counts.get("processed_files")),
         "failed_files": _safe_int(counts.get("failed_files")),
+        "processing_warning_files": _safe_int(counts.get("processing_warning_files")),
+        "retry_list_files": _safe_int(counts.get("retry_list_files")),
         "guardrail_failed_files": _safe_int(guardrails.get("failed_files")),
         "any_quality_operation_changed_files": _safe_int(signal.get("any_quality_operation_changed_files")),
+        "geometry_changed_files": _safe_int(signal.get("geometry_changed_files")),
+        "background_cleanup_changed_files": _safe_int(signal.get("background_cleanup_changed_files")),
+        "text_enhancement_changed_files": _safe_int(signal.get("text_enhancement_changed_files")),
+        "defect_cleanup_changed_files": _safe_int(signal.get("defect_cleanup_changed_files")),
+        "quality_operations_applied": _bool_dict(signal.get("quality_operations_applied")),
+        "guardrails": {
+            "enabled": bool(guardrails.get("enabled", True)),
+            "warning_files": _safe_int(guardrails.get("warning_files")),
+            "failed_files": _safe_int(guardrails.get("failed_files")),
+            "failure_reasons": _int_dict(guardrails.get("failure_reasons")),
+        },
     }
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if isinstance(item, str)]
+
+
+def _bool_dict(value: Any) -> dict[str, bool]:
+    if not isinstance(value, dict):
+        return {}
+    return {str(key): bool(flag) for key, flag in sorted(value.items()) if isinstance(key, str)}
+
+
+def _int_dict(value: Any) -> dict[str, int]:
+    if not isinstance(value, dict):
+        return {}
+    return {str(key): _safe_int(count) or 0 for key, count in sorted(value.items()) if isinstance(key, str)}
 
 
 def _reserve_async_job(record: dict[str, Any]) -> str:

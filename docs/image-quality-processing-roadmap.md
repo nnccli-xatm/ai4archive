@@ -333,6 +333,12 @@ Follow-up, 2026-06-09: the same local HTTP transport now exposes
 `GET /api/rule-templates` and `GET /api/rule-templates/{template_id}` for
 public-safe template catalog/detail responses without reading scan reports or
 writing derivative images.
+Follow-up, 2026-06-09: terminal service job public summaries now carry
+public-safe quality context copied from `processing_quality_summary.json`,
+including blocking codes, warning/retry counts, per-category changed-file
+counts, quality-operation category booleans, and aggregate guardrail status.
+This lets API clients judge completion quality without opening private
+production summaries or path-bearing checkpoints.
 
 ### M5：性能和后端实现
 

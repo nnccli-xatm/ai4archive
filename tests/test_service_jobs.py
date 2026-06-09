@@ -129,6 +129,7 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertTrue(summary["quality"]["provided"])
             self.assertEqual(summary["quality"]["status"], "pass")
             self.assertEqual(summary["quality"]["processed_files"], 1)
+            _assert_public_quality_summary(self, summary["quality"])
             self.assertEqual(processing_manifest["rule_template"]["id"], "dat-31-2017-standard")
             self.assertEqual(
                 processing_manifest["rule_template"]["processing_defaults"]["reuse_scan_measurements"],
@@ -166,6 +167,7 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertTrue(terminal["quality"]["provided"])
             self.assertEqual(terminal["quality"]["status"], "pass")
             self.assertEqual(terminal["counts"]["processed_files"], 1)
+            _assert_public_quality_summary(self, terminal["quality"])
             _assert_public_text_omits(self, public_raw, str(root.resolve()), "private_page_001")
 
     def test_start_job_async_enforces_active_job_limit_before_marking_running(self) -> None:
@@ -404,6 +406,30 @@ def _assert_public_text_omits(testcase: unittest.TestCase, raw: str, *private_va
     for value in private_values:
         testcase.assertNotIn(value, raw)
         testcase.assertNotIn(value, normalized)
+
+
+def _assert_public_quality_summary(testcase: unittest.TestCase, quality: dict) -> None:
+    testcase.assertTrue(quality["provided"])
+    testcase.assertEqual(quality["blocking_codes"], [])
+    testcase.assertEqual(quality["processing_warning_files"], 0)
+    testcase.assertEqual(quality["retry_list_files"], 0)
+    testcase.assertEqual(quality["guardrail_failed_files"], 0)
+    for field in (
+        "any_quality_operation_changed_files",
+        "geometry_changed_files",
+        "background_cleanup_changed_files",
+        "text_enhancement_changed_files",
+        "defect_cleanup_changed_files",
+    ):
+        testcase.assertIsInstance(quality[field], int)
+    testcase.assertEqual(
+        set(quality["quality_operations_applied"]),
+        {"geometry", "background_cleanup", "text_enhancement", "defect_cleanup"},
+    )
+    testcase.assertTrue(quality["guardrails"]["enabled"])
+    testcase.assertEqual(quality["guardrails"]["warning_files"], 0)
+    testcase.assertEqual(quality["guardrails"]["failed_files"], 0)
+    testcase.assertEqual(quality["guardrails"]["failure_reasons"], {})
 
 
 if __name__ == "__main__":

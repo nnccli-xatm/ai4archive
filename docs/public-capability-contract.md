@@ -56,7 +56,11 @@ subject to local policy review. Service-job rehearsal cores also write
 `scan-qc.service-job-public-summary.v1` and
 `service_job_index_public_summary.json` with schema
 `scan-qc.service-job-index-public-summary.v1`; both are classified as
-`prototype_or_validation` until the HTTP service/API surface is promoted.
+`prototype_or_validation` until the HTTP service/API surface is promoted. The
+service job public summary may expose aggregate quality category counts,
+blocking codes, and guardrail summaries from `processing_quality_summary.json`,
+but not source paths, filenames, hashes, thumbnails, OCR text, image content, or
+row-level evidence.
 
 Stable local operational outputs such as `production_run_summary.json`,
 `production_run_progress.json`, scan reports, processing manifests, review
@@ -113,6 +117,11 @@ aggregate public summaries, and relies on checkpoint recovery to mark stale
 running jobs as `needs_recovery` after service restart. The capabilities
 response publishes non-sensitive resource limits, including
 `max_active_async_jobs` and the per-job worker limit.
+Terminal service job summaries also expose public-safe quality context:
+blocking codes, processing warning and retry counts, per-category changed-file
+counts, quality-operation category booleans, and aggregate guardrail status.
+These fields are copied only from the public-safe production quality summary and
+remain free of local paths and filenames.
 
 ## Image Processing Capability Smoke
 

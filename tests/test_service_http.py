@@ -122,6 +122,10 @@ class ServiceHttpTransportTests(unittest.TestCase):
             self.assertTrue(run_summary["quality"]["provided"])
             self.assertEqual(run_summary["quality"]["status"], "pass")
             self.assertEqual(run_summary["quality"]["processed_files"], 1)
+            self.assertEqual(run_summary["quality"]["blocking_codes"], [])
+            self.assertIn("defect_cleanup", run_summary["quality"]["quality_operations_applied"])
+            self.assertTrue(run_summary["quality"]["guardrails"]["enabled"])
+            self.assertEqual(run_summary["quality"]["guardrails"]["failed_files"], 0)
             _assert_public_text_omits(self, raw, str(root.resolve()), "private_page_001")
 
     def test_http_start_job_returns_running_then_terminal_without_private_paths(self) -> None:
@@ -157,6 +161,8 @@ class ServiceHttpTransportTests(unittest.TestCase):
             self.assertEqual(terminal["state"], "finished")
             self.assertTrue(terminal["quality"]["provided"])
             self.assertEqual(terminal["quality"]["processed_files"], 1)
+            self.assertIn("geometry", terminal["quality"]["quality_operations_applied"])
+            self.assertEqual(terminal["quality"]["guardrails"]["failure_reasons"], {})
             _assert_public_text_omits(self, raw, str(root.resolve()), "private_page_001")
 
     def test_http_rejects_client_managed_service_root_without_echoing_paths(self) -> None:

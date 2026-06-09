@@ -174,6 +174,12 @@ alive, and still marks stale running checkpoints as `needs_recovery` after
 restart. Async start now enforces a non-sensitive `max_active_async_jobs`
 service limit before marking a job `running`; the capabilities response exposes
 both that limit and the per-job worker limit.
+Service job terminal public summaries now also carry public-safe quality
+context from `processing_quality_summary.json`: blocking codes, warning/retry
+counts, per-category changed-file counts, operation category booleans, and
+aggregate guardrail status. These fields give the frontend or an external
+scheduler enough quality state to poll without reading private production
+summaries or path-bearing checkpoints.
 
 ## 6. 阶段 2：图像处理规则模板系统
 

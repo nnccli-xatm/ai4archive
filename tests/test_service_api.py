@@ -149,6 +149,10 @@ class ServiceApiCoreTests(unittest.TestCase):
             self.assertTrue(summary["quality"]["provided"])
             self.assertEqual(summary["quality"]["status"], "pass")
             self.assertEqual(summary["quality"]["processed_files"], 1)
+            self.assertEqual(summary["quality"]["blocking_codes"], [])
+            self.assertIn("background_cleanup", summary["quality"]["quality_operations_applied"])
+            self.assertTrue(summary["quality"]["guardrails"]["enabled"])
+            self.assertEqual(summary["quality"]["guardrails"]["failed_files"], 0)
             _assert_public_text_omits(self, raw, str(root.resolve()), "private_page_001")
 
     def test_job_start_response_returns_running_then_terminal_without_paths(self) -> None:
@@ -180,6 +184,8 @@ class ServiceApiCoreTests(unittest.TestCase):
             self.assertEqual(terminal["state"], "finished")
             self.assertTrue(terminal["quality"]["provided"])
             self.assertEqual(terminal["quality"]["processed_files"], 1)
+            self.assertIn("text_enhancement", terminal["quality"]["quality_operations_applied"])
+            self.assertEqual(terminal["quality"]["guardrails"]["failure_reasons"], {})
             _assert_public_text_omits(self, raw, str(root.resolve()), "private_page_001")
 
     def test_create_job_response_requires_paths(self) -> None:

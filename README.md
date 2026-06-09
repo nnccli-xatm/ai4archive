@@ -1489,8 +1489,8 @@ HTTP transport for prototype `curl` or frontend integration.
 `derivatives`, `tmp`, `checkpoints`, and `logs` subdirectories. The private
 `service_job.json` checkpoint records authorized local paths and template
 settings for recovery. The shareable `service_job_public_summary.json` records
-only aggregate status, counts, isolation flags, recovery status, and privacy
-booleans.
+only aggregate status, counts, quality category signals, guardrail summary,
+isolation flags, recovery status, and privacy booleans.
 Recovery revalidates the checkpoint input path against the service root and
 marks stale `running` records without progress as `needs_recovery`, so a service
 restart does not leave an orphaned job looking active.
