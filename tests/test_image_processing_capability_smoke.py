@@ -50,6 +50,9 @@ class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
             self.assertEqual(payload["counts"]["guardrail_failed_files"], 0)
             self.assertGreaterEqual(payload["operation_counts"]["despeckled_files"], 1)
             self.assertGreaterEqual(payload["operation_counts"]["tone_normalized_files"], 1)
+            self.assertGreaterEqual(payload["operation_counts"]["paper_color_cast_normalized_files"], 1)
+            self.assertGreaterEqual(payload["operation_counts"]["edge_shadow_lightened_files"], 1)
+            self.assertGreaterEqual(payload["operation_counts"]["corner_shadows_lightened_files"], 1)
             self.assertGreaterEqual(payload["operation_counts"]["background_stains_lightened_files"], 1)
             self.assertGreaterEqual(payload["operation_counts"]["fold_shadows_lightened_files"], 1)
             self.assertGreaterEqual(payload["operation_counts"]["illumination_gradient_levelled_files"], 1)
@@ -86,6 +89,21 @@ class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
             self.assertEqual(quality_payload["counts"]["failed_files"], 0)
             self.assertGreaterEqual(quality_payload["quality_metrics"]["tone_background_delta"]["max"], 6)
             self.assertGreaterEqual(quality_payload["quality_metrics"]["tone_contrast_delta"]["max"], 40)
+            self.assertGreaterEqual(quality_payload["quality_metrics"]["paper_color_cast_delta"]["max"], 4)
+            self.assertGreaterEqual(
+                quality_payload["quality_metrics"]["paper_color_cast_changed_pixel_ratio"]["max"],
+                0.5,
+            )
+            self.assertGreaterEqual(quality_payload["quality_metrics"]["edge_shadow_delta"]["max"], 8)
+            self.assertGreaterEqual(
+                quality_payload["quality_metrics"]["edge_shadow_changed_pixel_ratio"]["max"],
+                0.02,
+            )
+            self.assertGreaterEqual(quality_payload["quality_metrics"]["corner_shadows_delta"]["max"], 2.5)
+            self.assertGreaterEqual(
+                quality_payload["quality_metrics"]["corner_shadows_changed_pixel_ratio"]["max"],
+                0.02,
+            )
             self.assertGreaterEqual(quality_payload["quality_metrics"]["background_stains_delta"]["max"], 6)
             self.assertGreaterEqual(
                 quality_payload["quality_metrics"]["background_stains_changed_pixel_ratio"]["max"],

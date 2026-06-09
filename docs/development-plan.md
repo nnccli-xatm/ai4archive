@@ -250,6 +250,9 @@ public-safe 聚合质量基线。
 最新补充：`image-processing-capability-smoke` 已加入浅色纸面局部背景污渍 fixture，
 要求全链路产生至少一次保守背景污渍弱化，并在 public-safe 聚合质量基线中输出污渍
 亮化幅度和像素变化比例指标。
+最新补充：已有色偏、边缘阴影和角落阴影 synthetic fixture 已升级为正式 smoke
+门槛，要求 public-safe 基线输出纸张色偏归一、边缘阴影清理和角落阴影清理的聚合
+处理次数和 before/after 指标。
 M3 的第一片保护契约也已补齐：`photo-mixed-safe-v1` 通过生产 CLI 端到端测试覆盖
 合成照片/印章/表格混排页，要求 production summary 和 processing manifest 明确保持
 强背景清理、透印清理、褪色文字增强和文字边缘锐化关闭，同时确认源图不变并仍输出
