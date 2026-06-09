@@ -156,6 +156,12 @@ the smoke payload. It covers aggregate changed-file counts, before/after metric
 averages/maxima, guardrails, fixture context, and privacy flags without paths,
 filenames, hashes, thumbnails, OCR text, or image content.
 
+Fixture update, 2026-06-09: the synthetic smoke baseline now covers 11 generated
+fixture groups: clean text, dark border, speckles, faded edge shadow, color
+cast, low-contrast text, scanlines, bleed-through, corner shadow, fold shadow,
+and mixed photo/stamp/table content. This remains public-safe because the images
+are generated at runtime and only aggregate fixture group IDs are published.
+
 ### M1：模板 schema 和 dry-run
 
 目标：用模板表达质量目标，而不是暴露底层滤镜组合。

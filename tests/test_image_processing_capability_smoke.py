@@ -18,6 +18,8 @@ from archive_scan_qc.processing_quality_summary import (
     SCHEMA_VERSION as QUALITY_SCHEMA_VERSION,
 )
 
+EXPECTED_SYNTHETIC_FIXTURES = 11
+
 
 class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
     def test_smoke_runs_real_processing_and_writes_public_safe_aggregate(self) -> None:
@@ -41,8 +43,8 @@ class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
             self.assertFalse(payload["privacy"]["contains_paths"])
             self.assertFalse(payload["privacy"]["contains_filenames"])
             self.assertFalse(payload["privacy"]["contains_hashes"])
-            self.assertEqual(payload["counts"]["synthetic_fixture_count"], 5)
-            self.assertEqual(payload["counts"]["processed_files"], 5)
+            self.assertEqual(payload["counts"]["synthetic_fixture_count"], EXPECTED_SYNTHETIC_FIXTURES)
+            self.assertEqual(payload["counts"]["processed_files"], EXPECTED_SYNTHETIC_FIXTURES)
             self.assertEqual(payload["counts"]["failed_files"], 0)
             self.assertEqual(payload["counts"]["retry_list_files"], 0)
             self.assertEqual(payload["counts"]["guardrail_failed_files"], 0)
@@ -55,7 +57,10 @@ class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
             self.assertFalse(quality_payload["privacy"]["contains_paths"])
             self.assertFalse(quality_payload["privacy"]["contains_hashes"])
             self.assertFalse(quality_payload["privacy"]["contains_image_content"])
-            self.assertEqual(quality_payload["counts"]["processed_files"], 5)
+            self.assertEqual(quality_payload["fixture_context"]["fixture_count"], EXPECTED_SYNTHETIC_FIXTURES)
+            self.assertIn("mixed_photo_stamp_table_page", quality_payload["fixture_context"]["fixture_groups"])
+            self.assertIn("bleed_through_page", quality_payload["fixture_context"]["fixture_groups"])
+            self.assertEqual(quality_payload["counts"]["processed_files"], EXPECTED_SYNTHETIC_FIXTURES)
             self.assertEqual(quality_payload["counts"]["failed_files"], 0)
             self.assertGreaterEqual(
                 quality_payload["quality_signal"]["any_quality_operation_changed_files"],

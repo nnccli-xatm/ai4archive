@@ -47,6 +47,12 @@ _SYNTHETIC_FIXTURE_GROUPS = (
     "speckled_text_page",
     "faded_shadow_page",
     "color_cast_page",
+    "low_contrast_text_page",
+    "scanline_page",
+    "bleed_through_page",
+    "corner_shadow_page",
+    "fold_shadow_page",
+    "mixed_photo_stamp_table_page",
 )
 
 
@@ -337,6 +343,12 @@ def _write_synthetic_fixtures(input_dir: Path) -> int:
         _speckled_text_page(),
         _faded_shadow_page(),
         _color_cast_page(),
+        _low_contrast_text_page(),
+        _scanline_page(),
+        _bleed_through_page(),
+        _corner_shadow_page(),
+        _fold_shadow_page(),
+        _mixed_photo_stamp_table_page(),
     )
     for index, image in enumerate(fixtures, start=1):
         image.save(input_dir / f"synthetic_fixture_{index:03d}.png", dpi=(300, 300))
@@ -385,6 +397,68 @@ def _color_cast_page() -> Image.Image:
     draw.rectangle((34, 30, 246, 190), outline=(80, 76, 68), width=1)
     for y in range(58, 164, 24):
         draw.rectangle((58, y, 218, y + 4), fill=(70, 68, 62))
+    return image
+
+
+def _low_contrast_text_page() -> Image.Image:
+    image = Image.new("RGB", (280, 220), (226, 226, 222))
+    draw = ImageDraw.Draw(image)
+    for y in range(58, 164, 24):
+        draw.rectangle((58, y, 218, y + 4), fill=(164, 164, 160))
+    return image
+
+
+def _scanline_page() -> Image.Image:
+    image = _clean_text_page()
+    draw = ImageDraw.Draw(image)
+    for y in (72, 126, 180):
+        draw.rectangle((20, y, 260, y + 1), fill=(188, 188, 188))
+    return image
+
+
+def _bleed_through_page() -> Image.Image:
+    image = Image.new("RGB", (280, 220), (238, 238, 232))
+    draw = ImageDraw.Draw(image)
+    for y in range(58, 164, 24):
+        draw.rectangle((58, y, 218, y + 4), fill=(52, 52, 48))
+    for y in range(68, 174, 24):
+        draw.rectangle((76, y, 202, y + 3), fill=(188, 188, 182))
+    return image
+
+
+def _corner_shadow_page() -> Image.Image:
+    image = _clean_text_page()
+    draw = ImageDraw.Draw(image)
+    for radius in range(62, 0, -4):
+        shade = 160 + radius
+        draw.pieslice((-radius, -radius, radius, radius), 0, 360, fill=(shade, shade, shade))
+    return image
+
+
+def _fold_shadow_page() -> Image.Image:
+    image = _clean_text_page()
+    draw = ImageDraw.Draw(image)
+    center = 142
+    for offset in range(-6, 7):
+        shade = 172 + abs(offset) * 8
+        draw.line((center + offset, 28, center + offset, 192), fill=(shade, shade, shade))
+    return image
+
+
+def _mixed_photo_stamp_table_page() -> Image.Image:
+    image = Image.new("RGB", (280, 220), (244, 242, 234))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((34, 30, 150, 114), fill=(180, 194, 198), outline=(80, 92, 96))
+    for x in range(34, 151, 8):
+        shade = 120 + (x % 40)
+        draw.line((x, 31, x, 113), fill=(shade, shade + 12, shade + 20))
+    draw.ellipse((184, 40, 238, 94), outline=(170, 34, 34), width=4)
+    for y in range(132, 190, 18):
+        draw.line((38, y, 240, y), fill=(40, 40, 38), width=1)
+    for x in range(38, 241, 42):
+        draw.line((x, 132, x, 186), fill=(40, 40, 38), width=1)
+    for y in (142, 160, 178):
+        draw.rectangle((52, y, 132, y + 3), fill=(52, 52, 48))
     return image
 
 
