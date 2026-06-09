@@ -104,6 +104,14 @@ The detail endpoint returns the no-image dry-run plan without reading local scan
 reports. Custom template `POST`/`PUT` APIs remain unimplemented until validation,
 authorization, and recovery semantics are defined.
 
+The prototype local service job API exposes public-safe job polling through
+`POST /api/jobs`, `GET /api/jobs`, `GET /api/jobs/{job_id}`,
+`POST /api/jobs/{job_id}/run`, `POST /api/jobs/{job_id}/start`, and
+`POST /api/jobs/{job_id}/cancel`. `run` is synchronous. `start` is a local
+in-process async MVP that returns `running` immediately, publishes only
+aggregate public summaries, and relies on checkpoint recovery to mark stale
+running jobs as `needs_recovery` after service restart.
+
 ## Image Processing Capability Smoke
 
 Use `image-processing-capability-smoke` when you need public-safe evidence that

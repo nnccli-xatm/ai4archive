@@ -19,6 +19,7 @@ from .service_api import (
     service_api_privacy,
     service_capabilities,
     service_health,
+    start_job_response,
 )
 
 
@@ -88,6 +89,9 @@ class ServiceApiRequestHandler(BaseHTTPRequestHandler):
                 return
             if len(segments) == 4 and segments[:2] == ["api", "jobs"] and segments[3] == "run":
                 self._send_json(200, run_job_response(service_root=self._service_root, job_id=segments[2]))
+                return
+            if len(segments) == 4 and segments[:2] == ["api", "jobs"] and segments[3] == "start":
+                self._send_json(202, start_job_response(service_root=self._service_root, job_id=segments[2]))
                 return
             raise ServiceHttpError(404, "not_found", "Endpoint not found.")
         except Exception as exc:  # pragma: no cover - covered through _send_exception branches

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 import tempfile
 import unittest
 from pathlib import Path
@@ -18,6 +19,7 @@ from archive_scan_qc.service_jobs import (
     recover_service_job,
     recover_service_jobs,
     run_service_job,
+    start_service_job_async,
 )
 from archive_scan_qc.processing_quality_summary import PROCESSING_QUALITY_SUMMARY_JSON
 
@@ -135,6 +137,34 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertTrue((job_root / "derivatives" / PROCESSING_QUALITY_SUMMARY_JSON).is_file())
             _assert_public_text_omits(self, public_raw, str(root.resolve()), "private_page_001")
             self.assertFalse(summary["private_paths_exposed"])
+
+    def test_start_job_async_returns_running_then_terminal_public_summary(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-job-async-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-source"
+            service_root = root / "service-root"
+            input_dir.mkdir()
+            _write_page(input_dir / "private_page_001.png")
+            create_service_job(
+                ServiceJobConfig(input_dir=input_dir, service_root=service_root, workers=1),
+                job_id="job-testasync001",
+            )
+
+            running = start_service_job_async(service_root, "job-testasync001")
+            terminal = _wait_for_terminal_summary(
+                self,
+                lambda: recover_service_job(service_root, "job-testasync001"),
+            )
+            job_root = service_root / "jobs" / "job-testasync001"
+            public_raw = (job_root / SERVICE_JOB_PUBLIC_SUMMARY_JSON).read_text(encoding="utf-8")
+
+            self.assertEqual(running["state"], "running")
+            self.assertEqual(running["recovery"]["status"], "async_running")
+            self.assertEqual(terminal["state"], "finished")
+            self.assertTrue(terminal["quality"]["provided"])
+            self.assertEqual(terminal["quality"]["status"], "pass")
+            self.assertEqual(terminal["counts"]["processed_files"], 1)
+            _assert_public_text_omits(self, public_raw, str(root.resolve()), "private_page_001")
 
     def test_cancel_job_marks_terminal_public_summary_without_private_paths(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-job-cancel-") as temp_dir:
@@ -308,6 +338,17 @@ def _write_page(path: Path) -> None:
         y = 95 + index * 42
         draw.line((72, y, 288, y), fill=(35, 35, 35), width=2)
     image.save(path, dpi=(300, 300))
+
+
+def _wait_for_terminal_summary(testcase: unittest.TestCase, read_summary) -> dict:  # type: ignore[no-untyped-def]
+    deadline = time.monotonic() + 10
+    last_summary = None
+    while time.monotonic() < deadline:
+        last_summary = read_summary()
+        if last_summary.get("state") in {"finished", "needs_review", "failed", "interrupted", "cancelled"}:
+            return last_summary
+        time.sleep(0.05)
+    testcase.fail(f"service job did not reach a terminal state: {last_summary}")
 
 
 def _assert_public_text_omits(testcase: unittest.TestCase, raw: str, *private_values: str) -> None:

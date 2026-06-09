@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from archive_scan_qc.service_api import (
     run_job_response,
     service_capabilities,
     service_health,
+    start_job_response,
 )
 from archive_scan_qc.service_jobs import SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON
 
@@ -48,6 +50,10 @@ class ServiceApiCoreTests(unittest.TestCase):
             )
             self.assertIn(
                 ("POST", "/api/jobs/{job_id}/run"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
+            self.assertIn(
+                ("POST", "/api/jobs/{job_id}/start"),
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
             self.assertEqual(capabilities["schemas"]["rule_template_catalog"], "scan-qc.rule-template-catalog.v1")
@@ -144,6 +150,37 @@ class ServiceApiCoreTests(unittest.TestCase):
             self.assertEqual(summary["quality"]["processed_files"], 1)
             _assert_public_text_omits(self, raw, str(root.resolve()), "private_page_001")
 
+    def test_job_start_response_returns_running_then_terminal_without_paths(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-api-start-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-input"
+            service_root = root / "service-root"
+            input_dir.mkdir()
+            _write_page(input_dir / "private_page_001.png")
+            create_job_response(
+                {
+                    "input_dir": str(input_dir),
+                    "service_root": str(service_root),
+                    "rule_template": "dat-31-2017-standard",
+                    "workers": 1,
+                },
+                job_id="job-testapistart001",
+            )
+
+            running = start_job_response(service_root=service_root, job_id="job-testapistart001")
+            terminal = _wait_for_terminal_summary(
+                self,
+                lambda: get_job_response(service_root=service_root, job_id="job-testapistart001"),
+            )
+            raw = json.dumps({"running": running, "terminal": terminal}, ensure_ascii=False)
+
+            self.assertEqual(running["state"], "running")
+            self.assertEqual(running["recovery"]["status"], "async_running")
+            self.assertEqual(terminal["state"], "finished")
+            self.assertTrue(terminal["quality"]["provided"])
+            self.assertEqual(terminal["quality"]["processed_files"], 1)
+            _assert_public_text_omits(self, raw, str(root.resolve()), "private_page_001")
+
     def test_create_job_response_requires_paths(self) -> None:
         with self.assertRaisesRegex(ValueError, "input_dir"):
             create_job_response({"service_root": "service-root"})
@@ -154,6 +191,17 @@ def _write_page(path: Path) -> None:
     draw = ImageDraw.Draw(image)
     draw.rectangle((32, 42, 188, 46), fill=(40, 40, 40))
     image.save(path, dpi=(300, 300))
+
+
+def _wait_for_terminal_summary(testcase: unittest.TestCase, read_summary) -> dict:  # type: ignore[no-untyped-def]
+    deadline = time.monotonic() + 10
+    last_summary = None
+    while time.monotonic() < deadline:
+        last_summary = read_summary()
+        if last_summary.get("state") in {"finished", "needs_review", "failed", "interrupted", "cancelled"}:
+            return last_summary
+        time.sleep(0.05)
+    testcase.fail(f"service job did not reach a terminal state: {last_summary}")
 
 
 def _assert_public_text_omits(testcase: unittest.TestCase, raw: str, *private_values: str) -> None:

@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import re
+import threading
 from typing import Any
 import uuid
 
@@ -40,6 +41,8 @@ SERVICE_JOBS_DIRNAME = "jobs"
 JOB_ID_PATTERN = re.compile(r"^job-[A-Za-z0-9][A-Za-z0-9_-]{2,80}$")
 TERMINAL_STATES = {"finished", "needs_review", "failed", "interrupted", "cancelled"}
 SERVICE_JOB_MAX_WORKERS = 8
+_ASYNC_JOB_LOCK = threading.Lock()
+_ASYNC_JOB_KEYS: set[str] = set()
 
 
 @dataclass(frozen=True)
@@ -120,25 +123,67 @@ def create_service_job(config: ServiceJobConfig, *, job_id: str | None = None) -
 def run_service_job(service_root: Path, job_id: str) -> dict[str, Any]:
     """Run a created service job synchronously and refresh its public summary."""
 
+    _mark_service_job_running(service_root, job_id, recovery_status="running")
+    return _execute_running_service_job(service_root, job_id, raise_errors=True)
+
+
+def start_service_job_async(service_root: Path, job_id: str) -> dict[str, Any]:
+    """Start a service job in a local background thread and return running state."""
+
+    summary = _mark_service_job_running(service_root, job_id, recovery_status="async_running")
+    record = load_service_job_record(service_root, job_id)
+    _register_async_job(record)
+    worker = threading.Thread(
+        target=_async_service_job_worker,
+        args=(service_root.resolve(), job_id),
+        name=f"archive-scan-qc-{job_id}",
+        daemon=True,
+    )
+    worker.start()
+    return summary
+
+
+def _mark_service_job_running(service_root: Path, job_id: str, *, recovery_status: str) -> dict[str, Any]:
     record = load_service_job_record(service_root, job_id)
     if record.get("state") == "running":
         raise RuntimeError("Service job is already running.")
     if str(record.get("state") or "") in TERMINAL_STATES:
         raise RuntimeError("Service job is already terminal.")
-    _update_record_state(record, "running", recovery_status="running")
+    _update_record_state(record, "running", recovery_status=recovery_status)
     _write_job_record(_job_root_from_record(record), record)
-    _write_public_summary(_job_root_from_record(record), _public_summary_from_record(record))
+    return _write_public_summary(_job_root_from_record(record), _public_summary_from_record(record))
 
+
+def _execute_running_service_job(service_root: Path, job_id: str, *, raise_errors: bool) -> dict[str, Any] | None:
+    record = load_service_job_record(service_root, job_id)
+    if record.get("state") != "running":
+        return recover_service_job(service_root, job_id)
     try:
         run_production_folder(_production_config_from_record(record))
     except BaseException:
-        refreshed = recover_service_job(service_root, job_id)
-        if refreshed.get("state") not in {"failed", "interrupted"}:
-            _update_record_state(record, "failed", recovery_status="failed_without_terminal_summary")
-            _write_job_record(_job_root_from_record(record), record)
-            _write_public_summary(_job_root_from_record(record), _public_summary_from_record(record))
-        raise
+        latest = load_service_job_record(service_root, job_id)
+        if latest.get("state") == "cancelled":
+            _write_public_summary(_job_root_from_record(latest), _public_summary_from_record(latest))
+        else:
+            refreshed = recover_service_job(service_root, job_id)
+            if refreshed.get("state") not in {"failed", "interrupted"}:
+                _update_record_state(latest, "failed", recovery_status="failed_without_terminal_summary")
+                _write_job_record(_job_root_from_record(latest), latest)
+                _write_public_summary(_job_root_from_record(latest), _public_summary_from_record(latest))
+        if raise_errors:
+            raise
+        return None
+    latest = load_service_job_record(service_root, job_id)
+    if latest.get("state") == "cancelled":
+        return _write_public_summary(_job_root_from_record(latest), _public_summary_from_record(latest))
     return recover_service_job(service_root, job_id)
+
+
+def _async_service_job_worker(service_root: Path, job_id: str) -> None:
+    try:
+        _execute_running_service_job(service_root, job_id, raise_errors=False)
+    finally:
+        _unregister_async_job_key(_async_job_key_from_parts(service_root, job_id))
 
 
 def cancel_service_job(service_root: Path, job_id: str) -> dict[str, Any]:
@@ -359,6 +404,8 @@ def _derive_recovered_state(
     production_summary: dict[str, Any] | None,
     production_progress: dict[str, Any] | None,
 ) -> tuple[str, str]:
+    if str(record.get("state") or "") == "cancelled":
+        return "cancelled", "cancelled_by_service_request"
     if isinstance(production_summary, dict) and isinstance(production_summary.get("status"), str):
         status = str(production_summary["status"])
         if status in TERMINAL_STATES:
@@ -368,8 +415,12 @@ def _derive_recovered_state(
         if state in TERMINAL_STATES:
             return state, "terminal_progress_recovered"
         if state == "running":
+            if str(record.get("state") or "") == "running" and _async_job_is_active(record):
+                return "running", "async_running"
             return "needs_recovery", "running_progress_requires_resume_after_service_restart"
     if str(record.get("state") or "") == "running":
+        if _async_job_is_active(record):
+            return "running", "async_running"
         return "needs_recovery", "running_record_requires_resume_after_service_restart"
     return str(record.get("state") or "created"), "job_record_recovered"
 
@@ -474,6 +525,29 @@ def _public_quality_payload(production_summary: dict[str, Any] | None) -> dict[s
         "guardrail_failed_files": _safe_int(guardrails.get("failed_files")),
         "any_quality_operation_changed_files": _safe_int(signal.get("any_quality_operation_changed_files")),
     }
+
+
+def _register_async_job(record: dict[str, Any]) -> None:
+    with _ASYNC_JOB_LOCK:
+        _ASYNC_JOB_KEYS.add(_async_job_key(record))
+
+
+def _unregister_async_job_key(key: str) -> None:
+    with _ASYNC_JOB_LOCK:
+        _ASYNC_JOB_KEYS.discard(key)
+
+
+def _async_job_is_active(record: dict[str, Any]) -> bool:
+    with _ASYNC_JOB_LOCK:
+        return _async_job_key(record) in _ASYNC_JOB_KEYS
+
+
+def _async_job_key(record: dict[str, Any]) -> str:
+    return _async_job_key_from_parts(Path(str(record["paths"]["service_root"])), str(record["job_id"]))
+
+
+def _async_job_key_from_parts(service_root: Path, job_id: str) -> str:
+    return f"{service_root.resolve()}::{job_id}"
 
 
 def _isolation_payload(service_root: Path, job_root: Path, directories: dict[str, Path]) -> dict[str, Any]:

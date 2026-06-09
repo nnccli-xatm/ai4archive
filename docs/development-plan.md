@@ -158,8 +158,8 @@ terminal service jobs.
 It also enforces a per-job worker limit during job creation and reports the
 non-sensitive worker quota in the public summary.
 `archive_scan_qc.service_api` now provides endpoint-shaped health,
-capabilities, rule-template catalog/detail, create, status, run, cancel, and
-recover responses while keeping path-bearing request data out of public
+capabilities, rule-template catalog/detail, create, status, run, start, cancel,
+and recover responses while keeping path-bearing request data out of public
 responses. The prototype
 `archive_scan_qc.service_http` transport exposes the core as local-only HTTP
 endpoints for `curl`/frontend integration tests; it uses the configured
@@ -167,7 +167,11 @@ service root instead of accepting a client-provided service-root path and still
 returns only public-safe aggregate JSON. The prototype `POST
 /api/jobs/{job_id}/run` endpoint currently invokes the production runner
 synchronously and returns the terminal public summary with aggregate quality
-fields.
+fields. The new `POST /api/jobs/{job_id}/start` endpoint is an in-process async
+MVP: it returns `running` immediately, runs the same production runner in a
+background thread, keeps active jobs `running` while the service process is
+alive, and still marks stale running checkpoints as `needs_recovery` after
+restart.
 
 ## 6. 阶段 2：图像处理规则模板系统
 

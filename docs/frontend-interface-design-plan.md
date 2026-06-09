@@ -222,6 +222,11 @@ Implementation note, 2026-06-09: the current local service API has implemented
 the read-only template endpoints `GET /api/rule-templates` and
 `GET /api/rule-templates/{template_id}`. Template `POST`/`PUT` and explicit
 dry-run write endpoints remain future service work.
+The same prototype service now exposes job boundary endpoints `POST /api/jobs`,
+`GET /api/jobs`, `GET /api/jobs/{job_id}`, `POST /api/jobs/{job_id}/run`,
+`POST /api/jobs/{job_id}/start`, and `POST /api/jobs/{job_id}/cancel`.
+`start` is a local in-process async MVP that returns `running` immediately and
+supports public-safe polling through the job status/index responses.
 
 后续对外接口应补充：
 

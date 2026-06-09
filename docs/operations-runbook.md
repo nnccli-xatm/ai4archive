@@ -234,15 +234,21 @@ response shapes. The prototype local HTTP transport can be started with
 127.0.0.1 --port 8765` and serves `GET /api/health`, `GET /api/capabilities`,
 `GET /api/rule-templates`, `GET /api/rule-templates/{template_id}`,
 `POST /api/jobs`, `GET /api/jobs`, `GET /api/jobs/{job_id}`,
-`POST /api/jobs/{job_id}/run`, and `POST /api/jobs/{job_id}/cancel`.
+`POST /api/jobs/{job_id}/run`, `POST /api/jobs/{job_id}/start`, and
+`POST /api/jobs/{job_id}/cancel`.
 The rule-template endpoints expose the same public-safe catalog and no-image
 dry-run plan as the CLI rule-template commands; custom template write APIs are
 not implemented in the local HTTP transport yet.
 The HTTP transport is local-only and uses the configured service root; reject
 requests that try to provide their own `service_root`.
-The first `run` endpoint is synchronous: clients should expect the request to
-return after the existing production runner reaches a terminal state, then poll
-the job status or index for public-safe counts and quality summary fields.
+The `run` endpoint is synchronous: clients should expect the request to return
+after the existing production runner reaches a terminal state, then poll the job
+status or index for public-safe counts and quality summary fields. The `start`
+endpoint is the first local in-process async MVP: it returns a `running` public
+summary immediately and executes the same production runner in a background
+thread. While the service process is alive, polling keeps active jobs in
+`running`; after a service restart, stale `running` checkpoints still recover as
+`needs_recovery`.
 `service_job.json` is private checkpoint state because it contains local paths
 and the template snapshot needed for recovery. `service_job_public_summary.json`
 is the public-safe polling/handoff shape: aggregate state, counts, isolation

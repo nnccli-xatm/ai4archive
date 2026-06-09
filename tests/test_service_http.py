@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from urllib.error import HTTPError
@@ -78,6 +79,10 @@ class ServiceHttpTransportTests(unittest.TestCase):
                 ("POST", "/api/jobs/{job_id}/run"),
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
+            self.assertIn(
+                ("POST", "/api/jobs/{job_id}/start"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
             self.assertEqual(created["state"], "created")
             self.assertEqual(status["state"], "created")
             self.assertEqual(cancelled["state"], "cancelled")
@@ -117,6 +122,41 @@ class ServiceHttpTransportTests(unittest.TestCase):
             self.assertTrue(run_summary["quality"]["provided"])
             self.assertEqual(run_summary["quality"]["status"], "pass")
             self.assertEqual(run_summary["quality"]["processed_files"], 1)
+            _assert_public_text_omits(self, raw, str(root.resolve()), "private_page_001")
+
+    def test_http_start_job_returns_running_then_terminal_without_private_paths(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-http-start-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-input"
+            service_root = root / "service-root"
+            input_dir.mkdir()
+            _write_page(input_dir / "private_page_001.png")
+
+            with _running_server(service_root) as base_url:
+                _json_request(
+                    base_url,
+                    "POST",
+                    "/api/jobs",
+                    {
+                        "job_id": "job-testhttpstart001",
+                        "input_dir": str(input_dir),
+                        "rule_template": "dat-31-2017-standard",
+                        "workers": 1,
+                    },
+                )
+                start_status, running = _json_request(base_url, "POST", "/api/jobs/job-testhttpstart001/start")
+                terminal = _wait_for_terminal_http(
+                    self,
+                    lambda: _json_request(base_url, "GET", "/api/jobs/job-testhttpstart001")[1],
+                )
+            raw = json.dumps({"running": running, "terminal": terminal}, ensure_ascii=False)
+
+            self.assertEqual(start_status, 202)
+            self.assertEqual(running["state"], "running")
+            self.assertEqual(running["recovery"]["status"], "async_running")
+            self.assertEqual(terminal["state"], "finished")
+            self.assertTrue(terminal["quality"]["provided"])
+            self.assertEqual(terminal["quality"]["processed_files"], 1)
             _assert_public_text_omits(self, raw, str(root.resolve()), "private_page_001")
 
     def test_http_rejects_client_managed_service_root_without_echoing_paths(self) -> None:
@@ -228,6 +268,17 @@ def _write_page(path: Path) -> None:
     draw = ImageDraw.Draw(image)
     draw.rectangle((32, 42, 188, 46), fill=(40, 40, 40))
     image.save(path, dpi=(300, 300))
+
+
+def _wait_for_terminal_http(testcase: unittest.TestCase, read_summary) -> dict:  # type: ignore[no-untyped-def]
+    deadline = time.monotonic() + 10
+    last_summary = None
+    while time.monotonic() < deadline:
+        last_summary = read_summary()
+        if last_summary.get("state") in {"finished", "needs_review", "failed", "interrupted", "cancelled"}:
+            return last_summary
+        time.sleep(0.05)
+    testcase.fail(f"service job did not reach a terminal state: {last_summary}")
 
 
 def _assert_public_text_omits(testcase: unittest.TestCase, raw: str, *private_values: str) -> None:

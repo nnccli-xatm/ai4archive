@@ -307,8 +307,12 @@ keeps `service_root` server-owned, returns sanitized public-safe errors, and is
 covered by HTTP tests for create/status/cancel/index responses without leaking
 paths or filenames. Follow-up, 2026-06-09: `POST /api/jobs/{job_id}/run`
 triggers the existing production runner synchronously and returns the terminal
-public summary with aggregate quality fields. Running jobs asynchronously and
-serving local-only review resources remain M4 follow-up work.
+public summary with aggregate quality fields. Follow-up, 2026-06-09:
+`POST /api/jobs/{job_id}/start` now starts the same production runner in a local
+background thread and returns a `running` public summary immediately. Active
+in-process async jobs stay `running` while the service is alive; stale running
+checkpoints after restart still recover as `needs_recovery`. Serving local-only
+review resources remains M4 follow-up work.
 Follow-up, 2026-06-09: the same local HTTP transport now exposes
 `GET /api/rule-templates` and `GET /api/rule-templates/{template_id}` for
 public-safe template catalog/detail responses without reading scan reports or

@@ -34,7 +34,10 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   keep endpoint-shaped service API and prototype local HTTP responses
   public-safe, including `GET /api/rule-templates`,
   `GET /api/rule-templates/{template_id}`, and synchronous
-  `POST /api/jobs/{job_id}/run` quality summaries. Confirm
+  `POST /api/jobs/{job_id}/run` quality summaries. Confirm async
+  `POST /api/jobs/{job_id}/start` returns `running`, later recovers terminal
+  public quality summaries, and keeps active in-process jobs distinct from
+  stale `running` checkpoints that must recover as `needs_recovery`. Confirm
   `service_job_public_summary.json` and
   `service_job_index_public_summary.json` stay free of paths, filenames, hashes,
   OCR text, thumbnails, and image content. Treat `service_job.json` as private
