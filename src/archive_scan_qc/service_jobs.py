@@ -96,6 +96,7 @@ def create_service_job(config: ServiceJobConfig, *, job_id: str | None = None) -
             "derivatives_dir": str(directories["derivatives"]),
             "tmp_dir": str(directories["tmp"]),
             "checkpoint_dir": str(directories["checkpoints"]),
+            "review_dir": str(directories["review"]),
             "log_dir": str(directories["logs"]),
         },
         "isolation": _isolation_payload(service_root, job_root, directories),
@@ -310,6 +311,7 @@ def _job_directories(job_root: Path) -> dict[str, Path]:
         "derivatives": job_root / "derivatives",
         "tmp": job_root / "tmp",
         "checkpoints": job_root / "checkpoints",
+        "review": job_root / "review",
         "logs": job_root / "logs",
     }
 
@@ -338,6 +340,8 @@ def _validate_loaded_record_paths(record: dict[str, Any], service_root: Path, jo
         raise ValueError("Service job root mismatch.")
     for key in ("metadata_dir", "derivatives_dir", "tmp_dir", "checkpoint_dir", "log_dir"):
         _require_within(Path(str(paths.get(key, ""))).resolve(), job_root)
+    if "review_dir" in paths:
+        _require_within(Path(str(paths.get("review_dir", ""))).resolve(), job_root)
 
 
 def _rules_profile_for_template(rule_template: str):
@@ -457,6 +461,7 @@ def _public_summary_from_record(
             "derivatives_isolated": bool(record["isolation"]["derivatives_isolated"]),
             "tmp_isolated": bool(record["isolation"]["tmp_isolated"]),
             "checkpoint_isolated": bool(record["isolation"]["checkpoint_isolated"]),
+            "review_isolated": bool(record["isolation"].get("review_isolated")),
         },
         "recovery": _public_recovery_payload(record.get("recovery")),
         "quality": _public_quality_payload(production_summary),
@@ -612,6 +617,7 @@ def _isolation_payload(service_root: Path, job_root: Path, directories: dict[str
         "derivatives_isolated": directories["derivatives"].parent == job_root,
         "tmp_isolated": directories["tmp"].parent == job_root,
         "checkpoint_isolated": directories["checkpoints"].parent == job_root,
+        "review_isolated": directories["review"].parent == job_root,
     }
 
 

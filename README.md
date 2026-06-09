@@ -1486,7 +1486,7 @@ health, capabilities, create, status, cancel, and recover responses.
 HTTP transport for prototype `curl` or frontend integration.
 `archive_scan_qc.service_jobs` provides the backend core: it creates one isolated
 `service_root/jobs/<job_id>/` directory per job, with separate `metadata`,
-`derivatives`, `tmp`, `checkpoints`, and `logs` subdirectories. The private
+`derivatives`, `tmp`, `checkpoints`, `review`, and `logs` subdirectories. The private
 `service_job.json` checkpoint records authorized local paths and template
 settings for recovery. The shareable `service_job_public_summary.json` records
 only aggregate status, counts, quality category signals, guardrail summary,

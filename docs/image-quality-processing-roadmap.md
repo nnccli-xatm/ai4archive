@@ -339,6 +339,10 @@ including blocking codes, warning/retry counts, per-category changed-file
 counts, quality-operation category booleans, and aggregate guardrail status.
 This lets API clients judge completion quality without opening private
 production summaries or path-bearing checkpoints.
+Follow-up, 2026-06-09: service job roots now reserve an isolated `review`
+subdirectory alongside `metadata`, `derivatives`, `tmp`, `checkpoints`, and
+`logs`. Public summaries expose only the review isolation boolean; local review
+packages remain path-bearing local-only artifacts.
 
 ### M5：性能和后端实现
 

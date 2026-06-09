@@ -253,12 +253,14 @@ thread. While the service process is alive, polling keeps active jobs in
 active-job limit before marking a job `running`, so rejected jobs remain in
 their prior public state.
 `service_job.json` is private checkpoint state because it contains local paths
-and the template snapshot needed for recovery. `service_job_public_summary.json`
-is the public-safe polling/handoff shape: aggregate state, counts, quality
-category signals, guardrail summary, isolation booleans, recovery status, and
-explicit privacy flags only. If recovery sees a stale `running` progress file
-after a service restart, it reports `needs_recovery` instead of leaking paths or
-leaving the job silently running.
+and the template snapshot needed for recovery. Each job root includes isolated
+`metadata`, `derivatives`, `tmp`, `checkpoints`, `review`, and `logs`
+subdirectories. `service_job_public_summary.json` is the public-safe
+polling/handoff shape: aggregate state, counts, quality category signals,
+guardrail summary, isolation booleans, recovery status, and explicit privacy
+flags only. If recovery sees a stale `running` progress file after a service
+restart, it reports `needs_recovery` instead of leaking paths or leaving the job
+silently running.
 Recovery also treats a private `service_job.json` checkpoint that still says
 `running` but has no progress file as `needs_recovery`, and it rejects a tampered
 checkpoint whose `input_dir` now overlaps the service root.

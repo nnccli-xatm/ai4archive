@@ -69,7 +69,7 @@ contain local paths or row-level evidence. Treat them as local-only sensitive
 artifacts unless reduced by a separate public-safe aggregate command.
 The service job checkpoint file `service_job.json` is also sensitive local
 state because it records the authorized input path, isolated output roots, and
-template snapshot used for recovery.
+template snapshot used for recovery, including local-only review roots.
 
 Use `public_capability_contract.json` as the stable index of supported schema
 names and artifact classifications before sharing validation evidence outside

@@ -148,6 +148,9 @@ public-safe `service_job_public_summary.json` aggregate status, rejects
 input/service-root overlap, and can recover terminal or stale running progress
 without exposing private paths. The first local HTTP API endpoints have landed;
 async execution and production-specific session endpoints remain follow-up work.
+Per-job roots now include separate `metadata`、`derivatives`、`tmp`、
+`checkpoints`、`review` 和 `logs` 子目录，public summary 只暴露对应隔离
+布尔值，不暴露本地路径。
 The checkpoint loader also revalidates `input_dir` against the service root and
 marks `running` records without progress as `needs_recovery` after restart.
 Root-level recovery now writes `service_job_index_public_summary.json` so an

@@ -42,6 +42,9 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   second async job is marked `running` when the limit is reached. Confirm
   terminal service summaries include public-safe quality category counts,
   operation category booleans, blocking codes, and aggregate guardrail status.
+  Confirm each job root has isolated metadata, derivatives, temp, checkpoint,
+  review, and log directories while public summaries expose only isolation
+  booleans.
   Confirm `service_job_public_summary.json` and
   `service_job_index_public_summary.json` stay free of paths, filenames, hashes,
   OCR text, thumbnails, and image content. Treat `service_job.json` as private
