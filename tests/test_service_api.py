@@ -11,6 +11,7 @@ from PIL import Image, ImageDraw
 from archive_scan_qc.service_api import (
     cancel_job_response,
     create_job_response,
+    get_job_local_review_artifact_response,
     get_job_response,
     get_rule_template_response,
     list_rule_templates_response,
@@ -61,11 +62,19 @@ class ServiceApiCoreTests(unittest.TestCase):
                 ("POST", "/api/jobs/{job_id}/retry"),
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
+            self.assertIn(
+                ("GET", "/api/jobs/{job_id}/local-review/{artifact_id}"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
             self.assertEqual(capabilities["schemas"]["rule_template_catalog"], "scan-qc.rule-template-catalog.v1")
             self.assertEqual(capabilities["schemas"]["rule_template_dry_run"], "scan-qc.rule-template-dry-run.v1")
             self.assertEqual(
                 capabilities["schemas"]["rule_template_custom_validation"],
                 "scan-qc.rule-template-custom-validation.v1",
+            )
+            self.assertEqual(
+                capabilities["schemas"]["service_job_local_review_artifact"],
+                "scan-qc.service-job-local-review-artifact.v1",
             )
             self.assertGreaterEqual(capabilities["resource_limits"]["max_active_async_jobs"], 1)
             self.assertGreaterEqual(capabilities["resource_limits"]["max_active_workers"], 1)
@@ -191,10 +200,25 @@ class ServiceApiCoreTests(unittest.TestCase):
 
             summary = run_job_response(service_root=service_root, job_id="job-testapirun001")
             status = get_job_response(service_root=service_root, job_id="job-testapirun001")
+            local_review = get_job_local_review_artifact_response(
+                service_root=service_root,
+                job_id="job-testapirun001",
+                artifact_id="processing-review-package",
+            )
             raw = json.dumps({"summary": summary, "status": status}, ensure_ascii=False)
+            local_raw = json.dumps(local_review, ensure_ascii=False)
 
             self.assertEqual(summary["state"], "finished")
             self.assertEqual(status["state"], "finished")
+            self.assertEqual(local_review["schema_version"], "scan-qc.service-job-local-review-artifact.v1")
+            self.assertEqual(local_review["artifact_id"], "processing-review-package")
+            self.assertEqual(local_review["payload"]["schema_version"], "scan-qc.processing-review.v1")
+            self.assertTrue(local_review["local_only"])
+            self.assertTrue(local_review["sensitive"])
+            self.assertFalse(local_review["public_safe"])
+            self.assertTrue(local_review["privacy"]["contains_paths"])
+            self.assertNotIn("artifact_path", local_raw)
+            self.assertIn("private_page_001", local_raw)
             self.assertEqual(summary["counts"]["resumed_files"], 0)
             self.assertEqual(summary["counts"]["reused_files"], 0)
             self.assertEqual(summary["counts"]["retry_list_files"], 0)
@@ -213,6 +237,13 @@ class ServiceApiCoreTests(unittest.TestCase):
             self.assertTrue(summary["local_review"]["production_review_queue_written"])
             self.assertFalse(summary["local_review"]["privacy"]["contains_paths"])
             _assert_public_text_omits(self, raw, str(root.resolve()), "private_page_001")
+
+            with self.assertRaisesRegex(ValueError, "Unsupported local review artifact"):
+                get_job_local_review_artifact_response(
+                    service_root=service_root,
+                    job_id="job-testapirun001",
+                    artifact_id="processing-review-package.json",
+                )
 
     def test_job_start_response_returns_running_then_terminal_without_paths(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-api-start-") as temp_dir:

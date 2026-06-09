@@ -90,6 +90,10 @@ class ServiceHttpTransportTests(unittest.TestCase):
                 ("POST", "/api/jobs/{job_id}/retry"),
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
+            self.assertIn(
+                ("GET", "/api/jobs/{job_id}/local-review/{artifact_id}"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
             self.assertGreaterEqual(capabilities["resource_limits"]["max_active_workers"], 1)
             self.assertGreaterEqual(capabilities["resource_limits"]["min_free_space_bytes"], 1)
             self.assertGreaterEqual(capabilities["resource_limits"]["max_tmp_bytes_per_job"], 1)
@@ -128,12 +132,34 @@ class ServiceHttpTransportTests(unittest.TestCase):
                     recovery_status="forced_failed_for_http_retry_test",
                 )
                 retry_status, retry_summary = _json_request(base_url, "POST", "/api/jobs/job-testhttprun001/retry")
+                local_status, local_review = _json_request(
+                    base_url,
+                    "GET",
+                    "/api/jobs/job-testhttprun001/local-review/production-review-queue",
+                )
+                invalid_artifact_status, invalid_artifact = _json_request(
+                    base_url,
+                    "GET",
+                    "/api/jobs/job-testhttprun001/local-review/production_review_queue.json",
+                )
                 status_status, status_summary = _json_request(base_url, "GET", "/api/jobs/job-testhttprun001")
             raw = json.dumps({"run": run_summary, "retry": retry_summary, "status": status_summary}, ensure_ascii=False)
+            local_raw = json.dumps(local_review, ensure_ascii=False)
 
             self.assertEqual(run_status, 200)
             self.assertEqual(retry_status, 200)
+            self.assertEqual(local_status, 200)
+            self.assertEqual(invalid_artifact_status, 400)
             self.assertEqual(status_status, 200)
+            self.assertEqual(local_review["schema_version"], "scan-qc.service-job-local-review-artifact.v1")
+            self.assertEqual(local_review["artifact_id"], "production-review-queue")
+            self.assertEqual(local_review["payload"]["schema_version"], "scan-qc.production-review-queue.v1")
+            self.assertTrue(local_review["local_only"])
+            self.assertTrue(local_review["sensitive"])
+            self.assertFalse(local_review["public_safe"])
+            self.assertTrue(local_review["privacy"]["contains_paths"])
+            self.assertIn("private-input", local_raw)
+            self.assertEqual(invalid_artifact["error"]["code"], "invalid_request")
             self.assertEqual(run_summary["state"], "finished")
             self.assertEqual(retry_summary["state"], "finished")
             self.assertEqual(status_summary["state"], "finished")
@@ -242,6 +268,12 @@ class ServiceHttpTransportTests(unittest.TestCase):
             self.assertEqual(payload["error"]["code"], "input_dir_missing")
             self.assertFalse(payload["private_paths_exposed"])
             _assert_public_text_omits(self, raw, str(root.resolve()), "missing-input")
+
+    def test_http_server_rejects_non_loopback_bind_host_for_local_only_api(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-http-host-") as temp_dir:
+            root = Path(temp_dir)
+            with self.assertRaisesRegex(ValueError, "loopback"):
+                create_service_http_server(service_root=root / "service-root", host="0.0.0.0", port=0)
 
     def test_http_rule_template_catalog_and_detail_are_public_safe(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-http-templates-") as temp_dir:

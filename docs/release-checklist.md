@@ -80,6 +80,11 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   production review queue files inside the isolated review directory while the
   public summary exposes only review availability, aggregate queue counts, and
   processing review group counts.
+  Confirm `GET /api/jobs/{job_id}/local-review/{artifact_id}` accepts only
+  `processing-review-package` and `production-review-queue`, returns
+  `local_only`/`sensitive`/`public_safe=false` payloads, and validates artifacts
+  under the isolated review directory. Confirm service HTTP rejects non-loopback
+  bind hosts.
   Confirm terminal recovery can regenerate missing local review artifacts from
   existing production metadata without exposing private paths.
   Confirm `service_job_public_summary.json` and

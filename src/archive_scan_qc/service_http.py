@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from ipaddress import ip_address
 import json
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ from urllib.parse import urlsplit
 from .service_api import (
     cancel_job_response,
     create_job_response,
+    get_job_local_review_artifact_response,
     get_rule_template_response,
     get_job_response,
     list_rule_templates_response,
@@ -62,6 +64,16 @@ class ServiceApiRequestHandler(BaseHTTPRequestHandler):
                 return
             if len(segments) == 3 and segments[:2] == ["api", "jobs"]:
                 self._send_json(200, get_job_response(service_root=self._service_root, job_id=segments[2]))
+                return
+            if len(segments) == 5 and segments[:2] == ["api", "jobs"] and segments[3] == "local-review":
+                self._send_json(
+                    200,
+                    get_job_local_review_artifact_response(
+                        service_root=self._service_root,
+                        job_id=segments[2],
+                        artifact_id=segments[4],
+                    ),
+                )
                 return
             raise ServiceHttpError(404, "not_found", "Endpoint not found.")
         except Exception as exc:  # pragma: no cover - covered through _send_exception branches
@@ -181,6 +193,7 @@ def create_service_http_server(
     host: str = "127.0.0.1",
     port: int = 8765,
 ) -> ThreadingHTTPServer:
+    _require_loopback_host(host)
     server = ThreadingHTTPServer((host, port), ServiceApiRequestHandler)
     server.service_root = service_root.resolve()  # type: ignore[attr-defined]
     return server
@@ -203,3 +216,15 @@ def _normalized_path(raw_path: str) -> str:
 
 def _path_segments(path: str) -> list[str]:
     return [segment for segment in path.split("/") if segment]
+
+
+def _require_loopback_host(host: str) -> None:
+    normalized = host.strip().lower()
+    if normalized == "localhost":
+        return
+    try:
+        if ip_address(normalized).is_loopback:
+            return
+    except ValueError:
+        pass
+    raise ValueError("Service API host must be a loopback address.")

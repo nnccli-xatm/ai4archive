@@ -297,6 +297,12 @@ checkpoint whose `input_dir` now overlaps the service root.
 For terminal jobs, recovery also regenerates missing local review artifacts from
 the existing production summary and processing manifest when possible, then
 refreshes the public review availability summary without exposing paths.
+Use `GET /api/jobs/{job_id}/local-review/{artifact_id}` only from the local
+service API to read sensitive review JSON artifacts. The accepted artifact IDs
+are `processing-review-package` and `production-review-queue`; the service
+validates the artifact path under the isolated job `review` directory and marks
+the response `local_only`, `sensitive`, and `public_safe=false`. Do not expose
+the service API on a non-loopback host.
 Use service-job cancellation only to mark a non-terminal job as stopped; the
 current synchronous runner cannot interrupt an in-flight image operation from a
 separate request, but it records `cancelled` as a terminal public-safe state and

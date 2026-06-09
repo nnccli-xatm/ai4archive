@@ -1510,6 +1510,11 @@ and aggregate review queue counts. The local processing review package groups
 background cleanup, readability improvement, defect cleanup, and original
 appearance risk separately so operators can distinguish quality gains from
 preservation-risk checks.
+The local-only service API can read those sensitive review JSON artifacts at
+`GET /api/jobs/{job_id}/local-review/{artifact_id}` using only fixed artifact
+IDs: `processing-review-package` and `production-review-queue`. These responses
+are explicitly `local_only`, `sensitive`, and not public-safe; the HTTP service
+rejects non-loopback bind hosts.
 Recovery revalidates the checkpoint input path against the service root and
 marks stale `running` records without progress as `needs_recovery`, so a service
 restart does not leave an orphaned job looking active.

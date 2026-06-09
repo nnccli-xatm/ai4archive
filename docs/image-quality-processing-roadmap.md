@@ -396,6 +396,12 @@ content.
 Follow-up, 2026-06-09: terminal service job recovery now regenerates missing
 local review artifacts from existing production metadata when possible, then
 refreshes only the public-safe review availability and aggregate group counts.
+Follow-up, 2026-06-09: the service API now exposes a local-only review artifact
+reader at `GET /api/jobs/{job_id}/local-review/{artifact_id}`. It accepts only
+`processing-review-package` and `production-review-queue`, validates the
+resolved path inside the isolated job `review` directory, and marks responses
+as sensitive `public_safe=false` payloads. The HTTP transport now rejects
+non-loopback bind hosts.
 Follow-up, 2026-06-09: service job public summaries now include nested
 `scan-qc.service-job-public-timings.v1` timing context. The service layer
 filters production-run stage timings, aggregate processing throughput, and

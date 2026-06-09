@@ -119,6 +119,7 @@ authorization, and recovery semantics are defined.
 
 The prototype local service job API exposes public-safe job polling through
 `POST /api/jobs`, `GET /api/jobs`, `GET /api/jobs/{job_id}`,
+`GET /api/jobs/{job_id}/local-review/{artifact_id}`,
 `POST /api/jobs/{job_id}/run`, `POST /api/jobs/{job_id}/start`,
 `POST /api/jobs/{job_id}/retry`, and `POST /api/jobs/{job_id}/cancel`. `run` is synchronous. `start` is a local
 in-process async MVP that returns `running` immediately, publishes only
@@ -152,6 +153,11 @@ in-memory before/after source hash comparison. The API returns only aggregate
 checked, unchanged, modified, missing, and added file totals plus source-change
 booleans; the hash values and source file list are never written to the public
 summary.
+The local review endpoint is a local-only sensitive channel, not a public-safe
+summary. It accepts only `processing-review-package` and `production-review-queue`
+artifact IDs, validates the resolved artifact path inside the job's isolated
+`review` directory, and returns payloads marked `local_only`, `sensitive`, and
+`public_safe=false`. The HTTP service rejects non-loopback bind hosts.
 
 ## Image Processing Capability Smoke
 

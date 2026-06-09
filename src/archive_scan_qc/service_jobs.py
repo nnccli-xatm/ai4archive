@@ -41,6 +41,7 @@ SERVICE_JOB_PUBLIC_SUMMARY_SCHEMA_VERSION = "scan-qc.service-job-public-summary.
 SERVICE_JOB_INDEX_PUBLIC_SUMMARY_SCHEMA_VERSION = "scan-qc.service-job-index-public-summary.v1"
 SERVICE_JOB_PUBLIC_TIMINGS_SCHEMA_VERSION = "scan-qc.service-job-public-timings.v1"
 SERVICE_JOB_SOURCE_INTEGRITY_SCHEMA_VERSION = "scan-qc.service-job-source-integrity.v1"
+LOCAL_REVIEW_ARTIFACT_SCHEMA_VERSION = "scan-qc.service-job-local-review-artifact.v1"
 SERVICE_JOB_RECORD_JSON = "service_job.json"
 SERVICE_JOB_PUBLIC_SUMMARY_JSON = "service_job_public_summary.json"
 SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON = "service_job_index_public_summary.json"
@@ -53,6 +54,10 @@ SERVICE_JOB_MAX_ACTIVE_JOBS = 2
 SERVICE_JOB_MAX_ACTIVE_WORKERS = 8
 SERVICE_JOB_MIN_FREE_SPACE_BYTES = 64 * 1024 * 1024
 SERVICE_JOB_MAX_TMP_BYTES = 1024 * 1024 * 1024
+LOCAL_REVIEW_ARTIFACT_IDS = {
+    "processing-review-package": "processing_review_package",
+    "production-review-queue": "production_review_queue",
+}
 PUBLIC_STAGE_TIMING_IDS = ("scan", "process", "summarize")
 PUBLIC_AGGREGATE_PROCESSING_UNAVAILABLE_REASONS = (
     "missing_total_images",
@@ -376,6 +381,51 @@ def load_service_job_record(service_root: Path, job_id: str) -> dict[str, Any]:
         raise ValueError("Service job id mismatch.")
     _validate_loaded_record_paths(record, root, job_root)
     return record
+
+
+def read_service_job_local_review_artifact(service_root: Path, job_id: str, artifact_id: str) -> dict[str, Any]:
+    """Read a path-bearing local review artifact through a fixed local-only allowlist."""
+
+    artifact_key = LOCAL_REVIEW_ARTIFACT_IDS.get(artifact_id)
+    if artifact_key is None:
+        raise ValueError("Unsupported local review artifact.")
+
+    recover_service_job(service_root, job_id)
+    record = load_service_job_record(service_root, job_id)
+    local_review = record.get("local_review") if isinstance(record.get("local_review"), dict) else {}
+    artifacts = local_review.get("artifacts") if isinstance(local_review.get("artifacts"), dict) else {}
+    artifact_value = artifacts.get(artifact_key) if isinstance(artifacts, dict) else None
+    if local_review.get("provided") is not True or not artifact_value:
+        raise RuntimeError("Local review artifact is not available.")
+
+    artifact_path = Path(str(artifact_value)).resolve()
+    job_root = _job_root_from_record(record)
+    review_dir = _service_job_review_dir(record)
+    _require_within(artifact_path, job_root)
+    _require_within(artifact_path, review_dir)
+    payload = _read_json(artifact_path)
+    if not isinstance(payload, dict):
+        raise RuntimeError("Local review artifact is not readable.")
+    return {
+        "schema_version": LOCAL_REVIEW_ARTIFACT_SCHEMA_VERSION,
+        "job_id": str(record.get("job_id") or job_id),
+        "artifact_id": artifact_id,
+        "artifact_schema_version": payload.get("schema_version"),
+        "local_only": True,
+        "sensitive": True,
+        "public_safe": False,
+        "payload": payload,
+        "privacy": {
+            "local_only": True,
+            "public_safe": False,
+            "contains_paths": True,
+            "contains_filenames": True,
+            "contains_hashes": True,
+            "contains_thumbnails": False,
+            "contains_ocr_text": False,
+            "contains_image_content": False,
+        },
+    }
 
 
 def _validate_service_paths(input_dir: Path, service_root: Path) -> None:

@@ -223,6 +223,11 @@ public summaries stay isolated per job.
 终态 service job 的恢复现在会在本地 review artifact 缺失时，基于已有
 production summary 和 processing manifest 重新生成隔离 review 包，并只刷新
 public-safe 可用性与聚合计数。
+`GET /api/jobs/{job_id}/local-review/{artifact_id}` 现在提供受控 local-only
+review artifact 读取通道，只接受 `processing-review-package` 和
+`production-review-queue` 两个固定 ID；服务端校验真实 artifact 路径仍在隔离
+`review` 目录内，响应标记为 sensitive 且 `public_safe=false`。HTTP transport
+现在拒绝非回环地址绑定。
 
 ## 6. 阶段 2：图像处理规则模板系统
 
