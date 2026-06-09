@@ -220,16 +220,26 @@ AI4-148 方向修订：普通生产入口必须是“生产工人批量质检修
 
 Implementation note, 2026-06-09: the current local service API has implemented
 the read-only template endpoints `GET /api/rule-templates` and
-`GET /api/rule-templates/{template_id}`. Template `POST`/`PUT` and explicit
-dry-run write endpoints remain future service work.
+`GET /api/rule-templates/{template_id}`, plus service-managed custom template
+validation and writes through `POST /api/rule-templates/validate`,
+`POST /api/rule-templates`, and `PUT /api/rule-templates/{template_id}`.
+Explicit sample-image dry-run write endpoints remain future service work.
 The same prototype service now exposes job boundary endpoints `POST /api/jobs`,
 `GET /api/jobs`, `GET /api/jobs/{job_id}`, `POST /api/jobs/{job_id}/run`,
-`POST /api/jobs/{job_id}/start`, and `POST /api/jobs/{job_id}/cancel`.
+`POST /api/jobs/{job_id}/start`, `POST /api/jobs/{job_id}/retry`, and
+`POST /api/jobs/{job_id}/cancel`.
 `start` is a local in-process async MVP that returns `running` immediately and
 supports public-safe polling through the job status/index responses. Frontend
 queue controls should also read `GET /api/capabilities` for
 `max_active_async_jobs` and per-job worker limits before enabling concurrent
 starts.
+The first production-worker facade is also implemented:
+`GET /api/production/session`, `POST /api/production/setup`,
+`POST /api/production/start`, `GET /api/production/progress`,
+`GET /api/production/review-queue`, and
+`POST /api/production/finish-export`. These endpoints are public-safe wrappers
+over job summaries. They do not return row-level review records and do not yet
+persist `POST /api/production/review-actions`.
 
 后续对外接口应补充：
 

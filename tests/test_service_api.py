@@ -15,6 +15,12 @@ from archive_scan_qc.service_api import (
     get_job_response,
     get_rule_template_response,
     list_rule_templates_response,
+    production_finish_export_response,
+    production_progress_response,
+    production_review_queue_response,
+    production_session_response,
+    production_setup_response,
+    production_start_response,
     recover_jobs_response,
     run_job_response,
     save_rule_template_response,
@@ -76,6 +82,30 @@ class ServiceApiCoreTests(unittest.TestCase):
                 ("GET", "/api/jobs/{job_id}/local-review/{artifact_id}"),
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
+            self.assertIn(
+                ("GET", "/api/production/session"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
+            self.assertIn(
+                ("POST", "/api/production/setup"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
+            self.assertIn(
+                ("POST", "/api/production/start"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
+            self.assertIn(
+                ("GET", "/api/production/progress"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
+            self.assertIn(
+                ("GET", "/api/production/review-queue"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
+            self.assertIn(
+                ("POST", "/api/production/finish-export"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
             self.assertEqual(capabilities["schemas"]["rule_template_catalog"], "scan-qc.rule-template-catalog.v1")
             self.assertEqual(capabilities["schemas"]["rule_template_dry_run"], "scan-qc.rule-template-dry-run.v1")
             self.assertEqual(
@@ -89,6 +119,10 @@ class ServiceApiCoreTests(unittest.TestCase):
             self.assertEqual(
                 capabilities["schemas"]["service_job_local_review_artifact"],
                 "scan-qc.service-job-local-review-artifact.v1",
+            )
+            self.assertEqual(
+                capabilities["schemas"]["production_session"],
+                "scan-qc.service-production-session.v1",
             )
             self.assertGreaterEqual(capabilities["resource_limits"]["max_active_async_jobs"], 1)
             self.assertGreaterEqual(capabilities["resource_limits"]["max_active_workers"], 1)
@@ -361,6 +395,63 @@ class ServiceApiCoreTests(unittest.TestCase):
             self.assertEqual(terminal["quality"]["guardrails"]["failure_reasons"], {})
             _assert_public_timing_summary(self, terminal["timings"], expected_processed_files=1)
             self.assertTrue(terminal["local_review"]["processing_review_package_written"])
+            _assert_public_text_omits(self, raw, str(root.resolve()), "private_page_001")
+
+    def test_production_facade_uses_public_safe_job_boundary(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-api-production-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-input"
+            service_root = root / "service-root"
+            input_dir.mkdir()
+            _write_page(input_dir / "private_page_001.png")
+
+            initial_session = production_session_response(service_root=service_root)
+            setup = production_setup_response(
+                {
+                    "input_dir": str(input_dir),
+                    "service_root": str(service_root),
+                    "rule_template": "dat-31-2017-standard",
+                    "workers": 1,
+                },
+                job_id="job-productionapi001",
+            )
+            running = production_start_response(service_root=service_root, job_id="job-productionapi001")
+            terminal = _wait_for_terminal_summary(
+                self,
+                lambda: production_progress_response(service_root=service_root, job_id="job-productionapi001")["job"],
+            )
+            review_queue = production_review_queue_response(service_root=service_root, job_id="job-productionapi001")
+            finish_export = production_finish_export_response(service_root=service_root, job_id="job-productionapi001")
+            final_session = production_session_response(service_root=service_root)
+            raw = json.dumps(
+                {
+                    "initial_session": initial_session,
+                    "setup": setup,
+                    "running": running,
+                    "terminal": terminal,
+                    "review_queue": review_queue,
+                    "finish_export": finish_export,
+                    "final_session": final_session,
+                },
+                ensure_ascii=False,
+            )
+
+            self.assertEqual(initial_session["schema_version"], "scan-qc.service-production-session.v1")
+            self.assertEqual(initial_session["view"], "session")
+            self.assertEqual(setup["view"], "setup")
+            self.assertEqual(setup["job"]["state"], "created")
+            self.assertEqual(running["view"], "start")
+            self.assertEqual(running["job"]["state"], "running")
+            self.assertEqual(terminal["state"], "finished")
+            self.assertEqual(review_queue["view"], "review_queue")
+            self.assertTrue(review_queue["review_queue"]["available"])
+            self.assertEqual(review_queue["review_queue"]["local_review_artifact_id"], "production-review-queue")
+            self.assertEqual(finish_export["view"], "finish_export")
+            self.assertTrue(finish_export["finish_export"]["terminal"])
+            self.assertTrue(finish_export["finish_export"]["ready_for_export"])
+            self.assertEqual(final_session["session"]["job_count"], 1)
+            self.assertEqual(final_session["session"]["state_counts"], {"finished": 1})
+            self.assertTrue(finish_export["privacy"]["public_safe"])
             _assert_public_text_omits(self, raw, str(root.resolve()), "private_page_001")
 
     def test_create_job_response_requires_paths(self) -> None:

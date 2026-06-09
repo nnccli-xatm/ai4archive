@@ -226,24 +226,37 @@ from the process table.
 
 For the service-oriented job boundary MVP, keep each externally submitted job
 inside its own `service_root/jobs/<job_id>/` directory. The service core creates
-separate `metadata`, `derivatives`, `tmp`, `checkpoints`, and `logs`
+separate `metadata`, `derivatives`, `tmp`, `checkpoints`, `review`, and `logs`
 subdirectories and rejects service roots that overlap the input directory.
 The in-process `archive_scan_qc.service_api` module defines the public-safe
 response shapes. The prototype local HTTP transport can be started with
 `archive-scan-qc service-api --service-root <approved-service-root> --host
 127.0.0.1 --port 8765` and serves `GET /api/health`, `GET /api/capabilities`,
 `GET /api/rule-templates`, `GET /api/rule-templates/{template_id}`,
-`POST /api/rule-templates/validate`, `POST /api/jobs`, `GET /api/jobs`, `GET /api/jobs/{job_id}`,
+`POST /api/rule-templates/validate`, `POST /api/rule-templates`,
+`PUT /api/rule-templates/{template_id}`, `POST /api/jobs`, `GET /api/jobs`,
+`GET /api/jobs/{job_id}`,
+`GET /api/jobs/{job_id}/local-review/{artifact_id}`,
 `POST /api/jobs/{job_id}/run`, `POST /api/jobs/{job_id}/start`,
-`POST /api/jobs/{job_id}/retry`, and `POST /api/jobs/{job_id}/cancel`.
+`POST /api/jobs/{job_id}/retry`, `POST /api/jobs/{job_id}/cancel`,
+`GET /api/production/session`, `POST /api/production/setup`,
+`POST /api/production/start`, `GET /api/production/progress`,
+`GET /api/production/review-queue`, and
+`POST /api/production/finish-export`.
 The rule-template endpoints expose the same public-safe catalog and no-image
 dry-run plan as the CLI rule-template commands. The validate endpoint accepts
 only an inline custom template draft and returns aggregate validation counts and
 risk codes; it does not write templates, accept local profile paths, or echo
-name patterns/rule rows. Custom template write APIs are still not implemented
-in the local HTTP transport yet.
+name patterns/rule rows. The custom template write endpoints save
+service-managed custom templates under server-owned storage and return only
+template IDs, validation counts, risk codes, and processing-default booleans.
 The HTTP transport is local-only and uses the configured service root; reject
 requests that try to provide their own `service_root`.
+The production endpoints are a public-safe facade over the job boundary:
+`setup` creates a job, `start` enters the async runner, `progress` polls by
+`job_id`, `review-queue` returns aggregate local-review availability and group
+counts, and `finish-export` returns a completion/export readiness summary.
+They do not persist review actions or return row-level local review records.
 The `run` endpoint is synchronous: clients should expect the request to return
 after the existing production runner reaches a terminal state, then poll the job
 status or index for public-safe counts and quality summary fields. The `start`

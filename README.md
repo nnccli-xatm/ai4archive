@@ -1516,6 +1516,15 @@ The local-only service API can read those sensitive review JSON artifacts at
 IDs: `processing-review-package` and `production-review-queue`. These responses
 are explicitly `local_only`, `sensitive`, and not public-safe; the HTTP service
 rejects non-loopback bind hosts.
+For a production-worker style client, the local service API also exposes
+public-safe facade endpoints: `GET /api/production/session`,
+`POST /api/production/setup`, `POST /api/production/start`,
+`GET /api/production/progress?job_id=...`,
+`GET /api/production/review-queue?job_id=...`, and
+`POST /api/production/finish-export`. These wrap the same service job boundary
+and return only aggregate session, job, review availability, and finish/export
+readiness summaries. They do not persist review actions or return row-level
+local review records.
 HTTP requests for missing jobs return a public-safe 404 `job_not_found` error;
 missing or unauthorized input directories during job creation remain 400
 `input_dir_missing`. Missing service-managed custom rule templates return a

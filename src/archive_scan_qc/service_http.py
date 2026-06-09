@@ -7,7 +7,7 @@ from ipaddress import ip_address
 import json
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from .rule_templates import RuleTemplateNotFoundError
 from .service_api import (
@@ -17,6 +17,12 @@ from .service_api import (
     get_rule_template_response,
     get_job_response,
     list_rule_templates_response,
+    production_finish_export_response,
+    production_progress_response,
+    production_review_queue_response,
+    production_session_response,
+    production_setup_response,
+    production_start_response,
     recover_jobs_response,
     retry_job_response,
     run_job_response,
@@ -60,6 +66,27 @@ class ServiceApiRequestHandler(BaseHTTPRequestHandler):
             if path == "/api/jobs":
                 self._send_json(200, recover_jobs_response(service_root=self._service_root))
                 return
+            if path == "/api/production/session":
+                self._send_json(200, production_session_response(service_root=self._service_root))
+                return
+            if path == "/api/production/progress":
+                self._send_json(
+                    200,
+                    production_progress_response(
+                        service_root=self._service_root,
+                        job_id=_required_query_arg(self.path, "job_id"),
+                    ),
+                )
+                return
+            if path == "/api/production/review-queue":
+                self._send_json(
+                    200,
+                    production_review_queue_response(
+                        service_root=self._service_root,
+                        job_id=_required_query_arg(self.path, "job_id"),
+                    ),
+                )
+                return
 
             segments = _path_segments(path)
             if len(segments) == 3 and segments[:2] == ["api", "rule-templates"]:
@@ -98,6 +125,52 @@ class ServiceApiRequestHandler(BaseHTTPRequestHandler):
                         "Service root is configured by the server.",
                     )
                 self._send_json(201, save_rule_template_response(payload, service_root=self._service_root))
+                return
+            if path == "/api/production/setup":
+                payload = self._read_json_body()
+                if "service_root" in payload:
+                    raise ServiceHttpError(
+                        400,
+                        "service_root_managed_by_server",
+                        "Service root is configured by the server.",
+                    )
+                job_id = payload.get("job_id")
+                if job_id is not None and not isinstance(job_id, str):
+                    raise ServiceHttpError(400, "invalid_job_id", "Job id must be a string.")
+                request = {**payload, "service_root": str(self._service_root)}
+                self._send_json(201, production_setup_response(request, job_id=job_id))
+                return
+            if path == "/api/production/start":
+                payload = self._read_json_body()
+                if "service_root" in payload:
+                    raise ServiceHttpError(
+                        400,
+                        "service_root_managed_by_server",
+                        "Service root is configured by the server.",
+                    )
+                self._send_json(
+                    202,
+                    production_start_response(
+                        service_root=self._service_root,
+                        job_id=_required_payload_arg(payload, "job_id"),
+                    ),
+                )
+                return
+            if path == "/api/production/finish-export":
+                payload = self._read_json_body()
+                if "service_root" in payload:
+                    raise ServiceHttpError(
+                        400,
+                        "service_root_managed_by_server",
+                        "Service root is configured by the server.",
+                    )
+                self._send_json(
+                    200,
+                    production_finish_export_response(
+                        service_root=self._service_root,
+                        job_id=_required_payload_arg(payload, "job_id"),
+                    ),
+                )
                 return
             if path == "/api/jobs":
                 payload = self._read_json_body()
@@ -253,6 +326,20 @@ def serve_service_api(*, service_root: Path, host: str = "127.0.0.1", port: int 
         server.serve_forever()
     finally:
         server.server_close()
+
+
+def _required_query_arg(raw_path: str, key: str) -> str:
+    values = parse_qs(urlsplit(raw_path).query, keep_blank_values=False).get(key)
+    if not values or not values[-1]:
+        raise ServiceHttpError(400, "missing_request_field", f"Missing query field: {key}.")
+    return values[-1]
+
+
+def _required_payload_arg(payload: dict[str, Any], key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value:
+        raise ServiceHttpError(400, "missing_request_field", f"Missing request field: {key}.")
+    return value
 
 
 def _normalized_path(raw_path: str) -> str:

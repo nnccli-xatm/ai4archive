@@ -94,6 +94,30 @@ class ServiceHttpTransportTests(unittest.TestCase):
                 ("GET", "/api/jobs/{job_id}/local-review/{artifact_id}"),
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
+            self.assertIn(
+                ("GET", "/api/production/session"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
+            self.assertIn(
+                ("POST", "/api/production/setup"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
+            self.assertIn(
+                ("POST", "/api/production/start"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
+            self.assertIn(
+                ("GET", "/api/production/progress"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
+            self.assertIn(
+                ("GET", "/api/production/review-queue"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
+            self.assertIn(
+                ("POST", "/api/production/finish-export"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
             self.assertGreaterEqual(capabilities["resource_limits"]["max_active_workers"], 1)
             self.assertGreaterEqual(capabilities["resource_limits"]["min_free_space_bytes"], 1)
             self.assertGreaterEqual(capabilities["resource_limits"]["max_tmp_bytes_per_job"], 1)
@@ -226,6 +250,104 @@ class ServiceHttpTransportTests(unittest.TestCase):
             _assert_public_timing_summary(self, terminal["timings"], expected_processed_files=1)
             self.assertTrue(terminal["local_review"]["processing_review_package_written"])
             _assert_public_text_omits(self, raw, str(root.resolve()), "private_page_001")
+
+    def test_http_production_facade_wraps_job_boundary_without_private_paths(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-http-production-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-input"
+            service_root = root / "service-root"
+            input_dir.mkdir()
+            _write_page(input_dir / "private_page_001.png")
+
+            with _running_server(service_root) as base_url:
+                session_status, session = _json_request(base_url, "GET", "/api/production/session")
+                setup_status, setup = _json_request(
+                    base_url,
+                    "POST",
+                    "/api/production/setup",
+                    {
+                        "job_id": "job-productionhttp001",
+                        "input_dir": str(input_dir),
+                        "rule_template": "dat-31-2017-standard",
+                        "workers": 1,
+                    },
+                )
+                start_status, running = _json_request(
+                    base_url,
+                    "POST",
+                    "/api/production/start",
+                    {"job_id": "job-productionhttp001"},
+                )
+                terminal = _wait_for_terminal_http(
+                    self,
+                    lambda: _json_request(
+                        base_url,
+                        "GET",
+                        "/api/production/progress?job_id=job-productionhttp001",
+                    )[1]["job"],
+                )
+                queue_status, review_queue = _json_request(
+                    base_url,
+                    "GET",
+                    "/api/production/review-queue?job_id=job-productionhttp001",
+                )
+                finish_status, finish_export = _json_request(
+                    base_url,
+                    "POST",
+                    "/api/production/finish-export",
+                    {"job_id": "job-productionhttp001"},
+                )
+                missing_job_id_status, missing_job_id = _json_request(
+                    base_url,
+                    "GET",
+                    "/api/production/progress",
+                )
+                managed_root_status, managed_root = _json_request(
+                    base_url,
+                    "POST",
+                    "/api/production/setup",
+                    {
+                        "service_root": str(root / "client-root"),
+                        "input_dir": str(input_dir),
+                    },
+                )
+            raw = json.dumps(
+                {
+                    "session": session,
+                    "setup": setup,
+                    "running": running,
+                    "terminal": terminal,
+                    "review_queue": review_queue,
+                    "finish_export": finish_export,
+                    "missing_job_id": missing_job_id,
+                    "managed_root": managed_root,
+                },
+                ensure_ascii=False,
+            )
+
+            self.assertEqual(session_status, 200)
+            self.assertEqual(setup_status, 201)
+            self.assertEqual(start_status, 202)
+            self.assertEqual(queue_status, 200)
+            self.assertEqual(finish_status, 200)
+            self.assertEqual(missing_job_id_status, 400)
+            self.assertEqual(managed_root_status, 400)
+            self.assertEqual(session["schema_version"], "scan-qc.service-production-session.v1")
+            self.assertEqual(session["view"], "session")
+            self.assertEqual(setup["view"], "setup")
+            self.assertEqual(setup["job"]["state"], "created")
+            self.assertEqual(running["view"], "start")
+            self.assertEqual(running["job"]["state"], "running")
+            self.assertEqual(terminal["state"], "finished")
+            self.assertEqual(review_queue["view"], "review_queue")
+            self.assertTrue(review_queue["review_queue"]["available"])
+            self.assertEqual(review_queue["review_queue"]["local_review_artifact_id"], "production-review-queue")
+            self.assertEqual(finish_export["view"], "finish_export")
+            self.assertTrue(finish_export["finish_export"]["ready_for_export"])
+            self.assertEqual(missing_job_id["error"]["code"], "missing_request_field")
+            self.assertEqual(managed_root["error"]["code"], "service_root_managed_by_server")
+            self.assertFalse(review_queue["privacy"]["contains_paths"])
+            _assert_public_text_omits(self, raw, str(root.resolve()), "private-input", "private_page_001", "client-root")
 
     def test_http_rejects_client_managed_service_root_without_echoing_paths(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-http-reject-") as temp_dir:

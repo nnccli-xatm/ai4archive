@@ -319,8 +319,10 @@ still preserving source bytes and writing a public-safe quality summary.
 Follow-up, 2026-06-09: `image-processing-capability-smoke` now also publishes a
 protected mixed-content fixture check in the public-safe quality baseline. It
 reports aggregate changed-pixel ratio, color mean absolute delta, and edge
-energy delta ratio with limits, without paths or filenames. Risk-grouped review
-packaging remains M3 follow-up work.
+energy delta ratio with limits, without paths or filenames. Risk-grouped local
+processing review packaging now separates background cleanup, readability
+improvement, defect cleanup, and original appearance risk groups; richer
+operator UI review actions remain follow-up work.
 
 ### M4：服务 API 和状态恢复
 
@@ -354,7 +356,7 @@ public summary with aggregate quality fields. Follow-up, 2026-06-09:
 background thread and returns a `running` public summary immediately. Active
 in-process async jobs stay `running` while the service is alive; stale running
 checkpoints after restart still recover as `needs_recovery`. Serving local-only
-review resources remains M4 follow-up work.
+review resources has landed through a fixed local-only artifact allowlist.
 Follow-up, 2026-06-09: async service start now enforces an in-process
 `max_active_async_jobs` limit before marking a job `running`, and the service
 capabilities response exposes that non-sensitive limit alongside the per-job
@@ -415,6 +417,11 @@ Follow-up, 2026-06-09: missing service-managed custom rule templates now return
 explicit public-safe 404 `rule_template_not_found` errors. Job creation validates
 the requested custom template before writing job directories or checkpoints, so
 failed template references do not create stale recoverable jobs.
+Follow-up, 2026-06-09: the service API now also exposes a production-worker
+facade around the same job boundary: session, setup, async start, progress,
+aggregate review-queue availability, and finish/export readiness. It remains
+public-safe and does not yet persist review actions or expose authorized preview
+resources.
 Follow-up, 2026-06-09: service job public summaries now include nested
 `scan-qc.service-job-public-timings.v1` timing context. The service layer
 filters production-run stage timings, aggregate processing throughput, and

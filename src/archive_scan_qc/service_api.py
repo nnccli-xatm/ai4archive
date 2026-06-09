@@ -38,6 +38,7 @@ from .service_jobs import (
 
 
 SERVICE_API_SCHEMA_VERSION = "scan-qc.service-api.v1"
+PRODUCTION_SESSION_SCHEMA_VERSION = "scan-qc.service-production-session.v1"
 
 
 def service_health(*, service_root: Path | None = None) -> dict[str, Any]:
@@ -73,13 +74,13 @@ def service_capabilities() -> dict[str, Any]:
             {"method": "POST", "path": "/api/jobs/{job_id}/start", "implemented_by_core": True},
             {"method": "POST", "path": "/api/jobs/{job_id}/retry", "implemented_by_core": True},
             {"method": "POST", "path": "/api/jobs/{job_id}/cancel", "implemented_by_core": True},
-            {"method": "GET", "path": "/api/production/session", "implemented_by_core": False},
-            {"method": "POST", "path": "/api/production/setup", "implemented_by_core": False},
-            {"method": "POST", "path": "/api/production/start", "implemented_by_core": False},
-            {"method": "GET", "path": "/api/production/progress", "implemented_by_core": False},
-            {"method": "GET", "path": "/api/production/review-queue", "implemented_by_core": False},
+            {"method": "GET", "path": "/api/production/session", "implemented_by_core": True},
+            {"method": "POST", "path": "/api/production/setup", "implemented_by_core": True},
+            {"method": "POST", "path": "/api/production/start", "implemented_by_core": True},
+            {"method": "GET", "path": "/api/production/progress", "implemented_by_core": True},
+            {"method": "GET", "path": "/api/production/review-queue", "implemented_by_core": True},
             {"method": "POST", "path": "/api/production/review-actions", "implemented_by_core": False},
-            {"method": "POST", "path": "/api/production/finish-export", "implemented_by_core": False},
+            {"method": "POST", "path": "/api/production/finish-export", "implemented_by_core": True},
         ],
         "resource_limits": {
             "max_workers_per_job": SERVICE_JOB_MAX_WORKERS,
@@ -98,6 +99,7 @@ def service_capabilities() -> dict[str, Any]:
             "rule_template_custom_validation": CUSTOM_TEMPLATE_VALIDATION_SCHEMA_VERSION,
             "service_rule_template_detail": SERVICE_TEMPLATE_DETAIL_SCHEMA_VERSION,
             "service_rule_template_write": SERVICE_TEMPLATE_WRITE_SCHEMA_VERSION,
+            "production_session": PRODUCTION_SESSION_SCHEMA_VERSION,
         },
         "privacy": service_api_privacy(),
     }
@@ -106,6 +108,70 @@ def service_capabilities() -> dict[str, Any]:
 def create_job_response(request: dict[str, Any], *, job_id: str | None = None) -> dict[str, Any]:
     config = _service_job_config_from_request(request)
     return create_service_job(config, job_id=job_id)
+
+
+def production_session_response(*, service_root: Path) -> dict[str, Any]:
+    index = recover_jobs_response(service_root=service_root)
+    return _production_response(
+        view="session",
+        session={
+            "job_count": _safe_int(index.get("job_count")),
+            "state_counts": _int_dict(index.get("state_counts")),
+            "jobs": index.get("jobs") if isinstance(index.get("jobs"), list) else [],
+        },
+    )
+
+
+def production_setup_response(request: dict[str, Any], *, job_id: str | None = None) -> dict[str, Any]:
+    summary = create_job_response(request, job_id=job_id)
+    return _production_job_response("setup", summary)
+
+
+def production_start_response(*, service_root: Path, job_id: str) -> dict[str, Any]:
+    return _production_job_response("start", start_job_response(service_root=service_root, job_id=job_id))
+
+
+def production_progress_response(*, service_root: Path, job_id: str) -> dict[str, Any]:
+    return _production_job_response("progress", get_job_response(service_root=service_root, job_id=job_id))
+
+
+def production_review_queue_response(*, service_root: Path, job_id: str) -> dict[str, Any]:
+    summary = get_job_response(service_root=service_root, job_id=job_id)
+    local_review = summary.get("local_review") if isinstance(summary.get("local_review"), dict) else {}
+    return _production_response(
+        view="review_queue",
+        job=summary,
+        review_queue={
+            "available": bool(local_review.get("production_review_queue_written")),
+            "review_item_count": _safe_int(local_review.get("review_item_count")),
+            "by_source": _int_dict(local_review.get("review_queue_by_source")),
+            "by_recommended_action": _int_dict(local_review.get("review_queue_by_recommended_action")),
+            "processing_review_group_counts": _int_dict(local_review.get("processing_review_group_counts")),
+            "local_review_artifact_id": (
+                "production-review-queue" if local_review.get("production_review_queue_written") else None
+            ),
+            "local_only_artifact": bool(local_review.get("production_review_queue_written")),
+        },
+    )
+
+
+def production_finish_export_response(*, service_root: Path, job_id: str) -> dict[str, Any]:
+    summary = get_job_response(service_root=service_root, job_id=job_id)
+    state = str(summary.get("state") or "")
+    quality = summary.get("quality") if isinstance(summary.get("quality"), dict) else {}
+    blocking_codes = quality.get("blocking_codes") if isinstance(quality.get("blocking_codes"), list) else []
+    return _production_response(
+        view="finish_export",
+        job=summary,
+        finish_export={
+            "terminal": state in {"finished", "needs_review", "failed", "interrupted", "cancelled"},
+            "ready_for_export": state == "finished" and not blocking_codes and not summary.get("source_images_modified"),
+            "requires_review": state == "needs_review" or bool(blocking_codes),
+            "state": state,
+            "blocking_codes": [str(code) for code in blocking_codes if isinstance(code, str)],
+            "source_images_modified": bool(summary.get("source_images_modified")),
+        },
+    )
 
 
 def list_rule_templates_response(*, service_root: Path | None = None) -> dict[str, Any]:
@@ -176,6 +242,53 @@ def service_api_privacy() -> dict[str, bool]:
     return _public_privacy()
 
 
+def _production_job_response(view: str, summary: dict[str, Any]) -> dict[str, Any]:
+    return _production_response(view=view, job=summary)
+
+
+def _production_response(
+    *,
+    view: str,
+    job: dict[str, Any] | None = None,
+    session: dict[str, Any] | None = None,
+    review_queue: dict[str, Any] | None = None,
+    finish_export: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "schema_version": PRODUCTION_SESSION_SCHEMA_VERSION,
+        "generated_at": _utc_now(),
+        "status": "pass",
+        "view": view,
+        "aggregate_only": True,
+        "public_safe": True,
+        "workflow": {
+            "setup_supported": True,
+            "async_start_supported": True,
+            "progress_polling_supported": True,
+            "review_queue_public_summary_supported": True,
+            "finish_export_summary_supported": True,
+            "review_actions_persisted": False,
+        },
+        "resource_limits": {
+            "max_workers_per_job": SERVICE_JOB_MAX_WORKERS,
+            "max_active_async_jobs": SERVICE_JOB_MAX_ACTIVE_JOBS,
+            "max_active_workers": SERVICE_JOB_MAX_ACTIVE_WORKERS,
+            "min_free_space_bytes": SERVICE_JOB_MIN_FREE_SPACE_BYTES,
+            "max_tmp_bytes_per_job": SERVICE_JOB_MAX_TMP_BYTES,
+        },
+        "privacy": _public_privacy(),
+    }
+    if job is not None:
+        payload["job"] = job
+    if session is not None:
+        payload["session"] = session
+    if review_queue is not None:
+        payload["review_queue"] = review_queue
+    if finish_export is not None:
+        payload["finish_export"] = finish_export
+    return payload
+
+
 def _service_job_config_from_request(request: dict[str, Any]) -> ServiceJobConfig:
     return ServiceJobConfig(
         input_dir=Path(str(_required(request, "input_dir"))),
@@ -199,6 +312,19 @@ def _optional_int(value: Any) -> int | None:
     if value is None:
         return None
     return int(value)
+
+
+def _safe_int(value: Any) -> int:
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _int_dict(value: Any) -> dict[str, int]:
+    if not isinstance(value, dict):
+        return {}
+    return {str(key): _safe_int(raw) for key, raw in sorted(value.items()) if isinstance(key, str)}
 
 
 def _public_privacy() -> dict[str, bool]:

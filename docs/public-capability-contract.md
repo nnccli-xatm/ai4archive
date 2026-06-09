@@ -133,6 +133,16 @@ expose local manifest rows or retry lists in the public response. The capabiliti
 response publishes non-sensitive resource limits, including
 `max_active_async_jobs`, `max_active_workers`, `min_free_space_bytes`,
 `max_tmp_bytes_per_job`, and the per-job worker limit.
+The local service API also exposes a production-worker facade with schema
+`scan-qc.service-production-session.v1`: `GET /api/production/session`,
+`POST /api/production/setup`, `POST /api/production/start`,
+`GET /api/production/progress?job_id=...`,
+`GET /api/production/review-queue?job_id=...`, and
+`POST /api/production/finish-export`. These endpoints wrap the same service job
+boundary and return only public-safe session, job, local-review availability, and
+finish/export readiness summaries. They do not persist review actions, return
+row-level review records, expose local preview resources, or echo client-supplied
+paths.
 The service template endpoints include `POST /api/rule-templates/validate`,
 `POST /api/rule-templates`, and `PUT /api/rule-templates/{template_id}`.
 Validation returns schema `scan-qc.rule-template-custom-validation.v1` without

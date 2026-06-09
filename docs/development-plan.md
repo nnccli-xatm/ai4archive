@@ -148,7 +148,10 @@ per-job roots, writes private `service_job.json` checkpoints, writes
 public-safe `service_job_public_summary.json` aggregate status, rejects
 input/service-root overlap, and can recover terminal or stale running progress
 without exposing private paths. The first local HTTP API endpoints have landed;
-async execution and production-specific session endpoints remain follow-up work.
+async execution has landed, and the first production-specific session facade now
+wraps setup/start/progress/review-queue/finish-export around the same job
+boundary. Production review-action persistence and authorized preview resources
+remain follow-up work.
 Per-job roots now include separate `metadata`、`derivatives`、`tmp`、
 `checkpoints`、`review` 和 `logs` 子目录，public summary 只暴露对应隔离
 布尔值，不暴露本地路径。
