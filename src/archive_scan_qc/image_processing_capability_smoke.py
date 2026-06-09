@@ -8,7 +8,7 @@ from pathlib import Path
 import tempfile
 from typing import Any
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 
 from .processing import ProcessingOptions, process_images
 from .processing_quality_summary import (
@@ -409,20 +409,26 @@ def _low_contrast_text_page() -> Image.Image:
 
 
 def _scanline_page() -> Image.Image:
-    image = _clean_text_page()
+    image = Image.new("RGB", (260, 180), (240, 240, 236))
     draw = ImageDraw.Draw(image)
-    for y in (72, 126, 180):
-        draw.rectangle((20, y, 260, y + 1), fill=(188, 188, 188))
+    for y in (42, 64, 86):
+        draw.rectangle((42, y, 158, y + 5), fill=(36, 36, 36))
+    for x0, x1 in ((16, 48), (96, 128), (196, 228)):
+        draw.rectangle((x0, 132, x1, 133), fill=(226, 226, 222))
     return image
 
 
 def _bleed_through_page() -> Image.Image:
-    image = Image.new("RGB", (280, 220), (238, 238, 232))
+    image = Image.new("RGB", (260, 180), (244, 244, 239))
     draw = ImageDraw.Draw(image)
-    for y in range(58, 164, 24):
-        draw.rectangle((58, y, 218, y + 4), fill=(52, 52, 48))
-    for y in range(68, 174, 24):
-        draw.rectangle((76, y, 202, y + 3), fill=(188, 188, 182))
+    draw.text((34, 36), "REAL", fill=(70, 70, 70))
+    mask = Image.new("L", image.size, 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.text((124, 82), "321", fill=255)
+    mask_draw.text((124, 104), "654", fill=255)
+    mask = mask.filter(ImageFilter.GaussianBlur(2.4))
+    ghost = Image.new("RGB", image.size, (232, 232, 228))
+    image.paste(ghost, (0, 0), mask.point(lambda value: int(value * 0.55)))
     return image
 
 
@@ -436,12 +442,9 @@ def _corner_shadow_page() -> Image.Image:
 
 
 def _fold_shadow_page() -> Image.Image:
-    image = _clean_text_page()
+    image = Image.new("RGB", (220, 160), (242, 242, 238))
     draw = ImageDraw.Draw(image)
-    center = 142
-    for offset in range(-6, 7):
-        shade = 172 + abs(offset) * 8
-        draw.line((center + offset, 28, center + offset, 192), fill=(shade, shade, shade))
+    draw.rectangle((109, 14, 110, 146), fill=(234, 234, 230))
     return image
 
 

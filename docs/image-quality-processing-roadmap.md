@@ -229,6 +229,11 @@ for those cases. The synthetic smoke now requires at least one tone-normalized
 fixture with public-safe `tone_background_delta` and `tone_contrast_delta`
 evidence.
 
+Follow-up, 2026-06-09: the synthetic smoke fixtures now also cover a safe narrow
+fold-shadow band, a diffuse reverse-side bleed-through ghost, and a segmented
+neutral scanline. The public-safe smoke must show at least one applied file and
+positive aggregate delta for each of those three M2 cleanup stages.
+
 ### M3：Photo/mixed-safe 管线 v1
 
 目标：让照片、图文混排、印章和批注不会被文字清洁策略误伤。
