@@ -17,6 +17,7 @@ from archive_scan_qc.service_api import (
     list_rule_templates_response,
     production_finish_export_response,
     production_progress_response,
+    production_review_actions_response,
     production_review_queue_response,
     production_session_response,
     production_setup_response,
@@ -103,6 +104,10 @@ class ServiceApiCoreTests(unittest.TestCase):
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
             self.assertIn(
+                ("POST", "/api/production/review-actions"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
+            self.assertIn(
                 ("POST", "/api/production/finish-export"),
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
@@ -123,6 +128,10 @@ class ServiceApiCoreTests(unittest.TestCase):
             self.assertEqual(
                 capabilities["schemas"]["production_session"],
                 "scan-qc.service-production-session.v1",
+            )
+            self.assertEqual(
+                capabilities["schemas"]["service_job_review_actions"],
+                "scan-qc.service-job-review-actions.v1",
             )
             self.assertGreaterEqual(capabilities["resource_limits"]["max_active_async_jobs"], 1)
             self.assertGreaterEqual(capabilities["resource_limits"]["max_active_workers"], 1)
@@ -421,6 +430,13 @@ class ServiceApiCoreTests(unittest.TestCase):
                 lambda: production_progress_response(service_root=service_root, job_id="job-productionapi001")["job"],
             )
             review_queue = production_review_queue_response(service_root=service_root, job_id="job-productionapi001")
+            review_actions = production_review_actions_response(
+                {
+                    "job_id": "job-productionapi001",
+                    "review_decisions": _review_decision_summary(("accepted_issue",)),
+                },
+                service_root=service_root,
+            )
             finish_export = production_finish_export_response(service_root=service_root, job_id="job-productionapi001")
             final_session = production_session_response(service_root=service_root)
             raw = json.dumps(
@@ -430,6 +446,7 @@ class ServiceApiCoreTests(unittest.TestCase):
                     "running": running,
                     "terminal": terminal,
                     "review_queue": review_queue,
+                    "review_actions": review_actions,
                     "finish_export": finish_export,
                     "final_session": final_session,
                 },
@@ -446,6 +463,23 @@ class ServiceApiCoreTests(unittest.TestCase):
             self.assertEqual(review_queue["view"], "review_queue")
             self.assertTrue(review_queue["review_queue"]["available"])
             self.assertEqual(review_queue["review_queue"]["local_review_artifact_id"], "production-review-queue")
+            self.assertEqual(review_actions["view"], "review_actions")
+            self.assertTrue(review_actions["review_actions"]["saved"])
+            self.assertEqual(review_actions["review_actions"]["verification"]["status"], "pass")
+            self.assertEqual(review_actions["review_actions"]["decision_summary"]["total_decisions"], 1)
+            self.assertNotIn("PRQ000001", raw)
+            self.assertTrue(
+                (service_root / "jobs" / "job-productionapi001" / "review" / "scan-qc-review-decisions.summary.json").is_file()
+            )
+            self.assertTrue(
+                (
+                    service_root
+                    / "jobs"
+                    / "job-productionapi001"
+                    / "review"
+                    / "review_decision_verification_summary.json"
+                ).is_file()
+            )
             self.assertEqual(finish_export["view"], "finish_export")
             self.assertTrue(finish_export["finish_export"]["terminal"])
             self.assertTrue(finish_export["finish_export"]["ready_for_export"])
@@ -470,6 +504,43 @@ def _write_page(path: Path) -> None:
     draw = ImageDraw.Draw(image)
     draw.rectangle((32, 42, 188, 46), fill=(40, 40, 40))
     image.save(path, dpi=(300, 300))
+
+
+def _review_decision_summary(decisions: tuple[str, ...]) -> dict[str, object]:
+    counts = {
+        "pending": 0,
+        "accepted_issue": 0,
+        "false_positive": 0,
+        "fixed_externally": 0,
+        "needs_rescan": 0,
+        "blocked": 0,
+    }
+    rows = []
+    for index, decision in enumerate(decisions, start=1):
+        counts[decision] += 1
+        rows.append({"scope": "production_review_queue", "local_id": f"PRQ{index:06d}", "decision": decision})
+    pending = counts["pending"]
+    reviewed = len(rows) - pending
+    return {
+        "schema": "scan-qc-review-decisions.local.v1",
+        "source_type": "production_review_queue",
+        "source_target_count": len(rows),
+        "generated_in_browser": False,
+        "privacy": {"local_only": True},
+        "review_counts": counts,
+        "aggregate_counts": {
+            "p0_pending": 0 if pending == 0 else pending,
+            "p1_pending": 0,
+            "review_completion": {
+                "total": len(rows),
+                "pending": pending,
+                "reviewed": reviewed,
+                "complete": pending == 0,
+            },
+        },
+        "reviewed_targets": reviewed,
+        "decisions": rows,
+    }
 
 
 def _wait_for_terminal_summary(testcase: unittest.TestCase, read_summary) -> dict:  # type: ignore[no-untyped-def]

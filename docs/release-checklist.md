@@ -53,10 +53,13 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   explicit privacy flags. Confirm the production facade endpoints
   `GET /api/production/session`, `POST /api/production/setup`,
   `POST /api/production/start`, `GET /api/production/progress?job_id=...`,
-  `GET /api/production/review-queue?job_id=...`, and
+  `GET /api/production/review-queue?job_id=...`,
+  `POST /api/production/review-actions`, and
   `POST /api/production/finish-export` wrap the same service job boundary,
-  reject client-managed `service_root`, and return only public-safe session,
-  job, review availability, and finish/export readiness summaries. Confirm async
+  reject client-managed `service_root`, persist review decisions only under the
+  isolated local `review` directory, and return only public-safe session, job,
+  review availability, review-decision verification, and finish/export
+  readiness summaries. Confirm async
   `POST /api/jobs/{job_id}/start` returns `running`, later recovers terminal
   public quality summaries, and keeps active in-process jobs distinct from
   stale `running` checkpoints that must recover as `needs_recovery`. Confirm

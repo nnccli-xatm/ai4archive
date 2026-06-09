@@ -19,6 +19,7 @@ from .service_api import (
     list_rule_templates_response,
     production_finish_export_response,
     production_progress_response,
+    production_review_actions_response,
     production_review_queue_response,
     production_session_response,
     production_setup_response,
@@ -169,6 +170,22 @@ class ServiceApiRequestHandler(BaseHTTPRequestHandler):
                     production_finish_export_response(
                         service_root=self._service_root,
                         job_id=_required_payload_arg(payload, "job_id"),
+                    ),
+                )
+                return
+            if path == "/api/production/review-actions":
+                payload = self._read_json_body()
+                if "service_root" in payload:
+                    raise ServiceHttpError(
+                        400,
+                        "service_root_managed_by_server",
+                        "Service root is configured by the server.",
+                    )
+                self._send_json(
+                    200,
+                    production_review_actions_response(
+                        payload,
+                        service_root=self._service_root,
                     ),
                 )
                 return

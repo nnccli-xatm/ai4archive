@@ -150,8 +150,9 @@ input/service-root overlap, and can recover terminal or stale running progress
 without exposing private paths. The first local HTTP API endpoints have landed;
 async execution has landed, and the first production-specific session facade now
 wraps setup/start/progress/review-queue/finish-export around the same job
-boundary. Production review-action persistence and authorized preview resources
-remain follow-up work.
+boundary. Production review-actions now persist local decision summaries and
+public-safe verification summaries under the isolated job `review` directory.
+Authorized preview resources and richer review history remain follow-up work.
 Per-job roots now include separate `metadata`、`derivatives`、`tmp`、
 `checkpoints`、`review` 和 `logs` 子目录，public summary 只暴露对应隔离
 布尔值，不暴露本地路径。
@@ -327,7 +328,8 @@ M3 的第一片保护契约也已补齐：`photo-mixed-safe-v1` 通过生产 CLI
 强背景清理、透印清理、褪色文字增强和文字边缘锐化关闭，同时确认源图不变并仍输出
 public-safe 质量摘要。`image-processing-capability-smoke` 也已把混排保护变成
 public-safe 聚合质量证据：输出该 fixture 的像素变化率、颜色均值漂移和边缘能量漂移
-及对应阈值。后续 M3 继续补按风险分组的本地 review package。
+及对应阈值。本地 processing review package 已按背景清理、可读性提升、缺陷清理和
+原貌风险分组；更深的操作员逐项复核 UI 和预览授权仍属于后续前端/API 工作。
 
 ## 7. 阶段 3：前端改为 API Client
 

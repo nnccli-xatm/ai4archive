@@ -27,6 +27,7 @@ from .production_runner import (
 from .processing_review import write_processing_review_package
 from .processing_quality_summary import PROCESSING_QUALITY_SUMMARY_JSON
 from .production_review_queue import PRODUCTION_REVIEW_QUEUE_JSON, write_production_review_queue
+from .review_decisions import REVIEW_DECISION_VERIFICATION_JSON, build_review_decision_verification_summary
 from .scanner import SUPPORTED_EXTENSIONS
 from .rules import (
     BUILTIN_RULE_TEMPLATE_IDS,
@@ -46,9 +47,11 @@ SERVICE_JOB_INDEX_PUBLIC_SUMMARY_SCHEMA_VERSION = "scan-qc.service-job-index-pub
 SERVICE_JOB_PUBLIC_TIMINGS_SCHEMA_VERSION = "scan-qc.service-job-public-timings.v1"
 SERVICE_JOB_SOURCE_INTEGRITY_SCHEMA_VERSION = "scan-qc.service-job-source-integrity.v1"
 LOCAL_REVIEW_ARTIFACT_SCHEMA_VERSION = "scan-qc.service-job-local-review-artifact.v1"
+SERVICE_JOB_REVIEW_ACTIONS_SCHEMA_VERSION = "scan-qc.service-job-review-actions.v1"
 SERVICE_JOB_RECORD_JSON = "service_job.json"
 SERVICE_JOB_PUBLIC_SUMMARY_JSON = "service_job_public_summary.json"
 SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON = "service_job_index_public_summary.json"
+SERVICE_JOB_REVIEW_DECISIONS_JSON = "scan-qc-review-decisions.summary.json"
 SERVICE_JOBS_DIRNAME = "jobs"
 JOB_ID_PATTERN = re.compile(r"^job-[A-Za-z0-9][A-Za-z0-9_-]{2,80}$")
 TERMINAL_STATES = {"finished", "needs_review", "failed", "interrupted", "cancelled"}
@@ -465,6 +468,65 @@ def read_service_job_local_review_artifact(service_root: Path, job_id: str, arti
     }
 
 
+def write_service_job_review_actions(
+    service_root: Path,
+    job_id: str,
+    review_decisions: dict[str, Any],
+) -> dict[str, Any]:
+    """Persist local review decisions and return only aggregate verification status."""
+
+    if not isinstance(review_decisions, dict):
+        raise ValueError("Review actions require a review_decisions object.")
+    recover_service_job(service_root, job_id)
+    record = load_service_job_record(service_root, job_id)
+    verification = build_review_decision_verification_summary(review_decisions)
+    if verification.get("status") != "pass":
+        raise ValueError("Review decisions failed public-safe verification.")
+
+    job_root = _job_root_from_record(record)
+    review_dir = _service_job_review_dir(record)
+    _require_within(review_dir, job_root)
+    review_dir.mkdir(parents=True, exist_ok=True)
+    decisions_path = review_dir / SERVICE_JOB_REVIEW_DECISIONS_JSON
+    verification_path = review_dir / REVIEW_DECISION_VERIFICATION_JSON
+    decisions_path.write_text(
+        json.dumps(review_decisions, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    verification_path.write_text(
+        json.dumps(verification, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    decision_summary = verification.get("decision_summary") if isinstance(verification.get("decision_summary"), dict) else {}
+    record["review_actions"] = {
+        "schema_version": SERVICE_JOB_REVIEW_ACTIONS_SCHEMA_VERSION,
+        "provided": True,
+        "updated_at": _utc_now(),
+        "artifacts": {
+            "review_decisions": str(decisions_path),
+            "review_decision_verification": str(verification_path),
+        },
+        "verification": _public_review_action_verification(verification),
+    }
+    _write_job_record(job_root, record)
+    return {
+        "schema_version": SERVICE_JOB_REVIEW_ACTIONS_SCHEMA_VERSION,
+        "generated_at": _utc_now(),
+        "job_id": str(record.get("job_id") or job_id),
+        "saved": True,
+        "review_decisions_written": True,
+        "verification_summary_written": True,
+        "decision_summary": _public_decision_summary(decision_summary),
+        "verification": _public_review_action_verification(verification),
+        "storage": {
+            "managed_by_service": True,
+            "local_only_payload_written": True,
+            "path_returned": False,
+        },
+        "privacy": _public_summary_privacy(),
+    }
+
+
 def _validate_service_paths(input_dir: Path, service_root: Path) -> None:
     if not input_dir.is_dir():
         raise FileNotFoundError(f"Service job input directory does not exist: {input_dir}")
@@ -764,6 +826,44 @@ def _safe_float(value: Any) -> float | None:
         return max(0.0, round(float(value), 6))
     except (TypeError, ValueError):
         return None
+
+
+def _public_decision_summary(decision_summary: Any) -> dict[str, Any]:
+    summary = decision_summary if isinstance(decision_summary, dict) else {}
+    closure = summary.get("closure_gate_summary") if isinstance(summary.get("closure_gate_summary"), dict) else {}
+    return {
+        "total_decisions": _safe_int(summary.get("total_decisions")) or 0,
+        "pending": _safe_int(summary.get("pending")) or 0,
+        "accepted": _safe_int(summary.get("accepted")) or 0,
+        "rejected": _safe_int(summary.get("rejected")) or 0,
+        "rework": _safe_int(summary.get("rework")) or 0,
+        "completion_status": str(summary.get("completion_status") or "unknown"),
+        "decision_counts": _int_dict(summary.get("decision_counts")),
+        "closure_gate_summary": {
+            "open_p0_count": _safe_int(closure.get("open_p0_count")) or 0,
+            "open_p1_count": _safe_int(closure.get("open_p1_count")) or 0,
+            "manually_handled_count": _safe_int(closure.get("manually_handled_count")) or 0,
+            "can_complete_delivery": bool(closure.get("can_complete_delivery")),
+        },
+    }
+
+
+def _public_review_action_verification(verification: Any) -> dict[str, Any]:
+    payload = verification if isinstance(verification, dict) else {}
+    privacy = payload.get("privacy") if isinstance(payload.get("privacy"), dict) else {}
+    return {
+        "status": str(payload.get("status") or "unknown"),
+        "blocking_count": _safe_int(payload.get("blocking_count")) or 0,
+        "warning_count": _safe_int(payload.get("warning_count")) or 0,
+        "blocking_counts_by_code": _int_dict(payload.get("blocking_counts_by_code")),
+        "warning_counts_by_code": _int_dict(payload.get("warning_counts_by_code")),
+        "privacy": {
+            "status": str(privacy.get("status") or "unknown"),
+            "aggregate_only": bool(privacy.get("aggregate_only")),
+            "sensitive_field_count": _safe_int(privacy.get("sensitive_field_count")) or 0,
+            "source_values_omitted": True,
+        },
+    }
 
 
 def _public_recovery_payload(recovery: Any) -> dict[str, Any]:

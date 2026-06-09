@@ -34,6 +34,7 @@ from .service_jobs import (
     run_service_job,
     read_service_job_local_review_artifact,
     start_service_job_async,
+    write_service_job_review_actions,
 )
 
 
@@ -79,7 +80,7 @@ def service_capabilities() -> dict[str, Any]:
             {"method": "POST", "path": "/api/production/start", "implemented_by_core": True},
             {"method": "GET", "path": "/api/production/progress", "implemented_by_core": True},
             {"method": "GET", "path": "/api/production/review-queue", "implemented_by_core": True},
-            {"method": "POST", "path": "/api/production/review-actions", "implemented_by_core": False},
+            {"method": "POST", "path": "/api/production/review-actions", "implemented_by_core": True},
             {"method": "POST", "path": "/api/production/finish-export", "implemented_by_core": True},
         ],
         "resource_limits": {
@@ -100,6 +101,7 @@ def service_capabilities() -> dict[str, Any]:
             "service_rule_template_detail": SERVICE_TEMPLATE_DETAIL_SCHEMA_VERSION,
             "service_rule_template_write": SERVICE_TEMPLATE_WRITE_SCHEMA_VERSION,
             "production_session": PRODUCTION_SESSION_SCHEMA_VERSION,
+            "service_job_review_actions": "scan-qc.service-job-review-actions.v1",
         },
         "privacy": service_api_privacy(),
     }
@@ -152,6 +154,17 @@ def production_review_queue_response(*, service_root: Path, job_id: str) -> dict
             ),
             "local_only_artifact": bool(local_review.get("production_review_queue_written")),
         },
+    )
+
+
+def production_review_actions_response(request: dict[str, Any], *, service_root: Path) -> dict[str, Any]:
+    job_id = _required_string(request, "job_id")
+    review_decisions = request.get("review_decisions")
+    if not isinstance(review_decisions, dict):
+        raise ValueError("Production review actions require a review_decisions object.")
+    return _production_response(
+        view="review_actions",
+        review_actions=write_service_job_review_actions(service_root, job_id, review_decisions),
     )
 
 
@@ -252,6 +265,7 @@ def _production_response(
     job: dict[str, Any] | None = None,
     session: dict[str, Any] | None = None,
     review_queue: dict[str, Any] | None = None,
+    review_actions: dict[str, Any] | None = None,
     finish_export: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
@@ -267,7 +281,7 @@ def _production_response(
             "progress_polling_supported": True,
             "review_queue_public_summary_supported": True,
             "finish_export_summary_supported": True,
-            "review_actions_persisted": False,
+            "review_actions_persisted": True,
         },
         "resource_limits": {
             "max_workers_per_job": SERVICE_JOB_MAX_WORKERS,
@@ -284,6 +298,8 @@ def _production_response(
         payload["session"] = session
     if review_queue is not None:
         payload["review_queue"] = review_queue
+    if review_actions is not None:
+        payload["review_actions"] = review_actions
     if finish_export is not None:
         payload["finish_export"] = finish_export
     return payload
@@ -305,6 +321,13 @@ def _required(request: dict[str, Any], key: str) -> Any:
     value = request.get(key)
     if value in {None, ""}:
         raise ValueError(f"Missing service API request field: {key}.")
+    return value
+
+
+def _required_string(request: dict[str, Any], key: str) -> str:
+    value = _required(request, key)
+    if not isinstance(value, str):
+        raise ValueError(f"Service API request field must be a string: {key}.")
     return value
 
 

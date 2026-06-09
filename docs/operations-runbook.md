@@ -255,8 +255,10 @@ requests that try to provide their own `service_root`.
 The production endpoints are a public-safe facade over the job boundary:
 `setup` creates a job, `start` enters the async runner, `progress` polls by
 `job_id`, `review-queue` returns aggregate local-review availability and group
-counts, and `finish-export` returns a completion/export readiness summary.
-They do not persist review actions or return row-level local review records.
+counts, `review-actions` writes the local decision summary plus aggregate
+verification summary under the isolated job `review` directory, and
+`finish-export` returns a completion/export readiness summary. Responses do not
+return row-level local review records, local IDs, paths, or raw decision rows.
 The `run` endpoint is synchronous: clients should expect the request to return
 after the existing production runner reaches a terminal state, then poll the job
 status or index for public-safe counts and quality summary fields. The `start`

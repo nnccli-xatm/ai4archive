@@ -236,10 +236,12 @@ starts.
 The first production-worker facade is also implemented:
 `GET /api/production/session`, `POST /api/production/setup`,
 `POST /api/production/start`, `GET /api/production/progress`,
-`GET /api/production/review-queue`, and
+`GET /api/production/review-queue`,
+`POST /api/production/review-actions`, and
 `POST /api/production/finish-export`. These endpoints are public-safe wrappers
-over job summaries. They do not return row-level review records and do not yet
-persist `POST /api/production/review-actions`.
+over job summaries. `review-actions` persists the local review decision summary
+inside the service-owned job review directory and returns only aggregate
+verification status; it does not return row-level review records.
 
 后续对外接口应补充：
 

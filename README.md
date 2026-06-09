@@ -1520,11 +1520,14 @@ For a production-worker style client, the local service API also exposes
 public-safe facade endpoints: `GET /api/production/session`,
 `POST /api/production/setup`, `POST /api/production/start`,
 `GET /api/production/progress?job_id=...`,
-`GET /api/production/review-queue?job_id=...`, and
-`POST /api/production/finish-export`. These wrap the same service job boundary
-and return only aggregate session, job, review availability, and finish/export
-readiness summaries. They do not persist review actions or return row-level
-local review records.
+`GET /api/production/review-queue?job_id=...`,
+`POST /api/production/review-actions`, and
+`POST /api/production/finish-export`. These wrap the same service job boundary.
+Review actions persist the local decision summary and verification summary under
+the job's isolated `review` directory, while API responses return only aggregate
+session, job, review availability, review-decision verification, and
+finish/export readiness summaries. They do not return row-level local review
+records.
 HTTP requests for missing jobs return a public-safe 404 `job_not_found` error;
 missing or unauthorized input directories during job creation remain 400
 `input_dir_missing`. Missing service-managed custom rule templates return a

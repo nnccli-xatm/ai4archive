@@ -137,12 +137,15 @@ The local service API also exposes a production-worker facade with schema
 `scan-qc.service-production-session.v1`: `GET /api/production/session`,
 `POST /api/production/setup`, `POST /api/production/start`,
 `GET /api/production/progress?job_id=...`,
-`GET /api/production/review-queue?job_id=...`, and
+`GET /api/production/review-queue?job_id=...`,
+`POST /api/production/review-actions`, and
 `POST /api/production/finish-export`. These endpoints wrap the same service job
-boundary and return only public-safe session, job, local-review availability, and
-finish/export readiness summaries. They do not persist review actions, return
-row-level review records, expose local preview resources, or echo client-supplied
-paths.
+boundary and return only public-safe session, job, local-review availability,
+review-decision verification, and finish/export readiness summaries. Review
+actions write the local decision summary and verification summary under the
+job's isolated `review` directory, but responses do not return row-level review
+records, local IDs, local preview resources, client-supplied paths, or raw
+decision rows.
 The service template endpoints include `POST /api/rule-templates/validate`,
 `POST /api/rule-templates`, and `PUT /api/rule-templates/{template_id}`.
 Validation returns schema `scan-qc.rule-template-custom-validation.v1` without
