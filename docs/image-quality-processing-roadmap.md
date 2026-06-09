@@ -1,0 +1,309 @@
+# Image Quality Processing Roadmap
+
+日期：2026-06-09
+
+本文档定义后续真实图像质量优化的工程路线。当前系统已经具备扫描质检、保守派生处理、生产 CLI、服务 job 原型、隐私边界和 CI 分组，但实际修图提升仍偏弱：多数处理项以“不破坏”为第一目标，质量改善缺少可量化基线、模板化参数、局部内容保护、真实样本验收和服务化恢复边界。
+
+后续开发不能继续无边界增加修图开关。正确主线是：先建立服务化 job 边界、路径隔离、状态恢复和 public-safe 摘要，再在这个边界内建设可度量、可回滚、模板驱动的图像增强管线。
+
+## 1. 产品目标
+
+目标不是做通用美图工具，而是做档案扫描生产中的“安全派生图优化”：
+
+- 源文件永远只读，不做原地覆盖。
+- 输出派生图必须提升可读性、洁净度或版面可用性。
+- 对照片、印章、批注、彩色内容、历史纸张纹理和装订痕迹保持保守。
+- 每个处理结果必须有 manifest、质量指标、guardrail、失败原因和复核入口。
+- 外部系统只能依赖稳定 job/API/CLI 契约，不直接调用内部处理函数。
+- public-safe 摘要只输出聚合指标，不泄露路径、文件名、hash、缩略图、OCR 文本或图片内容。
+
+## 2. 当前问题判断
+
+现状的核心问题不是缺少按钮，而是缺少质量闭环：
+
+- 处理项偏保守，`deskew`、`auto_crop`、`trim_dark_border`、`despeckle` 主要修正明显问题，对泛黄、灰底、阴影、透印、低对比文字和扫描线的提升有限。
+- 可选 `normalize_tones`、`lighten_edge_shadow`、`lighten_background_stains`、`lighten_scanlines` 等方向已经存在，但缺少足够强的模板策略、区域保护、真实样本验收和默认启用依据。
+- 当前 synthetic smoke 证明“能跑”，不能证明“质量明显变好”。
+- 当前 benchmark 更偏性能和失败率，缺少 before/after 质量收益指标。
+- 局部质量改善和过处理风险尚未形成同一套 guardrail。
+- 处理开关直接暴露给 CLI/模板时，容易形成无法解释的参数组合。
+
+结论：后续重点应从“功能开关堆叠”切到“模板驱动的质量目标 + 服务 job 安全边界 + 可量化验收”。
+
+## 3. 架构原则
+
+### 3.1 Job 边界优先
+
+所有新质量处理必须运行在 job 边界内：
+
+- 每个 job 有独立 `job_id`、输入授权、输出目录、临时目录、模板快照、checkpoint、manifest、review queue 和日志。
+- 输入目录和服务根目录不得重叠；输出目录冲突必须拒绝或进入明确 resume 模式。
+- job checkpoint 是 local-only 敏感状态；public summary 是可分享聚合状态。
+- 处理失败、中断、取消和恢复必须有明确状态，不允许长期停在不可判断的 `running`。
+- 重试必须复用已完成派生图和 manifest，不能静默覆盖或丢失已完成结果。
+
+### 3.2 模板优先于开关
+
+新增算法不直接变成默认公开开关。它们先进入模板：
+
+- `archival-safe-v1`：保留原貌，只做几何纠偏、边框和极小噪点处理。
+- `text-clean-readable-v1`：面向纯文本材料，强调灰底清理、文字对比、扫描线和透印控制。
+- `print-clean-v1`：面向后续打印/利用副本，允许更强的背景均衡和文字锐化，但必须有过处理复核。
+- `photo-mixed-safe-v1`：照片、图像、印章、彩色批注和混合版面保护优先。
+- `custom`：用户自定义模板必须通过 schema 校验、dry-run 和参数边界检查。
+
+公开 CLI/API 接受模板 ID 和少数高层意图，不接受无限组合的底层滤镜参数。
+
+### 3.3 质量收益必须可度量
+
+每个处理阶段都要记录 before/after 聚合指标：
+
+- 背景亮度均匀度、背景污染面积、边缘阴影面积、角落阴影面积。
+- 文字/前景对比度、局部对比提升、锐度变化、低对比区域比例。
+- 斜率角度和纠偏置信度。
+- 黑边面积、裁切比例、内容边缘保留率。
+- 噪点候选数量、去噪像素比例、连通文字保护命中率。
+- 扫描线强度、位置和处理后残留强度。
+- 透印候选面积和处理后变化。
+- 尺寸变化、色彩偏移、过曝/欠曝比例、过处理 guardrail 命中数。
+
+public-safe 输出只保留聚合计数、均值、分位数、状态和风险代码；行级图片证据只留在本地 review package。
+
+## 4. 目标处理管线
+
+后续处理管线按稳定阶段推进，每个阶段都可以在模板中启用或禁用。
+
+### 4.1 输入标准化
+
+- EXIF transpose。
+- 格式、色彩模式、DPI、尺寸、帧数和可打开性检查。
+- 源文件 hash 读取和只读安全记录。
+- 超大图内存预算和 tile/stream 处理策略。
+
+验收：输入文件处理前后 hash 一致；异常中断后仍可打开。
+
+### 4.2 版面几何
+
+- 更可靠的小角度 deskew，继续保持低置信度不旋转。
+- 黑边/暗边 trim 与内容边缘保护联动。
+- 自动裁切只裁掉可信空白/边框，不裁正文、页码、印章和装订边。
+- 后续可研究轻量透视/拍照倾斜纠正，但不进入首批默认能力。
+
+验收：斜率改善有聚合指标；裁切比例和内容边缘损失有 guardrail。
+
+### 4.3 背景与照明
+
+- 背景估计：区分纸张背景、文字前景、印章/批注、照片/图像块。
+- 灰底/泛黄归一：默认保持纸张质感，`text-clean-readable-v1` 可更强。
+- 边缘阴影、角落阴影、折痕阴影和渐变照明校正。
+- 背景污渍 lightening：只处理小面积、低饱和、非文字连通区域。
+
+验收：背景均匀度提升；文字区域对比不下降；彩色内容偏移受限。
+
+### 4.4 文字可读性
+
+- 局部对比增强，优先作用于文字附近低对比区域。
+- 轻量锐化文字边缘，避免光晕和笔画断裂。
+- 对严重灰底材料提供可选二值化/准二值化利用副本，但不覆盖保真派生图。
+- 文字保护 mask 参与去污点、去透印和背景处理。
+
+验收：前景/背景对比提升；细笔画保留率不过低；过锐化 guardrail 为零或可复核。
+
+### 4.5 噪点、扫描线和透印
+
+- 去孤立噪点继续保守，NumPy/OpenCV 只作为同语义加速或更稳定候选实现。
+- 扫描线处理按方向、连续性、宽度和颜色中性判断，避免处理正文横线、表格线和装订线。
+- 透印处理先识别背面淡文字候选，只对低置信度背景区域做弱化。
+- 胶印、霉斑、污渍和纸纹不得简单等同噪点。
+
+验收：噪点/扫描线/透印指标下降；表格线、正文线、批注和印章保留。
+
+### 4.6 输出与审计
+
+- 同一源图可生成多个派生 profile：`archival-safe`、`text-readable`、`print-clean`。
+- manifest 记录模板、参数摘要、操作顺序、每阶段指标、guardrail、失败原因和复核建议。
+- review package 提供本地 before/after 引用和分组列表，但不嵌入图片字节。
+- public summary 只输出聚合状态和质量收益统计。
+
+验收：外部系统可以只读 public summary 判断 job 状态；人工复核可在本地追溯具体图片。
+
+## 5. 里程碑
+
+### M0：质量基线和服务边界固化
+
+目标：先证明“怎么判断变好”，并把处理运行关进 job 边界。
+
+任务：
+
+- 定义 `processing_quality_summary.json` public-safe schema。
+- 扩展 synthetic fixture：灰底、泛黄、边缘阴影、角落阴影、折痕、低对比文字、扫描线、透印、照片混排、印章批注、表格线。
+- 建立 private validation set 分类标签，但标签和样本路径只留本地。
+- 在 service job 中挂载质量处理 job 状态：`queued`、`running`、`completed`、`failed`、`cancelled`、`stale_recovered`。
+- 明确 derivatives、metadata、temp、review、logs、public-summary 的目录隔离。
+- 增加源文件 hash 不变、输出目录冲突、恢复和 public-safe 摘要测试。
+
+验收：
+
+- synthetic quality baseline 可稳定生成聚合指标。
+- 两个并发 job 的输出、状态、模板和 review queue 不混淆。
+- public summary 不包含路径、文件名、hash、缩略图、OCR 文本或图片内容。
+
+### M1：模板 schema 和 dry-run
+
+目标：用模板表达质量目标，而不是暴露底层滤镜组合。
+
+任务：
+
+- 定义模板 schema：目标 profile、处理阶段、强度区间、保护规则、输出策略、复核策略。
+- 实现内置模板：`archival-safe-v1`、`text-clean-readable-v1`、`print-clean-v1`、`photo-mixed-safe-v1`。
+- 实现 template dry-run：读取样例或 scan report，生成处理计划和风险提示，不写正式派生图。
+- 将模板快照写入 job checkpoint、processing manifest 和 public summary 的聚合字段。
+- 非法模板参数必须拒绝；模板不得关闭源文件安全和隐私边界。
+
+验收：
+
+- 同一 synthetic fixture 在不同模板下生成不同处理计划。
+- 自定义模板越界会失败并返回 public-safe 错误码。
+- dry-run 能指出预计高风险图片类别和需要复核的处理阶段。
+
+### M2：Text-clean 质量管线 v1
+
+目标：先把纯文本扫描件做出肉眼可见提升。
+
+任务：
+
+- 实现背景估计和灰底/泛黄归一。
+- 实现低对比文字增强和轻量边缘锐化。
+- 实现边缘/角落/折痕阴影弱化。
+- 强化扫描线检测和弱化。
+- 对透印做保守弱化候选，不做激进清除。
+- 每个阶段都产生 before/after 指标和 guardrail。
+
+验收：
+
+- `text-clean-readable-v1` 在 synthetic 和私有样本聚合指标上提升背景均匀度、文字对比和扫描线残留。
+- 处理失败为 0，或失败原因可解释且可复核。
+- 彩色内容、印章、批注和表格线误处理率低于约定阈值。
+
+### M3：Photo/mixed-safe 管线 v1
+
+目标：让照片、图文混排、印章和批注不会被文字清洁策略误伤。
+
+任务：
+
+- 增加照片/图像块、印章/批注、彩色区域、表格线和装订边保护候选。
+- 模板默认对混合内容降级为保守处理。
+- review queue 把“可读性提升”和“原貌风险”分开分组。
+- 输出 profile 支持同源图的保守版和利用版并存。
+
+验收：
+
+- mixed/photo fixtures 不触发强背景清理或强锐化。
+- 被保护区域的色彩偏移和结构变化受限。
+- 本地 review package 能按风险分组展示候选。
+
+### M4：服务 API 和状态恢复
+
+目标：把质量处理从 CLI 能力演进到稳定后台任务。
+
+任务：
+
+- `POST /api/jobs` 支持模板 ID、输入授权、输出策略和 worker 限额。
+- `GET /api/jobs/{job_id}` 返回 public-safe 状态、进度、质量聚合和风险代码。
+- `POST /api/jobs/{job_id}/cancel` 支持取消并写入明确终态。
+- 服务重启后扫描 checkpoint，恢复终态和 stale running job。
+- API 不返回本地敏感路径；本地复核资源必须走受控 local-only 通道。
+
+验收：
+
+- 前端或外部系统无需读取文件系统即可判断 job 是否完成、失败、取消或可恢复。
+- 服务重启后 public summary 与 checkpoint 一致。
+- 并发 job 的路径、模板、状态和输出完全隔离。
+
+### M5：性能和后端实现
+
+目标：在质量提升成立后，再优化速度和依赖。
+
+任务：
+
+- 把可证明同语义的热点迁移到 NumPy/OpenCV。
+- 对大图读写引入 libvips 或 tile-based 策略，但输出语义必须保持一致。
+- worker 推荐进入服务调度，限制总并发和 per-job workers。
+- 对每个操作记录 timing，形成质量收益/耗时比。
+- CPU/Pillow fallback 保留，直到可选后端通过真实样本聚合验证。
+
+验收：
+
+- 质量指标不低于 Pillow baseline。
+- 后端切换不改变 public schema 和模板语义。
+- 处理吞吐不低于当前私有样本基线，失败率不升高。
+
+### M6：生产验收和发布门槛
+
+目标：让“图像变好”成为发布门禁，而不是人工口头判断。
+
+任务：
+
+- 扩展 `core-image-processing` CI：快速 synthetic quality regression。
+- 保留 350 秒级深度图像回归为 main/deep-full 或手动发布门禁。
+- 增加 private validation 聚合报告：只公开分组指标和风险代码。
+- release checklist 增加质量收益、过处理风险、源文件安全、恢复和 public-safe 检查。
+
+验收：
+
+- 发布前必须有 synthetic quality regression 和私有样本聚合验证。
+- 质量收益、过处理风险、处理失败、隐私自检和 cleanup 均有明确结果。
+- 任何算法默认值变化必须更新模板版本和 migration note。
+
+## 6. 第一批建议 Issue
+
+1. 定义 `processing_quality_summary.json` schema 和 public-safe 字段。
+2. 增加质量 synthetic fixture 生成器：灰底、阴影、扫描线、透印、低对比文字、混合内容。
+3. 扩展 image-processing capability smoke，使其报告质量收益聚合指标。
+4. 把 service job 目录隔离接入质量处理输出：derivatives、metadata、temp、review、logs。
+5. 增加源文件 hash 不变、输出目录冲突和 stale running 恢复测试。
+6. 定义模板 schema 和四个内置模板。
+7. 实现模板 dry-run，输出处理计划和风险提示。
+8. 实现 text-clean 背景估计和灰底/泛黄归一。
+9. 实现低对比文字增强和轻量锐化 guardrail。
+10. 实现边缘/角落/折痕阴影弱化。
+11. 强化扫描线检测和弱化，保护表格线。
+12. 实现保守透印候选弱化。
+13. 增加照片/图像块、印章、批注和彩色区域保护候选。
+14. 实现本地 before/after review package 分组，不嵌入图片字节。
+15. 增加 public-safe quality regression 到 CI 分组。
+16. 将 quality job 状态接入服务 API MVP。
+17. 增加取消、恢复、重试和并发隔离 API 测试。
+18. 将已验证热点迁移到 NumPy/OpenCV，并保留 Pillow fallback。
+19. 更新 release checklist 的图像质量发布门槛。
+20. 用私有样本跑模板对比，只提交聚合指标和风险代码。
+
+## 7. 验证矩阵
+
+- 文档变更：文档 diff 审查。
+- 模板 schema 变更：模板单测、非法参数测试、dry-run 测试。
+- 质量指标变更：synthetic quality regression、public-safe schema 测试、隐私泄露测试。
+- 图像算法变更：核心图像专项、质量收益测试、过处理 guardrail、私有样本聚合验证。
+- 服务 job 变更：路径隔离、checkpoint、恢复、取消、并发、public summary 测试。
+- CLI/API 边界变更：生产 CLI、服务 API、隐私边界和外部验证分组。
+- 性能后端变更：backend parity、timing、fallback、真实样本聚合验证。
+
+## 8. 不做或暂缓
+
+暂不优先做：
+
+- 原图原地修改。
+- 云端上传或网络修图。
+- 生成式图像修复。
+- 默认强二值化覆盖所有材料。
+- 未经模板和复核的自动强清洁。
+- 把 OpenCV/GPU/model 后端直接暴露成稳定公开契约。
+
+这些能力即使后续需要，也必须经过模板、job 边界、public-safe 摘要、真实样本聚合验证和发布门禁。
+
+## 9. 文档维护规则
+
+- 新增图像算法时，同步更新本文档、`docs/development-plan.md`、运维说明和 public capability contract 中的稳定/实验边界。
+- 新增公开 CLI/API 或 schema 时，同步更新 release checklist 和 public capability contract。
+- 新增处理模板时，必须写明目标材料、默认处理阶段、风险边界、验证样本和迁移策略。
+- 每次私有样本验证只提交聚合指标，不提交样本路径、文件名、hash、缩略图、OCR 文本或图片内容。
