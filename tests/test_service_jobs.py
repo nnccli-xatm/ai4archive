@@ -148,6 +148,34 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertEqual(summary["counts"]["remaining_files"], 5)
             _assert_public_text_omits(self, public_raw, str(root.resolve()), "private_page_001")
 
+    def test_recover_marks_running_record_without_progress_as_needs_recovery(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-job-record-recover-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-source"
+            service_root = root / "service-root"
+            input_dir.mkdir()
+            _write_page(input_dir / "private_page_001.png")
+            create_service_job(
+                ServiceJobConfig(input_dir=input_dir, service_root=service_root, workers=1),
+                job_id="job-testrecord001",
+            )
+            job_root = service_root / "jobs" / "job-testrecord001"
+            record_path = job_root / SERVICE_JOB_RECORD_JSON
+            record = json.loads(record_path.read_text(encoding="utf-8"))
+            record["state"] = "running"
+            record["recovery"]["status"] = "running"
+            record_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+            summary = recover_service_job(service_root, "job-testrecord001")
+            public_raw = (job_root / SERVICE_JOB_PUBLIC_SUMMARY_JSON).read_text(encoding="utf-8")
+
+            self.assertEqual(summary["state"], "needs_recovery")
+            self.assertEqual(
+                summary["recovery"]["status"],
+                "running_record_requires_resume_after_service_restart",
+            )
+            _assert_public_text_omits(self, public_raw, str(root.resolve()), "private_page_001")
+
     def test_recover_rejects_tampered_record_paths_outside_job_root(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-job-tamper-") as temp_dir:
             root = Path(temp_dir)
@@ -167,6 +195,27 @@ class ServiceJobBoundaryTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "escapes"):
                 recover_service_job(service_root, "job-testtamper001")
+
+    def test_recover_rejects_tampered_input_dir_inside_service_root(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-job-input-tamper-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-source"
+            service_root = root / "service-root"
+            input_dir.mkdir()
+            _write_page(input_dir / "private_page_001.png")
+            create_service_job(
+                ServiceJobConfig(input_dir=input_dir, service_root=service_root, workers=1),
+                job_id="job-testinput001",
+            )
+            job_root = service_root / "jobs" / "job-testinput001"
+            nested_input = job_root / "metadata"
+            record_path = job_root / SERVICE_JOB_RECORD_JSON
+            record = json.loads(record_path.read_text(encoding="utf-8"))
+            record["paths"]["input_dir"] = str(nested_input)
+            record_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "input directory overlaps"):
+                recover_service_job(service_root, "job-testinput001")
 
     def test_recover_service_jobs_indexes_multiple_jobs_without_paths(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-job-index-") as temp_dir:

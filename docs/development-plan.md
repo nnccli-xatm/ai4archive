@@ -148,6 +148,8 @@ public-safe `service_job_public_summary.json` aggregate status, rejects
 input/service-root overlap, and can recover terminal or stale running progress
 without exposing private paths. The HTTP API endpoints remain the next service
 MVP step.
+The checkpoint loader also revalidates `input_dir` against the service root and
+marks `running` records without progress as `needs_recovery` after restart.
 
 ## 6. 阶段 2：图像处理规则模板系统
 

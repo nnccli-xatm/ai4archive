@@ -1476,6 +1476,9 @@ core for a future HTTP API: it creates one isolated
 settings for recovery. The shareable `service_job_public_summary.json` records
 only aggregate status, counts, isolation flags, recovery status, and privacy
 booleans.
+Recovery revalidates the checkpoint input path against the service root and
+marks stale `running` records without progress as `needs_recovery`, so a service
+restart does not leave an orphaned job looking active.
 
 Treat `service_job.json`, `production_run_summary.json`, progress files, scan
 reports, processing manifests, derivative images, and review queues as local

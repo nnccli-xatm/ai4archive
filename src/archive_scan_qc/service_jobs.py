@@ -241,6 +241,11 @@ def _validate_loaded_record_paths(record: dict[str, Any], service_root: Path, jo
         raise ValueError("Service job record paths are missing.")
     service_root = service_root.resolve()
     job_root = job_root.resolve()
+    input_dir = Path(str(paths.get("input_dir", ""))).resolve()
+    if not input_dir.is_dir():
+        raise ValueError("Service job input directory is missing.")
+    if _paths_overlap(input_dir, service_root):
+        raise ValueError("Service job input directory overlaps the service root.")
     if Path(str(paths.get("service_root", ""))).resolve() != service_root:
         raise ValueError("Service job service root mismatch.")
     if Path(str(paths.get("job_root", ""))).resolve() != job_root:
@@ -328,6 +333,8 @@ def _derive_recovered_state(
             return state, "terminal_progress_recovered"
         if state == "running":
             return "needs_recovery", "running_progress_requires_resume_after_service_restart"
+    if str(record.get("state") or "") == "running":
+        return "needs_recovery", "running_record_requires_resume_after_service_restart"
     return str(record.get("state") or "created"), "job_record_recovered"
 
 
