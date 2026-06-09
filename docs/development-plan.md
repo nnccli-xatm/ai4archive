@@ -198,7 +198,8 @@ retry presence, attempt number, terminal retry status, and resume/reuse flags.
 Service job terminal public summaries now also carry public-safe quality
 context from `processing_quality_summary.json`: blocking codes, warning/retry
 counts, per-category changed-file counts, operation category booleans,
-whitelisted aggregate `quality_metrics`, and aggregate guardrail status. These
+whitelisted aggregate `quality_metrics` including changed-pixel ratios and
+brightness/contrast deltas, and aggregate guardrail status. These
 fields give the frontend or an external scheduler enough quality state to poll
 without reading private production summaries or path-bearing checkpoints.
 Service job public summaries now also carry nested

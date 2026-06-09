@@ -139,7 +139,8 @@ identifiers.
 Terminal service job summaries also expose public-safe quality context:
 blocking codes, processing warning and retry counts, per-category changed-file
 counts, quality-operation category booleans, whitelisted aggregate quality
-metrics, and aggregate guardrail status.
+metrics including brightness/contrast deltas and changed-pixel ratios, and
+aggregate guardrail status.
 These fields are copied only from the public-safe production quality summary and
 remain free of local paths and filenames.
 Terminal and recoverable running summaries also expose public-safe `timings`

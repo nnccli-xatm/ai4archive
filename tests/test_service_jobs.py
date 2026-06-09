@@ -831,8 +831,12 @@ def _assert_public_quality_summary(testcase: unittest.TestCase, quality: dict) -
     )
     testcase.assertIn("quality_metrics", quality)
     for metric_id in (
+        "brightness_delta",
+        "contrast_delta",
         "max_trim_margin_ratio",
         "scanner_gutter_max_trim_margin_ratio",
+        "tone_changed_pixel_ratio",
+        "background_stains_changed_pixel_ratio",
         "tone_background_delta",
         "processed_output_brightness_increase",
     ):

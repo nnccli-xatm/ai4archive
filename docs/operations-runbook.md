@@ -266,7 +266,8 @@ and the template snapshot needed for recovery. Each job root includes isolated
 `metadata`, `derivatives`, `tmp`, `checkpoints`, `review`, and `logs`
 subdirectories. `service_job_public_summary.json` is the public-safe
 polling/handoff shape: aggregate state, counts, quality category signals,
-whitelisted quality metrics, guardrail summary, timing summaries,
+whitelisted quality metrics including before/after deltas and changed-pixel
+ratios, guardrail summary, timing summaries,
 source-integrity counts, isolation booleans, recovery status, and explicit
 privacy flags only. Its public `counts`
 block includes aggregate retry/reuse fields (`resumed_files`, `reused_files`,
