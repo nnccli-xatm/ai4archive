@@ -16,6 +16,7 @@ from archive_scan_qc.service_jobs import (
     recover_service_jobs,
     run_service_job,
 )
+from archive_scan_qc.processing_quality_summary import PROCESSING_QUALITY_SUMMARY_JSON
 
 
 class ServiceJobBoundaryTests(unittest.TestCase):
@@ -89,8 +90,12 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertEqual(summary["recovery"]["status"], "terminal_summary_recovered")
             self.assertEqual(summary["counts"]["total_files"], 1)
             self.assertEqual(summary["counts"]["processed_files"], 1)
+            self.assertTrue(summary["quality"]["provided"])
+            self.assertEqual(summary["quality"]["status"], "pass")
+            self.assertEqual(summary["quality"]["processed_files"], 1)
             self.assertTrue((job_root / "metadata" / "production_run_summary.json").is_file())
             self.assertTrue((job_root / "derivatives" / "processing_manifest.json").is_file())
+            self.assertTrue((job_root / "derivatives" / PROCESSING_QUALITY_SUMMARY_JSON).is_file())
             _assert_public_text_omits(self, public_raw, str(root.resolve()), "private_page_001")
             self.assertFalse(summary["private_paths_exposed"])
 

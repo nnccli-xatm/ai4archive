@@ -10,6 +10,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 from archive_scan_qc.cli import main
+from archive_scan_qc.processing_quality_summary import PROCESSING_QUALITY_SUMMARY_JSON, SCHEMA_VERSION as QUALITY_SCHEMA_VERSION
 from archive_scan_qc.production_runner import ProductionRunConfig, run_production_folder
 from archive_scan_qc.rules import builtin_rules_profile, processing_defaults_for_rule_template
 
@@ -64,6 +65,8 @@ class StableCliRuleTemplateTests(unittest.TestCase):
             processing_manifest = json.loads(
                 (derivatives_dir / "processing_manifest.json").read_text(encoding="utf-8")
             )
+            quality_path = derivatives_dir / PROCESSING_QUALITY_SUMMARY_JSON
+            quality_summary = json.loads(quality_path.read_text(encoding="utf-8"))
 
             self.assertEqual(summary["rule_template"]["id"], "text-clean-print")
             self.assertEqual(scan_report["manifest"]["rules_profile"]["template"]["id"], "text-clean-print")
@@ -71,6 +74,12 @@ class StableCliRuleTemplateTests(unittest.TestCase):
             self.assertTrue(summary["options"]["sharpen_text_edges"])
             self.assertFalse(summary["options"]["despeckle_content_type_check"])
             self.assertFalse(processing_manifest["options"]["despeckle_content_type_check"])
+            self.assertEqual(summary["artifacts"]["processing_quality_summary"], str(quality_path.resolve()))
+            self.assertTrue(summary["processing_quality_summary"]["provided"])
+            self.assertEqual(summary["processing_quality_summary"]["status"], "pass")
+            self.assertEqual(quality_summary["schema_version"], QUALITY_SCHEMA_VERSION)
+            self.assertTrue(quality_summary["public_safe"])
+            self.assertFalse(quality_summary["privacy"]["contains_paths"])
             self.assertEqual(progress["state"], "finished")
             self.assertFalse(summary["source_images_modified"])
 

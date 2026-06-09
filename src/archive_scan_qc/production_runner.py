@@ -10,6 +10,11 @@ import time
 from typing import Any
 
 from .processing import ProcessingOptions, process_images
+from .processing_quality_summary import (
+    PROCESSING_QUALITY_SUMMARY_JSON,
+    build_processing_quality_summary,
+    write_processing_quality_summary,
+)
 from .reports import write_reports
 from .rules import RulesProfile
 from .scanner import ScanConfig, scan_batch
@@ -148,6 +153,10 @@ def run_production_folder(config: ProductionRunConfig) -> dict[str, Any]:
                 workers=config.workers,
             ),
         )
+        processing_quality_summary = _write_processing_quality_summary(
+            processing_manifest=processing_manifest,
+            derivative_dir=derivative_dir,
+        )
         stage_timings["process"] = time.perf_counter() - process_started_at
         processed_done = (
             processing_manifest["summary"]["processed_files"]
@@ -171,6 +180,7 @@ def run_production_folder(config: ProductionRunConfig) -> dict[str, Any]:
             config=config,
             report=report,
             processing_manifest=processing_manifest,
+            processing_quality_summary=processing_quality_summary,
             admin_report_dir=admin_report_dir,
             report_paths=report_paths,
             stage_timings=stage_timings,
@@ -203,6 +213,7 @@ def build_production_run_summary(
     processing_manifest: dict[str, Any],
     admin_report_dir: Path,
     report_paths: dict[str, Path] | None = None,
+    processing_quality_summary: dict[str, Any] | None = None,
     generated_at: str | None = None,
     stage_timings: dict[str, float] | None = None,
 ) -> dict[str, Any]:
@@ -253,6 +264,7 @@ def build_production_run_summary(
         "processing_manifest": str(config.derivative_output_dir.resolve() / "processing_manifest.json"),
         "processing_retry_manifest": str(config.derivative_output_dir.resolve() / "processing_retry_manifest.json"),
         "processing_audit_summary": str(config.derivative_output_dir.resolve() / "processing_audit_summary.json"),
+        "processing_quality_summary": str(config.derivative_output_dir.resolve() / PROCESSING_QUALITY_SUMMARY_JSON),
         "admin_reports": str(admin_report_dir.resolve()),
     }
     if report_paths:
@@ -305,6 +317,7 @@ def build_production_run_summary(
             "retry_total_files": local_reuse_summary["total_files"],
         },
         "local_reuse_summary": local_reuse_summary,
+        "processing_quality_summary": _production_quality_summary_payload(processing_quality_summary),
         "aggregate_processing": aggregate_processing,
         "progress": {
             "state": "completed",
@@ -334,6 +347,56 @@ def write_production_run_summary(summary: dict[str, Any], metadata_output_dir: P
     path = metadata_output_dir / PRODUCTION_RUN_SUMMARY_JSON
     path.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return path
+
+
+def _write_processing_quality_summary(
+    *,
+    processing_manifest: dict[str, Any],
+    derivative_dir: Path,
+) -> dict[str, Any]:
+    audit_summary = _read_json_object(derivative_dir / "processing_audit_summary.json")
+    payload = build_processing_quality_summary(
+        manifest=processing_manifest,
+        audit_summary=audit_summary,
+        fixture_context={
+            "source": "production_run",
+            "synthetic_inputs_only": False,
+            "fixture_count": 0,
+            "fixture_groups": [],
+        },
+        generated_at=processing_manifest.get("generated_at") if isinstance(processing_manifest.get("generated_at"), str) else None,
+    )
+    write_processing_quality_summary(payload, derivative_dir)
+    return payload
+
+
+def _production_quality_summary_payload(processing_quality_summary: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(processing_quality_summary, dict):
+        return {
+            "provided": False,
+            "status": "not_available",
+            "schema_version": "scan-qc.processing-quality-summary.v1",
+        }
+    quality_signal = processing_quality_summary.get("quality_signal")
+    counts = processing_quality_summary.get("counts")
+    guardrails = processing_quality_summary.get("guardrails")
+    return {
+        "provided": True,
+        "schema_version": processing_quality_summary.get("schema_version"),
+        "status": processing_quality_summary.get("status"),
+        "blocking_codes": processing_quality_summary.get("blocking_codes", []),
+        "public_safe": bool(processing_quality_summary.get("public_safe")),
+        "counts": counts if isinstance(counts, dict) else {},
+        "quality_signal": quality_signal if isinstance(quality_signal, dict) else {},
+        "guardrails": guardrails if isinstance(guardrails, dict) else {},
+    }
+
+
+def _read_json_object(path: Path) -> dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"Expected JSON object: {path.name}")
+    return payload
 
 
 def build_production_run_failure_summary(

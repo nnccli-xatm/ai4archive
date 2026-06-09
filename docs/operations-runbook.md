@@ -306,6 +306,7 @@ When derivative processing is enabled, `--process-out` also contains:
 - `processing_manifest.json`
 - `processing_retry_manifest.json`
 - `processing_audit_summary.json`
+- `processing_quality_summary.json`
 - `images/` with derivative images preserving source relative paths
 
 Each project run plan additionally writes under its project `--out` root:

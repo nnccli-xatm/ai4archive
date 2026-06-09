@@ -856,10 +856,11 @@ layer. Source images remain read-only. The CLI writes derivative images under
 `--process-out/images`, preserving source relative paths, and writes
 `--process-out/processing_manifest.json` to link each derivative back to the
 source SHA-256. It also writes `processing_retry_manifest.json` for local retry
-diagnosis and `processing_audit_summary.json` with aggregate-only counts,
-flags, worker metadata, timing, throughput, failure totals, and resume counts.
-The audit summary omits file lists, paths, hashes, thumbnails, and image
-content so it can be used as the production batch audit artifact without
+diagnosis, `processing_audit_summary.json` with aggregate-only counts, flags,
+worker metadata, timing, throughput, failure totals, and resume counts, and
+`processing_quality_summary.json` with public-safe before/after quality signals.
+The audit and quality summaries omit file lists, paths, hashes, thumbnails, and
+image content so they can be used as production batch audit artifacts without
 exposing private row-level data. The initial processing pipeline applies EXIF
 orientation normalization, safe RGB/L color conversion, and light automatic
 contrast normalization. Add `--auto-crop` with `--process-out` to enable

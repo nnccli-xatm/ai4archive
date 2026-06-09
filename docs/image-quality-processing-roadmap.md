@@ -162,6 +162,13 @@ cast, low-contrast text, scanlines, bleed-through, corner shadow, fold shadow,
 and mixed photo/stamp/table content. This remains public-safe because the images
 are generated at runtime and only aggregate fixture group IDs are published.
 
+Production-run update, 2026-06-09: `production-run` now writes
+`processing_quality_summary.json` beside the processing manifest and audit
+summary for every completed derivative-processing batch. The production summary
+stores a public-safe aggregate excerpt, and service job public summaries expose
+only quality status, processed/failed counts, guardrail failed counts, and
+changed-file counts.
+
 ### M1：模板 schema 和 dry-run
 
 目标：用模板表达质量目标，而不是暴露底层滤镜组合。

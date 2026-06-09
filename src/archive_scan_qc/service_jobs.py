@@ -21,6 +21,7 @@ from .production_runner import (
     ProductionRunConfig,
     run_production_folder,
 )
+from .processing_quality_summary import PROCESSING_QUALITY_SUMMARY_JSON
 from .rules import (
     BUILTIN_RULE_TEMPLATE_IDS,
     RulesProfileError,
@@ -308,6 +309,7 @@ def _production_artifact_paths(metadata_dir: Path, derivatives_dir: Path) -> dic
         "processing_manifest": str(derivatives_dir / "processing_manifest.json"),
         "processing_retry_manifest": str(derivatives_dir / "processing_retry_manifest.json"),
         "processing_audit_summary": str(derivatives_dir / "processing_audit_summary.json"),
+        "processing_quality_summary": str(derivatives_dir / PROCESSING_QUALITY_SUMMARY_JSON),
     }
 
 
@@ -357,6 +359,7 @@ def _public_summary_from_record(
             "checkpoint_isolated": bool(record["isolation"]["checkpoint_isolated"]),
         },
         "recovery": _public_recovery_payload(record.get("recovery")),
+        "quality": _public_quality_payload(production_summary),
         "source_images_modified": False,
         "network_services_called": False,
         "private_paths_exposed": False,
@@ -395,6 +398,29 @@ def _public_recovery_payload(recovery: Any) -> dict[str, Any]:
     return {
         "status": str(recovery.get("status") or "unknown"),
         "resume_supported": bool(recovery.get("resume_supported")),
+    }
+
+
+def _public_quality_payload(production_summary: dict[str, Any] | None) -> dict[str, Any]:
+    quality = production_summary.get("processing_quality_summary") if isinstance(production_summary, dict) else None
+    if not isinstance(quality, dict) or quality.get("provided") is not True:
+        return {
+            "provided": False,
+            "status": "not_available",
+            "public_safe": True,
+        }
+    counts = quality.get("counts") if isinstance(quality.get("counts"), dict) else {}
+    signal = quality.get("quality_signal") if isinstance(quality.get("quality_signal"), dict) else {}
+    guardrails = quality.get("guardrails") if isinstance(quality.get("guardrails"), dict) else {}
+    return {
+        "provided": True,
+        "schema_version": quality.get("schema_version"),
+        "status": quality.get("status"),
+        "public_safe": bool(quality.get("public_safe", True)),
+        "processed_files": _safe_int(counts.get("processed_files")),
+        "failed_files": _safe_int(counts.get("failed_files")),
+        "guardrail_failed_files": _safe_int(guardrails.get("failed_files")),
+        "any_quality_operation_changed_files": _safe_int(signal.get("any_quality_operation_changed_files")),
     }
 
 
