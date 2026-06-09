@@ -69,6 +69,7 @@ class ProductionRunConfig:
     lighten_scanlines: bool = False
     enhance_faded_text: bool = False
     sharpen_text_edges: bool = False
+    despeckle_content_type_check: bool = True
     despeckle_backend: str = "fallback"
     resume_processing: bool = True
     reuse_scan_measurements: bool = False
@@ -91,97 +92,108 @@ def run_production_folder(config: ProductionRunConfig) -> dict[str, Any]:
         _step("summarize", STEP_LABELS["summarize"], "pending"),
     ]
     stage_timings: dict[str, float] = {}
-    _write_progress(metadata_dir, "running", steps, current_step="scan")
-    steps[0] = _step("scan", STEP_LABELS["scan"], "running")
+    current_step: str | None = "scan"
+    try:
+        _write_progress(metadata_dir, "running", steps, current_step=current_step)
+        steps[0] = _step("scan", STEP_LABELS["scan"], "running")
 
-    scan_started_at = time.perf_counter()
-    report = scan_batch(
-        ScanConfig(
-            project_id=config.project_id,
-            batch_id=config.batch_id,
-            input_dir=config.input_dir,
-            output_dir=admin_report_dir,
-            min_dpi=config.min_dpi,
-            name_pattern=config.name_pattern,
-            manifest_csv=config.manifest_csv,
-            rules_profile=config.rules_profile,
-            workers=config.workers,
-            analysis_provider_command=config.analysis_provider_command,
+        scan_started_at = time.perf_counter()
+        report = scan_batch(
+            ScanConfig(
+                project_id=config.project_id,
+                batch_id=config.batch_id,
+                input_dir=config.input_dir,
+                output_dir=admin_report_dir,
+                min_dpi=config.min_dpi,
+                name_pattern=config.name_pattern,
+                manifest_csv=config.manifest_csv,
+                rules_profile=config.rules_profile,
+                workers=config.workers,
+                analysis_provider_command=config.analysis_provider_command,
+            )
         )
-    )
-    stage_timings["scan"] = time.perf_counter() - scan_started_at
-    report_paths = write_reports(report, admin_report_dir)
-    steps[0] = _step("scan", STEP_LABELS["scan"], "completed", completed_items=report["summary"]["total_files"])
-    steps[1] = _step("process", STEP_LABELS["process"], "running", total_items=report["summary"]["total_files"])
-    _write_progress(metadata_dir, "running", steps, current_step="process", stage_timings=stage_timings)
+        stage_timings["scan"] = time.perf_counter() - scan_started_at
+        report_paths = write_reports(report, admin_report_dir)
+        steps[0] = _step("scan", STEP_LABELS["scan"], "completed", completed_items=report["summary"]["total_files"])
+        current_step = "process"
+        steps[1] = _step("process", STEP_LABELS["process"], "running", total_items=report["summary"]["total_files"])
+        _write_progress(metadata_dir, "running", steps, current_step=current_step, stage_timings=stage_timings)
 
-    process_started_at = time.perf_counter()
-    processing_manifest = process_images(
-        report,
-        config.input_dir,
-        derivative_dir,
-        ProcessingOptions(
-            auto_crop=config.auto_crop,
-            deskew=config.deskew,
-            trim_dark_border=config.trim_dark_border,
-            scanner_gutter_trim=config.scanner_gutter_trim,
-            despeckle=config.despeckle,
-            normalize_tones=config.normalize_tones,
-            normalize_paper_color_cast=config.normalize_paper_color_cast,
-            lighten_edge_shadow=config.lighten_edge_shadow,
-            lighten_corner_shadows=config.lighten_corner_shadows,
-            lighten_background_stains=config.lighten_background_stains,
-            lighten_fold_shadows=config.lighten_fold_shadows,
-            level_illumination_gradient=config.level_illumination_gradient,
-            clean_bleed_through=config.clean_bleed_through,
-            lighten_scanlines=config.lighten_scanlines,
-            enhance_faded_text=config.enhance_faded_text,
-            sharpen_text_edges=config.sharpen_text_edges,
-            despeckle_backend=config.despeckle_backend,
-            resume_processing=config.resume_processing,
-            reuse_scan_measurements=config.reuse_scan_measurements,
-            workers=config.workers,
-        ),
-    )
-    stage_timings["process"] = time.perf_counter() - process_started_at
-    processed_done = (
-        processing_manifest["summary"]["processed_files"]
-        + processing_manifest["summary"]["resumed_files"]
-        + processing_manifest["summary"]["skipped_files"]
-        + processing_manifest["summary"]["failed_files"]
-    )
-    steps[1] = _step(
-        "process",
-        STEP_LABELS["process"],
-        "completed",
-        total_items=processing_manifest["summary"]["total_files"],
-        completed_items=processed_done,
-    )
-    steps[2] = _step("summarize", STEP_LABELS["summarize"], "running")
-    _write_progress(metadata_dir, "running", steps, current_step="summarize", stage_timings=stage_timings)
+        process_started_at = time.perf_counter()
+        processing_manifest = process_images(
+            report,
+            config.input_dir,
+            derivative_dir,
+            ProcessingOptions(
+                auto_crop=config.auto_crop,
+                deskew=config.deskew,
+                trim_dark_border=config.trim_dark_border,
+                scanner_gutter_trim=config.scanner_gutter_trim,
+                despeckle=config.despeckle,
+                normalize_tones=config.normalize_tones,
+                normalize_paper_color_cast=config.normalize_paper_color_cast,
+                lighten_edge_shadow=config.lighten_edge_shadow,
+                lighten_corner_shadows=config.lighten_corner_shadows,
+                lighten_background_stains=config.lighten_background_stains,
+                lighten_fold_shadows=config.lighten_fold_shadows,
+                level_illumination_gradient=config.level_illumination_gradient,
+                clean_bleed_through=config.clean_bleed_through,
+                lighten_scanlines=config.lighten_scanlines,
+                enhance_faded_text=config.enhance_faded_text,
+                sharpen_text_edges=config.sharpen_text_edges,
+                despeckle_content_type_check=config.despeckle_content_type_check,
+                despeckle_backend=config.despeckle_backend,
+                resume_processing=config.resume_processing,
+                reuse_scan_measurements=config.reuse_scan_measurements,
+                workers=config.workers,
+            ),
+        )
+        stage_timings["process"] = time.perf_counter() - process_started_at
+        processed_done = (
+            processing_manifest["summary"]["processed_files"]
+            + processing_manifest["summary"]["resumed_files"]
+            + processing_manifest["summary"]["skipped_files"]
+            + processing_manifest["summary"]["failed_files"]
+        )
+        steps[1] = _step(
+            "process",
+            STEP_LABELS["process"],
+            "completed",
+            total_items=processing_manifest["summary"]["total_files"],
+            completed_items=processed_done,
+        )
+        current_step = "summarize"
+        steps[2] = _step("summarize", STEP_LABELS["summarize"], "running")
+        _write_progress(metadata_dir, "running", steps, current_step=current_step, stage_timings=stage_timings)
 
-    summarize_started_at = time.perf_counter()
-    summary = build_production_run_summary(
-        config=config,
-        report=report,
-        processing_manifest=processing_manifest,
-        admin_report_dir=admin_report_dir,
-        report_paths=report_paths,
-        stage_timings=stage_timings,
-    )
-    stage_timings["summarize"] = time.perf_counter() - summarize_started_at
-    summary["stage_timings"] = _stage_timings_payload(stage_timings)
-    summary_path = write_production_run_summary(summary, metadata_dir)
-    steps[2] = _step("summarize", STEP_LABELS["summarize"], "completed")
-    _write_progress(
-        metadata_dir,
-        summary["status"],
-        steps,
-        current_step=None,
-        summary_path=summary_path,
-        stage_timings=stage_timings,
-    )
-    return summary
+        summarize_started_at = time.perf_counter()
+        summary = build_production_run_summary(
+            config=config,
+            report=report,
+            processing_manifest=processing_manifest,
+            admin_report_dir=admin_report_dir,
+            report_paths=report_paths,
+            stage_timings=stage_timings,
+        )
+        stage_timings["summarize"] = time.perf_counter() - summarize_started_at
+        summary["stage_timings"] = _stage_timings_payload(stage_timings)
+        summary_path = write_production_run_summary(summary, metadata_dir)
+        steps[2] = _step("summarize", STEP_LABELS["summarize"], "completed")
+        _write_progress(
+            metadata_dir,
+            summary["status"],
+            steps,
+            current_step=None,
+            summary_path=summary_path,
+            stage_timings=stage_timings,
+        )
+        return summary
+    except KeyboardInterrupt:
+        _write_terminal_run_failure(config, metadata_dir, steps, "interrupted", current_step, stage_timings, KeyboardInterrupt())
+        raise
+    except Exception as exc:
+        _write_terminal_run_failure(config, metadata_dir, steps, "failed", current_step, stage_timings, exc)
+        raise
 
 
 def build_production_run_summary(
@@ -205,30 +217,7 @@ def build_production_run_summary(
     status = _production_status(p0_findings, failed_files)
     operator_message = _operator_message(local_batch_state, p0_findings, failed_files)
     derivative_image_dir = Path(processing_manifest["image_root"])
-    options = {
-        "processing_mode": config.processing_mode,
-        "processing_mode_label_zh": PROCESSING_MODE_LABELS_ZH.get(config.processing_mode, config.processing_mode),
-        "processing_mode_purpose_zh": PROCESSING_MODE_PURPOSES_ZH.get(config.processing_mode, ""),
-        "processing_mode_output_zh": PROCESSING_MODE_OUTPUTS_ZH.get(config.processing_mode, ""),
-        "auto_crop": config.auto_crop,
-        "deskew": config.deskew,
-        "trim_dark_border": config.trim_dark_border,
-        "scanner_gutter_trim": config.scanner_gutter_trim,
-        "despeckle": config.despeckle,
-        "normalize_tones": config.normalize_tones,
-        "normalize_paper_color_cast": config.normalize_paper_color_cast,
-        "lighten_edge_shadow": config.lighten_edge_shadow,
-        "lighten_corner_shadows": config.lighten_corner_shadows,
-        "lighten_background_stains": config.lighten_background_stains,
-        "lighten_fold_shadows": config.lighten_fold_shadows,
-        "level_illumination_gradient": config.level_illumination_gradient,
-        "clean_bleed_through": config.clean_bleed_through,
-        "lighten_scanlines": config.lighten_scanlines,
-        "enhance_faded_text": config.enhance_faded_text,
-        "sharpen_text_edges": config.sharpen_text_edges,
-        "despeckle_backend": config.despeckle_backend,
-        "resume_processing": config.resume_processing,
-    }
+    options = _options_payload(config)
     reused_files = int(processing_summary.get("existing_derivative_reused_files", 0))
     reprocessed_files = int(processing_summary.get("reprocessed_files", 0))
     remaining_files = int(processing_summary.get("retry_list_files", failed_files))
@@ -269,12 +258,17 @@ def build_production_run_summary(
     if report_paths:
         artifacts["admin_scan_report"] = str(report_paths["json"])
         artifacts["admin_scan_report_html"] = str(report_paths["html"])
+    rules_profile_metadata = _rules_profile_metadata(config, report)
 
     return {
         "schema_version": SCHEMA_VERSION,
         "generated_at": generated_at or datetime.now(timezone.utc).isoformat(),
         "status": status,
         "status_label_zh": _status_label_zh(status),
+        "rules_profile": rules_profile_metadata,
+        "rule_template": (
+            rules_profile_metadata.get("template") if isinstance(rules_profile_metadata, dict) else None
+        ),
         "ready_for_operator_handoff": local_batch_state == "no_review_items",
         "local_batch_state": local_batch_state,
         "recovery_guidance": _recovery_guidance(local_batch_state, processing_summary),
@@ -342,6 +336,187 @@ def write_production_run_summary(summary: dict[str, Any], metadata_output_dir: P
     return path
 
 
+def build_production_run_failure_summary(
+    *,
+    config: ProductionRunConfig,
+    state: str,
+    current_step: str | None,
+    failure: dict[str, Any],
+    generated_at: str | None = None,
+    stage_timings: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    derivative_image_dir = config.derivative_output_dir.resolve() / "images"
+    metadata_dir = config.metadata_output_dir.resolve()
+    rule_profile = config.rules_profile.metadata() if config.rules_profile else None
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "generated_at": generated_at or datetime.now(timezone.utc).isoformat(),
+        "status": state,
+        "status_label_zh": _status_label_zh(state),
+        "rules_profile": rule_profile,
+        "rule_template": rule_profile.get("template") if isinstance(rule_profile, dict) else None,
+        "ready_for_operator_handoff": False,
+        "local_batch_state": state,
+        "recovery_guidance": {
+            "schema_version": "scan-qc.local-recovery-guidance.v1",
+            "aggregate_only": True,
+            "kind": "run_interrupted" if state == "interrupted" else "run_failed",
+            "title_zh": "本批次未正常完成" if state == "interrupted" else "本批次处理失败",
+            "message_zh": "请重新运行本批次，系统会尽量复用已完成的处理后图片。",
+            "next_steps_zh": [
+                "确认扫描原图文件夹仍可读取。",
+                "确认处理后输出文件夹仍可写入，磁盘空间充足。",
+                "重新运行同一条 production-run 命令以补齐缺失输出。",
+            ],
+        },
+        "operator_summary": {
+            "message": "本批次未正常完成，请重新运行或交管理员处理。",
+            "message_zh": "本批次未正常完成，请重新运行或交管理员处理。",
+            "processing_mode": config.processing_mode,
+            "processing_mode_label_zh": PROCESSING_MODE_LABELS_ZH.get(config.processing_mode, config.processing_mode),
+            "processing_mode_purpose_zh": PROCESSING_MODE_PURPOSES_ZH.get(config.processing_mode, ""),
+            "processing_mode_output_zh": PROCESSING_MODE_OUTPUTS_ZH.get(config.processing_mode, ""),
+            "input_folder": str(config.input_dir.resolve()),
+            "derivative_image_folder": str(derivative_image_dir),
+            "metadata_folder": str(metadata_dir),
+            "total_source_images": 0,
+            "openable_source_images": 0,
+            "derivative_images_ready": 0,
+            "files_needing_attention": 0,
+        },
+        "counts": {
+            "total_files": 0,
+            "openable_files": 0,
+            "p0_findings": 0,
+            "p1_findings": 0,
+            "p2_findings": 0,
+            "total_findings": 0,
+            "processed_files": 0,
+            "resumed_files": 0,
+            "skipped_files": 0,
+            "failed_files": 0,
+            "retry_list_files": 0,
+        },
+        "progress": {
+            "state": state,
+            "current_step": current_step,
+            "total_steps": 3,
+            "completed_steps": 0,
+        },
+        "failure": failure,
+        "performance": {},
+        "stage_timings": _stage_timings_payload(stage_timings),
+        "options": _options_payload(config),
+        "artifacts": {
+            "summary": str(metadata_dir / PRODUCTION_RUN_SUMMARY_JSON),
+            "progress": str(metadata_dir / PRODUCTION_RUN_PROGRESS_JSON),
+            "derivative_images": str(derivative_image_dir),
+            "admin_reports": str(metadata_dir / "admin_reports"),
+        },
+        "admin_artifacts_available": False,
+        "source_images_modified": False,
+        "network_services_called": False,
+        "model_inference_run": bool(config.analysis_provider_command),
+        "scan_processing_semantics": "failed_before_complete_handoff",
+    }
+
+
+def _write_terminal_run_failure(
+    config: ProductionRunConfig,
+    metadata_dir: Path,
+    steps: list[dict[str, Any]],
+    state: str,
+    current_step: str | None,
+    stage_timings: dict[str, float],
+    exc: BaseException,
+) -> Path:
+    failure = _failure_payload(exc, current_step)
+    failed_steps = _mark_current_step_terminal(steps, current_step, state)
+    summary = build_production_run_failure_summary(
+        config=config,
+        state=state,
+        current_step=current_step,
+        failure=failure,
+        stage_timings=stage_timings,
+    )
+    summary_path = write_production_run_summary(summary, metadata_dir)
+    _write_progress(
+        metadata_dir,
+        state,
+        failed_steps,
+        current_step=None,
+        summary_path=summary_path,
+        stage_timings=stage_timings,
+        failure=failure,
+    )
+    return summary_path
+
+
+def _failure_payload(exc: BaseException, current_step: str | None) -> dict[str, Any]:
+    return {
+        "schema_version": "scan-qc.production-run-failure.v1",
+        "aggregate_only": True,
+        "stage": current_step,
+        "error_type": type(exc).__name__,
+        "message": str(exc),
+        "message_zh": "本批次未正常完成，请查看本机状态文件并重新运行或交管理员处理。",
+    }
+
+
+def _mark_current_step_terminal(
+    steps: list[dict[str, Any]],
+    current_step: str | None,
+    state: str,
+) -> list[dict[str, Any]]:
+    terminal_step_state = "interrupted" if state == "interrupted" else "failed"
+    marked: list[dict[str, Any]] = []
+    for step in steps:
+        if step["id"] == current_step and step["state"] == "running":
+            marked.append({**step, "state": terminal_step_state})
+        else:
+            marked.append(step)
+    return marked
+
+
+def _options_payload(config: ProductionRunConfig) -> dict[str, Any]:
+    return {
+        "processing_mode": config.processing_mode,
+        "processing_mode_label_zh": PROCESSING_MODE_LABELS_ZH.get(config.processing_mode, config.processing_mode),
+        "processing_mode_purpose_zh": PROCESSING_MODE_PURPOSES_ZH.get(config.processing_mode, ""),
+        "processing_mode_output_zh": PROCESSING_MODE_OUTPUTS_ZH.get(config.processing_mode, ""),
+        "auto_crop": config.auto_crop,
+        "deskew": config.deskew,
+        "trim_dark_border": config.trim_dark_border,
+        "scanner_gutter_trim": config.scanner_gutter_trim,
+        "despeckle": config.despeckle,
+        "normalize_tones": config.normalize_tones,
+        "normalize_paper_color_cast": config.normalize_paper_color_cast,
+        "lighten_edge_shadow": config.lighten_edge_shadow,
+        "lighten_corner_shadows": config.lighten_corner_shadows,
+        "lighten_background_stains": config.lighten_background_stains,
+        "lighten_fold_shadows": config.lighten_fold_shadows,
+        "level_illumination_gradient": config.level_illumination_gradient,
+        "clean_bleed_through": config.clean_bleed_through,
+        "lighten_scanlines": config.lighten_scanlines,
+        "enhance_faded_text": config.enhance_faded_text,
+        "sharpen_text_edges": config.sharpen_text_edges,
+        "despeckle_content_type_check": config.despeckle_content_type_check,
+        "despeckle_backend": config.despeckle_backend,
+        "resume_processing": config.resume_processing,
+        "reuse_scan_measurements": config.reuse_scan_measurements,
+    }
+
+
+def _rules_profile_metadata(config: ProductionRunConfig, report: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    if isinstance(report, dict):
+        manifest = report.get("manifest")
+        if isinstance(manifest, dict) and isinstance(manifest.get("rules_profile"), dict):
+            return manifest["rules_profile"]
+    if config.rules_profile is not None:
+        return config.rules_profile.metadata()
+    return None
+
+
 def _write_progress(
     metadata_dir: Path,
     state: str,
@@ -350,6 +525,7 @@ def _write_progress(
     current_step: str | None,
     summary_path: Path | None = None,
     stage_timings: dict[str, float] | None = None,
+    failure: dict[str, Any] | None = None,
 ) -> Path:
     completed_steps = sum(1 for step in steps if step["state"] == "completed")
     payload = {
@@ -367,6 +543,8 @@ def _write_progress(
     }
     if summary_path is not None:
         payload["summary"] = str(summary_path)
+    if failure is not None:
+        payload["failure"] = failure
     path = metadata_dir / PRODUCTION_RUN_PROGRESS_JSON
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return path
@@ -651,6 +829,8 @@ def _status_label_zh(status: str) -> str:
         "finished": "已完成",
         "needs_review": "需要人工复核",
         "blocked": "已阻断",
+        "failed": "失败",
+        "interrupted": "已中断",
     }.get(status, status)
 
 
@@ -662,6 +842,8 @@ def _state_label_zh(state: str) -> str:
         "finished": "已完成",
         "needs_review": "需要人工复核",
         "blocked": "已阻断",
+        "failed": "失败",
+        "interrupted": "已中断",
     }.get(state, state)
 
 
@@ -674,4 +856,8 @@ def _progress_message_zh(state: str, current_step: str | None) -> str:
         return "已完成自动处理，仍有图片需要人工确认。"
     if state == "blocked":
         return "处理被阻断，请管理员查看失败文件。"
+    if state == "failed":
+        return "本批次处理失败，请重新运行或交管理员处理。"
+    if state == "interrupted":
+        return "本批次未正常完成，请重新运行或交管理员处理。"
     return _state_label_zh(state)

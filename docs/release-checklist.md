@@ -6,9 +6,37 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 
 - Run `PYTHONPATH=src python3 -m unittest discover -s tests`.
 - Run `PYTHONPATH=src python3 -m compileall -q src tests`.
+- Run `PYTHONPATH=src:tests python3 scripts/ci_regression_groups.py
+  verify-coverage` and confirm every `tests/test_*.py` module is assigned to
+  exactly one of `core-image-processing`, `production-cli`,
+  `privacy-boundary`, or `external-validation`.
 - Run `PYTHONPATH=src python3 scripts/check_offline_dependencies.py`.
 - Run `python3 scripts/validate_release.py`.
 - Confirm `archive-scan-qc --version` matches the package version.
+- Confirm `archive-scan-qc public-capability-contract --out
+  /placeholder/private-validation-output/public-capability-contract` creates
+  `public_capability_contract.json` with schema
+  `scan-qc.public-capability-contract.v1`, classifies stable CLI surfaces and
+  artifact schemas, and keeps OpenCV/libvips/GPU model inference out of the
+  stable public CLI backend list unless intentionally promoted in this release.
+- Confirm the public capability contract keeps path-bearing local operational
+  outputs such as `production_run_summary.json`,
+  `production_run_progress.json`, scan reports, processing manifests, review
+  templates, rework lists, production review queues, and delivery manifests
+  classified as local-sensitive unless a separate aggregate command reduces
+  them to a public-safe artifact.
+- Confirm service-job boundary tests create isolated per-job `metadata`,
+  `derivatives`, `tmp`, `checkpoints`, and `logs` directories, reject input and
+  service-root overlap, recover stale `running` progress as `needs_recovery`,
+  and keep `service_job_public_summary.json` free of paths, filenames, hashes,
+  OCR text, thumbnails, and image content. Treat `service_job.json` as private
+  checkpoint state.
+- Confirm `archive-scan-qc image-processing-capability-smoke --out
+  /placeholder/private-validation-output/image-processing-capability-smoke`
+  creates `image_processing_capability_smoke.json` with schema
+  `scan-qc.image-processing-capability-smoke.v1`, runs synthetic scan and
+  derivative processing, reports `source_images_modified=false`, and contains
+  no paths, filenames, hashes, OCR text, thumbnails, or image content.
 - Confirm the validator's examples-based dry-run created `preflight_report.json`,
   JSON, HTML, CSV, a processing manifest, a processing retry manifest, an
   aggregate processing audit summary, and derivative images from synthetic
@@ -23,6 +51,31 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 - Confirm a synthetic multi-batch `archive-scan-qc run-plan` creates per-batch
   preflight/scan/processing artifacts plus aggregate `run_plan_summary.json`
   and `run_plan_summary.csv`.
+- Confirm a synthetic `archive-scan-qc production-run --rule-template
+  text-clean-print` creates `production_run_summary.json`,
+  `production_run_progress.json`, derivative images, admin reports, and records
+  the rule template ID plus applied template processing defaults, including
+  `despeckle_content_type_check=false` for confirmed pure-text cleanup runs.
+- For external CLI batch-service regression on approved DIBCO/H-DIBCO samples,
+  run `python scripts/run_dibco_external_cli_test.py --data-root
+  D:\data-opt\DIBCO-H-DIBCO` from an environment with package requirements plus
+  `numpy`, then confirm `stable_cli_passed=true`, zero source-image
+  modifications, zero missing processed outputs, and review the generated
+  quality/performance report.
+- For CI-safe external validation smoke, confirm
+  `PYTHONPATH=src:tests python3 scripts/ci_regression_groups.py run
+  external-validation` uses only synthetic DIBCO/NoisyOffice-shaped data in a
+  temporary output root; treat it as CLI integration coverage, not benchmark
+  evidence.
+- For document-cleanup regression aligned with the current non-binarization
+  image-processing scope, run `python scripts/run_noisyoffice_external_cli_test.py
+  --data-root D:\data-opt\NoisyOffice` from an environment with package
+  requirements plus `numpy`, then confirm `stable_cli_passed=true`, zero
+  source-image modifications, zero missing processed outputs, zero size
+  mismatches, and review PSNR/SSIM/MAE deltas against clean grayscale GT.
+- Confirm an invalid or interrupted synthetic `production-run` writes a terminal
+  `failed` or `interrupted` progress state and a recovery-oriented production
+  summary instead of leaving the batch indefinitely `running`.
 - Confirm a synthetic `archive-scan-qc acceptance-summary` run creates an
   aggregate `acceptance_summary.json` with pass/fail status, blocking items,
   warnings, P0/P1 remaining counts, processing failure count, throughput and
@@ -53,6 +106,12 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   `examples/manifest.sample.csv` through `archive-scan-qc preflight` and the
   scan/process CLI against synthetic files named `BATCH001_PAGE_0001.png` and
   `BATCH001_PAGE_0002.png`.
+- Confirm `archive-scan-qc preflight`, `production-run`, and `run-plan` accept
+  built-in rule template IDs `dat-31-2017-standard`, `text-clean-print`, and
+  `high-fidelity-original`, and reject `--rule-template custom` without
+  `--rules-profile`. Confirm `text-clean-print` records the disabled
+  despeckle content-type preservation gate in processing manifests and
+  production-run options.
 - Run the `examples/local_analysis_provider.py` smoke test with
   `--analysis-provider-command` and confirm exactly one `source=provider`
   finding is reported, provider metadata is sanitized, and omitting the flag
@@ -84,6 +143,8 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 - Confirm the runbook's install, offline wheelhouse, domestic-platform,
   resource sizing, directory, report archival, exit-code, privacy,
   troubleshooting, and performance tuning guidance still matches the release.
+- Confirm README, `docs/public-capability-contract.md`, and the runbook describe
+  the same stable public CLI, schema, and processing backend boundary.
 - Confirm public PRs, issues, and release notes reference only synthetic
   examples or aggregate benchmark output.
 - Confirm production runbooks call `archive-scan-qc preflight` before the full

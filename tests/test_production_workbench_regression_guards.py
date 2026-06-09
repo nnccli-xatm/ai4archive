@@ -206,7 +206,9 @@ class ProductionWorkbenchRegressionGuardTests(unittest.TestCase):
             (input_dir / "page.png").write_bytes(b"fake image placeholder")
             controller = WorkbenchController()
 
-            with patch.object(local_workbench_module, "WINDOWS_DRIVE_MOUNT_ROOT", mount_root):
+            with patch.object(local_workbench_module, "WINDOWS_DRIVE_MOUNT_ROOT", mount_root), patch.object(
+                local_workbench_module, "_running_on_native_windows", return_value=False
+            ):
                 status = controller.configure(r"C:\Users\PS\batch\input", r"C:\Users\PS\batch\output")
 
             self.assertEqual(status["folders"]["input"], r"C:\Users\PS\batch\input")

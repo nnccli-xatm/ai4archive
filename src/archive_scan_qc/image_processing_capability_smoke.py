@@ -1,0 +1,373 @@
+"""Public-safe synthetic smoke run for image-processing capability."""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+import json
+from pathlib import Path
+import tempfile
+from typing import Any
+
+from PIL import Image, ImageDraw
+
+from .processing import ProcessingOptions, process_images
+from .scanner import ScanConfig, scan_batch
+
+
+IMAGE_PROCESSING_CAPABILITY_SMOKE_JSON = "image_processing_capability_smoke.json"
+SCHEMA_VERSION = "scan-qc.image-processing-capability-smoke.v1"
+
+_STABLE_OPERATION_FIELDS = (
+    "auto_crop",
+    "deskew",
+    "trim_dark_border",
+    "scanner_gutter_trim",
+    "despeckle",
+    "normalize_tones",
+    "normalize_paper_color_cast",
+    "lighten_edge_shadow",
+    "lighten_corner_shadows",
+    "lighten_background_stains",
+    "lighten_fold_shadows",
+    "level_illumination_gradient",
+    "clean_bleed_through",
+    "lighten_scanlines",
+    "enhance_faded_text",
+    "sharpen_text_edges",
+)
+
+
+def run_image_processing_capability_smoke(
+    *,
+    output_path: Path | None = None,
+    despeckle_backend: str = "fallback",
+    workers: int = 1,
+    generated_at: str | None = None,
+) -> tuple[Path | None, dict[str, Any]]:
+    """Run scan/process over generated fixtures and optionally write a summary."""
+
+    if despeckle_backend not in {"fallback", "numpy"}:
+        raise ValueError("despeckle_backend must be 'fallback' or 'numpy'.")
+    if workers < 1:
+        raise ValueError("workers must be a positive integer.")
+
+    with tempfile.TemporaryDirectory(prefix="ai4-image-processing-capability-") as temp_dir:
+        root = Path(temp_dir)
+        input_dir = root / "input"
+        scan_dir = root / "scan"
+        process_dir = root / "processed"
+        fixture_count = _write_synthetic_fixtures(input_dir)
+        source_bytes_before = _source_bytes(input_dir)
+        report = scan_batch(
+            ScanConfig(
+                project_id="synthetic-capability",
+                batch_id="image-processing-smoke",
+                input_dir=input_dir,
+                output_dir=scan_dir,
+                min_dpi=200,
+                workers=workers,
+            )
+        )
+        options = ProcessingOptions(
+            auto_crop=True,
+            deskew=True,
+            trim_dark_border=True,
+            scanner_gutter_trim=True,
+            despeckle=True,
+            normalize_tones=True,
+            normalize_paper_color_cast=True,
+            lighten_edge_shadow=True,
+            lighten_corner_shadows=True,
+            lighten_background_stains=True,
+            lighten_fold_shadows=True,
+            level_illumination_gradient=True,
+            clean_bleed_through=True,
+            lighten_scanlines=True,
+            enhance_faded_text=True,
+            sharpen_text_edges=True,
+            despeckle_content_type_check=False,
+            despeckle_backend=despeckle_backend,
+            workers=workers,
+        )
+        manifest = process_images(report, input_dir, process_dir, options)
+        source_images_modified = source_bytes_before != _source_bytes(input_dir)
+        audit_summary = _load_json(process_dir / "processing_audit_summary.json")
+        payload = _build_summary(
+            fixture_count=fixture_count,
+            report=report,
+            manifest=manifest,
+            audit_summary=audit_summary,
+            source_images_modified=source_images_modified,
+            despeckle_backend=despeckle_backend,
+            workers=workers,
+            generated_at=generated_at,
+        )
+
+    path = write_image_processing_capability_smoke(payload, output_path) if output_path else None
+    return path, payload
+
+
+def write_image_processing_capability_smoke(payload: dict[str, Any], output_path: Path) -> Path:
+    path = output_path / IMAGE_PROCESSING_CAPABILITY_SMOKE_JSON if output_path.suffix == "" else output_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def _build_summary(
+    *,
+    fixture_count: int,
+    report: dict[str, Any],
+    manifest: dict[str, Any],
+    audit_summary: dict[str, Any],
+    source_images_modified: bool,
+    despeckle_backend: str,
+    workers: int,
+    generated_at: str | None,
+) -> dict[str, Any]:
+    scan_summary = report.get("summary", {}) if isinstance(report.get("summary"), dict) else {}
+    processing_summary = manifest.get("summary", {}) if isinstance(manifest.get("summary"), dict) else {}
+    audit_counts = audit_summary.get("counts", {}) if isinstance(audit_summary.get("counts"), dict) else {}
+    audit_privacy = audit_summary.get("privacy", {}) if isinstance(audit_summary.get("privacy"), dict) else {}
+    operation_timings = _public_operation_timings(audit_summary)
+    blockers = _blocking_codes(
+        fixture_count=fixture_count,
+        scan_summary=scan_summary,
+        processing_summary=processing_summary,
+        audit_counts=audit_counts,
+        audit_privacy=audit_privacy,
+        source_images_modified=source_images_modified,
+    )
+
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "generated_at": generated_at or datetime.now(timezone.utc).isoformat(),
+        "status": "pass" if not blockers else "fail",
+        "blocking_codes": blockers,
+        "privacy": {
+            "aggregate_only": True,
+            "public_safe": True,
+            "synthetic_inputs_only": True,
+            "private_inputs_read": False,
+            "contains_file_list": False,
+            "contains_paths": False,
+            "contains_filenames": False,
+            "contains_hashes": False,
+            "contains_thumbnails": False,
+            "contains_ocr_text": False,
+            "contains_image_content": False,
+            "contains_environment_values": False,
+        },
+        "processing_run": {
+            "scan_run": True,
+            "image_processing_run": True,
+            "provider_commands_run": False,
+            "source_images_modified": source_images_modified,
+            "derivative_images_written": _safe_int(processing_summary.get("processed_files")) > 0,
+            "temp_work_paths_published": False,
+        },
+        "synthetic_fixture_summary": {
+            "fixture_count": fixture_count,
+            "fixture_source": "generated_at_runtime",
+            "private_source_images_required": False,
+        },
+        "stable_processing_contract": {
+            "despeckle_backend_requested": despeckle_backend,
+            "workers_requested": workers,
+            "operations_enabled": list(_STABLE_OPERATION_FIELDS),
+        },
+        "counts": {
+            "synthetic_fixture_count": fixture_count,
+            "total_files": _safe_int(scan_summary.get("total_files")),
+            "openable_files": _safe_int(scan_summary.get("openable_files")),
+            "p0_findings": _safe_int(scan_summary.get("p0_findings")),
+            "p1_findings": _safe_int(scan_summary.get("p1_findings")),
+            "p2_findings": _safe_int(scan_summary.get("p2_findings")),
+            "processed_files": _safe_int(processing_summary.get("processed_files")),
+            "failed_files": _safe_int(processing_summary.get("failed_files")),
+            "retry_list_files": _safe_int(processing_summary.get("retry_list_files")),
+            "processing_warning_files": _safe_int(audit_counts.get("processing_warning_files")),
+            "guardrail_failed_files": _safe_int(audit_counts.get("guardrail_failed_files")),
+        },
+        "operation_counts": _operation_counts(audit_counts),
+        "backend_summary": {
+            "despeckle_backend_requested": despeckle_backend,
+            "despeckle_backend_modes": _despeckle_backend_counts(operation_timings),
+        },
+        "operation_timings": operation_timings,
+        "source_semantics": {
+            "source_images_modified": source_images_modified,
+            "originals_read_only": not source_images_modified,
+            "derivatives_only": True,
+        },
+    }
+
+
+def _blocking_codes(
+    *,
+    fixture_count: int,
+    scan_summary: dict[str, Any],
+    processing_summary: dict[str, Any],
+    audit_counts: dict[str, Any],
+    audit_privacy: dict[str, Any],
+    source_images_modified: bool,
+) -> list[str]:
+    blockers: list[str] = []
+    if _safe_int(scan_summary.get("total_files")) != fixture_count:
+        blockers.append("synthetic_fixture_count_mismatch")
+    if _safe_int(scan_summary.get("openable_files")) != fixture_count:
+        blockers.append("synthetic_openability_mismatch")
+    if _safe_int(processing_summary.get("processed_files")) <= 0:
+        blockers.append("no_derivative_images_processed")
+    if _safe_int(processing_summary.get("failed_files")) != 0:
+        blockers.append("processing_failed_files")
+    if _safe_int(processing_summary.get("retry_list_files")) != 0:
+        blockers.append("processing_retry_list_not_empty")
+    if _safe_int(audit_counts.get("guardrail_failed_files")) != 0:
+        blockers.append("processing_guardrail_failed_files")
+    if source_images_modified:
+        blockers.append("source_images_modified")
+    if audit_privacy.get("aggregate_only") is not True:
+        blockers.append("audit_not_aggregate_only")
+    for field in ("contains_paths", "contains_hashes", "contains_thumbnails", "contains_ocr_text"):
+        if audit_privacy.get(field) is True:
+            blockers.append(f"audit_privacy_{field}")
+    return blockers
+
+
+def _public_operation_timings(audit_summary: dict[str, Any]) -> dict[str, Any]:
+    timing = audit_summary.get("timing")
+    if not isinstance(timing, dict):
+        return {}
+    operation_timings = timing.get("operation_timings")
+    if not isinstance(operation_timings, dict):
+        return {}
+    public_timings: dict[str, Any] = {}
+    for operation in _STABLE_OPERATION_FIELDS:
+        raw = operation_timings.get(operation)
+        if not isinstance(raw, dict):
+            continue
+        public_timings[operation] = {
+            key: raw[key]
+            for key in (
+                "enabled",
+                "file_count",
+                "elapsed_seconds",
+                "files_per_minute",
+                "average_seconds_per_file",
+                "backend_mode",
+                "backend_counts",
+                "numpy_available",
+            )
+            if key in raw
+        }
+    return public_timings
+
+
+def _operation_counts(audit_counts: dict[str, Any]) -> dict[str, int]:
+    fields = (
+        "deskewed_files",
+        "dark_border_trimmed_files",
+        "scanner_gutter_trimmed_files",
+        "auto_crop_applied_files",
+        "despeckled_files",
+        "tone_normalized_files",
+        "paper_color_cast_normalized_files",
+        "edge_shadow_lightened_files",
+        "corner_shadows_lightened_files",
+        "background_stains_lightened_files",
+        "fold_shadows_lightened_files",
+        "illumination_gradient_levelled_files",
+        "bleed_through_cleaned_files",
+        "scanlines_lightened_files",
+        "faded_text_enhanced_files",
+        "text_edges_sharpened_files",
+    )
+    return {field: _safe_int(audit_counts.get(field)) for field in fields}
+
+
+def _despeckle_backend_counts(operation_timings: dict[str, Any]) -> dict[str, int]:
+    despeckle = operation_timings.get("despeckle")
+    if not isinstance(despeckle, dict):
+        return {}
+    counts = despeckle.get("backend_counts")
+    if not isinstance(counts, dict):
+        return {}
+    return {str(key): _safe_int(value) for key, value in counts.items()}
+
+
+def _write_synthetic_fixtures(input_dir: Path) -> int:
+    input_dir.mkdir(parents=True, exist_ok=True)
+    fixtures = (
+        _clean_text_page(),
+        _dark_border_page(),
+        _speckled_text_page(),
+        _faded_shadow_page(),
+        _color_cast_page(),
+    )
+    for index, image in enumerate(fixtures, start=1):
+        image.save(input_dir / f"synthetic_fixture_{index:03d}.png", dpi=(300, 300))
+    return len(fixtures)
+
+
+def _clean_text_page() -> Image.Image:
+    image = Image.new("RGB", (280, 220), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((36, 28, 244, 190), outline=(35, 35, 35), width=2)
+    for y in range(54, 164, 22):
+        draw.rectangle((58, y, 220, y + 5), fill=(24, 24, 24))
+    return image
+
+
+def _dark_border_page() -> Image.Image:
+    image = _clean_text_page()
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 0, 16, 219), fill=(2, 2, 2))
+    draw.rectangle((264, 0, 279, 219), fill=(2, 2, 2))
+    return image
+
+
+def _speckled_text_page() -> Image.Image:
+    image = _clean_text_page()
+    draw = ImageDraw.Draw(image)
+    for x, y in ((30, 35), (48, 170), (132, 42), (230, 174), (250, 96), (74, 118)):
+        draw.point((x, y), fill=(0, 0, 0))
+    return image
+
+
+def _faded_shadow_page() -> Image.Image:
+    image = Image.new("RGB", (280, 220), (232, 232, 228))
+    draw = ImageDraw.Draw(image)
+    for y in range(56, 164, 22):
+        draw.rectangle((58, y, 220, y + 4), fill=(168, 168, 165))
+    for x in range(0, 38):
+        shade = 170 + int(x * 1.5)
+        draw.line((x, 0, x, 219), fill=(shade, shade, shade))
+    return image
+
+
+def _color_cast_page() -> Image.Image:
+    image = Image.new("RGB", (280, 220), (236, 230, 214))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((34, 30, 246, 190), outline=(80, 76, 68), width=1)
+    for y in range(58, 164, 24):
+        draw.rectangle((58, y, 218, y + 4), fill=(70, 68, 62))
+    return image
+
+
+def _source_bytes(input_dir: Path) -> dict[str, bytes]:
+    return {path.name: path.read_bytes() for path in sorted(input_dir.glob("*")) if path.is_file()}
+
+
+def _load_json(path: Path) -> dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"Expected JSON object: {path.name}")
+    return payload
+
+
+def _safe_int(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0

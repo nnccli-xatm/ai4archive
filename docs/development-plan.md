@@ -139,6 +139,14 @@
 - 取消、失败或恢复一个任务不影响其他任务，也不修改源文件。
 - Windows 中文路径任务可通过 API 创建、查询、恢复并生成处理副本。
 
+Implementation note, 2026-06-09: the service-job boundary core has a first
+local implementation in `archive_scan_qc.service_jobs`. It creates isolated
+per-job roots, writes private `service_job.json` checkpoints, writes
+public-safe `service_job_public_summary.json` aggregate status, rejects
+input/service-root overlap, and can recover terminal or stale running progress
+without exposing private paths. The HTTP API endpoints remain the next service
+MVP step.
+
 ## 6. 阶段 2：图像处理规则模板系统
 
 目标：让后端处理参数由模板驱动。

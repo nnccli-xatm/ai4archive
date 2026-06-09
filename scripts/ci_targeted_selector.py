@@ -24,6 +24,165 @@ class MethodSpan:
         return f"{self.class_name}.{self.method_name}"
 
 
+FAST_CONTRACT_TESTS = {
+    "tests/test_acceptance.py",
+    "tests/test_manifest.py",
+    "tests/test_rule_registry.py",
+    "tests/test_rules.py",
+    "tests/test_sampling.py",
+}
+
+
+PROCESSING_TARGETED_TESTS = {
+    "tests/test_backend_consistency.py",
+    "tests/test_content_type_regression.py",
+    "tests/test_dat_10_2_deskew_post_verification.py",
+    "tests/test_dat_10_3_crop_margin.py",
+    "tests/test_dat_10_4_despeckle_preservation.py",
+    "tests/test_deskew_optimization.py",
+    "tests/test_despeckle_opencv_backend.py",
+    "tests/test_image_io_vips_backend.py",
+    "tests/test_image_processing_capability_smoke.py",
+    "tests/test_quality_suite.py",
+    "tests/test_scan_background_stains.py",
+    "tests/test_scan_edge_shadow.py",
+    "tests/test_scan_processing_combo.py",
+    "tests/test_scan_processing_reuse.py",
+    "tests/test_scan_processing_workflow_regression.py",
+    "tests/test_scan_tone_normalization.py",
+    "tests/test_scanline_lightening.py",
+}
+
+
+SOURCE_TEST_MAP: dict[str, set[str]] = {
+    "__main__.py": {"tests/test_cli_smoke.py"},
+    "acceptance.py": {
+        "tests/test_acceptance.py",
+        "tests/test_acceptance_summary_regression.py",
+        "tests/test_dat_12_3_acceptance_verdict.py",
+    },
+    "analysis_provider.py": {"tests/test_analysis_provider.py"},
+    "artifact_readiness.py": {"tests/test_artifact_readiness.py"},
+    "benchmark.py": {"tests/test_performance_suite.py", "tests/test_worker_recommendation.py"},
+    "calibration.py": {"tests/test_rules_calibration.py"},
+    "capability_probe.py": {"tests/test_capability_probe.py"},
+    "cli.py": {
+        "tests/test_cli_smoke.py",
+        "tests/test_cli_stable_contract.py",
+        "tests/test_image_processing_capability_smoke.py",
+        "tests/test_public_capability_contract.py",
+        "tests/test_production_review_queue.py",
+        "tests/test_scan_background_stains.py",
+        "tests/test_scan_processing_combo.py",
+        "tests/test_scan_processing_reuse.py",
+        "tests/test_scan_tone_normalization.py",
+        "tests/test_scanline_lightening.py",
+    },
+    "concurrency.py": {"tests/test_worker_recommendation.py"},
+    "deep_inspection_candidates.py": {"tests/test_deep_inspection_candidates.py"},
+    "deep_inspection_provider.py": {"tests/test_deep_inspection_provider.py"},
+    "evidence_bundle.py": {"tests/test_evidence_bundle.py"},
+    "final_handoff.py": {"tests/test_final_handoff.py"},
+    "handoff.py": {"tests/test_handoff_manifest.py"},
+    "image_processing_capability_smoke.py": {"tests/test_image_processing_capability_smoke.py"},
+    "local_workbench.py": {
+        "tests/test_local_workbench_autosave.py",
+        "tests/test_production_workbench_completion_handoff.py",
+        "tests/test_production_workbench_regression_guards.py",
+    },
+    "manifest.py": {"tests/test_manifest.py"},
+    "preflight.py": {"tests/test_preflight_run_plan.py"},
+    "processing.py": set(PROCESSING_TARGETED_TESTS),
+    "processing_plan.py": {
+        "tests/test_scan_background_stains.py",
+        "tests/test_scan_processing_combo.py",
+        "tests/test_scan_processing_reuse.py",
+        "tests/test_scanline_lightening.py",
+    },
+    "processing_review.py": {"tests/test_processing_review.py"},
+    "production_rehearsal.py": {"tests/test_production_rehearsal.py"},
+    "production_review_queue.py": {"tests/test_production_review_queue.py", "tests/test_local_workbench_autosave.py"},
+    "production_runner.py": {
+        "tests/test_local_workbench_autosave.py",
+        "tests/test_production_workbench_completion_handoff.py",
+        "tests/test_quality_suite.py",
+    },
+    "public_capability_contract.py": {"tests/test_public_capability_contract.py"},
+    "reports.py": {"tests/test_reports_contract.py"},
+    "review_decisions.py": {"tests/test_local_workbench_autosave.py", "tests/test_review_decisions.py"},
+    "rework.py": {"tests/test_rework_actions.py"},
+    "rule_registry.py": {
+        "tests/test_dat_10_2_deskew_post_verification.py",
+        "tests/test_dat_10_3_crop_margin.py",
+        "tests/test_dat_10_4_despeckle_preservation.py",
+        "tests/test_rule_registry.py",
+    },
+    "rules.py": {
+        "tests/test_dat_9_4_tiered_resolution.py",
+        "tests/test_dat_10_2_deskew_post_verification.py",
+        "tests/test_dat_10_4_despeckle_preservation.py",
+        "tests/test_rule_registry.py",
+        "tests/test_rules.py",
+    },
+    "run_plan.py": {"tests/test_preflight_run_plan.py"},
+    "sampling.py": {"tests/test_dat_12_3_sampling_loop.py", "tests/test_sampling.py"},
+    "scanner.py": {
+        "tests/test_backend_consistency.py",
+        "tests/test_content_type_regression.py",
+        "tests/test_dat_9_4_tiered_resolution.py",
+        "tests/test_dat_10_2_deskew_post_verification.py",
+        "tests/test_dat_10_4_despeckle_preservation.py",
+        "tests/test_deskew_optimization.py",
+        "tests/test_despeckle_opencv_backend.py",
+        "tests/test_scan_background_stains.py",
+        "tests/test_scan_edge_shadow.py",
+        "tests/test_scan_processing_combo.py",
+        "tests/test_scan_processing_reuse.py",
+        "tests/test_scan_processing_workflow_regression.py",
+        "tests/test_scan_tone_normalization.py",
+        "tests/test_scanline_lightening.py",
+    },
+    "service_jobs.py": {"tests/test_service_jobs.py"},
+    "validation_index.py": {"tests/test_validation_index.py"},
+    "workbench_summary.py": {"tests/test_workbench_summary.py"},
+}
+
+
+SCRIPT_TEST_MAP: dict[str, set[str]] = {
+    "scripts/check_offline_dependencies.py": {"tests/test_delivery_tooling.py"},
+    "scripts/ci_regression_groups.py": {"tests/test_ci_regression_groups.py"},
+    "scripts/frontend_issue_driver.py": {"tests/test_delivery_tooling.py"},
+    "scripts/generate_issue_plan.py": {"tests/test_delivery_tooling.py"},
+    "scripts/release_candidate_summary.py": {"tests/test_release_summaries.py"},
+    "scripts/release_readiness_summary.py": {"tests/test_release_summaries.py"},
+    "scripts/run_dibco_external_cli_test.py": {"tests/test_ci_regression_groups.py"},
+    "scripts/run_noisyoffice_external_cli_test.py": {"tests/test_ci_regression_groups.py"},
+}
+
+
+PROCESSING_KEYWORDS = (
+    "background_stains",
+    "edge_shadow",
+    "tone_normalization",
+    "scanline",
+)
+
+
+def select_tests_for_source_path(path: str) -> set[str]:
+    file_name = Path(path).name
+    tests = set(SOURCE_TEST_MAP.get(file_name, FAST_CONTRACT_TESTS))
+    if any(token in path for token in PROCESSING_KEYWORDS):
+        tests.update(
+            {
+                "tests/test_scan_background_stains.py",
+                "tests/test_scan_edge_shadow.py",
+                "tests/test_scan_tone_normalization.py",
+                "tests/test_scanline_lightening.py",
+            }
+        )
+    return tests
+
+
 def _changed_files(base_ref: str) -> list[str]:
     output = subprocess.run(
         ["git", "diff", "--name-only", base_ref],
@@ -119,7 +278,7 @@ def select_test_ids_for_changed_test_file(path: str, diff_text: str) -> tuple[se
     if not file_path.exists():
         return set(), False
 
-    module = path[:-3].replace("/", ".")
+    module = file_path.stem
     try:
         spans = collect_test_method_spans(file_path)
     except (SyntaxError, UnicodeDecodeError):
@@ -155,38 +314,18 @@ def select_targeted_tests(base_ref: str, changed_files: list[str]) -> list[str]:
                 tests.add(path)
 
         if path.startswith("src/archive_scan_qc/"):
-            tests.add("tests/test_scan_qc.py")
-        if path.startswith("src/archive_scan_qc/") and "scan_processing" in path:
-            tests.update(
-                {
-                    "tests/test_scan_processing_combo.py",
-                    "tests/test_scan_processing_reuse.py",
-                    "tests/test_scan_processing_algorithm_regression.py",
-                }
-            )
-        if any(
-            token in path
-            for token in (
-                "background_stains",
-                "edge_shadow",
-                "tone_normalization",
-                "scanline",
-            )
-        ):
-            tests.update(
-                {
-                    "tests/test_scan_background_stains.py",
-                    "tests/test_scan_edge_shadow.py",
-                    "tests/test_scan_tone_normalization.py",
-                    "tests/test_scanline_lightening.py",
-                }
-            )
+            tests.update(select_tests_for_source_path(path))
+        if path in SCRIPT_TEST_MAP:
+            tests.update(SCRIPT_TEST_MAP[path])
 
     existing_or_ids = []
     for test in sorted(tests):
         if test.endswith(".py") and not Path(test).exists():
             continue
-        existing_or_ids.append(test)
+        if test.startswith("tests/test_") and test.endswith(".py"):
+            existing_or_ids.append(Path(test).stem)
+        else:
+            existing_or_ids.append(test)
     return existing_or_ids
 
 

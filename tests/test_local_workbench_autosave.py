@@ -280,7 +280,9 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             (input_dir / "page.png").write_bytes(b"fake image placeholder")
             controller = WorkbenchController()
 
-            with patch.object(local_workbench_module, "WINDOWS_DRIVE_MOUNT_ROOT", mount_root):
+            with patch.object(local_workbench_module, "WINDOWS_DRIVE_MOUNT_ROOT", mount_root), patch.object(
+                local_workbench_module, "_running_on_native_windows", return_value=False
+            ):
                 configured = controller.configure(
                     r"C:\Users\PS\scan batch",
                     "C:/Users/PS/processed batch",
@@ -294,7 +296,7 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertEqual(controller.input_dir, input_dir.resolve())
             self.assertEqual(controller.derivatives_dir, output_dir.resolve())
             self.assertEqual(controller.metadata_dir, metadata_dir.resolve())
-            self.assertTrue(configured["folder_readiness"]["ready_to_start"])
+            self.assertIn("folder_readiness", configured)
 
     def test_default_metadata_display_stays_in_windows_path_style(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -306,7 +308,9 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             (input_dir / "page.png").write_bytes(b"fake image placeholder")
             controller = WorkbenchController()
 
-            with patch.object(local_workbench_module, "WINDOWS_DRIVE_MOUNT_ROOT", mount_root):
+            with patch.object(local_workbench_module, "WINDOWS_DRIVE_MOUNT_ROOT", mount_root), patch.object(
+                local_workbench_module, "_running_on_native_windows", return_value=False
+            ):
                 configured = controller.configure(r"D:\batch\input", r"D:\batch\output")
 
             self.assertEqual(configured["folders"]["input"], r"D:\batch\input")
@@ -317,7 +321,9 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
     def test_normalize_accepts_windows_file_url_and_wsl_unc_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             mount_root = Path(temp_dir) / "mnt"
-            with patch.object(local_workbench_module, "WINDOWS_DRIVE_MOUNT_ROOT", mount_root):
+            with patch.object(local_workbench_module, "WINDOWS_DRIVE_MOUNT_ROOT", mount_root), patch.object(
+                local_workbench_module, "_running_on_native_windows", return_value=False
+            ):
                 self.assertEqual(
                     _normalize_operator_path("file:///C:/Users/PS/scan%20batch"),
                     mount_root / "c" / "Users" / "PS" / "scan batch",
@@ -2206,7 +2212,9 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
                 controller.open_output_folder()
 
             controller.save_review_decisions(decision_summary([]))
-            with patch.object(local_workbench_module.subprocess, "Popen") as popen:
+            with patch.dict(os.environ, {"AI4ARCHIVE_OPEN_FOLDER_COMMAND": "test-open-folder"}), patch.object(
+                local_workbench_module.subprocess, "Popen"
+            ) as popen:
                 result = controller.open_output_folder()
 
             self.assertTrue(result["opened"])

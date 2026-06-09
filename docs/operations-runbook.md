@@ -171,6 +171,48 @@ archive-scan-qc \
   --rules-profile /approved-work/rules/project-rules.json
 ```
 
+For the stable external CLI batch-service path, prefer `production-run` for a
+single batch. It writes `production_run_progress.json` while running and always
+uses a dedicated metadata directory for production status, summaries, admin
+reports, and recovery evidence:
+
+```bash
+archive-scan-qc production-run \
+  --input /approved-work/input-batches/batch-001 \
+  --derivatives-out /approved-work/processed-derivatives/batch-001 \
+  --metadata-out /approved-work/processed-derivatives/batch-001/_production_workbench \
+  --project project-code \
+  --batch batch-001 \
+  --manifest-csv /approved-work/manifests/batch-001.csv \
+  --rule-template dat-31-2017-standard \
+  --workers 2
+```
+
+Built-in rule templates are `dat-31-2017-standard`, `text-clean-print`, and
+`high-fidelity-original`. Use `--rule-template custom --rules-profile
+/approved-work/rules/project-rules.json` for a project-specific JSON template.
+`text-clean-print` is intentionally aggressive for confirmed pure-text scans:
+it enables text-cleanup operations and disables the despeckle photo/mixed-content
+preservation gate. Do not use it for photos, drawings, stamps-heavy pages, or
+other high-fidelity original material; use `high-fidelity-original` or a custom
+profile instead.
+Template metadata is recorded in the production summary and scan report. If a
+run fails before completion, the progress file moves to `failed` or
+`interrupted` with a failure object and a recovery-oriented production summary;
+external schedulers should read the JSON state instead of inferring status only
+from the process table.
+
+For the service-oriented job boundary MVP, keep each externally submitted job
+inside its own `service_root/jobs/<job_id>/` directory. The service core creates
+separate `metadata`, `derivatives`, `tmp`, `checkpoints`, and `logs`
+subdirectories and rejects service roots that overlap the input directory.
+`service_job.json` is private checkpoint state because it contains local paths
+and the template snapshot needed for recovery. `service_job_public_summary.json`
+is the public-safe polling/handoff shape: aggregate state, counts, isolation
+booleans, recovery status, and explicit privacy flags only. If recovery sees a
+stale `running` progress file after a service restart, it reports
+`needs_recovery` instead of leaking paths or leaving the job silently running.
+
 The manifest CSV must contain a `relative_path` column with paths relative to
 `--input`. Keep `--out` and `--process-out` outside the input tree where
 possible. If output is inside the input tree, the scanner skips the known output
@@ -218,9 +260,9 @@ For project-scale production runs, create a local run plan instead of launching
 each batch manually. CSV example:
 
 ```csv
-batch_id,input_dir,report_dir,process_out,manifest_csv,rules_profile,workers,auto_crop,deskew,trim_dark_border,despeckle,lighten_edge_shadow,lighten_background_stains,lighten_scanlines,resume_processing
-batch-001,/approved-work/input-batches/batch-001,batch-001,/approved-work/processed-derivatives/batch-001,/approved-work/manifests/batch-001.csv,/approved-work/rules/project-rules.json,2,true,true,true,true,false,false,false,false
-batch-002,/approved-work/input-batches/batch-002,batch-002,/approved-work/processed-derivatives/batch-002,/approved-work/manifests/batch-002.csv,/approved-work/rules/project-rules.json,2,true,true,true,true,false,false,false,true
+batch_id,input_dir,report_dir,process_out,manifest_csv,rule_template,rules_profile,workers,auto_crop,deskew,trim_dark_border,despeckle,lighten_edge_shadow,lighten_background_stains,lighten_scanlines,resume_processing
+batch-001,/approved-work/input-batches/batch-001,batch-001,/approved-work/processed-derivatives/batch-001,/approved-work/manifests/batch-001.csv,dat-31-2017-standard,,2,false,false,false,false,false,false,false,true
+batch-002,/approved-work/input-batches/batch-002,batch-002,/approved-work/processed-derivatives/batch-002,/approved-work/manifests/batch-002.csv,custom,/approved-work/rules/project-rules.json,2,true,true,true,true,false,false,false,true
 ```
 
 Run it with:
@@ -236,9 +278,10 @@ archive-scan-qc run-plan \
 JSON plans may be a top-level list of batch objects or an object with
 `project_id` and `batches`. Required batch fields are `batch_id` and
 `input_dir`. Optional fields are `report_dir`, `process_out`, `manifest_csv`,
-`rules_profile`, `workers`, `min_dpi`, `name_pattern`, `auto_crop`, `deskew`,
-`trim_dark_border`, `despeckle`, `normalize_tones`, `lighten_edge_shadow`, and
-`lighten_background_stains`, `lighten_scanlines`, and `resume_processing`.
+`rule_template`, `rules_profile`, `workers`, `min_dpi`, `name_pattern`,
+`auto_crop`, `deskew`, `trim_dark_border`, `despeckle`, `normalize_tones`,
+`lighten_edge_shadow`, `lighten_background_stains`, `lighten_scanlines`, and
+`resume_processing`.
 Relative input, manifest, and rules-profile paths resolve relative to the plan file; relative
 report and processing-output paths resolve under the project `--out` root.
 
@@ -541,6 +584,64 @@ ready", not as a failure of the required CPU/Pillow production baseline. Report
 only the aggregate fields from `capability_probe.json`: package labels,
 provider/GPU counts, configured booleans, warnings, and the
 `unchanged_cpu_pillow_baseline` semantics marker.
+
+## Public Capability Contract
+
+Run the public capability contract command during release validation and when a
+production operator needs to confirm which CLI surfaces and processing backends
+are stable:
+
+```bash
+archive-scan-qc public-capability-contract \
+  --out /approved-work/validation/public-capability-contract
+```
+
+The command writes `public_capability_contract.json` with schema
+`scan-qc.public-capability-contract.v1`. It is public-safe and aggregate-only:
+it does not scan directories, open images, run image processing, execute
+provider commands, probe hardware, read environment values, or include local
+paths, filenames, hashes, OCR text, thumbnails, or image content.
+
+Use this contract as the current boundary between stable CLI behavior and
+internal or experimental implementation paths. The required baseline remains
+CPU/Pillow. `--despeckle-backend fallback` and optional
+`--despeckle-backend numpy` are stable public CLI backends. OpenCV despeckle,
+libvips image IO, and built-in GPU/model inference are not stable public CLI
+capabilities unless a release updates the contract, README, and this runbook
+together.
+
+The contract is also the source of truth for artifact sharing. Public-safe
+aggregate artifacts include validation indexes, aggregate evidence bundles,
+final handoff summaries, processing audit summaries, benchmark/capability
+summaries, and workbench public summaries after local policy review.
+`service_job_public_summary.json` is included only as prototype/validation
+evidence for the service job boundary core until the HTTP/API surface is
+promoted.
+Path-bearing local operational files such as `production_run_summary.json`,
+`production_run_progress.json`, scan reports, processing manifests, review
+templates, rework lists, production review queues, and delivery manifests stay
+local-only unless reduced by a public-safe aggregate command.
+
+## Image Processing Capability Smoke
+
+Run the synthetic image-processing capability smoke during release validation
+or after installing on a production workstation when private test images are not
+approved for sharing:
+
+```bash
+archive-scan-qc image-processing-capability-smoke \
+  --out /approved-work/validation/image-processing-capability-smoke
+```
+
+The command generates synthetic images in a temporary directory, runs the real
+scan and derivative-processing path, and writes
+`image_processing_capability_smoke.json` with schema
+`scan-qc.image-processing-capability-smoke.v1`. Use it as aggregate evidence
+that source images remain unmodified, derivative processing executes, guardrail
+failures are zero or explained, and the requested stable despeckle backend is
+represented in backend counts. The JSON is public-safe aggregate evidence and
+must not contain paths, filenames, hashes, OCR text, thumbnails, or image
+content.
 
 ## 本地生产工作台入口和就绪检查
 

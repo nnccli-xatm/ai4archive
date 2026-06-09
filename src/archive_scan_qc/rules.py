@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import json
 from pathlib import Path
 from typing import Any
@@ -10,6 +10,49 @@ from typing import Any
 
 VALID_SEVERITIES = {"P0", "P1", "P2"}
 VALID_DPI_PURPOSES = {"standard", "com", "reproduction", "print"}
+RULE_TEMPLATE_VERSION = "scan-qc.rule-template.v1"
+CUSTOM_RULE_TEMPLATE_ID = "custom"
+BUILTIN_RULE_TEMPLATE_IDS = (
+    "dat-31-2017-standard",
+    "text-clean-print",
+    "high-fidelity-original",
+)
+RULE_TEMPLATE_IDS = (*BUILTIN_RULE_TEMPLATE_IDS, CUSTOM_RULE_TEMPLATE_ID)
+RULE_TEMPLATE_PROCESSING_DEFAULTS: dict[str, dict[str, bool]] = {
+    "dat-31-2017-standard": {
+        "auto_crop": True,
+        "deskew": True,
+        "trim_dark_border": True,
+        "despeckle": True,
+        "reuse_scan_measurements": True,
+    },
+    "text-clean-print": {
+        "auto_crop": True,
+        "deskew": True,
+        "trim_dark_border": True,
+        "scanner_gutter_trim": True,
+        "despeckle": True,
+        "despeckle_content_type_check": False,
+        "normalize_tones": True,
+        "normalize_paper_color_cast": True,
+        "lighten_edge_shadow": True,
+        "lighten_corner_shadows": True,
+        "lighten_background_stains": True,
+        "lighten_fold_shadows": True,
+        "level_illumination_gradient": True,
+        "clean_bleed_through": True,
+        "lighten_scanlines": True,
+        "enhance_faded_text": True,
+        "sharpen_text_edges": True,
+        "reuse_scan_measurements": True,
+    },
+    "high-fidelity-original": {
+        "trim_dark_border": True,
+        "scanner_gutter_trim": True,
+        "reuse_scan_measurements": True,
+    },
+    CUSTOM_RULE_TEMPLATE_ID: {},
+}
 DPI_MINIMUM_BY_PURPOSE: dict[str, int] = {
     "standard": 200,
     "com": 300,
@@ -33,6 +76,9 @@ class RulesProfile:
     name: str = "default"
     version: str = "scan-qc.phase1.v1"
     source: str = "builtin"
+    template_id: str | None = None
+    template_version: str | None = None
+    template_source: str | None = None
     min_dpi: int = 200
     dpi_purpose: str = "standard"
     name_pattern: str | None = None
@@ -83,7 +129,7 @@ class RulesProfile:
         }
 
     def metadata(self) -> dict[str, Any]:
-        return {
+        payload = {
             "name": self.name,
             "version": self.version,
             "source": self.source,
@@ -93,10 +139,123 @@ class RulesProfile:
                 for rule, setting in sorted(self.rules.items())
             },
         }
+        if self.template_id:
+            payload["template"] = {
+                "id": self.template_id,
+                "version": self.template_version or self.version,
+                "source": self.template_source or self.source,
+                "processing_defaults": processing_defaults_for_rule_template(self.template_id),
+            }
+        return payload
 
 
 def default_rules_profile() -> RulesProfile:
     return RulesProfile()
+
+
+def builtin_rules_profile(template_id: str) -> RulesProfile:
+    if template_id == "dat-31-2017-standard":
+        return RulesProfile(
+            name=template_id,
+            version=RULE_TEMPLATE_VERSION,
+            source=f"builtin-template:{template_id}",
+            template_id=template_id,
+            template_version=RULE_TEMPLATE_VERSION,
+            template_source="builtin",
+            min_dpi=200,
+            dpi_purpose="standard",
+            despeckle_max_pixel_change_ratio=0.008,
+            deskew_residual_threshold=0.5,
+        )
+    if template_id == "text-clean-print":
+        return RulesProfile(
+            name=template_id,
+            version=RULE_TEMPLATE_VERSION,
+            source=f"builtin-template:{template_id}",
+            template_id=template_id,
+            template_version=RULE_TEMPLATE_VERSION,
+            template_source="builtin",
+            min_dpi=300,
+            dpi_purpose="print",
+            dark_mean_threshold=35.0,
+            bright_mean_threshold=252.0,
+            low_contrast_stddev_threshold=8.0,
+            blur_laplacian_variance_threshold=24.0,
+            blur_min_contrast_stddev=10.0,
+            blank_brightness_min=250.0,
+            blank_contrast_max=5.0,
+            blank_foreground_coverage_max=0.002,
+            blank_edge_coverage_max=0.0015,
+            blank_dark_pixel_ratio_max=0.0003,
+            despeckle_max_pixel_change_ratio=0.02,
+            deskew_residual_threshold=0.4,
+        )
+    if template_id == "high-fidelity-original":
+        return RulesProfile(
+            name=template_id,
+            version=RULE_TEMPLATE_VERSION,
+            source=f"builtin-template:{template_id}",
+            template_id=template_id,
+            template_version=RULE_TEMPLATE_VERSION,
+            template_source="builtin",
+            min_dpi=300,
+            dpi_purpose="reproduction",
+            dark_mean_threshold=55.0,
+            bright_mean_threshold=248.0,
+            low_contrast_stddev_threshold=12.0,
+            blur_laplacian_variance_threshold=18.0,
+            blur_min_contrast_stddev=14.0,
+            despeckle_max_pixel_change_ratio=0.003,
+            deskew_residual_threshold=0.3,
+        )
+    raise RulesProfileError(
+        f"Unknown rule template '{template_id}'. Expected one of {', '.join(RULE_TEMPLATE_IDS)}."
+    )
+
+
+def attach_rule_template(profile: RulesProfile, template_id: str) -> RulesProfile:
+    if template_id not in RULE_TEMPLATE_IDS:
+        raise RulesProfileError(
+            f"Unknown rule template '{template_id}'. Expected one of {', '.join(RULE_TEMPLATE_IDS)}."
+        )
+    return replace(
+        profile,
+        template_id=template_id,
+        template_version=RULE_TEMPLATE_VERSION,
+        template_source="custom-file" if template_id == CUSTOM_RULE_TEMPLATE_ID else "builtin",
+    )
+
+
+def processing_defaults_for_rule_template(template_id: str | None) -> dict[str, bool]:
+    if not template_id:
+        return {}
+    if template_id not in RULE_TEMPLATE_IDS:
+        raise RulesProfileError(
+            f"Unknown rule template '{template_id}'. Expected one of {', '.join(RULE_TEMPLATE_IDS)}."
+        )
+    return dict(RULE_TEMPLATE_PROCESSING_DEFAULTS[template_id])
+
+
+def load_rules_profile_selection(
+    rules_profile_path: Path | None,
+    rule_template_id: str | None,
+) -> RulesProfile | None:
+    if not rule_template_id:
+        return load_rules_profile(rules_profile_path) if rules_profile_path else None
+    if rule_template_id in BUILTIN_RULE_TEMPLATE_IDS:
+        if rules_profile_path is not None:
+            raise RulesProfileError(
+                "Built-in rule templates cannot be combined with --rules-profile. "
+                "Use --rule-template custom with --rules-profile for custom templates."
+            )
+        return builtin_rules_profile(rule_template_id)
+    if rule_template_id == CUSTOM_RULE_TEMPLATE_ID:
+        if rules_profile_path is None:
+            raise RulesProfileError("--rule-template custom requires --rules-profile.")
+        return attach_rule_template(load_rules_profile(rules_profile_path), CUSTOM_RULE_TEMPLATE_ID)
+    raise RulesProfileError(
+        f"Unknown rule template '{rule_template_id}'. Expected one of {', '.join(RULE_TEMPLATE_IDS)}."
+    )
 
 
 def load_rules_profile(path: Path) -> RulesProfile:
@@ -117,10 +276,15 @@ def _profile_from_mapping(raw: dict[str, Any], *, source: str) -> RulesProfile:
     profile = default_rules_profile()
     quality = _optional_object(raw, "quality_thresholds")
     rules = _optional_object(raw, "rules")
+    template = _optional_object(raw, "template")
+    template_id = _optional_rule_template_id(template, "id", profile.template_id)
     return RulesProfile(
         name=_optional_string(raw, "name", profile.name),
         version=_optional_string(raw, "version", profile.version),
         source=source,
+        template_id=template_id,
+        template_version=_optional_nullable_string(template, "version", profile.template_version),
+        template_source=_optional_nullable_string(template, "source", profile.template_source),
         min_dpi=_optional_int(raw, "min_dpi", profile.min_dpi),
         dpi_purpose=_optional_dpi_purpose(raw, "dpi_purpose", profile.dpi_purpose),
         name_pattern=_optional_nullable_string(raw, "name_pattern", profile.name_pattern),
@@ -196,6 +360,15 @@ def _optional_nullable_string(raw: dict[str, Any], key: str, default: str | None
     if value is None or isinstance(value, str):
         return value
     raise RulesProfileError(f"Rules profile field '{key}' must be a string or null.")
+
+
+def _optional_rule_template_id(raw: dict[str, Any], key: str, default: str | None) -> str | None:
+    value = _optional_nullable_string(raw, key, default)
+    if value is not None and value not in RULE_TEMPLATE_IDS:
+        raise RulesProfileError(
+            f"Rules profile field 'template.{key}' must be one of {', '.join(RULE_TEMPLATE_IDS)}."
+        )
+    return value
 
 
 def _optional_int(raw: dict[str, Any], key: str, default: int) -> int:

@@ -14,7 +14,7 @@ The current implementation covers:
 - recursive image-directory import without modifying source files
 - file openability checks
 - image format, DPI, color mode, width, height, file size, and SHA-256 capture
-- Pillow-only image quality metrics: grayscale brightness mean, grayscale
+- CPU/Pillow image quality metrics: grayscale brightness mean, grayscale
   contrast standard deviation, Laplacian-variance sharpness approximation,
   dark-pixel ratio, foreground coverage, and edge coverage
 - duplicate filename and duplicate file-content checks
@@ -32,9 +32,11 @@ is open source, lightweight, cross-platform, and works offline. Hashing, JSON,
 CSV, path handling, and rule checks use only the Python standard library. This
 keeps phase one aligned with the design constraints: no cloud services, no
 large frontend framework, no generative image repair, and no original-image
-overwrites. The quality metrics, crop, and deskew implementations are also
-Pillow-only; they do not add OpenCV, scikit-image, GPU, cloud, or other heavy
-native dependencies.
+overwrites. The required production baseline remains CPU/Pillow. Optional
+extras can be installed for measured local acceleration paths, such as NumPy
+despeckle through the stable CLI contract, while OpenCV, libvips, and GPU/model
+provider paths remain optional internal or experimental surfaces unless the
+public capability contract explicitly promotes them.
 
 ### Production install
 
@@ -687,6 +689,53 @@ Interpretation:
   `readiness.model_acceleration_configured` show whether acceleration has been
   explicitly configured. The current required baseline remains
   `unchanged_cpu_pillow_baseline`.
+
+### Public capability contract
+
+Use `public-capability-contract` to write the stable public CLI, artifact
+schema, and backend boundary for the current package version:
+
+```bash
+PYTHONPATH=src python3 -m archive_scan_qc public-capability-contract \
+  --out /placeholder/private-validation-output/public-capability-contract
+```
+
+The command writes `public_capability_contract.json` with schema
+`scan-qc.public-capability-contract.v1`. It is public-safe and aggregate-only:
+it does not scan directories, open images, run image processing, execute
+provider commands, probe hardware, read environment values, or include local
+paths, filenames, hashes, thumbnails, OCR text, or image content.
+
+Use the generated contract to distinguish public-safe aggregate outputs from
+stable local operational outputs. `production_run_summary.json`,
+`production_run_progress.json`, scan reports, processing manifests, review
+templates, rework lists, production review queues, and delivery manifests can
+contain local paths or row-level evidence. Share only artifacts classified as
+`stable_public_safe_aggregate` after local policy review.
+
+The current stable processing contract is CPU/Pillow-first. The public CLI
+exposes `--despeckle-backend fallback` and optional
+`--despeckle-backend numpy`; OpenCV despeckle, libvips image IO, and GPU/model
+inference remain internal or experimental unless the public contract is updated
+in the same release. See `docs/public-capability-contract.md`.
+
+### Image processing capability smoke
+
+Use `image-processing-capability-smoke` for public-safe evidence that the
+installed package can still run the actual scan and derivative-processing path
+without private inputs:
+
+```bash
+PYTHONPATH=src python3 -m archive_scan_qc image-processing-capability-smoke \
+  --out /placeholder/private-validation-output/image-processing-capability-smoke
+```
+
+The command generates temporary synthetic images, runs `scan_batch` and
+`process_images`, and writes `image_processing_capability_smoke.json` with
+schema `scan-qc.image-processing-capability-smoke.v1`. The summary records
+aggregate fixture counts, processing counts, guardrail counts, operation counts,
+timing summaries, and backend counts. It does not publish paths, filenames,
+hashes, thumbnails, OCR text, image content, or environment values.
 
 ### Review and rule calibration
 
@@ -1381,6 +1430,26 @@ not a sensitive local evidence package. The command does not read
 source images, thumbnails, OCR text, hashes, private filenames/roots,
 derivative images, provider logs, command lines, or environment values.
 Unsupported explicit inputs are rejected or summarized by code/count only.
+
+### Service job boundary core
+
+The current service work is focused on job boundaries rather than adding more
+image-processing switches. `archive_scan_qc.service_jobs` provides the backend
+core for a future HTTP API: it creates one isolated
+`service_root/jobs/<job_id>/` directory per job, with separate `metadata`,
+`derivatives`, `tmp`, `checkpoints`, and `logs` subdirectories. The private
+`service_job.json` checkpoint records authorized local paths and template
+settings for recovery. The shareable `service_job_public_summary.json` records
+only aggregate status, counts, isolation flags, recovery status, and privacy
+booleans.
+
+Treat `service_job.json`, `production_run_summary.json`, progress files, scan
+reports, processing manifests, derivative images, and review queues as local
+sensitive state. Treat `service_job_public_summary.json` as public-safe
+prototype/validation evidence after local policy review; it must not contain
+source paths, filenames, hashes, OCR text, thumbnails, or image content. The
+service core currently reuses the production runner synchronously and is not yet
+a stable public CLI or HTTP API surface.
 
 See `docs/operations-runbook.md` for production installation, directory,
 privacy, troubleshooting, exit-code, and tuning guidance. See

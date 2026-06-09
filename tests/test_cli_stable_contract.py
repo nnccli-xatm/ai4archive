@@ -1,0 +1,158 @@
+from __future__ import annotations
+
+import contextlib
+import io
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from PIL import Image, ImageDraw
+
+from archive_scan_qc.cli import main
+from archive_scan_qc.production_runner import ProductionRunConfig, run_production_folder
+from archive_scan_qc.rules import builtin_rules_profile, processing_defaults_for_rule_template
+
+
+class StableCliRuleTemplateTests(unittest.TestCase):
+    def test_builtin_rule_template_metadata_and_processing_defaults_are_public(self) -> None:
+        profile = builtin_rules_profile("text-clean-print")
+        metadata = profile.metadata()
+
+        self.assertEqual(metadata["template"]["id"], "text-clean-print")
+        self.assertEqual(metadata["template"]["version"], "scan-qc.rule-template.v1")
+        self.assertEqual(metadata["thresholds"]["min_dpi"], 300)
+
+        defaults = processing_defaults_for_rule_template("text-clean-print")
+        self.assertTrue(defaults["normalize_tones"])
+        self.assertTrue(defaults["sharpen_text_edges"])
+        self.assertFalse(defaults["despeckle_content_type_check"])
+
+    def test_production_run_rule_template_records_template_and_applies_defaults(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-cli-template-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            _write_clean_page(input_dir / "BATCH001_PAGE_0001.png")
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "production-run",
+                        "--input",
+                        str(input_dir),
+                        "--derivatives-out",
+                        str(derivatives_dir),
+                        "--metadata-out",
+                        str(metadata_dir),
+                        "--rule-template",
+                        "text-clean-print",
+                        "--workers",
+                        "1",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            summary = json.loads((metadata_dir / "production_run_summary.json").read_text(encoding="utf-8"))
+            progress = json.loads((metadata_dir / "production_run_progress.json").read_text(encoding="utf-8"))
+            scan_report = json.loads(
+                (metadata_dir / "admin_reports" / "scan_qc_report.json").read_text(encoding="utf-8")
+            )
+            processing_manifest = json.loads(
+                (derivatives_dir / "processing_manifest.json").read_text(encoding="utf-8")
+            )
+
+            self.assertEqual(summary["rule_template"]["id"], "text-clean-print")
+            self.assertEqual(scan_report["manifest"]["rules_profile"]["template"]["id"], "text-clean-print")
+            self.assertTrue(summary["options"]["normalize_tones"])
+            self.assertTrue(summary["options"]["sharpen_text_edges"])
+            self.assertFalse(summary["options"]["despeckle_content_type_check"])
+            self.assertFalse(processing_manifest["options"]["despeckle_content_type_check"])
+            self.assertEqual(progress["state"], "finished")
+            self.assertFalse(summary["source_images_modified"])
+
+    def test_run_plan_accepts_rule_template_and_records_public_batch_choice(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-cli-run-plan-template-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "project-out"
+            input_dir.mkdir()
+            _write_clean_page(input_dir / "BATCH001_PAGE_0001.png")
+            plan_path = root / "plan.json"
+            plan_path.write_text(
+                json.dumps(
+                    {
+                        "project_id": "stable-cli",
+                        "batches": [
+                            {
+                                "batch_id": "batch-001",
+                                "input_dir": str(input_dir),
+                                "report_dir": "batch-001",
+                                "process_out": "processed-batch-001",
+                                "rule_template": "text-clean-print",
+                                "workers": 1,
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(["run-plan", "--plan-json", str(plan_path), "--out", str(output_dir)])
+
+            self.assertEqual(exit_code, 0)
+            summary = json.loads((output_dir / "run_plan_summary.json").read_text(encoding="utf-8"))
+            scan_report = json.loads((output_dir / "batch-001" / "scan_qc_report.json").read_text(encoding="utf-8"))
+            processing_manifest = json.loads(
+                (output_dir / "processed-batch-001" / "processing_manifest.json").read_text(encoding="utf-8")
+            )
+
+            self.assertEqual(summary["batches"][0]["rule_template"], "text-clean-print")
+            self.assertEqual(scan_report["manifest"]["rules_profile"]["template"]["id"], "text-clean-print")
+            self.assertFalse(processing_manifest["options"]["despeckle_content_type_check"])
+            self.assertEqual(processing_manifest["summary"]["failed_files"], 0)
+
+
+class StableCliFailureStateTests(unittest.TestCase):
+    def test_production_run_writes_failed_progress_and_summary_on_input_error(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-cli-failure-") as temp_dir:
+            root = Path(temp_dir)
+            metadata_dir = root / "metadata"
+            config = ProductionRunConfig(
+                input_dir=root / "missing-input",
+                derivative_output_dir=root / "derivatives",
+                metadata_output_dir=metadata_dir,
+                workers=1,
+            )
+
+            with self.assertRaises(FileNotFoundError):
+                run_production_folder(config)
+
+            progress = json.loads((metadata_dir / "production_run_progress.json").read_text(encoding="utf-8"))
+            summary = json.loads((metadata_dir / "production_run_summary.json").read_text(encoding="utf-8"))
+
+            self.assertEqual(progress["state"], "failed")
+            self.assertEqual(progress["steps"][0]["state"], "failed")
+            self.assertEqual(progress["failure"]["stage"], "scan")
+            self.assertEqual(summary["status"], "failed")
+            self.assertEqual(summary["failure"]["stage"], "scan")
+            self.assertFalse(summary["source_images_modified"])
+
+
+def _write_clean_page(path: Path) -> None:
+    image = Image.new("RGB", (640, 900), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((50, 50, 590, 850), outline=(210, 210, 210), width=3)
+    for index in range(10):
+        y = 140 + index * 45
+        draw.line((100, y, 540, y), fill=(40, 40, 40), width=2)
+    image.save(path, dpi=(300, 300))
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -89,7 +89,7 @@ def run_analysis_provider(
 
 
 def _prepare_command(command: str) -> list[str]:
-    argv = shlex.split(command)
+    argv = [_strip_command_token_quotes(token) for token in shlex.split(command, posix=os.name != "nt")]
 
     fixed: list[str] = []
     i = 0
@@ -123,6 +123,12 @@ def _prepare_command(command: str) -> list[str]:
         i += 1
 
     return fixed
+
+
+def _strip_command_token_quotes(token: str) -> str:
+    if len(token) >= 2 and token[0] == token[-1] and token[0] in {"'", '"'}:
+        return token[1:-1]
+    return token
 
 
 def _looks_like_path_token(token: str) -> bool:

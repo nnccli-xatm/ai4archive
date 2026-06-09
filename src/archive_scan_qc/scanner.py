@@ -320,6 +320,9 @@ def _effective_profile(config: ScanConfig) -> RulesProfile:
         name=profile.name,
         version=profile.version,
         source=profile.source,
+        template_id=profile.template_id,
+        template_version=profile.template_version,
+        template_source=profile.template_source,
         min_dpi=config.min_dpi if config.rules_profile is None else profile.min_dpi,
         name_pattern=config.name_pattern if config.rules_profile is None else profile.name_pattern,
         dark_mean_threshold=config.dark_mean_threshold if config.rules_profile is None else profile.dark_mean_threshold,
@@ -340,6 +343,7 @@ def _effective_profile(config: ScanConfig) -> RulesProfile:
         blank_dark_pixel_ratio_max=profile.blank_dark_pixel_ratio_max,
         dpi_purpose=profile.dpi_purpose,
         despeckle_max_pixel_change_ratio=profile.despeckle_max_pixel_change_ratio,
+        deskew_residual_threshold=profile.deskew_residual_threshold,
         rules=profile.rules,
     )
 

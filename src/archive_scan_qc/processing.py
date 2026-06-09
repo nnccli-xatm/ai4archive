@@ -446,6 +446,7 @@ def process_images(
             "worker_mode": performance["mode"],
         },
         "performance": performance,
+        "options": _processing_options_public_payload(options),
         "operations": [
             "exif_transpose",
             "convert_non_l_or_rgb_to_rgb",
@@ -1340,6 +1341,7 @@ def _processing_options_fingerprint(options: ProcessingOptions) -> str:
         "trim_dark_border": options.trim_dark_border,
         "scanner_gutter_trim": options.scanner_gutter_trim,
         "despeckle": options.despeckle,
+        "despeckle_content_type_check": options.despeckle_content_type_check,
         "normalize_tones": options.normalize_tones,
         "normalize_paper_color_cast": options.normalize_paper_color_cast,
         "lighten_edge_shadow": options.lighten_edge_shadow,
@@ -1394,6 +1396,32 @@ def _processing_options_fingerprint(options: ProcessingOptions) -> str:
     }
     payload = json.dumps(identity, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _processing_options_public_payload(options: ProcessingOptions) -> dict[str, Any]:
+    return {
+        "auto_crop": options.auto_crop,
+        "deskew": options.deskew,
+        "trim_dark_border": options.trim_dark_border,
+        "scanner_gutter_trim": options.scanner_gutter_trim,
+        "despeckle": options.despeckle,
+        "despeckle_content_type_check": options.despeckle_content_type_check,
+        "normalize_tones": options.normalize_tones,
+        "normalize_paper_color_cast": options.normalize_paper_color_cast,
+        "lighten_edge_shadow": options.lighten_edge_shadow,
+        "lighten_corner_shadows": options.lighten_corner_shadows,
+        "lighten_background_stains": options.lighten_background_stains,
+        "lighten_fold_shadows": options.lighten_fold_shadows,
+        "level_illumination_gradient": options.level_illumination_gradient,
+        "clean_bleed_through": options.clean_bleed_through,
+        "lighten_scanlines": options.lighten_scanlines,
+        "enhance_faded_text": options.enhance_faded_text,
+        "sharpen_text_edges": options.sharpen_text_edges,
+        "despeckle_backend": options.despeckle_backend,
+        "resume_processing": options.resume_processing,
+        "reuse_scan_measurements": options.reuse_scan_measurements,
+        "workers": options.workers,
+    }
 
 
 def _retry_manifest(manifest: dict[str, Any]) -> dict[str, Any]:

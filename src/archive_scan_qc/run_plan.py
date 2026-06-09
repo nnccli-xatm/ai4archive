@@ -15,7 +15,12 @@ from typing import Any
 from .preflight import PreflightConfig, run_preflight, write_preflight_report
 from .processing import ProcessingOptions, process_images
 from .reports import write_reports
-from .rules import RulesProfileError, load_rules_profile
+from .rules import (
+    RULE_TEMPLATE_IDS,
+    RulesProfileError,
+    load_rules_profile_selection,
+    processing_defaults_for_rule_template,
+)
 from .scanner import ScanConfig, scan_batch
 
 
@@ -54,6 +59,7 @@ class PlanBatch:
     despeckle_backend: str
     resume_processing: bool
     reuse_scan_measurements: bool = False
+    rule_template: str | None = None
 
 
 @dataclass(frozen=True)
@@ -150,6 +156,7 @@ def _run_batch(project_id: str, batch: PlanBatch, index: int) -> dict[str, Any]:
         "failure_reason": None,
         "report_dir": _public_output(batch.report_dir),
         "process_out": _public_output(batch.process_out),
+        "rule_template": batch.rule_template,
         "preflight_status": None,
         "preflight_error_count": 0,
         "preflight_warning_count": 0,
@@ -178,7 +185,12 @@ def _run_batch(project_id: str, batch: PlanBatch, index: int) -> dict[str, Any]:
         "workers": batch.workers,
     }
     try:
-        rules_profile, rules_profile_error = _load_rules_profile_for_preflight(batch.rules_profile)
+        rules_profile, rules_profile_error = _load_rules_profile_for_preflight(batch.rules_profile, batch.rule_template)
+        template_defaults = (
+            processing_defaults_for_rule_template(batch.rule_template)
+            if batch.rule_template and batch.process_out
+            else {}
+        )
         preflight = run_preflight(
             PreflightConfig(
                 project_id=project_id,
@@ -189,25 +201,25 @@ def _run_batch(project_id: str, batch: PlanBatch, index: int) -> dict[str, Any]:
                 manifest_csv=batch.manifest_csv,
                 rules_profile=rules_profile,
                 rules_profile_error=rules_profile_error,
-                rules_profile_provided=batch.rules_profile is not None,
+                rules_profile_provided=batch.rules_profile is not None or batch.rule_template is not None,
                 workers=batch.workers,
-                auto_crop=batch.auto_crop,
-                deskew=batch.deskew,
-                trim_dark_border=batch.trim_dark_border,
-                scanner_gutter_trim=batch.scanner_gutter_trim,
-                despeckle=batch.despeckle,
-                normalize_tones=batch.normalize_tones,
-                normalize_paper_color_cast=batch.normalize_paper_color_cast,
-                lighten_edge_shadow=batch.lighten_edge_shadow,
-                lighten_corner_shadows=batch.lighten_corner_shadows,
-                lighten_background_stains=batch.lighten_background_stains,
-                lighten_fold_shadows=batch.lighten_fold_shadows,
-                level_illumination_gradient=batch.level_illumination_gradient,
-                clean_bleed_through=batch.clean_bleed_through,
-                lighten_scanlines=batch.lighten_scanlines,
-                enhance_faded_text=batch.enhance_faded_text,
-                sharpen_text_edges=batch.sharpen_text_edges,
-                resume_processing=batch.resume_processing,
+                auto_crop=_processing_enabled(batch, template_defaults, "auto_crop"),
+                deskew=_processing_enabled(batch, template_defaults, "deskew"),
+                trim_dark_border=_processing_enabled(batch, template_defaults, "trim_dark_border"),
+                scanner_gutter_trim=_processing_enabled(batch, template_defaults, "scanner_gutter_trim"),
+                despeckle=_processing_enabled(batch, template_defaults, "despeckle"),
+                normalize_tones=_processing_enabled(batch, template_defaults, "normalize_tones"),
+                normalize_paper_color_cast=_processing_enabled(batch, template_defaults, "normalize_paper_color_cast"),
+                lighten_edge_shadow=_processing_enabled(batch, template_defaults, "lighten_edge_shadow"),
+                lighten_corner_shadows=_processing_enabled(batch, template_defaults, "lighten_corner_shadows"),
+                lighten_background_stains=_processing_enabled(batch, template_defaults, "lighten_background_stains"),
+                lighten_fold_shadows=_processing_enabled(batch, template_defaults, "lighten_fold_shadows"),
+                level_illumination_gradient=_processing_enabled(batch, template_defaults, "level_illumination_gradient"),
+                clean_bleed_through=_processing_enabled(batch, template_defaults, "clean_bleed_through"),
+                lighten_scanlines=_processing_enabled(batch, template_defaults, "lighten_scanlines"),
+                enhance_faded_text=_processing_enabled(batch, template_defaults, "enhance_faded_text"),
+                sharpen_text_edges=_processing_enabled(batch, template_defaults, "sharpen_text_edges"),
+                resume_processing=_processing_enabled(batch, template_defaults, "resume_processing"),
             )
         )
         write_preflight_report(preflight, batch.report_dir)
@@ -267,25 +279,30 @@ def _run_batch(project_id: str, batch: PlanBatch, index: int) -> dict[str, Any]:
                 batch.input_dir,
                 batch.process_out,
                 ProcessingOptions(
-                    auto_crop=batch.auto_crop,
-                    deskew=batch.deskew,
-                    trim_dark_border=batch.trim_dark_border,
-                    scanner_gutter_trim=batch.scanner_gutter_trim,
-                    despeckle=batch.despeckle,
-                    normalize_tones=batch.normalize_tones,
-                    normalize_paper_color_cast=batch.normalize_paper_color_cast,
-                    lighten_edge_shadow=batch.lighten_edge_shadow,
-                    lighten_corner_shadows=batch.lighten_corner_shadows,
-                    lighten_background_stains=batch.lighten_background_stains,
-                    lighten_fold_shadows=batch.lighten_fold_shadows,
-                    level_illumination_gradient=batch.level_illumination_gradient,
-                    clean_bleed_through=batch.clean_bleed_through,
-                    lighten_scanlines=batch.lighten_scanlines,
-                    enhance_faded_text=batch.enhance_faded_text,
-                    sharpen_text_edges=batch.sharpen_text_edges,
+                    auto_crop=_processing_enabled(batch, template_defaults, "auto_crop"),
+                    deskew=_processing_enabled(batch, template_defaults, "deskew"),
+                    trim_dark_border=_processing_enabled(batch, template_defaults, "trim_dark_border"),
+                    scanner_gutter_trim=_processing_enabled(batch, template_defaults, "scanner_gutter_trim"),
+                    despeckle=_processing_enabled(batch, template_defaults, "despeckle"),
+                    normalize_tones=_processing_enabled(batch, template_defaults, "normalize_tones"),
+                    normalize_paper_color_cast=_processing_enabled(batch, template_defaults, "normalize_paper_color_cast"),
+                    lighten_edge_shadow=_processing_enabled(batch, template_defaults, "lighten_edge_shadow"),
+                    lighten_corner_shadows=_processing_enabled(batch, template_defaults, "lighten_corner_shadows"),
+                    lighten_background_stains=_processing_enabled(batch, template_defaults, "lighten_background_stains"),
+                    lighten_fold_shadows=_processing_enabled(batch, template_defaults, "lighten_fold_shadows"),
+                    level_illumination_gradient=_processing_enabled(batch, template_defaults, "level_illumination_gradient"),
+                    clean_bleed_through=_processing_enabled(batch, template_defaults, "clean_bleed_through"),
+                    lighten_scanlines=_processing_enabled(batch, template_defaults, "lighten_scanlines"),
+                    enhance_faded_text=_processing_enabled(batch, template_defaults, "enhance_faded_text"),
+                    sharpen_text_edges=_processing_enabled(batch, template_defaults, "sharpen_text_edges"),
+                    despeckle_content_type_check=_template_default(
+                        template_defaults,
+                        "despeckle_content_type_check",
+                        True,
+                    ),
                     despeckle_backend=batch.despeckle_backend,
-                    resume_processing=batch.resume_processing,
-                    reuse_scan_measurements=batch.reuse_scan_measurements,
+                    resume_processing=_processing_enabled(batch, template_defaults, "resume_processing"),
+                    reuse_scan_measurements=_processing_enabled(batch, template_defaults, "reuse_scan_measurements"),
                     workers=batch.workers,
                 ),
             )
@@ -314,7 +331,7 @@ def _run_batch(project_id: str, batch: PlanBatch, index: int) -> dict[str, Any]:
 
         base["status"] = "passed"
         return base
-    except (OSError, ValueError, RulesProfileError) as exc:
+    except Exception as exc:
         base["failure_stage"] = base["failure_stage"] or "run"
         base["failure_reason"] = str(exc)
         return base
@@ -533,6 +550,7 @@ def _write_summary(payload: dict[str, Any], output_root: Path) -> None:
         "processing_files_per_minute",
         "report_dir",
         "process_out",
+        "rule_template",
     ]
     with (output_root / RUN_PLAN_CSV).open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
@@ -584,6 +602,7 @@ def _batch_from_row(row: dict[str, Any], index: int, plan_dir: Path, output_root
         process_out=_output_path(process_value, output_root) if process_value else None,
         manifest_csv=_plan_path(_text(normalized.get("manifest_csv")), plan_dir) if _text(normalized.get("manifest_csv")) else None,
         rules_profile=_plan_path(_text(normalized.get("rules_profile")), plan_dir) if _text(normalized.get("rules_profile")) else None,
+        rule_template=_rule_template(_text(normalized.get("rule_template")), index),
         workers=_optional_positive_int(normalized.get("workers"), "workers", index),
         min_dpi=_optional_positive_int(normalized.get("min_dpi"), "min_dpi", index),
         name_pattern=_text(normalized.get("name_pattern")) or None,
@@ -629,9 +648,9 @@ def _despeckle_backend(value: Any, index: int) -> str:
 
 
 def _load_rules_profile(batch: PlanBatch):
-    if not batch.rules_profile:
+    profile = load_rules_profile_selection(batch.rules_profile, batch.rule_template)
+    if profile is None:
         return None
-    profile = load_rules_profile(batch.rules_profile)
     if batch.min_dpi is not None:
         profile = replace(profile, min_dpi=batch.min_dpi)
     if batch.name_pattern is not None:
@@ -639,13 +658,29 @@ def _load_rules_profile(batch: PlanBatch):
     return profile
 
 
-def _load_rules_profile_for_preflight(path: Path | None):
-    if not path:
+def _load_rules_profile_for_preflight(path: Path | None, rule_template: str | None):
+    if not path and not rule_template:
         return None, None
     try:
-        return load_rules_profile(path), None
-    except RulesProfileError:
-        return None, "Rules profile could not be loaded or validated."
+        return load_rules_profile_selection(path, rule_template), None
+    except RulesProfileError as exc:
+        return None, str(exc)
+
+
+def _processing_enabled(batch: PlanBatch, template_defaults: dict[str, bool], field: str) -> bool:
+    return bool(getattr(batch, field) or template_defaults.get(field, False))
+
+
+def _template_default(template_defaults: dict[str, bool], field: str, default: bool) -> bool:
+    return bool(template_defaults[field]) if field in template_defaults else default
+
+
+def _rule_template(value: str, index: int) -> str | None:
+    if not value:
+        return None
+    if value not in RULE_TEMPLATE_IDS:
+        raise ValueError(f"Run plan row {index} field 'rule_template' must be one of {', '.join(RULE_TEMPLATE_IDS)}.")
+    return value
 
 
 def _plan_path(value: str, plan_dir: Path) -> Path:

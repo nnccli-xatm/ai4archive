@@ -346,6 +346,67 @@ def run_examples_dry_run() -> None:
             raise SystemExit("example suggested profile was not marked draft/suggested")
 
 
+def run_cli_stable_contract_validation() -> None:
+    with tempfile.TemporaryDirectory(prefix="archive-scan-qc-cli-stable-") as temp_dir:
+        temp = Path(temp_dir)
+        input_dir = temp / "input"
+        derivatives_dir = temp / "derivatives"
+        metadata_dir = temp / "metadata"
+        input_dir.mkdir()
+        _run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "from PIL import Image, ImageDraw; "
+                    "root = r'" + str(input_dir) + "'; "
+                    "img = Image.new('RGB', (320, 240), 'white'); "
+                    "draw = ImageDraw.Draw(img); "
+                    "draw.rectangle((32, 32, 288, 208), outline=(40, 40, 40), width=2); "
+                    "draw.text((48, 56), 'SYNTHETIC CLI STABLE', fill=(20, 20, 20)); "
+                    "img.save(root + '/CLI_STABLE_0001.png', dpi=(300, 300))"
+                ),
+            ]
+        )
+        _run(
+            [
+                sys.executable,
+                "-m",
+                "archive_scan_qc",
+                "production-run",
+                "--input",
+                str(input_dir),
+                "--derivatives-out",
+                str(derivatives_dir),
+                "--metadata-out",
+                str(metadata_dir),
+                "--rule-template",
+                "text-clean-print",
+                "--workers",
+                "1",
+            ],
+            env=_pythonpath_env(),
+        )
+        summary_path = metadata_dir / "production_run_summary.json"
+        progress_path = metadata_dir / "production_run_progress.json"
+        if not summary_path.exists() or not progress_path.exists():
+            raise SystemExit("CLI stable production-run did not write summary/progress artifacts")
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        progress = json.loads(progress_path.read_text(encoding="utf-8"))
+        if summary["schema_version"] != "scan-qc.production-run.v1":
+            raise SystemExit("CLI stable production-run summary schema changed")
+        if progress["schema_version"] != "scan-qc.production-run-progress.v1":
+            raise SystemExit("CLI stable production-run progress schema changed")
+        if progress["state"] != "finished" or summary["status"] != "finished":
+            raise SystemExit("CLI stable production-run did not finish cleanly")
+        if summary["rule_template"]["id"] != "text-clean-print":
+            raise SystemExit("CLI stable production-run did not record the rule template")
+        if not summary["options"]["normalize_tones"] or not summary["options"]["sharpen_text_edges"]:
+            raise SystemExit("CLI stable rule template defaults were not applied")
+        if summary["source_images_modified"]:
+            raise SystemExit("CLI stable production-run modified source images")
+
+
 def run_synthetic_integration_validation() -> None:
     with tempfile.TemporaryDirectory(prefix="archive-scan-qc-synthetic-") as temp_dir:
         temp = Path(temp_dir)
@@ -534,9 +595,9 @@ def _write_synthetic_batch(input_dir: Path) -> None:
     border = Image.new("RGB", (240, 180), (12, 12, 12))
     border.paste(clean.crop((9, 9, 231, 171)), (9, 9))
     border.save(input_dir / "SYNTH_DARK_BORDER_0001.png", dpi=(300, 300))
-    speckle = page()
+    speckle = Image.new("RGB", (240, 180), "white")
     pixels = speckle.load()
-    for x, y in ((34, 34), (86, 43), (131, 151), (207, 37), (216, 146)):
+    for x, y in ((80, 60), (120, 90), (160, 120), (200, 80)):
         pixels[x, y] = (0, 0, 0)
     speckle.save(input_dir / "SYNTH_SPECKLE_0001.png", dpi=(300, 300))
     low = Image.new("RGB", (240, 180), (252, 252, 252))
@@ -858,6 +919,7 @@ def main(argv: list[str] | None = None) -> int:
     if not args.skip_build_artifacts:
         run_build_artifacts()
     run_examples_dry_run()
+    run_cli_stable_contract_validation()
     run_synthetic_integration_validation()
     run_benchmark_validation()
     run_acceptance_validation()

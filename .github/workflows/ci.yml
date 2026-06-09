@@ -58,6 +58,9 @@ jobs:
       - name: Compile source and tests
         run: PYTHONPATH=src python -m compileall -q src tests
 
+      - name: Run fast unit contract tests
+        run: make test-fast PYTHON=python
+
       - name: Build wheel
         run: python -m pip wheel --no-deps --wheel-dir dist .
 
@@ -120,7 +123,7 @@ jobs:
       - name: Run targeted tests
         if: steps.targeted.outputs.run_tests == 'true'
         run: |
-          PYTHONPATH=src python -m unittest ${{ steps.targeted.outputs.tests }}
+          PYTHONPATH=src:tests python -m unittest ${{ steps.targeted.outputs.tests }}
 
       - name: Skip targeted tests
         if: steps.targeted.outputs.run_tests != 'true'
@@ -172,23 +175,19 @@ jobs:
           /tmp/archive-scan-qc-smoke/bin/python -m pip install dist/ai4archive-*.whl
           /tmp/archive-scan-qc-smoke/bin/archive-scan-qc --version
 
-  main-full-tests:
-    name: Main full tests Python 3.11 shard ${{ matrix.shard-label }}/4
+  main-regression-groups:
+    name: Main regression ${{ matrix.group }} Python 3.11
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - shard-index: 0
-            shard-label: 1
-          - shard-index: 1
-            shard-label: 2
-          - shard-index: 2
-            shard-label: 3
-          - shard-index: 3
-            shard-label: 4
+        group:
+          - core-image-processing
+          - production-cli
+          - privacy-boundary
+          - external-validation
 
     steps:
       - name: Check out repository
@@ -207,53 +206,33 @@ jobs:
           python-version: "3.11"
           cache: pip
 
-      - name: Install package for tests
-        run: python -m pip install -e .
-
-      - name: Select full-test shard
+      - name: Install package for regression group
         shell: bash
         run: |
           set -euo pipefail
-          PYTHONPATH=src python - <<'PY' > /tmp/test-shard.txt
-          import hashlib
-          import unittest
-
-          shard_index = ${{ matrix.shard-index }}
-          shard_count = 4
-
-          def iter_cases(suite):
-              for item in suite:
-                  if isinstance(item, unittest.TestSuite):
-                      yield from iter_cases(item)
-                  else:
-                      yield item
-
-          suite = unittest.defaultTestLoader.discover("tests")
-          test_ids = sorted(test.id() for test in iter_cases(suite))
-          for test_id in test_ids:
-              digest = hashlib.sha256(test_id.encode("utf-8")).hexdigest()
-              if int(digest[:8], 16) % shard_count == shard_index:
-                  print(test_id)
-          PY
-          test_count="$(wc -l < /tmp/test-shard.txt | tr -d ' ')"
-          if [ "$test_count" -eq 0 ]; then
-            echo "No tests selected for shard ${{ matrix.shard-label }}/4"
-            exit 1
+          if [ "${{ matrix.group }}" = "external-validation" ]; then
+            python -m pip install -e ".[numpy]"
+          else
+            python -m pip install -e .
           fi
-          echo "Selected ${test_count} tests for shard ${{ matrix.shard-label }}/4"
 
-      - name: Run full-test shard
-        run: PYTHONPATH=src:tests python -m unittest $(cat /tmp/test-shard.txt)
+      - name: Run regression group
+        run: PYTHONPATH=src:tests python scripts/ci_regression_groups.py run ${{ matrix.group }}
 
-  deep-full-test-build-smoke:
-    name: Deep full Python ${{ matrix.python-version }}
+  deep-regression-groups:
+    name: Deep regression ${{ matrix.group }} Python ${{ matrix.python-version }}
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'deep-full')
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
+        group:
+          - core-image-processing
+          - production-cli
+          - privacy-boundary
+          - external-validation
 
     steps:
       - name: Check out repository
@@ -272,22 +251,33 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
-      - name: Install package for tests
-        run: python -m pip install -e .
+      - name: Install package for regression group
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.group }}" = "external-validation" ]; then
+            python -m pip install -e ".[numpy]"
+          else
+            python -m pip install -e .
+          fi
 
       - name: Validate frontend workbench
+        if: matrix.group == 'production-cli'
         run: PYTHONPATH=src python scripts/validate_frontend_workbench.py
 
-      - name: Run unit tests
-        run: PYTHONPATH=src python -m unittest discover -s tests
+      - name: Run regression group
+        run: PYTHONPATH=src:tests python scripts/ci_regression_groups.py run ${{ matrix.group }}
 
       - name: Compile source and tests
+        if: matrix.group == 'production-cli'
         run: PYTHONPATH=src python -m compileall -q src tests
 
       - name: Build wheel
+        if: matrix.group == 'production-cli'
         run: python -m pip wheel --no-deps --wheel-dir dist .
 
       - name: Install wheel and smoke test console script
+        if: matrix.group == 'production-cli'
         run: |
           python -m venv /tmp/archive-scan-qc-smoke
           /tmp/archive-scan-qc-smoke/bin/python -m pip install --upgrade pip

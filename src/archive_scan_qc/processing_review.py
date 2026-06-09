@@ -123,6 +123,8 @@ def _review_record(record: dict[str, Any], manifest_dir: Path, out_dir: Path | N
 def _safe_output_href(value: Any, manifest_dir: Path, out_dir: Path | None) -> str | None:
     if not isinstance(value, str) or not value:
         return None
+    if value.startswith(("/", "\\")):
+        return None
     path = Path(value)
     if path.is_absolute() or ".." in path.parts:
         return None

@@ -28,6 +28,7 @@ from .deep_inspection_candidates import (
 from .evidence_bundle import EVIDENCE_BUNDLE_JSON, write_evidence_bundle_summary
 from .final_handoff import FINAL_HANDOFF_JSON, write_final_handoff_summary
 from .handoff import write_delivery_handoff_manifest
+from .image_processing_capability_smoke import run_image_processing_capability_smoke
 from .preflight import PreflightConfig, run_preflight, write_preflight_report
 from .production_runner import PRODUCTION_RUN_PROGRESS_JSON, PRODUCTION_RUN_SUMMARY_JSON, ProductionRunConfig, run_production_folder
 from .processing import ProcessingOptions, process_images
@@ -35,10 +36,16 @@ from .processing_plan import write_processing_plan
 from .processing_review import write_processing_review_package
 from .production_review_queue import PRODUCTION_REVIEW_QUEUE_JSON, write_production_review_queue
 from .production_rehearsal import ProductionRehearsalConfig, run_production_rehearsal
+from .public_capability_contract import build_public_capability_contract, write_public_capability_contract
 from .reports import write_reports, write_review_export, write_review_summary
 from .review_decisions import write_review_decision_verification_summary
 from .rework import write_rework_action_list
-from .rules import RulesProfileError, load_rules_profile
+from .rules import (
+    RULE_TEMPLATE_IDS,
+    RulesProfileError,
+    load_rules_profile_selection,
+    processing_defaults_for_rule_template,
+)
 from .sampling import DEFAULT_SAMPLE_RATIO, write_acceptance_sampling_export
 from .scanner import ScanConfig, scan_batch
 from .validation_index import VALIDATION_INDEX_JSON, write_public_safe_validation_index
@@ -114,6 +121,15 @@ def _add_scan_arguments(parser: argparse.ArgumentParser, *, include_scan_overrid
         default=None,
         type=Path,
         help="Optional JSON rules profile for thresholds, rule enablement, and severity overrides.",
+    )
+    parser.add_argument(
+        "--rule-template",
+        default=None,
+        choices=RULE_TEMPLATE_IDS,
+        help=(
+            "Optional processing rules template. Built-ins: dat-31-2017-standard, "
+            "text-clean-print, high-fidelity-original. Use custom with --rules-profile."
+        ),
     )
     parser.add_argument(
         "--process-out",
@@ -258,6 +274,10 @@ def main(argv: list[str] | None = None) -> int:
         return local_workbench_main(argv[1:])
     if argv and argv[0] == "capability-probe":
         return _main_capability_probe(argv[1:])
+    if argv and argv[0] == "image-processing-capability-smoke":
+        return _main_image_processing_capability_smoke(argv[1:])
+    if argv and argv[0] == "public-capability-contract":
+        return _main_public_capability_contract(argv[1:])
     if argv and argv[0] == "deep-inspection-provider-probe":
         return _main_deep_inspection_provider_probe(argv[1:])
     if argv and argv[0] == "deep-inspection-candidate-summary":
@@ -298,6 +318,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     _validate_processing_flags(parser, args)
     rules_profile = _load_rules_profile(parser, args)
+    if args.process_out:
+        _apply_rule_template_processing_defaults(args)
 
     config = ScanConfig(
         project_id=args.project,
@@ -339,6 +361,7 @@ def main(argv: list[str] | None = None) -> int:
                 lighten_scanlines=args.lighten_scanlines,
                 enhance_faded_text=args.enhance_faded_text,
                 sharpen_text_edges=args.sharpen_text_edges,
+                despeckle_content_type_check=getattr(args, "despeckle_content_type_check", True),
                 despeckle_backend=args.despeckle_backend,
                 resume_processing=args.resume_processing,
                 reuse_scan_measurements=args.reuse_scan_measurements,
@@ -403,7 +426,7 @@ def _main_preflight(argv: list[str]) -> int:
             manifest_csv=args.manifest_csv,
             rules_profile=rules_profile,
             rules_profile_error=rules_profile_error,
-            rules_profile_provided=args.rules_profile is not None,
+            rules_profile_provided=args.rules_profile is not None or args.rule_template is not None,
             workers=args.workers,
             auto_crop=args.auto_crop,
             deskew=args.deskew,
@@ -455,6 +478,12 @@ def _main_production_run(argv: list[str]) -> int:
     parser.add_argument("--name-pattern", default=None, help="可选文件名规则。")
     parser.add_argument("--manifest-csv", default=None, type=Path, help="可选批次清单 CSV，需包含 relative_path 列。")
     parser.add_argument("--rules-profile", default=None, type=Path, help="可选质检规则配置 JSON。")
+    parser.add_argument(
+        "--rule-template",
+        default=None,
+        choices=RULE_TEMPLATE_IDS,
+        help="图像处理规则模板：dat-31-2017-standard、text-clean-print、high-fidelity-original 或 custom。",
+    )
     parser.add_argument("--auto-crop", action="store_true", help="保守裁切处理后图片边缘。")
     parser.add_argument("--deskew", action="store_true", help="保守校正处理后图片的小角度倾斜。")
     parser.add_argument("--trim-dark-border", action="store_true", help="保守清理扫描黑边。")
@@ -503,6 +532,7 @@ def _main_production_run(argv: list[str]) -> int:
     )
     args = parser.parse_args(argv)
     rules_profile = _load_rules_profile(parser, args)
+    _apply_rule_template_processing_defaults(args)
     try:
         summary = run_production_folder(
             ProductionRunConfig(
@@ -531,6 +561,7 @@ def _main_production_run(argv: list[str]) -> int:
                 lighten_scanlines=args.lighten_scanlines,
                 enhance_faded_text=args.enhance_faded_text,
                 sharpen_text_edges=args.sharpen_text_edges,
+                despeckle_content_type_check=getattr(args, "despeckle_content_type_check", True),
                 despeckle_backend=args.despeckle_backend,
                 resume_processing=args.resume_processing,
                 reuse_scan_measurements=args.reuse_scan_measurements,
@@ -538,8 +569,10 @@ def _main_production_run(argv: list[str]) -> int:
                 analysis_provider_command=args.analysis_provider_command,
             )
         )
-    except (AnalysisProviderError, OSError, ValueError) as exc:
-        parser.error(str(exc))
+    except KeyboardInterrupt:
+        parser.exit(1, "archive-scan-qc production-run: interrupted\n")
+    except Exception as exc:
+        parser.exit(1, f"archive-scan-qc production-run: error: {exc}\n")
     print(f"生产状态: {summary['status_label_zh']} ({summary['status']})")
     print(f"操作提示: {summary['operator_summary']['message_zh']}")
     print(f"扫描原图数量: {summary['operator_summary']['total_source_images']}")
@@ -670,6 +703,73 @@ def _main_capability_probe(argv: list[str]) -> int:
     print("Inference run: no")
     print("Privacy: aggregate-only; no image paths, filenames, hashes, OCR text, thumbnails, secrets, or row-level findings.")
     return 0
+
+
+def _main_public_capability_contract(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="archive-scan-qc public-capability-contract",
+        description="Write the public-safe stable CLI, schema, and backend capability contract.",
+    )
+    parser.add_argument("--out", default=None, type=Path, help="Optional JSON output path or directory.")
+    args = parser.parse_args(argv)
+
+    report = build_public_capability_contract()
+    if args.out:
+        path = write_public_capability_contract(report, args.out)
+        print(f"Public capability contract: {path}")
+    public_safe_artifacts = sum(
+        1
+        for artifact in report["output_artifacts"]
+        if artifact.get("stability") == "stable_public_safe_aggregate"
+    )
+    print(f"Contract status: {report['status']}")
+    print(f"Schema version: {report['schema_version']}")
+    print(f"Stable CLI commands: {len(report['public_cli']['stable_commands'])}")
+    print(f"Tracked artifacts: {len(report['output_artifacts'])}")
+    print(f"Public-safe aggregate artifacts: {public_safe_artifacts}")
+    print("Image processing run: no")
+    print("Provider commands run: no")
+    print("Privacy: public-safe aggregate contract; no image paths, filenames, hashes, OCR text, thumbnails, or image content.")
+    return 0
+
+
+def _main_image_processing_capability_smoke(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="archive-scan-qc image-processing-capability-smoke",
+        description="Run a public-safe synthetic scan and derivative-processing smoke check.",
+    )
+    parser.add_argument("--out", default=None, type=Path, help="Optional JSON output path or directory.")
+    parser.add_argument(
+        "--despeckle-backend",
+        choices=("fallback", "numpy"),
+        default="fallback",
+        help="Synthetic despeckle backend to exercise. Defaults to fallback; numpy is opt-in.",
+    )
+    parser.add_argument("--workers", default=1, type=_positive_int, help="Local worker count for the synthetic run.")
+    args = parser.parse_args(argv)
+
+    try:
+        path, report = run_image_processing_capability_smoke(
+            output_path=args.out,
+            despeckle_backend=args.despeckle_backend,
+            workers=args.workers,
+        )
+    except (OSError, ValueError) as exc:
+        parser.exit(1, f"archive-scan-qc image-processing-capability-smoke: error: {exc}\n")
+    if path:
+        print(f"Image processing capability smoke: {path}")
+    print(f"Smoke status: {report['status']}")
+    print(f"Schema version: {report['schema_version']}")
+    print(f"Synthetic fixtures: {report['counts']['synthetic_fixture_count']}")
+    print(f"Processed files: {report['counts']['processed_files']}")
+    print(f"Processing failed files: {report['counts']['failed_files']}")
+    print(f"Guardrail failed files: {report['counts']['guardrail_failed_files']}")
+    print(f"Source images modified: {'yes' if report['processing_run']['source_images_modified'] else 'no'}")
+    print("Image processing run: yes")
+    print("Private images read: no")
+    print("Provider commands run: no")
+    print("Privacy: public-safe aggregate smoke; no image paths, filenames, hashes, OCR text, thumbnails, or image content.")
+    return 0 if report["status"] == "pass" else 1
 
 
 def _main_deep_inspection_provider_probe(argv: list[str]) -> int:
@@ -1366,7 +1466,7 @@ def _validate_processing_flags(parser: argparse.ArgumentParser, args: argparse.N
 
 def _load_rules_profile(parser: argparse.ArgumentParser, args: argparse.Namespace):
     try:
-        rules_profile = load_rules_profile(args.rules_profile) if args.rules_profile else None
+        rules_profile = load_rules_profile_selection(args.rules_profile, getattr(args, "rule_template", None))
     except RulesProfileError as exc:
         parser.error(str(exc))
     if rules_profile and args.min_dpi is not None:
@@ -1379,12 +1479,25 @@ def _load_rules_profile(parser: argparse.ArgumentParser, args: argparse.Namespac
 
 
 def _load_rules_profile_for_preflight(args: argparse.Namespace):
-    if not args.rules_profile:
+    if not args.rules_profile and not getattr(args, "rule_template", None):
         return None, None
     try:
-        return load_rules_profile(args.rules_profile), None
+        return load_rules_profile_selection(args.rules_profile, getattr(args, "rule_template", None)), None
+    except RulesProfileError as exc:
+        return None, str(exc)
+
+
+def _apply_rule_template_processing_defaults(args: argparse.Namespace) -> None:
+    template_id = getattr(args, "rule_template", None)
+    if not template_id:
+        return
+    try:
+        defaults = processing_defaults_for_rule_template(template_id)
     except RulesProfileError:
-        return None, "Rules profile could not be loaded or validated."
+        return
+    for field, enabled in defaults.items():
+        if hasattr(args, field) or field == "despeckle_content_type_check":
+            setattr(args, field, enabled)
 
 
 if __name__ == "__main__":

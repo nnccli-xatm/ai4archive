@@ -19,12 +19,13 @@ import platform
 import statistics
 import subprocess
 import sys
+import tempfile
 import time
 from typing import Any, Iterable
 from urllib.request import urlretrieve
 from zipfile import ZipFile
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 try:
     import numpy as np
@@ -65,6 +66,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--download-url", default=NOISYOFFICE_URL, help="Official NoisyOffice ZIP URL.")
     parser.add_argument("--no-download", action="store_true", help="Fail if the ZIP is missing instead of downloading.")
     parser.add_argument("--no-doc-report", action="store_true", help="Only write generated artifacts.")
+    parser.add_argument(
+        "--synthetic-smoke",
+        action="store_true",
+        help="Create a tiny NoisyOffice-shaped synthetic dataset under --data-root for CI smoke validation.",
+    )
     return parser
 
 
@@ -72,41 +78,59 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     started_at = datetime.now(timezone.utc)
     run_id = args.run_id or started_at.strftime("%Y%m%dT%H%M%SZ")
-    run_root = (args.output_root / run_id).resolve()
-    run_root.mkdir(parents=True, exist_ok=True)
+    temp_context = None
+    if args.synthetic_smoke and args.data_root == DEFAULT_DATA_ROOT:
+        temp_context = tempfile.TemporaryDirectory(prefix="noisyoffice-external-synthetic-")
+        args.data_root = Path(temp_context.name) / "data"
+    try:
+        if args.synthetic_smoke:
+            write_synthetic_dataset(args.data_root)
+            args.no_download = True
+        run_root = (args.output_root / run_id).resolve()
+        run_root.mkdir(parents=True, exist_ok=True)
 
-    dataset = prepare_dataset(args.data_root, args.download_url, no_download=args.no_download)
-    pairs = discover_pairs(dataset)
-    print(f"NoisyOffice pairs: {len(pairs)}", flush=True)
-    result, rows = run_external_cli(
-        pairs,
-        dataset=dataset,
-        run_root=run_root,
-        python_executable=args.python,
-        workers=args.workers,
-        rule_template=args.rule_template,
-    )
-    finished_at = datetime.now(timezone.utc)
-    payload = build_payload(
-        args=args,
-        run_id=run_id,
-        run_root=run_root,
-        dataset=dataset,
-        started_at=started_at,
-        finished_at=finished_at,
-        result=result,
-        rows=rows,
-    )
-    write_outputs(payload, rows, run_root, None if args.no_doc_report else args.report_path)
-    print(f"NoisyOffice external CLI test report: {run_root / 'noisyoffice_external_cli_test_report.md'}")
-    if not args.no_doc_report:
-        print(f"Docs report: {args.report_path.resolve()}")
-    print(f"Result JSON: {run_root / 'noisyoffice_external_cli_test_results.json'}")
-    return 0 if payload["summary"]["stable_cli_passed"] else 1
+        dataset = prepare_dataset(args.data_root, args.download_url, no_download=args.no_download)
+        pairs = discover_pairs(dataset)
+        print(f"NoisyOffice pairs: {len(pairs)}", flush=True)
+        result, rows = run_external_cli(
+            pairs,
+            dataset=dataset,
+            run_root=run_root,
+            python_executable=args.python,
+            workers=args.workers,
+            rule_template=args.rule_template,
+        )
+        finished_at = datetime.now(timezone.utc)
+        payload = build_payload(
+            args=args,
+            run_id=run_id,
+            run_root=run_root,
+            dataset=dataset,
+            started_at=started_at,
+            finished_at=finished_at,
+            result=result,
+            rows=rows,
+        )
+        write_outputs(payload, rows, run_root, None if args.no_doc_report else args.report_path)
+        print(f"NoisyOffice external CLI test report: {run_root / 'noisyoffice_external_cli_test_report.md'}")
+        if not args.no_doc_report:
+            print(f"Docs report: {args.report_path.resolve()}")
+        print(f"Result JSON: {run_root / 'noisyoffice_external_cli_test_results.json'}")
+        return 0 if payload["summary"]["stable_cli_passed"] else 1
+    finally:
+        if temp_context is not None:
+            temp_context.cleanup()
 
 
 def prepare_dataset(data_root: Path, download_url: str, *, no_download: bool) -> Path:
     data_root.mkdir(parents=True, exist_ok=True)
+    extracted = data_root / "extracted"
+    dataset = extracted / "NoisyOffice" / "SimulatedNoisyOffice"
+    source_dir = dataset / "simulated_noisy_images_grayscale"
+    clean_dir = dataset / "clean_images_grayscale"
+    if source_dir.is_dir() and clean_dir.is_dir():
+        return dataset
+
     zip_path = data_root / "noisyoffice.zip"
     if not zip_path.is_file():
         if no_download:
@@ -117,16 +141,44 @@ def prepare_dataset(data_root: Path, download_url: str, *, no_download: bool) ->
         bad = zf.testzip()
         if bad is not None:
             raise ValueError(f"NoisyOffice ZIP failed integrity check at {bad}")
-    extracted = data_root / "extracted"
-    source_dir = extracted / "NoisyOffice" / "SimulatedNoisyOffice" / "simulated_noisy_images_grayscale"
-    clean_dir = extracted / "NoisyOffice" / "SimulatedNoisyOffice" / "clean_images_grayscale"
     if not source_dir.is_dir() or not clean_dir.is_dir():
         print(f"Extracting NoisyOffice ZIP to {extracted}", flush=True)
         with ZipFile(zip_path) as zf:
             zf.extractall(extracted)
     if not source_dir.is_dir() or not clean_dir.is_dir():
         raise FileNotFoundError("NoisyOffice simulated noisy/clean directories were not found after extraction.")
-    return extracted / "NoisyOffice" / "SimulatedNoisyOffice"
+    return dataset
+
+
+def write_synthetic_dataset(data_root: Path) -> None:
+    dataset = data_root / "extracted" / "NoisyOffice" / "SimulatedNoisyOffice"
+    source_dir = dataset / "simulated_noisy_images_grayscale"
+    clean_dir = dataset / "clean_images_grayscale"
+    source_dir.mkdir(parents=True, exist_ok=True)
+    clean_dir.mkdir(parents=True, exist_ok=True)
+    for index, noise in enumerate(("Noise1", "Noise2"), start=1):
+        clean_name = f"{index:04d}_Clean_001.png"
+        noisy_name = f"{index:04d}_{noise}_001.png"
+        clean = synthetic_clean_page(index)
+        noisy = clean.copy()
+        draw = ImageDraw.Draw(noisy)
+        draw.point((24 + index * 8, 22), fill=0)
+        draw.point((160, 120 - index * 6), fill=0)
+        clean.save(clean_dir / clean_name, dpi=(300, 300))
+        noisy.save(source_dir / noisy_name, dpi=(300, 300))
+    (dataset / "SYNTHETIC_NOISYOFFICE_SMOKE.txt").write_text(
+        "Synthetic NoisyOffice-shaped CI smoke data; not benchmark evidence.\n",
+        encoding="utf-8",
+    )
+
+
+def synthetic_clean_page(index: int) -> Image.Image:
+    image = Image.new("L", (220, 160), 255)
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((24, 20, 196, 138), outline=32, width=2)
+    for y in (42, 68, 94, 120):
+        draw.rectangle((42, y, 174 - index * 7, y + 5), fill=24)
+    return image
 
 
 def discover_pairs(dataset: Path) -> list[ImagePair]:
