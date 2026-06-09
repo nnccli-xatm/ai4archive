@@ -24,6 +24,7 @@ from .service_jobs import (
     create_service_job,
     recover_service_job,
     recover_service_jobs,
+    retry_service_job,
     run_service_job,
     start_service_job_async,
 )
@@ -61,6 +62,7 @@ def service_capabilities() -> dict[str, Any]:
             {"method": "GET", "path": "/api/jobs/{job_id}", "implemented_by_core": True},
             {"method": "POST", "path": "/api/jobs/{job_id}/run", "implemented_by_core": True},
             {"method": "POST", "path": "/api/jobs/{job_id}/start", "implemented_by_core": True},
+            {"method": "POST", "path": "/api/jobs/{job_id}/retry", "implemented_by_core": True},
             {"method": "POST", "path": "/api/jobs/{job_id}/cancel", "implemented_by_core": True},
             {"method": "GET", "path": "/api/production/session", "implemented_by_core": False},
             {"method": "POST", "path": "/api/production/setup", "implemented_by_core": False},
@@ -115,6 +117,10 @@ def run_job_response(*, service_root: Path, job_id: str) -> dict[str, Any]:
 
 def start_job_response(*, service_root: Path, job_id: str) -> dict[str, Any]:
     return start_service_job_async(service_root, job_id)
+
+
+def retry_job_response(*, service_root: Path, job_id: str) -> dict[str, Any]:
+    return retry_service_job(service_root, job_id)
 
 
 def recover_jobs_response(*, service_root: Path) -> dict[str, Any]:

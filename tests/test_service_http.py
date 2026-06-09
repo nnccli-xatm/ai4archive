@@ -12,7 +12,10 @@ from urllib.request import Request, urlopen
 from PIL import Image, ImageDraw
 
 from archive_scan_qc.service_http import create_service_http_server
-from archive_scan_qc.service_jobs import SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON
+from archive_scan_qc.service_jobs import (
+    SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON,
+    SERVICE_JOB_RECORD_JSON,
+)
 
 
 class ServiceHttpTransportTests(unittest.TestCase):
@@ -83,6 +86,10 @@ class ServiceHttpTransportTests(unittest.TestCase):
                 ("POST", "/api/jobs/{job_id}/start"),
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
+            self.assertIn(
+                ("POST", "/api/jobs/{job_id}/retry"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
             self.assertGreaterEqual(capabilities["resource_limits"]["max_active_workers"], 1)
             self.assertGreaterEqual(capabilities["resource_limits"]["min_free_space_bytes"], 1)
             self.assertGreaterEqual(capabilities["resource_limits"]["max_tmp_bytes_per_job"], 1)
@@ -115,12 +122,20 @@ class ServiceHttpTransportTests(unittest.TestCase):
                     },
                 )
                 run_status, run_summary = _json_request(base_url, "POST", "/api/jobs/job-testhttprun001/run")
+                _force_service_job_state(
+                    service_root / "jobs" / "job-testhttprun001",
+                    "failed",
+                    recovery_status="forced_failed_for_http_retry_test",
+                )
+                retry_status, retry_summary = _json_request(base_url, "POST", "/api/jobs/job-testhttprun001/retry")
                 status_status, status_summary = _json_request(base_url, "GET", "/api/jobs/job-testhttprun001")
-            raw = json.dumps({"run": run_summary, "status": status_summary}, ensure_ascii=False)
+            raw = json.dumps({"run": run_summary, "retry": retry_summary, "status": status_summary}, ensure_ascii=False)
 
             self.assertEqual(run_status, 200)
+            self.assertEqual(retry_status, 200)
             self.assertEqual(status_status, 200)
             self.assertEqual(run_summary["state"], "finished")
+            self.assertEqual(retry_summary["state"], "finished")
             self.assertEqual(status_summary["state"], "finished")
             self.assertTrue(run_summary["quality"]["provided"])
             self.assertEqual(run_summary["quality"]["status"], "pass")
@@ -278,6 +293,18 @@ def _json_request(base_url: str, method: str, path: str, payload: dict[str, obje
             return response.status, json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
         return exc.code, json.loads(exc.read().decode("utf-8"))
+
+
+def _force_service_job_state(job_root: Path, state: str, *, recovery_status: str) -> None:
+    record_path = job_root / SERVICE_JOB_RECORD_JSON
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    record["state"] = state
+    record["recovery"] = {
+        **record.get("recovery", {}),
+        "status": recovery_status,
+        "resume_supported": True,
+    }
+    record_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def _write_page(path: Path) -> None:

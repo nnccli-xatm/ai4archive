@@ -114,11 +114,13 @@ authorization, and recovery semantics are defined.
 
 The prototype local service job API exposes public-safe job polling through
 `POST /api/jobs`, `GET /api/jobs`, `GET /api/jobs/{job_id}`,
-`POST /api/jobs/{job_id}/run`, `POST /api/jobs/{job_id}/start`, and
-`POST /api/jobs/{job_id}/cancel`. `run` is synchronous. `start` is a local
+`POST /api/jobs/{job_id}/run`, `POST /api/jobs/{job_id}/start`,
+`POST /api/jobs/{job_id}/retry`, and `POST /api/jobs/{job_id}/cancel`. `run` is synchronous. `start` is a local
 in-process async MVP that returns `running` immediately, publishes only
 aggregate public summaries, and relies on checkpoint recovery to mark stale
-running jobs as `needs_recovery` after service restart. The capabilities
+running jobs as `needs_recovery` after service restart. `retry` is synchronous
+and accepts only `failed`, `interrupted`, or `needs_recovery` jobs; it does not
+expose local manifest rows or retry lists in the public response. The capabilities
 response publishes non-sensitive resource limits, including
 `max_active_async_jobs`, `max_active_workers`, `min_free_space_bytes`,
 `max_tmp_bytes_per_job`, and the per-job worker limit.

@@ -1542,14 +1542,16 @@ archive-scan-qc service-api --service-root C:\approved\ai4archive-service-root -
 Available prototype endpoints are `GET /api/health`, `GET /api/capabilities`,
 `GET /api/rule-templates`, `GET /api/rule-templates/{template_id}`,
 `POST /api/jobs`, `GET /api/jobs`, `GET /api/jobs/{job_id}`,
-`POST /api/jobs/{job_id}/run`, `POST /api/jobs/{job_id}/start`, and
-`POST /api/jobs/{job_id}/cancel`. The HTTP layer uses the configured
+`POST /api/jobs/{job_id}/run`, `POST /api/jobs/{job_id}/start`,
+`POST /api/jobs/{job_id}/retry`, and `POST /api/jobs/{job_id}/cancel`. The HTTP layer uses the configured
 `--service-root`; clients must not submit their own service-root path. `run`
 keeps the existing synchronous production-run behavior. `start` is the first
 local in-process async MVP: it returns a running public summary immediately,
 executes the same production runner in a background thread, and relies on
 checkpoint recovery so a service restart can still mark orphaned running jobs as
-`needs_recovery`. The service capabilities response publishes the current
+`needs_recovery`. `retry` is an explicit synchronous retry entry for `failed`,
+`interrupted`, or `needs_recovery` jobs; it keeps the same job root and uses the
+production runner's resume behavior so existing derivatives can be reused. The service capabilities response publishes the current
 non-sensitive `max_active_async_jobs`, `max_active_workers`, and per-job worker
 limits, plus `min_free_space_bytes` and `max_tmp_bytes_per_job`; async `start`
 refuses new jobs before marking them `running` when the active-job,

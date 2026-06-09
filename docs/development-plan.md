@@ -112,6 +112,7 @@
 - `GET /api/capabilities`
 - `POST /api/jobs`
 - `GET /api/jobs/{job_id}`
+- `POST /api/jobs/{job_id}/retry`
 - `POST /api/jobs/{job_id}/cancel`
 - `GET /api/production/session`
 - `POST /api/production/setup`
@@ -185,6 +186,10 @@ capabilities response exposes both global limits and the per-job worker limit.
 Job creation checks configured minimum service-root free space, and job start
 checks the isolated temp directory against the per-job temp quota before the job
 can enter `running`.
+The new `POST /api/jobs/{job_id}/retry` endpoint is an explicit synchronous
+retry boundary for `failed`, `interrupted`, and `needs_recovery` jobs. It keeps
+the same job root and relies on production resume semantics so completed
+derivatives and manifests are reused instead of silently overwritten.
 Service job terminal public summaries now also carry public-safe quality
 context from `processing_quality_summary.json`: blocking codes, warning/retry
 counts, per-category changed-file counts, operation category booleans, and

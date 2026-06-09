@@ -306,6 +306,7 @@ packaging remains M3 follow-up work.
 
 - `POST /api/jobs` 支持模板 ID、输入授权、输出策略和 worker 限额。
 - `GET /api/jobs/{job_id}` 返回 public-safe 状态、进度、质量聚合和风险代码。
+- `POST /api/jobs/{job_id}/retry` 只允许失败、中断或可恢复 job 显式重试，并复用已完成派生图。
 - `POST /api/jobs/{job_id}/cancel` 支持取消并写入明确终态。
 - 服务重启后扫描 checkpoint，恢复终态和 stale running job。
 - API 不返回本地敏感路径；本地复核资源必须走受控 local-only 通道。
@@ -340,6 +341,9 @@ rejected by the global active-worker quota remain in their prior public state.
 Follow-up, 2026-06-09: service job creation now checks configured minimum
 service-root free space, and job start checks the isolated temp directory
 against `max_tmp_bytes_per_job` before entering `running`.
+Follow-up, 2026-06-09: `POST /api/jobs/{job_id}/retry` now provides a
+synchronous explicit retry boundary for `failed`, `interrupted`, and
+`needs_recovery` jobs while keeping ordinary terminal reruns rejected.
 Follow-up, 2026-06-09: the same local HTTP transport now exposes
 `GET /api/rule-templates` and `GET /api/rule-templates/{template_id}` for
 public-safe template catalog/detail responses without reading scan reports or

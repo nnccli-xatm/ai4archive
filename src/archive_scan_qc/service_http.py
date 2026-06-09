@@ -15,6 +15,7 @@ from .service_api import (
     get_job_response,
     list_rule_templates_response,
     recover_jobs_response,
+    retry_job_response,
     run_job_response,
     service_api_privacy,
     service_capabilities,
@@ -92,6 +93,9 @@ class ServiceApiRequestHandler(BaseHTTPRequestHandler):
                 return
             if len(segments) == 4 and segments[:2] == ["api", "jobs"] and segments[3] == "start":
                 self._send_json(202, start_job_response(service_root=self._service_root, job_id=segments[2]))
+                return
+            if len(segments) == 4 and segments[:2] == ["api", "jobs"] and segments[3] == "retry":
+                self._send_json(200, retry_job_response(service_root=self._service_root, job_id=segments[2]))
                 return
             raise ServiceHttpError(404, "not_found", "Endpoint not found.")
         except Exception as exc:  # pragma: no cover - covered through _send_exception branches

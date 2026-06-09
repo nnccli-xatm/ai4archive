@@ -234,8 +234,8 @@ response shapes. The prototype local HTTP transport can be started with
 127.0.0.1 --port 8765` and serves `GET /api/health`, `GET /api/capabilities`,
 `GET /api/rule-templates`, `GET /api/rule-templates/{template_id}`,
 `POST /api/jobs`, `GET /api/jobs`, `GET /api/jobs/{job_id}`,
-`POST /api/jobs/{job_id}/run`, `POST /api/jobs/{job_id}/start`, and
-`POST /api/jobs/{job_id}/cancel`.
+`POST /api/jobs/{job_id}/run`, `POST /api/jobs/{job_id}/start`,
+`POST /api/jobs/{job_id}/retry`, and `POST /api/jobs/{job_id}/cancel`.
 The rule-template endpoints expose the same public-safe catalog and no-image
 dry-run plan as the CLI rule-template commands; custom template write APIs are
 not implemented in the local HTTP transport yet.
@@ -254,6 +254,10 @@ thread. While the service process is alive, polling keeps active jobs in
 service-root free-space threshold. Async `start` checks active-job,
 active-worker, and per-job temp limits before marking a job `running`, so
 rejected jobs remain in their prior public state.
+Use `POST /api/jobs/{job_id}/retry` only for jobs already in `failed`,
+`interrupted`, or `needs_recovery`; it is synchronous in the prototype and
+keeps the same job root so production resume semantics can reuse completed
+derivatives and manifests.
 `service_job.json` is private checkpoint state because it contains local paths
 and the template snapshot needed for recovery. Each job root includes isolated
 `metadata`, `derivatives`, `tmp`, `checkpoints`, `review`, and `logs`

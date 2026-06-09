@@ -47,6 +47,7 @@ SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON = "service_job_index_public_summary.json"
 SERVICE_JOBS_DIRNAME = "jobs"
 JOB_ID_PATTERN = re.compile(r"^job-[A-Za-z0-9][A-Za-z0-9_-]{2,80}$")
 TERMINAL_STATES = {"finished", "needs_review", "failed", "interrupted", "cancelled"}
+RETRYABLE_STATES = {"failed", "interrupted", "needs_recovery"}
 SERVICE_JOB_MAX_WORKERS = 8
 SERVICE_JOB_MAX_ACTIVE_JOBS = 2
 SERVICE_JOB_MAX_ACTIVE_WORKERS = 8
@@ -176,6 +177,13 @@ def run_service_job(service_root: Path, job_id: str) -> dict[str, Any]:
     return _execute_running_service_job(service_root, job_id, raise_errors=True)
 
 
+def retry_service_job(service_root: Path, job_id: str) -> dict[str, Any]:
+    """Explicitly retry a failed, interrupted, or recoverable service job."""
+
+    _mark_service_job_retrying(service_root, job_id)
+    return _execute_running_service_job(service_root, job_id, raise_errors=True)
+
+
 def start_service_job_async(service_root: Path, job_id: str) -> dict[str, Any]:
     """Start a service job in a local background thread and return running state."""
 
@@ -204,6 +212,26 @@ def _mark_service_job_running(service_root: Path, job_id: str, *, recovery_statu
         raise RuntimeError("Service job is already terminal.")
     _validate_job_tmp_quota(record)
     _update_record_state(record, "running", recovery_status=recovery_status)
+    _write_job_record(_job_root_from_record(record), record)
+    return _write_public_summary(_job_root_from_record(record), _public_summary_from_record(record))
+
+
+def _mark_service_job_retrying(service_root: Path, job_id: str) -> dict[str, Any]:
+    record = load_service_job_record(service_root, job_id)
+    state = str(record.get("state") or "")
+    if state not in RETRYABLE_STATES:
+        raise RuntimeError("Service job is not in a retryable state.")
+    _validate_job_tmp_quota(record)
+    retry_count = (_safe_int(record.get("retry_count")) or 0) + 1
+    record["retry_count"] = retry_count
+    record["retry"] = {
+        "status": "retrying",
+        "attempt": retry_count,
+        "resume_processing": True,
+        "reuse_existing_derivatives": True,
+        "started_at": _utc_now(),
+    }
+    _update_record_state(record, "running", recovery_status="retrying")
     _write_job_record(_job_root_from_record(record), record)
     return _write_public_summary(_job_root_from_record(record), _public_summary_from_record(record))
 

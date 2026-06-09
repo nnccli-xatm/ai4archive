@@ -56,6 +56,10 @@ class ServiceApiCoreTests(unittest.TestCase):
                 ("POST", "/api/jobs/{job_id}/start"),
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
+            self.assertIn(
+                ("POST", "/api/jobs/{job_id}/retry"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
             self.assertEqual(capabilities["schemas"]["rule_template_catalog"], "scan-qc.rule-template-catalog.v1")
             self.assertEqual(capabilities["schemas"]["rule_template_dry_run"], "scan-qc.rule-template-dry-run.v1")
             self.assertGreaterEqual(capabilities["resource_limits"]["max_active_async_jobs"], 1)

@@ -26,6 +26,7 @@ from archive_scan_qc.service_jobs import (
     create_service_job,
     recover_service_job,
     recover_service_jobs,
+    retry_service_job,
     run_service_job,
     start_service_job_async,
 )
@@ -223,6 +224,63 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertFalse(summary["local_review"]["privacy"]["contains_paths"])
             _assert_public_text_omits(self, public_raw, str(root.resolve()), "private_page_001")
             self.assertFalse(summary["private_paths_exposed"])
+
+    def test_retry_job_reuses_existing_derivative_after_failed_state(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-job-retry-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-source"
+            service_root = root / "service-root"
+            input_dir.mkdir()
+            source_path = input_dir / "private_page_001.png"
+            _write_page(source_path)
+            source_sha_before = _sha256_for_test(source_path)
+            create_service_job(
+                ServiceJobConfig(input_dir=input_dir, service_root=service_root, workers=1),
+                job_id="job-testretry001",
+            )
+            run_service_job(service_root, "job-testretry001")
+            job_root = service_root / "jobs" / "job-testretry001"
+            _force_service_job_state(job_root, "failed", recovery_status="forced_failed_for_retry_test")
+
+            summary = retry_service_job(service_root, "job-testretry001")
+            processing_manifest = json.loads(
+                (job_root / "derivatives" / "processing_manifest.json").read_text(encoding="utf-8")
+            )
+            production_summary = json.loads(
+                (job_root / "metadata" / "production_run_summary.json").read_text(encoding="utf-8")
+            )
+            record = json.loads((job_root / SERVICE_JOB_RECORD_JSON).read_text(encoding="utf-8"))
+            public_raw = (job_root / SERVICE_JOB_PUBLIC_SUMMARY_JSON).read_text(encoding="utf-8")
+
+            self.assertEqual(summary["state"], "finished")
+            self.assertEqual(record["retry_count"], 1)
+            self.assertTrue(record["retry"]["resume_processing"])
+            self.assertTrue(record["retry"]["reuse_existing_derivatives"])
+            self.assertEqual(processing_manifest["summary"]["resumed_files"], 1)
+            self.assertEqual(processing_manifest["summary"]["existing_derivative_reused_files"], 1)
+            self.assertEqual(production_summary["counts"]["resumed_files"], 1)
+            self.assertEqual(production_summary["local_reuse_summary"]["reused_files"], 1)
+            self.assertEqual(_sha256_for_test(source_path), source_sha_before)
+            _assert_public_source_integrity(self, summary["source_integrity"], checked_files=1)
+            _assert_public_text_omits(self, public_raw, str(root.resolve()), "private_page_001")
+
+    def test_retry_job_rejects_non_retryable_state(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-job-retry-reject-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-source"
+            service_root = root / "service-root"
+            input_dir.mkdir()
+            _write_page(input_dir / "private_page_001.png")
+            create_service_job(
+                ServiceJobConfig(input_dir=input_dir, service_root=service_root, workers=1),
+                job_id="job-testretryreject001",
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "retryable state"):
+                retry_service_job(service_root, "job-testretryreject001")
+            summary = recover_service_job(service_root, "job-testretryreject001")
+
+            self.assertEqual(summary["state"], "created")
 
     def test_run_job_preserves_chinese_source_hash_with_public_integrity_summary(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-job-source-integrity-") as temp_dir:
@@ -721,6 +779,18 @@ def _assert_public_text_omits(testcase: unittest.TestCase, raw: str, *private_va
     for value in private_values:
         testcase.assertNotIn(value, raw)
         testcase.assertNotIn(value, normalized)
+
+
+def _force_service_job_state(job_root: Path, state: str, *, recovery_status: str) -> None:
+    record_path = job_root / SERVICE_JOB_RECORD_JSON
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    record["state"] = state
+    record["recovery"] = {
+        **record.get("recovery", {}),
+        "status": recovery_status,
+        "resume_supported": True,
+    }
+    record_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def _assert_public_quality_summary(testcase: unittest.TestCase, quality: dict) -> None:
