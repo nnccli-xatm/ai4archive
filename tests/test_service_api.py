@@ -17,6 +17,7 @@ from archive_scan_qc.service_api import (
     list_rule_templates_response,
     recover_jobs_response,
     run_job_response,
+    save_rule_template_response,
     service_capabilities,
     service_health,
     start_job_response,
@@ -51,6 +52,14 @@ class ServiceApiCoreTests(unittest.TestCase):
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
             self.assertIn(
+                ("POST", "/api/rule-templates"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
+            self.assertIn(
+                ("PUT", "/api/rule-templates/{template_id}"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
+            self.assertIn(
                 ("POST", "/api/jobs/{job_id}/run"),
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
@@ -71,6 +80,10 @@ class ServiceApiCoreTests(unittest.TestCase):
             self.assertEqual(
                 capabilities["schemas"]["rule_template_custom_validation"],
                 "scan-qc.rule-template-custom-validation.v1",
+            )
+            self.assertEqual(
+                capabilities["schemas"]["service_rule_template_write"],
+                "scan-qc.service-rule-template-write.v1",
             )
             self.assertEqual(
                 capabilities["schemas"]["service_job_local_review_artifact"],
@@ -136,6 +149,52 @@ class ServiceApiCoreTests(unittest.TestCase):
             self.assertTrue(payload["privacy"]["public_safe"])
             self.assertFalse(payload["privacy"]["contains_paths"])
             self.assertFalse(payload["privacy"]["contains_row_level_evidence"])
+            _assert_public_text_omits(self, raw, str(root.resolve()), "private-name-pattern")
+
+    def test_rule_template_save_and_replace_are_service_managed(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-api-template-save-") as temp_dir:
+            root = Path(temp_dir)
+            service_root = root / "service-root"
+            draft = {
+                "name": "saved-template",
+                "min_dpi": 300,
+                "dpi_purpose": "print",
+                "name_pattern": str(root / "private-name-pattern"),
+                "processing_defaults": {
+                    "auto_crop": True,
+                    "deskew": True,
+                    "normalize_tones": True,
+                    "reuse_scan_measurements": True,
+                },
+                "quality_thresholds": {"dark_mean_threshold": 38.0},
+                "rules": {"quality_too_dark": {"enabled": True, "severity": "P1"}},
+            }
+
+            created = save_rule_template_response(
+                {"template_id": "custom-readable001", "template": draft},
+                service_root=service_root,
+            )
+            catalog = list_rule_templates_response(service_root=service_root)
+            detail = get_rule_template_response(service_root=service_root, template_id="custom-readable001")
+            updated = save_rule_template_response(
+                {"template": {**draft, "processing_defaults": {"auto_crop": True}}},
+                service_root=service_root,
+                template_id="custom-readable001",
+                replace_existing=True,
+            )
+            raw = json.dumps({"created": created, "catalog": catalog, "detail": detail, "updated": updated}, ensure_ascii=False)
+
+            self.assertEqual(created["schema_version"], "scan-qc.service-rule-template-write.v1")
+            self.assertEqual(created["action"], "created")
+            self.assertEqual(created["template"]["id"], "custom-readable001")
+            self.assertTrue(created["template"]["service_managed"])
+            self.assertTrue(created["template"]["processing_defaults"]["normalize_tones"])
+            self.assertEqual(detail["schema_version"], "scan-qc.service-rule-template-detail.v1")
+            self.assertEqual(detail["template"]["id"], "custom-readable001")
+            self.assertIn("normalize_tones", {item["operation"] for item in detail["planned_operations"]})
+            self.assertIn("custom-readable001", {item["id"] for item in catalog["templates"]})
+            self.assertEqual(updated["action"], "updated")
+            self.assertFalse(updated["storage"]["path_returned"])
             _assert_public_text_omits(self, raw, str(root.resolve()), "private-name-pattern")
 
     def test_job_create_status_cancel_and_index_responses_stay_public_safe(self) -> None:

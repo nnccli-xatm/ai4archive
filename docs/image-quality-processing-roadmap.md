@@ -196,13 +196,17 @@ public-safe CLI output. `rule-template-catalog` writes
 and `rule-template-dry-run` writes `rule_template_dry_run.json` with schema
 `scan-qc.rule-template-dry-run.v1`. The dry-run reports aggregate scan counts,
 planned operation stages, and risk codes without running image processing or
-writing derivative images. Read-only HTTP template APIs are now exposed through
-`GET /api/rule-templates` and `GET /api/rule-templates/{template_id}`; full
-custom-template write APIs remain in M1/M4 follow-up work.
+writing derivative images. HTTP template APIs are now exposed through
+`GET /api/rule-templates`, `GET /api/rule-templates/{template_id}`,
+`POST /api/rule-templates`, and `PUT /api/rule-templates/{template_id}`.
 Follow-up, 2026-06-09: `POST /api/rule-templates/validate` now provides the
 first service-side custom template validation gate for inline drafts. It does
 not write templates and returns only public-safe aggregate validation counts,
 risk codes, and privacy flags.
+Follow-up, 2026-06-09: service-managed custom template writes now save validated
+drafts under server-owned storage. Catalog/detail responses include saved
+custom templates without returning paths or rule rows, and service jobs can use
+the saved template ID with a private template snapshot.
 
 Follow-up, 2026-06-09: the roadmap template IDs `archival-safe-v1`,
 `text-clean-readable-v1`, `print-clean-v1`, and `photo-mixed-safe-v1` are now

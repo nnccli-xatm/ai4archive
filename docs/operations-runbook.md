@@ -261,6 +261,11 @@ Use `POST /api/jobs/{job_id}/retry` only for jobs already in `failed`,
 `interrupted`, or `needs_recovery`; it is synchronous in the prototype and
 keeps the same job root so production resume semantics can reuse completed
 derivatives and manifests.
+Use `POST /api/rule-templates` and `PUT /api/rule-templates/{template_id}` to
+save service-managed custom templates. The service owns the storage path; public
+responses return only the template ID, validation counts, risk codes, and
+processing-default booleans. Saved custom templates appear in catalog/detail
+responses and can be selected by service jobs by template ID.
 `service_job.json` is private checkpoint state because it contains local paths
 and the template snapshot needed for recovery. Each job root includes isolated
 `metadata`, `derivatives`, `tmp`, `checkpoints`, `review`, and `logs`

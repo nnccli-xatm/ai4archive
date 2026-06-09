@@ -266,13 +266,18 @@ review artifact 读取通道，只接受 `processing-review-package` 和
 `rule-template-catalog` 和 `rule-template-dry-run`，分别输出
 `rule_template_catalog.json` 与 `rule_template_dry_run.json`。dry-run 当前
 输出聚合处理计划和风险码，不运行修图、不写派生图；`processing_manifest.json`
-已记录经过整理的模板快照和最终处理选项。只读 HTTP API
-`GET /api/rule-templates` 与 `GET /api/rule-templates/{template_id}` 已由
-service API 暴露；完整自定义模板写接口仍属于后续服务化阶段任务。
+已记录经过整理的模板快照和最终处理选项。HTTP API
+`GET /api/rule-templates`、`GET /api/rule-templates/{template_id}`、
+`POST /api/rule-templates` 与 `PUT /api/rule-templates/{template_id}` 已由
+service API 暴露。
 Follow-up, 2026-06-09: service API now exposes
 `POST /api/rule-templates/validate` for inline custom template draft validation.
 It returns only aggregate validation counts and risk codes, does not write a
 template, and does not echo local paths, name patterns, or rule rows.
+Follow-up, 2026-06-09: service-managed custom template writes now save
+validated drafts under server-owned storage. Catalog/detail responses include
+saved custom templates without returning paths or rule rows, and service jobs
+can use the saved template ID with a private template snapshot.
 Follow-up, 2026-06-09: 路线图中的 `archival-safe-v1`,
 `text-clean-readable-v1`, `print-clean-v1`, and `photo-mixed-safe-v1` 已作为
 内置模板 ID 落地；legacy ID 继续兼容。`text-clean-readable-v1` 和

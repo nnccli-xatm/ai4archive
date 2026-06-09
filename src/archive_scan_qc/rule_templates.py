@@ -5,11 +5,13 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import re
 from typing import Any
 
 from .rules import (
     BUILTIN_RULE_TEMPLATE_IDS,
     CUSTOM_RULE_TEMPLATE_ID,
+    RULE_TEMPLATE_PROCESSING_DEFAULTS,
     RULE_TEMPLATE_VERSION,
     RulesProfileError,
     attach_rule_template,
@@ -24,6 +26,14 @@ RULE_TEMPLATE_DRY_RUN_JSON = "rule_template_dry_run.json"
 CATALOG_SCHEMA_VERSION = "scan-qc.rule-template-catalog.v1"
 DRY_RUN_SCHEMA_VERSION = "scan-qc.rule-template-dry-run.v1"
 CUSTOM_TEMPLATE_VALIDATION_SCHEMA_VERSION = "scan-qc.rule-template-custom-validation.v1"
+SERVICE_TEMPLATE_WRITE_SCHEMA_VERSION = "scan-qc.service-rule-template-write.v1"
+SERVICE_TEMPLATE_DETAIL_SCHEMA_VERSION = "scan-qc.service-rule-template-detail.v1"
+SERVICE_RULE_TEMPLATE_SCHEMA_VERSION = "scan-qc.service-rule-template.v1"
+SERVICE_RULE_TEMPLATES_DIRNAME = "rule_templates"
+SERVICE_RULE_TEMPLATE_ID_PATTERN = re.compile(r"^custom-[A-Za-z0-9][A-Za-z0-9_-]{2,80}$")
+_ALLOWED_CUSTOM_PROCESSING_DEFAULTS = tuple(
+    sorted({key for defaults in RULE_TEMPLATE_PROCESSING_DEFAULTS.values() for key in defaults})
+)
 
 _TEMPLATE_DESCRIPTIONS: dict[str, dict[str, Any]] = {
     "dat-31-2017-standard": {
@@ -106,9 +116,15 @@ _OPERATION_DESCRIPTIONS: dict[str, dict[str, str]] = {
 }
 
 
-def build_rule_template_catalog(*, generated_at: str | None = None) -> dict[str, Any]:
+def build_rule_template_catalog(
+    *,
+    service_root: Path | None = None,
+    generated_at: str | None = None,
+) -> dict[str, Any]:
     templates = [_template_payload(template_id) for template_id in BUILTIN_RULE_TEMPLATE_IDS]
     templates.append(_custom_template_payload())
+    if service_root is not None:
+        templates.extend(_stored_template_catalog_payloads(service_root))
     return {
         "schema_version": CATALOG_SCHEMA_VERSION,
         "generated_at": generated_at or _utc_now(),
@@ -118,6 +134,18 @@ def build_rule_template_catalog(*, generated_at: str | None = None) -> dict[str,
         "templates": templates,
         "privacy": _privacy_payload(reads_scan_report=False),
     }
+
+
+def build_rule_template_detail(
+    *,
+    template_id: str,
+    service_root: Path | None = None,
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    if service_root is not None and _is_service_rule_template_id(template_id):
+        stored = load_service_rule_template(service_root, template_id)
+        return _stored_template_detail_payload(stored, generated_at=generated_at)
+    return build_rule_template_dry_run(rule_template=template_id, generated_at=generated_at)
 
 
 def build_rule_template_dry_run(
@@ -188,6 +216,65 @@ def build_custom_rule_template_validation(
     }
 
 
+def save_service_rule_template(
+    *,
+    service_root: Path,
+    template_id: str,
+    template_draft: dict[str, Any],
+    replace_existing: bool = False,
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    service_template_id = _validate_service_rule_template_id(template_id)
+    validation = build_custom_rule_template_validation(
+        template_draft=template_draft,
+        generated_at=generated_at,
+    )
+    processing_defaults = _custom_processing_defaults(template_draft)
+    path = _service_rule_template_path(service_root, service_template_id)
+    existed = path.is_file()
+    if existed and not replace_existing:
+        raise FileExistsError("Service rule template already exists.")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    stored = {
+        "schema_version": SERVICE_RULE_TEMPLATE_SCHEMA_VERSION,
+        "service_template_id": service_template_id,
+        "base_template_id": CUSTOM_RULE_TEMPLATE_ID,
+        "created_at": _utc_now(),
+        "updated_at": _utc_now(),
+        "local_only": True,
+        "template": template_draft,
+        "processing_defaults": processing_defaults,
+        "validation": {
+            "schema_version": validation["schema_version"],
+            "validation": validation["validation"],
+            "risk_codes": validation["risk_codes"],
+        },
+    }
+    if existed:
+        previous = _read_service_rule_template(path)
+        if isinstance(previous, dict) and isinstance(previous.get("created_at"), str):
+            stored["created_at"] = previous["created_at"]
+    path.write_text(json.dumps(stored, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return _service_rule_template_write_payload(
+        stored,
+        action="updated" if existed else "created",
+        generated_at=generated_at,
+    )
+
+
+def load_service_rule_template(service_root: Path, template_id: str) -> dict[str, Any]:
+    service_template_id = _validate_service_rule_template_id(template_id)
+    path = _service_rule_template_path(service_root, service_template_id)
+    if not path.is_file():
+        raise RulesProfileError("Service rule template does not exist.")
+    stored = _read_service_rule_template(path)
+    if not isinstance(stored, dict) or stored.get("schema_version") != SERVICE_RULE_TEMPLATE_SCHEMA_VERSION:
+        raise RulesProfileError("Service rule template schema is unsupported.")
+    if stored.get("service_template_id") != service_template_id:
+        raise RulesProfileError("Service rule template id mismatch.")
+    return stored
+
+
 def load_scan_report(path: Path | None) -> dict[str, Any] | None:
     if path is None:
         return None
@@ -203,6 +290,76 @@ def write_rule_template_catalog(payload: dict[str, Any], output_path: Path) -> P
 
 def write_rule_template_dry_run(payload: dict[str, Any], output_path: Path) -> Path:
     return _write_json(payload, output_path, RULE_TEMPLATE_DRY_RUN_JSON)
+
+
+def _stored_template_catalog_payloads(service_root: Path) -> list[dict[str, Any]]:
+    templates_dir = _service_rule_templates_dir(service_root)
+    if not templates_dir.is_dir():
+        return []
+    templates: list[dict[str, Any]] = []
+    for path in sorted(templates_dir.glob("*.json"), key=lambda item: item.name):
+        stored = _read_service_rule_template(path)
+        if isinstance(stored, dict) and stored.get("schema_version") == SERVICE_RULE_TEMPLATE_SCHEMA_VERSION:
+            templates.append(_stored_template_summary_payload(stored))
+    return templates
+
+
+def _stored_template_summary_payload(stored: dict[str, Any]) -> dict[str, Any]:
+    validation = stored.get("validation") if isinstance(stored.get("validation"), dict) else {}
+    validation_counts = validation.get("validation") if isinstance(validation.get("validation"), dict) else {}
+    risk_codes = validation.get("risk_codes") if isinstance(validation.get("risk_codes"), list) else []
+    return {
+        "id": str(stored.get("service_template_id") or ""),
+        "schema_version": RULE_TEMPLATE_VERSION,
+        "base_template_id": CUSTOM_RULE_TEMPLATE_ID,
+        "service_managed": True,
+        "stable": False,
+        "customizable": True,
+        "quality_goal": "service-managed custom template",
+        "output_profile": "custom",
+        "review_policy": "custom templates require local review before production",
+        "validation": _safe_validation_counts(validation_counts),
+        "risk_codes": [str(code) for code in risk_codes if isinstance(code, str)],
+        "processing_defaults": _bool_dict(stored.get("processing_defaults")),
+    }
+
+
+def _stored_template_detail_payload(stored: dict[str, Any], *, generated_at: str | None) -> dict[str, Any]:
+    summary = _stored_template_summary_payload(stored)
+    return {
+        "schema_version": SERVICE_TEMPLATE_DETAIL_SCHEMA_VERSION,
+        "generated_at": generated_at or _utc_now(),
+        "status": "pass",
+        "aggregate_only": True,
+        "public_safe": True,
+        "derivative_images_written": False,
+        "template": summary,
+        "planned_operations": _planned_operations_from_defaults(summary["processing_defaults"]),
+        "risk_codes": summary["risk_codes"],
+        "privacy": _privacy_payload(reads_scan_report=False),
+    }
+
+
+def _service_rule_template_write_payload(
+    stored: dict[str, Any],
+    *,
+    action: str,
+    generated_at: str | None,
+) -> dict[str, Any]:
+    summary = _stored_template_summary_payload(stored)
+    return {
+        "schema_version": SERVICE_TEMPLATE_WRITE_SCHEMA_VERSION,
+        "generated_at": generated_at or _utc_now(),
+        "status": "pass",
+        "action": action,
+        "template": summary,
+        "storage": {
+            "managed_by_service": True,
+            "path_returned": False,
+            "local_only_payload_written": True,
+        },
+        "privacy": _privacy_payload(reads_scan_report=False),
+    }
 
 
 def _template_payload(template_id: str) -> dict[str, Any]:
@@ -244,6 +401,10 @@ def _custom_template_payload() -> dict[str, Any]:
 
 def _planned_operations(template_id: str) -> list[dict[str, Any]]:
     defaults = processing_defaults_for_rule_template(template_id)
+    return _planned_operations_from_defaults(defaults)
+
+
+def _planned_operations_from_defaults(defaults: dict[str, bool]) -> list[dict[str, Any]]:
     planned = []
     for operation, enabled in sorted(defaults.items()):
         description = _OPERATION_DESCRIPTIONS.get(operation, {"stage": "other", "intent": operation})
@@ -257,6 +418,83 @@ def _planned_operations(template_id: str) -> list[dict[str, Any]]:
             }
         )
     return planned
+
+
+def _custom_processing_defaults(template_draft: dict[str, Any]) -> dict[str, bool]:
+    raw_defaults = template_draft.get("processing_defaults", {})
+    if raw_defaults is None:
+        raw_defaults = {}
+    if not isinstance(raw_defaults, dict):
+        raise RulesProfileError("Custom template field 'processing_defaults' must be an object.")
+    defaults: dict[str, bool] = {}
+    allowed = set(_ALLOWED_CUSTOM_PROCESSING_DEFAULTS)
+    for key, value in raw_defaults.items():
+        if not isinstance(key, str) or key not in allowed:
+            raise RulesProfileError(f"Custom template processing default '{key}' is not supported.")
+        if not isinstance(value, bool):
+            raise RulesProfileError(f"Custom template processing default '{key}' must be a boolean.")
+        defaults[key] = value
+    return defaults
+
+
+def _validate_service_rule_template_id(template_id: str) -> str:
+    if not isinstance(template_id, str) or not SERVICE_RULE_TEMPLATE_ID_PATTERN.match(template_id):
+        raise RulesProfileError("Service rule template id must start with 'custom-' and contain only safe characters.")
+    if template_id in BUILTIN_RULE_TEMPLATE_IDS or template_id == CUSTOM_RULE_TEMPLATE_ID:
+        raise RulesProfileError("Service rule template id must not collide with built-in templates.")
+    return template_id
+
+
+def _is_service_rule_template_id(template_id: str) -> bool:
+    return isinstance(template_id, str) and bool(SERVICE_RULE_TEMPLATE_ID_PATTERN.match(template_id))
+
+
+def _service_rule_template_path(service_root: Path, template_id: str) -> Path:
+    templates_dir = _service_rule_templates_dir(service_root)
+    path = (templates_dir / f"{template_id}.json").resolve()
+    if path.parent != templates_dir:
+        raise RulesProfileError("Service rule template path escapes the template directory.")
+    return path
+
+
+def _service_rule_templates_dir(service_root: Path) -> Path:
+    return (service_root.resolve() / SERVICE_RULE_TEMPLATES_DIRNAME).resolve()
+
+
+def _read_service_rule_template(path: Path) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _bool_dict(value: Any) -> dict[str, bool]:
+    if not isinstance(value, dict):
+        return {}
+    return {str(key): bool(flag) for key, flag in sorted(value.items()) if isinstance(key, str)}
+
+
+def _safe_validation_counts(value: Any) -> dict[str, int | str]:
+    if not isinstance(value, dict):
+        return {}
+    public_fields = (
+        "rule_count",
+        "disabled_rule_count",
+        "severity_override_count",
+        "min_dpi",
+        "dpi_purpose",
+        "effective_min_dpi",
+        "quality_threshold_count",
+    )
+    payload: dict[str, int | str] = {}
+    for field in public_fields:
+        raw = value.get(field)
+        if isinstance(raw, str):
+            payload[field] = raw
+        elif isinstance(raw, int):
+            payload[field] = _safe_int(raw)
+    return payload
 
 
 def _scan_summary(scan_report: dict[str, Any] | None) -> dict[str, Any]:

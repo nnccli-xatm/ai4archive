@@ -1558,7 +1558,8 @@ archive-scan-qc service-api --service-root C:\approved\ai4archive-service-root -
 
 Available prototype endpoints are `GET /api/health`, `GET /api/capabilities`,
 `GET /api/rule-templates`, `GET /api/rule-templates/{template_id}`,
-`POST /api/rule-templates/validate`, `POST /api/jobs`, `GET /api/jobs`, `GET /api/jobs/{job_id}`,
+`POST /api/rule-templates/validate`, `POST /api/rule-templates`,
+`PUT /api/rule-templates/{template_id}`, `POST /api/jobs`, `GET /api/jobs`, `GET /api/jobs/{job_id}`,
 `POST /api/jobs/{job_id}/run`, `POST /api/jobs/{job_id}/start`,
 `POST /api/jobs/{job_id}/retry`, and `POST /api/jobs/{job_id}/cancel`. The HTTP layer uses the configured
 `--service-root`; clients must not submit their own service-root path. `run`
@@ -1578,6 +1579,11 @@ yet a stable public network API.
 `POST /api/rule-templates/validate` validates an inline custom template draft
 without writing it, without accepting local profile paths, and without echoing
 name patterns, rule rows, paths, or file identifiers.
+`POST /api/rule-templates` and `PUT /api/rule-templates/{template_id}` write
+service-managed custom templates under server-owned storage. Their public-safe
+responses expose only the custom template ID, validation counts, risk codes, and
+processing-default booleans; saved templates can be listed, inspected, and used
+by service jobs through their service template ID.
 
 See `docs/operations-runbook.md` for production installation, directory,
 privacy, troubleshooting, exit-code, and tuning guidance. See

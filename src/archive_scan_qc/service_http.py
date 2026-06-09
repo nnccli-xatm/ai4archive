@@ -19,6 +19,7 @@ from .service_api import (
     recover_jobs_response,
     retry_job_response,
     run_job_response,
+    save_rule_template_response,
     service_api_privacy,
     service_capabilities,
     service_health,
@@ -53,7 +54,7 @@ class ServiceApiRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(200, service_capabilities())
                 return
             if path == "/api/rule-templates":
-                self._send_json(200, list_rule_templates_response())
+                self._send_json(200, list_rule_templates_response(service_root=self._service_root))
                 return
             if path == "/api/jobs":
                 self._send_json(200, recover_jobs_response(service_root=self._service_root))
@@ -61,7 +62,7 @@ class ServiceApiRequestHandler(BaseHTTPRequestHandler):
 
             segments = _path_segments(path)
             if len(segments) == 3 and segments[:2] == ["api", "rule-templates"]:
-                self._send_json(200, get_rule_template_response(template_id=segments[2]))
+                self._send_json(200, get_rule_template_response(service_root=self._service_root, template_id=segments[2]))
                 return
             if len(segments) == 3 and segments[:2] == ["api", "jobs"]:
                 self._send_json(200, get_job_response(service_root=self._service_root, job_id=segments[2]))
@@ -86,6 +87,16 @@ class ServiceApiRequestHandler(BaseHTTPRequestHandler):
             segments = _path_segments(path)
             if path == "/api/rule-templates/validate":
                 self._send_json(200, validate_rule_template_response(self._read_json_body()))
+                return
+            if path == "/api/rule-templates":
+                payload = self._read_json_body()
+                if "service_root" in payload:
+                    raise ServiceHttpError(
+                        400,
+                        "service_root_managed_by_server",
+                        "Service root is configured by the server.",
+                    )
+                self._send_json(201, save_rule_template_response(payload, service_root=self._service_root))
                 return
             if path == "/api/jobs":
                 payload = self._read_json_body()
@@ -113,6 +124,32 @@ class ServiceApiRequestHandler(BaseHTTPRequestHandler):
                 return
             if len(segments) == 4 and segments[:2] == ["api", "jobs"] and segments[3] == "retry":
                 self._send_json(200, retry_job_response(service_root=self._service_root, job_id=segments[2]))
+                return
+            raise ServiceHttpError(404, "not_found", "Endpoint not found.")
+        except Exception as exc:  # pragma: no cover - covered through _send_exception branches
+            self._send_exception(exc)
+
+    def do_PUT(self) -> None:  # noqa: N802 - stdlib handler API
+        try:
+            path = _normalized_path(self.path)
+            segments = _path_segments(path)
+            if len(segments) == 3 and segments[:2] == ["api", "rule-templates"]:
+                payload = self._read_json_body()
+                if "service_root" in payload:
+                    raise ServiceHttpError(
+                        400,
+                        "service_root_managed_by_server",
+                        "Service root is configured by the server.",
+                    )
+                self._send_json(
+                    200,
+                    save_rule_template_response(
+                        payload,
+                        service_root=self._service_root,
+                        template_id=segments[2],
+                        replace_existing=True,
+                    ),
+                )
                 return
             raise ServiceHttpError(404, "not_found", "Endpoint not found.")
         except Exception as exc:  # pragma: no cover - covered through _send_exception branches
@@ -146,6 +183,9 @@ class ServiceApiRequestHandler(BaseHTTPRequestHandler):
             self._send_error_json(exc.status, exc.code, exc.message)
             return
         if isinstance(exc, FileExistsError):
+            if "rule template" in str(exc).lower():
+                self._send_error_json(409, "rule_template_already_exists", "Rule template already exists.")
+                return
             self._send_error_json(409, "job_already_exists", "Service job already exists.")
             return
         if isinstance(exc, ServiceJobNotFoundError):

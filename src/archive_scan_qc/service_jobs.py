@@ -30,10 +30,14 @@ from .production_review_queue import PRODUCTION_REVIEW_QUEUE_JSON, write_product
 from .scanner import SUPPORTED_EXTENSIONS
 from .rules import (
     BUILTIN_RULE_TEMPLATE_IDS,
+    CUSTOM_RULE_TEMPLATE_ID,
     RulesProfileError,
+    attach_rule_template,
     builtin_rules_profile,
     processing_defaults_for_rule_template,
+    rules_profile_from_mapping,
 )
+from .rule_templates import load_service_rule_template
 
 
 SERVICE_JOB_SCHEMA_VERSION = "scan-qc.service-job.v1"
@@ -168,8 +172,21 @@ def create_service_job(config: ServiceJobConfig, *, job_id: str | None = None) -
     for path in directories.values():
         path.mkdir(parents=True, exist_ok=False)
 
-    profile = _rules_profile_for_template(config.rule_template)
-    processing_defaults = _processing_options_for_job(config.rule_template, config.processing_mode)
+    stored_template = _stored_service_template(service_root, config.rule_template)
+    profile = _rules_profile_for_template(config.rule_template, service_root, stored_template=stored_template)
+    processing_defaults = _processing_options_for_job(
+        config.rule_template,
+        config.processing_mode,
+        service_root,
+        stored_template=stored_template,
+    )
+    template_metadata = profile.metadata().get("template")
+    if stored_template is not None and isinstance(template_metadata, dict):
+        template_metadata = {
+            **template_metadata,
+            "service_template_id": config.rule_template,
+            "source": "service-managed-custom-template",
+        }
     now = _utc_now()
     record = {
         "schema_version": SERVICE_JOB_SCHEMA_VERSION,
@@ -196,9 +213,11 @@ def create_service_job(config: ServiceJobConfig, *, job_id: str | None = None) -
         "isolation": _isolation_payload(service_root, job_root, directories),
         "template_snapshot": {
             "schema_version": "scan-qc.service-template-snapshot.v1",
-            "rule_template": profile.metadata().get("template"),
+            "service_template_id": config.rule_template,
+            "rule_template": template_metadata,
             "processing_mode": config.processing_mode,
             "processing_defaults": processing_defaults,
+            "custom_template_draft": stored_template.get("template") if isinstance(stored_template, dict) else None,
             "workers": workers,
         },
         "resource_limits": {
@@ -533,14 +552,41 @@ def _validate_loaded_record_paths(record: dict[str, Any], service_root: Path, jo
         _require_within(Path(str(paths.get("review_dir", ""))).resolve(), job_root)
 
 
-def _rules_profile_for_template(rule_template: str):
+def _stored_service_template(service_root: Path, rule_template: str) -> dict[str, Any] | None:
+    if rule_template in BUILTIN_RULE_TEMPLATE_IDS:
+        return None
+    return load_service_rule_template(service_root, rule_template)
+
+
+def _rules_profile_for_template(
+    rule_template: str,
+    service_root: Path,
+    *,
+    stored_template: dict[str, Any] | None = None,
+):
     if rule_template not in BUILTIN_RULE_TEMPLATE_IDS:
-        raise RulesProfileError("Service jobs currently require a built-in rule template.")
+        stored = stored_template if isinstance(stored_template, dict) else load_service_rule_template(service_root, rule_template)
+        template_draft = stored.get("template") if isinstance(stored.get("template"), dict) else {}
+        return attach_rule_template(
+            rules_profile_from_mapping(template_draft, source=f"service-managed-template:{rule_template}"),
+            CUSTOM_RULE_TEMPLATE_ID,
+        )
     return builtin_rules_profile(rule_template)
 
 
-def _processing_options_for_job(rule_template: str, processing_mode: str) -> dict[str, bool]:
-    defaults = processing_defaults_for_rule_template(rule_template)
+def _processing_options_for_job(
+    rule_template: str,
+    processing_mode: str,
+    service_root: Path,
+    *,
+    stored_template: dict[str, Any] | None = None,
+) -> dict[str, bool]:
+    if rule_template in BUILTIN_RULE_TEMPLATE_IDS:
+        defaults = processing_defaults_for_rule_template(rule_template)
+    else:
+        stored = stored_template if isinstance(stored_template, dict) else load_service_rule_template(service_root, rule_template)
+        raw_defaults = stored.get("processing_defaults")
+        defaults = {str(key): bool(value) for key, value in raw_defaults.items()} if isinstance(raw_defaults, dict) else {}
     if processing_mode == "standard":
         return defaults
     if processing_mode == "qc_only":
@@ -554,15 +600,29 @@ def _processing_options_for_job(rule_template: str, processing_mode: str) -> dic
 
 
 def _production_config_from_record(record: dict[str, Any]) -> ProductionRunConfig:
-    template = record["template_snapshot"]["rule_template"]["id"]
+    template_snapshot = record["template_snapshot"]
+    template = template_snapshot["rule_template"]["id"]
     defaults = dict(record["template_snapshot"]["processing_defaults"])
+    if template == CUSTOM_RULE_TEMPLATE_ID:
+        template_draft = template_snapshot.get("custom_template_draft")
+        if not isinstance(template_draft, dict):
+            raise RulesProfileError("Custom service job template snapshot is missing.")
+        rules_profile = attach_rule_template(
+            rules_profile_from_mapping(
+                template_draft,
+                source=f"service-job-template-snapshot:{template_snapshot.get('service_template_id') or 'custom'}",
+            ),
+            CUSTOM_RULE_TEMPLATE_ID,
+        )
+    else:
+        rules_profile = builtin_rules_profile(template)
     return ProductionRunConfig(
         input_dir=Path(record["paths"]["input_dir"]),
         derivative_output_dir=Path(record["paths"]["derivatives_dir"]),
         metadata_output_dir=Path(record["paths"]["metadata_dir"]),
         project_id=record["project"]["project_id"],
         batch_id=record["project"]["batch_id"],
-        rules_profile=builtin_rules_profile(template),
+        rules_profile=rules_profile,
         processing_mode=record["template_snapshot"]["processing_mode"],
         workers=record["template_snapshot"].get("workers"),
         auto_crop=bool(defaults.get("auto_crop")),
@@ -641,7 +701,9 @@ def _public_summary_from_record(
         "public_safe": True,
         "counts": counts,
         "template": {
-            "rule_template_id": record["template_snapshot"]["rule_template"]["id"],
+            "rule_template_id": record["template_snapshot"].get("service_template_id")
+            or record["template_snapshot"]["rule_template"]["id"],
+            "base_rule_template_id": record["template_snapshot"]["rule_template"]["id"],
             "processing_mode": record["template_snapshot"]["processing_mode"],
         },
         "resource_limits": _public_resource_limits(record.get("resource_limits")),

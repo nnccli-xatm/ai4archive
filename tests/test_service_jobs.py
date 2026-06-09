@@ -31,6 +31,7 @@ from archive_scan_qc.service_jobs import (
     start_service_job_async,
 )
 from archive_scan_qc.processing_quality_summary import PROCESSING_QUALITY_SUMMARY_JSON
+from archive_scan_qc.rule_templates import save_service_rule_template
 
 
 class ServiceJobBoundaryTests(unittest.TestCase):
@@ -159,6 +160,59 @@ class ServiceJobBoundaryTests(unittest.TestCase):
 
             self.assertEqual(created["resource_limits"]["max_tmp_bytes_per_job"], 4)
             self.assertEqual(status["state"], "created")
+
+    def test_service_job_runs_service_managed_custom_template_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-job-custom-template-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-input"
+            service_root = root / "service-root"
+            input_dir.mkdir()
+            _write_page(input_dir / "private_page_001.png")
+            save_service_rule_template(
+                service_root=service_root,
+                template_id="custom-readable001",
+                template_draft={
+                    "name": "saved-custom-template",
+                    "min_dpi": 300,
+                    "dpi_purpose": "print",
+                    "processing_defaults": {
+                        "auto_crop": True,
+                        "deskew": True,
+                        "normalize_tones": True,
+                        "reuse_scan_measurements": True,
+                    },
+                    "quality_thresholds": {"dark_mean_threshold": 38.0},
+                    "rules": {"quality_too_dark": {"enabled": True, "severity": "P1"}},
+                },
+            )
+
+            created = create_service_job(
+                ServiceJobConfig(
+                    input_dir=input_dir,
+                    service_root=service_root,
+                    rule_template="custom-readable001",
+                    workers=1,
+                ),
+                job_id="job-testcustomtemplate001",
+            )
+            summary = run_service_job(service_root, "job-testcustomtemplate001")
+            job_root = service_root / "jobs" / "job-testcustomtemplate001"
+            record = json.loads((job_root / SERVICE_JOB_RECORD_JSON).read_text(encoding="utf-8"))
+            processing_manifest = json.loads(
+                (job_root / "derivatives" / "processing_manifest.json").read_text(encoding="utf-8")
+            )
+            raw = json.dumps({"created": created, "summary": summary}, ensure_ascii=False)
+
+            self.assertEqual(created["template"]["rule_template_id"], "custom-readable001")
+            self.assertEqual(created["template"]["base_rule_template_id"], "custom")
+            self.assertEqual(summary["template"]["rule_template_id"], "custom-readable001")
+            self.assertEqual(summary["template"]["base_rule_template_id"], "custom")
+            self.assertEqual(record["template_snapshot"]["service_template_id"], "custom-readable001")
+            self.assertTrue(record["template_snapshot"]["processing_defaults"]["normalize_tones"])
+            self.assertIsInstance(record["template_snapshot"]["custom_template_draft"], dict)
+            self.assertEqual(processing_manifest["rule_template"]["id"], "custom")
+            self.assertEqual(summary["state"], "finished")
+            _assert_public_text_omits(self, raw, str(root.resolve()), "private_page_001")
 
     def test_run_job_writes_terminal_public_summary_without_private_paths(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-job-run-") as temp_dir:

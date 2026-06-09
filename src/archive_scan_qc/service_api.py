@@ -10,9 +10,12 @@ from .rule_templates import (
     CATALOG_SCHEMA_VERSION,
     CUSTOM_TEMPLATE_VALIDATION_SCHEMA_VERSION,
     DRY_RUN_SCHEMA_VERSION,
+    SERVICE_TEMPLATE_DETAIL_SCHEMA_VERSION,
+    SERVICE_TEMPLATE_WRITE_SCHEMA_VERSION,
     build_rule_template_catalog,
     build_custom_rule_template_validation,
-    build_rule_template_dry_run,
+    build_rule_template_detail,
+    save_service_rule_template,
 )
 from .service_jobs import (
     SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON,
@@ -60,8 +63,8 @@ def service_capabilities() -> dict[str, Any]:
             {"method": "GET", "path": "/api/rule-templates", "implemented_by_core": True},
             {"method": "GET", "path": "/api/rule-templates/{template_id}", "implemented_by_core": True},
             {"method": "POST", "path": "/api/rule-templates/validate", "implemented_by_core": True},
-            {"method": "POST", "path": "/api/rule-templates", "implemented_by_core": False},
-            {"method": "PUT", "path": "/api/rule-templates/{template_id}", "implemented_by_core": False},
+            {"method": "POST", "path": "/api/rule-templates", "implemented_by_core": True},
+            {"method": "PUT", "path": "/api/rule-templates/{template_id}", "implemented_by_core": True},
             {"method": "POST", "path": "/api/jobs", "implemented_by_core": True},
             {"method": "GET", "path": "/api/jobs", "implemented_by_core": True},
             {"method": "GET", "path": "/api/jobs/{job_id}", "implemented_by_core": True},
@@ -93,6 +96,8 @@ def service_capabilities() -> dict[str, Any]:
             "rule_template_catalog": CATALOG_SCHEMA_VERSION,
             "rule_template_dry_run": DRY_RUN_SCHEMA_VERSION,
             "rule_template_custom_validation": CUSTOM_TEMPLATE_VALIDATION_SCHEMA_VERSION,
+            "service_rule_template_detail": SERVICE_TEMPLATE_DETAIL_SCHEMA_VERSION,
+            "service_rule_template_write": SERVICE_TEMPLATE_WRITE_SCHEMA_VERSION,
         },
         "privacy": service_api_privacy(),
     }
@@ -103,12 +108,12 @@ def create_job_response(request: dict[str, Any], *, job_id: str | None = None) -
     return create_service_job(config, job_id=job_id)
 
 
-def list_rule_templates_response() -> dict[str, Any]:
-    return build_rule_template_catalog()
+def list_rule_templates_response(*, service_root: Path | None = None) -> dict[str, Any]:
+    return build_rule_template_catalog(service_root=service_root)
 
 
-def get_rule_template_response(*, template_id: str) -> dict[str, Any]:
-    return build_rule_template_dry_run(rule_template=template_id)
+def get_rule_template_response(*, template_id: str, service_root: Path | None = None) -> dict[str, Any]:
+    return build_rule_template_detail(template_id=template_id, service_root=service_root)
 
 
 def validate_rule_template_response(request: dict[str, Any]) -> dict[str, Any]:
@@ -116,6 +121,27 @@ def validate_rule_template_response(request: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(template_draft, dict):
         raise ValueError("Rule template validation requires a template object.")
     return build_custom_rule_template_validation(template_draft=template_draft)
+
+
+def save_rule_template_response(
+    request: dict[str, Any],
+    *,
+    service_root: Path,
+    template_id: str | None = None,
+    replace_existing: bool = False,
+) -> dict[str, Any]:
+    service_template_id = template_id or request.get("template_id")
+    if not isinstance(service_template_id, str):
+        raise ValueError("Rule template save requires a template_id string.")
+    template_draft = request.get("template")
+    if not isinstance(template_draft, dict):
+        raise ValueError("Rule template save requires a template object.")
+    return save_service_rule_template(
+        service_root=service_root,
+        template_id=service_template_id,
+        template_draft=template_draft,
+        replace_existing=replace_existing,
+    )
 
 
 def get_job_response(*, service_root: Path, job_id: str) -> dict[str, Any]:

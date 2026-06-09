@@ -323,31 +323,110 @@ class ServiceHttpTransportTests(unittest.TestCase):
                         }
                     },
                 )
+                save_status, saved = _json_request(
+                    base_url,
+                    "POST",
+                    "/api/rule-templates",
+                    {
+                        "template_id": "custom-http001",
+                        "template": {
+                            "name": "http-custom-template",
+                            "min_dpi": 300,
+                            "dpi_purpose": "print",
+                            "name_pattern": str(root / "private-template-pattern"),
+                            "processing_defaults": {"auto_crop": True, "normalize_tones": True},
+                            "rules": {
+                                "dpi_missing": {"enabled": False, "severity": "P2"},
+                            },
+                        }
+                    },
+                )
+                duplicate_status, duplicate_error = _json_request(
+                    base_url,
+                    "POST",
+                    "/api/rule-templates",
+                    {
+                        "template_id": "custom-http001",
+                        "template": {"name": "duplicate-template"},
+                    },
+                )
+                saved_detail_status, saved_detail = _json_request(
+                    base_url,
+                    "GET",
+                    "/api/rule-templates/custom-http001",
+                )
+                update_status, updated = _json_request(
+                    base_url,
+                    "PUT",
+                    "/api/rule-templates/custom-http001",
+                    {
+                        "template": {
+                            "name": "http-custom-template-updated",
+                            "processing_defaults": {"auto_crop": True},
+                        }
+                    },
+                )
+                managed_root_status, managed_root_error = _json_request(
+                    base_url,
+                    "POST",
+                    "/api/rule-templates",
+                    {
+                        "service_root": str(root / "client-root"),
+                        "template_id": "custom-http002",
+                        "template": {"name": "bad-template"},
+                    },
+                )
+                catalog_after_status, catalog_after = _json_request(base_url, "GET", "/api/rule-templates")
                 custom_status, custom_error = _json_request(base_url, "GET", "/api/rule-templates/custom")
             raw = json.dumps(
-                {"catalog": catalog, "detail": detail, "validation": validation, "custom_error": custom_error},
+                {
+                    "catalog": catalog,
+                    "detail": detail,
+                    "validation": validation,
+                    "saved": saved,
+                    "saved_detail": saved_detail,
+                    "updated": updated,
+                    "catalog_after": catalog_after,
+                    "duplicate_error": duplicate_error,
+                    "managed_root_error": managed_root_error,
+                    "custom_error": custom_error,
+                },
                 ensure_ascii=False,
             )
 
             self.assertEqual(catalog_status, 200)
             self.assertEqual(detail_status, 200)
             self.assertEqual(validate_status, 200)
+            self.assertEqual(save_status, 201)
+            self.assertEqual(duplicate_status, 409)
+            self.assertEqual(saved_detail_status, 200)
+            self.assertEqual(update_status, 200)
+            self.assertEqual(managed_root_status, 400)
+            self.assertEqual(catalog_after_status, 200)
             self.assertEqual(custom_status, 400)
             self.assertEqual(catalog["schema_version"], "scan-qc.rule-template-catalog.v1")
             self.assertEqual(detail["schema_version"], "scan-qc.rule-template-dry-run.v1")
             self.assertEqual(validation["schema_version"], "scan-qc.rule-template-custom-validation.v1")
+            self.assertEqual(saved["schema_version"], "scan-qc.service-rule-template-write.v1")
+            self.assertEqual(saved["template"]["id"], "custom-http001")
+            self.assertTrue(saved["template"]["processing_defaults"]["normalize_tones"])
+            self.assertEqual(saved_detail["schema_version"], "scan-qc.service-rule-template-detail.v1")
+            self.assertEqual(updated["action"], "updated")
+            self.assertEqual(duplicate_error["error"]["code"], "rule_template_already_exists")
+            self.assertEqual(managed_root_error["error"]["code"], "service_root_managed_by_server")
             self.assertTrue(validation["valid"])
             self.assertEqual(validation["template"]["id"], "custom")
             self.assertEqual(validation["validation"]["rule_count"], 1)
             self.assertFalse(validation["privacy"]["contains_paths"])
             self.assertIn("print-clean-v1", {template["id"] for template in catalog["templates"]})
+            self.assertIn("custom-http001", {template["id"] for template in catalog_after["templates"]})
             self.assertEqual(detail["template"]["id"], "text-clean-readable-v1")
             self.assertIn("text_clean_requires_pure_text_batch_confirmation", detail["risk_codes"])
             self.assertFalse(detail["derivative_images_written"])
             self.assertEqual(custom_error["schema_version"], "scan-qc.service-api-error.v1")
             self.assertEqual(custom_error["error"]["code"], "invalid_request")
             self.assertFalse(custom_error["private_paths_exposed"])
-            _assert_public_text_omits(self, raw, str(root.resolve()), "private-pattern")
+            _assert_public_text_omits(self, raw, str(root.resolve()), "private-pattern", "private-template-pattern")
 
 
 class _running_server:

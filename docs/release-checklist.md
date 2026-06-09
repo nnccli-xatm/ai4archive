@@ -89,6 +89,11 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   Confirm missing job status and local-review requests return 404
   `job_not_found`, while missing create-job input directories still return 400
   `input_dir_missing`.
+  Confirm `POST /api/rule-templates` and
+  `PUT /api/rule-templates/{template_id}` save service-managed custom templates,
+  return only public-safe validation counts/risk codes/processing defaults, do
+  not expose storage paths or rule rows, and allow a service job to run from the
+  saved template ID with a private template snapshot.
   Confirm terminal recovery can regenerate missing local review artifacts from
   existing production metadata without exposing private paths.
   Confirm `service_job_public_summary.json` and
