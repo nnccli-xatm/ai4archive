@@ -574,12 +574,13 @@ archive-scan-qc processing-review-package \
 
 The command writes `processing_review_package.json` and standalone
 `processing_review_package.html`. The package groups deskewed,
-dark-border-trimmed, cropped, despeckled, failed, and guardrail-warning records
-and preserves per-operation decisions for local review. It may include row-level
-source/output relative paths, hashes, warnings, failure reasons, and local
-derivative links under the operator processing output tree. Keep it inside the
-approved environment. It is sensitive local evidence, not public aggregate
-evidence, and it must not replace `review_summary.json`,
+dark-border-trimmed, cropped, despeckled, background cleanup, readability
+improvement, defect cleanup, original appearance risk, failed, and
+guardrail-warning records and preserves per-operation decisions for local
+review. It may include row-level source/output relative paths, hashes, warnings,
+failure reasons, and local derivative links under the operator processing output
+tree. Keep it inside the approved environment. It is sensitive local evidence,
+not public aggregate evidence, and it must not replace `review_summary.json`,
 `processing_audit_summary.json`, or `acceptance_summary.json` in release
 materials. The HTML does not embed base64 image data.
 

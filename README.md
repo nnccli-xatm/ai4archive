@@ -861,13 +861,14 @@ archive-scan-qc processing-review-package \
 
 This writes `processing_review_package.json` and a standalone
 `processing_review_package.html` with grouped sections for deskewed,
-dark-border-trimmed, cropped, despeckled, failed, and guardrail-warning records.
-It may include row-level source and derivative relative paths, hashes, operation
-decisions, failure reasons, and local derivative links. Treat it as sensitive
-local evidence only. It is not an aggregate acceptance artifact and must not be
-uploaded to public issues, PRs, chats, or release systems. The HTML uses safe
-relative links for derivative outputs under the processing output tree and does
-not embed base64 image data.
+dark-border-trimmed, cropped, despeckled, background cleanup, readability
+improvement, defect cleanup, original appearance risk, failed, and
+guardrail-warning records. It may include row-level source and derivative
+relative paths, hashes, operation decisions, failure reasons, and local
+derivative links. Treat it as sensitive local evidence only. It is not an
+aggregate acceptance artifact and must not be uploaded to public issues, PRs,
+chats, or release systems. The HTML uses safe relative links for derivative
+outputs under the processing output tree and does not embed base64 image data.
 
 ### Rule and standards traceability
 
