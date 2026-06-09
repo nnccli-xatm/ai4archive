@@ -32,8 +32,10 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   tampered checkpoint input paths that overlap the service root, mark cancelled
   jobs as terminal and not rerunnable, enforce the per-job worker limit, and
   keep endpoint-shaped service API and prototype local HTTP responses
-  public-safe, including synchronous `POST /api/jobs/{job_id}/run` quality
-  summaries. Confirm `service_job_public_summary.json` and
+  public-safe, including `GET /api/rule-templates`,
+  `GET /api/rule-templates/{template_id}`, and synchronous
+  `POST /api/jobs/{job_id}/run` quality summaries. Confirm
+  `service_job_public_summary.json` and
   `service_job_index_public_summary.json` stay free of paths, filenames, hashes,
   OCR text, thumbnails, and image content. Treat `service_job.json` as private
   checkpoint state.

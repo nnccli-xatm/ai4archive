@@ -11,6 +11,8 @@ from archive_scan_qc.service_api import (
     cancel_job_response,
     create_job_response,
     get_job_response,
+    get_rule_template_response,
+    list_rule_templates_response,
     recover_jobs_response,
     run_job_response,
     service_capabilities,
@@ -37,11 +39,39 @@ class ServiceApiCoreTests(unittest.TestCase):
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
             self.assertIn(
+                ("GET", "/api/rule-templates"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
+            self.assertIn(
+                ("GET", "/api/rule-templates/{template_id}"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
+            self.assertIn(
                 ("POST", "/api/jobs/{job_id}/run"),
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
+            self.assertEqual(capabilities["schemas"]["rule_template_catalog"], "scan-qc.rule-template-catalog.v1")
+            self.assertEqual(capabilities["schemas"]["rule_template_dry_run"], "scan-qc.rule-template-dry-run.v1")
             self.assertTrue(capabilities["privacy"]["public_safe"])
             self.assertNotIn(str(root), raw)
+
+    def test_rule_template_responses_are_public_safe(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-api-templates-") as temp_dir:
+            root = Path(temp_dir)
+
+            catalog = list_rule_templates_response()
+            detail = get_rule_template_response(template_id="text-clean-readable-v1")
+            raw = json.dumps({"catalog": catalog, "detail": detail}, ensure_ascii=False)
+
+            self.assertEqual(catalog["schema_version"], "scan-qc.rule-template-catalog.v1")
+            self.assertEqual(detail["schema_version"], "scan-qc.rule-template-dry-run.v1")
+            self.assertIn("text-clean-readable-v1", {template["id"] for template in catalog["templates"]})
+            self.assertEqual(detail["template"]["id"], "text-clean-readable-v1")
+            self.assertFalse(detail["derivative_images_written"])
+            self.assertIn("text_clean_requires_pure_text_batch_confirmation", detail["risk_codes"])
+            self.assertTrue(detail["privacy"]["public_safe"])
+            self.assertFalse(detail["privacy"]["contains_paths"])
+            _assert_public_text_omits(self, raw, str(root.resolve()))
 
     def test_job_create_status_cancel_and_index_responses_stay_public_safe(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-api-job-") as temp_dir:

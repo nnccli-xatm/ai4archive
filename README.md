@@ -1507,7 +1507,8 @@ archive-scan-qc service-api --service-root C:\approved\ai4archive-service-root -
 ```
 
 Available prototype endpoints are `GET /api/health`, `GET /api/capabilities`,
-`POST /api/jobs`, `GET /api/jobs`, `GET /api/jobs/{job_id}`, and
+`GET /api/rule-templates`, `GET /api/rule-templates/{template_id}`,
+`POST /api/jobs`, `GET /api/jobs`, `GET /api/jobs/{job_id}`,
 `POST /api/jobs/{job_id}/run`, and `POST /api/jobs/{job_id}/cancel`. The HTTP
 layer uses the configured `--service-root`; clients must not submit their own
 service-root path. The service core currently reuses the production runner

@@ -193,8 +193,9 @@ public-safe CLI output. `rule-template-catalog` writes
 and `rule-template-dry-run` writes `rule_template_dry_run.json` with schema
 `scan-qc.rule-template-dry-run.v1`. The dry-run reports aggregate scan counts,
 planned operation stages, and risk codes without running image processing or
-writing derivative images. HTTP template APIs, full custom-template validation,
-and job checkpoint/public-summary template snapshots remain in M1/M4 follow-up
+writing derivative images. Read-only HTTP template APIs are now exposed through
+`GET /api/rule-templates` and `GET /api/rule-templates/{template_id}`; full
+custom-template validation and template write APIs remain in M1/M4 follow-up
 work.
 
 Follow-up, 2026-06-09: the roadmap template IDs `archival-safe-v1`,
@@ -289,6 +290,10 @@ paths or filenames. Follow-up, 2026-06-09: `POST /api/jobs/{job_id}/run`
 triggers the existing production runner synchronously and returns the terminal
 public summary with aggregate quality fields. Running jobs asynchronously and
 serving local-only review resources remain M4 follow-up work.
+Follow-up, 2026-06-09: the same local HTTP transport now exposes
+`GET /api/rule-templates` and `GET /api/rule-templates/{template_id}` for
+public-safe template catalog/detail responses without reading scan reports or
+writing derivative images.
 
 ### M5：性能和后端实现
 

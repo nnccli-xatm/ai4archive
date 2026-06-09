@@ -11,7 +11,9 @@ from urllib.parse import urlsplit
 from .service_api import (
     cancel_job_response,
     create_job_response,
+    get_rule_template_response,
     get_job_response,
+    list_rule_templates_response,
     recover_jobs_response,
     run_job_response,
     service_api_privacy,
@@ -44,11 +46,17 @@ class ServiceApiRequestHandler(BaseHTTPRequestHandler):
             if path == "/api/capabilities":
                 self._send_json(200, service_capabilities())
                 return
+            if path == "/api/rule-templates":
+                self._send_json(200, list_rule_templates_response())
+                return
             if path == "/api/jobs":
                 self._send_json(200, recover_jobs_response(service_root=self._service_root))
                 return
 
             segments = _path_segments(path)
+            if len(segments) == 3 and segments[:2] == ["api", "rule-templates"]:
+                self._send_json(200, get_rule_template_response(template_id=segments[2]))
+                return
             if len(segments) == 3 and segments[:2] == ["api", "jobs"]:
                 self._send_json(200, get_job_response(service_root=self._service_root, job_id=segments[2]))
                 return

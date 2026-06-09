@@ -218,6 +218,11 @@ AI4-148 方向修订：普通生产入口必须是“生产工人批量质检修
 - `POST /api/catalog/ocr-extract`
 - `POST /api/catalog/export`
 
+Implementation note, 2026-06-09: the current local service API has implemented
+the read-only template endpoints `GET /api/rule-templates` and
+`GET /api/rule-templates/{template_id}`. Template `POST`/`PUT` and explicit
+dry-run write endpoints remain future service work.
+
 后续对外接口应补充：
 
 - 批次任务创建、取消、暂停、恢复、重试和幂等提交。

@@ -94,6 +94,12 @@ report when `--scan-report` is provided, but its output remains aggregate-only
 and excludes paths, filenames, hashes, thumbnails, OCR text, image content, and
 row-level evidence.
 
+The prototype local service API exposes the same public-safe read-only surfaces
+through `GET /api/rule-templates` and `GET /api/rule-templates/{template_id}`.
+The detail endpoint returns the no-image dry-run plan without reading local scan
+reports. Custom template `POST`/`PUT` APIs remain unimplemented until validation,
+authorization, and recovery semantics are defined.
+
 ## Image Processing Capability Smoke
 
 Use `image-processing-capability-smoke` when you need public-safe evidence that

@@ -71,6 +71,10 @@ class ServiceHttpTransportTests(unittest.TestCase):
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
             self.assertIn(
+                ("GET", "/api/rule-templates"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
+            self.assertIn(
                 ("POST", "/api/jobs/{job_id}/run"),
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
@@ -156,6 +160,37 @@ class ServiceHttpTransportTests(unittest.TestCase):
             self.assertEqual(payload["error"]["code"], "input_dir_missing")
             self.assertFalse(payload["private_paths_exposed"])
             _assert_public_text_omits(self, raw, str(root.resolve()), "missing-input")
+
+    def test_http_rule_template_catalog_and_detail_are_public_safe(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-http-templates-") as temp_dir:
+            root = Path(temp_dir)
+            service_root = root / "service-root"
+            with _running_server(service_root) as base_url:
+                catalog_status, catalog = _json_request(base_url, "GET", "/api/rule-templates")
+                detail_status, detail = _json_request(
+                    base_url,
+                    "GET",
+                    "/api/rule-templates/text-clean-readable-v1",
+                )
+                custom_status, custom_error = _json_request(base_url, "GET", "/api/rule-templates/custom")
+            raw = json.dumps(
+                {"catalog": catalog, "detail": detail, "custom_error": custom_error},
+                ensure_ascii=False,
+            )
+
+            self.assertEqual(catalog_status, 200)
+            self.assertEqual(detail_status, 200)
+            self.assertEqual(custom_status, 400)
+            self.assertEqual(catalog["schema_version"], "scan-qc.rule-template-catalog.v1")
+            self.assertEqual(detail["schema_version"], "scan-qc.rule-template-dry-run.v1")
+            self.assertIn("print-clean-v1", {template["id"] for template in catalog["templates"]})
+            self.assertEqual(detail["template"]["id"], "text-clean-readable-v1")
+            self.assertIn("text_clean_requires_pure_text_batch_confirmation", detail["risk_codes"])
+            self.assertFalse(detail["derivative_images_written"])
+            self.assertEqual(custom_error["schema_version"], "scan-qc.service-api-error.v1")
+            self.assertEqual(custom_error["error"]["code"], "invalid_request")
+            self.assertFalse(custom_error["private_paths_exposed"])
+            _assert_public_text_omits(self, raw, str(root.resolve()))
 
 
 class _running_server:

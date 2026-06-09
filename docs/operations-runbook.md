@@ -232,8 +232,12 @@ The in-process `archive_scan_qc.service_api` module defines the public-safe
 response shapes. The prototype local HTTP transport can be started with
 `archive-scan-qc service-api --service-root <approved-service-root> --host
 127.0.0.1 --port 8765` and serves `GET /api/health`, `GET /api/capabilities`,
-`POST /api/jobs`, `GET /api/jobs`, `GET /api/jobs/{job_id}`, and
+`GET /api/rule-templates`, `GET /api/rule-templates/{template_id}`,
+`POST /api/jobs`, `GET /api/jobs`, `GET /api/jobs/{job_id}`,
 `POST /api/jobs/{job_id}/run`, and `POST /api/jobs/{job_id}/cancel`.
+The rule-template endpoints expose the same public-safe catalog and no-image
+dry-run plan as the CLI rule-template commands; custom template write APIs are
+not implemented in the local HTTP transport yet.
 The HTTP transport is local-only and uses the configured service root; reject
 requests that try to provide their own `service_root`.
 The first `run` endpoint is synchronous: clients should expect the request to

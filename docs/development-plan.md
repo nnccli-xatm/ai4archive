@@ -146,8 +146,8 @@ local implementation in `archive_scan_qc.service_jobs`. It creates isolated
 per-job roots, writes private `service_job.json` checkpoints, writes
 public-safe `service_job_public_summary.json` aggregate status, rejects
 input/service-root overlap, and can recover terminal or stale running progress
-without exposing private paths. The HTTP API endpoints remain the next service
-MVP step.
+without exposing private paths. The first local HTTP API endpoints have landed;
+async execution and production-specific session endpoints remain follow-up work.
 The checkpoint loader also revalidates `input_dir` against the service root and
 marks `running` records without progress as `needs_recovery` after restart.
 Root-level recovery now writes `service_job_index_public_summary.json` so an
@@ -158,8 +158,9 @@ terminal service jobs.
 It also enforces a per-job worker limit during job creation and reports the
 non-sensitive worker quota in the public summary.
 `archive_scan_qc.service_api` now provides endpoint-shaped health,
-capabilities, create, status, cancel, and recover responses while keeping
-path-bearing request data out of public responses. The prototype
+capabilities, rule-template catalog/detail, create, status, run, cancel, and
+recover responses while keeping path-bearing request data out of public
+responses. The prototype
 `archive_scan_qc.service_http` transport exposes the core as local-only HTTP
 endpoints for `curl`/frontend integration tests; it uses the configured
 service root instead of accepting a client-provided service-root path and still
@@ -202,8 +203,9 @@ fields.
 `rule-template-catalog` 和 `rule-template-dry-run`，分别输出
 `rule_template_catalog.json` 与 `rule_template_dry_run.json`。dry-run 当前
 输出聚合处理计划和风险码，不运行修图、不写派生图；`processing_manifest.json`
-已记录经过整理的模板快照和最终处理选项。HTTP API 和完整自定义模板校验仍属于
-服务化阶段任务。
+已记录经过整理的模板快照和最终处理选项。只读 HTTP API
+`GET /api/rule-templates` 与 `GET /api/rule-templates/{template_id}` 已由
+service API 暴露；完整自定义模板校验和写接口仍属于后续服务化阶段任务。
 Follow-up, 2026-06-09: 路线图中的 `archival-safe-v1`,
 `text-clean-readable-v1`, `print-clean-v1`, and `photo-mixed-safe-v1` 已作为
 内置模板 ID 落地；legacy ID 继续兼容。`text-clean-readable-v1` 和

@@ -6,6 +6,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .rule_templates import (
+    CATALOG_SCHEMA_VERSION,
+    DRY_RUN_SCHEMA_VERSION,
+    build_rule_template_catalog,
+    build_rule_template_dry_run,
+)
 from .service_jobs import (
     SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON,
     SERVICE_JOB_MAX_WORKERS,
@@ -41,6 +47,10 @@ def service_capabilities() -> dict[str, Any]:
         "endpoints": [
             {"method": "GET", "path": "/api/health", "implemented_by_core": True},
             {"method": "GET", "path": "/api/capabilities", "implemented_by_core": True},
+            {"method": "GET", "path": "/api/rule-templates", "implemented_by_core": True},
+            {"method": "GET", "path": "/api/rule-templates/{template_id}", "implemented_by_core": True},
+            {"method": "POST", "path": "/api/rule-templates", "implemented_by_core": False},
+            {"method": "PUT", "path": "/api/rule-templates/{template_id}", "implemented_by_core": False},
             {"method": "POST", "path": "/api/jobs", "implemented_by_core": True},
             {"method": "GET", "path": "/api/jobs", "implemented_by_core": True},
             {"method": "GET", "path": "/api/jobs/{job_id}", "implemented_by_core": True},
@@ -61,6 +71,8 @@ def service_capabilities() -> dict[str, Any]:
             "service_api": SERVICE_API_SCHEMA_VERSION,
             "service_job_public_summary": "scan-qc.service-job-public-summary.v1",
             "service_job_index_public_summary": "scan-qc.service-job-index-public-summary.v1",
+            "rule_template_catalog": CATALOG_SCHEMA_VERSION,
+            "rule_template_dry_run": DRY_RUN_SCHEMA_VERSION,
         },
         "privacy": service_api_privacy(),
     }
@@ -69,6 +81,14 @@ def service_capabilities() -> dict[str, Any]:
 def create_job_response(request: dict[str, Any], *, job_id: str | None = None) -> dict[str, Any]:
     config = _service_job_config_from_request(request)
     return create_service_job(config, job_id=job_id)
+
+
+def list_rule_templates_response() -> dict[str, Any]:
+    return build_rule_template_catalog()
+
+
+def get_rule_template_response(*, template_id: str) -> dict[str, Any]:
+    return build_rule_template_dry_run(rule_template=template_id)
 
 
 def get_job_response(*, service_root: Path, job_id: str) -> dict[str, Any]:
