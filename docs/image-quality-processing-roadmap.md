@@ -279,8 +279,10 @@ status, and cancellation. `archive_scan_qc.service_http` now exposes the first
 local-only HTTP transport behind `archive-scan-qc service-api`. The transport
 keeps `service_root` server-owned, returns sanitized public-safe errors, and is
 covered by HTTP tests for create/status/cancel/index responses without leaking
-paths or filenames. Running jobs asynchronously and serving local-only review
-resources remain M4 follow-up work.
+paths or filenames. Follow-up, 2026-06-09: `POST /api/jobs/{job_id}/run`
+triggers the existing production runner synchronously and returns the terminal
+public summary with aggregate quality fields. Running jobs asynchronously and
+serving local-only review resources remain M4 follow-up work.
 
 ### M5：性能和后端实现
 

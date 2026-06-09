@@ -14,6 +14,7 @@ from .service_jobs import (
     create_service_job,
     recover_service_job,
     recover_service_jobs,
+    run_service_job,
 )
 
 
@@ -43,6 +44,7 @@ def service_capabilities() -> dict[str, Any]:
             {"method": "POST", "path": "/api/jobs", "implemented_by_core": True},
             {"method": "GET", "path": "/api/jobs", "implemented_by_core": True},
             {"method": "GET", "path": "/api/jobs/{job_id}", "implemented_by_core": True},
+            {"method": "POST", "path": "/api/jobs/{job_id}/run", "implemented_by_core": True},
             {"method": "POST", "path": "/api/jobs/{job_id}/cancel", "implemented_by_core": True},
             {"method": "GET", "path": "/api/production/session", "implemented_by_core": False},
             {"method": "POST", "path": "/api/production/setup", "implemented_by_core": False},
@@ -75,6 +77,10 @@ def get_job_response(*, service_root: Path, job_id: str) -> dict[str, Any]:
 
 def cancel_job_response(*, service_root: Path, job_id: str) -> dict[str, Any]:
     return cancel_service_job(service_root, job_id)
+
+
+def run_job_response(*, service_root: Path, job_id: str) -> dict[str, Any]:
+    return run_service_job(service_root, job_id)
 
 
 def recover_jobs_response(*, service_root: Path) -> dict[str, Any]:

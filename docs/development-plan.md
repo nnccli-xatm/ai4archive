@@ -163,7 +163,10 @@ path-bearing request data out of public responses. The prototype
 `archive_scan_qc.service_http` transport exposes the core as local-only HTTP
 endpoints for `curl`/frontend integration tests; it uses the configured
 service root instead of accepting a client-provided service-root path and still
-returns only public-safe aggregate JSON.
+returns only public-safe aggregate JSON. The prototype `POST
+/api/jobs/{job_id}/run` endpoint currently invokes the production runner
+synchronously and returns the terminal public summary with aggregate quality
+fields.
 
 ## 6. 阶段 2：图像处理规则模板系统
 

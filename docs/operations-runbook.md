@@ -231,9 +231,12 @@ response shapes. The prototype local HTTP transport can be started with
 `archive-scan-qc service-api --service-root <approved-service-root> --host
 127.0.0.1 --port 8765` and serves `GET /api/health`, `GET /api/capabilities`,
 `POST /api/jobs`, `GET /api/jobs`, `GET /api/jobs/{job_id}`, and
-`POST /api/jobs/{job_id}/cancel`.
+`POST /api/jobs/{job_id}/run`, and `POST /api/jobs/{job_id}/cancel`.
 The HTTP transport is local-only and uses the configured service root; reject
 requests that try to provide their own `service_root`.
+The first `run` endpoint is synchronous: clients should expect the request to
+return after the existing production runner reaches a terminal state, then poll
+the job status or index for public-safe counts and quality summary fields.
 `service_job.json` is private checkpoint state because it contains local paths
 and the template snapshot needed for recovery. `service_job_public_summary.json`
 is the public-safe polling/handoff shape: aggregate state, counts, isolation

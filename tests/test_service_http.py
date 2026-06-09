@@ -70,6 +70,10 @@ class ServiceHttpTransportTests(unittest.TestCase):
                 ("GET", "/api/jobs"),
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
+            self.assertIn(
+                ("POST", "/api/jobs/{job_id}/run"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
             self.assertEqual(created["state"], "created")
             self.assertEqual(status["state"], "created")
             self.assertEqual(cancelled["state"], "cancelled")
@@ -77,6 +81,39 @@ class ServiceHttpTransportTests(unittest.TestCase):
             self.assertTrue((service_root / SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON).is_file())
             self.assertTrue(health_after["job_index_available"])
             _assert_public_text_omits(self, raw, str(root.resolve()), "输入目录", "私有页面001")
+
+    def test_http_run_job_writes_quality_summary_without_private_paths(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-http-run-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-input"
+            service_root = root / "service-root"
+            input_dir.mkdir()
+            _write_page(input_dir / "private_page_001.png")
+
+            with _running_server(service_root) as base_url:
+                _json_request(
+                    base_url,
+                    "POST",
+                    "/api/jobs",
+                    {
+                        "job_id": "job-testhttprun001",
+                        "input_dir": str(input_dir),
+                        "rule_template": "dat-31-2017-standard",
+                        "workers": 1,
+                    },
+                )
+                run_status, run_summary = _json_request(base_url, "POST", "/api/jobs/job-testhttprun001/run")
+                status_status, status_summary = _json_request(base_url, "GET", "/api/jobs/job-testhttprun001")
+            raw = json.dumps({"run": run_summary, "status": status_summary}, ensure_ascii=False)
+
+            self.assertEqual(run_status, 200)
+            self.assertEqual(status_status, 200)
+            self.assertEqual(run_summary["state"], "finished")
+            self.assertEqual(status_summary["state"], "finished")
+            self.assertTrue(run_summary["quality"]["provided"])
+            self.assertEqual(run_summary["quality"]["status"], "pass")
+            self.assertEqual(run_summary["quality"]["processed_files"], 1)
+            _assert_public_text_omits(self, raw, str(root.resolve()), "private_page_001")
 
     def test_http_rejects_client_managed_service_root_without_echoing_paths(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-http-reject-") as temp_dir:
