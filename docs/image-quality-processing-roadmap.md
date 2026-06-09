@@ -252,6 +252,12 @@ line-like low-confidence pages, handwriting, tables, stamps, photos, and texture
 risks on the skip path. The public-safe `image-processing-capability-smoke`
 fixture set now includes this ultra-pale typed-glyph case.
 
+Follow-up, 2026-06-09: the smoke fixture set now includes a light-paper page
+with a low-amplitude illumination gradient and sparse typed text. The public-safe
+baseline must show at least one illumination-gradient leveling operation plus
+aggregate correction-delta and changed-pixel-ratio evidence, without publishing
+paths, filenames, or image content.
+
 ### M3：Photo/mixed-safe 管线 v1
 
 目标：让照片、图文混排、印章和批注不会被文字清洁策略误伤。

@@ -48,6 +48,7 @@ _SYNTHETIC_FIXTURE_GROUPS = (
     "faded_shadow_page",
     "color_cast_page",
     "low_contrast_text_page",
+    "illumination_gradient_page",
     "scanline_page",
     "bleed_through_page",
     "corner_shadow_page",
@@ -435,6 +436,7 @@ def _write_synthetic_fixtures(input_dir: Path) -> int:
         _faded_shadow_page(),
         _color_cast_page(),
         _low_contrast_text_page(),
+        _illumination_gradient_page(),
         _scanline_page(),
         _bleed_through_page(),
         _corner_shadow_page(),
@@ -498,6 +500,21 @@ def _low_contrast_text_page() -> Image.Image:
     draw = ImageDraw.Draw(image)
     for y in range(58, 164, 24):
         draw.rectangle((58, y, 218, y + 4), fill=(164, 164, 160))
+    return image
+
+
+def _illumination_gradient_page() -> Image.Image:
+    width, height = 320, 240
+    image = Image.new("RGB", (width, height))
+    pixels = image.load()
+    for y in range(height):
+        for x in range(width):
+            value = int(226 + (246 - 226) * x / max(1, width - 1))
+            pixels[x, y] = (value, value, value)
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default()
+    for index, line in enumerate(("ARCHIVE", "REGISTER", "PAGE")):
+        draw.text((72, 70 + index * 28), line, fill=(90, 90, 90), font=font)
     return image
 
 

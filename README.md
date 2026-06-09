@@ -768,8 +768,9 @@ schema `scan-qc.image-processing-capability-smoke.v1` plus
 counts, processing counts, guardrail counts, operation counts, timing summaries,
 backend counts, and public-safe before/after quality signals, including guarded
 tone-normalization, fold-shadow, diffuse bleed-through, segmented scanline,
-faded-text, ultra-pale typed-glyph, and blurred text-edge evidence from
-synthetic fixtures. The public-safe quality baseline also includes a protected
+illumination-gradient leveling, faded-text, ultra-pale typed-glyph, and blurred
+text-edge evidence from synthetic fixtures. The public-safe quality baseline
+also includes a protected
 mixed photo/stamp/table fixture check that reports only aggregate changed-pixel,
 color-delta, and edge-energy drift metrics with limits. They do not
 publish paths, filenames, hashes, thumbnails, OCR text, image content, or

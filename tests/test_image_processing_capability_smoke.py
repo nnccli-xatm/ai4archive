@@ -18,7 +18,7 @@ from archive_scan_qc.processing_quality_summary import (
     SCHEMA_VERSION as QUALITY_SCHEMA_VERSION,
 )
 
-EXPECTED_SYNTHETIC_FIXTURES = 13
+EXPECTED_SYNTHETIC_FIXTURES = 14
 
 
 class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
@@ -51,6 +51,7 @@ class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
             self.assertGreaterEqual(payload["operation_counts"]["despeckled_files"], 1)
             self.assertGreaterEqual(payload["operation_counts"]["tone_normalized_files"], 1)
             self.assertGreaterEqual(payload["operation_counts"]["fold_shadows_lightened_files"], 1)
+            self.assertGreaterEqual(payload["operation_counts"]["illumination_gradient_levelled_files"], 1)
             self.assertGreaterEqual(payload["operation_counts"]["bleed_through_cleaned_files"], 1)
             self.assertGreaterEqual(payload["operation_counts"]["scanlines_lightened_files"], 1)
             self.assertGreaterEqual(payload["operation_counts"]["faded_text_enhanced_files"], 1)
@@ -66,6 +67,7 @@ class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
             self.assertEqual(quality_payload["fixture_context"]["fixture_count"], EXPECTED_SYNTHETIC_FIXTURES)
             self.assertIn("mixed_photo_stamp_table_page", quality_payload["fixture_context"]["fixture_groups"])
             self.assertIn("bleed_through_page", quality_payload["fixture_context"]["fixture_groups"])
+            self.assertIn("illumination_gradient_page", quality_payload["fixture_context"]["fixture_groups"])
             self.assertIn("ultra_pale_typed_text_page", quality_payload["fixture_context"]["fixture_groups"])
             protected_checks = quality_payload["fixture_context"]["protected_content_checks"]
             self.assertEqual(payload["protected_content_checks"], protected_checks)
@@ -83,6 +85,14 @@ class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
             self.assertGreaterEqual(quality_payload["quality_metrics"]["tone_background_delta"]["max"], 6)
             self.assertGreaterEqual(quality_payload["quality_metrics"]["tone_contrast_delta"]["max"], 40)
             self.assertGreaterEqual(quality_payload["quality_metrics"]["fold_shadows_delta"]["max"], 4)
+            self.assertGreaterEqual(
+                quality_payload["quality_metrics"]["illumination_gradient_correction_delta"]["max"],
+                8,
+            )
+            self.assertGreaterEqual(
+                quality_payload["quality_metrics"]["illumination_gradient_changed_pixel_ratio"]["max"],
+                0.7,
+            )
             self.assertGreaterEqual(quality_payload["quality_metrics"]["bleed_through_delta"]["max"], 3)
             self.assertGreaterEqual(quality_payload["quality_metrics"]["scanlines_delta"]["max"], 4)
             self.assertGreaterEqual(quality_payload["quality_metrics"]["faded_text_delta"]["max"], 3)
