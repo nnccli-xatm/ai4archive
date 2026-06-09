@@ -187,6 +187,16 @@ changed-file counts.
 - 自定义模板越界会失败并返回 public-safe 错误码。
 - dry-run 能指出预计高风险图片类别和需要复核的处理阶段。
 
+Implementation note, 2026-06-09: the first M1 slice is now available as
+public-safe CLI output. `rule-template-catalog` writes
+`rule_template_catalog.json` with schema `scan-qc.rule-template-catalog.v1`,
+and `rule-template-dry-run` writes `rule_template_dry_run.json` with schema
+`scan-qc.rule-template-dry-run.v1`. The dry-run reports aggregate scan counts,
+planned operation stages, and risk codes without running image processing or
+writing derivative images. HTTP template APIs, full custom-template validation,
+and job checkpoint/public-summary template snapshots remain in M1/M4 follow-up
+work.
+
 ### M2：Text-clean 质量管线 v1
 
 目标：先把纯文本扫描件做出肉眼可见提升。

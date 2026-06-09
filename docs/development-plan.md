@@ -163,7 +163,7 @@ MVP step.
 任务：
 
 - 定义模板 schema：质检阈值、处理开关、处理强度、区域保护、复核策略、输出策略、性能策略和审计字段。
-- 实现 `GET /api/rule-templates`、`GET /api/rule-templates/{template_id}`、`POST /api/rule-templates`、`PUT /api/rule-templates/{template_id}`。
+- 先实现 CLI 级 `rule-template-catalog` 和 `rule-template-dry-run`，再在服务化阶段补齐 `GET /api/rule-templates`、`GET /api/rule-templates/{template_id}`、`POST /api/rule-templates`、`PUT /api/rule-templates/{template_id}`。
 - 实现模板 dry-run：用样例图片生成处理计划和风险提示，不写正式输出。
 - 将模板参数映射到现有 `rules_profile`、`ProcessingOptions` 和 review policy。
 - 禁止自定义模板关闭关键 P0 完整性规则或突破隐私/审计边界。
@@ -174,6 +174,12 @@ MVP step.
 - 同一批样例在不同模板下生成不同处理计划。
 - 自定义模板非法参数会被拒绝。
 - 报告记录模板 ID、名称、版本和参数摘要。
+
+当前进展（2026-06-09）：CLI 已提供 public-safe 的
+`rule-template-catalog` 和 `rule-template-dry-run`，分别输出
+`rule_template_catalog.json` 与 `rule_template_dry_run.json`。dry-run 当前
+输出聚合处理计划和风险码，不运行修图、不写派生图；HTTP API 和完整自定义模板
+校验仍属于服务化阶段任务。
 
 ## 7. 阶段 3：前端改为 API Client
 

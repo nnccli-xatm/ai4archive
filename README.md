@@ -719,6 +719,28 @@ exposes `--despeckle-backend fallback` and optional
 inference remain internal or experimental unless the public contract is updated
 in the same release. See `docs/public-capability-contract.md`.
 
+### Rule template catalog and dry-run
+
+Use the rule-template catalog and dry-run commands to inspect the built-in image
+quality templates without running image processing or writing derivative images:
+
+```bash
+PYTHONPATH=src python3 -m archive_scan_qc rule-template-catalog \
+  --out /placeholder/private-validation-output/rule-template-catalog
+
+PYTHONPATH=src python3 -m archive_scan_qc rule-template-dry-run \
+  --rule-template text-clean-print \
+  --out /placeholder/private-validation-output/rule-template-dry-run
+```
+
+`rule-template-catalog` writes `rule_template_catalog.json` with schema
+`scan-qc.rule-template-catalog.v1`. `rule-template-dry-run` writes
+`rule_template_dry_run.json` with schema `scan-qc.rule-template-dry-run.v1`.
+The dry-run can optionally read a local `scan_qc_report.json`, but the output is
+aggregate-only: it reports file/finding counts, planned operation stages, and
+risk codes without paths, filenames, hashes, thumbnails, OCR text, image
+content, or row-level evidence.
+
 ### Image processing capability smoke
 
 Use `image-processing-capability-smoke` for public-safe evidence that the

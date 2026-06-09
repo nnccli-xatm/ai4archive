@@ -31,6 +31,9 @@ class PublicCapabilityContractTests(unittest.TestCase):
         self.assertIn("archive-scan-qc preflight", stable_commands)
         self.assertIn("archive-scan-qc image-processing-capability-smoke", stable_commands)
         self.assertIn("archive-scan-qc public-capability-contract", stable_commands)
+        public_safe_commands = {item["command"] for item in contract["public_cli"]["public_safe_aggregate_commands"]}
+        self.assertIn("archive-scan-qc rule-template-catalog", public_safe_commands)
+        self.assertIn("archive-scan-qc rule-template-dry-run", public_safe_commands)
 
         artifacts = {item["name"]: item for item in contract["output_artifacts"]}
         self.assertEqual(artifacts["scan_qc_report.json"]["stability"], "stable_sensitive_local")
@@ -43,6 +46,10 @@ class PublicCapabilityContractTests(unittest.TestCase):
             "scan-qc.processing-quality-summary.v1",
         )
         self.assertEqual(artifacts["processing_quality_summary.json"]["stability"], "stable_public_safe_aggregate")
+        self.assertEqual(artifacts["rule_template_catalog.json"]["schema_version"], "scan-qc.rule-template-catalog.v1")
+        self.assertEqual(artifacts["rule_template_dry_run.json"]["schema_version"], "scan-qc.rule-template-dry-run.v1")
+        self.assertEqual(artifacts["rule_template_catalog.json"]["stability"], "stable_public_safe_aggregate")
+        self.assertEqual(artifacts["rule_template_dry_run.json"]["stability"], "stable_public_safe_aggregate")
         self.assertEqual(artifacts["artifact_readiness_checklist.json"]["schema_version"], "scan-qc-artifact-readiness-checklist.v1")
         self.assertEqual(
             artifacts["service_job_public_summary.json"]["schema_version"],

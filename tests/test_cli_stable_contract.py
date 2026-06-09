@@ -126,6 +126,107 @@ class StableCliRuleTemplateTests(unittest.TestCase):
             self.assertFalse(processing_manifest["options"]["despeckle_content_type_check"])
             self.assertEqual(processing_manifest["summary"]["failed_files"], 0)
 
+    def test_rule_template_catalog_and_dry_run_are_public_safe(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-cli-template-dry-run-") as temp_dir:
+            root = Path(temp_dir)
+            catalog_dir = root / "catalog"
+            dry_run_dir = root / "dry-run"
+            catalog_stdout = io.StringIO()
+            dry_run_stdout = io.StringIO()
+
+            with contextlib.redirect_stdout(catalog_stdout):
+                catalog_exit = main(["rule-template-catalog", "--out", str(catalog_dir)])
+            with contextlib.redirect_stdout(dry_run_stdout):
+                dry_run_exit = main(
+                    [
+                        "rule-template-dry-run",
+                        "--rule-template",
+                        "text-clean-print",
+                        "--out",
+                        str(dry_run_dir),
+                    ]
+                )
+
+            catalog = json.loads((catalog_dir / "rule_template_catalog.json").read_text(encoding="utf-8"))
+            dry_run = json.loads((dry_run_dir / "rule_template_dry_run.json").read_text(encoding="utf-8"))
+            raw = json.dumps({"catalog": catalog, "dry_run": dry_run}, ensure_ascii=False)
+
+        self.assertEqual(catalog_exit, 0)
+        self.assertEqual(dry_run_exit, 0)
+        self.assertEqual(catalog["schema_version"], "scan-qc.rule-template-catalog.v1")
+        self.assertEqual(dry_run["schema_version"], "scan-qc.rule-template-dry-run.v1")
+        self.assertIn("text-clean-print", {template["id"] for template in catalog["templates"]})
+        self.assertEqual(dry_run["template"]["id"], "text-clean-print")
+        self.assertFalse(dry_run["derivative_images_written"])
+        self.assertIn("scan_report_not_provided", dry_run["risk_codes"])
+        self.assertIn("text_clean_requires_pure_text_batch_confirmation", dry_run["risk_codes"])
+        self.assertFalse(dry_run["privacy"]["contains_paths"])
+        self.assertNotIn(temp_dir, raw)
+        self.assertIn("Derivative images written: no", dry_run_stdout.getvalue())
+
+    def test_rule_template_dry_run_reduces_scan_report_to_public_safe_counts(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-cli-template-report-") as temp_dir:
+            root = Path(temp_dir)
+            scan_report = root / "scan_qc_report.json"
+            output_dir = root / "dry-run"
+            scan_report.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "total_files": 7,
+                            "openable_files": 6,
+                            "p0_findings": 1,
+                            "p1_findings": 2,
+                            "p2_findings": 3,
+                            "total_findings": 6,
+                        },
+                        "manifest": {
+                            "rules_profile": {
+                                "template": {
+                                    "id": str(root / "private-rules-profile.json"),
+                                }
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "rule-template-dry-run",
+                        "--rule-template",
+                        "high-fidelity-original",
+                        "--scan-report",
+                        str(scan_report),
+                        "--out",
+                        str(output_dir),
+                    ]
+                )
+
+            payload = json.loads((output_dir / "rule_template_dry_run.json").read_text(encoding="utf-8"))
+            raw = json.dumps(payload, ensure_ascii=False)
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["scan_summary"]["total_files"], 7)
+        self.assertEqual(payload["scan_summary"]["p0_findings"], 1)
+        self.assertEqual(payload["scan_summary"]["source_rules_template_id"], "unknown_or_custom")
+        self.assertTrue(payload["privacy"]["reads_scan_report"])
+        self.assertIn("p0_findings_require_review_before_processing", payload["risk_codes"])
+        self.assertFalse(payload["derivative_images_written"])
+        self.assertNotIn(temp_dir, raw)
+
+    def test_rule_template_dry_run_rejects_custom_template_without_private_profile(self) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as context:
+                main(["rule-template-dry-run", "--rule-template", "custom"])
+
+        self.assertEqual(context.exception.code, 2)
+        self.assertIn("custom templates requires a validated rules profile path", stderr.getvalue())
+
 
 class StableCliFailureStateTests(unittest.TestCase):
     def test_production_run_writes_failed_progress_and_summary_on_input_error(self) -> None:

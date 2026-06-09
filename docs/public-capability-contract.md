@@ -27,6 +27,11 @@ The stable public CLI contract currently covers:
 - `archive-scan-qc image-processing-capability-smoke`
 - `archive-scan-qc public-capability-contract`
 
+Public-safe aggregate CLI commands currently also include:
+
+- `archive-scan-qc rule-template-catalog`
+- `archive-scan-qc rule-template-dry-run`
+
 Normal scan reports, processing manifests, local review exports, and delivery
 manifests can include row-level private evidence. Treat them as local-only
 sensitive artifacts unless a separate aggregate verifier reduces them to a
@@ -39,6 +44,7 @@ Public-safe aggregate outputs include release and handoff summaries such as
 `processing_audit_summary.json`, `processing_quality_summary.json`,
 `benchmark_results.json`, `capability_probe.json`,
 `image_processing_capability_smoke.json`,
+`rule_template_catalog.json`, `rule_template_dry_run.json`,
 `deep_inspection_provider_probe.json`,
 `deep_inspection_candidate_summary.json`, `review_summary.json`,
 `review_decision_verification_summary.json`, `acceptance_summary.json`,
@@ -62,6 +68,29 @@ template snapshot used for recovery.
 Use `public_capability_contract.json` as the stable index of supported schema
 names and artifact classifications before sharing validation evidence outside
 the approved local environment.
+
+## Rule Template Catalog And Dry-Run
+
+Use `rule-template-catalog` to publish the built-in template metadata and
+`rule-template-dry-run` to publish an aggregate processing plan for a selected
+template:
+
+```bash
+archive-scan-qc rule-template-catalog \
+  --out /approved-work/validation/rule-template-catalog
+
+archive-scan-qc rule-template-dry-run \
+  --rule-template text-clean-print \
+  --out /approved-work/validation/rule-template-dry-run
+```
+
+The commands write `rule_template_catalog.json` with schema
+`scan-qc.rule-template-catalog.v1` and `rule_template_dry_run.json` with schema
+`scan-qc.rule-template-dry-run.v1`. They do not run image processing or write
+derivative images. `rule-template-dry-run` may read a local sensitive scan
+report when `--scan-report` is provided, but its output remains aggregate-only
+and excludes paths, filenames, hashes, thumbnails, OCR text, image content, and
+row-level evidence.
 
 ## Image Processing Capability Smoke
 

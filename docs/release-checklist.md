@@ -40,6 +40,14 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   `scan-qc.processing-quality-summary.v1`, reports a passing public-safe
   quality baseline, and contains no paths, filenames, hashes, OCR text,
   thumbnails, or image content.
+- Confirm `archive-scan-qc rule-template-catalog --out
+  /placeholder/private-validation-output/rule-template-catalog` and
+  `archive-scan-qc rule-template-dry-run --rule-template text-clean-print --out
+  /placeholder/private-validation-output/rule-template-dry-run` create
+  `rule_template_catalog.json` and `rule_template_dry_run.json` with schemas
+  `scan-qc.rule-template-catalog.v1` and `scan-qc.rule-template-dry-run.v1`,
+  report `Derivative images written: no`, and contain no paths, filenames,
+  hashes, OCR text, thumbnails, image content, or row-level evidence.
 - Confirm the validator's examples-based dry-run created `preflight_report.json`,
   JSON, HTML, CSV, a processing manifest, a processing retry manifest, an
   aggregate processing audit summary, and derivative images from synthetic
@@ -115,6 +123,9 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   `--rules-profile`. Confirm `text-clean-print` records the disabled
   despeckle content-type preservation gate in processing manifests and
   production-run options.
+- Confirm `archive-scan-qc rule-template-dry-run --rule-template custom`
+  rejects the request with a public-safe operator error unless a future
+  validated custom-template dry-run path is added.
 - Run the `examples/local_analysis_provider.py` smoke test with
   `--analysis-provider-command` and confirm exactly one `source=provider`
   finding is reported, provider metadata is sanitized, and omitting the flag

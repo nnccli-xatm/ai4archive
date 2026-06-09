@@ -40,6 +40,13 @@ from .public_capability_contract import build_public_capability_contract, write_
 from .reports import write_reports, write_review_export, write_review_summary
 from .review_decisions import write_review_decision_verification_summary
 from .rework import write_rework_action_list
+from .rule_templates import (
+    build_rule_template_catalog,
+    build_rule_template_dry_run,
+    load_scan_report,
+    write_rule_template_catalog,
+    write_rule_template_dry_run,
+)
 from .rules import (
     RULE_TEMPLATE_IDS,
     RulesProfileError,
@@ -278,6 +285,10 @@ def main(argv: list[str] | None = None) -> int:
         return _main_image_processing_capability_smoke(argv[1:])
     if argv and argv[0] == "public-capability-contract":
         return _main_public_capability_contract(argv[1:])
+    if argv and argv[0] == "rule-template-catalog":
+        return _main_rule_template_catalog(argv[1:])
+    if argv and argv[0] == "rule-template-dry-run":
+        return _main_rule_template_dry_run(argv[1:])
     if argv and argv[0] == "deep-inspection-provider-probe":
         return _main_deep_inspection_provider_probe(argv[1:])
     if argv and argv[0] == "deep-inspection-candidate-summary":
@@ -773,6 +784,56 @@ def _main_image_processing_capability_smoke(argv: list[str]) -> int:
     print("Provider commands run: no")
     print("Privacy: public-safe aggregate smoke; no image paths, filenames, hashes, OCR text, thumbnails, or image content.")
     return 0 if report["status"] == "pass" else 1
+
+
+def _main_rule_template_catalog(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="archive-scan-qc rule-template-catalog",
+        description="Write a public-safe catalog of built-in image-processing rule templates.",
+    )
+    parser.add_argument("--out", default=None, type=Path, help="Optional JSON output path or directory.")
+    args = parser.parse_args(argv)
+    payload = build_rule_template_catalog()
+    if args.out:
+        path = write_rule_template_catalog(payload, args.out)
+        print(f"Rule template catalog: {path}")
+    print(f"Catalog status: {payload['status']}")
+    print(f"Schema version: {payload['schema_version']}")
+    print(f"Templates: {len(payload['templates'])}")
+    print("Image processing run: no")
+    print("Derivative images written: no")
+    print("Privacy: public-safe aggregate template catalog; no paths, filenames, hashes, thumbnails, OCR text, or image content.")
+    return 0
+
+
+def _main_rule_template_dry_run(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="archive-scan-qc rule-template-dry-run",
+        description="Write a public-safe aggregate dry-run plan for a rule template without derivative images.",
+    )
+    parser.add_argument("--rule-template", required=True, choices=RULE_TEMPLATE_IDS, help="Template ID to dry-run.")
+    parser.add_argument("--scan-report", default=None, type=Path, help="Optional sensitive local scan_qc_report.json.")
+    parser.add_argument("--out", default=None, type=Path, help="Optional JSON output path or directory.")
+    args = parser.parse_args(argv)
+    try:
+        payload = build_rule_template_dry_run(
+            rule_template=args.rule_template,
+            scan_report=load_scan_report(args.scan_report),
+        )
+    except (OSError, ValueError, RulesProfileError) as exc:
+        parser.error(str(exc))
+    if args.out:
+        path = write_rule_template_dry_run(payload, args.out)
+        print(f"Rule template dry-run: {path}")
+    enabled_operations = [item for item in payload["planned_operations"] if item["enabled"]]
+    print(f"Dry-run status: {payload['status']}")
+    print(f"Schema version: {payload['schema_version']}")
+    print(f"Rule template: {payload['template']['id']}")
+    print(f"Enabled operations: {len(enabled_operations)}")
+    print(f"Risk codes: {len(payload['risk_codes'])}")
+    print("Derivative images written: no")
+    print("Privacy: public-safe aggregate template dry-run; no paths, filenames, hashes, thumbnails, OCR text, or image content.")
+    return 0
 
 
 def _main_deep_inspection_provider_probe(argv: list[str]) -> int:

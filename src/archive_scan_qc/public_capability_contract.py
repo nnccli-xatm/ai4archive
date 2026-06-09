@@ -13,6 +13,7 @@ from typing import Any
 
 from ._version import __version__
 from .processing_quality_summary import PROCESSING_QUALITY_SUMMARY_JSON
+from .rule_templates import RULE_TEMPLATE_CATALOG_JSON, RULE_TEMPLATE_DRY_RUN_JSON
 
 
 PUBLIC_CAPABILITY_CONTRACT_JSON = "public_capability_contract.json"
@@ -213,6 +214,16 @@ def build_public_capability_contract(generated_at: str | None = None) -> dict[st
                     "Summarize already-detected candidate counts for future optional deep inspection.",
                     "scan-qc.deep-inspection-candidates.v1",
                 ),
+                _command(
+                    "archive-scan-qc rule-template-catalog",
+                    "Write public-safe built-in rule template metadata.",
+                    "scan-qc.rule-template-catalog.v1",
+                ),
+                _command(
+                    "archive-scan-qc rule-template-dry-run",
+                    "Write a public-safe aggregate dry-run plan for a rule template without derivative images.",
+                    "scan-qc.rule-template-dry-run.v1",
+                ),
             ],
             "prototype_or_validation_commands": [
                 _command(
@@ -274,6 +285,8 @@ def build_public_capability_contract(generated_at: str | None = None) -> dict[st
             _artifact("public_safe_validation_index.json", "scan-qc.public-safe-validation-index.v1", "stable_public_safe_aggregate"),
             _artifact("artifact_readiness_checklist.json", "scan-qc-artifact-readiness-checklist.v1", "stable_public_safe_aggregate"),
             _artifact("workbench_public_summary.json", "scan-qc.workbench-public-summary.v1", "stable_public_safe_aggregate"),
+            _artifact(RULE_TEMPLATE_CATALOG_JSON, "scan-qc.rule-template-catalog.v1", "stable_public_safe_aggregate"),
+            _artifact(RULE_TEMPLATE_DRY_RUN_JSON, "scan-qc.rule-template-dry-run.v1", "stable_public_safe_aggregate"),
             _artifact("service_job_public_summary.json", "scan-qc.service-job-public-summary.v1", "prototype_or_validation"),
             _artifact(PUBLIC_CAPABILITY_CONTRACT_JSON, SCHEMA_VERSION, "stable_public_safe_aggregate"),
         ],

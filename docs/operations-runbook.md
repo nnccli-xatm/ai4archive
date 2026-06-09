@@ -196,6 +196,26 @@ it enables text-cleanup operations and disables the despeckle photo/mixed-conten
 preservation gate. Do not use it for photos, drawings, stamps-heavy pages, or
 other high-fidelity original material; use `high-fidelity-original` or a custom
 profile instead.
+
+Before exposing a template to operators or an external scheduler, generate the
+public-safe catalog and dry-run plan:
+
+```bash
+archive-scan-qc rule-template-catalog \
+  --out /approved-work/validation/rule-template-catalog
+
+archive-scan-qc rule-template-dry-run \
+  --rule-template text-clean-print \
+  --scan-report /approved-work/qc-report/scan_qc_report.json \
+  --out /approved-work/validation/rule-template-dry-run
+```
+
+The dry-run may read the local sensitive scan report, but it does not run image
+processing or write derivative images. Its JSON output contains only aggregate
+file/finding counts, planned operation stages, risk codes, and privacy flags; it
+must not include paths, filenames, hashes, OCR text, thumbnails, image content,
+or row-level evidence.
+
 Template metadata is recorded in the production summary and scan report. If a
 run fails before completion, the progress file moves to `failed` or
 `interrupted` with a failure object and a recovery-oriented production summary;
@@ -619,8 +639,9 @@ together.
 
 The contract is also the source of truth for artifact sharing. Public-safe
 aggregate artifacts include validation indexes, aggregate evidence bundles,
-final handoff summaries, processing audit summaries, benchmark/capability
-summaries, and workbench public summaries after local policy review.
+final handoff summaries, processing audit summaries, rule-template catalog and
+dry-run summaries, benchmark/capability summaries, and workbench public
+summaries after local policy review.
 `service_job_public_summary.json` is included only as prototype/validation
 evidence for the service job boundary core until the HTTP/API surface is
 promoted.
