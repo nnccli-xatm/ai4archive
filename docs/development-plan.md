@@ -178,8 +178,9 @@ MVP step.
 当前进展（2026-06-09）：CLI 已提供 public-safe 的
 `rule-template-catalog` 和 `rule-template-dry-run`，分别输出
 `rule_template_catalog.json` 与 `rule_template_dry_run.json`。dry-run 当前
-输出聚合处理计划和风险码，不运行修图、不写派生图；HTTP API 和完整自定义模板
-校验仍属于服务化阶段任务。
+输出聚合处理计划和风险码，不运行修图、不写派生图；`processing_manifest.json`
+已记录经过整理的模板快照和最终处理选项。HTTP API 和完整自定义模板校验仍属于
+服务化阶段任务。
 
 ## 7. 阶段 3：前端改为 API Client
 

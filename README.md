@@ -881,6 +881,9 @@ source SHA-256. It also writes `processing_retry_manifest.json` for local retry
 diagnosis, `processing_audit_summary.json` with aggregate-only counts, flags,
 worker metadata, timing, throughput, failure totals, and resume counts, and
 `processing_quality_summary.json` with public-safe before/after quality signals.
+`processing_manifest.json` records the selected rule-template snapshot when the
+scan report was produced from a built-in or custom template, plus the final
+applied processing options.
 The audit and quality summaries omit file lists, paths, hashes, thumbnails, and
 image content so they can be used as production batch audit artifacts without
 exposing private row-level data. The initial processing pipeline applies EXIF

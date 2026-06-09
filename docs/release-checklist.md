@@ -67,6 +67,8 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   `production_run_progress.json`, derivative images, admin reports, and records
   the rule template ID plus applied template processing defaults, including
   `despeckle_content_type_check=false` for confirmed pure-text cleanup runs.
+  Confirm `processing_manifest.json` also records the sanitized `rule_template`
+  snapshot with template ID, version, source, and processing defaults.
 - For external CLI batch-service regression on approved DIBCO/H-DIBCO samples,
   run `python scripts/run_dibco_external_cli_test.py --data-root
   D:\data-opt\DIBCO-H-DIBCO` from an environment with package requirements plus

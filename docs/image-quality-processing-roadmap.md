@@ -197,6 +197,11 @@ writing derivative images. HTTP template APIs, full custom-template validation,
 and job checkpoint/public-summary template snapshots remain in M1/M4 follow-up
 work.
 
+Processing-manifest update, 2026-06-09: `processing_manifest.json` now records
+the selected `rule_template` snapshot when the source scan report carries one.
+The snapshot is limited to template ID, version, source, and processing defaults;
+the manifest still records the final applied processing options separately.
+
 ### M2：Text-clean 质量管线 v1
 
 目标：先把纯文本扫描件做出肉眼可见提升。

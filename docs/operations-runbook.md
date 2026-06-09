@@ -337,6 +337,9 @@ Each project run plan additionally writes under its project `--out` root:
 Archive the command line, rules profile, manifest CSV, JSON report, HTML
 report, CSV exports, processing plan, processing manifest, retry manifest, audit summary,
 package version, Python version, Pillow version, platform, and worker setting.
+When a rule template was selected, `processing_manifest.json` records a
+sanitized `rule_template` snapshot with template ID, version, source, and
+processing defaults in addition to the final applied processing options.
 Treat row-level reports, processing manifests, and retry manifests as sensitive
 because they include filenames, relative paths, hashes, and per-file metrics.
 Processing plans are also sensitive local evidence for the same reason and are

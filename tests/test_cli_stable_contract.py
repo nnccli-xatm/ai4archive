@@ -73,6 +73,8 @@ class StableCliRuleTemplateTests(unittest.TestCase):
             self.assertTrue(summary["options"]["normalize_tones"])
             self.assertTrue(summary["options"]["sharpen_text_edges"])
             self.assertFalse(summary["options"]["despeckle_content_type_check"])
+            self.assertEqual(processing_manifest["rule_template"]["id"], "text-clean-print")
+            self.assertEqual(processing_manifest["rule_template"]["version"], "scan-qc.rule-template.v1")
             self.assertFalse(processing_manifest["options"]["despeckle_content_type_check"])
             self.assertEqual(summary["artifacts"]["processing_quality_summary"], str(quality_path.resolve()))
             self.assertTrue(summary["processing_quality_summary"]["provided"])
@@ -123,6 +125,7 @@ class StableCliRuleTemplateTests(unittest.TestCase):
 
             self.assertEqual(summary["batches"][0]["rule_template"], "text-clean-print")
             self.assertEqual(scan_report["manifest"]["rules_profile"]["template"]["id"], "text-clean-print")
+            self.assertEqual(processing_manifest["rule_template"]["id"], "text-clean-print")
             self.assertFalse(processing_manifest["options"]["despeckle_content_type_check"])
             self.assertEqual(processing_manifest["summary"]["failed_files"], 0)
 

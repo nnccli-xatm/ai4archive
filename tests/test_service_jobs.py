@@ -85,6 +85,9 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             summary = run_service_job(service_root, "job-testrun001")
             job_root = service_root / "jobs" / "job-testrun001"
             public_raw = (job_root / SERVICE_JOB_PUBLIC_SUMMARY_JSON).read_text(encoding="utf-8")
+            processing_manifest = json.loads(
+                (job_root / "derivatives" / "processing_manifest.json").read_text(encoding="utf-8")
+            )
 
             self.assertEqual(summary["state"], "finished")
             self.assertEqual(summary["recovery"]["status"], "terminal_summary_recovered")
@@ -93,6 +96,11 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertTrue(summary["quality"]["provided"])
             self.assertEqual(summary["quality"]["status"], "pass")
             self.assertEqual(summary["quality"]["processed_files"], 1)
+            self.assertEqual(processing_manifest["rule_template"]["id"], "dat-31-2017-standard")
+            self.assertEqual(
+                processing_manifest["rule_template"]["processing_defaults"]["reuse_scan_measurements"],
+                True,
+            )
             self.assertTrue((job_root / "metadata" / "production_run_summary.json").is_file())
             self.assertTrue((job_root / "derivatives" / "processing_manifest.json").is_file())
             self.assertTrue((job_root / "derivatives" / PROCESSING_QUALITY_SUMMARY_JSON).is_file())

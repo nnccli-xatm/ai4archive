@@ -430,6 +430,7 @@ def process_images(
         "source_report_schema_version": report.get("schema_version"),
         "process_dir": str(process_dir),
         "image_root": str(image_root),
+        "rule_template": _rule_template_snapshot(report),
         "summary": {
             "total_files": len(records),
             "processed_files": processed_files,
@@ -510,6 +511,27 @@ def process_images(
         encoding="utf-8",
     )
     return manifest
+
+
+def _rule_template_snapshot(report: dict[str, Any]) -> dict[str, Any] | None:
+    manifest = report.get("manifest") if isinstance(report, dict) else None
+    rules_profile = manifest.get("rules_profile") if isinstance(manifest, dict) else None
+    template = rules_profile.get("template") if isinstance(rules_profile, dict) else None
+    if not isinstance(template, dict):
+        return None
+    snapshot: dict[str, Any] = {}
+    for key in ("id", "version", "source"):
+        value = template.get(key)
+        if isinstance(value, str):
+            snapshot[key] = value
+    defaults = template.get("processing_defaults")
+    if isinstance(defaults, dict):
+        snapshot["processing_defaults"] = {
+            str(name): bool(enabled)
+            for name, enabled in sorted(defaults.items())
+            if isinstance(name, str)
+        }
+    return snapshot or None
 
 
 def aggregate_processing_reuse_precheck(
