@@ -759,9 +759,9 @@ schema `scan-qc.image-processing-capability-smoke.v1` plus
 `scan-qc.processing-quality-summary.v1`. The summaries record aggregate fixture
 counts, processing counts, guardrail counts, operation counts, timing summaries,
 backend counts, and public-safe before/after quality signals, including guarded
-tone-normalization, fold-shadow, diffuse bleed-through, and segmented scanline
-evidence from synthetic fixtures. They do not publish paths, filenames, hashes,
-thumbnails, OCR text, image content, or
+tone-normalization, fold-shadow, diffuse bleed-through, segmented scanline,
+faded-text, and blurred text-edge evidence from synthetic fixtures. They do not
+publish paths, filenames, hashes, thumbnails, OCR text, image content, or
 environment values.
 
 ### Review and rule calibration

@@ -38,9 +38,9 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   derivative processing, reports `source_images_modified=false`, writes
   `processing_quality_summary.json` with schema
   `scan-qc.processing-quality-summary.v1`, reports a passing public-safe
-  quality baseline with tone, fold-shadow, bleed-through, and scanline aggregate
-  deltas from synthetic fixtures, and contains no paths, filenames, hashes, OCR
-  text, thumbnails, or image content.
+  quality baseline with tone, fold-shadow, bleed-through, scanline, faded-text,
+  and text-edge aggregate deltas from synthetic fixtures, and contains no paths,
+  filenames, hashes, OCR text, thumbnails, or image content.
 - Confirm `archive-scan-qc rule-template-catalog --out
   /placeholder/private-validation-output/rule-template-catalog` and
   `archive-scan-qc rule-template-dry-run --rule-template text-clean-print --out

@@ -8,7 +8,7 @@ from pathlib import Path
 import tempfile
 from typing import Any
 
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from .processing import ProcessingOptions, process_images
 from .processing_quality_summary import (
@@ -52,6 +52,7 @@ _SYNTHETIC_FIXTURE_GROUPS = (
     "bleed_through_page",
     "corner_shadow_page",
     "fold_shadow_page",
+    "blurred_text_edges_page",
     "mixed_photo_stamp_table_page",
 )
 
@@ -348,6 +349,7 @@ def _write_synthetic_fixtures(input_dir: Path) -> int:
         _bleed_through_page(),
         _corner_shadow_page(),
         _fold_shadow_page(),
+        _blurred_text_edges_page(),
         _mixed_photo_stamp_table_page(),
     )
     for index, image in enumerate(fixtures, start=1):
@@ -446,6 +448,26 @@ def _fold_shadow_page() -> Image.Image:
     draw = ImageDraw.Draw(image)
     draw.rectangle((109, 14, 110, 146), fill=(234, 234, 230))
     return image
+
+
+def _blurred_text_edges_page() -> Image.Image:
+    image = Image.new("RGB", (420, 560), (245, 245, 242))
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default()
+    lines = (
+        "ARCHIVE QUALITY CONTROL PAGE",
+        "TYPED TEXT EDGES ARE SOFT",
+        "REVIEW SHOULD STAY SAFE",
+        "PRINTED STROKES ONLY",
+        "LOCAL BATCH SAMPLE",
+        "NEUTRAL LIGHT PAPER",
+        "MILD BLUR CASE",
+        "STABLE ROW STRUCTURE",
+        "FINAL TEXT LINE",
+    )
+    for index, line in enumerate(lines):
+        draw.text((64, 100 + index * 34), line, fill=(72, 72, 72), font=font)
+    return image.filter(ImageFilter.GaussianBlur(radius=0.75))
 
 
 def _mixed_photo_stamp_table_page() -> Image.Image:

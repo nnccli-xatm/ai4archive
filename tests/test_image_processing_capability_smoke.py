@@ -18,7 +18,7 @@ from archive_scan_qc.processing_quality_summary import (
     SCHEMA_VERSION as QUALITY_SCHEMA_VERSION,
 )
 
-EXPECTED_SYNTHETIC_FIXTURES = 11
+EXPECTED_SYNTHETIC_FIXTURES = 12
 
 
 class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
@@ -53,6 +53,8 @@ class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
             self.assertGreaterEqual(payload["operation_counts"]["fold_shadows_lightened_files"], 1)
             self.assertGreaterEqual(payload["operation_counts"]["bleed_through_cleaned_files"], 1)
             self.assertGreaterEqual(payload["operation_counts"]["scanlines_lightened_files"], 1)
+            self.assertGreaterEqual(payload["operation_counts"]["faded_text_enhanced_files"], 1)
+            self.assertGreaterEqual(payload["operation_counts"]["text_edges_sharpened_files"], 1)
             self.assertGreater(payload["backend_summary"]["despeckle_backend_modes"]["fallback"], 0)
             self.assertEqual(payload["quality_baseline"]["schema_version"], QUALITY_SCHEMA_VERSION)
             self.assertEqual(payload["quality_baseline"]["status"], "pass")
@@ -71,6 +73,12 @@ class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
             self.assertGreaterEqual(quality_payload["quality_metrics"]["fold_shadows_delta"]["max"], 4)
             self.assertGreaterEqual(quality_payload["quality_metrics"]["bleed_through_delta"]["max"], 3)
             self.assertGreaterEqual(quality_payload["quality_metrics"]["scanlines_delta"]["max"], 4)
+            self.assertGreaterEqual(quality_payload["quality_metrics"]["faded_text_delta"]["max"], 3)
+            self.assertGreaterEqual(quality_payload["quality_metrics"]["text_edges_delta"]["max"], 3)
+            self.assertGreater(
+                quality_payload["quality_metrics"]["text_edges_edge_energy_after"]["max"],
+                quality_payload["quality_metrics"]["text_edges_edge_energy_before"]["max"],
+            )
             self.assertGreaterEqual(
                 quality_payload["quality_signal"]["any_quality_operation_changed_files"],
                 1,

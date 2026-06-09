@@ -187,6 +187,8 @@ MVP step.
 交给局部阴影清理，避免和 guardrail 冲突。
 `image-processing-capability-smoke` 也开始要求折痕阴影、保守透印弱化和分段扫描线
 在全链路 synthetic fixture 上至少各有一次可量化生效。
+随后补入轻微发虚正文夹具，要求浅墨正文增强和文字边缘锐化也产生 public-safe
+聚合增益。
 
 ## 7. 阶段 3：前端改为 API Client
 
