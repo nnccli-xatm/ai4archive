@@ -272,6 +272,9 @@ separately; public service summaries may expose only those group counts.
 Recovery also treats a private `service_job.json` checkpoint that still says
 `running` but has no progress file as `needs_recovery`, and it rejects a tampered
 checkpoint whose `input_dir` now overlaps the service root.
+For terminal jobs, recovery also regenerates missing local review artifacts from
+the existing production summary and processing manifest when possible, then
+refreshes the public review availability summary without exposing paths.
 Use service-job cancellation only to mark a non-terminal job as stopped; the
 current synchronous runner cannot interrupt an in-flight image operation from a
 separate request, but it records `cancelled` as a terminal public-safe state and

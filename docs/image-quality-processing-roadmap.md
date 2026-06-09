@@ -358,6 +358,9 @@ background cleanup, readability improvement, defect cleanup, and original
 appearance risk groups. Service public summaries expose only aggregate group
 counts so operator review planning does not require reading row-level package
 content.
+Follow-up, 2026-06-09: terminal service job recovery now regenerates missing
+local review artifacts from existing production metadata when possible, then
+refreshes only the public-safe review availability and aggregate group counts.
 
 ### M5：性能和后端实现
 

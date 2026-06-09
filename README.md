@@ -1503,6 +1503,8 @@ preservation-risk checks.
 Recovery revalidates the checkpoint input path against the service root and
 marks stale `running` records without progress as `needs_recovery`, so a service
 restart does not leave an orphaned job looking active.
+Terminal recovery also rebuilds missing local review artifacts from the existing
+production summary and processing manifest when possible.
 The core also supports a public-safe `cancelled` terminal state for jobs that
 are stopped before completion; terminal jobs cannot be run again accidentally.
 Job creation enforces a per-job worker limit and reports the non-sensitive

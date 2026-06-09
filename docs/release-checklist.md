@@ -49,6 +49,8 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   production review queue files inside the isolated review directory while the
   public summary exposes only review availability, aggregate queue counts, and
   processing review group counts.
+  Confirm terminal recovery can regenerate missing local review artifacts from
+  existing production metadata without exposing private paths.
   Confirm `service_job_public_summary.json` and
   `service_job_index_public_summary.json` stay free of paths, filenames, hashes,
   OCR text, thumbnails, and image content. Treat `service_job.json` as private

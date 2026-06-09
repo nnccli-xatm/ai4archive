@@ -214,6 +214,8 @@ def recover_service_job(service_root: Path, job_id: str) -> dict[str, Any]:
     production_summary = _read_json(metadata_dir / PRODUCTION_RUN_SUMMARY_JSON)
     production_progress = _read_json(metadata_dir / PRODUCTION_RUN_PROGRESS_JSON)
     state, recovery_status = _derive_recovered_state(record, production_summary, production_progress)
+    if state in TERMINAL_STATES and isinstance(production_summary, dict) and not _local_review_is_available(record):
+        _refresh_service_job_review_artifacts(record, production_summary)
     _update_record_state(record, state, recovery_status=recovery_status)
     _write_job_record(_job_root_from_record(record), record)
     return _write_public_summary(
@@ -618,6 +620,11 @@ def _refresh_service_job_review_artifacts(record: dict[str, Any], production_sum
     except Exception:
         record["local_review"] = _local_review_unavailable("review_artifact_generation_failed")
     _write_job_record(_job_root_from_record(record), record)
+
+
+def _local_review_is_available(record: dict[str, Any]) -> bool:
+    local_review = record.get("local_review")
+    return isinstance(local_review, dict) and local_review.get("provided") is True
 
 
 def _service_job_review_dir(record: dict[str, Any]) -> Path:

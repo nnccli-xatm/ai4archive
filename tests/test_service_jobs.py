@@ -196,6 +196,38 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertTrue(terminal["local_review"]["processing_review_package_html_written"])
             _assert_public_text_omits(self, public_raw, str(root.resolve()), "private_page_001")
 
+    def test_recover_regenerates_missing_terminal_local_review_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-job-review-recover-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-source"
+            service_root = root / "service-root"
+            input_dir.mkdir()
+            _write_page(input_dir / "private_page_001.png")
+            create_service_job(
+                ServiceJobConfig(input_dir=input_dir, service_root=service_root, workers=1),
+                job_id="job-testreviewrecover001",
+            )
+            run_service_job(service_root, "job-testreviewrecover001")
+            job_root = service_root / "jobs" / "job-testreviewrecover001"
+            record_path = job_root / SERVICE_JOB_RECORD_JSON
+            record = json.loads(record_path.read_text(encoding="utf-8"))
+            record.pop("local_review", None)
+            record_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            for path in (job_root / "review").glob("*"):
+                if path.is_file():
+                    path.unlink()
+
+            summary = recover_service_job(service_root, "job-testreviewrecover001")
+            public_raw = (job_root / SERVICE_JOB_PUBLIC_SUMMARY_JSON).read_text(encoding="utf-8")
+
+            self.assertEqual(summary["state"], "finished")
+            self.assertEqual(summary["recovery"]["status"], "terminal_summary_recovered")
+            self.assertTrue((job_root / "review" / "processing_review_package.json").is_file())
+            self.assertTrue((job_root / "review" / "production_review_queue.json").is_file())
+            self.assertTrue(summary["local_review"]["provided"])
+            self.assertIn("readability_improvement", summary["local_review"]["processing_review_group_counts"])
+            _assert_public_text_omits(self, public_raw, str(root.resolve()), "private_page_001")
+
     def test_start_job_async_enforces_active_job_limit_before_marking_running(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-job-async-limit-") as temp_dir:
             root = Path(temp_dir)

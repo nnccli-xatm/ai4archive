@@ -189,6 +189,9 @@ scheduler enough quality state to poll without reading private production
 summaries or path-bearing checkpoints.
 本地 processing review package 已按背景清理、可读性提升、缺陷清理和原貌风险
 分组；service public summary 只透出这些分组的聚合计数，仍不暴露行级路径。
+终态 service job 的恢复现在会在本地 review artifact 缺失时，基于已有
+production summary 和 processing manifest 重新生成隔离 review 包，并只刷新
+public-safe 可用性与聚合计数。
 
 ## 6. 阶段 2：图像处理规则模板系统
 
