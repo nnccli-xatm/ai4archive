@@ -22,7 +22,7 @@ from archive_scan_qc.service_api import (
     start_job_response,
     validate_rule_template_response,
 )
-from archive_scan_qc.service_jobs import SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON
+from archive_scan_qc.service_jobs import SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON, ServiceJobNotFoundError
 
 
 class ServiceApiCoreTests(unittest.TestCase):
@@ -283,6 +283,12 @@ class ServiceApiCoreTests(unittest.TestCase):
     def test_create_job_response_requires_paths(self) -> None:
         with self.assertRaisesRegex(ValueError, "input_dir"):
             create_job_response({"service_root": "service-root"})
+
+    def test_missing_job_response_raises_explicit_not_found(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-api-missing-job-") as temp_dir:
+            root = Path(temp_dir)
+            with self.assertRaises(ServiceJobNotFoundError):
+                get_job_response(service_root=root / "service-root", job_id="job-missing001")
 
 
 def _write_page(path: Path) -> None:

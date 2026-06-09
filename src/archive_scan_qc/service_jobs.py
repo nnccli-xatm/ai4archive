@@ -133,6 +133,10 @@ class ServiceJobConfig:
     workers: int | None = 1
 
 
+class ServiceJobNotFoundError(FileNotFoundError):
+    """Raised when a requested service job checkpoint does not exist."""
+
+
 def create_service_job(config: ServiceJobConfig, *, job_id: str | None = None) -> dict[str, Any]:
     """Create an isolated service job record and public-safe summary."""
 
@@ -374,6 +378,8 @@ def load_service_job_record(service_root: Path, job_id: str) -> dict[str, Any]:
     job_root = (root / SERVICE_JOBS_DIRNAME / job_id).resolve()
     _require_within(job_root, root)
     record_path = job_root / SERVICE_JOB_RECORD_JSON
+    if not record_path.is_file():
+        raise ServiceJobNotFoundError("Service job does not exist.")
     record = json.loads(record_path.read_text(encoding="utf-8"))
     if record.get("schema_version") != SERVICE_JOB_SCHEMA_VERSION:
         raise ValueError("Unsupported service job schema.")

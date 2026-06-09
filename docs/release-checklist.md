@@ -85,6 +85,9 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   `local_only`/`sensitive`/`public_safe=false` payloads, and validates artifacts
   under the isolated review directory. Confirm service HTTP rejects non-loopback
   bind hosts.
+  Confirm missing job status and local-review requests return 404
+  `job_not_found`, while missing create-job input directories still return 400
+  `input_dir_missing`.
   Confirm terminal recovery can regenerate missing local review artifacts from
   existing production metadata without exposing private paths.
   Confirm `service_job_public_summary.json` and

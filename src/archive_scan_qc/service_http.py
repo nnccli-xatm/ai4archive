@@ -25,6 +25,7 @@ from .service_api import (
     start_job_response,
     validate_rule_template_response,
 )
+from .service_jobs import ServiceJobNotFoundError
 
 
 SERVICE_API_ERROR_SCHEMA_VERSION = "scan-qc.service-api-error.v1"
@@ -146,6 +147,9 @@ class ServiceApiRequestHandler(BaseHTTPRequestHandler):
             return
         if isinstance(exc, FileExistsError):
             self._send_error_json(409, "job_already_exists", "Service job already exists.")
+            return
+        if isinstance(exc, ServiceJobNotFoundError):
+            self._send_error_json(404, "job_not_found", "Service job does not exist.")
             return
         if isinstance(exc, FileNotFoundError):
             self._send_error_json(400, "input_dir_missing", "Input directory does not exist or is not authorized.")

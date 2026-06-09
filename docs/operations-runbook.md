@@ -303,6 +303,9 @@ are `processing-review-package` and `production-review-queue`; the service
 validates the artifact path under the isolated job `review` directory and marks
 the response `local_only`, `sensitive`, and `public_safe=false`. Do not expose
 the service API on a non-loopback host.
+Treat HTTP 404 `job_not_found` as a missing checkpoint/job-id condition. Treat
+400 `input_dir_missing` only as a job creation input authorization or existence
+problem.
 Use service-job cancellation only to mark a non-terminal job as stopped; the
 current synchronous runner cannot interrupt an in-flight image operation from a
 separate request, but it records `cancelled` as a terminal public-safe state and

@@ -269,6 +269,27 @@ class ServiceHttpTransportTests(unittest.TestCase):
             self.assertFalse(payload["private_paths_exposed"])
             _assert_public_text_omits(self, raw, str(root.resolve()), "missing-input")
 
+    def test_http_missing_job_error_is_public_safe_not_found(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-http-missing-job-") as temp_dir:
+            root = Path(temp_dir)
+            service_root = root / "service-root"
+            with _running_server(service_root) as base_url:
+                status, payload = _json_request(base_url, "GET", "/api/jobs/job-missing001")
+                review_status, review_payload = _json_request(
+                    base_url,
+                    "GET",
+                    "/api/jobs/job-missing001/local-review/processing-review-package",
+                )
+            raw = json.dumps({"status": payload, "review": review_payload}, ensure_ascii=False)
+
+            self.assertEqual(status, 404)
+            self.assertEqual(review_status, 404)
+            self.assertEqual(payload["error"]["code"], "job_not_found")
+            self.assertEqual(review_payload["error"]["code"], "job_not_found")
+            self.assertFalse(payload["private_paths_exposed"])
+            self.assertFalse(review_payload["private_paths_exposed"])
+            _assert_public_text_omits(self, raw, str(root.resolve()), "job-missing001")
+
     def test_http_server_rejects_non_loopback_bind_host_for_local_only_api(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-http-host-") as temp_dir:
             root = Path(temp_dir)

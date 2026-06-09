@@ -228,6 +228,8 @@ review artifact 读取通道，只接受 `processing-review-package` 和
 `production-review-queue` 两个固定 ID；服务端校验真实 artifact 路径仍在隔离
 `review` 目录内，响应标记为 sensitive 且 `public_safe=false`。HTTP transport
 现在拒绝非回环地址绑定。
+缺失的 service job checkpoint 现在通过 public-safe 404 `job_not_found`
+表达，和创建 job 时输入目录缺失或未授权的 400 `input_dir_missing` 明确区分。
 
 ## 6. 阶段 2：图像处理规则模板系统
 

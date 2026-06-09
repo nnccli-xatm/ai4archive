@@ -158,6 +158,8 @@ summary. It accepts only `processing-review-package` and `production-review-queu
 artifact IDs, validates the resolved artifact path inside the job's isolated
 `review` directory, and returns payloads marked `local_only`, `sensitive`, and
 `public_safe=false`. The HTTP service rejects non-loopback bind hosts.
+Missing job checkpoints return a public-safe 404 `job_not_found` response,
+distinct from 400 `input_dir_missing` during job creation.
 
 ## Image Processing Capability Smoke
 

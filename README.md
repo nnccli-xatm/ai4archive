@@ -1515,6 +1515,9 @@ The local-only service API can read those sensitive review JSON artifacts at
 IDs: `processing-review-package` and `production-review-queue`. These responses
 are explicitly `local_only`, `sensitive`, and not public-safe; the HTTP service
 rejects non-loopback bind hosts.
+HTTP requests for missing jobs return a public-safe 404 `job_not_found` error;
+missing or unauthorized input directories during job creation remain 400
+`input_dir_missing`.
 Recovery revalidates the checkpoint input path against the service root and
 marks stale `running` records without progress as `needs_recovery`, so a service
 restart does not leave an orphaned job looking active.
