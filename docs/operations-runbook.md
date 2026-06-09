@@ -331,6 +331,12 @@ timing block also reports count-only backend mode fields for the optional NumPy
 candidate filter or the Python/Pillow fallback; fallback is expected and
 non-blocking when NumPy is unavailable. It does not include file lists, paths,
 hashes, thumbnails, or image content.
+`processing_quality_summary.json` is the public-safe quality-baseline companion
+artifact. It reduces the manifest and audit summary to aggregate before/after
+quality signals, changed-file counts, metric averages/maxima, guardrails, and
+privacy flags. Use it when validating whether synthetic or private aggregate
+runs actually improved quality without sharing manifests, filenames, paths,
+hashes, thumbnails, OCR text, or image content.
 `--normalize-tones` is default-off and should only be enabled for batches with
 neutral gray or dark low-contrast text pages. It no-ops when it detects normal
 exposure, obvious color content, red stamps, light color annotations, faint
@@ -636,12 +642,14 @@ archive-scan-qc image-processing-capability-smoke \
 The command generates synthetic images in a temporary directory, runs the real
 scan and derivative-processing path, and writes
 `image_processing_capability_smoke.json` with schema
-`scan-qc.image-processing-capability-smoke.v1`. Use it as aggregate evidence
-that source images remain unmodified, derivative processing executes, guardrail
-failures are zero or explained, and the requested stable despeckle backend is
-represented in backend counts. The JSON is public-safe aggregate evidence and
-must not contain paths, filenames, hashes, OCR text, thumbnails, or image
-content.
+`scan-qc.image-processing-capability-smoke.v1` plus
+`processing_quality_summary.json` with schema
+`scan-qc.processing-quality-summary.v1`. Use these as aggregate evidence that
+source images remain unmodified, derivative processing executes, guardrail
+failures are zero or explained, requested stable despeckle backend is
+represented in backend counts, and before/after quality signals are measurable.
+Both JSON files are public-safe aggregate evidence and must not contain paths,
+filenames, hashes, OCR text, thumbnails, or image content.
 
 ## 本地生产工作台入口和就绪检查
 

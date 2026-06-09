@@ -11,6 +11,11 @@ from typing import Any
 from PIL import Image, ImageDraw
 
 from .processing import ProcessingOptions, process_images
+from .processing_quality_summary import (
+    PROCESSING_QUALITY_SUMMARY_JSON,
+    build_processing_quality_summary,
+    write_processing_quality_summary,
+)
 from .scanner import ScanConfig, scan_batch
 
 
@@ -36,6 +41,14 @@ _STABLE_OPERATION_FIELDS = (
     "sharpen_text_edges",
 )
 
+_SYNTHETIC_FIXTURE_GROUPS = (
+    "clean_text_page",
+    "dark_border_page",
+    "speckled_text_page",
+    "faded_shadow_page",
+    "color_cast_page",
+)
+
 
 def run_image_processing_capability_smoke(
     *,
@@ -43,7 +56,7 @@ def run_image_processing_capability_smoke(
     despeckle_backend: str = "fallback",
     workers: int = 1,
     generated_at: str | None = None,
-) -> tuple[Path | None, dict[str, Any]]:
+) -> tuple[Path | None, dict[str, Any], Path | None]:
     """Run scan/process over generated fixtures and optionally write a summary."""
 
     if despeckle_backend not in {"fallback", "numpy"}:
@@ -92,11 +105,23 @@ def run_image_processing_capability_smoke(
         manifest = process_images(report, input_dir, process_dir, options)
         source_images_modified = source_bytes_before != _source_bytes(input_dir)
         audit_summary = _load_json(process_dir / "processing_audit_summary.json")
+        quality_summary = build_processing_quality_summary(
+            manifest=manifest,
+            audit_summary=audit_summary,
+            fixture_context={
+                "source": "generated_at_runtime",
+                "synthetic_inputs_only": True,
+                "fixture_count": fixture_count,
+                "fixture_groups": list(_SYNTHETIC_FIXTURE_GROUPS),
+            },
+            generated_at=generated_at,
+        )
         payload = _build_summary(
             fixture_count=fixture_count,
             report=report,
             manifest=manifest,
             audit_summary=audit_summary,
+            quality_summary=quality_summary,
             source_images_modified=source_images_modified,
             despeckle_backend=despeckle_backend,
             workers=workers,
@@ -104,7 +129,8 @@ def run_image_processing_capability_smoke(
         )
 
     path = write_image_processing_capability_smoke(payload, output_path) if output_path else None
-    return path, payload
+    quality_path = write_processing_quality_summary(quality_summary, output_path) if output_path else None
+    return path, payload, quality_path
 
 
 def write_image_processing_capability_smoke(payload: dict[str, Any], output_path: Path) -> Path:
@@ -120,6 +146,7 @@ def _build_summary(
     report: dict[str, Any],
     manifest: dict[str, Any],
     audit_summary: dict[str, Any],
+    quality_summary: dict[str, Any],
     source_images_modified: bool,
     despeckle_backend: str,
     workers: int,
@@ -169,7 +196,13 @@ def _build_summary(
         "synthetic_fixture_summary": {
             "fixture_count": fixture_count,
             "fixture_source": "generated_at_runtime",
+            "fixture_groups": list(_SYNTHETIC_FIXTURE_GROUPS),
             "private_source_images_required": False,
+        },
+        "quality_baseline": quality_summary,
+        "related_public_safe_artifacts": {
+            "image_processing_capability_smoke": IMAGE_PROCESSING_CAPABILITY_SMOKE_JSON,
+            "processing_quality_summary": PROCESSING_QUALITY_SUMMARY_JSON,
         },
         "stable_processing_contract": {
             "despeckle_backend_requested": despeckle_backend,

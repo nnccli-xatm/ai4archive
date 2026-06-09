@@ -36,8 +36,9 @@ public-safe summary.
 
 Public-safe aggregate outputs include release and handoff summaries such as
 `preflight_report.json`, `run_plan_summary.json`,
-`processing_audit_summary.json`, `benchmark_results.json`,
-`capability_probe.json`, `image_processing_capability_smoke.json`,
+`processing_audit_summary.json`, `processing_quality_summary.json`,
+`benchmark_results.json`, `capability_probe.json`,
+`image_processing_capability_smoke.json`,
 `deep_inspection_provider_probe.json`,
 `deep_inspection_candidate_summary.json`, `review_summary.json`,
 `review_decision_verification_summary.json`, `acceptance_summary.json`,
@@ -76,10 +77,14 @@ archive-scan-qc image-processing-capability-smoke \
 The command creates synthetic images in a temporary directory, runs
 `scan_batch` and `process_images`, writes no private inputs, and emits
 `image_processing_capability_smoke.json` with schema
-`scan-qc.image-processing-capability-smoke.v1`. The JSON records aggregate
+`scan-qc.image-processing-capability-smoke.v1` and
+`processing_quality_summary.json` with schema
+`scan-qc.processing-quality-summary.v1`. The smoke JSON records aggregate
 fixture counts, processing counts, guardrail counts, operation counts, timing
-summaries, and backend counts. It does not include paths, filenames, hashes,
-thumbnails, OCR text, image content, or environment values.
+summaries, backend counts, and the embedded public-safe quality baseline. The
+quality summary records aggregate before/after quality signals, changed-file
+counts, guardrails, and metric averages/maxima. Neither file includes paths,
+filenames, hashes, thumbnails, OCR text, image content, or environment values.
 
 ## Processing Backend Boundary
 

@@ -35,8 +35,11 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   /placeholder/private-validation-output/image-processing-capability-smoke`
   creates `image_processing_capability_smoke.json` with schema
   `scan-qc.image-processing-capability-smoke.v1`, runs synthetic scan and
-  derivative processing, reports `source_images_modified=false`, and contains
-  no paths, filenames, hashes, OCR text, thumbnails, or image content.
+  derivative processing, reports `source_images_modified=false`, writes
+  `processing_quality_summary.json` with schema
+  `scan-qc.processing-quality-summary.v1`, reports a passing public-safe
+  quality baseline, and contains no paths, filenames, hashes, OCR text,
+  thumbnails, or image content.
 - Confirm the validator's examples-based dry-run created `preflight_report.json`,
   JSON, HTML, CSV, a processing manifest, a processing retry manifest, an
   aggregate processing audit summary, and derivative images from synthetic

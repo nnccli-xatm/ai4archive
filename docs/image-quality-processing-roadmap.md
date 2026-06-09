@@ -148,6 +148,14 @@ public-safe 输出只保留聚合计数、均值、分位数、状态和风险�
 - 两个并发 job 的输出、状态、模板和 review queue 不混淆。
 - public summary 不包含路径、文件名、hash、缩略图、OCR 文本或图片内容。
 
+Implementation note, 2026-06-09: `processing_quality_summary.json` with schema
+`scan-qc.processing-quality-summary.v1` is now the first public-safe quality
+baseline artifact. The synthetic `image-processing-capability-smoke` command
+writes it next to the smoke summary and embeds the same aggregate baseline in
+the smoke payload. It covers aggregate changed-file counts, before/after metric
+averages/maxima, guardrails, fixture context, and privacy flags without paths,
+filenames, hashes, thumbnails, OCR text, or image content.
+
 ### M1：模板 schema 和 dry-run
 
 目标：用模板表达质量目标，而不是暴露底层滤镜组合。

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from ._version import __version__
+from .processing_quality_summary import PROCESSING_QUALITY_SUMMARY_JSON
 
 
 PUBLIC_CAPABILITY_CONTRACT_JSON = "public_capability_contract.json"
@@ -249,6 +250,7 @@ def build_public_capability_contract(generated_at: str | None = None) -> dict[st
             _artifact("production_run_progress.json", "scan-qc.production-run-progress.v1", "stable_sensitive_local"),
             _artifact("production_run_summary.json", "scan-qc.production-run.v1", "stable_sensitive_local"),
             _artifact("processing_audit_summary.json", "scan-qc.processing.audit.v1", "stable_public_safe_aggregate"),
+            _artifact(PROCESSING_QUALITY_SUMMARY_JSON, "scan-qc.processing-quality-summary.v1", "stable_public_safe_aggregate"),
             _artifact("run_plan_summary.json", "scan-qc.run-plan-summary.v1", "stable_public_safe_aggregate"),
             _artifact("benchmark_results.json", "scan-qc.benchmark.v1", "stable_public_safe_aggregate"),
             _artifact("capability_probe.json", "scan-qc.capability-probe.v1", "stable_public_safe_aggregate"),

@@ -749,7 +749,7 @@ def _main_image_processing_capability_smoke(argv: list[str]) -> int:
     args = parser.parse_args(argv)
 
     try:
-        path, report = run_image_processing_capability_smoke(
+        path, report, quality_path = run_image_processing_capability_smoke(
             output_path=args.out,
             despeckle_backend=args.despeckle_backend,
             workers=args.workers,
@@ -758,12 +758,15 @@ def _main_image_processing_capability_smoke(argv: list[str]) -> int:
         parser.exit(1, f"archive-scan-qc image-processing-capability-smoke: error: {exc}\n")
     if path:
         print(f"Image processing capability smoke: {path}")
+    if quality_path:
+        print(f"Processing quality summary: {quality_path}")
     print(f"Smoke status: {report['status']}")
     print(f"Schema version: {report['schema_version']}")
     print(f"Synthetic fixtures: {report['counts']['synthetic_fixture_count']}")
     print(f"Processed files: {report['counts']['processed_files']}")
     print(f"Processing failed files: {report['counts']['failed_files']}")
     print(f"Guardrail failed files: {report['counts']['guardrail_failed_files']}")
+    print(f"Quality baseline status: {report['quality_baseline']['status']}")
     print(f"Source images modified: {'yes' if report['processing_run']['source_images_modified'] else 'no'}")
     print("Image processing run: yes")
     print("Private images read: no")

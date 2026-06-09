@@ -732,10 +732,13 @@ PYTHONPATH=src python3 -m archive_scan_qc image-processing-capability-smoke \
 
 The command generates temporary synthetic images, runs `scan_batch` and
 `process_images`, and writes `image_processing_capability_smoke.json` with
-schema `scan-qc.image-processing-capability-smoke.v1`. The summary records
-aggregate fixture counts, processing counts, guardrail counts, operation counts,
-timing summaries, and backend counts. It does not publish paths, filenames,
-hashes, thumbnails, OCR text, image content, or environment values.
+schema `scan-qc.image-processing-capability-smoke.v1` plus
+`processing_quality_summary.json` with schema
+`scan-qc.processing-quality-summary.v1`. The summaries record aggregate fixture
+counts, processing counts, guardrail counts, operation counts, timing summaries,
+backend counts, and public-safe before/after quality signals. They do not
+publish paths, filenames, hashes, thumbnails, OCR text, image content, or
+environment values.
 
 ### Review and rule calibration
 

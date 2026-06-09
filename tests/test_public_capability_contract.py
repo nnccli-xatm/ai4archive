@@ -38,6 +38,11 @@ class PublicCapabilityContractTests(unittest.TestCase):
         self.assertEqual(artifacts["production_run_progress.json"]["schema_version"], "scan-qc.production-run-progress.v1")
         self.assertEqual(artifacts["processing_retry_manifest.json"]["schema_version"], "scan-qc.processing.retry.v1")
         self.assertEqual(artifacts["processing_audit_summary.json"]["schema_version"], "scan-qc.processing.audit.v1")
+        self.assertEqual(
+            artifacts["processing_quality_summary.json"]["schema_version"],
+            "scan-qc.processing-quality-summary.v1",
+        )
+        self.assertEqual(artifacts["processing_quality_summary.json"]["stability"], "stable_public_safe_aggregate")
         self.assertEqual(artifacts["artifact_readiness_checklist.json"]["schema_version"], "scan-qc-artifact-readiness-checklist.v1")
         self.assertEqual(
             artifacts["service_job_public_summary.json"]["schema_version"],
