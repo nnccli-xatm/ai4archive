@@ -87,6 +87,7 @@ PUBLIC_OPERATION_TIMING_IDS = (
 )
 PUBLIC_QUALITY_METRIC_IDS = (
     "crop_ratio",
+    "deskew_abs_angle_degrees",
     "max_trim_margin_ratio",
     "scanner_gutter_max_trim_margin_ratio",
     "despeckle_pixel_ratio",

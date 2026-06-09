@@ -8530,8 +8530,12 @@ def _bleed_through_light_paper_rgb(
     sample.thumbnail((360, 360), Image.Resampling.BILINEAR)
     gray_sample = grayscale.copy()
     gray_sample.thumbnail(sample.size, Image.Resampling.BILINEAR)
+    if gray_sample.size != sample.size:
+        gray_sample = gray_sample.resize(sample.size, Image.Resampling.BILINEAR)
     foreground_sample = foreground.copy()
     foreground_sample.thumbnail(sample.size, Image.Resampling.NEAREST)
+    if foreground_sample.size != sample.size:
+        foreground_sample = foreground_sample.resize(sample.size, Image.Resampling.NEAREST)
     gray_pixels = gray_sample.load()
     foreground_pixels = foreground_sample.load()
     reds: list[int] = []

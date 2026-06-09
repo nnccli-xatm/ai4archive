@@ -18,7 +18,7 @@ from archive_scan_qc.processing_quality_summary import (
     SCHEMA_VERSION as QUALITY_SCHEMA_VERSION,
 )
 
-EXPECTED_SYNTHETIC_FIXTURES = 16
+EXPECTED_SYNTHETIC_FIXTURES = 17
 
 
 class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
@@ -48,6 +48,7 @@ class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
             self.assertEqual(payload["counts"]["failed_files"], 0)
             self.assertEqual(payload["counts"]["retry_list_files"], 0)
             self.assertEqual(payload["counts"]["guardrail_failed_files"], 0)
+            self.assertGreaterEqual(payload["operation_counts"]["deskewed_files"], 1)
             self.assertGreaterEqual(payload["operation_counts"]["dark_border_trimmed_files"], 1)
             self.assertGreaterEqual(payload["operation_counts"]["scanner_gutter_trimmed_files"], 1)
             self.assertGreaterEqual(payload["operation_counts"]["despeckled_files"], 1)
@@ -71,6 +72,7 @@ class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
             self.assertFalse(quality_payload["privacy"]["contains_hashes"])
             self.assertFalse(quality_payload["privacy"]["contains_image_content"])
             self.assertEqual(quality_payload["fixture_context"]["fixture_count"], EXPECTED_SYNTHETIC_FIXTURES)
+            self.assertIn("skewed_text_page", quality_payload["fixture_context"]["fixture_groups"])
             self.assertIn("mixed_photo_stamp_table_page", quality_payload["fixture_context"]["fixture_groups"])
             self.assertIn("bleed_through_page", quality_payload["fixture_context"]["fixture_groups"])
             self.assertIn("background_stain_page", quality_payload["fixture_context"]["fixture_groups"])
@@ -90,8 +92,10 @@ class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
             self.assertLessEqual(mixed_check["edge_energy_delta_ratio"], mixed_check["max_edge_energy_delta_ratio"])
             self.assertEqual(quality_payload["counts"]["processed_files"], EXPECTED_SYNTHETIC_FIXTURES)
             self.assertEqual(quality_payload["counts"]["failed_files"], 0)
+            self.assertGreaterEqual(quality_payload["counts"]["deskewed_files"], 1)
             self.assertGreaterEqual(quality_payload["counts"]["dark_border_trimmed_files"], 1)
             self.assertGreaterEqual(quality_payload["counts"]["scanner_gutter_trimmed_files"], 1)
+            self.assertGreaterEqual(quality_payload["quality_metrics"]["deskew_abs_angle_degrees"]["max"], 0.3)
             self.assertGreaterEqual(quality_payload["quality_metrics"]["max_trim_margin_ratio"]["max"], 0.04)
             self.assertGreaterEqual(
                 quality_payload["quality_metrics"]["scanner_gutter_max_trim_margin_ratio"]["max"],

@@ -43,6 +43,7 @@ _STABLE_OPERATION_FIELDS = (
 
 _SYNTHETIC_FIXTURE_GROUPS = (
     "clean_text_page",
+    "skewed_text_page",
     "dark_border_page",
     "scanner_gutter_page",
     "speckled_text_page",
@@ -284,6 +285,8 @@ def _blocking_codes(
         blockers.append("processing_failed_files")
     if _safe_int(processing_summary.get("retry_list_files")) != 0:
         blockers.append("processing_retry_list_not_empty")
+    if _safe_int(audit_counts.get("deskewed_files")) <= 0:
+        blockers.append("deskew_not_applied")
     if _safe_int(audit_counts.get("guardrail_failed_files")) != 0:
         blockers.append("processing_guardrail_failed_files")
     if source_images_modified:
@@ -433,6 +436,7 @@ def _write_synthetic_fixtures(input_dir: Path) -> int:
     input_dir.mkdir(parents=True, exist_ok=True)
     fixtures = (
         _clean_text_page(),
+        _skewed_text_page(),
         _dark_border_page(),
         _scanner_gutter_page(),
         _speckled_text_page(),
@@ -461,6 +465,29 @@ def _clean_text_page() -> Image.Image:
     for y in range(54, 164, 22):
         draw.rectangle((58, y, 220, y + 5), fill=(24, 24, 24))
     return image
+
+
+def _skewed_text_page() -> Image.Image:
+    image = Image.new("RGB", (420, 560), (246, 246, 246))
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default()
+    lines = (
+        "ARCHIVE REGISTER PAGE",
+        "STABLE BODY TEXT ROW",
+        "SMALL ANGLE DESKEW",
+        "PUBLIC SAFE SYNTHETIC",
+        "NEUTRAL PAPER SAMPLE",
+        "ROW EVIDENCE ONLY",
+        "FINAL TEXT LINE",
+    )
+    for index, line in enumerate(lines):
+        draw.text((74, 112 + index * 38), line, fill=(78, 78, 78), font=font)
+    return image.rotate(
+        -0.65,
+        resample=Image.Resampling.BICUBIC,
+        expand=True,
+        fillcolor=(246, 246, 246),
+    )
 
 
 def _dark_border_page() -> Image.Image:

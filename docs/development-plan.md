@@ -299,6 +299,10 @@ public-safe 聚合质量基线。
 要求装订/扫描空白边裁切至少生效一次；`processing_quality_summary.json`
 现在输出聚合 `scanner_gutter_max_trim_margin_ratio`，用于区分 gutter trim 与其他
 几何裁切收益。
+最新补充：`image-processing-capability-smoke` 已加入 small-angle skewed text
+fixture，要求保守 deskew 至少生效一次；`processing_quality_summary.json`
+现在输出聚合 `deskew_abs_angle_degrees`，用于区分真实纠偏与仅启用 deskew
+选项。
 M3 的第一片保护契约也已补齐：`photo-mixed-safe-v1` 通过生产 CLI 端到端测试覆盖
 合成照片/印章/表格混排页，要求 production summary 和 processing manifest 明确保持
 强背景清理、透印清理、褪色文字增强和文字边缘锐化关闭，同时确认源图不变并仍输出

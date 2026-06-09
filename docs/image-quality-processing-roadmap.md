@@ -283,6 +283,10 @@ Follow-up, 2026-06-09: the public-safe smoke now also includes a scanner-gutter
 fixture and requires at least one scanner-gutter trim. The quality summary
 publishes the aggregate `scanner_gutter_max_trim_margin_ratio` metric so external
 validation can distinguish gutter trim evidence from other geometry trims.
+Follow-up, 2026-06-09: the public-safe smoke now also includes a small-angle
+skewed text fixture and requires at least one conservative deskew. The quality
+summary publishes aggregate `deskew_abs_angle_degrees` evidence so CI can
+distinguish actual geometry correction from a merely enabled deskew option.
 
 ### M3：Photo/mixed-safe 管线 v1
 

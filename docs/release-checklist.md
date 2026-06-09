@@ -93,8 +93,9 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   derivative processing, reports `source_images_modified=false`, writes
   `processing_quality_summary.json` with schema
   `scan-qc.processing-quality-summary.v1`, reports a passing public-safe
-  quality baseline with dark-border trim, scanner-gutter trim, tone, paper
-  color-cast, edge-shadow, corner-shadow, background-stain, fold-shadow,
+  quality baseline with small-angle deskew, dark-border trim,
+  scanner-gutter trim, tone, paper color-cast, edge-shadow, corner-shadow,
+  background-stain, fold-shadow,
   bleed-through, scanline, faded-text, illumination-gradient, ultra-pale
   typed-glyph, and text-edge aggregate deltas from synthetic fixtures, includes
   protected mixed photo/stamp/table changed-pixel, color-delta, and edge-energy
