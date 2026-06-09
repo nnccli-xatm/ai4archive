@@ -245,6 +245,12 @@ Follow-up, 2026-06-09: the smoke fixture set now includes a mildly blurred typed
 body-text page. The public-safe smoke must show both faded-text enhancement and
 text-edge sharpening deltas, including increased aggregate text-edge energy.
 
+Follow-up, 2026-06-09: faded-text enhancement now has a narrow ultra-pale typed
+glyph path. The candidate threshold extends only to very light printed glyphs,
+requires many stable small components and a tight changed area, and keeps broad
+line-like low-confidence pages, handwriting, tables, stamps, photos, and texture
+risks on the skip path.
+
 ### M3：Photo/mixed-safe 管线 v1
 
 目标：让照片、图文混排、印章和批注不会被文字清洁策略误伤。

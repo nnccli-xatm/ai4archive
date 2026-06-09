@@ -2299,6 +2299,55 @@ class ScanQcTest(unittest.TestCase):
             self.assertNotIn("private_pale_typed_text", audit_summary_text)
             self.assertNotIn(str(input_dir), audit_summary_text)
 
+    def test_enhance_faded_text_improves_ultra_pale_typed_glyphs_with_tight_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            source = input_dir / "private_ultra_pale_typed_text.png"
+            image = _synthetic_pale_typed_text_page(ink=232)
+            image.save(source, dpi=(300, 300))
+            source_bytes = source.read_bytes()
+            original = image.convert("L")
+            original_text_mean = ImageStat.Stat(original.crop((46, 40, 210, 140))).mean[0]
+            original_background_mean = ImageStat.Stat(original.crop((248, 40, 330, 140))).mean[0]
+
+            report = scan_batch(ScanConfig("p1", "b1", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(enhance_faded_text=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            record = manifest["files"][0]
+            audit = record["processing_audit"]
+            processed = Image.open(process_dir / record["output_relative_path"]).convert("L")
+            processed_text_mean = ImageStat.Stat(processed.crop((46, 40, 210, 140))).mean[0]
+            processed_background_mean = ImageStat.Stat(processed.crop((248, 40, 330, 140))).mean[0]
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertTrue(record["faded_text_enhanced"])
+            self.assertEqual(record["faded_text_reason_code"], "applied_stable_low_contrast_text")
+            self.assertGreaterEqual(audit["faded_text_delta"], 8.0)
+            self.assertGreater(audit["faded_text_changed_pixel_ratio"], 0.0)
+            self.assertLessEqual(audit["faded_text_changed_pixel_ratio"], 0.04)
+            self.assertLessEqual(audit["faded_text_candidate_pixel_ratio"], 0.04)
+            self.assertGreater(original_text_mean - processed_text_mean, 0.10)
+            self.assertLess(abs(original_background_mean - processed_background_mean), 0.5)
+            self.assertEqual(audit["guardrail_failures"], [])
+            self.assertEqual(
+                audit_summary["guardrails"]["faded_text"]["reason_code_distribution"],
+                {"applied_stable_low_contrast_text": 1},
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertNotIn("private_ultra_pale_typed_text", audit_summary_text)
+            self.assertNotIn(str(input_dir), audit_summary_text)
+
     def test_enhance_faded_text_skips_low_contrast_handwriting_without_changing_pixels(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
