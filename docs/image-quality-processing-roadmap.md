@@ -156,11 +156,13 @@ the smoke payload. It covers aggregate changed-file counts, before/after metric
 averages/maxima, guardrails, fixture context, and privacy flags without paths,
 filenames, hashes, thumbnails, OCR text, or image content.
 
-Fixture update, 2026-06-09: the synthetic smoke baseline now covers 11 generated
-fixture groups: clean text, dark border, speckles, faded edge shadow, color
-cast, low-contrast text, scanlines, bleed-through, corner shadow, fold shadow,
-and mixed photo/stamp/table content. This remains public-safe because the images
-are generated at runtime and only aggregate fixture group IDs are published.
+Fixture update, 2026-06-09: the synthetic smoke baseline now covers 16 generated
+fixture groups: clean text, dark border, scanner gutter, speckles, faded edge
+shadow, color cast, low-contrast text, illumination gradient, scanlines,
+bleed-through, corner shadow, localized background stain, fold shadow, blurred
+text edges, ultra-pale typed text, and mixed photo/stamp/table content. This
+remains public-safe because the images are generated at runtime and only
+aggregate fixture group IDs are published.
 
 Production-run update, 2026-06-09: `production-run` now writes
 `processing_quality_summary.json` beside the processing manifest and audit
@@ -277,6 +279,10 @@ have a narrow conservative trim path. It requires balanced continuous opposite
 edges, stable light paper immediately inside the edge, and protected-content
 boundary checks. The public-safe smoke now requires at least one dark-border trim
 and aggregate max-trim-margin evidence without publishing paths or filenames.
+Follow-up, 2026-06-09: the public-safe smoke now also includes a scanner-gutter
+fixture and requires at least one scanner-gutter trim. The quality summary
+publishes the aggregate `scanner_gutter_max_trim_margin_ratio` metric so external
+validation can distinguish gutter trim evidence from other geometry trims.
 
 ### M3：Photo/mixed-safe 管线 v1
 

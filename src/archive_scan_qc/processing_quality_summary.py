@@ -41,6 +41,7 @@ _METRIC_FIELDS = (
     "contrast_delta",
     "crop_ratio",
     "max_trim_margin_ratio",
+    "scanner_gutter_max_trim_margin_ratio",
     "deskew_abs_angle_degrees",
     "despeckle_pixel_ratio",
     "tone_background_delta",

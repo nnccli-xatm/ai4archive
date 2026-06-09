@@ -18,7 +18,7 @@ from archive_scan_qc.processing_quality_summary import (
     SCHEMA_VERSION as QUALITY_SCHEMA_VERSION,
 )
 
-EXPECTED_SYNTHETIC_FIXTURES = 15
+EXPECTED_SYNTHETIC_FIXTURES = 16
 
 
 class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
@@ -49,6 +49,7 @@ class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
             self.assertEqual(payload["counts"]["retry_list_files"], 0)
             self.assertEqual(payload["counts"]["guardrail_failed_files"], 0)
             self.assertGreaterEqual(payload["operation_counts"]["dark_border_trimmed_files"], 1)
+            self.assertGreaterEqual(payload["operation_counts"]["scanner_gutter_trimmed_files"], 1)
             self.assertGreaterEqual(payload["operation_counts"]["despeckled_files"], 1)
             self.assertGreaterEqual(payload["operation_counts"]["tone_normalized_files"], 1)
             self.assertGreaterEqual(payload["operation_counts"]["paper_color_cast_normalized_files"], 1)
@@ -73,6 +74,7 @@ class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
             self.assertIn("mixed_photo_stamp_table_page", quality_payload["fixture_context"]["fixture_groups"])
             self.assertIn("bleed_through_page", quality_payload["fixture_context"]["fixture_groups"])
             self.assertIn("background_stain_page", quality_payload["fixture_context"]["fixture_groups"])
+            self.assertIn("scanner_gutter_page", quality_payload["fixture_context"]["fixture_groups"])
             self.assertIn("illumination_gradient_page", quality_payload["fixture_context"]["fixture_groups"])
             self.assertIn("ultra_pale_typed_text_page", quality_payload["fixture_context"]["fixture_groups"])
             protected_checks = quality_payload["fixture_context"]["protected_content_checks"]
@@ -89,7 +91,12 @@ class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
             self.assertEqual(quality_payload["counts"]["processed_files"], EXPECTED_SYNTHETIC_FIXTURES)
             self.assertEqual(quality_payload["counts"]["failed_files"], 0)
             self.assertGreaterEqual(quality_payload["counts"]["dark_border_trimmed_files"], 1)
+            self.assertGreaterEqual(quality_payload["counts"]["scanner_gutter_trimmed_files"], 1)
             self.assertGreaterEqual(quality_payload["quality_metrics"]["max_trim_margin_ratio"]["max"], 0.04)
+            self.assertGreaterEqual(
+                quality_payload["quality_metrics"]["scanner_gutter_max_trim_margin_ratio"]["max"],
+                0.04,
+            )
             self.assertGreaterEqual(quality_payload["quality_metrics"]["tone_background_delta"]["max"], 6)
             self.assertGreaterEqual(quality_payload["quality_metrics"]["tone_contrast_delta"]["max"], 40)
             self.assertGreaterEqual(quality_payload["quality_metrics"]["paper_color_cast_delta"]["max"], 4)

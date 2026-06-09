@@ -44,6 +44,7 @@ _STABLE_OPERATION_FIELDS = (
 _SYNTHETIC_FIXTURE_GROUPS = (
     "clean_text_page",
     "dark_border_page",
+    "scanner_gutter_page",
     "speckled_text_page",
     "faded_shadow_page",
     "color_cast_page",
@@ -433,6 +434,7 @@ def _write_synthetic_fixtures(input_dir: Path) -> int:
     fixtures = (
         _clean_text_page(),
         _dark_border_page(),
+        _scanner_gutter_page(),
         _speckled_text_page(),
         _faded_shadow_page(),
         _color_cast_page(),
@@ -466,6 +468,14 @@ def _dark_border_page() -> Image.Image:
     draw = ImageDraw.Draw(image)
     draw.rectangle((0, 0, 16, 219), fill=(2, 2, 2))
     draw.rectangle((264, 0, 279, 219), fill=(2, 2, 2))
+    return image
+
+
+def _scanner_gutter_page() -> Image.Image:
+    image = Image.new("RGB", (240, 180), (236, 236, 236))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((10, 0, 239, 179), fill=(248, 248, 248))
+    draw.rectangle((36, 32, 204, 148), outline=(60, 60, 60), width=2)
     return image
 
 
