@@ -156,6 +156,7 @@ class ServiceApiCoreTests(unittest.TestCase):
             self.assertEqual(summary["counts"]["resumed_files"], 0)
             self.assertEqual(summary["counts"]["reused_files"], 0)
             self.assertEqual(summary["counts"]["retry_list_files"], 0)
+            self.assertFalse(summary["retry"]["provided"])
             self.assertTrue(summary["quality"]["provided"])
             self.assertEqual(summary["quality"]["status"], "pass")
             self.assertEqual(summary["quality"]["processed_files"], 1)

@@ -1497,6 +1497,9 @@ recovery status, and privacy booleans.
 The public `counts` block includes aggregate retry/reuse fields such as
 `resumed_files`, `reused_files`, `reprocessed_files`, and `retry_list_files`
 without exposing processing manifest rows or retry lists.
+The public `retry` block exposes only whether an explicit retry happened, its
+attempt number, status, and resume/reuse booleans; it never includes paths,
+manifest rows, or retry file lists.
 When a service job reaches production processing, it also writes local-only
 `processing_review_package.json`, `processing_review_package.html`, and
 `production_review_queue.json` files inside the isolated `review` directory.

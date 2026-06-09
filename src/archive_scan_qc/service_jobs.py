@@ -294,6 +294,7 @@ def recover_service_job(service_root: Path, job_id: str) -> dict[str, Any]:
     if state in TERMINAL_STATES and isinstance(production_summary, dict) and not _local_review_is_available(record):
         _refresh_service_job_review_artifacts(record, production_summary)
     _update_record_state(record, state, recovery_status=recovery_status)
+    _refresh_retry_status(record, state)
     _write_job_record(_job_root_from_record(record), record)
     return _write_public_summary(
         _job_root_from_record(record),
@@ -557,6 +558,7 @@ def _public_summary_from_record(
             "review_isolated": bool(record["isolation"].get("review_isolated")),
         },
         "recovery": _public_recovery_payload(record.get("recovery")),
+        "retry": _public_retry_payload(record),
         "quality": _public_quality_payload(production_summary),
         "timings": _public_timings_payload(production_summary, production_progress),
         "source_integrity": source_integrity,
@@ -612,6 +614,26 @@ def _public_recovery_payload(recovery: Any) -> dict[str, Any]:
     return {
         "status": str(recovery.get("status") or "unknown"),
         "resume_supported": bool(recovery.get("resume_supported")),
+    }
+
+
+def _public_retry_payload(record: dict[str, Any]) -> dict[str, Any]:
+    retry = record.get("retry") if isinstance(record.get("retry"), dict) else {}
+    attempt = _safe_int(retry.get("attempt", record.get("retry_count"))) if isinstance(retry, dict) else None
+    provided = bool(attempt)
+    return {
+        "provided": provided,
+        "status": str(retry.get("status") or ("not_started" if not provided else "unknown")),
+        "attempt": attempt or 0,
+        "resume_processing": bool(retry.get("resume_processing")) if provided else False,
+        "reuse_existing_derivatives": bool(retry.get("reuse_existing_derivatives")) if provided else False,
+        "privacy": {
+            "contains_paths": False,
+            "contains_filenames": False,
+            "contains_hashes": False,
+            "contains_manifest_rows": False,
+            "contains_retry_file_list": False,
+        },
     }
 
 
@@ -1108,6 +1130,14 @@ def _async_worker_units(record: dict[str, Any]) -> int:
     if workers is None:
         return SERVICE_JOB_MAX_WORKERS
     return min(max(1, workers), SERVICE_JOB_MAX_WORKERS)
+
+
+def _refresh_retry_status(record: dict[str, Any], state: str) -> None:
+    retry = record.get("retry")
+    if not isinstance(retry, dict) or retry.get("status") != "retrying" or state == "running":
+        return
+    retry["status"] = "completed" if state in {"finished", "needs_review"} else state
+    retry["finished_at"] = _utc_now()
 
 
 def _validate_job_tmp_quota(record: dict[str, Any]) -> None:

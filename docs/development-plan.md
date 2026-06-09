@@ -193,6 +193,8 @@ derivatives and manifests are reused instead of silently overwritten.
 Service job public `counts` now expose aggregate retry/reuse totals
 (`resumed_files`, `reused_files`, `reprocessed_files`, and `retry_list_files`)
 without exposing processing or retry manifest rows.
+Service job public summaries also include a public-safe `retry` block with
+retry presence, attempt number, terminal retry status, and resume/reuse flags.
 Service job terminal public summaries now also carry public-safe quality
 context from `processing_quality_summary.json`: blocking codes, warning/retry
 counts, per-category changed-file counts, operation category booleans, and

@@ -267,7 +267,9 @@ guardrail summary, timing summaries, source-integrity counts, isolation
 booleans, recovery status, and explicit privacy flags only. Its public `counts`
 block includes aggregate retry/reuse fields (`resumed_files`, `reused_files`,
 `reprocessed_files`, and `retry_list_files`) so schedulers can confirm resume
-behavior without opening private manifests. Its nested
+behavior without opening private manifests. Its public `retry` block exposes
+only retry availability, attempt number, status, and resume/reuse booleans; it
+does not include paths, manifest rows, or retry file lists. Its nested
 `timings` block uses schema
 `scan-qc.service-job-public-timings.v1` and includes only whitelisted stage IDs,
 aggregate processing throughput, and whitelisted operation timing fields. Its

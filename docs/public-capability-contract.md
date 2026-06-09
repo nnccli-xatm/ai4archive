@@ -67,6 +67,9 @@ counts with schema `scan-qc.service-job-source-integrity.v1`. Its public
 `resumed_files`, `reused_files`, `reprocessed_files`, and `retry_list_files`,
 but not source paths, filenames, hashes, thumbnails, OCR text, image content,
 processing manifest rows, retry manifest rows, or row-level evidence.
+The public `retry` block may expose only retry presence, attempt count, status,
+and resume/reuse booleans; it must not expose paths, filenames, hashes,
+manifest rows, retry file lists, or local exception details.
 
 Stable local operational outputs such as `production_run_summary.json`,
 `production_run_progress.json`, scan reports, processing manifests, review

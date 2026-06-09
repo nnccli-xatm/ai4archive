@@ -44,7 +44,9 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   derivatives/manifests through resume semantics. Confirm public job `counts`
   expose only aggregate retry/reuse numbers such as `resumed_files`,
   `reused_files`, `reprocessed_files`, and `retry_list_files`, not retry
-  manifest rows or file identifiers. Confirm async
+  manifest rows or file identifiers. Confirm the public `retry` block contains
+  only retry presence, attempt number, status, resume/reuse booleans, and
+  explicit privacy flags. Confirm async
   `POST /api/jobs/{job_id}/start` returns `running`, later recovers terminal
   public quality summaries, and keeps active in-process jobs distinct from
   stale `running` checkpoints that must recover as `needs_recovery`. Confirm

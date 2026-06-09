@@ -347,6 +347,8 @@ synchronous explicit retry boundary for `failed`, `interrupted`, and
 Public service summaries now also expose aggregate retry/reuse counts so
 external schedulers can verify resume behavior without reading private
 processing or retry manifests.
+They also expose a public-safe retry status block with attempt number and
+resume/reuse booleans, while retry file lists remain private.
 Follow-up, 2026-06-09: the same local HTTP transport now exposes
 `GET /api/rule-templates` and `GET /api/rule-templates/{template_id}` for
 public-safe template catalog/detail responses without reading scan reports or
