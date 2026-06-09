@@ -49,7 +49,7 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   filenames, hashes, OCR text, thumbnails, or image content.
 - Confirm `archive-scan-qc rule-template-catalog --out
   /placeholder/private-validation-output/rule-template-catalog` and
-  `archive-scan-qc rule-template-dry-run --rule-template text-clean-print --out
+  `archive-scan-qc rule-template-dry-run --rule-template text-clean-readable-v1 --out
   /placeholder/private-validation-output/rule-template-dry-run` create
   `rule_template_catalog.json` and `rule_template_dry_run.json` with schemas
   `scan-qc.rule-template-catalog.v1` and `scan-qc.rule-template-dry-run.v1`,
@@ -70,7 +70,7 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   preflight/scan/processing artifacts plus aggregate `run_plan_summary.json`
   and `run_plan_summary.csv`.
 - Confirm a synthetic `archive-scan-qc production-run --rule-template
-  text-clean-print` creates `production_run_summary.json`,
+  text-clean-readable-v1` creates `production_run_summary.json`,
   `production_run_progress.json`, derivative images, admin reports, and records
   the rule template ID plus applied template processing defaults, including
   `despeckle_content_type_check=false` for confirmed pure-text cleanup runs.
@@ -127,9 +127,11 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   scan/process CLI against synthetic files named `BATCH001_PAGE_0001.png` and
   `BATCH001_PAGE_0002.png`.
 - Confirm `archive-scan-qc preflight`, `production-run`, and `run-plan` accept
-  built-in rule template IDs `dat-31-2017-standard`, `text-clean-print`, and
-  `high-fidelity-original`, and reject `--rule-template custom` without
-  `--rules-profile`. Confirm `text-clean-print` records the disabled
+  built-in rule template IDs `archival-safe-v1`, `text-clean-readable-v1`,
+  `print-clean-v1`, `photo-mixed-safe-v1`, and the legacy IDs
+  `dat-31-2017-standard`, `text-clean-print`, and `high-fidelity-original`, and
+  reject `--rule-template custom` without `--rules-profile`. Confirm
+  `text-clean-readable-v1` and legacy `text-clean-print` record the disabled
   despeckle content-type preservation gate in processing manifests and
   production-run options.
 - Confirm `archive-scan-qc rule-template-dry-run --rule-template custom`

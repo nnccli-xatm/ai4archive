@@ -85,7 +85,7 @@
 - 强化 Windows 路径兼容：CLI 参数、manifest 相对路径、输出目录、报告和恢复逻辑必须支持中文路径、空格路径和长路径；公开摘要继续脱敏。
 - 强化源文件安全：处理前后记录源文件可读性和哈希一致性；异常、中断、重试和 `--no-resume-processing` 均不得修改输入目录。
 - 强化进程级并发约定：外部调度器可并发启动多个 CLI job，但必须使用不同 metadata/output 目录；CLI 检测到输出目录冲突时必须拒绝或进入明确 resume 模式，不能混写。
-- 补齐规则模板 CLI 支持：允许通过模板 ID 选择 `dat-31-2017-standard`、`text-clean-print`、`high-fidelity-original` 和用户自定义模板；报告记录模板 ID、名称、版本和参数摘要；`text-clean-print` 明确映射为纯文本清洁参数，并关闭去污点前的照片/混合内容保护判断。
+- 补齐规则模板 CLI 支持：允许通过模板 ID 选择 `archival-safe-v1`、`text-clean-readable-v1`、`print-clean-v1`、`photo-mixed-safe-v1`、legacy IDs 和用户自定义模板；报告记录模板 ID、名称、版本和参数摘要；text-clean 系模板明确映射为纯文本清洁参数，并关闭去污点前的照片/混合内容保护判断。
 - 输出隐私安全收敛：公开摘要只包含聚合状态、数量、风险代码、性能和处理结果，不泄露私有路径、文件名、hash、OCR 文本、缩略图或图片内容。
 - 建立发布验证命令：补齐 clean install、wheel 构建、synthetic production-run、run-plan、preflight、capability-probe、核心单测和 release validation 的最小组合。
 - 更新运维文档：说明安装、典型命令、目录约定、退出码、状态文件、失败重试、隐私边界和外部调度器集成方式。
@@ -175,8 +175,12 @@ fields.
 内置模板：
 
 - `dat-31-2017-standard`：严格按照 DA/T 31-2017 和项目验收规则处理，原貌保护优先。
+- `archival-safe-v1`：路线图命名的原貌保护模板，当前复用已验证的档案安全处理默认值。
 - `text-clean-print`：面向纯文本扫描件，尽量提高洁净度和文字清晰度，接近干净打印效果。
+- `text-clean-readable-v1`：路线图命名的纯文本可读性模板，默认启用当前已验证的背景、阴影、透印、扫描线、褪色文字和文字边缘增强组合。
+- `print-clean-v1`：面向打印/利用副本的强清洁模板，当前复用 text-clean 管线并在 dry-run 中提示过处理复核。
 - `high-fidelity-original`：面向照片、绘画、珍贵档案等，核心区域尽量不处理，只处理边框外或指定区域。
+- `photo-mixed-safe-v1`：路线图命名的照片/混排保护模板，当前复用高保真低风险处理默认值。
 - `custom`：用户自定义模板，必须通过参数校验和样例 dry-run 后才能用于正式批次。
 
 任务：
@@ -189,7 +193,7 @@ fields.
 
 验收：
 
-- 三个内置模板可查询和选择。
+- legacy 模板和四个 v1 内置模板可查询和选择。
 - 同一批样例在不同模板下生成不同处理计划。
 - 自定义模板非法参数会被拒绝。
 - 报告记录模板 ID、名称、版本和参数摘要。
@@ -200,6 +204,11 @@ fields.
 输出聚合处理计划和风险码，不运行修图、不写派生图；`processing_manifest.json`
 已记录经过整理的模板快照和最终处理选项。HTTP API 和完整自定义模板校验仍属于
 服务化阶段任务。
+Follow-up, 2026-06-09: 路线图中的 `archival-safe-v1`,
+`text-clean-readable-v1`, `print-clean-v1`, and `photo-mixed-safe-v1` 已作为
+内置模板 ID 落地；legacy ID 继续兼容。`text-clean-readable-v1` 和
+`print-clean-v1` 复用当前已验证的 text-clean 质量增强组合，后者在 dry-run
+中额外提示过处理复核。
 
 当前进展（2026-06-09）：M2 的第一步已扩展 `normalize_tones`，使中性浅纸面
 低对比文字页可以产生可量化的背景和对比度提升；明显边缘阴影页会跳过全页 tone，

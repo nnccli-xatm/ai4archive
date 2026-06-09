@@ -188,14 +188,16 @@ archive-scan-qc production-run \
   --workers 2
 ```
 
-Built-in rule templates are `dat-31-2017-standard`, `text-clean-print`, and
-`high-fidelity-original`. Use `--rule-template custom --rules-profile
-/approved-work/rules/project-rules.json` for a project-specific JSON template.
-`text-clean-print` is intentionally aggressive for confirmed pure-text scans:
-it enables text-cleanup operations and disables the despeckle photo/mixed-content
-preservation gate. Do not use it for photos, drawings, stamps-heavy pages, or
-other high-fidelity original material; use `high-fidelity-original` or a custom
-profile instead.
+Built-in rule templates include `archival-safe-v1`,
+`text-clean-readable-v1`, `print-clean-v1`, and `photo-mixed-safe-v1`. Legacy
+IDs `dat-31-2017-standard`, `text-clean-print`, and `high-fidelity-original`
+remain supported for existing run plans. Use `--rule-template custom
+--rules-profile /approved-work/rules/project-rules.json` for a project-specific
+JSON template. `text-clean-readable-v1` and legacy `text-clean-print` enable the
+current text cleanup operations and disable the despeckle photo/mixed-content
+preservation gate. Do not use them for photos, drawings, stamps-heavy pages, or
+other high-fidelity original material; use `photo-mixed-safe-v1`,
+`high-fidelity-original`, or a custom profile instead.
 
 Before exposing a template to operators or an external scheduler, generate the
 public-safe catalog and dry-run plan:
@@ -205,7 +207,7 @@ archive-scan-qc rule-template-catalog \
   --out /approved-work/validation/rule-template-catalog
 
 archive-scan-qc rule-template-dry-run \
-  --rule-template text-clean-print \
+  --rule-template text-clean-readable-v1 \
   --scan-report /approved-work/qc-report/scan_qc_report.json \
   --out /approved-work/validation/rule-template-dry-run
 ```

@@ -29,6 +29,21 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         self.assertTrue(defaults["sharpen_text_edges"])
         self.assertFalse(defaults["despeckle_content_type_check"])
 
+        readable = builtin_rules_profile("text-clean-readable-v1").metadata()
+        readable_defaults = processing_defaults_for_rule_template("text-clean-readable-v1")
+        print_clean_defaults = processing_defaults_for_rule_template("print-clean-v1")
+        photo_defaults = processing_defaults_for_rule_template("photo-mixed-safe-v1")
+
+        self.assertEqual(readable["template"]["id"], "text-clean-readable-v1")
+        self.assertEqual(readable["thresholds"]["min_dpi"], 300)
+        self.assertTrue(readable_defaults["normalize_tones"])
+        self.assertTrue(readable_defaults["enhance_faded_text"])
+        self.assertTrue(readable_defaults["sharpen_text_edges"])
+        self.assertTrue(print_clean_defaults["clean_bleed_through"])
+        self.assertFalse(print_clean_defaults["despeckle_content_type_check"])
+        self.assertTrue(photo_defaults["trim_dark_border"])
+        self.assertNotIn("enhance_faded_text", photo_defaults)
+
     def test_production_run_rule_template_records_template_and_applies_defaults(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-cli-template-") as temp_dir:
             root = Path(temp_dir)
@@ -85,6 +100,45 @@ class StableCliRuleTemplateTests(unittest.TestCase):
             self.assertEqual(progress["state"], "finished")
             self.assertFalse(summary["source_images_modified"])
 
+    def test_production_run_accepts_v1_text_clean_template(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-cli-template-v1-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            _write_clean_page(input_dir / "BATCH001_PAGE_0001.png")
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "production-run",
+                        "--input",
+                        str(input_dir),
+                        "--derivatives-out",
+                        str(derivatives_dir),
+                        "--metadata-out",
+                        str(metadata_dir),
+                        "--rule-template",
+                        "text-clean-readable-v1",
+                        "--workers",
+                        "1",
+                    ]
+                )
+
+            summary = json.loads((metadata_dir / "production_run_summary.json").read_text(encoding="utf-8"))
+            processing_manifest = json.loads(
+                (derivatives_dir / "processing_manifest.json").read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(summary["rule_template"]["id"], "text-clean-readable-v1")
+        self.assertEqual(processing_manifest["rule_template"]["id"], "text-clean-readable-v1")
+        self.assertTrue(summary["options"]["normalize_tones"])
+        self.assertTrue(summary["options"]["enhance_faded_text"])
+        self.assertTrue(summary["options"]["sharpen_text_edges"])
+
     def test_run_plan_accepts_rule_template_and_records_public_batch_choice(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-cli-run-plan-template-") as temp_dir:
             root = Path(temp_dir)
@@ -103,7 +157,7 @@ class StableCliRuleTemplateTests(unittest.TestCase):
                                 "input_dir": str(input_dir),
                                 "report_dir": "batch-001",
                                 "process_out": "processed-batch-001",
-                                "rule_template": "text-clean-print",
+                                "rule_template": "text-clean-readable-v1",
                                 "workers": 1,
                             }
                         ],
@@ -123,9 +177,9 @@ class StableCliRuleTemplateTests(unittest.TestCase):
                 (output_dir / "processed-batch-001" / "processing_manifest.json").read_text(encoding="utf-8")
             )
 
-            self.assertEqual(summary["batches"][0]["rule_template"], "text-clean-print")
-            self.assertEqual(scan_report["manifest"]["rules_profile"]["template"]["id"], "text-clean-print")
-            self.assertEqual(processing_manifest["rule_template"]["id"], "text-clean-print")
+            self.assertEqual(summary["batches"][0]["rule_template"], "text-clean-readable-v1")
+            self.assertEqual(scan_report["manifest"]["rules_profile"]["template"]["id"], "text-clean-readable-v1")
+            self.assertEqual(processing_manifest["rule_template"]["id"], "text-clean-readable-v1")
             self.assertFalse(processing_manifest["options"]["despeckle_content_type_check"])
             self.assertEqual(processing_manifest["summary"]["failed_files"], 0)
 
@@ -159,6 +213,9 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         self.assertEqual(catalog["schema_version"], "scan-qc.rule-template-catalog.v1")
         self.assertEqual(dry_run["schema_version"], "scan-qc.rule-template-dry-run.v1")
         self.assertIn("text-clean-print", {template["id"] for template in catalog["templates"]})
+        self.assertIn("text-clean-readable-v1", {template["id"] for template in catalog["templates"]})
+        self.assertIn("print-clean-v1", {template["id"] for template in catalog["templates"]})
+        self.assertIn("photo-mixed-safe-v1", {template["id"] for template in catalog["templates"]})
         self.assertEqual(dry_run["template"]["id"], "text-clean-print")
         self.assertFalse(dry_run["derivative_images_written"])
         self.assertIn("scan_report_not_provided", dry_run["risk_codes"])
@@ -166,6 +223,59 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         self.assertFalse(dry_run["privacy"]["contains_paths"])
         self.assertNotIn(temp_dir, raw)
         self.assertIn("Derivative images written: no", dry_run_stdout.getvalue())
+
+    def test_v1_template_dry_run_reports_quality_goal_risks(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-cli-template-v1-dry-run-") as temp_dir:
+            root = Path(temp_dir)
+            text_dir = root / "text-readable"
+            photo_dir = root / "photo-safe"
+            print_dir = root / "print-clean"
+            stdout = io.StringIO()
+
+            with contextlib.redirect_stdout(stdout):
+                text_exit = main(
+                    [
+                        "rule-template-dry-run",
+                        "--rule-template",
+                        "text-clean-readable-v1",
+                        "--out",
+                        str(text_dir),
+                    ]
+                )
+                print_exit = main(
+                    [
+                        "rule-template-dry-run",
+                        "--rule-template",
+                        "print-clean-v1",
+                        "--out",
+                        str(print_dir),
+                    ]
+                )
+                photo_exit = main(
+                    [
+                        "rule-template-dry-run",
+                        "--rule-template",
+                        "photo-mixed-safe-v1",
+                        "--out",
+                        str(photo_dir),
+                    ]
+                )
+            text_payload = json.loads((text_dir / "rule_template_dry_run.json").read_text(encoding="utf-8"))
+            print_payload = json.loads((print_dir / "rule_template_dry_run.json").read_text(encoding="utf-8"))
+            photo_payload = json.loads((photo_dir / "rule_template_dry_run.json").read_text(encoding="utf-8"))
+            raw = json.dumps({"text": text_payload, "print": print_payload, "photo": photo_payload}, ensure_ascii=False)
+
+        self.assertEqual(text_exit, 0)
+        self.assertEqual(print_exit, 0)
+        self.assertEqual(photo_exit, 0)
+        self.assertEqual(text_payload["template"]["id"], "text-clean-readable-v1")
+        self.assertEqual(text_payload["template"]["output_profile"], "text-clean-readable")
+        self.assertIn("text_clean_requires_pure_text_batch_confirmation", text_payload["risk_codes"])
+        self.assertEqual(print_payload["template"]["output_profile"], "print-clean")
+        self.assertIn("print_clean_requires_overprocessing_review", print_payload["risk_codes"])
+        self.assertEqual(photo_payload["template"]["output_profile"], "photo-mixed-safe")
+        self.assertIn("strong_cleanup_disabled_by_high_fidelity_goal", photo_payload["risk_codes"])
+        self.assertNotIn(temp_dir, raw)
 
     def test_rule_template_dry_run_reduces_scan_report_to_public_safe_counts(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-cli-template-report-") as temp_dir:

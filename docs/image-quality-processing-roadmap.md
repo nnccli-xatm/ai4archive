@@ -197,6 +197,12 @@ writing derivative images. HTTP template APIs, full custom-template validation,
 and job checkpoint/public-summary template snapshots remain in M1/M4 follow-up
 work.
 
+Follow-up, 2026-06-09: the roadmap template IDs `archival-safe-v1`,
+`text-clean-readable-v1`, `print-clean-v1`, and `photo-mixed-safe-v1` are now
+built-ins. Legacy IDs remain supported. `text-clean-readable-v1` and
+`print-clean-v1` currently reuse the verified text-clean processing defaults;
+`print-clean-v1` adds an overprocessing review risk code during dry-run.
+
 Processing-manifest update, 2026-06-09: `processing_manifest.json` now records
 the selected `rule_template` snapshot when the source scan report carries one.
 The snapshot is limited to template ID, version, source, and processing defaults;

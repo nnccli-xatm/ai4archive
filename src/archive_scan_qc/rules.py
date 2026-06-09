@@ -14,42 +14,67 @@ RULE_TEMPLATE_VERSION = "scan-qc.rule-template.v1"
 CUSTOM_RULE_TEMPLATE_ID = "custom"
 BUILTIN_RULE_TEMPLATE_IDS = (
     "dat-31-2017-standard",
+    "archival-safe-v1",
     "text-clean-print",
+    "text-clean-readable-v1",
+    "print-clean-v1",
     "high-fidelity-original",
+    "photo-mixed-safe-v1",
 )
 RULE_TEMPLATE_IDS = (*BUILTIN_RULE_TEMPLATE_IDS, CUSTOM_RULE_TEMPLATE_ID)
+ARCHIVAL_SAFE_PROCESSING_DEFAULTS = {
+    "auto_crop": True,
+    "deskew": True,
+    "trim_dark_border": True,
+    "despeckle": True,
+    "reuse_scan_measurements": True,
+}
+TEXT_CLEAN_PROCESSING_DEFAULTS = {
+    "auto_crop": True,
+    "deskew": True,
+    "trim_dark_border": True,
+    "scanner_gutter_trim": True,
+    "despeckle": True,
+    "despeckle_content_type_check": False,
+    "normalize_tones": True,
+    "normalize_paper_color_cast": True,
+    "lighten_edge_shadow": True,
+    "lighten_corner_shadows": True,
+    "lighten_background_stains": True,
+    "lighten_fold_shadows": True,
+    "level_illumination_gradient": True,
+    "clean_bleed_through": True,
+    "lighten_scanlines": True,
+    "enhance_faded_text": True,
+    "sharpen_text_edges": True,
+    "reuse_scan_measurements": True,
+}
+PHOTO_MIXED_SAFE_PROCESSING_DEFAULTS = {
+    "trim_dark_border": True,
+    "scanner_gutter_trim": True,
+    "reuse_scan_measurements": True,
+}
 RULE_TEMPLATE_PROCESSING_DEFAULTS: dict[str, dict[str, bool]] = {
     "dat-31-2017-standard": {
-        "auto_crop": True,
-        "deskew": True,
-        "trim_dark_border": True,
-        "despeckle": True,
-        "reuse_scan_measurements": True,
+        **ARCHIVAL_SAFE_PROCESSING_DEFAULTS,
+    },
+    "archival-safe-v1": {
+        **ARCHIVAL_SAFE_PROCESSING_DEFAULTS,
     },
     "text-clean-print": {
-        "auto_crop": True,
-        "deskew": True,
-        "trim_dark_border": True,
-        "scanner_gutter_trim": True,
-        "despeckle": True,
-        "despeckle_content_type_check": False,
-        "normalize_tones": True,
-        "normalize_paper_color_cast": True,
-        "lighten_edge_shadow": True,
-        "lighten_corner_shadows": True,
-        "lighten_background_stains": True,
-        "lighten_fold_shadows": True,
-        "level_illumination_gradient": True,
-        "clean_bleed_through": True,
-        "lighten_scanlines": True,
-        "enhance_faded_text": True,
-        "sharpen_text_edges": True,
-        "reuse_scan_measurements": True,
+        **TEXT_CLEAN_PROCESSING_DEFAULTS,
+    },
+    "text-clean-readable-v1": {
+        **TEXT_CLEAN_PROCESSING_DEFAULTS,
+    },
+    "print-clean-v1": {
+        **TEXT_CLEAN_PROCESSING_DEFAULTS,
     },
     "high-fidelity-original": {
-        "trim_dark_border": True,
-        "scanner_gutter_trim": True,
-        "reuse_scan_measurements": True,
+        **PHOTO_MIXED_SAFE_PROCESSING_DEFAULTS,
+    },
+    "photo-mixed-safe-v1": {
+        **PHOTO_MIXED_SAFE_PROCESSING_DEFAULTS,
     },
     CUSTOM_RULE_TEMPLATE_ID: {},
 }
@@ -154,7 +179,7 @@ def default_rules_profile() -> RulesProfile:
 
 
 def builtin_rules_profile(template_id: str) -> RulesProfile:
-    if template_id == "dat-31-2017-standard":
+    if template_id in {"dat-31-2017-standard", "archival-safe-v1"}:
         return RulesProfile(
             name=template_id,
             version=RULE_TEMPLATE_VERSION,
@@ -167,7 +192,7 @@ def builtin_rules_profile(template_id: str) -> RulesProfile:
             despeckle_max_pixel_change_ratio=0.008,
             deskew_residual_threshold=0.5,
         )
-    if template_id == "text-clean-print":
+    if template_id in {"text-clean-print", "text-clean-readable-v1", "print-clean-v1"}:
         return RulesProfile(
             name=template_id,
             version=RULE_TEMPLATE_VERSION,
@@ -190,7 +215,7 @@ def builtin_rules_profile(template_id: str) -> RulesProfile:
             despeckle_max_pixel_change_ratio=0.02,
             deskew_residual_threshold=0.4,
         )
-    if template_id == "high-fidelity-original":
+    if template_id in {"high-fidelity-original", "photo-mixed-safe-v1"}:
         return RulesProfile(
             name=template_id,
             version=RULE_TEMPLATE_VERSION,

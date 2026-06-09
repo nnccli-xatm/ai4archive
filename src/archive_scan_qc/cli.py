@@ -134,8 +134,9 @@ def _add_scan_arguments(parser: argparse.ArgumentParser, *, include_scan_overrid
         default=None,
         choices=RULE_TEMPLATE_IDS,
         help=(
-            "Optional processing rules template. Built-ins: dat-31-2017-standard, "
-            "text-clean-print, high-fidelity-original. Use custom with --rules-profile."
+            "Optional processing rules template. Built-ins include archival-safe-v1, "
+            "text-clean-readable-v1, print-clean-v1, photo-mixed-safe-v1, and legacy IDs. "
+            "Use custom with --rules-profile."
         ),
     )
     parser.add_argument(
@@ -495,7 +496,10 @@ def _main_production_run(argv: list[str]) -> int:
         "--rule-template",
         default=None,
         choices=RULE_TEMPLATE_IDS,
-        help="图像处理规则模板：dat-31-2017-standard、text-clean-print、high-fidelity-original 或 custom。",
+        help=(
+            "图像处理规则模板：archival-safe-v1、text-clean-readable-v1、print-clean-v1、"
+            "photo-mixed-safe-v1、legacy IDs 或 custom。"
+        ),
     )
     parser.add_argument("--auto-crop", action="store_true", help="保守裁切处理后图片边缘。")
     parser.add_argument("--deskew", action="store_true", help="保守校正处理后图片的小角度倾斜。")

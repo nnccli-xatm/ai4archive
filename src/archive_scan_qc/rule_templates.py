@@ -31,6 +31,14 @@ _TEMPLATE_DESCRIPTIONS: dict[str, dict[str, Any]] = {
         "output_profile": "archival-safe",
         "review_policy": "发现 P0、处理失败或 guardrail 命中时进入人工复核。",
     },
+    "archival-safe-v1": {
+        "name_zh": "档案安全 v1",
+        "quality_goal": "保留原貌优先，只做低风险几何、边框和极小噪点处理。",
+        "intended_inputs": ["普通纸质档案扫描件", "需要保留原貌的标准批次"],
+        "risk_boundary": "不追求强清洁；低置信度处理必须跳过或进入复核。",
+        "output_profile": "archival-safe",
+        "review_policy": "发现 P0、处理失败或 guardrail 命中时进入人工复核。",
+    },
     "text-clean-print": {
         "name_zh": "纯文本清洁打印模板",
         "quality_goal": "提升纯文本扫描件洁净度、背景均匀度和文字可读性。",
@@ -39,6 +47,22 @@ _TEMPLATE_DESCRIPTIONS: dict[str, dict[str, Any]] = {
         "output_profile": "text-clean-readable",
         "review_policy": "强清洁、文字增强、扫描线和透印处理后按风险分组复核。",
     },
+    "text-clean-readable-v1": {
+        "name_zh": "文本清晰可读 v1",
+        "quality_goal": "提升纯文本扫描件背景均匀度、文字对比、扫描线和透印控制。",
+        "intended_inputs": ["确认无照片和复杂彩色内容的纯文本页", "用于高可读利用副本的批次"],
+        "risk_boundary": "必须确认批次以文字为主；印章、批注、照片和混合内容需要人工复核。",
+        "output_profile": "text-clean-readable",
+        "review_policy": "背景清理、文字增强、扫描线和透印处理后按风险分组复核。",
+    },
+    "print-clean-v1": {
+        "name_zh": "打印清洁 v1",
+        "quality_goal": "面向后续打印或利用副本，允许更强的背景均衡和文字锐化。",
+        "intended_inputs": ["确认纯文本的打印利用副本", "需要最大化可读性的低对比文字批次"],
+        "risk_boundary": "不用于照片、印章密集、批注密集或珍贵原貌材料；过处理必须复核。",
+        "output_profile": "print-clean",
+        "review_policy": "默认要求关注过处理、过锐化、背景洗白和文字断裂风险。",
+    },
     "high-fidelity-original": {
         "name_zh": "高保真原貌模板",
         "quality_goal": "尽量保留照片、绘画、印章、批注和历史纸张原貌。",
@@ -46,6 +70,14 @@ _TEMPLATE_DESCRIPTIONS: dict[str, dict[str, Any]] = {
         "risk_boundary": "核心内容区域默认不做清洁；只允许边框、扫描台边等低风险处理。",
         "output_profile": "photo-mixed-safe",
         "review_policy": "任何强清洁需求都应复制为自定义模板并经过 dry-run 复核。",
+    },
+    "photo-mixed-safe-v1": {
+        "name_zh": "照片混排保护 v1",
+        "quality_goal": "照片、图像、印章、批注和彩色区域保护优先，只允许低风险边界处理。",
+        "intended_inputs": ["照片", "图文混排页", "印章或批注较多的页面", "珍贵原貌材料"],
+        "risk_boundary": "核心内容区域默认不做清洁；任何强清洁需求都应转自定义模板并 dry-run。",
+        "output_profile": "photo-mixed-safe",
+        "review_policy": "任何强清洁、文字增强或去透印请求都需要人工复核。",
     },
 }
 
@@ -223,10 +255,12 @@ def _dry_run_warnings(rule_template: str, scan_summary: dict[str, Any], *, scan_
         warnings.append("scan_report_has_no_files")
     if scan_summary["p0_findings"] > 0:
         warnings.append("p0_findings_require_review_before_processing")
-    if rule_template == "text-clean-print":
+    if rule_template in {"text-clean-print", "text-clean-readable-v1", "print-clean-v1"}:
         warnings.append("text_clean_requires_pure_text_batch_confirmation")
         warnings.append("mixed_photo_stamp_content_requires_review")
-    if rule_template == "high-fidelity-original":
+    if rule_template == "print-clean-v1":
+        warnings.append("print_clean_requires_overprocessing_review")
+    if rule_template in {"high-fidelity-original", "photo-mixed-safe-v1"}:
         warnings.append("strong_cleanup_disabled_by_high_fidelity_goal")
     return warnings
 

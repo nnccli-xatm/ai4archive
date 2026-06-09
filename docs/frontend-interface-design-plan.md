@@ -414,14 +414,18 @@ AI4-148 方向修订：普通生产入口必须是“生产工人批量质检修
 默认模板：
 
 - `dat-31-2017-standard`：严格按照 DA/T 31-2017 和项目验收规则处理，原貌保护优先。
+- `archival-safe-v1`：路线图命名的原貌保护模板，适合作为新界面的默认安全选项。
 - `text-clean-print`：面向确认无照片、绘画、印章密集页的纯文本扫描件，尽量提高洁净度和文字清晰度，接近干净打印效果；后台可关闭去污点前的照片/混合内容保护判断。
+- `text-clean-readable-v1`：面向纯文本可读性提升，启用已验证的背景、阴影、透印、扫描线、褪色文字和文字边缘增强组合。
+- `print-clean-v1`：面向打印/利用副本的强清洁模板，必须提示过处理复核风险。
 - `high-fidelity-original`：面向照片、绘画、珍贵档案等，核心区域尽量不处理，只处理边框外或指定区域。
+- `photo-mixed-safe-v1`：面向照片、图文混排、印章和批注保护，适合作为混合材料默认选项。
 - `custom`：用户自定义模板，必须通过参数校验和样例 dry-run 后才能用于正式批次。
 
 ```json
 {
   "schema_version": "scan-qc.rule-template.v1",
-  "template_id": "text-clean-print",
+  "template_id": "text-clean-readable-v1",
   "name_zh": "纯文本高清晰度模板",
   "type": "built_in|custom",
   "version": "2026.1",

@@ -82,7 +82,7 @@ archive-scan-qc rule-template-catalog \
   --out /approved-work/validation/rule-template-catalog
 
 archive-scan-qc rule-template-dry-run \
-  --rule-template text-clean-print \
+  --rule-template text-clean-readable-v1 \
   --out /approved-work/validation/rule-template-dry-run
 ```
 

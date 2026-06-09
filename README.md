@@ -729,13 +729,17 @@ PYTHONPATH=src python3 -m archive_scan_qc rule-template-catalog \
   --out /placeholder/private-validation-output/rule-template-catalog
 
 PYTHONPATH=src python3 -m archive_scan_qc rule-template-dry-run \
-  --rule-template text-clean-print \
+  --rule-template text-clean-readable-v1 \
   --out /placeholder/private-validation-output/rule-template-dry-run
 ```
 
 `rule-template-catalog` writes `rule_template_catalog.json` with schema
 `scan-qc.rule-template-catalog.v1`. `rule-template-dry-run` writes
 `rule_template_dry_run.json` with schema `scan-qc.rule-template-dry-run.v1`.
+Built-ins include the v1 templates `archival-safe-v1`,
+`text-clean-readable-v1`, `print-clean-v1`, and `photo-mixed-safe-v1`. The
+legacy IDs `dat-31-2017-standard`, `text-clean-print`, and
+`high-fidelity-original` remain supported for existing run plans.
 The dry-run can optionally read a local `scan_qc_report.json`, but the output is
 aggregate-only: it reports file/finding counts, planned operation stages, and
 risk codes without paths, filenames, hashes, thumbnails, OCR text, image
