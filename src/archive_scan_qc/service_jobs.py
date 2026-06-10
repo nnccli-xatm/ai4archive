@@ -168,6 +168,10 @@ class ServiceJobNotFoundError(FileNotFoundError):
     """Raised when a requested service job checkpoint does not exist."""
 
 
+class InvalidServiceJobIdError(ValueError):
+    """Raised when a service job id cannot be used as a storage-safe directory name."""
+
+
 def create_service_job(config: ServiceJobConfig, *, job_id: str | None = None) -> dict[str, Any]:
     """Create an isolated service job record and public-safe summary."""
 
@@ -690,7 +694,7 @@ def _paths_overlap(left: Path, right: Path) -> bool:
 
 def _validate_job_id(job_id: str) -> str:
     if not JOB_ID_PATTERN.match(job_id):
-        raise ValueError("Invalid service job id.")
+        raise InvalidServiceJobIdError("Invalid service job id.")
     return job_id
 
 

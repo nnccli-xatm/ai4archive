@@ -26,6 +26,7 @@ from archive_scan_qc.service_jobs import (
     SERVICE_JOB_PUBLIC_SUMMARY_JSON,
     SERVICE_JOB_RECORD_JSON,
     ServiceJobConfig,
+    InvalidServiceJobIdError,
     cancel_service_job,
     create_service_job,
     recover_service_job,
@@ -116,6 +117,24 @@ class ServiceJobBoundaryTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "must not overlap"):
                 create_service_job(ServiceJobConfig(input_dir=input_dir, service_root=service_root))
+
+    def test_create_rejects_invalid_job_id_without_job_directory(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-job-invalid-id-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            service_root = root / "service-root"
+            input_dir.mkdir()
+            _write_page(input_dir / "private_page_001.png")
+
+            with self.assertRaisesRegex(InvalidServiceJobIdError, "Invalid service job id"):
+                create_service_job(
+                    ServiceJobConfig(input_dir=input_dir, service_root=service_root, workers=1),
+                    job_id="../job-escape001",
+                )
+
+            jobs_dir = service_root / "jobs"
+            self.assertTrue(jobs_dir.is_dir())
+            self.assertEqual(list(jobs_dir.iterdir()), [])
 
     def test_create_rejects_invalid_worker_limits(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-job-workers-") as temp_dir:

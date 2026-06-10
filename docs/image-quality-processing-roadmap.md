@@ -527,6 +527,10 @@ non-loopback bind hosts.
 Follow-up, 2026-06-09: missing service job checkpoints now return explicit
 public-safe 404 `job_not_found` errors, separate from 400 `input_dir_missing`
 for invalid create-job inputs.
+Follow-up, 2026-06-10: invalid service job IDs now return explicit public-safe
+400 `invalid_job_id` errors. HTTP responses do not echo the rejected ID, input
+path, or filename, and the core creation path does not create a job directory for
+the rejected ID.
 Follow-up, 2026-06-09: missing service-managed custom rule templates now return
 explicit public-safe 404 `rule_template_not_found` errors. Job creation validates
 the requested custom template before writing job directories or checkpoints, so

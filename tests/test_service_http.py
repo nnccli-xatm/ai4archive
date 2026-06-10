@@ -656,6 +656,46 @@ class ServiceHttpTransportTests(unittest.TestCase):
             self.assertFalse(payload["private_paths_exposed"])
             _assert_public_text_omits(self, raw, str(root.resolve()), "missing-input")
 
+    def test_http_invalid_job_id_error_is_public_safe_without_job_directory(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-http-invalid-job-id-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-input"
+            service_root = root / "service-root"
+            input_dir.mkdir()
+            _write_page(input_dir / "private_page_001.png")
+
+            with _running_server(service_root) as base_url:
+                create_status, create_error = _json_request(
+                    base_url,
+                    "POST",
+                    "/api/jobs",
+                    {
+                        "job_id": "../job-escape001",
+                        "input_dir": str(input_dir),
+                        "workers": 1,
+                    },
+                )
+                get_status, get_error = _json_request(base_url, "GET", "/api/jobs/bad%2Fjob")
+            raw = json.dumps({"create": create_error, "get": get_error}, ensure_ascii=False)
+
+            self.assertEqual(create_status, 400)
+            self.assertEqual(get_status, 400)
+            self.assertEqual(create_error["error"]["code"], "invalid_job_id")
+            self.assertEqual(get_error["error"]["code"], "invalid_job_id")
+            self.assertTrue(create_error["public_safe"])
+            self.assertFalse(create_error["private_paths_exposed"])
+            self.assertFalse(create_error["privacy"]["contains_paths"])
+            self.assertEqual(list((service_root / "jobs").iterdir()), [])
+            _assert_public_text_omits(
+                self,
+                raw,
+                "../job-escape001",
+                "bad%2Fjob",
+                str(root.resolve()),
+                "private-input",
+                "private_page_001",
+            )
+
     def test_http_missing_job_error_is_public_safe_not_found(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-http-missing-job-") as temp_dir:
             root = Path(temp_dir)
