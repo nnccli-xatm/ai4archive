@@ -17,6 +17,7 @@ from .rules import (
     attach_rule_template,
     builtin_rules_profile,
     processing_defaults_for_rule_template,
+    processing_profile_for_rule_template,
     rules_profile_from_mapping,
 )
 
@@ -382,6 +383,7 @@ def _template_payload(template_id: str) -> dict[str, Any]:
         "review_policy": description["review_policy"],
         "thresholds": metadata["thresholds"],
         "processing_defaults": processing_defaults_for_rule_template(template_id),
+        "processing_profile": processing_profile_for_rule_template(template_id),
         "stable": True,
         "customizable": False,
     }
@@ -399,6 +401,7 @@ def _custom_template_payload() -> dict[str, Any]:
         "review_policy": "按自定义模板风险策略和系统强制 guardrail 复核。",
         "thresholds": {},
         "processing_defaults": {},
+        "processing_profile": "standard",
         "stable": False,
         "customizable": True,
     }

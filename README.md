@@ -740,6 +740,10 @@ Built-ins include the v1 templates `archival-safe-v1`,
 `text-clean-readable-v1`, `print-clean-v1`, and `photo-mixed-safe-v1`. The
 legacy IDs `dat-31-2017-standard`, `text-clean-print`, and
 `high-fidelity-original` remain supported for existing run plans.
+Template payloads also expose a public-safe `processing_profile`. `print-clean-v1`
+uses `print_clean`, so production manifests and summaries can distinguish it
+from `text-clean-readable-v1`; in that profile, light-paper low-contrast tone
+normalization uses a stronger bounded mapping for print/use copies.
 `photo-mixed-safe-v1` is covered by a production-run contract test with a
 synthetic mixed photo/stamp/table page; the production summary and processing
 manifest must keep strong background cleanup, faded-text enhancement, and text
@@ -938,7 +942,7 @@ so successful clean/no-op batches are visible without being mislabeled as failed
 quality improvements.
 `processing_manifest.json` records the selected rule-template snapshot when the
 scan report was produced from a built-in or custom template, plus the final
-applied processing options.
+applied processing options, including the resolved `processing_profile`.
 The audit and quality summaries omit file lists, paths, hashes, thumbnails, and
 image content so they can be used as production batch audit artifacts without
 exposing private row-level data. The initial processing pipeline applies EXIF

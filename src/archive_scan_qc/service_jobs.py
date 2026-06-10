@@ -36,6 +36,7 @@ from .rules import (
     attach_rule_template,
     builtin_rules_profile,
     processing_defaults_for_rule_template,
+    processing_profile_for_rule_template,
     rules_profile_from_mapping,
 )
 from .rule_templates import load_service_rule_template
@@ -228,6 +229,7 @@ def create_service_job(config: ServiceJobConfig, *, job_id: str | None = None) -
             "service_template_id": config.rule_template,
             "rule_template": template_metadata,
             "processing_mode": config.processing_mode,
+            "processing_profile": _processing_profile_for_job(config.rule_template),
             "processing_defaults": processing_defaults,
             "custom_template_draft": stored_template.get("template") if isinstance(stored_template, dict) else None,
             "workers": workers,
@@ -826,6 +828,12 @@ def _processing_options_for_job(
     raise ValueError("Unsupported service job processing mode.")
 
 
+def _processing_profile_for_job(rule_template: str) -> str:
+    if rule_template in BUILTIN_RULE_TEMPLATE_IDS:
+        return processing_profile_for_rule_template(rule_template)
+    return "standard"
+
+
 def _production_config_from_record(record: dict[str, Any]) -> ProductionRunConfig:
     template_snapshot = record["template_snapshot"]
     template = template_snapshot["rule_template"]["id"]
@@ -851,6 +859,11 @@ def _production_config_from_record(record: dict[str, Any]) -> ProductionRunConfi
         batch_id=record["project"]["batch_id"],
         rules_profile=rules_profile,
         processing_mode=record["template_snapshot"]["processing_mode"],
+        processing_profile=(
+            template_snapshot.get("processing_profile")
+            if isinstance(template_snapshot.get("processing_profile"), str)
+            else _processing_profile_for_job(template)
+        ),
         workers=record["template_snapshot"].get("workers"),
         auto_crop=bool(defaults.get("auto_crop")),
         deskew=bool(defaults.get("deskew")),

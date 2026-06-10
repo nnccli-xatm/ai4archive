@@ -81,6 +81,7 @@ class ProductionRunConfig:
     workers: int | None = None
     analysis_provider_command: str | None = None
     processing_mode: str = "standard"
+    processing_profile: str = "standard"
 
 
 def run_production_folder(config: ProductionRunConfig) -> dict[str, Any]:
@@ -150,6 +151,7 @@ def run_production_folder(config: ProductionRunConfig) -> dict[str, Any]:
                 despeckle_backend=config.despeckle_backend,
                 resume_processing=config.resume_processing,
                 reuse_scan_measurements=config.reuse_scan_measurements,
+                processing_profile=config.processing_profile,
                 workers=config.workers,
             ),
         )
@@ -288,6 +290,7 @@ def build_production_run_summary(
             "message": operator_message,
             "message_zh": operator_message,
             "processing_mode": config.processing_mode,
+            "processing_profile": config.processing_profile,
             "processing_mode_label_zh": PROCESSING_MODE_LABELS_ZH.get(config.processing_mode, config.processing_mode),
             "processing_mode_purpose_zh": PROCESSING_MODE_PURPOSES_ZH.get(config.processing_mode, ""),
             "processing_mode_output_zh": PROCESSING_MODE_OUTPUTS_ZH.get(config.processing_mode, ""),
@@ -546,6 +549,7 @@ def _mark_current_step_terminal(
 def _options_payload(config: ProductionRunConfig) -> dict[str, Any]:
     return {
         "processing_mode": config.processing_mode,
+        "processing_profile": config.processing_profile,
         "processing_mode_label_zh": PROCESSING_MODE_LABELS_ZH.get(config.processing_mode, config.processing_mode),
         "processing_mode_purpose_zh": PROCESSING_MODE_PURPOSES_ZH.get(config.processing_mode, ""),
         "processing_mode_output_zh": PROCESSING_MODE_OUTPUTS_ZH.get(config.processing_mode, ""),

@@ -111,6 +111,7 @@ def build_processing_plan(
             "lighten_scanlines": options.lighten_scanlines,
             "enhance_faded_text": options.enhance_faded_text,
             "sharpen_text_edges": options.sharpen_text_edges,
+            "processing_profile": options.processing_profile,
             "resume_processing": options.resume_processing,
             "reuse_scan_measurements": options.reuse_scan_measurements,
         },
@@ -423,6 +424,7 @@ def _processing_options_fingerprint(options: ProcessingOptions) -> str:
         "lighten_scanlines": options.lighten_scanlines,
         "enhance_faded_text": options.enhance_faded_text,
         "sharpen_text_edges": options.sharpen_text_edges,
+        "processing_profile": options.processing_profile,
         "deskew_max_degrees": options.deskew_max_degrees,
         "deskew_min_confidence": options.deskew_min_confidence,
     }, sort_keys=True)

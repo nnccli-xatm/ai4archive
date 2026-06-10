@@ -128,7 +128,9 @@ The commands write `rule_template_catalog.json` with schema
 derivative images. `rule-template-dry-run` may read a local sensitive scan
 report when `--scan-report` is provided, but its output remains aggregate-only
 and excludes paths, filenames, hashes, thumbnails, OCR text, image content, and
-row-level evidence.
+row-level evidence. Template catalog/detail payloads may expose a public-safe
+`processing_profile` enum, such as `standard` or `print_clean`, because it is a
+template-level processing intent rather than local evidence.
 For actual production runs, `photo-mixed-safe-v1` must keep strong cleanup,
 faded-text enhancement, and text-edge sharpening disabled in the production
 summary and processing manifest while still emitting the public-safe
@@ -143,8 +145,8 @@ The detail endpoint returns the no-image dry-run plan without reading local scan
 reports. Service-managed custom template validation and writes are available
 through `POST /api/rule-templates/validate`, `POST /api/rule-templates`, and
 `PUT /api/rule-templates/{template_id}`; those responses expose only public-safe
-validation counts, risk codes, processing-default booleans, and service template
-IDs.
+validation counts, risk codes, processing-default booleans, processing profile,
+and service template IDs.
 
 The prototype local service job API exposes public-safe job polling through
 `POST /api/jobs`, `GET /api/jobs`, `GET /api/jobs/{job_id}`,

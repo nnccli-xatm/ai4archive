@@ -78,6 +78,16 @@ RULE_TEMPLATE_PROCESSING_DEFAULTS: dict[str, dict[str, bool]] = {
     },
     CUSTOM_RULE_TEMPLATE_ID: {},
 }
+RULE_TEMPLATE_PROCESSING_PROFILES: dict[str, str] = {
+    "dat-31-2017-standard": "standard",
+    "archival-safe-v1": "standard",
+    "text-clean-print": "standard",
+    "text-clean-readable-v1": "standard",
+    "print-clean-v1": "print_clean",
+    "high-fidelity-original": "standard",
+    "photo-mixed-safe-v1": "standard",
+    CUSTOM_RULE_TEMPLATE_ID: "standard",
+}
 DPI_MINIMUM_BY_PURPOSE: dict[str, int] = {
     "standard": 200,
     "com": 300,
@@ -259,6 +269,16 @@ def processing_defaults_for_rule_template(template_id: str | None) -> dict[str, 
             f"Unknown rule template '{template_id}'. Expected one of {', '.join(RULE_TEMPLATE_IDS)}."
         )
     return dict(RULE_TEMPLATE_PROCESSING_DEFAULTS[template_id])
+
+
+def processing_profile_for_rule_template(template_id: str | None) -> str:
+    if not template_id:
+        return "standard"
+    if template_id not in RULE_TEMPLATE_IDS:
+        raise RulesProfileError(
+            f"Unknown rule template '{template_id}'. Expected one of {', '.join(RULE_TEMPLATE_IDS)}."
+        )
+    return RULE_TEMPLATE_PROCESSING_PROFILES[template_id]
 
 
 def load_rules_profile_selection(

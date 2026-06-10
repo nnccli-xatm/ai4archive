@@ -53,6 +53,7 @@ from .rules import (
     RulesProfileError,
     load_rules_profile_selection,
     processing_defaults_for_rule_template,
+    processing_profile_for_rule_template,
 )
 from .sampling import DEFAULT_SAMPLE_RATIO, write_acceptance_sampling_export
 from .scanner import ScanConfig, scan_batch
@@ -587,6 +588,7 @@ def _main_production_run(argv: list[str]) -> int:
                 reuse_scan_measurements=args.reuse_scan_measurements,
                 workers=args.workers,
                 analysis_provider_command=args.analysis_provider_command,
+                processing_profile=_processing_profile_for_args(args),
             )
         )
     except KeyboardInterrupt:
@@ -1619,6 +1621,14 @@ def _apply_rule_template_processing_defaults(args: argparse.Namespace) -> None:
     for field, enabled in defaults.items():
         if hasattr(args, field) or field == "despeckle_content_type_check":
             setattr(args, field, enabled)
+
+
+def _processing_profile_for_args(args: argparse.Namespace) -> str:
+    template_id = getattr(args, "rule_template", None)
+    try:
+        return processing_profile_for_rule_template(template_id)
+    except RulesProfileError:
+        return "standard"
 
 
 if __name__ == "__main__":

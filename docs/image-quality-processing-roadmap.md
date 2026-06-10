@@ -232,9 +232,11 @@ the saved template ID with a private template snapshot.
 
 Follow-up, 2026-06-09: the roadmap template IDs `archival-safe-v1`,
 `text-clean-readable-v1`, `print-clean-v1`, and `photo-mixed-safe-v1` are now
-built-ins. Legacy IDs remain supported. `text-clean-readable-v1` and
-`print-clean-v1` currently reuse the verified text-clean processing defaults;
-`print-clean-v1` adds an overprocessing review risk code during dry-run.
+built-ins. Legacy IDs remain supported. `print-clean-v1` now resolves to a
+`print_clean` processing profile instead of being only a renamed text-clean
+plan: dry-run/detail payloads, production manifests, and production summaries
+publish the profile, while `print-clean-v1` still adds an overprocessing review
+risk code during dry-run.
 
 Processing-manifest update, 2026-06-09: `processing_manifest.json` now records
 the selected `rule_template` snapshot when the source scan report carries one.
@@ -278,6 +280,13 @@ tone-normalization pixel deltas above 16 luma points. This makes the same
 light-paper low-contrast regression publish non-zero public-safe changed-ratio
 evidence for the acted text region while avoiding the full-page background
 overcount that appears at lower thresholds.
+Follow-up, 2026-06-10: `print-clean-v1` now uses the `print_clean` processing
+profile for light-paper low-contrast tone normalization. The profile keeps the
+same color, texture, foreground-density, and guardrail stack but maps the safe
+text-clean candidate to a whiter background and stronger text contrast for
+print/use copies; the regression compares it against the standard readable
+profile on the same synthetic page and verifies source bytes plus aggregate
+audit privacy remain unchanged.
 
 Follow-up, 2026-06-09: the synthetic smoke fixtures now also cover a safe narrow
 fold-shadow band, a diffuse reverse-side bleed-through ghost, and a segmented

@@ -70,6 +70,7 @@ class ProcessingOptions:
     image_io_backend: str = "fallback"
     resume_processing: bool = False
     reuse_scan_measurements: bool = False
+    processing_profile: str = "standard"
     deskew_max_degrees: float = 5.0
     deskew_min_confidence: float = 0.08
     audit_max_size_change_ratio: float = 0.55
@@ -1376,6 +1377,7 @@ def _processing_options_fingerprint(options: ProcessingOptions) -> str:
         "enhance_faded_text": options.enhance_faded_text,
         "sharpen_text_edges": options.sharpen_text_edges,
         "despeckle_backend": options.despeckle_backend,
+        "processing_profile": options.processing_profile,
         "reuse_scan_measurements": options.reuse_scan_measurements,
         "deskew_max_degrees": options.deskew_max_degrees,
         "deskew_min_confidence": options.deskew_min_confidence,
@@ -1440,6 +1442,7 @@ def _processing_options_public_payload(options: ProcessingOptions) -> dict[str, 
         "enhance_faded_text": options.enhance_faded_text,
         "sharpen_text_edges": options.sharpen_text_edges,
         "despeckle_backend": options.despeckle_backend,
+        "processing_profile": options.processing_profile,
         "resume_processing": options.resume_processing,
         "reuse_scan_measurements": options.reuse_scan_measurements,
         "workers": options.workers,
@@ -3819,7 +3822,7 @@ def _process_image(
     tone = ToneNormalizationResult(processed, False, "tone normalization disabled", None, None, None, None)
     with _operation_timer(operation_timings, "normalize_tones", enabled=options.normalize_tones):
         if options.normalize_tones:
-            tone = _normalize_tones_conservative(processed)
+            tone = _normalize_tones_conservative(processed, processing_profile=options.processing_profile)
             processed = tone.image
             operations.append("normalize_tones_conservative" if tone.applied else "normalize_tones_noop")
         else:
@@ -4388,7 +4391,11 @@ class _operation_timer:
             timing["elapsed_seconds"] = max(0.0, round(time.perf_counter() - self.started_at, 6))
 
 
-def _normalize_tones_conservative(image: Image.Image) -> ToneNormalizationResult:
+def _normalize_tones_conservative(
+    image: Image.Image,
+    *,
+    processing_profile: str = "standard",
+) -> ToneNormalizationResult:
     if image.width < 30 or image.height < 30:
         return ToneNormalizationResult(image, False, "image too small for tone normalization", None, None, None, None)
     color_risk = _tone_color_risk_reason(image)
@@ -4527,13 +4534,22 @@ def _normalize_tones_conservative(image: Image.Image) -> ToneNormalizationResult
             contrast_before,
             contrast_before,
         )
+    print_clean_profile = processing_profile == "print_clean"
     if light_paper_low_contrast_range:
-        target_low = 122
-        target_high = 245
-        min_background_delta = 6
-        min_contrast_delta = 24
-        max_background_delta = 36
-        max_contrast_delta = 65
+        if print_clean_profile:
+            target_low = 108
+            target_high = 250
+            min_background_delta = 8
+            min_contrast_delta = 32
+            max_background_delta = 42
+            max_contrast_delta = 65
+        else:
+            target_low = 122
+            target_high = 245
+            min_background_delta = 6
+            min_contrast_delta = 24
+            max_background_delta = 36
+            max_contrast_delta = 65
     else:
         target_low = 70
         target_high = 224
@@ -4580,10 +4596,13 @@ def _normalize_tones_conservative(image: Image.Image) -> ToneNormalizationResult
         )
 
     normalized = _replace_luminance_preserving_chroma(image, normalized_l)
+    applied_reason = "tone normalization applied: neutral gray low-contrast text page"
+    if light_paper_low_contrast_range and print_clean_profile:
+        applied_reason = "tone normalization applied: print-clean light-paper low-contrast text page"
     return ToneNormalizationResult(
         normalized,
         True,
-        "tone normalization applied: neutral gray low-contrast text page",
+        applied_reason,
         background_before,
         background_after,
         contrast_before,

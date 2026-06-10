@@ -8648,6 +8648,78 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (source_name, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_print_clean_profile_strengthens_light_paper_low_contrast_tone_gain(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-print-clean-tone-profile-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            readable_process_dir = root / "readable"
+            print_process_dir = root / "print-clean"
+            input_dir.mkdir()
+
+            source_name = "synthetic_print_clean_low_contrast_text.png"
+            page = Image.new("RGB", (620, 860), (232, 232, 226))
+            draw = ImageDraw.Draw(page)
+            for index in range(18):
+                y = 90 + index * 34
+                x = 70 + (index % 3) * 8
+                draw.rectangle((x, y, x + 360, y + 5), fill=(150, 150, 145))
+                draw.rectangle((x + 390, y, x + 470, y + 5), fill=(150, 150, 145))
+            source_path = input_dir / source_name
+            page.save(source_path, dpi=(300, 300))
+            source_bytes = source_path.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "print-clean-tone-profile", input_dir, output_dir))
+            readable_manifest = process_images(
+                report,
+                input_dir,
+                readable_process_dir,
+                ProcessingOptions(normalize_tones=True, workers=1),
+            )
+            print_manifest = process_images(
+                report,
+                input_dir,
+                print_process_dir,
+                ProcessingOptions(normalize_tones=True, processing_profile="print_clean", workers=1),
+            )
+            readable_record = readable_manifest["files"][0]
+            print_record = print_manifest["files"][0]
+            print_audit = print_record["processing_audit"]
+            audit_summary_text = (print_process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            self.assertEqual(source_path.read_bytes(), source_bytes)
+            self.assertTrue(readable_record["tone_normalized"])
+            self.assertTrue(print_record["tone_normalized"])
+            self.assertEqual(readable_record["tone_reason"], "tone normalization applied: neutral gray low-contrast text page")
+            self.assertEqual(
+                print_record["tone_reason"],
+                "tone normalization applied: print-clean light-paper low-contrast text page",
+            )
+            readable_contrast_delta = readable_record["tone_contrast_after"] - readable_record["tone_contrast_before"]
+            print_contrast_delta = print_record["tone_contrast_after"] - print_record["tone_contrast_before"]
+            readable_background_delta = readable_record["tone_background_after"] - readable_record["tone_background_before"]
+            print_background_delta = print_record["tone_background_after"] - print_record["tone_background_before"]
+
+            self.assertGreaterEqual(print_contrast_delta, readable_contrast_delta + 12.0)
+            self.assertGreaterEqual(print_background_delta, readable_background_delta + 3.0)
+            self.assertGreaterEqual(print_audit["tone_changed_pixel_ratio"], 0.08)
+            self.assertLessEqual(print_audit["tone_changed_pixel_ratio"], 0.12)
+            self.assertEqual(print_audit["guardrail_failures"], [])
+            self.assertEqual(print_audit["combination_quality_guard_action"], "passed")
+            self.assertEqual(print_audit["cumulative_change_guard_action"], "passed")
+
+            self.assertEqual(audit_summary["counts"]["tone_normalized_files"], 1)
+            self.assertIn(
+                "tone normalization applied: print-clean light-paper low-contrast text page",
+                audit_summary["guardrails"]["tone_normalization"]["reason_distribution"],
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (source_name, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_saturated_color_marks_preserve_stamp_highlighter_and_operator_chroma(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-saturated-color-marks-") as temp_dir:
             root = Path(temp_dir)

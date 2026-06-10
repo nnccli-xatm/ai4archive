@@ -12,7 +12,11 @@ from PIL import Image, ImageDraw
 from archive_scan_qc.cli import main
 from archive_scan_qc.processing_quality_summary import PROCESSING_QUALITY_SUMMARY_JSON, SCHEMA_VERSION as QUALITY_SCHEMA_VERSION
 from archive_scan_qc.production_runner import ProductionRunConfig, run_production_folder
-from archive_scan_qc.rules import builtin_rules_profile, processing_defaults_for_rule_template
+from archive_scan_qc.rules import (
+    builtin_rules_profile,
+    processing_defaults_for_rule_template,
+    processing_profile_for_rule_template,
+)
 
 
 class StableCliRuleTemplateTests(unittest.TestCase):
@@ -41,6 +45,8 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         self.assertTrue(readable_defaults["sharpen_text_edges"])
         self.assertTrue(print_clean_defaults["clean_bleed_through"])
         self.assertFalse(print_clean_defaults["despeckle_content_type_check"])
+        self.assertEqual(processing_profile_for_rule_template("text-clean-readable-v1"), "standard")
+        self.assertEqual(processing_profile_for_rule_template("print-clean-v1"), "print_clean")
         self.assertTrue(photo_defaults["trim_dark_border"])
         self.assertNotIn("enhance_faded_text", photo_defaults)
 
@@ -135,9 +141,49 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(summary["rule_template"]["id"], "text-clean-readable-v1")
         self.assertEqual(processing_manifest["rule_template"]["id"], "text-clean-readable-v1")
+        self.assertEqual(summary["options"]["processing_profile"], "standard")
+        self.assertEqual(processing_manifest["options"]["processing_profile"], "standard")
         self.assertTrue(summary["options"]["normalize_tones"])
         self.assertTrue(summary["options"]["enhance_faded_text"])
         self.assertTrue(summary["options"]["sharpen_text_edges"])
+
+    def test_production_run_print_clean_template_records_print_profile(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-cli-print-clean-template-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            _write_clean_page(input_dir / "BATCH001_PAGE_0001.png")
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "production-run",
+                        "--input",
+                        str(input_dir),
+                        "--derivatives-out",
+                        str(derivatives_dir),
+                        "--metadata-out",
+                        str(metadata_dir),
+                        "--rule-template",
+                        "print-clean-v1",
+                        "--workers",
+                        "1",
+                    ]
+                )
+
+            summary = json.loads((metadata_dir / "production_run_summary.json").read_text(encoding="utf-8"))
+            processing_manifest = json.loads(
+                (derivatives_dir / "processing_manifest.json").read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(summary["rule_template"]["id"], "print-clean-v1")
+        self.assertEqual(processing_manifest["rule_template"]["id"], "print-clean-v1")
+        self.assertEqual(summary["options"]["processing_profile"], "print_clean")
+        self.assertEqual(processing_manifest["options"]["processing_profile"], "print_clean")
 
     def test_production_run_photo_mixed_safe_template_keeps_strong_cleanup_disabled(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-cli-photo-safe-template-") as temp_dir:
@@ -334,8 +380,10 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         self.assertEqual(photo_exit, 0)
         self.assertEqual(text_payload["template"]["id"], "text-clean-readable-v1")
         self.assertEqual(text_payload["template"]["output_profile"], "text-clean-readable")
+        self.assertEqual(text_payload["template"]["processing_profile"], "standard")
         self.assertIn("text_clean_requires_pure_text_batch_confirmation", text_payload["risk_codes"])
         self.assertEqual(print_payload["template"]["output_profile"], "print-clean")
+        self.assertEqual(print_payload["template"]["processing_profile"], "print_clean")
         self.assertIn("print_clean_requires_overprocessing_review", print_payload["risk_codes"])
         self.assertEqual(photo_payload["template"]["output_profile"], "photo-mixed-safe")
         self.assertIn("strong_cleanup_disabled_by_high_fidelity_goal", photo_payload["risk_codes"])
