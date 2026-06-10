@@ -17,13 +17,13 @@ import threading
 import time
 import traceback
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 import uuid
 import webbrowser
 
 from .processing import ProcessingOptions, aggregate_processing_reuse_precheck
 from .processing_review import REVIEW_JSON as PROCESSING_REVIEW_JSON, write_processing_review_package
-from .production_review_queue import PRODUCTION_REVIEW_QUEUE_JSON, write_production_review_queue
+from .production_review_queue import OPERATOR_ACTIONS, PRODUCTION_REVIEW_QUEUE_JSON, write_production_review_queue
 from .production_runner import (
     PROCESSING_MODE_LABELS_ZH,
     PROCESSING_MODE_OUTPUTS_ZH,
@@ -44,6 +44,8 @@ WORKBENCH_HTML = ROOT / "docs" / "production-workbench-prototype.html"
 DOCS_DIR = ROOT / "docs"
 DEFAULT_METADATA_DIRNAME = "_production_workbench"
 SERVER_SCHEMA = "scan-qc.local-production-workbench.v1"
+LOCAL_PRODUCTION_REVIEW_ITEM_SCHEMA = "scan-qc.service-job-local-review-item.v1"
+LOCAL_PRODUCTION_JOB_PREFIX = "job-local-workbench-"
 PREFLIGHT_SNAPSHOT_SCHEMA = "scan-qc.local-preflight-snapshot.v1"
 PREFLIGHT_SNAPSHOT_MAX_AGE_SECONDS = 10 * 60
 MAINTENANCE_ERROR_LOG_JSONL = "local_workbench_maintenance_errors.jsonl"
@@ -96,6 +98,10 @@ DISK_SPACE_ESTIMATE_OVERHEAD_NUMERATOR = 6
 DISK_SPACE_ESTIMATE_OVERHEAD_DENOMINATOR = 5
 
 
+def _new_local_workbench_job_id() -> str:
+    return f"{LOCAL_PRODUCTION_JOB_PREFIX}{uuid.uuid4().hex[:12]}"
+
+
 class WorkbenchPreflightError(ValueError):
     """Operator-safe folder preflight failure."""
 
@@ -122,6 +128,7 @@ class WorkbenchController:
         self.last_preflight_reuse_summary: dict[str, Any] | None = None
         self._last_folder_readiness: dict[str, Any] | None = None
         self._last_preflight_snapshot: dict[str, Any] | None = None
+        self.local_job_id = _new_local_workbench_job_id()
 
     def configure(
         self,
@@ -166,6 +173,13 @@ class WorkbenchController:
             selected_mode,
         )
         with self._lock:
+            same_batch = (
+                self.input_dir == input_path
+                and self.derivatives_dir == output_path
+                and self.metadata_dir == metadata_path
+            )
+            if not same_batch:
+                self.local_job_id = _new_local_workbench_job_id()
             self.input_dir = input_path
             self.derivatives_dir = output_path
             self.metadata_dir = metadata_path
@@ -220,6 +234,7 @@ class WorkbenchController:
             self.last_preflight_reuse_summary = None
             self._last_folder_readiness = None
             self._last_preflight_snapshot = None
+            self.local_job_id = _new_local_workbench_job_id()
         status = self.status()
         status["next_batch_reset"] = {
             "schema_version": "scan-qc.local-next-batch-reset.v1",
@@ -315,6 +330,49 @@ class WorkbenchController:
                 response_source = "original_fallback" if not source_filter and source == "original" else source
                 return candidate.expanduser().resolve(), response_source
         raise ValueError("未找到这条复核记录对应的本机预览图。")
+
+    def production_preview_path(self, job_id: str, local_id: str, requested_source: str | None = None) -> tuple[Path, str]:
+        self._require_local_job_id(job_id)
+        return self.preview_path(local_id, requested_source)
+
+    def production_review_item(self, job_id: str, local_id: str) -> dict[str, Any]:
+        self._require_local_job_id(job_id)
+        safe_id = local_id.strip()
+        if not safe_id:
+            raise ValueError("missing_local_review_item")
+        with self._lock:
+            metadata_dir = self.metadata_dir
+        if metadata_dir is None:
+            raise ValueError("local_workbench_not_configured")
+        queue = _read_json(metadata_dir / PRODUCTION_REVIEW_QUEUE_JSON)
+        items = queue.get("items") if isinstance(queue, dict) else None
+        if not isinstance(items, list):
+            raise ValueError("local_review_queue_missing")
+        item = next((entry for entry in items if isinstance(entry, dict) and entry.get("local_id") == safe_id), None)
+        if item is None:
+            raise ValueError("local_review_item_not_found")
+        return {
+            "schema_version": LOCAL_PRODUCTION_REVIEW_ITEM_SCHEMA,
+            "job_id": job_id,
+            "local_id": safe_id,
+            "item": dict(item),
+            "allowed_operator_actions": list(OPERATOR_ACTIONS),
+            "privacy": {
+                "local_only": True,
+                "public_safe": False,
+                "contains_review_rows": True,
+                "contains_paths": True,
+                "contains_image_bytes": False,
+            },
+        }
+
+    def _require_local_job_id(self, job_id: str) -> None:
+        safe_id = str(job_id or "").strip()
+        with self._lock:
+            current_job_id = self.local_job_id
+            configured = bool(self.input_dir and self.derivatives_dir and self.metadata_dir)
+        if not configured or safe_id != current_job_id:
+            raise ValueError("local_job_id_mismatch")
 
     def save_review_decisions(self, summary: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
@@ -519,10 +577,15 @@ class WorkbenchController:
             last_error = self.last_error
             last_preflight_guidance = self.last_preflight_guidance
             last_preflight_reuse_summary = self.last_preflight_reuse_summary
+            local_job_id = self.local_job_id
         folder_readiness = self._folder_readiness_for_status(input_path, derivatives_path, metadata_path, processing_mode)
         raw_summary = _read_json(metadata_path / PRODUCTION_RUN_SUMMARY_JSON) if metadata_path else None
         summary = _sanitize_operator_status_summary(raw_summary)
         progress = _read_json(metadata_path / PRODUCTION_RUN_PROGRESS_JSON) if metadata_path else None
+        if isinstance(summary, dict):
+            summary = {**summary, "job_id": local_job_id}
+        if isinstance(progress, dict):
+            progress = {**progress, "job_id": local_job_id}
         queue = self._queue_with_preview_sources(metadata_path) if metadata_path else None
         draft_decisions = _read_json(metadata_path / REVIEW_DECISION_DRAFT_JSON) if metadata_path else None
         final_decisions = _read_json(metadata_path / REVIEW_DECISION_SUMMARY_JSON) if metadata_path else None
@@ -550,6 +613,7 @@ class WorkbenchController:
             recovery_guidance = _sanitize_operator_guidance(restored_batch)
         return {
             "schema_version": SERVER_SCHEMA,
+            "job_id": local_job_id,
             "running": running,
             "configured": bool(input_path and derivatives_path and metadata_path),
             "last_error_zh": last_error,
@@ -750,6 +814,12 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/status":
             self._send_json(self.workbench_controller.status())
             return
+        if parsed.path == "/api/production/review-item":
+            self._serve_production_review_item(parse_qs(parsed.query))
+            return
+        if parsed.path == "/api/production/preview":
+            self._serve_production_preview(parse_qs(parsed.query))
+            return
         if parsed.path.startswith("/api/preview/"):
             parts = [unquote(part) for part in parsed.path.removeprefix("/api/preview/").split("/") if part]
             self._serve_preview(parts[0] if parts else "", parts[1] if len(parts) > 1 else None)
@@ -828,6 +898,32 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
         except ValueError as exc:
             self._send_json({"error_zh": str(exc)}, HTTPStatus.NOT_FOUND)
             return
+        self._send_preview_file(path, source, legacy_header=True)
+
+    def _serve_production_review_item(self, params: dict[str, list[str]]) -> None:
+        try:
+            payload = self.workbench_controller.production_review_item(
+                _first_query_value(params, "job_id"),
+                _first_query_value(params, "local_id"),
+            )
+        except ValueError as exc:
+            self._send_json({"error_zh": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+        self._send_json(payload)
+
+    def _serve_production_preview(self, params: dict[str, list[str]]) -> None:
+        try:
+            path, source = self.workbench_controller.production_preview_path(
+                _first_query_value(params, "job_id"),
+                _first_query_value(params, "local_id"),
+                _first_query_value(params, "source", required=False),
+            )
+        except ValueError as exc:
+            self._send_json({"error_zh": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+        self._send_preview_file(path, source, legacy_header=False)
+
+    def _send_preview_file(self, path: Path, source: str, *, legacy_header: bool) -> None:
         content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         body = path.read_bytes()
         self.send_response(HTTPStatus.OK)
@@ -835,7 +931,10 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Preview-Source", source)
+        self.send_header("X-AI4-Local-Only", "true")
+        self.send_header("X-AI4-Preview-Source", source)
+        if legacy_header:
+            self.send_header("X-Preview-Source", source)
         self.end_headers()
         self.wfile.write(body)
 
@@ -866,6 +965,14 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     except (OSError, json.JSONDecodeError):
         return None
     return payload if isinstance(payload, dict) else None
+
+
+def _first_query_value(params: dict[str, list[str]], name: str, *, required: bool = True) -> str:
+    values = params.get(name) or []
+    value = values[0].strip() if values else ""
+    if required and not value:
+        raise ValueError("missing_required_query_parameter")
+    return value
 
 
 def _prepare_next_batch_retention_summary(

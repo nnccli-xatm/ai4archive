@@ -4,9 +4,12 @@ import json
 import os
 import shutil
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from urllib.error import HTTPError
+from urllib.request import urlopen
 
 from PIL import Image
 
@@ -21,6 +24,7 @@ from archive_scan_qc.local_workbench import (
     _folder_is_writable,
     _normalize_operator_path,
     _pick_windows_folder_via_powershell,
+    make_server,
     sanitize_operator_error_zh,
 )
 from archive_scan_qc.production_runner import ProductionRunConfig, build_production_run_summary, run_production_folder
@@ -1737,6 +1741,78 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertEqual(status["queue"]["items"][1]["preview_sources"], {"original": False, "processed": False})
             self.assertEqual(controller.preview_path("PRQ000001", "original")[1], "original")
             self.assertEqual(controller.preview_path("PRQ000001", "processed")[1], "processed")
+            job_id = status["job_id"]
+            review_item = controller.production_review_item(job_id, "PRQ000001")
+            self.assertEqual(review_item["schema_version"], "scan-qc.service-job-local-review-item.v1")
+            self.assertEqual(review_item["local_id"], "PRQ000001")
+            self.assertTrue(review_item["privacy"]["local_only"])
+            self.assertEqual(controller.production_preview_path(job_id, "PRQ000001", "processed")[1], "processed")
+            with self.assertRaises(ValueError):
+                controller.production_preview_path("job-local-workbench-stale", "PRQ000001", "processed")
+
+    def test_loopback_production_facade_routes_serve_local_review_and_preview(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = root / "metadata"
+            (input_dir / "nested").mkdir(parents=True)
+            (output_dir / "images" / "nested").mkdir(parents=True)
+            metadata_dir.mkdir()
+            (input_dir / "nested" / "a.png").write_bytes(b"original")
+            (output_dir / "images" / "nested" / "a.png").write_bytes(b"processed")
+            (metadata_dir / PRODUCTION_REVIEW_QUEUE_JSON).write_text(
+                json.dumps(
+                    {
+                        "schema_version": "scan-qc.production-review-queue.v1",
+                        "items": [{"local_id": "PRQ000001", "relative_path": "nested/a.png"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            server = make_server(
+                "127.0.0.1",
+                0,
+                input_dir=input_dir,
+                derivatives_dir=output_dir,
+                metadata_dir=metadata_dir,
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            base_url = f"http://127.0.0.1:{server.server_port}"
+            try:
+                status = json.loads(urlopen(f"{base_url}/api/status", timeout=5).read().decode("utf-8"))
+                job_id = status["job_id"]
+                review_item = json.loads(
+                    urlopen(
+                        f"{base_url}/api/production/review-item?job_id={job_id}&local_id=PRQ000001",
+                        timeout=5,
+                    )
+                    .read()
+                    .decode("utf-8")
+                )
+                preview_response = urlopen(
+                    f"{base_url}/api/production/preview?job_id={job_id}&local_id=PRQ000001&source=processed",
+                    timeout=5,
+                )
+                preview_body = preview_response.read()
+                with self.assertRaises(HTTPError) as raised:
+                    urlopen(
+                        f"{base_url}/api/production/preview?job_id=job-local-workbench-stale&local_id=PRQ000001&source=processed",
+                        timeout=5,
+                    )
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
+            self.assertEqual(review_item["local_id"], "PRQ000001")
+            self.assertEqual(review_item["item"]["relative_path"], "nested/a.png")
+            self.assertTrue(review_item["privacy"]["local_only"])
+            self.assertEqual(preview_response.headers.get("X-AI4-Local-Only"), "true")
+            self.assertEqual(preview_response.headers.get("X-AI4-Preview-Source"), "processed")
+            self.assertEqual(preview_body, b"processed")
+            self.assertEqual(raised.exception.code, 400)
 
     def test_final_completion_still_writes_verifier_outputs(self) -> None:
         private_hash = "b" * 64
