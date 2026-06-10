@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import tempfile
 import time
@@ -413,6 +414,55 @@ class ServiceApiCoreTests(unittest.TestCase):
                     artifact_id="processing-review-package.json",
                 )
 
+    def test_job_run_response_handles_nested_unicode_space_paths_without_public_leak(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-api-unicode-path-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = (
+                root
+                / "中文 输入 目录"
+                / "nested folder with spaces"
+                / "long-but-ci-safe-segment-0001-0002-0003"
+            )
+            service_root = root / "服务 root with spaces"
+            input_dir.mkdir(parents=True)
+            source_path = input_dir / "私有 页面 001.png"
+            _write_page(source_path)
+            source_sha_before = _sha256_for_test(source_path)
+            create_job_response(
+                {
+                    "input_dir": str(input_dir),
+                    "service_root": str(service_root),
+                    "rule_template": "dat-31-2017-standard",
+                    "workers": 1,
+                },
+                job_id="job-testapiunicode001",
+            )
+
+            summary = run_job_response(service_root=service_root, job_id="job-testapiunicode001")
+            status = get_job_response(service_root=service_root, job_id="job-testapiunicode001")
+            session = production_session_response(service_root=service_root)
+            raw = json.dumps({"summary": summary, "status": status, "session": session}, ensure_ascii=False)
+
+            self.assertEqual(summary["state"], "finished")
+            self.assertEqual(status["state"], "finished")
+            self.assertEqual(session["session"]["state_counts"], {"finished": 1})
+            self.assertEqual(session["session"]["jobs"][0]["quality"]["provided"], True)
+            self.assertEqual(_sha256_for_test(source_path), source_sha_before)
+            self.assertFalse(summary["source_images_modified"])
+            _assert_public_source_integrity(self, summary["source_integrity"], checked_files=1)
+            self.assertTrue(summary["quality"]["provided"])
+            self.assertFalse(summary["quality"]["blocking_codes"])
+            _assert_public_text_omits(
+                self,
+                raw,
+                str(root.resolve()),
+                "中文 输入 目录",
+                "nested folder with spaces",
+                "long-but-ci-safe-segment",
+                "服务 root with spaces",
+                "私有 页面 001",
+            )
+
     def test_job_start_response_returns_running_then_terminal_without_paths(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-api-start-") as temp_dir:
             root = Path(temp_dir)
@@ -595,6 +645,14 @@ def _write_page(path: Path) -> None:
     draw = ImageDraw.Draw(image)
     draw.rectangle((32, 42, 188, 46), fill=(40, 40, 40))
     image.save(path, dpi=(300, 300))
+
+
+def _sha256_for_test(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _review_decision_summary(decisions: tuple[str, ...]) -> dict[str, object]:

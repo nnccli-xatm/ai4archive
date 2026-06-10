@@ -235,6 +235,10 @@ supported source images and publish only nested
 checkpoint and public summary do not store source hashes, filenames, or file
 lists; public responses expose only checked/unchanged/modified/missing/added
 totals and booleans for source-image modification/source-tree change.
+The service API regression now also runs a completed production job from a
+nested Windows-style path containing Chinese characters and spaces, then checks
+that the source hash is unchanged and public responses omit those private path
+segments.
 Concurrent async service-job regression now forces two real production jobs
 through the runner at the same time and verifies that job state, metadata,
 derivatives, template snapshots, processing manifests, review artifacts, and

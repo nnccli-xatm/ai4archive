@@ -127,6 +127,9 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   counts, and blocking-code counts. Confirm root-level recovery issue reporting
   exposes only skipped counts and aggregate issue codes, not skipped job IDs,
   checkpoint rows, local paths, or exception messages.
+  Confirm the service API path regression completes a production job from a
+  nested Chinese/space path, leaves source hashes unchanged, and omits private
+  path segments from public responses.
 - Confirm `archive-scan-qc image-processing-capability-smoke --out
   /placeholder/private-validation-output/image-processing-capability-smoke`
   creates `image_processing_capability_smoke.json` with schema

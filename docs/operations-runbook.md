@@ -313,7 +313,10 @@ aggregate processing throughput, and whitelisted operation timing fields. Its
 nested `source_integrity` block uses schema
 `scan-qc.service-job-source-integrity.v1` and includes only checked, unchanged,
 modified, missing, and added source-image counts plus source-change booleans.
-It never publishes source hashes or file lists. If recovery sees a stale
+It never publishes source hashes or file lists. Keep the service API regression
+covering nested Chinese/space paths, completed production processing, unchanged
+source hashes, and public responses with those private path segments omitted.
+If recovery sees a stale
 `running` progress file after a service restart, it reports `needs_recovery`
 instead of leaking paths or leaving the job silently running.
 After production processing, service jobs write local-only
