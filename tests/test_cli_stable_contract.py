@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -114,6 +115,45 @@ class StableCliRuleTemplateTests(unittest.TestCase):
             self.assertFalse(quality_summary["privacy"]["contains_paths"])
             self.assertEqual(progress["state"], "finished")
             self.assertFalse(summary["source_images_modified"])
+
+    def test_production_run_preserves_chinese_space_path_source_bytes(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-cli-source-safe-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "输入 目录"
+            derivatives_dir = root / "处理 输出"
+            metadata_dir = root / "状态 输出"
+            input_dir.mkdir()
+            source = input_dir / "档案 页面 001.png"
+            _write_clean_page(source)
+            source_hash_before = _sha256_for_test(source)
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                exit_code = main(
+                    [
+                        "production-run",
+                        "--input",
+                        str(input_dir),
+                        "--derivatives-out",
+                        str(derivatives_dir),
+                        "--metadata-out",
+                        str(metadata_dir),
+                        "--rule-template",
+                        "dat-31-2017-standard",
+                        "--workers",
+                        "1",
+                    ]
+                )
+
+            summary = json.loads((metadata_dir / "production_run_summary.json").read_text(encoding="utf-8"))
+            manifest = json.loads((derivatives_dir / "processing_manifest.json").read_text(encoding="utf-8"))
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(source_hash_before, _sha256_for_test(source))
+            self.assertFalse(summary["source_images_modified"])
+            self.assertEqual(summary["operator_summary"]["input_folder"], str(input_dir.resolve()))
+            self.assertEqual(manifest["project"]["input_dir"], str(input_dir.resolve()))
+            self.assertEqual(manifest["files"][0]["source_relative_path"], source.name)
+            self.assertTrue((derivatives_dir / manifest["files"][0]["output_relative_path"]).is_file())
 
     def test_production_run_accepts_v1_text_clean_template(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-cli-template-v1-") as temp_dir:
@@ -942,6 +982,14 @@ def _start_production_run_cli(
         stderr=subprocess.PIPE,
         text=True,
     )
+
+
+def _sha256_for_test(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _write_clean_page(path: Path) -> None:

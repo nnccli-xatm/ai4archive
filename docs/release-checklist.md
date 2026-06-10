@@ -48,6 +48,9 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   `production_run_summary.json`. Confirm two CLI `production-run` processes
   using different metadata and derivatives directories can run concurrently
   without cross-writing summary, manifest, or lock files.
+  Confirm CLI `production-run` succeeds with Chinese and space-containing input,
+  metadata, derivatives, and source filenames while preserving source hashes and
+  reporting `source_images_modified=false`.
   Confirm `run-plan` rejects duplicate `report_dir`, duplicate `process_out`,
   and cross-row `report_dir`/`process_out` collisions before any batch runs.
   Confirm synchronous

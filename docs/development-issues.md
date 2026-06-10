@@ -67,6 +67,12 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 - 服务 API 回归包含中文/空格路径和 source hash unchanged。
 - 隐私边界测试序列化响应后找不到私有路径片段。
 
+当前进展：
+
+- 服务 API 已覆盖中文/空格路径、source hash unchanged 和 public response 脱敏。
+- CLI `production-run` 已覆盖中文/空格路径下处理成功、source hash unchanged、
+  `source_images_modified=false` 和派生图写入独立输出目录。
+
 ### DEV-004 CLI 并发隔离
 
 状态：`done`
