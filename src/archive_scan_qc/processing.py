@@ -4531,7 +4531,7 @@ def _normalize_tones_conservative(image: Image.Image) -> ToneNormalizationResult
         target_low = 122
         target_high = 245
         min_background_delta = 6
-        min_contrast_delta = 35
+        min_contrast_delta = 24
         max_background_delta = 36
         max_contrast_delta = 65
     else:

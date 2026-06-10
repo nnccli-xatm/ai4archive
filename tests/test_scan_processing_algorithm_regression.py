@@ -8596,6 +8596,52 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (source_name, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_light_paper_low_contrast_text_normalization_applies_visible_readability_gain(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-light-paper-low-contrast-tone-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+
+            source_name = "synthetic_light_paper_low_contrast_text.png"
+            page = Image.new("RGB", (620, 860), (232, 232, 226))
+            draw = ImageDraw.Draw(page)
+            for index in range(18):
+                y = 90 + index * 34
+                x = 70 + (index % 3) * 8
+                draw.rectangle((x, y, x + 360, y + 5), fill=(150, 150, 145))
+                draw.rectangle((x + 390, y, x + 470, y + 5), fill=(150, 150, 145))
+            source_path = input_dir / source_name
+            page.save(source_path, dpi=(300, 300))
+            source_bytes = source_path.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "light-paper-low-contrast-tone", input_dir, output_dir))
+            manifest = process_images(report, input_dir, process_dir, ProcessingOptions(normalize_tones=True, workers=1))
+            record = manifest["files"][0]
+            audit = record["processing_audit"]
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            self.assertEqual(source_path.read_bytes(), source_bytes)
+            self.assertTrue(record["tone_normalized"])
+            self.assertEqual(record["tone_reason"], "tone normalization applied: neutral gray low-contrast text page")
+            self.assertGreaterEqual(record["tone_background_after"] - record["tone_background_before"], 6.0)
+            self.assertGreaterEqual(record["tone_contrast_after"] - record["tone_contrast_before"], 24.0)
+            self.assertEqual(audit["guardrail_failures"], [])
+            self.assertEqual(audit["combination_quality_guard_action"], "passed")
+            with Image.open(process_dir / record["output_relative_path"]) as output:
+                self.assertIsNotNone(ImageChops.difference(page, output.convert("RGB")).getbbox())
+
+            self.assertEqual(audit_summary["counts"]["processed_files"], 1)
+            self.assertEqual(audit_summary["counts"]["tone_normalized_files"], 1)
+            self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (source_name, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_saturated_color_marks_preserve_stamp_highlighter_and_operator_chroma(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-saturated-color-marks-") as temp_dir:
             root = Path(temp_dir)

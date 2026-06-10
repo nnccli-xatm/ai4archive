@@ -255,6 +255,12 @@ skips obvious edge-shadow pages so localized shadow cleanup remains responsible
 for those cases. The synthetic smoke now requires at least one tone-normalized
 fixture with public-safe `tone_background_delta` and `tone_contrast_delta`
 evidence.
+Follow-up, 2026-06-10: the light-paper low-contrast path now accepts moderate
+but visible contrast gains instead of no-oping when the conservative candidate
+improves contrast by less than the older high threshold. A dedicated regression
+checks that a neutral low-contrast text page changes visibly, improves
+background/contrast metrics, keeps the source file unchanged, and publishes only
+aggregate audit evidence.
 
 Follow-up, 2026-06-09: the synthetic smoke fixtures now also cover a safe narrow
 fold-shadow band, a diffuse reverse-side bleed-through ghost, and a segmented

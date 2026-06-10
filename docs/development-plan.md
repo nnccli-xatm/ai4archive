@@ -314,6 +314,9 @@ Follow-up, 2026-06-09: 路线图中的 `archival-safe-v1`,
 当前进展（2026-06-09）：M2 的第一步已扩展 `normalize_tones`，使中性浅纸面
 低对比文字页可以产生可量化的背景和对比度提升；明显边缘阴影页会跳过全页 tone，
 交给局部阴影清理，避免和 guardrail 冲突。
+2026-06-10 补充：浅纸低对比正文的 tone normalization 已降低“可见但中等”
+对比收益的 no-op 门槛，并增加单图回归，要求源文件不变、输出确实变化、
+背景/对比指标提升且 audit summary 保持 aggregate-only。
 `image-processing-capability-smoke` 也开始要求折痕阴影、保守透印弱化和分段扫描线
 在全链路 synthetic fixture 上至少各有一次可量化生效。
 2026-06-10 补充：保守透印弱化已加入 broad thin-paper 窄路径，只在稳定浅纸、
