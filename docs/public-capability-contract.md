@@ -93,6 +93,10 @@ processing manifest rows, retry manifest rows, or row-level evidence.
 The public `retry` block may expose only retry presence, attempt count, status,
 and resume/reuse booleans; it must not expose paths, filenames, hashes,
 manifest rows, retry file lists, or local exception details.
+`GET /api/capabilities` mirrors the service quality boundary in
+`public_boundaries.service_quality` so API clients can distinguish job-level
+quality metrics from counts-only production session and root index quality
+aggregates without reading private artifacts.
 
 Stable local operational outputs such as `production_run_summary.json`,
 `production_run_progress.json`, scan reports, processing manifests, review

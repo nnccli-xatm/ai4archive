@@ -129,6 +129,9 @@ def service_capabilities() -> dict[str, Any]:
             "service_job_review_history": SERVICE_JOB_REVIEW_HISTORY_SCHEMA_VERSION,
             "service_job_event_log": SERVICE_JOB_EVENT_LOG_SCHEMA_VERSION,
         },
+        "public_boundaries": {
+            "service_quality": _service_quality_public_boundary(),
+        },
         "privacy": service_api_privacy(),
     }
 
@@ -312,6 +315,54 @@ def recover_jobs_response(*, service_root: Path) -> dict[str, Any]:
 
 def service_api_privacy() -> dict[str, bool]:
     return _public_privacy()
+
+
+def _service_quality_public_boundary() -> dict[str, Any]:
+    forbidden_private_content = [
+        "local_paths",
+        "file_lists",
+        "filenames",
+        "hashes",
+        "thumbnails",
+        "ocr_text",
+        "image_content",
+        "quality_rows",
+    ]
+    return {
+        "schema_version": "scan-qc.service-quality-public-boundary.v1",
+        "public_safe": True,
+        "job_summary": {
+            "scope": "single job public summary",
+            "may_include_job_id": True,
+            "may_include_processing_profile": True,
+            "may_include_quality_metrics": True,
+            "allowed_processing_profiles": ["standard", "print_clean", "photo_mixed_safe"],
+            "allowed_quality_context": [
+                "blocking_codes",
+                "quality_signal_status",
+                "quality_category_counts",
+                "quality_operation_category_booleans",
+                "whitelisted_quality_metrics",
+                "guardrail_status",
+            ],
+            "forbidden_content": forbidden_private_content,
+        },
+        "session_and_index_quality": {
+            "scope": "production session and root index nested quality aggregates",
+            "may_include_job_id": False,
+            "may_include_processing_profile": False,
+            "may_include_quality_metrics": False,
+            "allowed_quality_context": [
+                "quality_availability",
+                "job_status_counts",
+                "quality_signal_status_counts",
+                "aggregate_file_counts",
+                "blocking_code_counts",
+            ],
+            "forbidden_content": forbidden_private_content
+            + ["job_ids", "processing_profiles", "quality_metrics"],
+        },
+    }
 
 
 def _finish_export_blocking_codes(

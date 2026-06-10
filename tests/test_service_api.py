@@ -183,6 +183,22 @@ class ServiceApiCoreTests(unittest.TestCase):
                 capabilities["schemas"]["service_job_index_source_integrity"],
                 "scan-qc.service-job-index-source-integrity.v1",
             )
+            quality_boundary = capabilities["public_boundaries"]["service_quality"]
+            self.assertEqual(
+                quality_boundary["schema_version"],
+                "scan-qc.service-quality-public-boundary.v1",
+            )
+            self.assertTrue(quality_boundary["public_safe"])
+            self.assertTrue(quality_boundary["job_summary"]["may_include_quality_metrics"])
+            self.assertIn("print_clean", quality_boundary["job_summary"]["allowed_processing_profiles"])
+            self.assertFalse(quality_boundary["session_and_index_quality"]["may_include_job_id"])
+            self.assertFalse(quality_boundary["session_and_index_quality"]["may_include_quality_metrics"])
+            self.assertIn(
+                "quality_signal_status_counts",
+                quality_boundary["session_and_index_quality"]["allowed_quality_context"],
+            )
+            self.assertIn("quality_rows", quality_boundary["session_and_index_quality"]["forbidden_content"])
+            self.assertIn("quality_metrics", quality_boundary["session_and_index_quality"]["forbidden_content"])
             self.assertGreaterEqual(capabilities["resource_limits"]["max_active_async_jobs"], 1)
             self.assertGreaterEqual(capabilities["resource_limits"]["max_active_workers"], 1)
             self.assertGreaterEqual(capabilities["resource_limits"]["min_free_space_bytes"], 1)

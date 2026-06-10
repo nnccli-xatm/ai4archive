@@ -322,8 +322,10 @@ aggregate stain-cleanup metrics, but production session and root-index
 counts, aggregate file counts, and blocking-code counts. Use the job-specific
 summary when an authorized caller needs quality metric maxima; use
 `GET /api/production/session` when a UI or scheduler only needs batch-level
-public-safe status without job lists or quality rows. Its nested
-`timings` block uses schema
+public-safe status without job lists or quality rows. `GET /api/capabilities`
+also publishes
+`public_boundaries.service_quality`, which repeats this job-summary versus
+session/index quality split for API clients. The nested `timings` block uses schema
 `scan-qc.service-job-public-timings.v1` and includes only whitelisted stage IDs,
 aggregate processing throughput, and whitelisted operation timing fields. Its
 nested `source_integrity` block uses schema

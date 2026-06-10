@@ -97,6 +97,11 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   that detail to status counts, quality-signal status counts, aggregate file
   counts, and blocking-code counts without paths, filenames, hashes, or quality
   rows.
+  Confirm `GET /api/capabilities` exposes
+  `public_boundaries.service_quality` with the same distinction: job summaries
+  may carry whitelisted quality metrics, while production session and root
+  index quality aggregates must prohibit job IDs, processing profiles, quality
+  rows, and `quality_metrics`.
   Confirm terminal and recoverable running service summaries include nested
   `scan-qc.service-job-public-timings.v1` timing context with only whitelisted
   stage IDs, aggregate processing throughput, whitelisted operation timing

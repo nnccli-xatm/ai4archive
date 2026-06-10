@@ -124,6 +124,17 @@ class ServiceHttpTransportTests(unittest.TestCase):
                 capabilities["schemas"]["service_job_index_recovery_issues"],
                 "scan-qc.service-job-index-recovery-issues.v1",
             )
+            quality_boundary = capabilities["public_boundaries"]["service_quality"]
+            self.assertEqual(
+                quality_boundary["schema_version"],
+                "scan-qc.service-quality-public-boundary.v1",
+            )
+            self.assertIn("print_clean", quality_boundary["job_summary"]["allowed_processing_profiles"])
+            self.assertTrue(quality_boundary["job_summary"]["may_include_quality_metrics"])
+            self.assertFalse(quality_boundary["session_and_index_quality"]["may_include_job_id"])
+            self.assertFalse(quality_boundary["session_and_index_quality"]["may_include_quality_metrics"])
+            self.assertIn("quality_rows", quality_boundary["session_and_index_quality"]["forbidden_content"])
+            self.assertIn("quality_metrics", quality_boundary["session_and_index_quality"]["forbidden_content"])
             self.assertIn(
                 ("GET", "/api/production/session"),
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
