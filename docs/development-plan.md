@@ -296,6 +296,9 @@ review artifact 读取通道，只接受 `processing-review-package` 和
 public-safe `processing_profile` 枚举；checkpoint 仍保存完整模板快照，public
 summary 只暴露模板 ID、基础模板 ID、processing mode 和 profile，不暴露规则行、
 本地路径、文件名、hash、OCR、缩略图或图片内容。
+2026-06-10 补充：旧 service job checkpoint 如果缺少 `processing_profile`，
+恢复 public summary 时会根据内置模板 ID 回推出 public-safe profile；`print-clean-v1`
+会恢复为 `print_clean`，自定义或未知快照回退为 `standard`。
 
 ## 6. 阶段 2：图像处理规则模板系统
 

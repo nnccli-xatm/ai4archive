@@ -445,6 +445,36 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertFalse(summary["source_images_modified"])
             _assert_public_text_omits(self, public_raw, str(root.resolve()), "输入 目录", "私有 页面001")
 
+    def test_recover_legacy_checkpoint_derives_public_processing_profile(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-job-legacy-profile-recover-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-source"
+            service_root = root / "service-root"
+            input_dir.mkdir()
+            _write_page(input_dir / "private_page_001.png")
+            create_service_job(
+                ServiceJobConfig(
+                    input_dir=input_dir,
+                    service_root=service_root,
+                    rule_template="print-clean-v1",
+                    workers=1,
+                ),
+                job_id="job-testlegacyprofile001",
+            )
+            job_root = service_root / "jobs" / "job-testlegacyprofile001"
+            record_path = job_root / SERVICE_JOB_RECORD_JSON
+            record = json.loads(record_path.read_text(encoding="utf-8"))
+            record["template_snapshot"].pop("processing_profile", None)
+            record_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+            summary = recover_service_job(service_root, "job-testlegacyprofile001")
+            public_raw = (job_root / SERVICE_JOB_PUBLIC_SUMMARY_JSON).read_text(encoding="utf-8")
+
+            self.assertEqual(summary["state"], "created")
+            self.assertEqual(summary["template"]["rule_template_id"], "print-clean-v1")
+            self.assertEqual(summary["template"]["processing_profile"], "print_clean")
+            _assert_public_text_omits(self, public_raw, str(root.resolve()), "private_page_001")
+
     def test_start_job_async_returns_running_then_terminal_public_summary(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-job-async-") as temp_dir:
             root = Path(temp_dir)

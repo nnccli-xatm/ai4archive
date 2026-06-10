@@ -519,6 +519,10 @@ public-safe `processing_profile` in their template block. Checkpoints still hold
 the private template snapshot for recovery, while public summaries expose only
 template IDs, processing mode, and profile enum without local paths, filenames,
 hashes, OCR text, thumbnails, image content, or template rule rows.
+Follow-up, 2026-06-10: legacy service-job checkpoints that do not yet contain
+`processing_profile` are recovered by deriving the public-safe profile from the
+built-in template ID. `print-clean-v1` recovers as `print_clean`; custom or
+unknown snapshots fall back to `standard`.
 Follow-up, 2026-06-09: the service API now also exposes a production-worker
 facade around the same job boundary: session, setup, async start, progress,
 aggregate review-queue availability, and finish/export readiness. It remains
