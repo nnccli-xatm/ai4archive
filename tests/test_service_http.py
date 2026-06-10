@@ -331,6 +331,17 @@ class ServiceHttpTransportTests(unittest.TestCase):
                     "GET",
                     "/api/production/preview?job_id=job-productionhttp001&local_id=PRQ000001&source=original",
                 )
+                _ensure_preview_queue_item(
+                    service_root,
+                    "job-productionhttp001",
+                    "../private_page_001.png",
+                    local_id="PRQ999999",
+                )
+                unsafe_preview_status, unsafe_preview = _json_request(
+                    base_url,
+                    "GET",
+                    "/api/production/preview?job_id=job-productionhttp001&local_id=PRQ999999&source=original",
+                )
                 actions_status, review_actions = _json_request(
                     base_url,
                     "POST",
@@ -388,6 +399,7 @@ class ServiceHttpTransportTests(unittest.TestCase):
                     "running": running,
                     "terminal": terminal,
                     "review_queue": review_queue,
+                    "unsafe_preview": unsafe_preview,
                     "review_actions": review_actions,
                     "job_review_history": job_review_history,
                     "production_review_history": production_review_history,
@@ -407,6 +419,7 @@ class ServiceHttpTransportTests(unittest.TestCase):
             self.assertEqual(queue_status, 200)
             self.assertEqual(job_preview_status, 200)
             self.assertEqual(production_preview_status, 200)
+            self.assertEqual(unsafe_preview_status, 400)
             self.assertEqual(actions_status, 200)
             self.assertEqual(job_review_history_status, 200)
             self.assertEqual(production_review_history_status, 200)
@@ -463,6 +476,7 @@ class ServiceHttpTransportTests(unittest.TestCase):
             self.assertGreater(len(job_preview_body), 20)
             self.assertEqual(production_preview_headers.get("X-AI4-Preview-Source"), "original")
             self.assertEqual(job_preview_body, production_preview_body)
+            self.assertEqual(unsafe_preview["error"]["code"], "invalid_request")
             self.assertEqual(review_actions["view"], "review_actions")
             self.assertTrue(review_actions["review_actions"]["saved"])
             self.assertEqual(review_actions["review_actions"]["verification"]["status"], "pass")
@@ -492,6 +506,7 @@ class ServiceHttpTransportTests(unittest.TestCase):
             self.assertEqual(invalid_preview["error"]["code"], "invalid_request")
             self.assertEqual(managed_root["error"]["code"], "service_root_managed_by_server")
             self.assertFalse(review_queue["privacy"]["contains_paths"])
+            self.assertNotIn("../", raw)
             _assert_public_text_omits(self, raw, str(root.resolve()), "private-input", "private_page_001", "client-root")
 
     def test_http_rejects_client_managed_service_root_without_echoing_paths(self) -> None:
@@ -822,18 +837,24 @@ def _review_decision_summary(decisions: tuple[str, ...]) -> dict[str, object]:
     }
 
 
-def _ensure_preview_queue_item(service_root: Path, job_id: str, relative_path: str) -> None:
+def _ensure_preview_queue_item(
+    service_root: Path,
+    job_id: str,
+    relative_path: str,
+    *,
+    local_id: str = "PRQ000001",
+) -> None:
     queue_path = service_root / "jobs" / job_id / "review" / "production_review_queue.json"
     queue = json.loads(queue_path.read_text(encoding="utf-8"))
     items = queue.get("items")
     if not isinstance(items, list):
         items = []
         queue["items"] = items
-    if not any(isinstance(item, dict) and item.get("local_id") == "PRQ000001" for item in items):
+    if not any(isinstance(item, dict) and item.get("local_id") == local_id for item in items):
         items.insert(
             0,
             {
-                "local_id": "PRQ000001",
+                "local_id": local_id,
                 "relative_path": relative_path,
                 "severity": "P2",
                 "source_category": "processing_failure",
