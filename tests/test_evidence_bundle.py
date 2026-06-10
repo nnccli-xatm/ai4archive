@@ -145,6 +145,109 @@ def _aggregate_baseline_bundle_payload(*, real_artifact_metrics: bool = False) -
     return payload
 
 
+def _processing_quality_summary_bundle_payload() -> dict[str, object]:
+    return {
+        "schema_version": "scan-qc.processing-quality-summary.v1",
+        "status": "pass",
+        "blocking_codes": [],
+        "aggregate_only": True,
+        "public_safe": True,
+        "quality_measurement": {
+            "method": "processing_manifest_and_audit_aggregate",
+            "before_after_evidence": "aggregate_metrics_only",
+            "row_level_evidence_included": False,
+            "image_content_included": False,
+        },
+        "fixture_context": {
+            "source": "generated_at_runtime",
+            "synthetic_inputs_only": True,
+            "fixture_count": 18,
+            "fixture_groups": ["low_contrast_text_page"],
+            "protected_content_checks": [
+                {
+                    "fixture_group": "mixed_photo_stamp_table_page",
+                    "checked": True,
+                    "status": "pass",
+                    "fail_codes": [],
+                }
+            ],
+        },
+        "counts": {"processed_files": 18, "failed_files": 0, "retry_list_files": 0, "guardrail_failed_files": 0},
+        "quality_signal": {
+            "status": "measured_with_changes",
+            "processed_files": 18,
+            "any_quality_operation_changed_files": 4,
+            "quality_operations_applied": {"geometry": True, "background_cleanup": True, "text_enhancement": True},
+        },
+        "guardrails": {"enabled": True, "warning_files": 0, "failed_files": 0, "failure_reasons": {}},
+        "privacy": {
+            "aggregate_only": True,
+            "public_safe": True,
+            "contains_file_list": False,
+            "contains_paths": False,
+            "contains_filenames": False,
+            "contains_hashes": False,
+            "contains_thumbnails": False,
+            "contains_ocr_text": False,
+            "contains_image_content": False,
+            "contains_environment_values": False,
+            "contains_row_level_evidence": False,
+        },
+    }
+
+
+def _image_processing_capability_smoke_bundle_payload(
+    *,
+    status: str = "pass",
+    blocking_codes: list[str] | None = None,
+) -> dict[str, object]:
+    return {
+        "schema_version": "scan-qc.image-processing-capability-smoke.v1",
+        "status": status,
+        "blocking_codes": blocking_codes or [],
+        "privacy": {
+            "aggregate_only": True,
+            "public_safe": True,
+            "synthetic_inputs_only": True,
+            "private_inputs_read": False,
+            "contains_file_list": False,
+            "contains_paths": False,
+            "contains_filenames": False,
+            "contains_hashes": False,
+            "contains_thumbnails": False,
+            "contains_ocr_text": False,
+            "contains_image_content": False,
+            "contains_environment_values": False,
+        },
+        "processing_run": {
+            "scan_run": True,
+            "image_processing_run": True,
+            "provider_commands_run": False,
+            "source_images_modified": False,
+            "derivative_images_written": True,
+            "temp_work_paths_published": False,
+        },
+        "synthetic_fixture_summary": {
+            "fixture_count": 18,
+            "fixture_source": "generated_at_runtime",
+            "fixture_groups": ["low_contrast_text_page"],
+            "private_source_images_required": False,
+        },
+        "quality_baseline": _processing_quality_summary_bundle_payload(),
+        "related_public_safe_artifacts": {
+            "image_processing_capability_smoke": "image_processing_capability_smoke.json",
+            "processing_quality_summary": "processing_quality_summary.json",
+        },
+        "counts": {"synthetic_fixture_count": 18, "processed_files": 18, "failed_files": 0},
+        "operation_counts": {"deskewed_files": 1, "tone_normalized_files": 1},
+        "source_semantics": {
+            "source_images_modified": False,
+            "originals_read_only": True,
+            "derivatives_only": True,
+        },
+    }
+
+
 def _deep_inspection_candidate_bundle_payload() -> dict[str, object]:
     return {
         "schema_version": "scan-qc.deep-inspection-candidates.v1",
@@ -313,6 +416,41 @@ class EvidenceBundleTests(unittest.TestCase):
         self.assertEqual(summary["status"], "pass")
         self.assertEqual(summary["artifact_presence"]["deep_inspection_candidate_summary.json"]["status"], "optional_missing")
         self.assertNotIn("deep_inspection_candidate_summary.json", {item["artifact"] for item in summary["blocking_items"]})
+
+    def test_evidence_bundle_verifier_accepts_image_processing_public_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_json(root / "release_candidate_summary.json", _release_candidate_bundle_payload())
+            _write_json(root / "image_processing_capability_smoke.json", _image_processing_capability_smoke_bundle_payload())
+            _write_json(root / "processing_quality_summary.json", _processing_quality_summary_bundle_payload())
+
+            summary = build_evidence_bundle_summary(root, generated_at="2026-01-01T00:00:00+00:00")
+
+        self.assertEqual(summary["status"], "pass")
+        self.assertEqual(summary["artifact_presence"]["image_processing_capability_smoke.json"]["status"], "pass")
+        self.assertEqual(summary["artifact_presence"]["processing_quality_summary.json"]["status"], "pass")
+        self.assertFalse(summary["privacy"]["private_indicators_found"])
+
+    def test_evidence_bundle_verifier_propagates_image_processing_blocking_codes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_json(root / "release_candidate_summary.json", _release_candidate_bundle_payload())
+            _write_json(
+                root / "image_processing_capability_smoke.json",
+                _image_processing_capability_smoke_bundle_payload(
+                    status="fail",
+                    blocking_codes=["text_edge_energy_not_improved"],
+                ),
+            )
+
+            summary = build_evidence_bundle_summary(root, generated_at="2026-01-01T00:00:00+00:00")
+            raw = json.dumps(summary, ensure_ascii=False, sort_keys=True)
+
+        self.assertEqual(summary["status"], "fail")
+        codes = {item["code"] for item in summary["blocking_items"] if item["artifact"] == "image_processing_capability_smoke.json"}
+        self.assertIn("artifact_status_failed", codes)
+        self.assertIn("text_edge_energy_not_improved", codes)
+        self.assertNotIn(str(root), raw)
 
     def test_evidence_bundle_verifier_blocks_deep_inspection_candidate_privacy_or_inference_failures(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

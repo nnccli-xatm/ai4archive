@@ -174,6 +174,12 @@ deskew, tone, color-cast, shadow, stain, fold, illumination, bleed-through,
 scanline, faded-text, and text-edge metrics must clear minimum evidence
 thresholds or the smoke emits an explicit blocking code. Text-edge smoke
 evidence also requires aggregate edge energy to increase after sharpening.
+Follow-up, 2026-06-10: the public-safe handoff chain now consumes the image
+smoke evidence directly. `evidence-bundle-verify`,
+`public-safe-validation-index`, `artifact-readiness-checklist`, and
+`workbench-summary` recognize `image_processing_capability_smoke.json` and
+`processing_quality_summary.json`; failed image-quality gates propagate as
+aggregate `blocking_codes` instead of disappearing after the smoke command.
 
 Production-run update, 2026-06-09: `production-run` now writes
 `processing_quality_summary.json` beside the processing manifest and audit

@@ -59,7 +59,158 @@ def _final_handoff_bundle_payload() -> dict[str, object]:
     }
 
 
+def _processing_quality_summary_payload(
+    *,
+    status: str = "pass",
+    blocking_codes: list[str] | None = None,
+) -> dict[str, object]:
+    return {
+        "schema_version": "scan-qc.processing-quality-summary.v1",
+        "status": status,
+        "blocking_codes": blocking_codes or [],
+        "aggregate_only": True,
+        "public_safe": True,
+        "quality_measurement": {
+            "method": "processing_manifest_and_audit_aggregate",
+            "before_after_evidence": "aggregate_metrics_only",
+            "row_level_evidence_included": False,
+            "image_content_included": False,
+        },
+        "fixture_context": {
+            "source": "generated_at_runtime",
+            "synthetic_inputs_only": True,
+            "fixture_count": 18,
+            "fixture_groups": ["low_contrast_text_page", "blurred_text_edges_page"],
+            "protected_content_checks": [
+                {
+                    "fixture_group": "mixed_photo_stamp_table_page",
+                    "checked": True,
+                    "status": "pass",
+                    "fail_codes": [],
+                    "changed_pixel_ratio": 0.001,
+                    "color_mean_abs_delta": 0.2,
+                    "edge_energy_before": 40.0,
+                    "edge_energy_after": 40.2,
+                    "edge_energy_delta_ratio": 0.005,
+                    "max_changed_pixel_ratio": 0.01,
+                    "max_color_mean_abs_delta": 1.0,
+                    "max_edge_energy_delta_ratio": 0.02,
+                }
+            ],
+        },
+        "counts": {
+            "processed_files": 18,
+            "failed_files": 0,
+            "retry_list_files": 0,
+            "guardrail_failed_files": 0,
+            "deskewed_files": 1,
+            "tone_normalized_files": 1,
+            "faded_text_enhanced_files": 1,
+            "text_edges_sharpened_files": 1,
+        },
+        "quality_signal": {
+            "status": "measured_with_changes",
+            "processed_files": 18,
+            "any_quality_operation_changed_files": 4,
+            "geometry_changed_files": 1,
+            "background_cleanup_changed_files": 1,
+            "text_enhancement_changed_files": 2,
+            "defect_cleanup_changed_files": 0,
+            "quality_operations_applied": {
+                "geometry": True,
+                "background_cleanup": True,
+                "text_enhancement": True,
+                "defect_cleanup": False,
+            },
+        },
+        "quality_metrics": {
+            "tone_changed_pixel_ratio": {"count": 1, "average": 0.06, "max": 0.06},
+            "text_edges_edge_energy_before": {"count": 1, "average": 70.0, "max": 70.0},
+            "text_edges_edge_energy_after": {"count": 1, "average": 90.0, "max": 90.0},
+        },
+        "guardrails": {"enabled": True, "warning_files": 0, "failed_files": 0, "failure_reasons": {}},
+        "privacy": {
+            "aggregate_only": True,
+            "public_safe": True,
+            "contains_file_list": False,
+            "contains_paths": False,
+            "contains_filenames": False,
+            "contains_hashes": False,
+            "contains_thumbnails": False,
+            "contains_ocr_text": False,
+            "contains_image_content": False,
+            "contains_environment_values": False,
+            "contains_row_level_evidence": False,
+        },
+    }
+
+
+def _image_processing_capability_smoke_payload(
+    *,
+    status: str = "pass",
+    blocking_codes: list[str] | None = None,
+) -> dict[str, object]:
+    return {
+        "schema_version": "scan-qc.image-processing-capability-smoke.v1",
+        "status": status,
+        "blocking_codes": blocking_codes or [],
+        "privacy": {
+            "aggregate_only": True,
+            "public_safe": True,
+            "synthetic_inputs_only": True,
+            "private_inputs_read": False,
+            "contains_file_list": False,
+            "contains_paths": False,
+            "contains_filenames": False,
+            "contains_hashes": False,
+            "contains_thumbnails": False,
+            "contains_ocr_text": False,
+            "contains_image_content": False,
+            "contains_environment_values": False,
+        },
+        "processing_run": {
+            "scan_run": True,
+            "image_processing_run": True,
+            "provider_commands_run": False,
+            "source_images_modified": False,
+            "derivative_images_written": True,
+            "temp_work_paths_published": False,
+        },
+        "synthetic_fixture_summary": {
+            "fixture_count": 18,
+            "fixture_source": "generated_at_runtime",
+            "fixture_groups": ["low_contrast_text_page", "blurred_text_edges_page"],
+            "private_source_images_required": False,
+        },
+        "quality_baseline": _processing_quality_summary_payload(),
+        "related_public_safe_artifacts": {
+            "image_processing_capability_smoke": "image_processing_capability_smoke.json",
+            "processing_quality_summary": "processing_quality_summary.json",
+        },
+        "counts": {
+            "synthetic_fixture_count": 18,
+            "processed_files": 18,
+            "failed_files": 0,
+            "retry_list_files": 0,
+            "guardrail_failed_files": 0,
+        },
+        "operation_counts": {
+            "deskewed_files": 1,
+            "tone_normalized_files": 1,
+            "faded_text_enhanced_files": 1,
+            "text_edges_sharpened_files": 1,
+        },
+        "source_semantics": {
+            "source_images_modified": False,
+            "originals_read_only": True,
+            "derivatives_only": True,
+        },
+    }
+
+
 def _write_public_safe_validation_index_fixtures(root: Path) -> None:
+    _write_json(root / "image_processing_capability_smoke.json", _image_processing_capability_smoke_payload())
+    _write_json(root / "processing_quality_summary.json", _processing_quality_summary_payload())
     _write_json(
         root / "frontend_workbench_validation.json",
         {
@@ -101,8 +252,10 @@ class ValidationIndexTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(summary["status"], "pass")
-        self.assertEqual(summary["summary"]["artifacts_present"], 7)
+        self.assertEqual(summary["summary"]["artifacts_present"], 9)
         self.assertEqual(summary["summary"]["artifacts_failed"], 0)
+        self.assertEqual(summary["artifact_presence"]["image_processing_capability_smoke.json"]["status"], "pass")
+        self.assertEqual(summary["artifact_presence"]["processing_quality_summary.json"]["status"], "pass")
         self.assertEqual(summary["artifact_presence"]["frontend_workbench_validation.json"]["status"], "pass")
         self.assertEqual(summary["artifact_presence"]["review_decision_verification_summary.json"]["status"], "pass")
         self.assertEqual(summary["artifact_presence"]["final_production_handoff_summary.json"]["status"], "pass")
@@ -149,7 +302,11 @@ class ValidationIndexTests(unittest.TestCase):
             raw = json.dumps(summary, ensure_ascii=False, sort_keys=True)
 
         self.assertEqual(summary["status"], "pass")
-        self.assertEqual(summary["summary"]["known_artifacts"], 7)
+        self.assertEqual(summary["summary"]["known_artifacts"], 9)
+        image_smoke = summary["artifacts"]["image_processing_capability_smoke.json"]
+        self.assertEqual(image_smoke["schema_version"], "scan-qc.image-processing-capability-smoke.v1")
+        self.assertEqual(image_smoke["reported_status"], "pass")
+        self.assertEqual(image_smoke["counts"].get("blocking_counts_by_code", {}), {})
         review_decisions = summary["artifacts"]["review_decision_verification_summary.json"]
         self.assertEqual(review_decisions["schema_version"], "scan-qc.review-decision-verification-summary.v1")
         self.assertEqual(review_decisions["reported_status"], "pass")
@@ -162,6 +319,30 @@ class ValidationIndexTests(unittest.TestCase):
         self.assertEqual(handoff["status"], "pass")
         for forbidden in ("decision_counts", "source_type", "scan-qc-review-decisions.local.v1", "aggregate_handoff"):
             self.assertNotIn(forbidden, raw)
+
+    def test_public_safe_validation_index_propagates_image_smoke_blocking_codes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_public_safe_validation_index_fixtures(root)
+            _write_json(
+                root / "image_processing_capability_smoke.json",
+                _image_processing_capability_smoke_payload(
+                    status="fail",
+                    blocking_codes=["tone_changed_pixel_ratio_below_min"],
+                ),
+            )
+
+            summary = build_public_safe_validation_index(input_dir=root, generated_at="2026-01-01T00:00:00+00:00")
+            raw = json.dumps(summary, ensure_ascii=False, sort_keys=True)
+
+        self.assertEqual(summary["status"], "fail")
+        self.assertEqual(summary["artifact_presence"]["image_processing_capability_smoke.json"]["status"], "fail")
+        codes = {item["code"] for item in summary["blocking_items"]}
+        self.assertIn("artifact_status_failed", codes)
+        self.assertIn("tone_changed_pixel_ratio_below_min", codes)
+        counts = summary["artifacts"]["image_processing_capability_smoke.json"]["counts"]
+        self.assertEqual(counts["blocking_counts_by_code"]["tone_changed_pixel_ratio_below_min"], 1)
+        self.assertNotIn(str(root), raw)
 
     def test_public_safe_validation_index_blocks_review_decision_private_source_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -13,7 +13,7 @@ from archive_scan_qc.workbench_summary import build_workbench_public_summary
 
 from test_evidence_bundle import _deep_inspection_candidate_bundle_payload, _write_json
 from test_final_handoff import _aggregate_evidence_bundle_payload
-from test_validation_index import _final_handoff_bundle_payload
+from test_validation_index import _final_handoff_bundle_payload, _image_processing_capability_smoke_payload
 
 
 def _write_artifact_readiness_required_fixtures(root: Path) -> None:
@@ -147,6 +147,32 @@ class ArtifactReadinessTests(unittest.TestCase):
             self.assertNotIn("scan_qc_report.json", raw)
             for value in forbidden_private_values:
                 self.assertNotIn(value, raw)
+
+    def test_artifact_readiness_checklist_propagates_image_smoke_blocker(self) -> None:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                _write_artifact_readiness_required_fixtures(root)
+                _write_json(
+                    root / "image_processing_capability_smoke.json",
+                    _image_processing_capability_smoke_payload(
+                        status="fail",
+                        blocking_codes=["text_edge_energy_not_improved"],
+                    ),
+                )
+
+                summary = build_artifact_readiness_checklist(
+                    evidence_dir=root,
+                    generated_at="2026-01-01T00:00:00+00:00",
+                )
+                raw = json.dumps(summary, ensure_ascii=False, sort_keys=True)
+
+            self.assertEqual(summary["status"], "fail")
+            self.assertFalse(summary["ready"])
+            row = summary["artifact_readiness_checklist"]["image_processing_capability_smoke.json"]
+            self.assertTrue(row["present"])
+            self.assertEqual(row["status"], "fail")
+            self.assertIn("text_edge_energy_not_improved", summary["blocking_counts_by_code"])
+            self.assertNotIn(str(root), raw)
 
     def test_artifact_readiness_checklist_loads_in_workbench_summary(self) -> None:
             with tempfile.TemporaryDirectory() as temp_dir:

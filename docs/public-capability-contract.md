@@ -261,6 +261,12 @@ aggregate changed-pixel, color-delta, and edge-energy drift metrics with
 limits. Neither file includes paths, filenames, hashes, thumbnails, OCR text,
 image content, or environment values.
 
+The public-safe aggregation chain recognizes both files. When supplied to
+`evidence-bundle-verify`, `public-safe-validation-index`,
+`artifact-readiness-checklist`, or `workbench-summary`, image-quality
+`blocking_codes` are preserved as aggregate code/count blockers without exposing
+fixture files, paths, hashes, thumbnails, OCR text, or image content.
+
 ## Processing Backend Boundary
 
 Stable processing semantics remain CPU/Pillow-first:

@@ -17,7 +17,12 @@ from test_evidence_bundle import (
     _write_json,
 )
 from test_final_handoff import _aggregate_evidence_bundle_payload
-from test_validation_index import _final_handoff_bundle_payload, _write_public_safe_validation_index_fixtures
+from test_validation_index import (
+    _final_handoff_bundle_payload,
+    _image_processing_capability_smoke_payload,
+    _processing_quality_summary_payload,
+    _write_public_safe_validation_index_fixtures,
+)
 
 
 def _review_summary_bundle_payload() -> dict[str, object]:
@@ -116,9 +121,9 @@ def _workbench_public_summary_payload() -> dict[str, object]:
         "blocking_item_count": 0,
         "warning_item_count": 0,
         "summary": {
-            "known_artifacts": 17,
-            "artifacts_present": 16,
-            "artifacts_passed": 16,
+            "known_artifacts": 19,
+            "artifacts_present": 18,
+            "artifacts_passed": 18,
             "artifacts_failed": 0,
             "artifacts_missing": 1,
             "unsupported_inputs": 0,
@@ -531,6 +536,39 @@ class WorkbenchSummaryTests(unittest.TestCase):
                 self.assertNotIn(value, raw)
             self.assertIn("Workbench summary status: fail", stdout.getvalue())
 
+    def test_workbench_summary_propagates_image_smoke_blockers_and_metrics(self) -> None:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                _write_json(
+                    root / "image_processing_capability_smoke.json",
+                    _image_processing_capability_smoke_payload(
+                        status="fail",
+                        blocking_codes=["text_edge_energy_not_improved"],
+                    ),
+                )
+                _write_json(root / "processing_quality_summary.json", _processing_quality_summary_payload())
+
+                summary = build_workbench_public_summary(
+                    files=[
+                        root / "image_processing_capability_smoke.json",
+                        root / "processing_quality_summary.json",
+                    ],
+                    generated_at="2026-01-01T00:00:00+00:00",
+                )
+                raw = json.dumps(summary, ensure_ascii=False, sort_keys=True)
+
+            self.assertEqual(summary["status"], "fail")
+            self.assertIn("text_edge_energy_not_improved", summary["blocking_counts_by_code"])
+            image_processing = summary["summary"]["image_processing_capability"]
+            self.assertEqual(image_processing["smoke_status"], "fail")
+            self.assertEqual(image_processing["quality_summary_status"], "pass")
+            self.assertEqual(image_processing["synthetic_fixture_count"], 18)
+            self.assertEqual(image_processing["processed_files"], 18)
+            self.assertEqual(image_processing["quality_signal_status"], "measured_with_changes")
+            self.assertFalse(image_processing["source_images_modified"])
+            self.assertTrue(image_processing["derivative_images_written"])
+            self.assertNotIn(str(root), raw)
+
     def test_workbench_summary_rejects_explicit_private_inputs_without_reading(self) -> None:
             with tempfile.TemporaryDirectory() as temp_dir:
                 root = Path(temp_dir)
@@ -571,8 +609,8 @@ class WorkbenchSummaryTests(unittest.TestCase):
             self.assertEqual(presence["reported_status"], "pass")
             self.assertTrue(presence["ready"])
             metrics = summary["artifacts"]["workbench_public_summary.json"]["metrics"]
-            self.assertEqual(metrics["known_artifacts"], 17)
-            self.assertEqual(metrics["artifacts_present"], 16)
+            self.assertEqual(metrics["known_artifacts"], 19)
+            self.assertEqual(metrics["artifacts_present"], 18)
             self.assertEqual(metrics["artifacts_failed"], 0)
 
     def test_workbench_summary_directory_mode_recognizes_public_summary_input(self) -> None:
@@ -591,7 +629,7 @@ class WorkbenchSummaryTests(unittest.TestCase):
             self.assertTrue(presence["present"])
             self.assertEqual(presence["status"], "pass")
             metrics = summary["artifacts"]["workbench_public_summary.json"]["metrics"]
-            self.assertEqual(metrics["artifacts_passed"], 16)
+            self.assertEqual(metrics["artifacts_passed"], 18)
 
     def test_workbench_summary_directory_mode_ignores_unknown_private_files(self) -> None:
             with tempfile.TemporaryDirectory() as temp_dir:

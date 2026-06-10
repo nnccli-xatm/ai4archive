@@ -783,6 +783,13 @@ color-delta, and edge-energy drift metrics with limits. They do not
 publish paths, filenames, hashes, thumbnails, OCR text, image content, or
 environment values.
 
+`image_processing_capability_smoke.json` and
+`processing_quality_summary.json` are now first-class public-safe evidence
+inputs for `evidence-bundle-verify`, `public-safe-validation-index`,
+`artifact-readiness-checklist`, and `workbench-summary`. If the smoke or quality
+summary reports `blocking_codes`, those codes propagate by aggregate code/count
+instead of being hidden behind a generic pass/fail status.
+
 ### Private validation aggregate
 
 For operator-approved private validation runs, keep raw per-image results local
@@ -1501,8 +1508,9 @@ This writes `workbench_public_summary.json` with schema
 `scan-qc.workbench-public-summary.v1`. It summarizes known aggregate/public-safe
 JSON artifacts such as the aggregate evidence bundle, final handoff summary,
 release candidate summary, release readiness summary, acceptance summary,
-review summary, deep-inspection candidate summary, provider probes,
-public-safe validation index, and public-safe artifact readiness checklist. The
+review summary, image-processing capability smoke, processing quality summary,
+deep-inspection candidate summary, provider probes, public-safe validation
+index, and public-safe artifact readiness checklist. The
 bundle contains status, readiness, check counts, blocking and warning counts by
 aggregate code, artifact presence/status, workflow state, aggregate card
 metrics, and privacy status.

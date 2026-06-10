@@ -48,6 +48,18 @@ class WorkbenchArtifact:
 
 KNOWN_WORKBENCH_ARTIFACTS = (
     WorkbenchArtifact(WORKBENCH_SUMMARY_JSON, "workbench_public_summary", "Workbench public summary", "scan-qc.workbench-public-summary."),
+    WorkbenchArtifact(
+        "image_processing_capability_smoke.json",
+        "image_processing_capability_smoke",
+        "Image-processing capability smoke",
+        "scan-qc.image-processing-capability-smoke.",
+    ),
+    WorkbenchArtifact(
+        "processing_quality_summary.json",
+        "processing_quality_summary",
+        "Processing quality summary",
+        "scan-qc.processing-quality-summary.",
+    ),
     WorkbenchArtifact("run_plan_summary.json", "run_plan", "Run-plan summary", "scan-qc.run-plan-summary."),
     WorkbenchArtifact(
         "aggregate_baseline_summary.json",
@@ -246,6 +258,9 @@ def build_workbench_public_summary(
         summary_metrics["human_review_closure"] = closure_metrics
     readiness_metrics = _deep_inspection_readiness_metrics(artifacts)
     summary_metrics.update(readiness_metrics)
+    image_processing_metrics = _image_processing_capability_metrics(artifacts)
+    if image_processing_metrics:
+        summary_metrics["image_processing_capability"] = image_processing_metrics
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -413,8 +428,14 @@ def _artifact_record(
 
 def _metrics(payload: dict[str, Any], expected: WorkbenchArtifact) -> dict[str, Any]:
     metrics: dict[str, Any] = {
-        "blocking_item_count": _count_from_payload(payload, "blocking_item_count", "blocking_items"),
-        "warning_item_count": _count_from_payload(payload, "warning_item_count", "warnings"),
+        "blocking_item_count": max(
+            _count_from_payload(payload, "blocking_item_count", "blocking_items"),
+            _list_count(payload.get("blocking_codes")),
+        ),
+        "warning_item_count": max(
+            _count_from_payload(payload, "warning_item_count", "warnings"),
+            _list_count(payload.get("warning_codes")),
+        ),
     }
     metrics.update(_processing_reuse_counts(payload))
     metrics.update(_processing_operation_timings(payload))
@@ -448,6 +469,10 @@ def _metrics(payload: dict[str, Any], expected: WorkbenchArtifact) -> dict[str, 
                 "unsupported_inputs",
             ):
                 metrics[key] = _safe_int(summary.get(key))
+    if expected.name == "image_processing_capability_smoke.json":
+        metrics.update(_image_processing_smoke_metrics(payload))
+    if expected.name == "processing_quality_summary.json":
+        metrics.update(_processing_quality_summary_metrics(payload))
     if expected.name == "deep_inspection_candidate_summary.json":
         for key in ("candidate_total", "provider_count"):
             metrics[key] = _safe_int(payload.get(key))
@@ -515,6 +540,111 @@ def _metrics(payload: dict[str, Any], expected: WorkbenchArtifact) -> dict[str, 
     if expected.name == "acceptance_summary.json":
         metrics.update(_acceptance_closure_metrics(payload))
     return {key: value for key, value in metrics.items() if value is not None}
+
+
+def _image_processing_smoke_metrics(payload: dict[str, Any]) -> dict[str, Any]:
+    counts = payload.get("counts")
+    operation_counts = payload.get("operation_counts")
+    processing_run = payload.get("processing_run")
+    source_semantics = payload.get("source_semantics")
+    quality_baseline = payload.get("quality_baseline")
+    fixture_summary = payload.get("synthetic_fixture_summary")
+    metrics = _clean_optional_metrics(
+        {
+            "synthetic_fixture_count": _safe_int(counts.get("synthetic_fixture_count")) if isinstance(counts, dict) else None,
+            "processed_files": _safe_int(counts.get("processed_files")) if isinstance(counts, dict) else None,
+            "failed_files": _safe_int(counts.get("failed_files")) if isinstance(counts, dict) else None,
+            "guardrail_failed_files": _safe_int(counts.get("guardrail_failed_files")) if isinstance(counts, dict) else None,
+            "operation_counts": _safe_count_map(operation_counts),
+            "source_images_modified": (
+                source_semantics.get("source_images_modified") if isinstance(source_semantics, dict) and isinstance(source_semantics.get("source_images_modified"), bool)
+                else processing_run.get("source_images_modified") if isinstance(processing_run, dict) and isinstance(processing_run.get("source_images_modified"), bool)
+                else None
+            ),
+            "derivative_images_written": (
+                processing_run.get("derivative_images_written") if isinstance(processing_run, dict) and isinstance(processing_run.get("derivative_images_written"), bool) else None
+            ),
+            "fixture_group_count": (
+                len(fixture_summary.get("fixture_groups"))
+                if isinstance(fixture_summary, dict) and isinstance(fixture_summary.get("fixture_groups"), list)
+                else None
+            ),
+        }
+    )
+    if isinstance(quality_baseline, dict):
+        metrics.update(_processing_quality_summary_metrics(quality_baseline))
+    return metrics
+
+
+def _processing_quality_summary_metrics(payload: dict[str, Any]) -> dict[str, Any]:
+    counts = payload.get("counts")
+    quality_signal = payload.get("quality_signal")
+    guardrails = payload.get("guardrails")
+    fixture_context = payload.get("fixture_context")
+    metrics = _clean_optional_metrics(
+        {
+            "processed_files": _safe_int(counts.get("processed_files")) if isinstance(counts, dict) else None,
+            "failed_files": _safe_int(counts.get("failed_files")) if isinstance(counts, dict) else None,
+            "guardrail_failed_files": _safe_int(counts.get("guardrail_failed_files")) if isinstance(counts, dict) else None,
+            "quality_signal_status": (
+                quality_signal.get("status")
+                if isinstance(quality_signal, dict)
+                and isinstance(quality_signal.get("status"), str)
+                and _safe_metric_key(quality_signal["status"])
+                else None
+            ),
+            "any_quality_operation_changed_files": (
+                _safe_int(quality_signal.get("any_quality_operation_changed_files")) if isinstance(quality_signal, dict) else None
+            ),
+            "geometry_changed_files": _safe_int(quality_signal.get("geometry_changed_files")) if isinstance(quality_signal, dict) else None,
+            "background_cleanup_changed_files": (
+                _safe_int(quality_signal.get("background_cleanup_changed_files")) if isinstance(quality_signal, dict) else None
+            ),
+            "text_enhancement_changed_files": _safe_int(quality_signal.get("text_enhancement_changed_files")) if isinstance(quality_signal, dict) else None,
+            "defect_cleanup_changed_files": _safe_int(quality_signal.get("defect_cleanup_changed_files")) if isinstance(quality_signal, dict) else None,
+            "guardrail_warning_files": _safe_int(guardrails.get("warning_files")) if isinstance(guardrails, dict) else None,
+            "fixture_group_count": (
+                len(fixture_context.get("fixture_groups"))
+                if isinstance(fixture_context, dict) and isinstance(fixture_context.get("fixture_groups"), list)
+                else None
+            ),
+        }
+    )
+    operation_flags = quality_signal.get("quality_operations_applied") if isinstance(quality_signal, dict) else None
+    if isinstance(operation_flags, dict):
+        metrics["quality_operations_applied"] = {
+            str(key): bool(value)
+            for key, value in sorted(operation_flags.items())
+            if isinstance(key, str) and _safe_metric_key(key) and isinstance(value, bool)
+        }
+    return metrics
+
+
+def _image_processing_capability_metrics(artifacts: dict[str, Any]) -> dict[str, Any]:
+    smoke = _artifact_metrics(artifacts, "image_processing_capability_smoke.json")
+    quality = _artifact_metrics(artifacts, "processing_quality_summary.json")
+    if not smoke and not quality:
+        return {}
+    return _clean_optional_metrics(
+        {
+            "smoke_status": artifacts["image_processing_capability_smoke.json"].get("reported_status"),
+            "quality_summary_status": artifacts["processing_quality_summary.json"].get("reported_status"),
+            "synthetic_fixture_count": smoke.get("synthetic_fixture_count"),
+            "processed_files": _first_present(smoke.get("processed_files"), quality.get("processed_files")),
+            "failed_files": _first_present(smoke.get("failed_files"), quality.get("failed_files")),
+            "guardrail_failed_files": _first_present(smoke.get("guardrail_failed_files"), quality.get("guardrail_failed_files")),
+            "quality_signal_status": _first_present(smoke.get("quality_signal_status"), quality.get("quality_signal_status")),
+            "any_quality_operation_changed_files": _first_present(
+                smoke.get("any_quality_operation_changed_files"),
+                quality.get("any_quality_operation_changed_files"),
+            ),
+            "fixture_group_count": _first_present(smoke.get("fixture_group_count"), quality.get("fixture_group_count")),
+            "source_images_modified": smoke.get("source_images_modified"),
+            "derivative_images_written": smoke.get("derivative_images_written"),
+            "smoke_blocking_item_count": smoke.get("blocking_item_count"),
+            "quality_blocking_item_count": quality.get("blocking_item_count"),
+        }
+    )
 
 
 def _human_review_closure_metrics(artifacts: dict[str, Any]) -> dict[str, Any]:
@@ -812,11 +942,19 @@ def _workflow_state(artifacts: dict[str, Any]) -> dict[str, Any]:
 
 
 def _blocking_codes(payload: dict[str, Any]) -> list[str]:
-    return _coded_items(payload.get("blocking_items")) + _coded_items(payload.get("checks_failed"))
+    return (
+        _coded_items(payload.get("blocking_items"))
+        + _coded_items(payload.get("blocking_codes"))
+        + _coded_items(payload.get("checks_failed"))
+    )
 
 
 def _warning_codes(payload: dict[str, Any]) -> list[str]:
-    return _coded_items(payload.get("warning_items")) + _coded_items(payload.get("warnings"))
+    return (
+        _coded_items(payload.get("warning_items"))
+        + _coded_items(payload.get("warning_codes"))
+        + _coded_items(payload.get("warnings"))
+    )
 
 
 def _coded_items(value: Any) -> list[str]:
@@ -875,6 +1013,10 @@ def _count_from_payload(payload: dict[str, Any], count_key: str, list_key: str) 
     if count:
         return count
     value = payload.get(list_key)
+    return len(value) if isinstance(value, list) else 0
+
+
+def _list_count(value: Any) -> int:
     return len(value) if isinstance(value, list) else 0
 
 

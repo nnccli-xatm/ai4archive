@@ -31,6 +31,16 @@ class KnownAggregateArtifact:
 
 
 KNOWN_PUBLIC_SAFE_ARTIFACTS = (
+    KnownAggregateArtifact(
+        "image_processing_capability_smoke.json",
+        "image_processing_capability_smoke",
+        "scan-qc.image-processing-capability-smoke.",
+    ),
+    KnownAggregateArtifact(
+        "processing_quality_summary.json",
+        "processing_quality_summary",
+        "scan-qc.processing-quality-summary.",
+    ),
     KnownAggregateArtifact("frontend_workbench_validation.json", "frontend_workbench_validation"),
     KnownAggregateArtifact("release_readiness_summary.json", "release_readiness", "scan-qc.release-readiness."),
     KnownAggregateArtifact("release_candidate_summary.json", "release_candidate", "scan-qc.release-candidate-summary."),
@@ -245,6 +255,10 @@ def _artifact_record(
     for code in privacy_codes:
         blockers.append(_blocker(expected, code))
     checks_failed += len(privacy_codes)
+    public_blocking_codes = _public_blocking_codes(payload.get("blocking_codes"))
+    for code in public_blocking_codes:
+        blockers.append(_blocker(expected, code))
+    checks_failed += len(public_blocking_codes)
     checks_passed = _extract_int(payload, "checks_passed")
     nested_failed = _extract_int(payload, "checks_failed")
     if checks_passed == 0 and nested_failed == 0 and checks_failed == 0:
@@ -275,18 +289,20 @@ def _artifact_record(
 def _privacy_codes(payload: dict[str, Any], raw: str) -> list[str]:
     codes = set(_privacy_failures(payload, raw))
     raw_lower = raw.lower()
-    extra_patterns = {
-        "private_derivative_reference_present": ("derivative_image", "derivative/"),
-        "private_local_preview_object_url_present": ("blob:", "preview_object_url", "url.createobjecturl"),
-        "private_provider_command_string_present": ("provider_command", "analysis_provider_command"),
-        "private_prompt_present": ("prompt",),
-        "private_raw_model_output_present": ("raw_model_output", "model_output"),
-        "private_manifest_reference_present": ("processing_manifest", "manifest.csv", "row_report.csv"),
-        "private_source_metadata_present": ("source_type", "scan-qc-review-decisions.local.v1"),
-    }
-    for code, needles in extra_patterns.items():
-        if any(needle in raw_lower for needle in needles):
-            codes.add(code)
+    if "derivative/" in raw_lower:
+        codes.add("private_derivative_reference_present")
+    if any(needle in raw_lower for needle in ("blob:", "preview_object_url", "url.createobjecturl")):
+        codes.add("private_local_preview_object_url_present")
+    if any(needle in raw_lower for needle in ('"provider_command"', '"analysis_provider_command"')):
+        codes.add("private_provider_command_string_present")
+    if '"prompt"' in raw_lower:
+        codes.add("private_prompt_present")
+    if any(needle in raw_lower for needle in ('"raw_model_output"', "raw_model_output:", '"model_output"')):
+        codes.add("private_raw_model_output_present")
+    if any(needle in raw_lower for needle in ('"processing_manifest"', "manifest.csv", "row_report.csv")):
+        codes.add("private_manifest_reference_present")
+    if any(needle in raw_lower for needle in ("source_type", "scan-qc-review-decisions.local.v1")):
+        codes.add("private_source_metadata_present")
     return sorted(codes)
 
 
@@ -327,7 +343,36 @@ def _safe_artifact_counts(payload: dict[str, Any]) -> dict[str, Any]:
                 for code, count in sorted(value.items())
                 if isinstance(count, int) and not isinstance(count, bool)
             }
+    public_blocking_codes = _public_blocking_codes(payload.get("blocking_codes"))
+    if public_blocking_codes:
+        counts["blocking_counts_by_code"] = _counts_by_code(public_blocking_codes)
+    public_warning_codes = _public_blocking_codes(payload.get("warning_codes"))
+    if public_warning_codes:
+        counts["warning_counts_by_code"] = _counts_by_code(public_warning_codes)
     return counts
+
+
+def _public_blocking_codes(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    codes: list[str] = []
+    for item in value:
+        if isinstance(item, str):
+            codes.append(item if _safe_public_code(item) else "aggregate_item_present")
+        else:
+            codes.append("aggregate_item_present")
+    return codes
+
+
+def _safe_public_code(value: str) -> bool:
+    return bool(value) and all(char.islower() or char.isdigit() or char == "_" for char in value)
+
+
+def _counts_by_code(codes: list[str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for code in codes:
+        counts[code] = counts.get(code, 0) + 1
+    return dict(sorted(counts.items()))
 
 
 def _processing_reuse_counts(payload: dict[str, Any]) -> dict[str, int]:

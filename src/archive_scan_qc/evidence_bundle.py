@@ -160,6 +160,16 @@ class ExpectedArtifact:
 
 
 EXPECTED_ARTIFACTS = (
+    ExpectedArtifact(
+        "image_processing_capability_smoke.json",
+        False,
+        "scan-qc.image-processing-capability-smoke.",
+    ),
+    ExpectedArtifact(
+        "processing_quality_summary.json",
+        False,
+        "scan-qc.processing-quality-summary.",
+    ),
     ExpectedArtifact("release_candidate_summary.json", True, "scan-qc.release-candidate-summary."),
     ExpectedArtifact("release_readiness_summary.json", False, "scan-qc.release-readiness."),
     ExpectedArtifact("acceptance_summary.json", False, "scan-qc.acceptance-summary."),
@@ -285,6 +295,11 @@ def _verify_artifact(path: Path, expected: ExpectedArtifact) -> tuple[dict[str, 
     if privacy_failures:
         failed += len(privacy_failures)
         blockers.extend(_blocker(expected.name, code) for code in privacy_failures)
+
+    public_blocking_codes = _public_blocking_codes(payload.get("blocking_codes"))
+    if public_blocking_codes:
+        failed += len(public_blocking_codes)
+        blockers.extend(_blocker(expected.name, code) for code in public_blocking_codes)
 
     count_failures = _count_failures(payload, artifact_name=expected.name)
     if count_failures:
@@ -426,6 +441,22 @@ def _count_map(value: Any) -> bool:
     return isinstance(value, dict) and all(isinstance(key, str) and _non_negative_int(count) for key, count in value.items())
 
 
+def _public_blocking_codes(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    codes: list[str] = []
+    for item in value:
+        if isinstance(item, str):
+            codes.append(item if _safe_public_code(item) else "aggregate_item_present")
+        else:
+            codes.append("aggregate_item_present")
+    return sorted(set(codes))
+
+
+def _safe_public_code(value: str) -> bool:
+    return bool(value) and all(char.islower() or char.isdigit() or char == "_" for char in value)
+
+
 def _safe_count_map(value: Any) -> dict[str, int]:
     if not isinstance(value, dict):
         return {}
@@ -466,6 +497,8 @@ def _private_key(path: tuple[str, ...], key: str, value: Any) -> bool:
         return False
     if _aggregate_key_exception(path, normalized, value):
         return False
+    if _public_image_processing_key(path, value):
+        return False
     return any(token in normalized for token in _PRIVATE_KEYS)
 
 
@@ -483,6 +516,63 @@ def _aggregate_key_exception(path: tuple[str, ...], normalized: str, value: Any)
     if "finding_rule_counts_repeated_runs" in path and _aggregate_count_structure(value):
         return True
     if path == ("benchmark", "finding_rule_counts_repeated_runs") and _aggregate_count_structure(value):
+        return True
+    return False
+
+
+def _public_image_processing_key(path: tuple[str, ...], value: Any) -> bool:
+    effective_path = path[1:] if path[:1] == ("quality_baseline",) else path
+    image_processing_artifact_names = {
+        "image_processing_capability_smoke.json",
+        "processing_quality_summary.json",
+    }
+    if (
+        len(path) == 2
+        and path[0] in {"artifact_readiness_checklist", "public_safe_artifact_readiness", "artifact_presence", "artifacts"}
+        and path[1] in image_processing_artifact_names
+        and isinstance(value, dict)
+    ):
+        return True
+    bool_paths = {
+        ("privacy", "private_inputs_read"),
+        ("processing_run", "image_processing_run"),
+        ("processing_run", "source_images_modified"),
+        ("processing_run", "derivative_images_written"),
+        ("processing_run", "temp_work_paths_published"),
+        ("source_semantics", "source_images_modified"),
+        ("source_semantics", "originals_read_only"),
+        ("source_semantics", "derivatives_only"),
+        ("synthetic_fixture_summary", "private_source_images_required"),
+        ("quality_measurement", "image_content_included"),
+        ("quality_measurement", "row_level_evidence_included"),
+    }
+    string_paths = {
+        ("fixture_context", "source"),
+        ("synthetic_fixture_summary", "fixture_source"),
+        ("related_public_safe_artifacts", "image_processing_capability_smoke"),
+        ("related_public_safe_artifacts", "processing_quality_summary"),
+    }
+    aggregate_container_paths = {
+        ("source_semantics",),
+        ("fixture_context",),
+        ("fixture_context", "protected_content_checks"),
+    }
+    if effective_path in bool_paths and isinstance(value, bool):
+        return True
+    if effective_path in string_paths and isinstance(value, str) and not _private_value(value):
+        return True
+    if effective_path in aggregate_container_paths and isinstance(value, (dict, list)):
+        return True
+    if len(effective_path) >= 2 and effective_path[0] in {"counts", "operation_counts"} and _numeric_count_value(value):
+        return True
+    if len(effective_path) >= 2 and effective_path[0] == "quality_signal":
+        if _numeric_count_value(value):
+            return True
+        if effective_path[1] == "quality_operations_applied" and isinstance(value, (dict, bool)):
+            return True
+    if len(effective_path) >= 2 and effective_path[0] == "quality_metrics" and _aggregate_count_structure(value):
+        return True
+    if len(effective_path) >= 2 and effective_path[0] == "guardrails" and _aggregate_count_structure(value):
         return True
     return False
 

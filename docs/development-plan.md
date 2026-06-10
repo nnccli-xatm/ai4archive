@@ -361,6 +361,11 @@ files 时会直接失败，并输出明确 blocker。
 操作即使被计数为 applied，只要 deskew、tone、色偏、阴影、污渍、折痕、
 照明、透印、扫描线、褪色文字或文字边缘等证据指标低于门槛，也会进入
 `blocking_codes`；文字边缘锐化还要求聚合 edge energy 在处理后高于处理前。
+2026-06-10 补充：`image_processing_capability_smoke.json` 和
+`processing_quality_summary.json` 已接入 public-safe 聚合交接链路；
+`evidence-bundle-verify`、`public-safe-validation-index`、
+`artifact-readiness-checklist` 和 `workbench-summary` 会识别这两类证据，并把
+图像质量 `blocking_codes` 以聚合 code/count 形式继续向后传递。
 最新补充：`image-processing-capability-smoke` 已加入浅色纸面局部背景污渍 fixture，
 要求全链路产生至少一次保守背景污渍弱化，并在 public-safe 聚合质量基线中输出污渍
 亮化幅度和像素变化比例指标。

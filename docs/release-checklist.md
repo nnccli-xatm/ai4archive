@@ -157,6 +157,10 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   protected mixed photo/stamp/table changed-pixel, color-delta, and edge-energy
   drift checks within limits, and contains no paths, filenames, hashes, OCR
   text, thumbnails, or image content.
+  Confirm both generated JSON files are kept with the approved aggregate release
+  evidence so `evidence-bundle-verify`, `public-safe-validation-index`,
+  `artifact-readiness-checklist`, and `workbench-summary` can propagate any
+  image-quality `blocking_codes` by aggregate code/count.
 - Confirm `archive-scan-qc rule-template-catalog --out
   /placeholder/private-validation-output/rule-template-catalog` and
   `archive-scan-qc rule-template-dry-run --rule-template text-clean-readable-v1 --out
@@ -430,9 +434,12 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 
   Share only `aggregate_evidence_bundle_summary.json` after it passes. The
   verifier checks JSON parseability, schema/status/count fields, artifact
-  presence, and privacy indicators, and reports private evidence findings by
-  code without copying private paths, filenames, hashes, OCR text, thumbnails,
-  image content, row-level findings, secrets, or sample roots into the summary.
+  presence, and privacy indicators, including optional
+  `image_processing_capability_smoke.json` and
+  `processing_quality_summary.json` when present, and reports private evidence
+  findings or image-quality blockers by code without copying private paths,
+  filenames, hashes, OCR text, thumbnails, image content, row-level findings,
+  secrets, or sample roots into the summary.
 - After the release-candidate summary and aggregate evidence bundle verifier
   have run, generate the final public handoff decision:
 
@@ -463,7 +470,9 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
 
   Share `artifact_readiness_checklist.json` when the release or workbench
   handoff needs artifact-level readiness rows, aggregate missing counts, and
-  blocking/warning counts by code. Keep local private artifacts private:
+  blocking/warning counts by code, including image-processing smoke and
+  processing-quality rows when those public-safe artifacts are present. Keep
+  local private artifacts private:
   source images, row-level findings, processing manifests, CSV row reports, OCR
   text, thumbnails, hashes, private filenames or roots, derivative images,
   reviewer notes, provider commands, raw model output, prompts, embeddings,

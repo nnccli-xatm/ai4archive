@@ -840,6 +840,13 @@ cleanup, and scanline lightening each produce at least one public-safe aggregate
 delta. It also requires faded-text enhancement and text-edge sharpening evidence
 from a synthetic mildly blurred typed-text fixture, including improved aggregate
 edge energy after sharpening, without exposing image content.
+
+Keep both generated files with the approved release evidence directory. The
+aggregate evidence verifier, public-safe validation index, artifact readiness
+checklist, and workbench summary all recognize
+`image_processing_capability_smoke.json` and `processing_quality_summary.json`
+as public-safe inputs and propagate any image-quality `blocking_codes` by
+aggregate code/count.
 Both JSON files are public-safe aggregate evidence and must not contain paths,
 filenames, hashes, OCR text, thumbnails, or image content.
 
