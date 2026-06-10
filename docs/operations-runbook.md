@@ -267,7 +267,10 @@ The `finish-export` payload is the scheduler handoff gate: treat
 inspect public-safe `blocking_codes` such as `job_not_terminal`,
 `job_requires_review`, `job_failed`, `job_interrupted`, `job_cancelled`,
 `job_needs_recovery`, `source_images_modified`, or quality blocker codes rather
-than parsing local logs or private summaries.
+than parsing local logs or private summaries. If `retryable=true`, the scheduler
+may call `POST /api/jobs/{job_id}/retry`; this applies to failed, interrupted,
+and recovered `needs_recovery` jobs, not to created, cancelled, or already
+export-ready jobs.
 Use the dedicated review-history endpoints when a frontend only needs to refresh
 aggregate review history after an action; do not read the local history JSON
 directly outside the service boundary.

@@ -513,6 +513,11 @@ Follow-up, 2026-06-10: async cancellation race coverage now verifies that a
 running job remains `cancelled` after the background worker finishes and still
 refreshes public-safe source-integrity aggregates without exposing private
 paths or filenames.
+Follow-up, 2026-06-10: the production `finish-export` facade now exposes
+public-safe `blocking_codes` plus a `retryable` boolean. Recovered
+`needs_recovery` jobs report `job_needs_recovery` and `retryable=true`, so
+external schedulers can choose the explicit retry endpoint without reading
+private checkpoints or local logs.
 
 ### M5：性能和后端实现
 

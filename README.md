@@ -1582,7 +1582,9 @@ only `ready_for_export=true` is export-ready. When false, public-safe
 `blocking_codes` explain the reason, including whitelisted quality blockers and
 service-boundary codes such as `job_not_terminal`, `job_requires_review`,
 `job_failed`, `job_interrupted`, `job_cancelled`, `job_needs_recovery`, and
-`source_images_modified`.
+`source_images_modified`. The same payload also exposes `retryable=true` for
+states that may use `POST /api/jobs/{job_id}/retry`, including failed,
+interrupted, and recovered `needs_recovery` jobs.
 Review actions persist the local decision summary, verification summary, and
 append-only `service_job_review_history.json` under the job's isolated `review`
 directory, while API responses return only aggregate session, job, review

@@ -65,7 +65,9 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   `ready_for_export=true` as the only export-ready condition and returns
   public-safe `blocking_codes` for non-terminal, review-required,
   failed/interrupted/cancelled, recoverable, source-modified, and quality-blocked
-  jobs. Confirm
+  jobs. Confirm `retryable=true` is present only for states accepted by
+  `POST /api/jobs/{job_id}/retry`, including recovered `needs_recovery` jobs.
+  Confirm
   `GET /api/jobs/{job_id}/review-history` never returns local IDs, decision
   rows, paths, filenames, or the local review history path. Confirm local-only
   preview endpoints

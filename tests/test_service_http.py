@@ -166,12 +166,14 @@ class ServiceHttpTransportTests(unittest.TestCase):
             self.assertEqual(created["state"], "created")
             self.assertEqual(status["state"], "created")
             self.assertFalse(not_ready_finish["finish_export"]["terminal"])
+            self.assertFalse(not_ready_finish["finish_export"]["retryable"])
             self.assertFalse(not_ready_finish["finish_export"]["ready_for_export"])
             self.assertFalse(not_ready_finish["finish_export"]["requires_review"])
             self.assertEqual(not_ready_finish["finish_export"]["state"], "created")
             self.assertEqual(not_ready_finish["finish_export"]["blocking_codes"], ["job_not_terminal"])
             self.assertEqual(cancelled["state"], "cancelled")
             self.assertTrue(cancelled_finish["finish_export"]["terminal"])
+            self.assertFalse(cancelled_finish["finish_export"]["retryable"])
             self.assertFalse(cancelled_finish["finish_export"]["ready_for_export"])
             self.assertFalse(cancelled_finish["finish_export"]["requires_review"])
             self.assertEqual(cancelled_finish["finish_export"]["state"], "cancelled")
@@ -182,6 +184,58 @@ class ServiceHttpTransportTests(unittest.TestCase):
             self.assertTrue((service_root / SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON).is_file())
             self.assertTrue(health_after["job_index_available"])
             _assert_public_text_omits(self, raw, str(root.resolve()), "输入目录", "私有页面001")
+
+    def test_http_finish_export_marks_recovered_job_retryable_without_private_paths(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-http-finish-recovery-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-source"
+            service_root = root / "service-root"
+            input_dir.mkdir()
+            _write_page(input_dir / "private_page_001.png")
+
+            with _running_server(service_root) as base_url:
+                create_status, _created = _json_request(
+                    base_url,
+                    "POST",
+                    "/api/jobs",
+                    {
+                        "job_id": "job-finishhttprecover001",
+                        "input_dir": str(input_dir),
+                        "rule_template": "dat-31-2017-standard",
+                        "workers": 1,
+                    },
+                )
+                job_root = service_root / "jobs" / "job-finishhttprecover001"
+                record_path = job_root / SERVICE_JOB_RECORD_JSON
+                record = json.loads(record_path.read_text(encoding="utf-8"))
+                record["state"] = "finished"
+                record["recovery"]["status"] = "forced_finished_without_summary"
+                record_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+                finish_status, finish_export = _json_request(
+                    base_url,
+                    "POST",
+                    "/api/production/finish-export",
+                    {"job_id": "job-finishhttprecover001"},
+                )
+
+            raw = json.dumps(finish_export, ensure_ascii=False)
+
+            self.assertEqual(create_status, 201)
+            self.assertEqual(finish_status, 200)
+            self.assertEqual(finish_export["view"], "finish_export")
+            self.assertEqual(finish_export["job"]["state"], "needs_recovery")
+            self.assertEqual(
+                finish_export["job"]["recovery"]["status"],
+                "terminal_state_missing_production_summary",
+            )
+            self.assertFalse(finish_export["finish_export"]["terminal"])
+            self.assertTrue(finish_export["finish_export"]["retryable"])
+            self.assertFalse(finish_export["finish_export"]["ready_for_export"])
+            self.assertFalse(finish_export["finish_export"]["requires_review"])
+            self.assertEqual(finish_export["finish_export"]["state"], "needs_recovery")
+            self.assertEqual(finish_export["finish_export"]["blocking_codes"], ["job_needs_recovery"])
+            self.assertTrue(finish_export["privacy"]["public_safe"])
+            _assert_public_text_omits(self, raw, str(root.resolve()), "private_page_001")
 
     def test_http_run_job_writes_quality_summary_without_private_paths(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-http-run-") as temp_dir:

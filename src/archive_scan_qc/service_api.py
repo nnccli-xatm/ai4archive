@@ -30,6 +30,7 @@ from .service_jobs import (
     SERVICE_JOB_EVENT_LOG_SCHEMA_VERSION,
     SERVICE_JOB_MIN_FREE_SPACE_BYTES,
     SERVICE_JOB_REVIEW_HISTORY_SCHEMA_VERSION,
+    RETRYABLE_STATES,
     TERMINAL_STATES,
     ServiceJobConfig,
     cancel_service_job,
@@ -221,6 +222,7 @@ def production_finish_export_response(*, service_root: Path, job_id: str) -> dic
         job=summary,
         finish_export={
             "terminal": state in TERMINAL_STATES,
+            "retryable": state in RETRYABLE_STATES,
             "ready_for_export": state == "finished" and not blocking_codes,
             "requires_review": state == "needs_review" or bool(quality_blocking_codes) or source_images_modified,
             "state": state,
