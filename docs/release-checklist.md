@@ -90,6 +90,13 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   operation category booleans, whitelisted aggregate quality metrics, blocking
   codes, quality signal status, changed-pixel ratios, brightness/contrast
   deltas, and aggregate guardrail status.
+  Confirm `print-clean-v1` service jobs expose the `print_clean` processing
+  profile plus job-level aggregate stain-cleanup metrics through
+  `GET /api/jobs/{job_id}` and `POST /api/jobs/{job_id}/run`, while
+  `GET /api/production/session` and the root index `quality` aggregate reduce
+  that detail to status counts, quality-signal status counts, aggregate file
+  counts, and blocking-code counts without paths, filenames, hashes, or quality
+  rows.
   Confirm terminal and recoverable running service summaries include nested
   `scan-qc.service-job-public-timings.v1` timing context with only whitelisted
   stage IDs, aggregate processing throughput, whitelisted operation timing

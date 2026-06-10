@@ -219,6 +219,13 @@ metrics including brightness/contrast deltas and changed-pixel ratios, and
 aggregate guardrail status.
 These fields are copied only from the public-safe production quality summary and
 remain free of local paths and filenames.
+For `print-clean-v1`, job summaries may expose the `print_clean` processing
+profile and whitelisted aggregate quality metrics such as background-stain
+deltas and changed-pixel ratios. `GET /api/production/session` and the root
+index's nested `quality` aggregate must reduce that detail to status counts,
+quality-signal status counts, aggregate file counts, and blocking-code counts
+only; they must not expose quality rows, local paths, filenames, hashes,
+thumbnails, OCR text, or image content.
 Terminal and recoverable running summaries also expose public-safe `timings`
 context: whitelisted stage IDs, aggregate processing throughput, and whitelisted
 operation timing fields such as enabled state, file count, elapsed seconds,

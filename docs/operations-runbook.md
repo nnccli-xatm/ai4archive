@@ -316,6 +316,13 @@ block includes aggregate retry/reuse fields (`resumed_files`, `reused_files`,
 behavior without opening private manifests. Its public `retry` block exposes
 only retry availability, attempt number, status, and resume/reuse booleans; it
 does not include paths, manifest rows, or retry file lists. Its nested
+quality summary may expose `print-clean-v1` as `print_clean` and job-level
+aggregate stain-cleanup metrics, but production session and root-index
+`quality` aggregates reduce that detail to status counts, quality-signal status
+counts, aggregate file counts, and blocking-code counts. Use the job-specific
+summary when an authorized caller needs quality metric maxima; use
+`GET /api/production/session` when a UI or scheduler only needs batch-level
+public-safe status without job lists or quality rows. Its nested
 `timings` block uses schema
 `scan-qc.service-job-public-timings.v1` and includes only whitelisted stage IDs,
 aggregate processing throughput, and whitelisted operation timing fields. Its
