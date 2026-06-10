@@ -255,10 +255,12 @@ requests that try to provide their own `service_root`.
 The production endpoints are a public-safe facade over the job boundary:
 `setup` creates a job, `start` enters the async runner, `progress` polls by
 `job_id`, `review-queue` returns aggregate local-review availability and group
-counts, `review-actions` writes the local decision summary plus aggregate
-verification summary under the isolated job `review` directory, and
-`finish-export` returns a completion/export readiness summary. Responses do not
-return row-level local review records, local IDs, paths, or raw decision rows.
+counts, `review-actions` writes the local decision summary, aggregate
+verification summary, and append-only `service_job_review_history.json` under
+the isolated job `review` directory, and `finish-export` returns a
+completion/export readiness summary. Responses expose only aggregate
+review-history counts and latest verification status; they do not return
+row-level local review records, local IDs, paths, or raw decision rows.
 Use `GET /api/jobs/{job_id}/local-preview/{local_id}?source=original|processed`
 or `GET /api/production/preview?job_id=...&local_id=...&source=...` only inside
 the local workstation session to show preview image bytes. The service resolves

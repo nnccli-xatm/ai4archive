@@ -49,10 +49,12 @@ SERVICE_JOB_SOURCE_INTEGRITY_SCHEMA_VERSION = "scan-qc.service-job-source-integr
 LOCAL_REVIEW_ARTIFACT_SCHEMA_VERSION = "scan-qc.service-job-local-review-artifact.v1"
 LOCAL_PREVIEW_SCHEMA_VERSION = "scan-qc.service-job-local-preview.v1"
 SERVICE_JOB_REVIEW_ACTIONS_SCHEMA_VERSION = "scan-qc.service-job-review-actions.v1"
+SERVICE_JOB_REVIEW_HISTORY_SCHEMA_VERSION = "scan-qc.service-job-review-history.v1"
 SERVICE_JOB_RECORD_JSON = "service_job.json"
 SERVICE_JOB_PUBLIC_SUMMARY_JSON = "service_job_public_summary.json"
 SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON = "service_job_index_public_summary.json"
 SERVICE_JOB_REVIEW_DECISIONS_JSON = "scan-qc-review-decisions.summary.json"
+SERVICE_JOB_REVIEW_HISTORY_JSON = "service_job_review_history.json"
 SERVICE_JOBS_DIRNAME = "jobs"
 JOB_ID_PATTERN = re.compile(r"^job-[A-Za-z0-9][A-Za-z0-9_-]{2,80}$")
 TERMINAL_STATES = {"finished", "needs_review", "failed", "interrupted", "cancelled"}
@@ -553,6 +555,7 @@ def write_service_job_review_actions(
     review_dir = _service_job_review_dir(record)
     _require_within(review_dir, job_root)
     review_dir.mkdir(parents=True, exist_ok=True)
+    updated_at = _utc_now()
     decisions_path = review_dir / SERVICE_JOB_REVIEW_DECISIONS_JSON
     verification_path = review_dir / REVIEW_DECISION_VERIFICATION_JSON
     decisions_path.write_text(
@@ -563,27 +566,39 @@ def write_service_job_review_actions(
         json.dumps(verification, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    history_path, history_summary = _append_service_job_review_history(
+        review_dir=review_dir,
+        job_root=job_root,
+        record=record,
+        review_decisions=review_decisions,
+        verification=verification,
+        recorded_at=updated_at,
+    )
     decision_summary = verification.get("decision_summary") if isinstance(verification.get("decision_summary"), dict) else {}
     record["review_actions"] = {
         "schema_version": SERVICE_JOB_REVIEW_ACTIONS_SCHEMA_VERSION,
         "provided": True,
-        "updated_at": _utc_now(),
+        "updated_at": updated_at,
         "artifacts": {
             "review_decisions": str(decisions_path),
             "review_decision_verification": str(verification_path),
+            "review_history": str(history_path),
         },
         "verification": _public_review_action_verification(verification),
+        "history": history_summary,
     }
     _write_job_record(job_root, record)
     return {
         "schema_version": SERVICE_JOB_REVIEW_ACTIONS_SCHEMA_VERSION,
-        "generated_at": _utc_now(),
+        "generated_at": updated_at,
         "job_id": str(record.get("job_id") or job_id),
         "saved": True,
         "review_decisions_written": True,
         "verification_summary_written": True,
+        "review_history_written": True,
         "decision_summary": _public_decision_summary(decision_summary),
         "verification": _public_review_action_verification(verification),
+        "history": history_summary,
         "storage": {
             "managed_by_service": True,
             "local_only_payload_written": True,
@@ -880,6 +895,7 @@ def _public_summary_from_record(
         "timings": _public_timings_payload(production_summary, production_progress),
         "source_integrity": source_integrity,
         "local_review": _public_local_review_payload(record.get("local_review")),
+        "review_actions": _public_review_actions_payload(record.get("review_actions")),
         "source_images_modified": bool(source_integrity.get("source_images_modified")),
         "network_services_called": False,
         "private_paths_exposed": False,
@@ -960,6 +976,138 @@ def _public_review_action_verification(verification: Any) -> dict[str, Any]:
             "aggregate_only": bool(privacy.get("aggregate_only")),
             "sensitive_field_count": _safe_int(privacy.get("sensitive_field_count")) or 0,
             "source_values_omitted": True,
+        },
+    }
+
+
+def _append_service_job_review_history(
+    *,
+    review_dir: Path,
+    job_root: Path,
+    record: dict[str, Any],
+    review_decisions: dict[str, Any],
+    verification: dict[str, Any],
+    recorded_at: str,
+) -> tuple[Path, dict[str, Any]]:
+    history_path = (review_dir / SERVICE_JOB_REVIEW_HISTORY_JSON).resolve()
+    _require_within(history_path, job_root)
+    previous = _read_json(history_path) if history_path.is_file() else {}
+    previous_entries = previous.get("entries") if isinstance(previous, dict) else None
+    entries = list(previous_entries) if isinstance(previous_entries, list) else []
+    entry = {
+        "entry_id": f"review-action-{len(entries) + 1:06d}",
+        "recorded_at": recorded_at,
+        "job_id": str(record.get("job_id") or ""),
+        "review_decisions": review_decisions,
+        "verification": verification,
+    }
+    entries.append(entry)
+    history = {
+        "schema_version": SERVICE_JOB_REVIEW_HISTORY_SCHEMA_VERSION,
+        "job_id": str(record.get("job_id") or ""),
+        "updated_at": recorded_at,
+        "entry_count": len(entries),
+        "local_only": True,
+        "sensitive": True,
+        "public_safe": False,
+        "entries": entries,
+        "privacy": {
+            "local_only": True,
+            "public_safe": False,
+            "contains_review_rows": True,
+            "contains_local_ids": True,
+            "contains_paths": False,
+            "contains_filenames": False,
+            "contains_hashes": False,
+            "contains_thumbnails": False,
+            "contains_ocr_text": False,
+            "contains_image_content": False,
+            "path_returned_to_http_client": False,
+        },
+    }
+    history_path.write_text(
+        json.dumps(history, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return history_path, _public_review_history_payload(history)
+
+
+def _public_review_actions_payload(review_actions: Any) -> dict[str, Any]:
+    payload = review_actions if isinstance(review_actions, dict) else {}
+    provided = payload.get("provided") is True
+    return {
+        "schema_version": SERVICE_JOB_REVIEW_ACTIONS_SCHEMA_VERSION,
+        "provided": provided,
+        "status": "available" if provided else "not_available",
+        "updated": bool(payload.get("updated_at")) if provided else False,
+        "verification": _public_review_action_verification(payload.get("verification")),
+        "history": _public_review_history_payload(payload.get("history")),
+        "storage": {
+            "managed_by_service": provided,
+            "local_only_payload_written": provided,
+            "path_returned": False,
+        },
+        "privacy": _public_summary_privacy(),
+    }
+
+
+def _public_review_history_payload(history: Any) -> dict[str, Any]:
+    payload = history if isinstance(history, dict) else {}
+    if "latest_verification_status" in payload:
+        entry_count = _safe_int(payload.get("entry_count")) or 0
+        return {
+            "schema_version": SERVICE_JOB_REVIEW_HISTORY_SCHEMA_VERSION,
+            "provided": entry_count > 0,
+            "status": "available" if entry_count > 0 else "not_available",
+            "entry_count": entry_count,
+            "latest_verification_status": str(payload.get("latest_verification_status") or "unknown"),
+            "latest_completion_status": str(payload.get("latest_completion_status") or "unknown"),
+            "latest_decision_summary": _public_decision_summary(payload.get("latest_decision_summary")),
+            "local_only_payload_written": bool(payload.get("local_only_payload_written")),
+            "path_returned": False,
+            "privacy": {
+                "public_safe": True,
+                "aggregate_only": True,
+                "contains_review_rows": False,
+                "contains_local_ids": False,
+                "contains_paths": False,
+                "contains_filenames": False,
+                "contains_hashes": False,
+                "contains_thumbnails": False,
+                "contains_ocr_text": False,
+                "contains_image_content": False,
+            },
+        }
+    entries = payload.get("entries") if isinstance(payload.get("entries"), list) else []
+    latest = entries[-1] if entries and isinstance(entries[-1], dict) else {}
+    latest_verification = latest.get("verification") if isinstance(latest.get("verification"), dict) else {}
+    latest_summary = (
+        latest_verification.get("decision_summary")
+        if isinstance(latest_verification.get("decision_summary"), dict)
+        else {}
+    )
+    entry_count = _safe_int(payload.get("entry_count")) or len(entries)
+    return {
+        "schema_version": SERVICE_JOB_REVIEW_HISTORY_SCHEMA_VERSION,
+        "provided": entry_count > 0,
+        "status": "available" if entry_count > 0 else "not_available",
+        "entry_count": entry_count,
+        "latest_verification_status": str(latest_verification.get("status") or "unknown"),
+        "latest_completion_status": str(latest_summary.get("completion_status") or "unknown"),
+        "latest_decision_summary": _public_decision_summary(latest_summary),
+        "local_only_payload_written": entry_count > 0,
+        "path_returned": False,
+        "privacy": {
+            "public_safe": True,
+            "aggregate_only": True,
+            "contains_review_rows": False,
+            "contains_local_ids": False,
+            "contains_paths": False,
+            "contains_filenames": False,
+            "contains_hashes": False,
+            "contains_thumbnails": False,
+            "contains_ocr_text": False,
+            "contains_image_content": False,
         },
     }
 

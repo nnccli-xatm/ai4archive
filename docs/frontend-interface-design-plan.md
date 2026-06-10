@@ -240,8 +240,9 @@ The first production-worker facade is also implemented:
 `POST /api/production/review-actions`, and
 `POST /api/production/finish-export`. These endpoints are public-safe wrappers
 over job summaries. `review-actions` persists the local review decision summary
-inside the service-owned job review directory and returns only aggregate
-verification status; it does not return row-level review records.
+inside the service-owned job review directory, appends local-only review
+history, and returns only aggregate verification/history status; it does not
+return row-level review records or local IDs.
 
 后续对外接口应补充：
 
@@ -249,7 +250,7 @@ verification status; it does not return row-level review records.
 - 按任务 ID 查询阶段状态、进度事件、阻断原因和聚合性能。
 - 按授权令牌读取原图/处理后图预览，不暴露真实本地路径给非本机调用方。
 - 查询 job 级资源配额和排队状态，包括 requested_workers、effective_workers、全局并发上限、当前限流原因和磁盘空间阻断原因。
-- 提交复核动作、读取复核历史、生成验收摘要和移交摘要。
+- 提交复核动作、读取 public-safe 复核历史聚合状态、生成验收摘要和移交摘要；行级复核历史只能留在本地敏感文件中。
 - 管理图像处理规则模板，支持内置模板查询、用户自定义模板保存、参数校验、样例图片 dry-run、模板版本和审批状态。
 - 提交样例参数、TIF 转 JPG、JPG 生成双层 PDF、PDF/OFD 转换、批量重命名、DPI 修改、分件拷贝和 OCR 目录提取任务；所有写操作都应支持 dry-run、冲突检查、执行确认、任务恢复和回滚/补救清单。
 - 输出 OpenAPI/接口文档，声明字段版本、错误码、隐私边界和外部系统调用限制。

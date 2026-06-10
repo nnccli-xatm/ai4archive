@@ -323,7 +323,9 @@ energy delta ratio with limits, without paths or filenames. Risk-grouped local
 processing review packaging now separates background cleanup, readability
 improvement, defect cleanup, and original appearance risk groups. Local-only
 operator preview authorization is now available through service job preview
-endpoints; richer review history and UI remain follow-up work.
+endpoints, and review actions now append to local-only job review history while
+publishing only aggregate history counts; richer review UI remains follow-up
+work.
 
 ### M4：服务 API 和状态恢复
 
@@ -422,7 +424,8 @@ Follow-up, 2026-06-09: the service API now also exposes a production-worker
 facade around the same job boundary: session, setup, async start, progress,
 aggregate review-queue availability, and finish/export readiness. It remains
 public-safe. Review actions now persist local decision summaries and aggregate
-verification under the job's isolated review directory, and local-only preview
+verification under the job's isolated review directory, append to local-only
+review history, and publish only aggregate history counts. Local-only preview
 resources now resolve authorized `job_id`/`local_id`/`source` requests without
 publishing paths or filenames.
 Follow-up, 2026-06-09: service job public summaries now include nested

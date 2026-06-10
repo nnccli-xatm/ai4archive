@@ -57,9 +57,10 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   `POST /api/production/review-actions`, and
   `POST /api/production/finish-export` wrap the same service job boundary,
   reject client-managed `service_root`, persist review decisions only under the
-  isolated local `review` directory, and return only public-safe session, job,
-  review availability, review-decision verification, and finish/export
-  readiness summaries. Confirm local-only preview endpoints
+  isolated local `review` directory, append review actions to
+  `service_job_review_history.json`, and return only public-safe session, job,
+  review availability, review-decision verification, review-history counts, and
+  finish/export readiness summaries. Confirm local-only preview endpoints
   `GET /api/jobs/{job_id}/local-preview/{local_id}` and
   `GET /api/production/preview?job_id=...&local_id=...` read image bytes only
   from authorized input or derivative directories, reject invalid `source`
@@ -190,6 +191,10 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   without private filenames, roots, hashes, OCR text, thumbnails, row-level
   findings, reviewer notes, prompts, provider commands, raw model output,
   object URLs, or sample data.
+- Confirm service `review-actions` writes local-only
+  `service_job_review_history.json` under the job `review` directory and that
+  public service responses expose only entry count, latest verification status,
+  latest completion status, and aggregate decision counts.
 - Confirm `PYTHONPATH=src python3 scripts/validate_frontend_workbench.py
   --json-out /placeholder/private-validation-output/release-candidate/frontend_workbench_validation.json`
   creates a public-safe aggregate frontend workbench validation summary with

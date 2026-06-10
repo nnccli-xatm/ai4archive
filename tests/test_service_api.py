@@ -146,6 +146,10 @@ class ServiceApiCoreTests(unittest.TestCase):
                 capabilities["schemas"]["service_job_review_actions"],
                 "scan-qc.service-job-review-actions.v1",
             )
+            self.assertEqual(
+                capabilities["schemas"]["service_job_review_history"],
+                "scan-qc.service-job-review-history.v1",
+            )
             self.assertGreaterEqual(capabilities["resource_limits"]["max_active_async_jobs"], 1)
             self.assertGreaterEqual(capabilities["resource_limits"]["max_active_workers"], 1)
             self.assertGreaterEqual(capabilities["resource_limits"]["min_free_space_bytes"], 1)
@@ -457,6 +461,10 @@ class ServiceApiCoreTests(unittest.TestCase):
                 },
                 service_root=service_root,
             )
+            progress_after_actions = production_progress_response(
+                service_root=service_root,
+                job_id="job-productionapi001",
+            )
             finish_export = production_finish_export_response(service_root=service_root, job_id="job-productionapi001")
             final_session = production_session_response(service_root=service_root)
             raw = json.dumps(
@@ -467,6 +475,7 @@ class ServiceApiCoreTests(unittest.TestCase):
                     "terminal": terminal,
                     "review_queue": review_queue,
                     "review_actions": review_actions,
+                    "progress_after_actions": progress_after_actions,
                     "finish_export": finish_export,
                     "final_session": final_session,
                 },
@@ -492,6 +501,10 @@ class ServiceApiCoreTests(unittest.TestCase):
             self.assertTrue(review_actions["review_actions"]["saved"])
             self.assertEqual(review_actions["review_actions"]["verification"]["status"], "pass")
             self.assertEqual(review_actions["review_actions"]["decision_summary"]["total_decisions"], 1)
+            self.assertTrue(review_actions["review_actions"]["review_history_written"])
+            self.assertEqual(review_actions["review_actions"]["history"]["entry_count"], 1)
+            self.assertEqual(review_actions["review_actions"]["history"]["latest_verification_status"], "pass")
+            self.assertEqual(progress_after_actions["job"]["review_actions"]["history"]["entry_count"], 1)
             self.assertNotIn("PRQ000001", raw)
             self.assertTrue(
                 (service_root / "jobs" / "job-productionapi001" / "review" / "scan-qc-review-decisions.summary.json").is_file()
@@ -505,6 +518,12 @@ class ServiceApiCoreTests(unittest.TestCase):
                     / "review_decision_verification_summary.json"
                 ).is_file()
             )
+            review_history_path = service_root / "jobs" / "job-productionapi001" / "review" / "service_job_review_history.json"
+            self.assertTrue(review_history_path.is_file())
+            review_history = json.loads(review_history_path.read_text(encoding="utf-8"))
+            self.assertEqual(review_history["schema_version"], "scan-qc.service-job-review-history.v1")
+            self.assertEqual(review_history["entry_count"], 1)
+            self.assertIn("PRQ000001", json.dumps(review_history, ensure_ascii=False))
             self.assertEqual(finish_export["view"], "finish_export")
             self.assertTrue(finish_export["finish_export"]["terminal"])
             self.assertTrue(finish_export["finish_export"]["ready_for_export"])

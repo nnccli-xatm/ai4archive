@@ -141,9 +141,10 @@ The local service API also exposes a production-worker facade with schema
 `POST /api/production/review-actions`, and
 `POST /api/production/finish-export`. These endpoints wrap the same service job
 boundary and return only public-safe session, job, local-review availability,
-review-decision verification, and finish/export readiness summaries. Review
-actions write the local decision summary and verification summary under the
-job's isolated `review` directory, but responses do not return row-level review
+review-decision verification, review-history counts, and finish/export readiness
+summaries. Review actions write the local decision summary, verification
+summary, and append-only `service_job_review_history.json` under the job's
+isolated `review` directory, but responses do not return row-level review
 records, local IDs, local preview resources, client-supplied paths, or raw
 decision rows.
 Preview image bytes are exposed only through local-only sensitive endpoints:

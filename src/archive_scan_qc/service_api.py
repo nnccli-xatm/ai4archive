@@ -25,6 +25,7 @@ from .service_jobs import (
     SERVICE_JOB_MAX_TMP_BYTES,
     SERVICE_JOB_MAX_WORKERS,
     SERVICE_JOB_MIN_FREE_SPACE_BYTES,
+    SERVICE_JOB_REVIEW_HISTORY_SCHEMA_VERSION,
     ServiceJobConfig,
     cancel_service_job,
     create_service_job,
@@ -106,6 +107,7 @@ def service_capabilities() -> dict[str, Any]:
             "service_rule_template_write": SERVICE_TEMPLATE_WRITE_SCHEMA_VERSION,
             "production_session": PRODUCTION_SESSION_SCHEMA_VERSION,
             "service_job_review_actions": "scan-qc.service-job-review-actions.v1",
+            "service_job_review_history": SERVICE_JOB_REVIEW_HISTORY_SCHEMA_VERSION,
         },
         "privacy": service_api_privacy(),
     }
@@ -296,6 +298,7 @@ def _production_response(
             "review_queue_public_summary_supported": True,
             "finish_export_summary_supported": True,
             "review_actions_persisted": True,
+            "review_history_public_summary_supported": True,
         },
         "resource_limits": {
             "max_workers_per_job": SERVICE_JOB_MAX_WORKERS,
