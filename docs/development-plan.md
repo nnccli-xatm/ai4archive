@@ -357,6 +357,10 @@ public-safe 聚合质量基线。
 最新补充：`image-processing-capability-smoke` 的 `status`/`blocking_codes`
 现在把所有声明必需的质量操作纳入聚合 count 门禁；任一关键操作为 0 applied
 files 时会直接失败，并输出明确 blocker。
+2026-06-10 补充：同一 smoke gate 现在还检查关键 public-safe 质量指标最大值；
+操作即使被计数为 applied，只要 deskew、tone、色偏、阴影、污渍、折痕、
+照明、透印、扫描线、褪色文字或文字边缘等证据指标低于门槛，也会进入
+`blocking_codes`。
 最新补充：`image-processing-capability-smoke` 已加入浅色纸面局部背景污渍 fixture，
 要求全链路产生至少一次保守背景污渍弱化，并在 public-safe 聚合质量基线中输出污渍
 亮化幅度和像素变化比例指标。

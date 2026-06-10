@@ -110,6 +110,7 @@ class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
             )
             self.assertGreaterEqual(quality_payload["quality_metrics"]["tone_background_delta"]["max"], 6)
             self.assertGreaterEqual(quality_payload["quality_metrics"]["tone_contrast_delta"]["max"], 40)
+            self.assertGreaterEqual(quality_payload["quality_metrics"]["tone_changed_pixel_ratio"]["max"], 0.05)
             self.assertGreaterEqual(quality_payload["quality_metrics"]["paper_color_cast_delta"]["max"], 4)
             self.assertGreaterEqual(
                 quality_payload["quality_metrics"]["paper_color_cast_changed_pixel_ratio"]["max"],
@@ -208,11 +209,45 @@ class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
                     },
                     audit_counts=audit_counts,
                     audit_privacy=audit_privacy,
+                    quality_summary=_passing_quality_summary(),
                     protected_content_checks=[{"status": "pass"}],
                     source_images_modified=False,
                 )
 
                 self.assertIn(blocker, blockers)
+
+    def test_blocking_codes_require_quality_metric_minima(self) -> None:
+        audit_counts = {field: 1 for field in _REQUIRED_OPERATION_COUNT_BLOCKERS}
+        audit_counts["guardrail_failed_files"] = 0
+        audit_privacy = {
+            "aggregate_only": True,
+            "contains_paths": False,
+            "contains_hashes": False,
+            "contains_thumbnails": False,
+            "contains_ocr_text": False,
+        }
+        quality_summary = _passing_quality_summary()
+        quality_summary["quality_metrics"]["tone_contrast_delta"]["max"] = 39.0
+
+        blockers = _blocking_codes(
+            fixture_count=EXPECTED_SYNTHETIC_FIXTURES,
+            scan_summary={
+                "total_files": EXPECTED_SYNTHETIC_FIXTURES,
+                "openable_files": EXPECTED_SYNTHETIC_FIXTURES,
+            },
+            processing_summary={
+                "processed_files": EXPECTED_SYNTHETIC_FIXTURES,
+                "failed_files": 0,
+                "retry_list_files": 0,
+            },
+            audit_counts=audit_counts,
+            audit_privacy=audit_privacy,
+            quality_summary=quality_summary,
+            protected_content_checks=[{"status": "pass"}],
+            source_images_modified=False,
+        )
+
+        self.assertIn("tone_contrast_delta_below_min", blockers)
 
     def test_processing_quality_signal_distinguishes_no_quality_changes(self) -> None:
         base_audit = {
@@ -253,6 +288,38 @@ class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
         self.assertEqual(changed["status"], "pass")
         self.assertEqual(changed["quality_signal"]["status"], "measured_with_changes")
         self.assertEqual(changed["quality_signal"]["background_cleanup_changed_files"], 1)
+
+
+def _passing_quality_summary() -> dict[str, object]:
+    metric_names = (
+        "deskew_abs_angle_degrees",
+        "max_trim_margin_ratio",
+        "scanner_gutter_max_trim_margin_ratio",
+        "tone_background_delta",
+        "tone_contrast_delta",
+        "tone_changed_pixel_ratio",
+        "paper_color_cast_delta",
+        "paper_color_cast_changed_pixel_ratio",
+        "edge_shadow_delta",
+        "edge_shadow_changed_pixel_ratio",
+        "corner_shadows_delta",
+        "corner_shadows_changed_pixel_ratio",
+        "background_stains_delta",
+        "background_stains_changed_pixel_ratio",
+        "fold_shadows_delta",
+        "illumination_gradient_correction_delta",
+        "illumination_gradient_changed_pixel_ratio",
+        "bleed_through_delta",
+        "scanlines_delta",
+        "faded_text_delta",
+        "text_edges_delta",
+    )
+    return {
+        "quality_metrics": {
+            name: {"count": EXPECTED_SYNTHETIC_FIXTURES, "average": 1.0, "max": 100.0}
+            for name in metric_names
+        }
+    }
 
 
 if __name__ == "__main__":

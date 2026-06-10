@@ -80,6 +80,35 @@ _REQUIRED_OPERATION_COUNT_BLOCKERS = {
     "text_edges_sharpened_files": "text_edges_not_sharpened",
 }
 
+_REQUIRED_QUALITY_METRIC_MINIMA = (
+    ("deskew_abs_angle_degrees", "max", 0.3, "deskew_angle_evidence_below_min"),
+    ("max_trim_margin_ratio", "max", 0.04, "trim_margin_evidence_below_min"),
+    ("scanner_gutter_max_trim_margin_ratio", "max", 0.04, "scanner_gutter_evidence_below_min"),
+    ("tone_background_delta", "max", 6.0, "tone_background_delta_below_min"),
+    ("tone_contrast_delta", "max", 40.0, "tone_contrast_delta_below_min"),
+    ("tone_changed_pixel_ratio", "max", 0.05, "tone_changed_pixel_ratio_below_min"),
+    ("paper_color_cast_delta", "max", 4.0, "paper_color_cast_delta_below_min"),
+    ("paper_color_cast_changed_pixel_ratio", "max", 0.5, "paper_color_cast_changed_ratio_below_min"),
+    ("edge_shadow_delta", "max", 8.0, "edge_shadow_delta_below_min"),
+    ("edge_shadow_changed_pixel_ratio", "max", 0.02, "edge_shadow_changed_ratio_below_min"),
+    ("corner_shadows_delta", "max", 2.5, "corner_shadows_delta_below_min"),
+    ("corner_shadows_changed_pixel_ratio", "max", 0.02, "corner_shadows_changed_ratio_below_min"),
+    ("background_stains_delta", "max", 6.0, "background_stains_delta_below_min"),
+    ("background_stains_changed_pixel_ratio", "max", 0.01, "background_stains_changed_ratio_below_min"),
+    ("fold_shadows_delta", "max", 4.0, "fold_shadows_delta_below_min"),
+    ("illumination_gradient_correction_delta", "max", 8.0, "illumination_gradient_delta_below_min"),
+    (
+        "illumination_gradient_changed_pixel_ratio",
+        "max",
+        0.7,
+        "illumination_gradient_changed_ratio_below_min",
+    ),
+    ("bleed_through_delta", "max", 3.0, "bleed_through_delta_below_min"),
+    ("scanlines_delta", "max", 4.0, "scanlines_delta_below_min"),
+    ("faded_text_delta", "max", 3.0, "faded_text_delta_below_min"),
+    ("text_edges_delta", "max", 3.0, "text_edges_delta_below_min"),
+)
+
 _MIXED_CONTENT_MAX_CHANGED_PIXEL_RATIO = 0.01
 _MIXED_CONTENT_MAX_COLOR_MEAN_ABS_DELTA = 1.0
 _MIXED_CONTENT_MAX_EDGE_ENERGY_DELTA_RATIO = 0.02
@@ -208,6 +237,7 @@ def _build_summary(
         processing_summary=processing_summary,
         audit_counts=audit_counts,
         audit_privacy=audit_privacy,
+        quality_summary=quality_summary,
         protected_content_checks=protected_content_checks,
         source_images_modified=source_images_modified,
     )
@@ -290,6 +320,7 @@ def _blocking_codes(
     processing_summary: dict[str, Any],
     audit_counts: dict[str, Any],
     audit_privacy: dict[str, Any],
+    quality_summary: dict[str, Any] | None = None,
     protected_content_checks: list[dict[str, Any]],
     source_images_modified: bool,
 ) -> list[str]:
@@ -307,6 +338,7 @@ def _blocking_codes(
     for field, blocker in _REQUIRED_OPERATION_COUNT_BLOCKERS.items():
         if _safe_int(audit_counts.get(field)) <= 0:
             blockers.append(blocker)
+    blockers.extend(_quality_metric_blockers(quality_summary))
     if _safe_int(audit_counts.get("guardrail_failed_files")) != 0:
         blockers.append("processing_guardrail_failed_files")
     if source_images_modified:
@@ -318,6 +350,20 @@ def _blocking_codes(
             blockers.append(f"audit_privacy_{field}")
     if any(check.get("status") != "pass" for check in protected_content_checks):
         blockers.append("protected_content_check_failed")
+    return blockers
+
+
+def _quality_metric_blockers(quality_summary: dict[str, Any] | None) -> list[str]:
+    if not isinstance(quality_summary, dict):
+        return ["quality_metric_summary_missing"]
+    metrics = quality_summary.get("quality_metrics")
+    if not isinstance(metrics, dict):
+        return ["quality_metric_summary_missing"]
+    blockers: list[str] = []
+    for metric_name, statistic_name, minimum, blocker in _REQUIRED_QUALITY_METRIC_MINIMA:
+        metric = metrics.get(metric_name)
+        if not isinstance(metric, dict) or _safe_float(metric.get(statistic_name)) < minimum:
+            blockers.append(blocker)
     return blockers
 
 
@@ -721,3 +767,10 @@ def _safe_int(value: Any) -> int:
         return int(value)
     except (TypeError, ValueError):
         return 0
+
+
+def _safe_float(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0

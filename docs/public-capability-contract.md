@@ -245,7 +245,9 @@ The command creates synthetic images in a temporary directory, runs
 fixture counts, processing counts, guardrail counts, operation counts, timing
 summaries, backend counts, and the embedded public-safe quality baseline. The
 smoke status fails with explicit blocking codes if any declared required quality
-operation has zero applied files in the aggregate audit counts. The
+operation has zero applied files in the aggregate audit counts or if the
+matching allowlisted aggregate quality metric maxima stay below required
+evidence thresholds. The
 quality summary records aggregate before/after quality signals, changed-file
 counts, guardrails, and metric averages/maxima, including localized
 small-angle deskew, paired dark-edge trim, scanner-gutter trim, paper

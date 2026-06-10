@@ -168,6 +168,11 @@ Follow-up, 2026-06-10: `image-processing-capability-smoke` now treats declared
 required quality operations as status blockers. If aggregate audit counts show
 zero applied files for a required operation, the public-safe smoke fails with a
 specific blocking code instead of merely publishing a zero count.
+Follow-up, 2026-06-10: the same smoke gate now also checks required public-safe
+quality metric maxima. An operation counted as applied is not enough; key
+deskew, tone, color-cast, shadow, stain, fold, illumination, bleed-through,
+scanline, faded-text, and text-edge metrics must clear minimum evidence
+thresholds or the smoke emits an explicit blocking code.
 
 Production-run update, 2026-06-09: `production-run` now writes
 `processing_quality_summary.json` beside the processing manifest and audit
