@@ -418,10 +418,7 @@ def recover_service_jobs(service_root: Path) -> dict[str, Any]:
         "recovery_issues": _public_index_recovery_issues_payload(recovery_issue_codes),
         "privacy": _public_summary_privacy(),
     }
-    (root / SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON).write_text(
-        json.dumps(index, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    _write_json_atomic(root / SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON, index)
     return index
 
 
@@ -2076,14 +2073,28 @@ def _update_record_state(record: dict[str, Any], state: str, *, recovery_status:
 
 def _write_job_record(job_root: Path, record: dict[str, Any]) -> Path:
     path = job_root / SERVICE_JOB_RECORD_JSON
-    path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _write_json_atomic(path, record)
     return path
 
 
 def _write_public_summary(job_root: Path, summary: dict[str, Any]) -> dict[str, Any]:
     path = job_root / SERVICE_JOB_PUBLIC_SUMMARY_JSON
-    path.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _write_json_atomic(path, summary)
     return summary
+
+
+def _write_json_atomic(path: Path, payload: dict[str, Any]) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        temp_path.replace(path)
+    finally:
+        try:
+            temp_path.unlink()
+        except FileNotFoundError:
+            pass
+    return path
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:

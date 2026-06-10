@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from archive_scan_qc.cli import main
 from archive_scan_qc.processing_quality_summary import PROCESSING_QUALITY_SUMMARY_JSON, SCHEMA_VERSION as QUALITY_SCHEMA_VERSION
@@ -154,7 +154,9 @@ class StableCliRuleTemplateTests(unittest.TestCase):
             derivatives_dir = root / "derivatives"
             metadata_dir = root / "metadata"
             input_dir.mkdir()
-            _write_clean_page(input_dir / "BATCH001_PAGE_0001.png")
+            source = input_dir / "BATCH001_PAGE_0001.png"
+            _write_blurred_text_edges_page(source)
+            source_bytes = source.read_bytes()
 
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
@@ -178,12 +180,19 @@ class StableCliRuleTemplateTests(unittest.TestCase):
             processing_manifest = json.loads(
                 (derivatives_dir / "processing_manifest.json").read_text(encoding="utf-8")
             )
+            record = processing_manifest["files"][0]
+            source_bytes_after = source.read_bytes()
 
         self.assertEqual(exit_code, 0)
+        self.assertEqual(source_bytes_after, source_bytes)
         self.assertEqual(summary["rule_template"]["id"], "print-clean-v1")
         self.assertEqual(processing_manifest["rule_template"]["id"], "print-clean-v1")
         self.assertEqual(summary["options"]["processing_profile"], "print_clean")
         self.assertEqual(processing_manifest["options"]["processing_profile"], "print_clean")
+        self.assertTrue(record["text_edges_sharpened"])
+        self.assertEqual(record["text_edges_reason_code"], "applied_print_clean_blurred_text_edges")
+        self.assertGreater(record["text_edges_delta"], 10.0)
+        self.assertGreater(record["text_edges_edge_energy_after"], record["text_edges_edge_energy_before"])
 
     def test_production_run_photo_mixed_safe_template_keeps_strong_cleanup_disabled(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-cli-photo-safe-template-") as temp_dir:
@@ -487,6 +496,26 @@ def _write_clean_page(path: Path) -> None:
         y = 140 + index * 45
         draw.line((100, y, 540, y), fill=(40, 40, 40), width=2)
     image.save(path, dpi=(300, 300))
+
+
+def _write_blurred_text_edges_page(path: Path) -> None:
+    image = Image.new("RGB", (420, 560), (245, 245, 242))
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default()
+    lines = (
+        "ARCHIVE QUALITY CONTROL PAGE",
+        "TYPED TEXT EDGES ARE SOFT",
+        "REVIEW SHOULD STAY SAFE",
+        "PRINTED STROKES ONLY",
+        "LOCAL BATCH SAMPLE",
+        "NEUTRAL LIGHT PAPER",
+        "MILD BLUR CASE",
+        "STABLE ROW STRUCTURE",
+        "FINAL TEXT LINE",
+    )
+    for index, line in enumerate(lines):
+        draw.text((64, 100 + index * 34), line, fill=(72, 72, 72), font=font)
+    image.filter(ImageFilter.GaussianBlur(radius=0.75)).save(path, dpi=(300, 300))
 
 
 def _write_mixed_photo_safe_page(path: Path) -> None:

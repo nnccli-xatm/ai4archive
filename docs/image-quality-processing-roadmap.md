@@ -297,6 +297,11 @@ edge sharpening for the same print/use-copy target. The regression compares the
 same synthetic page under `standard` and `print_clean`, requires higher edge
 delta and edge-energy gain for the print-clean derivative, and keeps the local
 source, public-safe audit, and combination/cumulative guardrails unchanged.
+Follow-up, 2026-06-10: the production CLI contract for
+`production-run --rule-template print-clean-v1` now runs a stable blurred text
+page and requires the processing manifest to show the `print_clean` profile plus
+`applied_print_clean_blurred_text_edges` evidence, while the source image bytes
+remain unchanged.
 
 Follow-up, 2026-06-09: the synthetic smoke fixtures now also cover a safe narrow
 fold-shadow band, a diffuse reverse-side bleed-through ghost, and a segmented
@@ -523,6 +528,10 @@ Follow-up, 2026-06-10: legacy service-job checkpoints that do not yet contain
 `processing_profile` are recovered by deriving the public-safe profile from the
 built-in template ID. `print-clean-v1` recovers as `print_clean`; custom or
 unknown snapshots fall back to `standard`.
+Follow-up, 2026-06-10: service-job checkpoint, per-job public summary, and root
+index public summary writes now use same-directory temporary JSON files followed
+by atomic replace. This prevents async status polling from reading empty or
+partially written state files while a worker is updating checkpoints.
 Follow-up, 2026-06-09: the service API now also exposes a production-worker
 facade around the same job boundary: session, setup, async start, progress,
 aggregate review-queue availability, and finish/export readiness. It remains

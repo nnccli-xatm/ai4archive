@@ -299,6 +299,9 @@ summary 只暴露模板 ID、基础模板 ID、processing mode 和 profile，不
 2026-06-10 补充：旧 service job checkpoint 如果缺少 `processing_profile`，
 恢复 public summary 时会根据内置模板 ID 回推出 public-safe profile；`print-clean-v1`
 会恢复为 `print_clean`，自定义或未知快照回退为 `standard`。
+2026-06-10 补充：service job checkpoint、job public summary 和 root index
+public summary 写入改为同目录临时 JSON 后原子替换，避免 async worker 写状态时
+轮询端读到空文件或半写 JSON。
 
 ## 6. 阶段 2：图像处理规则模板系统
 
@@ -370,6 +373,9 @@ standard/profile 差异。
 2026-06-10 补充：同一 `print_clean` profile 现在也增强稳定模糊正文边缘锐化；
 standard 仍保持原保守强度，print-clean 在相同候选筛选和内容保护下提高边缘 delta
 与 edge-energy 增益，并通过源文件不变、public-safe audit 和组合/累计 guardrail 回归。
+2026-06-10 补充：`production-run --rule-template print-clean-v1` 也已覆盖
+稳定模糊正文页端到端回归，处理 manifest 必须记录 `print_clean` profile，并产生
+`applied_print_clean_blurred_text_edges` 的文字边缘锐化证据，同时源文件字节不变。
 `image-processing-capability-smoke` 也开始要求折痕阴影、保守透印弱化和分段扫描线
 在全链路 synthetic fixture 上至少各有一次可量化生效。
 2026-06-10 补充：保守透印弱化已加入 broad thin-paper 窄路径，只在稳定浅纸、
