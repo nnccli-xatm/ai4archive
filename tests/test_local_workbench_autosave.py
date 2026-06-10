@@ -1742,6 +1742,12 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertEqual(controller.preview_path("PRQ000001", "original")[1], "original")
             self.assertEqual(controller.preview_path("PRQ000001", "processed")[1], "processed")
             job_id = status["job_id"]
+            review_queue = controller.production_review_queue(job_id)
+            self.assertEqual(review_queue["view"], "review_queue")
+            self.assertEqual(review_queue["review_queue"]["review_item_count"], 2)
+            self.assertTrue(review_queue["review_queue"]["local_only_artifact"])
+            self.assertEqual(review_queue["local_review_queue"]["items"][0]["preview_source"], "comparison")
+            self.assertTrue(review_queue["privacy"]["local_only"])
             review_item = controller.production_review_item(job_id, "PRQ000001")
             self.assertEqual(review_item["schema_version"], "scan-qc.service-job-local-review-item.v1")
             self.assertEqual(review_item["local_id"], "PRQ000001")
@@ -1783,6 +1789,14 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             try:
                 status = json.loads(urlopen(f"{base_url}/api/status", timeout=5).read().decode("utf-8"))
                 job_id = status["job_id"]
+                review_queue = json.loads(
+                    urlopen(
+                        f"{base_url}/api/production/review-queue?job_id={job_id}",
+                        timeout=5,
+                    )
+                    .read()
+                    .decode("utf-8")
+                )
                 review_item = json.loads(
                     urlopen(
                         f"{base_url}/api/production/review-item?job_id={job_id}&local_id=PRQ000001",
@@ -1798,7 +1812,7 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
                 preview_body = preview_response.read()
                 with self.assertRaises(HTTPError) as raised:
                     urlopen(
-                        f"{base_url}/api/production/preview?job_id=job-local-workbench-stale&local_id=PRQ000001&source=processed",
+                        f"{base_url}/api/production/review-queue?job_id=job-local-workbench-stale",
                         timeout=5,
                     )
             finally:
@@ -1806,6 +1820,11 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=5)
 
+            self.assertEqual(review_queue["view"], "review_queue")
+            self.assertEqual(review_queue["review_queue"]["review_item_count"], 1)
+            self.assertTrue(review_queue["review_queue"]["local_only_artifact"])
+            self.assertEqual(review_queue["local_review_queue"]["items"][0]["preview_source"], "comparison")
+            self.assertTrue(review_queue["privacy"]["local_only"])
             self.assertEqual(review_item["local_id"], "PRQ000001")
             self.assertEqual(review_item["item"]["relative_path"], "nested/a.png")
             self.assertTrue(review_item["privacy"]["local_only"])

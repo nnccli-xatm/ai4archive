@@ -366,6 +366,53 @@ class WorkbenchController:
             },
         }
 
+    def production_review_queue(self, job_id: str) -> dict[str, Any]:
+        self._require_local_job_id(job_id)
+        with self._lock:
+            metadata_dir = self.metadata_dir
+        if metadata_dir is None:
+            raise ValueError("local_workbench_not_configured")
+        queue = self._queue_with_preview_sources(metadata_dir)
+        available = isinstance(queue, dict)
+        items = queue.get("items") if isinstance(queue, dict) else []
+        if not isinstance(items, list):
+            items = []
+        summary = queue.get("summary") if isinstance(queue, dict) and isinstance(queue.get("summary"), dict) else {}
+        review_item_count = _safe_nonnegative_int(summary.get("total_items") if summary else len(items))
+        by_source = summary.get("items_by_source") if isinstance(summary.get("items_by_source"), dict) else {}
+        by_action = (
+            summary.get("items_by_suggested_action")
+            if isinstance(summary.get("items_by_suggested_action"), dict)
+            else {}
+        )
+        group_counts = (
+            summary.get("processing_review_group_counts")
+            if isinstance(summary.get("processing_review_group_counts"), dict)
+            else {}
+        )
+        return {
+            "schema_version": SERVER_SCHEMA,
+            "view": "review_queue",
+            "job_id": job_id,
+            "review_queue": {
+                "available": available,
+                "review_item_count": review_item_count,
+                "by_source": _int_dict(by_source),
+                "by_recommended_action": _int_dict(by_action),
+                "processing_review_group_counts": _int_dict(group_counts),
+                "local_review_artifact_id": "production-review-queue" if available else None,
+                "local_only_artifact": available,
+            },
+            "local_review_queue": queue,
+            "privacy": {
+                "local_only": True,
+                "public_safe": False,
+                "contains_review_rows": available,
+                "contains_paths": available,
+                "contains_image_bytes": False,
+            },
+        }
+
     def _require_local_job_id(self, job_id: str) -> None:
         safe_id = str(job_id or "").strip()
         with self._lock:
@@ -817,6 +864,9 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/production/review-item":
             self._serve_production_review_item(parse_qs(parsed.query))
             return
+        if parsed.path == "/api/production/review-queue":
+            self._serve_production_review_queue(parse_qs(parsed.query))
+            return
         if parsed.path == "/api/production/preview":
             self._serve_production_preview(parse_qs(parsed.query))
             return
@@ -906,6 +956,14 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
                 _first_query_value(params, "job_id"),
                 _first_query_value(params, "local_id"),
             )
+        except ValueError as exc:
+            self._send_json({"error_zh": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+        self._send_json(payload)
+
+    def _serve_production_review_queue(self, params: dict[str, list[str]]) -> None:
+        try:
+            payload = self.workbench_controller.production_review_queue(_first_query_value(params, "job_id"))
         except ValueError as exc:
             self._send_json({"error_zh": str(exc)}, HTTPStatus.BAD_REQUEST)
             return
@@ -2904,6 +2962,12 @@ def _safe_nonnegative_int(value: Any) -> int:
         return max(0, int(value or 0))
     except (TypeError, ValueError):
         return 0
+
+
+def _int_dict(payload: Any) -> dict[str, int]:
+    if not isinstance(payload, dict):
+        return {}
+    return {str(key): _safe_nonnegative_int(value) for key, value in payload.items()}
 
 
 def _safe_optional_nonnegative_int(value: Any) -> int | None:

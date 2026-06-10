@@ -324,8 +324,10 @@ class ProductionWorkbenchRegressionGuardTests(unittest.TestCase):
             self.assertIn(required, html)
         for required in [
             'elif self.path == "/api/open-output-folder":',
+            'parsed.path == "/api/production/review-queue"',
             'parsed.path == "/api/production/review-item"',
             'parsed.path == "/api/production/preview"',
+            "production_review_queue",
             "production_review_item",
             "production_preview_path",
             "X-AI4-Local-Only",

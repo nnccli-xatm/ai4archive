@@ -352,9 +352,10 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 - 生产工作台原型已拆出 `productionApiRoutes`、`localBridgeRoutes`、`apiPath`、
   `productionApiPath` 和 `localBridgePath`，review item、preview 以及现有
   local bridge 调用均通过 client route helper 生成，不再在调用点散落硬编码路径。
-- 本地 loopback workbench 已提供 `/api/production/review-item` 和
-  `/api/production/preview` 兼容路由，使用当前 local job id 校验批次边界，
-  并以 local-only header 返回预览图片，避免 route client 改造后回退到旧
+- 本地 loopback workbench 已提供 `/api/production/review-queue`、
+  `/api/production/review-item` 和 `/api/production/preview` 兼容路由，
+  使用当前 local job id 校验批次边界，并以 local-only header 返回预览图片，
+  避免 route client 改造后回退到旧
   `/api/preview/` 调用。
 - 前端守护测试已覆盖 production facade route helper、local bridge route helper
   和 local-only review/preview URL 构造，后续可逐项把 setup/start/progress、
