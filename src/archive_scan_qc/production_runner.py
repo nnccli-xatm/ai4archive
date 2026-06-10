@@ -571,9 +571,11 @@ def _write_terminal_run_failure(
 
 
 def _failure_payload(exc: BaseException, current_step: str | None) -> dict[str, Any]:
+    kind = "run_interrupted" if isinstance(exc, KeyboardInterrupt) else "run_failed"
     return {
         "schema_version": "scan-qc.production-run-failure.v1",
         "aggregate_only": True,
+        "kind": kind,
         "stage": current_step,
         "error_type": type(exc).__name__,
         "message": str(exc),

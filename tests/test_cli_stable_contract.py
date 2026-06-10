@@ -10,6 +10,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
@@ -882,6 +883,36 @@ class StableCliFailureStateTests(unittest.TestCase):
             self.assertEqual(progress["steps"][0]["state"], "failed")
             self.assertEqual(progress["failure"]["stage"], "scan")
             self.assertEqual(summary["status"], "failed")
+            self.assertEqual(summary["failure"]["stage"], "scan")
+            self.assertFalse(summary["source_images_modified"])
+
+    def test_production_run_writes_interrupted_progress_and_summary_on_keyboard_interrupt(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-cli-interrupted-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            _write_clean_page(input_dir / "page.png")
+            config = ProductionRunConfig(
+                input_dir=input_dir,
+                derivative_output_dir=derivatives_dir,
+                metadata_output_dir=metadata_dir,
+                workers=1,
+            )
+
+            with patch("archive_scan_qc.production_runner.scan_batch", side_effect=KeyboardInterrupt):
+                with self.assertRaises(KeyboardInterrupt):
+                    run_production_folder(config)
+
+            progress = json.loads((metadata_dir / PRODUCTION_RUN_PROGRESS_JSON).read_text(encoding="utf-8"))
+            summary = json.loads((metadata_dir / PRODUCTION_RUN_SUMMARY_JSON).read_text(encoding="utf-8"))
+
+            self.assertEqual(progress["state"], "interrupted")
+            self.assertEqual(progress["steps"][0]["state"], "interrupted")
+            self.assertEqual(progress["failure"]["stage"], "scan")
+            self.assertEqual(summary["status"], "interrupted")
+            self.assertEqual(summary["failure"]["kind"], "run_interrupted")
             self.assertEqual(summary["failure"]["stage"], "scan")
             self.assertFalse(summary["source_images_modified"])
 

@@ -19,7 +19,7 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 
 ### DEV-001 CLI 稳定批量服务版
 
-状态：`in-progress`
+状态：`done`
 
 范围：
 
@@ -35,9 +35,16 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 - public capability contract 能生成 public-safe JSON。
 - release checklist 覆盖安装、运行、失败、恢复和隐私边界。
 
+已完成证据：
+
+- `production-cli`、`privacy-boundary` 和 `external-validation` 分组在当前分支通过。
+- `public-capability-contract` CLI 和机器可读 contract 覆盖稳定 CLI、artifact
+  schema、public-safe aggregate artifact 与服务边界。
+- release checklist 已覆盖 CLI、服务、失败/恢复、源图只读和隐私边界。
+
 ### DEV-002 production-run 终态、停滞识别和断点复跑
 
-状态：`in-progress`
+状态：`done`
 
 范围：
 
@@ -51,9 +58,18 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 - 输入文件处理前后 hash 一致。
 - `GET /api/production/finish-export` 给出 public-safe blocking_codes。
 
+已完成证据：
+
+- `production-run` 失败和 KeyboardInterrupt 中断均写 terminal progress/summary，
+  且 `source_images_modified=false`。
+- service job recovery 覆盖 stale running、无 progress running、缺失 terminal
+  summary 的 `needs_recovery`，以及 retryable/non-retryable 状态。
+- `finish-export` 对 non-terminal、cancelled、needs_recovery 和 review-gate block
+  均返回 public-safe blocking codes。
+
 ### DEV-003 Windows 中文路径和源文件只读安全
 
-状态：`in-progress`
+状态：`done`
 
 范围：
 
@@ -72,6 +88,8 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 - 服务 API 已覆盖中文/空格路径、source hash unchanged 和 public response 脱敏。
 - CLI `production-run` 已覆盖中文/空格路径下处理成功、source hash unchanged、
   `source_images_modified=false` 和派生图写入独立输出目录。
+- 异步状态 JSON 写入已对 Windows transient file lock 做短重试，测试等待后台
+  worker 收尾后再清理临时目录。
 
 ### DEV-004 CLI 并发隔离
 
