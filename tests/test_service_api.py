@@ -160,6 +160,10 @@ class ServiceApiCoreTests(unittest.TestCase):
                 capabilities["schemas"]["service_job_review_history"],
                 "scan-qc.service-job-review-history.v1",
             )
+            self.assertEqual(
+                capabilities["schemas"]["service_job_event_log"],
+                "scan-qc.service-job-event-log.v1",
+            )
             self.assertGreaterEqual(capabilities["resource_limits"]["max_active_async_jobs"], 1)
             self.assertGreaterEqual(capabilities["resource_limits"]["max_active_workers"], 1)
             self.assertGreaterEqual(capabilities["resource_limits"]["min_free_space_bytes"], 1)

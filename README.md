@@ -1584,6 +1584,10 @@ missing, and added file totals. The public summary never records the hashes,
 file list, paths, or filenames.
 The core also supports a public-safe `cancelled` terminal state for jobs that
 are stopped before completion; terminal jobs cannot be run again accidentally.
+Each job also writes a local-only `service_job_event_log.json` under its
+isolated `logs` directory for service state/review events. Public summaries
+only expose the event count, latest event type, latest state, latest recovery
+status, and privacy flags; they never return event rows or the log path.
 Job creation enforces a per-job worker limit and reports the non-sensitive
 per-job worker, global active-worker, minimum free-space, and per-job temp
 quotas in public summaries.

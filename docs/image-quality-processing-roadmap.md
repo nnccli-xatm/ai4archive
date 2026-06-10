@@ -402,6 +402,10 @@ Follow-up, 2026-06-09: service job roots now reserve an isolated `review`
 subdirectory alongside `metadata`, `derivatives`, `tmp`, `checkpoints`, and
 `logs`. Public summaries expose only the review isolation boolean; local review
 packages remain path-bearing local-only artifacts.
+Follow-up, 2026-06-10: the isolated `logs` directory now stores a local-only
+`service_job_event_log.json` for service state/review events. Public summaries
+publish only aggregate event count/latest event metadata and never expose event
+rows or log paths.
 Follow-up, 2026-06-09: completed service jobs now write the local-only
 processing review package and production review queue into that isolated
 `review` directory. Public summaries expose only review availability and

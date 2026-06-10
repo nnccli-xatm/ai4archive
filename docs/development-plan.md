@@ -160,6 +160,9 @@ review UI remains follow-up work.
 The service API also exposes job-level and production-facade review-history
 queries that return only aggregate history counts/latest verification status,
 without local IDs or row-level decision records.
+Service jobs now write local-only event logs under the isolated `logs`
+directory and expose only public-safe event counts/latest event metadata in the
+public summary.
 Per-job roots now include separate `metadata`、`derivatives`、`tmp`、
 `checkpoints`、`review` 和 `logs` 子目录，public summary 只暴露对应隔离
 布尔值，不暴露本地路径。

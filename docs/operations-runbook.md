@@ -351,6 +351,10 @@ Service job creation rejects worker counts below 1 or above the configured
 per-job limit; the public summary includes only the requested worker count,
 per-job limit, global active-worker limit, minimum free-space threshold, and
 per-job temp limit, not local paths or process details.
+Each service job writes a local-only `service_job_event_log.json` under the
+isolated `logs` directory. Use the public `events` summary for monitoring:
+event count, latest event type, latest state, and latest recovery status only.
+Do not publish event rows or the local log path.
 When recovering the full service root, read
 `service_job_index_public_summary.json` for aggregate job state counts and
 per-job public summaries; it is designed for polling without exposing local

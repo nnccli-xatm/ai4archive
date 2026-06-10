@@ -50,11 +50,13 @@ LOCAL_REVIEW_ARTIFACT_SCHEMA_VERSION = "scan-qc.service-job-local-review-artifac
 LOCAL_PREVIEW_SCHEMA_VERSION = "scan-qc.service-job-local-preview.v1"
 SERVICE_JOB_REVIEW_ACTIONS_SCHEMA_VERSION = "scan-qc.service-job-review-actions.v1"
 SERVICE_JOB_REVIEW_HISTORY_SCHEMA_VERSION = "scan-qc.service-job-review-history.v1"
+SERVICE_JOB_EVENT_LOG_SCHEMA_VERSION = "scan-qc.service-job-event-log.v1"
 SERVICE_JOB_RECORD_JSON = "service_job.json"
 SERVICE_JOB_PUBLIC_SUMMARY_JSON = "service_job_public_summary.json"
 SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON = "service_job_index_public_summary.json"
 SERVICE_JOB_REVIEW_DECISIONS_JSON = "scan-qc-review-decisions.summary.json"
 SERVICE_JOB_REVIEW_HISTORY_JSON = "service_job_review_history.json"
+SERVICE_JOB_EVENT_LOG_JSON = "service_job_event_log.json"
 SERVICE_JOBS_DIRNAME = "jobs"
 JOB_ID_PATTERN = re.compile(r"^job-[A-Za-z0-9][A-Za-z0-9_-]{2,80}$")
 TERMINAL_STATES = {"finished", "needs_review", "failed", "interrupted", "cancelled"}
@@ -240,6 +242,7 @@ def create_service_job(config: ServiceJobConfig, *, job_id: str | None = None) -
             "checkpoint_files": [SERVICE_JOB_RECORD_JSON, SERVICE_JOB_PUBLIC_SUMMARY_JSON],
         },
     }
+    _append_service_job_event(record, "job_created", state="created", recovery_status="created")
     _write_job_record(job_root, record)
     return _write_public_summary(job_root, _public_summary_from_record(record))
 
@@ -587,6 +590,12 @@ def write_service_job_review_actions(
         "verification": _public_review_action_verification(verification),
         "history": history_summary,
     }
+    _append_service_job_event(
+        record,
+        "review_actions_recorded",
+        state=str(record.get("state") or "unknown"),
+        recovery_status=str((record.get("recovery") or {}).get("status") or "unknown"),
+    )
     _write_job_record(job_root, record)
     return {
         "schema_version": SERVICE_JOB_REVIEW_ACTIONS_SCHEMA_VERSION,
@@ -922,9 +931,11 @@ def _public_summary_from_record(
             "tmp_isolated": bool(record["isolation"]["tmp_isolated"]),
             "checkpoint_isolated": bool(record["isolation"]["checkpoint_isolated"]),
             "review_isolated": bool(record["isolation"].get("review_isolated")),
+            "log_isolated": bool(record["isolation"].get("log_isolated")),
         },
         "recovery": _public_recovery_payload(record.get("recovery")),
         "retry": _public_retry_payload(record),
+        "events": _public_event_log_payload(record.get("event_log")),
         "quality": _public_quality_payload(production_summary),
         "timings": _public_timings_payload(production_summary, production_progress),
         "source_integrity": source_integrity,
@@ -1136,6 +1147,97 @@ def _public_review_history_payload(history: Any) -> dict[str, Any]:
             "aggregate_only": True,
             "contains_review_rows": False,
             "contains_local_ids": False,
+            "contains_paths": False,
+            "contains_filenames": False,
+            "contains_hashes": False,
+            "contains_thumbnails": False,
+            "contains_ocr_text": False,
+            "contains_image_content": False,
+        },
+    }
+
+
+def _append_service_job_event(
+    record: dict[str, Any],
+    event_type: str,
+    *,
+    state: str,
+    recovery_status: str,
+) -> dict[str, Any]:
+    job_root = _job_root_from_record(record)
+    log_dir = Path(str(record["paths"]["log_dir"])).resolve()
+    _require_within(log_dir, job_root)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = (log_dir / SERVICE_JOB_EVENT_LOG_JSON).resolve()
+    _require_within(log_path, job_root)
+    previous = _read_json(log_path) if log_path.is_file() else {}
+    previous_events = previous.get("events") if isinstance(previous, dict) else None
+    events = list(previous_events) if isinstance(previous_events, list) else []
+    recorded_at = _utc_now()
+    event = {
+        "event_id": f"service-event-{len(events) + 1:06d}",
+        "recorded_at": recorded_at,
+        "event_type": str(event_type),
+        "state": str(state),
+        "recovery_status": str(recovery_status),
+    }
+    events.append(event)
+    event_log = {
+        "schema_version": SERVICE_JOB_EVENT_LOG_SCHEMA_VERSION,
+        "job_id": str(record.get("job_id") or ""),
+        "updated_at": recorded_at,
+        "event_count": len(events),
+        "local_only": True,
+        "sensitive": True,
+        "public_safe": False,
+        "events": events,
+        "privacy": {
+            "local_only": True,
+            "public_safe": False,
+            "contains_event_rows": True,
+            "contains_paths": False,
+            "contains_filenames": False,
+            "contains_hashes": False,
+            "contains_thumbnails": False,
+            "contains_ocr_text": False,
+            "contains_image_content": False,
+            "path_returned_to_http_client": False,
+        },
+    }
+    log_path.write_text(
+        json.dumps(event_log, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    record["event_log"] = {
+        "schema_version": SERVICE_JOB_EVENT_LOG_SCHEMA_VERSION,
+        "provided": True,
+        "updated_at": recorded_at,
+        "event_count": len(events),
+        "latest_event_type": str(event_type),
+        "latest_state": str(state),
+        "latest_recovery_status": str(recovery_status),
+        "artifacts": {"event_log": str(log_path)},
+    }
+    return record["event_log"]
+
+
+def _public_event_log_payload(event_log: Any) -> dict[str, Any]:
+    payload = event_log if isinstance(event_log, dict) else {}
+    provided = payload.get("provided") is True
+    return {
+        "schema_version": SERVICE_JOB_EVENT_LOG_SCHEMA_VERSION,
+        "provided": provided,
+        "status": "available" if provided else "not_available",
+        "event_count": _safe_int(payload.get("event_count")) or 0,
+        "latest_event_type": str(payload.get("latest_event_type") or "unknown"),
+        "latest_state": str(payload.get("latest_state") or "unknown"),
+        "latest_recovery_status": str(payload.get("latest_recovery_status") or "unknown"),
+        "local_only_payload_written": provided,
+        "path_returned": False,
+        "privacy": {
+            "public_safe": True,
+            "aggregate_only": True,
+            "contains_event_rows": False,
             "contains_paths": False,
             "contains_filenames": False,
             "contains_hashes": False,
@@ -1733,10 +1835,14 @@ def _isolation_payload(service_root: Path, job_root: Path, directories: dict[str
         "tmp_isolated": directories["tmp"].parent == job_root,
         "checkpoint_isolated": directories["checkpoints"].parent == job_root,
         "review_isolated": directories["review"].parent == job_root,
+        "log_isolated": directories["logs"].parent == job_root,
     }
 
 
 def _update_record_state(record: dict[str, Any], state: str, *, recovery_status: str) -> None:
+    previous_state = str(record.get("state") or "")
+    previous_recovery = record.get("recovery") if isinstance(record.get("recovery"), dict) else {}
+    previous_recovery_status = str(previous_recovery.get("status") or "")
     record["state"] = state
     record["updated_at"] = _utc_now()
     record["recovery"] = {
@@ -1744,6 +1850,8 @@ def _update_record_state(record: dict[str, Any], state: str, *, recovery_status:
         "status": recovery_status,
         "resume_supported": True,
     }
+    if previous_state != state or previous_recovery_status != recovery_status:
+        _append_service_job_event(record, "state_changed", state=state, recovery_status=recovery_status)
 
 
 def _write_job_record(job_root: Path, record: dict[str, Any]) -> Path:

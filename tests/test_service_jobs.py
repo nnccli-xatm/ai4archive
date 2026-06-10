@@ -18,6 +18,7 @@ from archive_scan_qc.service_jobs import (
     SERVICE_JOB_MAX_ACTIVE_WORKERS,
     SERVICE_JOB_MAX_TMP_BYTES,
     SERVICE_JOB_MIN_FREE_SPACE_BYTES,
+    SERVICE_JOB_EVENT_LOG_JSON,
     SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON,
     SERVICE_JOB_PUBLIC_SUMMARY_JSON,
     SERVICE_JOB_RECORD_JSON,
@@ -63,6 +64,14 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertTrue(summary["isolation"]["derivatives_isolated"])
             self.assertTrue(summary["isolation"]["tmp_isolated"])
             self.assertTrue(summary["isolation"]["review_isolated"])
+            self.assertTrue(summary["isolation"]["log_isolated"])
+            self.assertEqual(summary["events"]["schema_version"], "scan-qc.service-job-event-log.v1")
+            self.assertTrue(summary["events"]["provided"])
+            self.assertEqual(summary["events"]["event_count"], 1)
+            self.assertEqual(summary["events"]["latest_event_type"], "job_created")
+            self.assertEqual(summary["events"]["latest_state"], "created")
+            self.assertFalse(summary["events"]["path_returned"])
+            self.assertFalse(summary["events"]["privacy"]["contains_event_rows"])
             self.assertEqual(summary["resource_limits"]["max_workers_per_job"], SERVICE_JOB_MAX_WORKERS)
             self.assertEqual(summary["resource_limits"]["max_active_workers"], SERVICE_JOB_MAX_ACTIVE_WORKERS)
             self.assertEqual(summary["resource_limits"]["min_free_space_bytes"], SERVICE_JOB_MIN_FREE_SPACE_BYTES)
@@ -73,6 +82,12 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertEqual(Path(record["paths"]["tmp_dir"]).parent, job_root)
             self.assertEqual(Path(record["paths"]["review_dir"]).parent, job_root)
             self.assertTrue((job_root / "review").is_dir())
+            self.assertTrue((job_root / "logs" / SERVICE_JOB_EVENT_LOG_JSON).is_file())
+            event_log = json.loads((job_root / "logs" / SERVICE_JOB_EVENT_LOG_JSON).read_text(encoding="utf-8"))
+            self.assertTrue(event_log["local_only"])
+            self.assertFalse(event_log["public_safe"])
+            self.assertEqual(event_log["event_count"], 1)
+            self.assertEqual(event_log["events"][0]["event_type"], "job_created")
             self.assertEqual(record["resource_limits"]["max_workers_per_job"], SERVICE_JOB_MAX_WORKERS)
             self.assertEqual(record["resource_limits"]["max_active_workers"], SERVICE_JOB_MAX_ACTIVE_WORKERS)
             self.assertEqual(record["resource_limits"]["min_free_space_bytes"], SERVICE_JOB_MIN_FREE_SPACE_BYTES)
@@ -86,6 +101,7 @@ class ServiceJobBoundaryTests(unittest.TestCase):
                 "private_page_001",
                 "sha256",
                 SERVICE_JOB_RECORD_JSON,
+                SERVICE_JOB_EVENT_LOG_JSON,
             )
 
     def test_create_rejects_overlapping_service_root_and_input_dir(self) -> None:
@@ -237,6 +253,11 @@ class ServiceJobBoundaryTests(unittest.TestCase):
 
             self.assertEqual(summary["state"], "finished")
             self.assertEqual(summary["recovery"]["status"], "terminal_summary_recovered")
+            self.assertTrue(summary["events"]["provided"])
+            self.assertGreaterEqual(summary["events"]["event_count"], 3)
+            self.assertEqual(summary["events"]["latest_event_type"], "state_changed")
+            self.assertEqual(summary["events"]["latest_state"], "finished")
+            self.assertFalse(summary["events"]["privacy"]["contains_event_rows"])
             self.assertEqual(summary["counts"]["total_files"], 1)
             self.assertEqual(summary["counts"]["processed_files"], 1)
             self.assertEqual(summary["counts"]["resumed_files"], 0)
@@ -264,6 +285,10 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertTrue((job_root / "review" / "processing_review_package.json").is_file())
             self.assertTrue((job_root / "review" / "processing_review_package.html").is_file())
             self.assertTrue((job_root / "review" / "production_review_queue.json").is_file())
+            self.assertTrue((job_root / "logs" / SERVICE_JOB_EVENT_LOG_JSON).is_file())
+            event_log = json.loads((job_root / "logs" / SERVICE_JOB_EVENT_LOG_JSON).read_text(encoding="utf-8"))
+            self.assertGreaterEqual(event_log["event_count"], 3)
+            self.assertTrue(event_log["privacy"]["contains_event_rows"])
             review_package = json.loads(
                 (job_root / "review" / "processing_review_package.json").read_text(encoding="utf-8")
             )

@@ -153,6 +153,9 @@ records, local IDs, local preview resources, client-supplied paths, or raw
 decision rows.
 The dedicated review-history endpoints return the same aggregate history status
 without requiring clients to read local history JSON directly.
+Service job event logs are local-only under the isolated `logs` directory. Public
+summaries may expose only event count, latest event type, latest state, latest
+recovery status, and privacy flags.
 Preview image bytes are exposed only through local-only sensitive endpoints:
 `GET /api/jobs/{job_id}/local-preview/{local_id}?source=original|processed` and
 `GET /api/production/preview?job_id=...&local_id=...&source=...`. They resolve

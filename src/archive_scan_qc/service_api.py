@@ -24,6 +24,7 @@ from .service_jobs import (
     SERVICE_JOB_MAX_ACTIVE_WORKERS,
     SERVICE_JOB_MAX_TMP_BYTES,
     SERVICE_JOB_MAX_WORKERS,
+    SERVICE_JOB_EVENT_LOG_SCHEMA_VERSION,
     SERVICE_JOB_MIN_FREE_SPACE_BYTES,
     SERVICE_JOB_REVIEW_HISTORY_SCHEMA_VERSION,
     ServiceJobConfig,
@@ -111,6 +112,7 @@ def service_capabilities() -> dict[str, Any]:
             "production_session": PRODUCTION_SESSION_SCHEMA_VERSION,
             "service_job_review_actions": "scan-qc.service-job-review-actions.v1",
             "service_job_review_history": SERVICE_JOB_REVIEW_HISTORY_SCHEMA_VERSION,
+            "service_job_event_log": SERVICE_JOB_EVENT_LOG_SCHEMA_VERSION,
         },
         "privacy": service_api_privacy(),
     }
