@@ -3,6 +3,9 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -841,6 +844,104 @@ class StableCliFailureStateTests(unittest.TestCase):
             self.assertEqual(summary["status"], "failed")
             self.assertEqual(summary["failure"]["stage"], "scan")
             self.assertFalse(summary["source_images_modified"])
+
+
+class StableCliConcurrencyTests(unittest.TestCase):
+    def test_two_production_run_cli_processes_keep_outputs_isolated(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-cli-concurrent-") as temp_dir:
+            root = Path(temp_dir)
+            input_one = root / "input-one"
+            input_two = root / "input-two"
+            derivatives_one = root / "derivatives-one"
+            derivatives_two = root / "derivatives-two"
+            metadata_one = root / "metadata-one"
+            metadata_two = root / "metadata-two"
+            input_one.mkdir()
+            input_two.mkdir()
+            _write_clean_page(input_one / "page-one.png")
+            _write_clean_page(input_two / "page-two.png")
+
+            processes = [
+                _start_production_run_cli(
+                    input_dir=input_one,
+                    derivatives_dir=derivatives_one,
+                    metadata_dir=metadata_one,
+                    batch_id="batch-one",
+                ),
+                _start_production_run_cli(
+                    input_dir=input_two,
+                    derivatives_dir=derivatives_two,
+                    metadata_dir=metadata_two,
+                    batch_id="batch-two",
+                ),
+            ]
+            results = [process.communicate(timeout=90) for process in processes]
+
+            for process, (stdout, stderr) in zip(processes, results):
+                self.assertEqual(process.returncode, 0, msg=f"stdout:\n{stdout}\nstderr:\n{stderr}")
+
+            summary_one = json.loads((metadata_one / PRODUCTION_RUN_SUMMARY_JSON).read_text(encoding="utf-8"))
+            summary_two = json.loads((metadata_two / PRODUCTION_RUN_SUMMARY_JSON).read_text(encoding="utf-8"))
+            manifest_one = json.loads((derivatives_one / "processing_manifest.json").read_text(encoding="utf-8"))
+            manifest_two = json.loads((derivatives_two / "processing_manifest.json").read_text(encoding="utf-8"))
+
+            self.assertEqual(summary_one["status"], "finished")
+            self.assertEqual(summary_two["status"], "finished")
+            self.assertEqual(summary_one["operator_summary"]["input_folder"], str(input_one.resolve()))
+            self.assertEqual(summary_two["operator_summary"]["input_folder"], str(input_two.resolve()))
+            self.assertEqual(manifest_one["project"]["input_dir"], str(input_one.resolve()))
+            self.assertEqual(manifest_two["project"]["input_dir"], str(input_two.resolve()))
+            self.assertEqual(manifest_one["project"]["batch_id"], "batch-one")
+            self.assertEqual(manifest_two["project"]["batch_id"], "batch-two")
+            self.assertNotEqual(summary_one["operator_summary"]["metadata_folder"], summary_two["operator_summary"]["metadata_folder"])
+            self.assertNotEqual(manifest_one["process_dir"], manifest_two["process_dir"])
+            self.assertFalse((metadata_one / PRODUCTION_RUN_LOCK_JSON).exists())
+            self.assertFalse((metadata_two / PRODUCTION_RUN_LOCK_JSON).exists())
+            self.assertFalse((derivatives_one / PRODUCTION_RUN_LOCK_JSON).exists())
+            self.assertFalse((derivatives_two / PRODUCTION_RUN_LOCK_JSON).exists())
+
+
+def _start_production_run_cli(
+    *,
+    input_dir: Path,
+    derivatives_dir: Path,
+    metadata_dir: Path,
+    batch_id: str,
+) -> subprocess.Popen[str]:
+    repo_root = Path(__file__).resolve().parents[1]
+    env = os.environ.copy()
+    pythonpath_parts = [str(repo_root / "src")]
+    if env.get("PYTHONPATH"):
+        pythonpath_parts.append(env["PYTHONPATH"])
+    env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
+    return subprocess.Popen(
+        [
+            sys.executable,
+            "-B",
+            "-m",
+            "archive_scan_qc",
+            "production-run",
+            "--input",
+            str(input_dir),
+            "--derivatives-out",
+            str(derivatives_dir),
+            "--metadata-out",
+            str(metadata_dir),
+            "--project",
+            "concurrent-cli",
+            "--batch",
+            batch_id,
+            "--rule-template",
+            "dat-31-2017-standard",
+            "--workers",
+            "1",
+        ],
+        cwd=str(repo_root),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
 
 
 def _write_clean_page(path: Path) -> None:

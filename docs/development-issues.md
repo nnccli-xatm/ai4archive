@@ -69,7 +69,7 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 
 ### DEV-004 CLI 并发隔离
 
-状态：`in-progress`
+状态：`done`
 
 范围：
 
@@ -92,10 +92,8 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 - `run-plan` 已在加载计划时拒绝任意两个批次复用同一个 `report_dir` 或
   `process_out`，也拒绝一个批次的 report 目录撞上另一个批次的 process
   目录。
-
-剩余缺口：
-
-- 增加两个真实 CLI 进程使用不同输出目录并发运行的回归。
+- 已增加两个真实 `production-run` CLI 进程使用不同 metadata/derivatives
+  目录并发运行的回归，验证 summary、manifest 和 lock 文件互不污染。
 
 ### DEV-005 后台服务 MVP
 

@@ -192,7 +192,8 @@ archive-scan-qc production-run \
 run, `production-run` writes a transient `.archive_scan_qc_production_run.lock`
 under each output root. A second run that targets either locked output directory
 is rejected before overwriting progress or summary files. Use separate metadata
-and derivatives directories for concurrent external CLI jobs; use
+and derivatives directories for concurrent external CLI jobs; this concurrent
+external CLI shape is covered by regression tests. Use
 `--resume-processing` only after the previous run has finished or been
 explicitly recovered.
 
