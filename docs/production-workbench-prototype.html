@@ -1819,6 +1819,31 @@
       saveTimer: null
     };
 
+    const productionApiRoutes = Object.freeze({
+      session: "/api/production/session",
+      setup: "/api/production/setup",
+      start: "/api/production/start",
+      progress: "/api/production/progress",
+      reviewQueue: "/api/production/review-queue",
+      reviewItem: "/api/production/review-item",
+      preview: "/api/production/preview",
+      reviewActions: "/api/production/review-actions",
+      reviewHistory: "/api/production/review-history",
+      finishExport: "/api/production/finish-export"
+    });
+
+    const localBridgeRoutes = Object.freeze({
+      configure: "/api/configure",
+      status: "/api/status",
+      pickFolder: "/api/pick-folder",
+      start: "/api/start",
+      retry: "/api/retry",
+      saveDraftDecisions: "/api/save-draft-decisions",
+      finishDecisions: "/api/finish-decisions",
+      openOutputFolder: "/api/open-output-folder",
+      resetBatch: "/api/reset-batch"
+    });
+
     function serviceQuery(params) {
       return Object.entries(params)
         .filter(([, value]) => typeof value === "string" && value.length > 0)
@@ -1826,14 +1851,27 @@
         .join("&");
     }
 
+    function apiPath(route, params = {}) {
+      const query = serviceQuery(params);
+      return query ? `${route}?${query}` : route;
+    }
+
+    function productionApiPath(name, params = {}) {
+      return apiPath(productionApiRoutes[name], params);
+    }
+
+    function localBridgePath(name) {
+      return localBridgeRoutes[name];
+    }
+
     function productionReviewItemUrl(localId) {
       if (!localApi.enabled || !state.jobId || !localId) return "";
-      return `/api/production/review-item?${serviceQuery({ job_id: state.jobId, local_id: localId })}`;
+      return productionApiPath("reviewItem", { job_id: state.jobId, local_id: localId });
     }
 
     function productionPreviewUrl(localId, source) {
       if (!localApi.enabled || !state.jobId || !localId || !source) return "";
-      return `/api/production/preview?${serviceQuery({ job_id: state.jobId, local_id: localId, source })}`;
+      return productionApiPath("preview", { job_id: state.jobId, local_id: localId, source });
     }
 
     function pendingCount() {
@@ -3336,7 +3374,7 @@
       let payload;
       try {
         els.loadStatus.textContent = duringLaunch ? runningGuidanceText(null) : "正在保存文件夹。";
-        payload = await apiPost("/api/configure", {
+        payload = await apiPost(localBridgePath("configure"), {
           input_dir: els.inputPath.value.trim(),
           derivatives_dir: els.outputPath.value.trim(),
           processing_mode: selectedProcessingMode()
@@ -3384,7 +3422,7 @@
       try {
         button.disabled = true;
         els.loadStatus.textContent = isInput ? "正在打开系统原图文件夹选择器。" : "正在打开系统输出文件夹选择器。";
-        const payload = await apiPost("/api/pick-folder", { kind });
+        const payload = await apiPost(localBridgePath("pickFolder"), { kind });
         if (payload.cancelled) {
           els.loadStatus.textContent = payload.message_zh || "已取消选择文件夹。";
           render();
@@ -3414,7 +3452,7 @@
     async function pollServerStatus() {
       if (!localApi.enabled) return;
       try {
-        const response = await fetch("/api/status");
+        const response = await fetch(localBridgePath("status"));
         if (!response.ok) return;
         const payload = await response.json();
         applyServerStatus(payload);
@@ -3460,7 +3498,7 @@
           render();
           return;
         }
-        const payload = await apiPost("/api/start", {
+        const payload = await apiPost(localBridgePath("start"), {
           input_dir: els.inputPath.value.trim(),
           derivatives_dir: els.outputPath.value.trim(),
           processing_mode: selectedProcessingMode()
@@ -3495,7 +3533,7 @@
         state.status = "checking";
         els.loadStatus.textContent = "正在重试本批次，请等待。";
         render();
-        const payload = await apiPost("/api/retry", {});
+        const payload = await apiPost(localBridgePath("retry"), {});
         applyServerStatus(payload);
         els.loadStatus.textContent = "正在重试本批次，请等待；系统会继续使用当前文件夹。";
         window.clearInterval(localApi.polling);
@@ -3521,7 +3559,7 @@
       try {
         state.openOutputFolderStatus = "正在打开输出文件夹。";
         render();
-        const payload = await apiPost("/api/open-output-folder", {});
+        const payload = await apiPost(localBridgePath("openOutputFolder"), {});
         state.openOutputFolderStatus = payload.message_zh || "已打开输出文件夹。请检查处理后图片数量和画面状态。";
         els.loadStatus.textContent = state.openOutputFolderStatus;
         render();
@@ -3632,7 +3670,7 @@
 
     async function saveDraftDecisions() {
       try {
-        const payload = await apiPost("/api/save-draft-decisions", draftDecisionArtifact());
+        const payload = await apiPost(localBridgePath("saveDraftDecisions"), draftDecisionArtifact());
         state.lastDraftMessage = payload.message_zh || "已自动保存";
         els.loadStatus.textContent = state.lastDraftMessage;
       } catch (error) {
@@ -3656,7 +3694,7 @@
       try {
         state.finishConfirmationVisible = false;
         els.loadStatus.textContent = "正在完成并导出结果。";
-        const payload = await apiPost("/api/finish-decisions", decisionArtifact());
+        const payload = await apiPost(localBridgePath("finishDecisions"), decisionArtifact());
         clearFinishBlocker();
         applyCompletionPanel(payload.completion_panel);
         if (payload.saved && (payload.saved.decision_summary || payload.saved.verification_summary)) state.decisionSaveSummary = DECISION_SAVE_LABEL;
@@ -3808,7 +3846,7 @@
     async function resetServerBatchState() {
       if (!localApi.enabled) return;
       try {
-        return await apiPost("/api/reset-batch", {});
+        return await apiPost(localBridgePath("resetBatch"), {});
       } catch (error) {
         els.loadStatus.textContent = error.message || "当前不能开始新批次。";
       }

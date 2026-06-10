@@ -201,10 +201,17 @@ class ProductionWorkbenchRegressionGuardTests(unittest.TestCase):
 
         for required in [
             "function serviceQuery(params)",
+            "const productionApiRoutes = Object.freeze({",
+            "const localBridgeRoutes = Object.freeze({",
+            "function apiPath(route, params = {})",
+            "function productionApiPath(name, params = {})",
+            "function localBridgePath(name)",
             "function productionReviewItemUrl(localId)",
-            "/api/production/review-item?",
+            "/api/production/review-item",
+            'return productionApiPath("reviewItem", { job_id: state.jobId, local_id: localId });',
             "function productionPreviewUrl(localId, source)",
-            "/api/production/preview?",
+            "/api/production/preview",
+            'return productionApiPath("preview", { job_id: state.jobId, local_id: localId, source });',
             "reviewItemUrl: productionReviewItemUrl(item.local_id || \"\")",
             "originalPreviewUrl: hasOriginal ? productionPreviewUrl(item.local_id || \"\", \"original\") : \"\"",
             "processedPreviewUrl: hasProcessed ? productionPreviewUrl(item.local_id || \"\", \"processed\") : \"\"",
@@ -311,7 +318,7 @@ class ProductionWorkbenchRegressionGuardTests(unittest.TestCase):
             'id="openOutputFolderStatus"',
             "openOutputFolderAvailable",
             "openOutputFolder()",
-            'apiPost("/api/open-output-folder", {})',
+            'apiPost(localBridgePath("openOutputFolder"), {})',
             "输出文件夹没有打开。请重新选择输出文件夹，或联系管理员处理。",
         ]:
             self.assertIn(required, html)

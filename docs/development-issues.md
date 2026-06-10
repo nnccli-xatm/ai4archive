@@ -347,6 +347,15 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 - 批次设置、模板选择、进度、复核、预览和 finish-export 全部走服务 API。
 - 前端不得直接执行 CLI、处理本地文件、猜测绝对路径或写 public-safe 摘要。
 
+当前进展：
+
+- 生产工作台原型已拆出 `productionApiRoutes`、`localBridgeRoutes`、`apiPath`、
+  `productionApiPath` 和 `localBridgePath`，review item、preview 以及现有
+  local bridge 调用均通过 client route helper 生成，不再在调用点散落硬编码路径。
+- 前端守护测试已覆盖 production facade route helper、local bridge route helper
+  和 local-only review/preview URL 构造，后续可逐项把 setup/start/progress、
+  review-actions 与 finish-export 从 local bridge 切换到服务 facade。
+
 ### DEV-401 批量重命名 plan/apply
 
 状态：`later`

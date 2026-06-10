@@ -480,7 +480,7 @@ def validate_completion_export_smoke(html: str, errors: list[str]) -> None:
     """Exercise the local completion export path with synthetic aggregate-only data."""
 
     for required_token in [
-        'const payload = await apiPost("/api/finish-decisions", decisionArtifact());',
+        'const payload = await apiPost(localBridgePath("finishDecisions"), decisionArtifact());',
         "applyCompletionPanel(payload.completion_panel);",
         'state.status = "complete";',
         "state.progress = 100;",
@@ -1179,10 +1179,14 @@ def main() -> int:
         "source_target_count",
         "review_counts",
         "review_completion",
+        "productionApiRoutes",
+        "localBridgeRoutes",
+        "function productionApiPath(name, params = {})",
+        "function localBridgePath(name)",
         "/api/finish-decisions",
         "/api/save-draft-decisions",
-        "/api/production/review-item?",
-        "/api/production/preview?",
+        "/api/production/review-item",
+        "/api/production/preview",
         "reviewItemUrl",
         "productionReviewItemUrl",
         "productionPreviewUrl",
