@@ -14,6 +14,8 @@ from PIL import Image, ImageDraw
 from archive_scan_qc.service_http import create_service_http_server
 from archive_scan_qc.service_jobs import (
     SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON,
+    SERVICE_JOB_INDEX_QUALITY_SCHEMA_VERSION,
+    SERVICE_JOB_INDEX_SOURCE_INTEGRITY_SCHEMA_VERSION,
     SERVICE_JOB_RECORD_JSON,
 )
 
@@ -359,6 +361,7 @@ class ServiceHttpTransportTests(unittest.TestCase):
                     "/api/production/finish-export",
                     {"job_id": "job-productionhttp001"},
                 )
+                final_session_status, final_session = _json_request(base_url, "GET", "/api/production/session")
                 missing_job_id_status, missing_job_id = _json_request(
                     base_url,
                     "GET",
@@ -390,6 +393,7 @@ class ServiceHttpTransportTests(unittest.TestCase):
                     "production_review_history": production_review_history,
                     "post_actions_progress": post_actions_progress,
                     "finish_export": finish_export,
+                    "final_session": final_session,
                     "missing_job_id": missing_job_id,
                     "invalid_preview": invalid_preview,
                     "managed_root": managed_root,
@@ -408,12 +412,42 @@ class ServiceHttpTransportTests(unittest.TestCase):
             self.assertEqual(production_review_history_status, 200)
             self.assertEqual(post_actions_progress_status, 200)
             self.assertEqual(finish_status, 200)
+            self.assertEqual(final_session_status, 200)
             self.assertEqual(missing_job_id_status, 400)
             self.assertEqual(invalid_preview_status, 400)
             self.assertEqual(managed_root_status, 400)
             self.assertEqual(session["schema_version"], "scan-qc.service-production-session.v1")
             self.assertEqual(session["view"], "session")
+            self.assertEqual(session["session"]["quality"]["status"], "not_available")
+            self.assertEqual(session["session"]["source_integrity"]["status"], "not_available")
             self.assertEqual(session["session"]["recovery_issues"]["status"], "clear")
+            self.assertEqual(final_session["session"]["job_count"], 1)
+            self.assertEqual(final_session["session"]["state_counts"], {"finished": 1})
+            self.assertEqual(final_session["session"]["recovery_issues"]["status"], "clear")
+            final_quality = final_session["session"]["quality"]
+            self.assertEqual(final_quality["schema_version"], SERVICE_JOB_INDEX_QUALITY_SCHEMA_VERSION)
+            self.assertTrue(final_quality["provided"])
+            self.assertEqual(final_quality["provided_job_count"], 1)
+            self.assertEqual(final_quality["processed_files"], 1)
+            self.assertEqual(final_quality["status_counts"], {"pass": 1})
+            self.assertFalse(final_quality["privacy"]["contains_paths"])
+            self.assertFalse(final_quality["privacy"]["contains_job_ids"])
+            self.assertFalse(final_quality["privacy"]["contains_quality_rows"])
+            final_source_integrity = final_session["session"]["source_integrity"]
+            self.assertEqual(
+                final_source_integrity["schema_version"],
+                SERVICE_JOB_INDEX_SOURCE_INTEGRITY_SCHEMA_VERSION,
+            )
+            self.assertTrue(final_source_integrity["provided"])
+            self.assertEqual(final_source_integrity["status"], "pass")
+            self.assertEqual(final_source_integrity["checked_files"], 1)
+            self.assertEqual(final_source_integrity["unchanged_files"], 1)
+            self.assertEqual(final_source_integrity["modified_files"], 0)
+            self.assertFalse(final_source_integrity["source_images_modified"])
+            self.assertFalse(final_source_integrity["source_tree_changed"])
+            self.assertFalse(final_source_integrity["privacy"]["contains_paths"])
+            self.assertFalse(final_source_integrity["privacy"]["contains_hashes"])
+            self.assertFalse(final_source_integrity["privacy"]["contains_file_lists"])
             self.assertEqual(setup["view"], "setup")
             self.assertEqual(setup["job"]["state"], "created")
             self.assertEqual(running["view"], "start")
