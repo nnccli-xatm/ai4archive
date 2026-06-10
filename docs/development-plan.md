@@ -382,6 +382,10 @@ unchanged.
 It also includes faint reverse-side bleed-through cleanup with
 `applied_faint_reverse_ghost`, bounded positive deltas in the manifest and
 public-safe quality summary, no guardrail failures, and unchanged source bytes.
+Low-amplitude illumination-gradient leveling is covered as a full-page low-delta
+production contract: high changed-pixel ratio is acceptable only with bounded
+correction delta, public-safe quality metrics, guardrail pass, and unchanged
+source bytes.
 Follow-up, 2026-06-09: 路线图中的 `archival-safe-v1`,
 `text-clean-readable-v1`, `print-clean-v1`, and `photo-mixed-safe-v1` 已作为
 内置模板 ID 落地；legacy ID 继续兼容。`print-clean-v1` 现在解析为

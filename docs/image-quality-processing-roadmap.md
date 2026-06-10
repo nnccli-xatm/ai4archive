@@ -332,6 +332,11 @@ Follow-up, 2026-06-10: `print-clean-v1` production CLI coverage now also include
 a faint reverse-side bleed-through page. The contract requires
 `applied_faint_reverse_ghost`, bounded positive bleed-through deltas,
 public-safe quality metrics, no guardrail failures, and unchanged source bytes.
+Follow-up, 2026-06-10: `print-clean-v1` production CLI coverage now includes a
+low-amplitude illumination-gradient page. Because this operation is a full-page
+low-delta leveling pass, the contract treats a high changed-pixel ratio as
+acceptable only with bounded correction delta, guardrail pass, public-safe
+quality metrics, and unchanged source bytes.
 
 Follow-up, 2026-06-09: the synthetic smoke fixtures now also cover a safe narrow
 fold-shadow band, a diffuse reverse-side bleed-through ghost, and a segmented

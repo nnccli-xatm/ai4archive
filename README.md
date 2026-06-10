@@ -764,6 +764,9 @@ manifest and public-safe quality summary without changing source bytes.
 Faint reverse-side bleed-through cleanup is also covered by a production-run
 contract with bounded positive deltas, reason-code evidence, public-safe quality
 metrics, and unchanged source bytes.
+Low-amplitude illumination-gradient leveling is covered as a full-page
+low-delta correction: the public metrics must show a bounded correction delta,
+guardrail pass, and unchanged source bytes even when most pixels move slightly.
 The dry-run can optionally read a local `scan_qc_report.json`, but the output is
 aggregate-only: it reports file/finding counts, planned operation stages, and
 risk codes without paths, filenames, hashes, thumbnails, OCR text, image
