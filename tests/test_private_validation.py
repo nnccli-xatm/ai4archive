@@ -27,6 +27,7 @@ class PrivateValidationAggregateTests(unittest.TestCase):
                     counts={"total_files": 3, "processed_files": 3, "quality_gain_files": 3},
                     metrics={"text_contrast_delta": {"count": 3, "average": 0.25, "max": 0.4}},
                     risk_codes=["quality_gain_measured"],
+                    quality_signal_status="measured_with_changes",
                 ),
             )
             _write_json(
@@ -37,6 +38,7 @@ class PrivateValidationAggregateTests(unittest.TestCase):
                     counts={"total_files": 2, "processed_files": 2, "guardrail_failed_files": 1},
                     metrics={"color_mean_abs_delta": {"count": 2, "average": 0.02, "max": 0.03}},
                     risk_codes=["color_shift_risk"],
+                    quality_signal_status="measured_no_quality_operations",
                 ),
             )
 
@@ -50,11 +52,26 @@ class PrivateValidationAggregateTests(unittest.TestCase):
         self.assertEqual(summary["group_count"], 2)
         groups = {group["group_id"]: group for group in summary["group_summaries"]}
         self.assertEqual(groups["low_contrast_text"]["counts"]["quality_gain_items"], 3)
+        self.assertEqual(
+            groups["low_contrast_text"]["quality_signal_status_counts"],
+            [{"status": "measured_with_changes", "count": 1}],
+        )
         text_metrics = {metric["metric_id"]: metric for metric in groups["low_contrast_text"]["metric_summary"]}
         self.assertEqual(text_metrics["text_contrast_delta"]["count"], 3)
         self.assertEqual(text_metrics["text_contrast_delta"]["average"], 0.25)
         self.assertEqual(text_metrics["text_contrast_delta"]["max"], 0.4)
         self.assertEqual(groups["mixed_content_guardrail"]["failed_validation_inputs"], 1)
+        self.assertEqual(
+            groups["mixed_content_guardrail"]["quality_signal_status_counts"],
+            [{"status": "measured_no_quality_operations", "count": 1}],
+        )
+        self.assertEqual(
+            summary["quality_signal_status_counts"],
+            [
+                {"status": "measured_no_quality_operations", "count": 1},
+                {"status": "measured_with_changes", "count": 1},
+            ],
+        )
         risk_codes = {item["risk_code"]: item["count"] for item in summary["risk_code_counts"]}
         self.assertEqual(risk_codes["color_shift_risk"], 1)
         self.assertIn("validation_group_failed", summary["blocking_codes"])
@@ -123,8 +140,9 @@ def _private_validation_payload(
     counts: dict[str, int] | None = None,
     metrics: dict[str, dict[str, float]] | None = None,
     risk_codes: list[str] | None = None,
+    quality_signal_status: str | None = None,
 ) -> dict[str, object]:
-    return {
+    payload: dict[str, object] = {
         "schema_version": "scan-qc.private-validation-result.local.v1",
         "public_group_id": group_id,
         "status": status,
@@ -142,6 +160,9 @@ def _private_validation_payload(
         ],
         "privacy": {"aggregate_only": False, "contains_paths": True},
     }
+    if quality_signal_status is not None:
+        payload["quality_signal"] = {"status": quality_signal_status}
+    return payload
 
 
 if __name__ == "__main__":

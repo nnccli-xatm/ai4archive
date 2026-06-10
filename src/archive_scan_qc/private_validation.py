@@ -18,6 +18,12 @@ _SAFE_CODE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _IMAGE_SUFFIX_RE = re.compile(r"\.(?:png|jpe?g|tiff?|bmp|gif|jp2|pdf|csv)$", re.IGNORECASE)
 _PASS_STATUSES = {"pass", "passed", "ok", "success"}
 _FAIL_STATUSES = {"fail", "failed", "error", "blocked"}
+_QUALITY_SIGNAL_STATUSES = {
+    "measured_with_changes",
+    "measured_no_quality_operations",
+    "not_applicable",
+    "unknown",
+}
 _COUNT_FIELDS = (
     ("total_files", "total_items"),
     ("processed_files", "processed_items"),
@@ -70,6 +76,7 @@ def build_private_validation_aggregate(
     paths = _input_paths(input_dir=input_dir, files=files or [])
     group_accumulators: dict[str, dict[str, Any]] = {}
     risk_code_counts: dict[str, int] = {}
+    quality_signal_status_counts: dict[str, int] = {}
     blocking_codes: list[str] = []
     raw_sensitive_count = 0
     invalid_payload_count = 0
@@ -104,6 +111,9 @@ def build_private_validation_aggregate(
             _increment(risk_code_counts, "validation_status_unknown")
         _merge_counts(group["counts"], payload.get("counts"))
         _merge_metrics(group["metric_accumulators"], payload.get("quality_metrics"))
+        signal_status = _quality_signal_status(payload)
+        _increment(group["quality_signal_status_counts"], signal_status)
+        _increment(quality_signal_status_counts, signal_status)
         _merge_risk_codes(risk_code_counts, payload.get("risk_codes"))
 
     groups = [_public_group(group) for group in sorted(group_accumulators.values(), key=lambda item: item["group_id"])]
@@ -126,6 +136,7 @@ def build_private_validation_aggregate(
         },
         "group_count": len(groups),
         "group_summaries": groups,
+        "quality_signal_status_counts": _status_count_summary(quality_signal_status_counts),
         "risk_code_counts": _risk_code_summary(risk_code_counts),
         "quality_measurement": {
             "method": "private_validation_aggregate_only",
@@ -190,6 +201,7 @@ def _new_group(group_id: str) -> dict[str, Any]:
         "unknown_validation_inputs": 0,
         "counts": {public_field: 0 for _input_field, public_field in _COUNT_FIELDS},
         "metric_accumulators": {},
+        "quality_signal_status_counts": {},
     }
 
 
@@ -224,6 +236,16 @@ def _merge_risk_codes(target: dict[str, int], value: Any) -> None:
             _increment(target, "unsafe_risk_code_omitted")
 
 
+def _quality_signal_status(payload: dict[str, Any]) -> str:
+    signal = payload.get("quality_signal")
+    value = signal.get("status") if isinstance(signal, dict) else payload.get("quality_signal_status")
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in _QUALITY_SIGNAL_STATUSES:
+            return normalized
+    return "unknown"
+
+
 def _public_group(group: dict[str, Any]) -> dict[str, Any]:
     return {
         "group_id": group["group_id"],
@@ -232,6 +254,7 @@ def _public_group(group: dict[str, Any]) -> dict[str, Any]:
         "failed_validation_inputs": group["failed_validation_inputs"],
         "unknown_validation_inputs": group["unknown_validation_inputs"],
         "counts": dict(group["counts"]),
+        "quality_signal_status_counts": _status_count_summary(group["quality_signal_status_counts"]),
         "metric_summary": _metric_summary(group["metric_accumulators"]),
     }
 
@@ -255,6 +278,13 @@ def _risk_code_summary(risk_code_counts: dict[str, int]) -> list[dict[str, int |
     return [
         {"risk_code": code, "count": count}
         for code, count in sorted(risk_code_counts.items())
+    ]
+
+
+def _status_count_summary(counts: dict[str, int]) -> list[dict[str, int | str]]:
+    return [
+        {"status": status, "count": count}
+        for status, count in sorted(counts.items())
     ]
 
 

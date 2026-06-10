@@ -509,9 +509,9 @@ Implementation note, 2026-06-10: `archive-scan-qc private-validation-aggregate`
 now writes `private_validation_aggregate_summary.json` with schema
 `scan-qc.private-validation-aggregate.v1`. It reduces operator-approved private
 validation JSON inputs to public group IDs, aggregate item counts, allowlisted
-quality metric summaries, and risk-code counts. Raw private labels, paths,
-filenames, hashes, OCR text, row-level rows, thumbnails, and image bytes remain
-local.
+quality metric summaries, quality-signal status counts, and risk-code counts.
+Raw private labels, paths, filenames, hashes, OCR text, row-level rows,
+thumbnails, and image bytes remain local.
 
 ## 6. 第一批建议 Issue
 

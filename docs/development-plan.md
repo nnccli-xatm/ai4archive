@@ -353,8 +353,8 @@ public-safe 聚合质量证据：输出该 fixture 的像素变化率、颜色�
 原貌风险分组；更深的操作员逐项复核 UI 仍属于后续前端/API 工作。
 2026-06-10 补充：`private-validation-aggregate` 已提供私有样本验证的
 public-safe 聚合报告，只公开 public group ID、聚合 item 计数、allowlisted
-质量指标和风险代码；样本标签、路径、文件名、hash、OCR 文本、行级记录和图片内容
-仍只留本地。
+质量指标、quality signal status 计数和风险代码；样本标签、路径、文件名、hash、
+OCR 文本、行级记录和图片内容仍只留本地。
 
 ## 7. 阶段 3：前端改为 API Client
 

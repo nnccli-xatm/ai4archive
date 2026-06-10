@@ -995,9 +995,9 @@ commands, raw model output, object URLs, or actual sample data.
 `private_validation_aggregate_summary.json` is designed for operator-approved
 private image-quality validation. Raw private validation rows remain local; the
 published artifact may include only public group IDs, aggregate item counts,
-allowlisted metric summaries, risk-code counts, and privacy self-check status.
-It must not include private labels, local paths, filenames, hashes, OCR text,
-thumbnails, row-level rows, or image bytes.
+allowlisted metric summaries, quality-signal status counts, risk-code counts,
+and privacy self-check status. It must not include private labels, local paths,
+filenames, hashes, OCR text, thumbnails, row-level rows, or image bytes.
 
 `aggregate_evidence_bundle_summary.json` and
 `final_production_handoff_summary.json` are public-safe aggregate summaries

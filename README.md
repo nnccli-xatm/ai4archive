@@ -795,7 +795,7 @@ archive-scan-qc private-validation-aggregate \
 The command writes `private_validation_aggregate_summary.json` with schema
 `scan-qc.private-validation-aggregate.v1`. It accepts private local JSON inputs
 but publishes only public group IDs, aggregate item counts, allowlisted quality
-metric summaries, risk-code counts, and privacy self-check status. It omits
+metric summaries, quality-signal status counts, risk-code counts, and privacy self-check status. It omits
 private labels, paths, filenames, hashes, OCR text, thumbnails, row-level rows,
 and image bytes.
 

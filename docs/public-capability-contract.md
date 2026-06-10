@@ -53,7 +53,10 @@ Public-safe aggregate outputs include release and handoff summaries such as
 `final_production_handoff_summary.json`, `public_safe_validation_index.json`,
 `private_validation_aggregate_summary.json`,
 `artifact_readiness_checklist.json`, and `workbench_public_summary.json`,
-subject to local policy review. Service-job rehearsal cores also write
+subject to local policy review. The private validation aggregate may include
+only public group IDs, aggregate item counts, allowlisted metric summaries,
+quality-signal status counts, risk-code counts, and privacy self-check status.
+Service-job rehearsal cores also write
 `service_job_public_summary.json` with schema
 `scan-qc.service-job-public-summary.v1` and
 `service_job_index_public_summary.json` with schema
