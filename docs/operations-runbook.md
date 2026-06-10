@@ -838,8 +838,8 @@ background-stain cleanup, fold-shadow cleanup, illumination-gradient leveling,
 conservative diffuse bleed-through cleanup, broad thin-paper bleed-through
 cleanup, and scanline lightening each produce at least one public-safe aggregate
 delta. It also requires faded-text enhancement and text-edge sharpening evidence
-from a synthetic mildly blurred typed-text fixture, without exposing image
-content.
+from a synthetic mildly blurred typed-text fixture, including improved aggregate
+edge energy after sharpening, without exposing image content.
 Both JSON files are public-safe aggregate evidence and must not contain paths,
 filenames, hashes, OCR text, thumbnails, or image content.
 

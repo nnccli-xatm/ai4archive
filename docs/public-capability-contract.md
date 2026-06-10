@@ -254,6 +254,7 @@ small-angle deskew, paired dark-edge trim, scanner-gutter trim, paper
 color-cast normalization, edge/corner shadow cleanup, background-stain cleanup,
 illumination-gradient leveling, diffuse bleed-through cleanup, broad thin-paper
 bleed-through cleanup, and the ultra-pale typed glyph fixture group.
+Text-edge evidence includes an aggregate before/after edge-energy comparison.
 It also records a
 protected mixed photo/stamp/table fixture check as
 aggregate changed-pixel, color-delta, and edge-energy drift metrics with

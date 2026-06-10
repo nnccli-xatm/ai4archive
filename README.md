@@ -775,7 +775,8 @@ normalization, edge-shadow cleanup, corner-shadow cleanup, paired dark-edge
 trim, scanner-gutter trim, localized background-stain cleanup, fold-shadow,
 diffuse bleed-through, broad thin-paper bleed-through, segmented scanline,
 illumination-gradient leveling, faded-text, ultra-pale typed-glyph, and blurred
-text-edge evidence from synthetic fixtures.
+text-edge evidence from synthetic fixtures; text-edge evidence also requires
+aggregate edge energy after sharpening to exceed the before value.
 The public-safe quality baseline also includes a protected
 mixed photo/stamp/table fixture check that reports only aggregate changed-pixel,
 color-delta, and edge-energy drift metrics with limits. They do not

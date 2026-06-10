@@ -109,6 +109,16 @@ _REQUIRED_QUALITY_METRIC_MINIMA = (
     ("text_edges_delta", "max", 3.0, "text_edges_delta_below_min"),
 )
 
+_REQUIRED_QUALITY_METRIC_COMPARISONS = (
+    (
+        "text_edges_edge_energy_after",
+        "max",
+        "text_edges_edge_energy_before",
+        "max",
+        "text_edge_energy_not_improved",
+    ),
+)
+
 _MIXED_CONTENT_MAX_CHANGED_PIXEL_RATIO = 0.01
 _MIXED_CONTENT_MAX_COLOR_MEAN_ABS_DELTA = 1.0
 _MIXED_CONTENT_MAX_EDGE_ENERGY_DELTA_RATIO = 0.02
@@ -363,6 +373,15 @@ def _quality_metric_blockers(quality_summary: dict[str, Any] | None) -> list[str
     for metric_name, statistic_name, minimum, blocker in _REQUIRED_QUALITY_METRIC_MINIMA:
         metric = metrics.get(metric_name)
         if not isinstance(metric, dict) or _safe_float(metric.get(statistic_name)) < minimum:
+            blockers.append(blocker)
+    for after_metric_name, after_statistic, before_metric_name, before_statistic, blocker in (
+        _REQUIRED_QUALITY_METRIC_COMPARISONS
+    ):
+        after_metric = metrics.get(after_metric_name)
+        before_metric = metrics.get(before_metric_name)
+        after_value = _safe_float(after_metric.get(after_statistic)) if isinstance(after_metric, dict) else 0.0
+        before_value = _safe_float(before_metric.get(before_statistic)) if isinstance(before_metric, dict) else 0.0
+        if after_value <= before_value:
             blockers.append(blocker)
     return blockers
 

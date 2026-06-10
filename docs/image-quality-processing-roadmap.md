@@ -172,7 +172,8 @@ Follow-up, 2026-06-10: the same smoke gate now also checks required public-safe
 quality metric maxima. An operation counted as applied is not enough; key
 deskew, tone, color-cast, shadow, stain, fold, illumination, bleed-through,
 scanline, faded-text, and text-edge metrics must clear minimum evidence
-thresholds or the smoke emits an explicit blocking code.
+thresholds or the smoke emits an explicit blocking code. Text-edge smoke
+evidence also requires aggregate edge energy to increase after sharpening.
 
 Production-run update, 2026-06-09: `production-run` now writes
 `processing_quality_summary.json` beside the processing manifest and audit
