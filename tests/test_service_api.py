@@ -455,7 +455,7 @@ class ServiceApiCoreTests(unittest.TestCase):
             self.assertEqual(summary["state"], "finished")
             self.assertEqual(status["state"], "finished")
             self.assertEqual(session["session"]["state_counts"], {"finished": 1})
-            self.assertEqual(session["session"]["jobs"][0]["quality"]["provided"], True)
+            self.assertNotIn("jobs", session["session"])
             index_quality = session["session"]["quality"]
             self.assertEqual(index_quality["schema_version"], SERVICE_JOB_INDEX_QUALITY_SCHEMA_VERSION)
             self.assertTrue(index_quality["provided"])
@@ -657,6 +657,7 @@ class ServiceApiCoreTests(unittest.TestCase):
             self.assertEqual(final_session["session"]["job_count"], 1)
             self.assertEqual(final_session["session"]["state_counts"], {"finished": 1})
             self.assertEqual(final_session["session"]["recovery_issues"]["status"], "clear")
+            self.assertNotIn("jobs", final_session["session"])
             final_quality = final_session["session"]["quality"]
             self.assertEqual(final_quality["schema_version"], SERVICE_JOB_INDEX_QUALITY_SCHEMA_VERSION)
             self.assertTrue(final_quality["provided"])

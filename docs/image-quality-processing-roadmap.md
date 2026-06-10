@@ -457,6 +457,9 @@ Follow-up, 2026-06-10: the public index now also includes nested source-integrit
 aggregates for checked/unchanged/modified/missing/added source-image counts and
 source-change booleans, without exposing file lists, paths, filenames, hashes,
 OCR text, thumbnails, or image content.
+Follow-up, 2026-06-10: `GET /api/production/session` now mirrors only those
+root-level aggregate quality/source-integrity/recovery blocks plus job/state
+counts. It no longer embeds per-job summaries or job IDs in the session view.
 Follow-up, 2026-06-09: the service API now exposes a local-only review artifact
 reader at `GET /api/jobs/{job_id}/local-review/{artifact_id}`. It accepts only
 `processing-review-package` and `production-review-queue`, validates the

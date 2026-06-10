@@ -1564,7 +1564,9 @@ public-safe facade endpoints: `GET /api/production/session`,
 `GET /api/production/session` mirrors the root service index's public-safe
 `quality` and `source_integrity` aggregate blocks so a production client can see
 batch-level quality availability, status counts, file counts, and source-change
-booleans without expanding every job.
+booleans without expanding every job. The session view intentionally omits the
+per-job summary list and job IDs; callers use job-specific endpoints when they
+already hold an authorized job ID.
 Review actions persist the local decision summary, verification summary, and
 append-only `service_job_review_history.json` under the job's isolated `review`
 directory, while API responses return only aggregate session, job, review

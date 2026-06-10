@@ -214,6 +214,9 @@ The production session facade now also forwards the root index's public-safe
 `quality` and `source_integrity` aggregate blocks so clients can poll
 batch-level quality/source-change status without expanding each job or reading
 private checkpoints.
+2026-06-10 补充：`GET /api/production/session` 已收紧为纯聚合视图，只保留
+`job_count`、`state_counts`、`quality`、`source_integrity` 和
+`recovery_issues`，不再返回 per-job summary list 或 job IDs。
 The new `POST /api/jobs/{job_id}/retry` endpoint is an explicit synchronous
 retry boundary for `failed`, `interrupted`, and `needs_recovery` jobs. It keeps
 the same job root and relies on production resume semantics so completed
