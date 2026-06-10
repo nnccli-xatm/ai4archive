@@ -390,6 +390,7 @@ class ServiceApiCoreTests(unittest.TestCase):
             self.assertEqual(summary["quality"]["status"], "pass")
             self.assertEqual(summary["quality"]["processed_files"], 1)
             self.assertEqual(summary["quality"]["blocking_codes"], [])
+            self.assertEqual(summary["quality"]["quality_signal_status"], "measured_no_quality_operations")
             self.assertIn("background_cleanup", summary["quality"]["quality_operations_applied"])
             self.assertTrue(summary["quality"]["guardrails"]["enabled"])
             self.assertEqual(summary["quality"]["guardrails"]["failed_files"], 0)

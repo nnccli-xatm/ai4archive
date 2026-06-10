@@ -1340,6 +1340,7 @@ def _public_quality_payload(production_summary: dict[str, Any] | None) -> dict[s
             "status": "not_available",
             "public_safe": True,
             "blocking_codes": [],
+            "quality_signal_status": "not_available",
             "quality_operations_applied": {},
             "quality_metrics": {},
             "guardrails": {
@@ -1364,6 +1365,7 @@ def _public_quality_payload(production_summary: dict[str, Any] | None) -> dict[s
         "processing_warning_files": _safe_int(counts.get("processing_warning_files")),
         "retry_list_files": _safe_int(counts.get("retry_list_files")),
         "guardrail_failed_files": _safe_int(guardrails.get("failed_files")),
+        "quality_signal_status": str(signal.get("status") or "unknown"),
         "any_quality_operation_changed_files": _safe_int(signal.get("any_quality_operation_changed_files")),
         "geometry_changed_files": _safe_int(signal.get("geometry_changed_files")),
         "background_cleanup_changed_files": _safe_int(signal.get("background_cleanup_changed_files")),

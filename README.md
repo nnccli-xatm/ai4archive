@@ -919,6 +919,10 @@ source SHA-256. It also writes `processing_retry_manifest.json` for local retry
 diagnosis, `processing_audit_summary.json` with aggregate-only counts, flags,
 worker metadata, timing, throughput, failure totals, and resume counts, and
 `processing_quality_summary.json` with public-safe before/after quality signals.
+The quality summary's `quality_signal.status` distinguishes
+`measured_with_changes`, `measured_no_quality_operations`, and `not_applicable`,
+so successful clean/no-op batches are visible without being mislabeled as failed
+quality improvements.
 `processing_manifest.json` records the selected rule-template snapshot when the
 scan report was produced from a built-in or custom template, plus the final
 applied processing options.

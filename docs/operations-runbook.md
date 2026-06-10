@@ -491,7 +491,10 @@ artifact. It reduces the manifest and audit summary to aggregate before/after
 quality signals, changed-file counts, metric averages/maxima, guardrails, and
 privacy flags. Use it when validating whether synthetic or private aggregate
 runs actually improved quality without sharing manifests, filenames, paths,
-hashes, thumbnails, OCR text, or image content.
+hashes, thumbnails, OCR text, or image content. Its `quality_signal.status`
+distinguishes `measured_with_changes`, `measured_no_quality_operations`, and
+`not_applicable`; use the no-changes status as a triage signal, not as a private
+evidence leak.
 `--normalize-tones` is default-off and should only be enabled for batches with
 neutral gray, dark low-contrast text pages, or neutral light-paper low-contrast
 text pages. It no-ops when it detects normal exposure, obvious color content,

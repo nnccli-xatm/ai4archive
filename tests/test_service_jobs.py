@@ -962,6 +962,7 @@ def _assert_public_quality_summary(testcase: unittest.TestCase, quality: dict) -
     testcase.assertEqual(quality["processing_warning_files"], 0)
     testcase.assertEqual(quality["retry_list_files"], 0)
     testcase.assertEqual(quality["guardrail_failed_files"], 0)
+    testcase.assertIn(quality["quality_signal_status"], {"measured_with_changes", "measured_no_quality_operations"})
     for field in (
         "any_quality_operation_changed_files",
         "geometry_changed_files",

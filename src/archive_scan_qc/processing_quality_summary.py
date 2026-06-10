@@ -185,8 +185,11 @@ def _quality_signal(counts: dict[str, int]) -> dict[str, Any]:
     defect_changed = _sum_fields(counts, _DEFECT_FIELDS)
     changed_total = geometry_changed + background_changed + text_changed + defect_changed
     processed = counts.get("processed_files", 0)
+    status = "not_applicable"
+    if processed:
+        status = "measured_with_changes" if changed_total else "measured_no_quality_operations"
     return {
-        "status": "measured" if processed else "not_applicable",
+        "status": status,
         "processed_files": processed,
         "any_quality_operation_changed_files": min(processed, changed_total) if processed else 0,
         "geometry_changed_files": min(processed, geometry_changed) if processed else 0,

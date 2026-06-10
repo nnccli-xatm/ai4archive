@@ -64,11 +64,12 @@ aggregates for skipped checkpoint recovery issues, limited to skipped counts and
 allowlisted issue-code counts. It must not expose skipped job IDs, checkpoint
 rows, local paths, filenames, hashes, or exception messages. The service job
 public summary may expose aggregate quality category counts,
-whitelisted aggregate `quality_metrics`, blocking codes, and guardrail summaries
-from `processing_quality_summary.json`, plus aggregate local review availability,
-queue counts, processing-review group counts, and nested timing context with schema
-`scan-qc.service-job-public-timings.v1`, plus nested source-integrity aggregate
-counts with schema `scan-qc.service-job-source-integrity.v1`. Its public
+whitelisted aggregate `quality_metrics`, blocking codes, quality signal status,
+and guardrail summaries from `processing_quality_summary.json`, plus aggregate
+local review availability, queue counts, processing-review group counts, and
+nested timing context with schema `scan-qc.service-job-public-timings.v1`, plus
+nested source-integrity aggregate counts with schema
+`scan-qc.service-job-source-integrity.v1`. Its public
 `counts` block may also expose aggregate retry/reuse counts such as
 `resumed_files`, `reused_files`, `reprocessed_files`, and `retry_list_files`,
 but not source paths, filenames, hashes, thumbnails, OCR text, image content,
@@ -115,7 +116,10 @@ row-level evidence.
 For actual production runs, `photo-mixed-safe-v1` must keep strong cleanup,
 faded-text enhancement, and text-edge sharpening disabled in the production
 summary and processing manifest while still emitting the public-safe
-`processing_quality_summary.json` aggregate.
+`processing_quality_summary.json` aggregate. The quality summary may expose
+`quality_signal.status` values `measured_with_changes`,
+`measured_no_quality_operations`, or `not_applicable` without exposing file
+lists, paths, hashes, or row-level evidence.
 
 The prototype local service API exposes the same public-safe read-only surfaces
 through `GET /api/rule-templates` and `GET /api/rule-templates/{template_id}`.

@@ -17,6 +17,7 @@ from archive_scan_qc.image_processing_capability_smoke import (
 )
 from archive_scan_qc.processing_quality_summary import (
     PROCESSING_QUALITY_SUMMARY_JSON,
+    build_processing_quality_summary,
     SCHEMA_VERSION as QUALITY_SCHEMA_VERSION,
 )
 
@@ -150,6 +151,7 @@ class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
                 quality_payload["quality_signal"]["any_quality_operation_changed_files"],
                 1,
             )
+            self.assertEqual(quality_payload["quality_signal"]["status"], "measured_with_changes")
 
             self.assertNotIn(temp_dir, raw)
             self.assertNotIn("synthetic_fixture_001", raw)
@@ -211,6 +213,46 @@ class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
                 )
 
                 self.assertIn(blocker, blockers)
+
+    def test_processing_quality_signal_distinguishes_no_quality_changes(self) -> None:
+        base_audit = {
+            "counts": {
+                "processed_files": 2,
+                "failed_files": 0,
+                "retry_list_files": 0,
+                "guardrail_failed_files": 0,
+            },
+            "guardrails": {"enabled": True, "failed_files": 0, "failure_reasons": {}},
+            "privacy": {
+                "aggregate_only": True,
+                "contains_paths": False,
+                "contains_hashes": False,
+                "contains_thumbnails": False,
+                "contains_ocr_text": False,
+                "contains_image_content": False,
+            },
+        }
+
+        no_change = build_processing_quality_summary(
+            manifest={"summary": {"processed_files": 2, "failed_files": 0, "retry_list_files": 0}},
+            audit_summary=base_audit,
+            generated_at="2026-06-10T00:00:00+00:00",
+        )
+        changed_audit = json.loads(json.dumps(base_audit))
+        changed_audit["counts"]["tone_normalized_files"] = 1
+        changed = build_processing_quality_summary(
+            manifest={"summary": {"processed_files": 2, "failed_files": 0, "retry_list_files": 0}},
+            audit_summary=changed_audit,
+            generated_at="2026-06-10T00:00:00+00:00",
+        )
+
+        self.assertEqual(no_change["status"], "pass")
+        self.assertEqual(no_change["quality_signal"]["status"], "measured_no_quality_operations")
+        self.assertEqual(no_change["quality_signal"]["any_quality_operation_changed_files"], 0)
+        self.assertFalse(any(no_change["quality_signal"]["quality_operations_applied"].values()))
+        self.assertEqual(changed["status"], "pass")
+        self.assertEqual(changed["quality_signal"]["status"], "measured_with_changes")
+        self.assertEqual(changed["quality_signal"]["background_cleanup_changed_files"], 1)
 
 
 if __name__ == "__main__":

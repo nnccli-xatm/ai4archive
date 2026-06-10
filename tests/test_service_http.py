@@ -227,6 +227,7 @@ class ServiceHttpTransportTests(unittest.TestCase):
             self.assertEqual(run_summary["quality"]["status"], "pass")
             self.assertEqual(run_summary["quality"]["processed_files"], 1)
             self.assertEqual(run_summary["quality"]["blocking_codes"], [])
+            self.assertEqual(run_summary["quality"]["quality_signal_status"], "measured_no_quality_operations")
             self.assertIn("defect_cleanup", run_summary["quality"]["quality_operations_applied"])
             self.assertTrue(run_summary["quality"]["guardrails"]["enabled"])
             self.assertEqual(run_summary["quality"]["guardrails"]["failed_files"], 0)

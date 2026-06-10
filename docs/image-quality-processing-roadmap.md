@@ -176,6 +176,11 @@ stores a public-safe aggregate excerpt, and service job public summaries expose
 only quality status, processed/failed counts, guardrail failed counts,
 changed-file counts, and whitelisted aggregate quality metrics including
 changed-pixel ratios and brightness/contrast deltas.
+Follow-up, 2026-06-10: `processing_quality_summary.json` now distinguishes
+`quality_signal.status` values for `measured_with_changes`,
+`measured_no_quality_operations`, and `not_applicable`. Service job public
+quality summaries expose that status so schedulers can triage no-benefit clean
+batches without opening manifests or row-level evidence.
 
 ### M1：模板 schema 和 dry-run
 
