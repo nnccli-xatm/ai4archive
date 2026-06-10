@@ -512,7 +512,11 @@ text pages. It no-ops when it detects normal exposure, obvious color content,
 red stamps, light color annotations, faint marks, dense foreground, too little
 tonal separation, or a clear edge-shadow case that should be handled by local
 shadow cleanup. Review `tone_normalized_files`, tone delta metrics, and
-row-level local reasons before accepting derivatives for archival packages.
+`tone_changed_pixel_ratio` before accepting derivatives for archival packages.
+The changed-pixel ratio uses a moderate luma-delta threshold for tone
+normalization, so light-paper low-contrast text pages should show non-zero
+aggregate acted-region evidence without exposing file names, paths, hashes, or
+image content.
 When `--deskew --trim-dark-border --auto-crop --despeckle --normalize-tones
 --lighten-edge-shadow --lighten-background-stains` are combined, size change,
 crop ratio, trim margin, deskew angle, despeckle pixel ratio, bounded tone

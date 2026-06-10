@@ -261,6 +261,11 @@ improves contrast by less than the older high threshold. A dedicated regression
 checks that a neutral low-contrast text page changes visibly, improves
 background/contrast metrics, keeps the source file unchanged, and publishes only
 aggregate audit evidence.
+Follow-up, 2026-06-10: `tone_changed_pixel_ratio` now counts moderate
+tone-normalization pixel deltas above 16 luma points. This makes the same
+light-paper low-contrast regression publish non-zero public-safe changed-ratio
+evidence for the acted text region while avoiding the full-page background
+overcount that appears at lower thresholds.
 
 Follow-up, 2026-06-09: the synthetic smoke fixtures now also cover a safe narrow
 fold-shadow band, a diffuse reverse-side bleed-through ghost, and a segmented

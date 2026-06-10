@@ -4619,7 +4619,7 @@ def _tone_local_noise_ratio(grayscale: Image.Image) -> float:
 
 def _tone_changed_pixel_ratio(source_l: Image.Image, normalized_l: Image.Image) -> float:
     diff = ImageChops.difference(source_l, normalized_l)
-    changed = sum(diff.point(lambda value: 255 if value > 20 else 0).histogram()[1:])
+    changed = sum(diff.point(lambda value: 255 if value > 16 else 0).histogram()[1:])
     return changed / max(1, source_l.width * source_l.height)
 
 

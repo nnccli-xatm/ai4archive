@@ -330,6 +330,9 @@ Follow-up, 2026-06-09: 路线图中的 `archival-safe-v1`,
 2026-06-10 补充：浅纸低对比正文的 tone normalization 已降低“可见但中等”
 对比收益的 no-op 门槛，并增加单图回归，要求源文件不变、输出确实变化、
 背景/对比指标提升且 audit summary 保持 aggregate-only。
+2026-06-10 补充：`tone_changed_pixel_ratio` 的统计阈值已从强变化调整为
+中等可见变化，使同一浅纸低对比回归可以公开非零的文字区 changed-ratio
+聚合证据；处理开关、源文件只读边界和受保护内容 guardrail 不变。
 `image-processing-capability-smoke` 也开始要求折痕阴影、保守透印弱化和分段扫描线
 在全链路 synthetic fixture 上至少各有一次可量化生效。
 2026-06-10 补充：保守透印弱化已加入 broad thin-paper 窄路径，只在稳定浅纸、

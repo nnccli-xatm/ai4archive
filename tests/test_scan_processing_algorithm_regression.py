@@ -8628,6 +8628,8 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertEqual(record["tone_reason"], "tone normalization applied: neutral gray low-contrast text page")
             self.assertGreaterEqual(record["tone_background_after"] - record["tone_background_before"], 6.0)
             self.assertGreaterEqual(record["tone_contrast_after"] - record["tone_contrast_before"], 24.0)
+            self.assertGreaterEqual(audit["tone_changed_pixel_ratio"], 0.08)
+            self.assertLessEqual(audit["tone_changed_pixel_ratio"], 0.12)
             self.assertEqual(audit["guardrail_failures"], [])
             self.assertEqual(audit["combination_quality_guard_action"], "passed")
             with Image.open(process_dir / record["output_relative_path"]) as output:
@@ -8636,6 +8638,10 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             self.assertEqual(audit_summary["counts"]["processed_files"], 1)
             self.assertEqual(audit_summary["counts"]["tone_normalized_files"], 1)
             self.assertEqual(audit_summary["counts"]["failed_files"], 0)
+            self.assertGreaterEqual(
+                audit_summary["guardrails"]["tone_normalization"]["changed_pixel_ratio"]["max"],
+                0.08,
+            )
             self.assertTrue(audit_summary["privacy"]["aggregate_only"])
             self.assertFalse(audit_summary["privacy"]["contains_paths"])
             self.assertFalse(audit_summary["privacy"]["contains_hashes"])

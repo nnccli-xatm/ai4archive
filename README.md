@@ -935,6 +935,9 @@ conservative Pillow-only page-border cropping for derivative images.
 For text-clean batches, tone normalization also covers neutral light-paper
 low-contrast text pages, while skipping pages with clear edge shadows so local
 shadow cleanup can handle them without full-page tone shifts.
+The public-safe tone changed-pixel ratio now counts moderate luma deltas above
+16, so these light-paper low-contrast pages publish non-zero aggregate evidence
+for the acted text region without lowering source safety or privacy boundaries.
 
 By default, rerunning the same command preserves the previous overwrite/rerun
 semantics and processes every scanned record again. Add `--resume-processing`
