@@ -375,6 +375,10 @@ It also now runs a stable localized background-stain page through the same
 template, requiring bounded positive stain-cleanup evidence in both the manifest
 and public-safe quality summary, no guardrail failures, and unchanged source
 bytes.
+The same production CLI contract coverage now includes stable low-contrast
+neutral scanlines, with bounded scanline deltas and changed-pixel evidence in
+both the manifest and public-safe quality summary while source bytes remain
+unchanged.
 Follow-up, 2026-06-09: 路线图中的 `archival-safe-v1`,
 `text-clean-readable-v1`, `print-clean-v1`, and `photo-mixed-safe-v1` 已作为
 内置模板 ID 落地；legacy ID 继续兼容。`print-clean-v1` 现在解析为

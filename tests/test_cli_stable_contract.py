@@ -302,6 +302,67 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         self.assertEqual(quality_summary["counts"]["background_stains_lightened_files"], 1)
         self.assertGreaterEqual(quality_summary["quality_metrics"]["background_stains_delta"]["max"], 6.0)
 
+    def test_production_run_print_clean_template_records_scanline_evidence(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-cli-print-clean-scanline-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            source = input_dir / "BATCH001_PAGE_0001.png"
+            _write_print_clean_scanline_page(source)
+            source_bytes = source.read_bytes()
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "production-run",
+                        "--input",
+                        str(input_dir),
+                        "--derivatives-out",
+                        str(derivatives_dir),
+                        "--metadata-out",
+                        str(metadata_dir),
+                        "--rule-template",
+                        "print-clean-v1",
+                        "--workers",
+                        "1",
+                    ]
+                )
+
+            summary = json.loads((metadata_dir / "production_run_summary.json").read_text(encoding="utf-8"))
+            processing_manifest = json.loads(
+                (derivatives_dir / "processing_manifest.json").read_text(encoding="utf-8")
+            )
+            quality_summary = json.loads(
+                (derivatives_dir / PROCESSING_QUALITY_SUMMARY_JSON).read_text(encoding="utf-8")
+            )
+            record = processing_manifest["files"][0]
+            audit = record["processing_audit"]
+            source_bytes_after = source.read_bytes()
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(source_bytes_after, source_bytes)
+        self.assertEqual(summary["rule_template"]["id"], "print-clean-v1")
+        self.assertEqual(processing_manifest["rule_template"]["id"], "print-clean-v1")
+        self.assertEqual(summary["options"]["processing_profile"], "print_clean")
+        self.assertEqual(processing_manifest["options"]["processing_profile"], "print_clean")
+        self.assertTrue(record["scanlines_lightened"])
+        self.assertEqual(record["scanlines_orientation"], "horizontal")
+        self.assertGreaterEqual(record["scanlines_count"], 1)
+        self.assertIn("low-contrast neutral background scanlines", record["scanlines_reason"])
+        self.assertGreaterEqual(audit["scanlines_delta"], 4.0)
+        self.assertGreater(audit["scanlines_changed_pixel_ratio"], 0.0)
+        self.assertLessEqual(audit["scanlines_changed_pixel_ratio"], 0.03)
+        self.assertLessEqual(audit["scanlines_candidate_pixel_ratio"], 0.03)
+        self.assertEqual(audit["guardrail_failures"], [])
+        self.assertEqual(quality_summary["schema_version"], QUALITY_SCHEMA_VERSION)
+        self.assertEqual(quality_summary["status"], "pass")
+        self.assertEqual(quality_summary["quality_signal"]["status"], "measured_with_changes")
+        self.assertEqual(quality_summary["counts"]["scanlines_lightened_files"], 1)
+        self.assertGreaterEqual(quality_summary["quality_metrics"]["scanlines_delta"]["max"], 4.0)
+
     def test_production_run_photo_mixed_safe_template_keeps_strong_cleanup_disabled(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-cli-photo-safe-template-") as temp_dir:
             root = Path(temp_dir)
@@ -646,6 +707,17 @@ def _write_print_clean_background_stain_page(path: Path) -> None:
     mask_draw.ellipse((178, 58, 222, 102), fill=150)
     mask = mask.filter(ImageFilter.GaussianBlur(7))
     image = Image.composite(Image.new("RGB", image.size, (224, 220, 196)), image, mask)
+    image.save(path, dpi=(300, 300))
+
+
+def _write_print_clean_scanline_page(path: Path) -> None:
+    image = Image.new("RGB", (260, 180), (240, 240, 236))
+    draw = ImageDraw.Draw(image)
+    for y in (42, 64, 86):
+        draw.rectangle((42, y, 158, y + 5), fill=(36, 36, 36))
+    for y in (122, 132, 144):
+        for x0 in (18, 54, 92, 132, 172, 212):
+            draw.rectangle((x0, y, x0 + 14, y + 1), fill=(237, 237, 233))
     image.save(path, dpi=(300, 300))
 
 

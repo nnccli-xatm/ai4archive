@@ -324,6 +324,10 @@ a stable localized background-stain page. The contract requires bounded positive
 background-stain deltas in the manifest and public-safe
 `processing_quality_summary.json`, no guardrail failures, and unchanged source
 bytes.
+Follow-up, 2026-06-10: `print-clean-v1` production CLI coverage now includes a
+stable low-contrast neutral scanline page as well. The manifest and public-safe
+quality summary must show bounded positive scanline deltas and changed-pixel
+ratios while keeping source bytes unchanged.
 
 Follow-up, 2026-06-09: the synthetic smoke fixtures now also cover a safe narrow
 fold-shadow band, a diffuse reverse-side bleed-through ghost, and a segmented

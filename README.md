@@ -758,6 +758,9 @@ It also has a production-run contract for conservative localized background
 stain lightening: the processing manifest and public-safe quality summary must
 show bounded positive stain deltas, no guardrail failures, and unchanged source
 bytes.
+Stable low-contrast neutral scanlines are covered the same way: `print-clean-v1`
+must publish bounded scanline deltas and changed-pixel ratios through the
+manifest and public-safe quality summary without changing source bytes.
 The dry-run can optionally read a local `scan_qc_report.json`, but the output is
 aggregate-only: it reports file/finding counts, planned operation stages, and
 risk codes without paths, filenames, hashes, thumbnails, OCR text, image
