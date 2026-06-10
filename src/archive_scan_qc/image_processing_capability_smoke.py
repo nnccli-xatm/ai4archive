@@ -62,6 +62,24 @@ _SYNTHETIC_FIXTURE_GROUPS = (
     "mixed_photo_stamp_table_page",
 )
 
+_REQUIRED_OPERATION_COUNT_BLOCKERS = {
+    "deskewed_files": "deskew_not_applied",
+    "dark_border_trimmed_files": "dark_border_trim_not_applied",
+    "scanner_gutter_trimmed_files": "scanner_gutter_trim_not_applied",
+    "despeckled_files": "despeckle_not_applied",
+    "tone_normalized_files": "tone_normalization_not_applied",
+    "paper_color_cast_normalized_files": "paper_color_cast_not_normalized",
+    "edge_shadow_lightened_files": "edge_shadow_not_lightened",
+    "corner_shadows_lightened_files": "corner_shadows_not_lightened",
+    "background_stains_lightened_files": "background_stains_not_lightened",
+    "fold_shadows_lightened_files": "fold_shadows_not_lightened",
+    "illumination_gradient_levelled_files": "illumination_gradient_not_levelled",
+    "bleed_through_cleaned_files": "bleed_through_not_cleaned",
+    "scanlines_lightened_files": "scanlines_not_lightened",
+    "faded_text_enhanced_files": "faded_text_not_enhanced",
+    "text_edges_sharpened_files": "text_edges_not_sharpened",
+}
+
 _MIXED_CONTENT_MAX_CHANGED_PIXEL_RATIO = 0.01
 _MIXED_CONTENT_MAX_COLOR_MEAN_ABS_DELTA = 1.0
 _MIXED_CONTENT_MAX_EDGE_ENERGY_DELTA_RATIO = 0.02
@@ -286,8 +304,9 @@ def _blocking_codes(
         blockers.append("processing_failed_files")
     if _safe_int(processing_summary.get("retry_list_files")) != 0:
         blockers.append("processing_retry_list_not_empty")
-    if _safe_int(audit_counts.get("deskewed_files")) <= 0:
-        blockers.append("deskew_not_applied")
+    for field, blocker in _REQUIRED_OPERATION_COUNT_BLOCKERS.items():
+        if _safe_int(audit_counts.get(field)) <= 0:
+            blockers.append(blocker)
     if _safe_int(audit_counts.get("guardrail_failed_files")) != 0:
         blockers.append("processing_guardrail_failed_files")
     if source_images_modified:

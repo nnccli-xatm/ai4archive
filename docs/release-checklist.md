@@ -137,7 +137,8 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   background-stain, fold-shadow,
   diffuse bleed-through, broad thin-paper bleed-through, scanline, faded-text,
   illumination-gradient, ultra-pale typed-glyph, and text-edge aggregate deltas
-  from synthetic fixtures, includes
+  from synthetic fixtures, fails with explicit blocking codes if any declared
+  required quality operation has zero applied files, includes
   protected mixed photo/stamp/table changed-pixel, color-delta, and edge-energy
   drift checks within limits, and contains no paths, filenames, hashes, OCR
   text, thumbnails, or image content.

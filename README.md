@@ -766,7 +766,9 @@ schema `scan-qc.image-processing-capability-smoke.v1` plus
 `processing_quality_summary.json` with schema
 `scan-qc.processing-quality-summary.v1`. The summaries record aggregate fixture
 counts, processing counts, guardrail counts, operation counts, timing summaries,
-backend counts, and public-safe before/after quality signals, including guarded
+backend counts, and public-safe before/after quality signals. The smoke status
+fails with explicit blocking codes if any declared required quality operation
+has zero applied files in the aggregate audit counts, including guarded
 tone-normalization, small-angle deskew, paper color-cast normalization,
 edge-shadow cleanup, corner-shadow cleanup, paired dark-edge trim,
 scanner-gutter trim, localized

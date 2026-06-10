@@ -164,6 +164,10 @@ bleed-through, corner shadow, localized background stain, fold shadow, blurred
 text edges, ultra-pale typed text, and mixed photo/stamp/table content. This
 remains public-safe because the images are generated at runtime and only
 aggregate fixture group IDs are published.
+Follow-up, 2026-06-10: `image-processing-capability-smoke` now treats declared
+required quality operations as status blockers. If aggregate audit counts show
+zero applied files for a required operation, the public-safe smoke fails with a
+specific blocking code instead of merely publishing a zero count.
 
 Production-run update, 2026-06-09: `production-run` now writes
 `processing_quality_summary.json` beside the processing manifest and audit

@@ -806,6 +806,8 @@ scan and derivative-processing path, and writes
 source images remain unmodified, derivative processing executes, guardrail
 failures are zero or explained, requested stable despeckle backend is
 represented in backend counts, and before/after quality signals are measurable.
+The smoke status fails with explicit blocking codes if any declared required
+quality operation has zero applied files in the aggregate audit counts.
 The smoke also requires one synthetic small-angle deskew and publishes aggregate
 `deskew_abs_angle_degrees` evidence. It checks that guarded tone normalization
 improves at least one neutral light-paper low-contrast fixture, and that paper

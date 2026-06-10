@@ -10,6 +10,8 @@ from pathlib import Path
 from archive_scan_qc.cli import main
 from archive_scan_qc.image_processing_capability_smoke import (
     IMAGE_PROCESSING_CAPABILITY_SMOKE_JSON,
+    _REQUIRED_OPERATION_COUNT_BLOCKERS,
+    _blocking_codes,
     SCHEMA_VERSION,
     run_image_processing_capability_smoke,
 )
@@ -175,6 +177,40 @@ class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
         self.assertIn("Image processing run: yes", stdout.getvalue())
         self.assertIn("Private images read: no", stdout.getvalue())
         self.assertIn("Provider commands run: no", stdout.getvalue())
+
+    def test_blocking_codes_require_declared_quality_operations_to_apply(self) -> None:
+        base_audit_counts = {field: 1 for field in _REQUIRED_OPERATION_COUNT_BLOCKERS}
+        base_audit_counts["guardrail_failed_files"] = 0
+        audit_privacy = {
+            "aggregate_only": True,
+            "contains_paths": False,
+            "contains_hashes": False,
+            "contains_thumbnails": False,
+            "contains_ocr_text": False,
+        }
+
+        for field, blocker in _REQUIRED_OPERATION_COUNT_BLOCKERS.items():
+            with self.subTest(field=field):
+                audit_counts = dict(base_audit_counts)
+                audit_counts[field] = 0
+                blockers = _blocking_codes(
+                    fixture_count=EXPECTED_SYNTHETIC_FIXTURES,
+                    scan_summary={
+                        "total_files": EXPECTED_SYNTHETIC_FIXTURES,
+                        "openable_files": EXPECTED_SYNTHETIC_FIXTURES,
+                    },
+                    processing_summary={
+                        "processed_files": EXPECTED_SYNTHETIC_FIXTURES,
+                        "failed_files": 0,
+                        "retry_list_files": 0,
+                    },
+                    audit_counts=audit_counts,
+                    audit_privacy=audit_privacy,
+                    protected_content_checks=[{"status": "pass"}],
+                    source_images_modified=False,
+                )
+
+                self.assertIn(blocker, blockers)
 
 
 if __name__ == "__main__":
