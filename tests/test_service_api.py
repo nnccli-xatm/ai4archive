@@ -333,14 +333,24 @@ class ServiceApiCoreTests(unittest.TestCase):
                 job_id="job-testapi001",
             )
             status_summary = get_job_response(service_root=service_root, job_id="job-testapi001")
+            not_ready_finish_export = production_finish_export_response(
+                service_root=service_root,
+                job_id="job-testapi001",
+            )
             cancel_summary = cancel_job_response(service_root=service_root, job_id="job-testapi001")
+            cancelled_finish_export = production_finish_export_response(
+                service_root=service_root,
+                job_id="job-testapi001",
+            )
             index_summary = recover_jobs_response(service_root=service_root)
             health = service_health(service_root=service_root)
             raw = json.dumps(
                 {
                     "create": create_summary,
                     "status": status_summary,
+                    "not_ready_finish_export": not_ready_finish_export,
                     "cancel": cancel_summary,
+                    "cancelled_finish_export": cancelled_finish_export,
                     "index": index_summary,
                     "health": health,
                 },
@@ -350,7 +360,17 @@ class ServiceApiCoreTests(unittest.TestCase):
             self.assertEqual(create_summary["state"], "created")
             self.assertEqual(create_summary["template"]["rule_template_id"], "text-clean-print")
             self.assertEqual(status_summary["state"], "created")
+            self.assertFalse(not_ready_finish_export["finish_export"]["terminal"])
+            self.assertFalse(not_ready_finish_export["finish_export"]["ready_for_export"])
+            self.assertFalse(not_ready_finish_export["finish_export"]["requires_review"])
+            self.assertEqual(not_ready_finish_export["finish_export"]["state"], "created")
+            self.assertEqual(not_ready_finish_export["finish_export"]["blocking_codes"], ["job_not_terminal"])
             self.assertEqual(cancel_summary["state"], "cancelled")
+            self.assertTrue(cancelled_finish_export["finish_export"]["terminal"])
+            self.assertFalse(cancelled_finish_export["finish_export"]["ready_for_export"])
+            self.assertFalse(cancelled_finish_export["finish_export"]["requires_review"])
+            self.assertEqual(cancelled_finish_export["finish_export"]["state"], "cancelled")
+            self.assertEqual(cancelled_finish_export["finish_export"]["blocking_codes"], ["job_cancelled"])
             self.assertEqual(index_summary["state_counts"], {"cancelled": 1})
             self.assertEqual(index_summary["skipped_job_count"], 0)
             self.assertEqual(index_summary["recovery_issues"]["status"], "clear")

@@ -1577,6 +1577,12 @@ batch-level quality availability, status counts, file counts, and source-change
 booleans without expanding every job. The session view intentionally omits the
 per-job summary list and job IDs; callers use job-specific endpoints when they
 already hold an authorized job ID.
+`POST /api/production/finish-export` returns the scheduler-facing export gate:
+only `ready_for_export=true` is export-ready. When false, public-safe
+`blocking_codes` explain the reason, including whitelisted quality blockers and
+service-boundary codes such as `job_not_terminal`, `job_requires_review`,
+`job_failed`, `job_interrupted`, `job_cancelled`, `job_needs_recovery`, and
+`source_images_modified`.
 Review actions persist the local decision summary, verification summary, and
 append-only `service_job_review_history.json` under the job's isolated `review`
 directory, while API responses return only aggregate session, job, review

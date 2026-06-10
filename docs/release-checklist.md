@@ -61,7 +61,11 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   isolated local `review` directory, append review actions to
   `service_job_review_history.json`, and return only public-safe session, job,
   review availability, review-decision verification, review-history counts, and
-  finish/export readiness summaries. Confirm
+  finish/export readiness summaries. Confirm `finish-export` treats
+  `ready_for_export=true` as the only export-ready condition and returns
+  public-safe `blocking_codes` for non-terminal, review-required,
+  failed/interrupted/cancelled, recoverable, source-modified, and quality-blocked
+  jobs. Confirm
   `GET /api/jobs/{job_id}/review-history` never returns local IDs, decision
   rows, paths, filenames, or the local review history path. Confirm local-only
   preview endpoints

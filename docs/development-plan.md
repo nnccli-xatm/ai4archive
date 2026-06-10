@@ -160,6 +160,10 @@ review UI remains follow-up work.
 The service API also exposes job-level and production-facade review-history
 queries that return only aggregate history counts/latest verification status,
 without local IDs or row-level decision records.
+The production `finish-export` facade now treats `ready_for_export` as the
+single scheduler export gate and emits public-safe blocking codes for
+non-terminal jobs, review-required jobs, failed/interrupted/cancelled jobs,
+recoverable jobs, source-image modification, and quality blockers.
 Service jobs now write local-only event logs under the isolated `logs`
 directory and expose only public-safe event counts/latest event metadata in the
 public summary.

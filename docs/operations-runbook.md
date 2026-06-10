@@ -262,6 +262,12 @@ the isolated job `review` directory, and `finish-export` returns a
 completion/export readiness summary. Responses expose only aggregate
 review-history counts and latest verification status; they do not return
 row-level local review records, local IDs, paths, or raw decision rows.
+The `finish-export` payload is the scheduler handoff gate: treat
+`ready_for_export=true` as the only export-ready condition. When it is false,
+inspect public-safe `blocking_codes` such as `job_not_terminal`,
+`job_requires_review`, `job_failed`, `job_interrupted`, `job_cancelled`,
+`job_needs_recovery`, `source_images_modified`, or quality blocker codes rather
+than parsing local logs or private summaries.
 Use the dedicated review-history endpoints when a frontend only needs to refresh
 aggregate review history after an action; do not read the local history JSON
 directly outside the service boundary.

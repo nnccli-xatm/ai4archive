@@ -46,7 +46,19 @@ class ServiceHttpTransportTests(unittest.TestCase):
                     },
                 )
                 status_status, status = _json_request(base_url, "GET", "/api/jobs/job-testhttp001")
+                not_ready_finish_status, not_ready_finish = _json_request(
+                    base_url,
+                    "POST",
+                    "/api/production/finish-export",
+                    {"job_id": "job-testhttp001"},
+                )
                 cancel_status, cancelled = _json_request(base_url, "POST", "/api/jobs/job-testhttp001/cancel")
+                cancelled_finish_status, cancelled_finish = _json_request(
+                    base_url,
+                    "POST",
+                    "/api/production/finish-export",
+                    {"job_id": "job-testhttp001"},
+                )
                 index_status, index = _json_request(base_url, "GET", "/api/jobs")
                 health_after_status, health_after = _json_request(base_url, "GET", "/api/health")
 
@@ -56,7 +68,9 @@ class ServiceHttpTransportTests(unittest.TestCase):
                     "capabilities": capabilities,
                     "created": created,
                     "status": status,
+                    "not_ready_finish": not_ready_finish,
                     "cancelled": cancelled,
+                    "cancelled_finish": cancelled_finish,
                     "index": index,
                     "health_after": health_after,
                 },
@@ -67,7 +81,9 @@ class ServiceHttpTransportTests(unittest.TestCase):
             self.assertEqual(capabilities_status, 200)
             self.assertEqual(create_status, 201)
             self.assertEqual(status_status, 200)
+            self.assertEqual(not_ready_finish_status, 200)
             self.assertEqual(cancel_status, 200)
+            self.assertEqual(cancelled_finish_status, 200)
             self.assertEqual(index_status, 200)
             self.assertEqual(health_after_status, 200)
             self.assertEqual(health["schema_version"], "scan-qc.service-api.v1")
@@ -149,7 +165,17 @@ class ServiceHttpTransportTests(unittest.TestCase):
             self.assertGreaterEqual(capabilities["resource_limits"]["max_tmp_bytes_per_job"], 1)
             self.assertEqual(created["state"], "created")
             self.assertEqual(status["state"], "created")
+            self.assertFalse(not_ready_finish["finish_export"]["terminal"])
+            self.assertFalse(not_ready_finish["finish_export"]["ready_for_export"])
+            self.assertFalse(not_ready_finish["finish_export"]["requires_review"])
+            self.assertEqual(not_ready_finish["finish_export"]["state"], "created")
+            self.assertEqual(not_ready_finish["finish_export"]["blocking_codes"], ["job_not_terminal"])
             self.assertEqual(cancelled["state"], "cancelled")
+            self.assertTrue(cancelled_finish["finish_export"]["terminal"])
+            self.assertFalse(cancelled_finish["finish_export"]["ready_for_export"])
+            self.assertFalse(cancelled_finish["finish_export"]["requires_review"])
+            self.assertEqual(cancelled_finish["finish_export"]["state"], "cancelled")
+            self.assertEqual(cancelled_finish["finish_export"]["blocking_codes"], ["job_cancelled"])
             self.assertEqual(index["state_counts"], {"cancelled": 1})
             self.assertEqual(index["skipped_job_count"], 0)
             self.assertEqual(index["recovery_issues"]["status"], "clear")

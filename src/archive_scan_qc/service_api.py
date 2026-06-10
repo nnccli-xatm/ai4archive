@@ -30,6 +30,7 @@ from .service_jobs import (
     SERVICE_JOB_EVENT_LOG_SCHEMA_VERSION,
     SERVICE_JOB_MIN_FREE_SPACE_BYTES,
     SERVICE_JOB_REVIEW_HISTORY_SCHEMA_VERSION,
+    TERMINAL_STATES,
     ServiceJobConfig,
     cancel_service_job,
     create_service_job,
@@ -47,6 +48,13 @@ from .service_jobs import (
 
 SERVICE_API_SCHEMA_VERSION = "scan-qc.service-api.v1"
 PRODUCTION_SESSION_SCHEMA_VERSION = "scan-qc.service-production-session.v1"
+_FINISH_EXPORT_STATE_BLOCKING_CODES = {
+    "needs_review": "job_requires_review",
+    "failed": "job_failed",
+    "interrupted": "job_interrupted",
+    "cancelled": "job_cancelled",
+    "needs_recovery": "job_needs_recovery",
+}
 
 
 def service_health(*, service_root: Path | None = None) -> dict[str, Any]:
@@ -200,17 +208,24 @@ def production_finish_export_response(*, service_root: Path, job_id: str) -> dic
     summary = get_job_response(service_root=service_root, job_id=job_id)
     state = str(summary.get("state") or "")
     quality = summary.get("quality") if isinstance(summary.get("quality"), dict) else {}
-    blocking_codes = quality.get("blocking_codes") if isinstance(quality.get("blocking_codes"), list) else []
+    quality_blocking_code_values = quality.get("blocking_codes") if isinstance(quality.get("blocking_codes"), list) else []
+    quality_blocking_codes = _public_code_list(quality_blocking_code_values)
+    source_images_modified = bool(summary.get("source_images_modified"))
+    blocking_codes = _finish_export_blocking_codes(
+        state=state,
+        quality_blocking_codes=quality_blocking_codes,
+        source_images_modified=source_images_modified,
+    )
     return _production_response(
         view="finish_export",
         job=summary,
         finish_export={
-            "terminal": state in {"finished", "needs_review", "failed", "interrupted", "cancelled"},
-            "ready_for_export": state == "finished" and not blocking_codes and not summary.get("source_images_modified"),
-            "requires_review": state == "needs_review" or bool(blocking_codes),
+            "terminal": state in TERMINAL_STATES,
+            "ready_for_export": state == "finished" and not blocking_codes,
+            "requires_review": state == "needs_review" or bool(quality_blocking_codes) or source_images_modified,
             "state": state,
-            "blocking_codes": [str(code) for code in blocking_codes if isinstance(code, str)],
-            "source_images_modified": bool(summary.get("source_images_modified")),
+            "blocking_codes": blocking_codes,
+            "source_images_modified": source_images_modified,
         },
     )
 
@@ -295,6 +310,38 @@ def recover_jobs_response(*, service_root: Path) -> dict[str, Any]:
 
 def service_api_privacy() -> dict[str, bool]:
     return _public_privacy()
+
+
+def _finish_export_blocking_codes(
+    *,
+    state: str,
+    quality_blocking_codes: list[str],
+    source_images_modified: bool,
+) -> list[str]:
+    blocking_codes = list(quality_blocking_codes)
+    state_blocking_code = _FINISH_EXPORT_STATE_BLOCKING_CODES.get(state)
+    if state_blocking_code:
+        _append_unique(blocking_codes, state_blocking_code)
+    elif state and state not in TERMINAL_STATES and state != "finished":
+        _append_unique(blocking_codes, "job_not_terminal")
+    elif state != "finished":
+        _append_unique(blocking_codes, "job_not_exportable")
+    if source_images_modified:
+        _append_unique(blocking_codes, "source_images_modified")
+    return blocking_codes
+
+
+def _public_code_list(values: list[Any]) -> list[str]:
+    codes: list[str] = []
+    for value in values:
+        if isinstance(value, str) and value:
+            _append_unique(codes, value)
+    return codes
+
+
+def _append_unique(values: list[str], value: str) -> None:
+    if value not in values:
+        values.append(value)
 
 
 def _production_job_response(view: str, summary: dict[str, Any]) -> dict[str, Any]:

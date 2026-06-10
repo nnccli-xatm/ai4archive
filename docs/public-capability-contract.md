@@ -175,6 +175,12 @@ summary, and append-only `service_job_review_history.json` under the job's
 isolated `review` directory, but responses do not return row-level review
 records, local IDs, local preview resources, client-supplied paths, or raw
 decision rows.
+The `finish-export` summary exposes public-safe `blocking_codes` for export
+readiness. Codes may include whitelisted quality blockers plus service-boundary
+codes such as `job_not_terminal`, `job_requires_review`, `job_failed`,
+`job_interrupted`, `job_cancelled`, `job_needs_recovery`, and
+`source_images_modified`; clients should use these codes instead of inferring
+export readiness from state text alone.
 The dedicated review-history endpoints return the same aggregate history status
 without requiring clients to read local history JSON directly.
 Service job event logs are local-only under the isolated `logs` directory. Public
