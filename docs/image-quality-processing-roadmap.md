@@ -319,6 +319,11 @@ text page under `production-run --rule-template print-clean-v1`, requiring the
 processing manifest to show `print_clean`,
 `applied_print_clean_stable_low_contrast_text`, a positive bounded changed-pixel
 ratio, no guardrail failures, and unchanged source bytes.
+Follow-up, 2026-06-10: `print-clean-v1` production CLI coverage now also includes
+a stable localized background-stain page. The contract requires bounded positive
+background-stain deltas in the manifest and public-safe
+`processing_quality_summary.json`, no guardrail failures, and unchanged source
+bytes.
 
 Follow-up, 2026-06-09: the synthetic smoke fixtures now also cover a safe narrow
 fold-shadow band, a diffuse reverse-side bleed-through ghost, and a segmented

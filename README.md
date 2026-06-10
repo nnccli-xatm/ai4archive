@@ -754,6 +754,10 @@ edge sharpening disabled while still writing a public-safe quality summary.
 text (`applied_print_clean_stable_low_contrast_text`) and stable blurred text
 edges (`applied_print_clean_blurred_text_edges`) while keeping source image bytes
 unchanged.
+It also has a production-run contract for conservative localized background
+stain lightening: the processing manifest and public-safe quality summary must
+show bounded positive stain deltas, no guardrail failures, and unchanged source
+bytes.
 The dry-run can optionally read a local `scan_qc_report.json`, but the output is
 aggregate-only: it reports file/finding counts, planned operation stages, and
 risk codes without paths, filenames, hashes, thumbnails, OCR text, image

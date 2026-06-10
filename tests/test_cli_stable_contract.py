@@ -243,6 +243,65 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         self.assertLessEqual(record["faded_text_changed_pixel_ratio"], 0.10)
         self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
 
+    def test_production_run_print_clean_template_records_background_stain_evidence(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-cli-print-clean-background-stain-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            source = input_dir / "BATCH001_PAGE_0001.png"
+            _write_print_clean_background_stain_page(source)
+            source_bytes = source.read_bytes()
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "production-run",
+                        "--input",
+                        str(input_dir),
+                        "--derivatives-out",
+                        str(derivatives_dir),
+                        "--metadata-out",
+                        str(metadata_dir),
+                        "--rule-template",
+                        "print-clean-v1",
+                        "--workers",
+                        "1",
+                    ]
+                )
+
+            summary = json.loads((metadata_dir / "production_run_summary.json").read_text(encoding="utf-8"))
+            processing_manifest = json.loads(
+                (derivatives_dir / "processing_manifest.json").read_text(encoding="utf-8")
+            )
+            quality_summary = json.loads(
+                (derivatives_dir / PROCESSING_QUALITY_SUMMARY_JSON).read_text(encoding="utf-8")
+            )
+            record = processing_manifest["files"][0]
+            audit = record["processing_audit"]
+            source_bytes_after = source.read_bytes()
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(source_bytes_after, source_bytes)
+        self.assertEqual(summary["rule_template"]["id"], "print-clean-v1")
+        self.assertEqual(processing_manifest["rule_template"]["id"], "print-clean-v1")
+        self.assertEqual(summary["options"]["processing_profile"], "print_clean")
+        self.assertEqual(processing_manifest["options"]["processing_profile"], "print_clean")
+        self.assertTrue(record["background_stains_lightened"])
+        self.assertIn("localized low-contrast stains", record["background_stains_reason"])
+        self.assertGreaterEqual(audit["background_stains_delta"], 6.0)
+        self.assertGreater(audit["background_stains_changed_pixel_ratio"], 0.02)
+        self.assertLessEqual(audit["background_stains_changed_pixel_ratio"], 0.05)
+        self.assertLessEqual(audit["background_stains_candidate_pixel_ratio"], 0.05)
+        self.assertEqual(audit["guardrail_failures"], [])
+        self.assertEqual(quality_summary["schema_version"], QUALITY_SCHEMA_VERSION)
+        self.assertEqual(quality_summary["status"], "pass")
+        self.assertEqual(quality_summary["quality_signal"]["status"], "measured_with_changes")
+        self.assertEqual(quality_summary["counts"]["background_stains_lightened_files"], 1)
+        self.assertGreaterEqual(quality_summary["quality_metrics"]["background_stains_delta"]["max"], 6.0)
+
     def test_production_run_photo_mixed_safe_template_keeps_strong_cleanup_disabled(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-cli-photo-safe-template-") as temp_dir:
             root = Path(temp_dir)
@@ -574,6 +633,19 @@ def _write_print_clean_faded_text_page(path: Path) -> None:
     lines = ("ARCHIVE REGISTER 1948", "PALE PRINT LINE", "FILING COPY TEXT")
     for index, line in enumerate(lines):
         draw.text((48, 52 + index * 32), line, fill=(228, 228, 228), font=font)
+    image.save(path, dpi=(300, 300))
+
+
+def _write_print_clean_background_stain_page(path: Path) -> None:
+    image = Image.new("RGB", (260, 190), (242, 242, 236))
+    draw = ImageDraw.Draw(image)
+    for y in (54, 82, 110):
+        draw.rectangle((42, y, 142, y + 4), fill=(42, 42, 42))
+    mask = Image.new("L", image.size, 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.ellipse((178, 58, 222, 102), fill=150)
+    mask = mask.filter(ImageFilter.GaussianBlur(7))
+    image = Image.composite(Image.new("RGB", image.size, (224, 220, 196)), image, mask)
     image.save(path, dpi=(300, 300))
 
 
