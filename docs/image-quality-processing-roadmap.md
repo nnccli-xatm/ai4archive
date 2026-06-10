@@ -607,6 +607,12 @@ public-safe `blocking_codes` plus a `retryable` boolean. Recovered
 `needs_recovery` jobs report `job_needs_recovery` and `retryable=true`, so
 external schedulers can choose the explicit retry endpoint without reading
 private checkpoints or local logs.
+Follow-up, 2026-06-10: service API regression now also runs a completed
+`print-clean-v1` job with localized background-stain cleanup and verifies that
+job status plus production session summaries expose only public-safe
+`print_clean` profile, job-level aggregate stain metrics, and session-level
+quality status counts, with no private paths, filenames, or source hashes; the
+session summary still omits job lists and job IDs.
 
 ### M5：性能和后端实现
 

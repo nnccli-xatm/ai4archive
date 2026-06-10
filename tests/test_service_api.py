@@ -7,7 +7,7 @@ import time
 import unittest
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 
 from archive_scan_qc.service_api import (
     cancel_job_response,
@@ -561,6 +561,65 @@ class ServiceApiCoreTests(unittest.TestCase):
                 "私有 页面 001",
             )
 
+    def test_job_run_response_exposes_print_clean_quality_evidence_without_paths(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-api-print-clean-quality-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private input"
+            service_root = root / "service root"
+            input_dir.mkdir()
+            source_path = input_dir / "private_page_001.png"
+            _write_print_clean_background_stain_page(source_path)
+            source_sha_before = _sha256_for_test(source_path)
+            create_job_response(
+                {
+                    "input_dir": str(input_dir),
+                    "service_root": str(service_root),
+                    "rule_template": "print-clean-v1",
+                    "workers": 1,
+                },
+                job_id="job-printcleanquality001",
+            )
+
+            summary = run_job_response(service_root=service_root, job_id="job-printcleanquality001")
+            status = get_job_response(service_root=service_root, job_id="job-printcleanquality001")
+            session = production_session_response(service_root=service_root)
+            raw = json.dumps({"summary": summary, "status": status, "session": session}, ensure_ascii=False)
+
+            quality_metrics = summary["quality"]["quality_metrics"]
+            session_quality = session["session"]["quality"]
+
+            self.assertEqual(summary["state"], "finished")
+            self.assertEqual(status["state"], "finished")
+            self.assertEqual(summary["template"]["rule_template_id"], "print-clean-v1")
+            self.assertEqual(summary["template"]["processing_profile"], "print_clean")
+            self.assertEqual(status["template"]["processing_profile"], "print_clean")
+            self.assertTrue(summary["quality"]["provided"])
+            self.assertEqual(summary["quality"]["status"], "pass")
+            self.assertEqual(summary["quality"]["quality_signal_status"], "measured_with_changes")
+            self.assertEqual(summary["quality"]["processed_files"], 1)
+            self.assertEqual(summary["quality"]["background_cleanup_changed_files"], 1)
+            self.assertEqual(summary["quality"]["guardrail_failed_files"], 0)
+            self.assertGreaterEqual(quality_metrics["background_stains_delta"]["max"], 6.0)
+            self.assertGreater(quality_metrics["background_stains_changed_pixel_ratio"]["max"], 0.02)
+            self.assertLessEqual(quality_metrics["background_stains_changed_pixel_ratio"]["max"], 0.05)
+            self.assertEqual(session_quality["status_counts"], {"pass": 1})
+            self.assertEqual(session_quality["quality_signal_status_counts"], {"measured_with_changes": 1})
+            self.assertNotIn("quality_metrics", session_quality)
+            self.assertFalse(session_quality["privacy"]["contains_paths"])
+            self.assertFalse(session_quality["privacy"]["contains_job_ids"])
+            self.assertFalse(session_quality["privacy"]["contains_quality_rows"])
+            self.assertEqual(_sha256_for_test(source_path), source_sha_before)
+            self.assertFalse(summary["source_images_modified"])
+            _assert_public_source_integrity(self, summary["source_integrity"], checked_files=1)
+            _assert_public_text_omits(
+                self,
+                raw,
+                str(root.resolve()),
+                "private input",
+                "service root",
+                "private_page_001",
+            )
+
     def test_job_start_response_returns_running_then_terminal_without_paths(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-api-start-") as temp_dir:
             root = Path(temp_dir)
@@ -769,6 +828,19 @@ def _write_page(path: Path) -> None:
     image = Image.new("RGB", (220, 160), "white")
     draw = ImageDraw.Draw(image)
     draw.rectangle((32, 42, 188, 46), fill=(40, 40, 40))
+    image.save(path, dpi=(300, 300))
+
+
+def _write_print_clean_background_stain_page(path: Path) -> None:
+    image = Image.new("RGB", (260, 190), (242, 242, 236))
+    draw = ImageDraw.Draw(image)
+    for y in (54, 82, 110):
+        draw.rectangle((42, y, 142, y + 4), fill=(42, 42, 42))
+    mask = Image.new("L", image.size, 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.ellipse((178, 58, 222, 102), fill=150)
+    mask = mask.filter(ImageFilter.GaussianBlur(7))
+    image = Image.composite(Image.new("RGB", image.size, (224, 220, 196)), image, mask)
     image.save(path, dpi=(300, 300))
 
 

@@ -265,6 +265,12 @@ The service API regression now also runs a completed production job from a
 nested Windows-style path containing Chinese characters and spaces, then checks
 that the source hash is unchanged and public responses omit those private path
 segments.
+The service API regression also runs a completed `print-clean-v1` job with
+localized background-stain cleanup and verifies that job status plus production
+session summaries expose only public-safe `print_clean` profile, job-level
+aggregate stain metrics, and session-level quality status counts, while omitting
+private paths, filenames, and hashes; the session summary still omits job lists
+and job IDs.
 Recovery now treats `finished` or `needs_review` checkpoints/progress without a
 terminal `production_run_summary.json` as `needs_recovery`, using the public-safe
 reason code `terminal_state_missing_production_summary`, so schedulers do not

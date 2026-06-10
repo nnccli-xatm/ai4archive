@@ -1604,6 +1604,12 @@ batch-level quality availability, status counts, file counts, and source-change
 booleans without expanding every job. The session view intentionally omits the
 per-job summary list and job IDs; callers use job-specific endpoints when they
 already hold an authorized job ID.
+Service API regression also covers a completed `print-clean-v1` job with
+localized background-stain cleanup: job status and production session summaries
+must expose only public-safe `print_clean` profile, job-level aggregate stain
+metrics, and session-level quality status counts, with no private paths,
+filenames, or source hashes; the session summary still omits job lists and job
+IDs.
 `POST /api/production/finish-export` returns the scheduler-facing export gate:
 only `ready_for_export=true` is export-ready. When false, public-safe
 `blocking_codes` explain the reason, including whitelisted quality blockers and
