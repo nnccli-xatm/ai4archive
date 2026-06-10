@@ -13,12 +13,14 @@ from archive_scan_qc.service_api import (
     create_job_response,
     get_job_local_preview_response,
     get_job_local_review_artifact_response,
+    get_job_review_history_response,
     get_job_response,
     get_rule_template_response,
     list_rule_templates_response,
     production_finish_export_response,
     production_progress_response,
     production_review_actions_response,
+    production_review_history_response,
     production_review_queue_response,
     production_session_response,
     production_setup_response,
@@ -89,6 +91,10 @@ class ServiceApiCoreTests(unittest.TestCase):
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
             self.assertIn(
+                ("GET", "/api/jobs/{job_id}/review-history"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
+            self.assertIn(
                 ("GET", "/api/production/session"),
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
@@ -106,6 +112,10 @@ class ServiceApiCoreTests(unittest.TestCase):
             )
             self.assertIn(
                 ("GET", "/api/production/review-queue"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
+            self.assertIn(
+                ("GET", "/api/production/review-history"),
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
             self.assertIn(
@@ -461,6 +471,14 @@ class ServiceApiCoreTests(unittest.TestCase):
                 },
                 service_root=service_root,
             )
+            job_review_history = get_job_review_history_response(
+                service_root=service_root,
+                job_id="job-productionapi001",
+            )
+            production_review_history = production_review_history_response(
+                service_root=service_root,
+                job_id="job-productionapi001",
+            )
             progress_after_actions = production_progress_response(
                 service_root=service_root,
                 job_id="job-productionapi001",
@@ -475,6 +493,8 @@ class ServiceApiCoreTests(unittest.TestCase):
                     "terminal": terminal,
                     "review_queue": review_queue,
                     "review_actions": review_actions,
+                    "job_review_history": job_review_history,
+                    "production_review_history": production_review_history,
                     "progress_after_actions": progress_after_actions,
                     "finish_export": finish_export,
                     "final_session": final_session,
@@ -504,6 +524,17 @@ class ServiceApiCoreTests(unittest.TestCase):
             self.assertTrue(review_actions["review_actions"]["review_history_written"])
             self.assertEqual(review_actions["review_actions"]["history"]["entry_count"], 1)
             self.assertEqual(review_actions["review_actions"]["history"]["latest_verification_status"], "pass")
+            self.assertEqual(job_review_history["schema_version"], "scan-qc.service-job-review-history.v1")
+            self.assertTrue(job_review_history["provided"])
+            self.assertEqual(job_review_history["status"], "available")
+            self.assertEqual(job_review_history["review_history"]["entry_count"], 1)
+            self.assertEqual(job_review_history["review_history"]["latest_verification_status"], "pass")
+            self.assertFalse(job_review_history["storage"]["path_returned"])
+            self.assertFalse(job_review_history["review_history"]["privacy"]["contains_review_rows"])
+            self.assertFalse(job_review_history["review_history"]["privacy"]["contains_local_ids"])
+            self.assertEqual(production_review_history["view"], "review_history")
+            self.assertEqual(production_review_history["review_history"]["review_history"]["entry_count"], 1)
+            self.assertTrue(production_review_history["privacy"]["public_safe"])
             self.assertEqual(progress_after_actions["job"]["review_actions"]["history"]["entry_count"], 1)
             self.assertNotIn("PRQ000001", raw)
             self.assertTrue(

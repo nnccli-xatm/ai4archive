@@ -99,6 +99,10 @@ class ServiceHttpTransportTests(unittest.TestCase):
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
             self.assertIn(
+                ("GET", "/api/jobs/{job_id}/review-history"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
+            self.assertIn(
                 ("GET", "/api/production/session"),
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
@@ -116,6 +120,10 @@ class ServiceHttpTransportTests(unittest.TestCase):
             )
             self.assertIn(
                 ("GET", "/api/production/review-queue"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
+            self.assertIn(
+                ("GET", "/api/production/review-history"),
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
             self.assertIn(
@@ -323,6 +331,16 @@ class ServiceHttpTransportTests(unittest.TestCase):
                         "review_decisions": _review_decision_summary(("accepted_issue",)),
                     },
                 )
+                job_review_history_status, job_review_history = _json_request(
+                    base_url,
+                    "GET",
+                    "/api/jobs/job-productionhttp001/review-history",
+                )
+                production_review_history_status, production_review_history = _json_request(
+                    base_url,
+                    "GET",
+                    "/api/production/review-history?job_id=job-productionhttp001",
+                )
                 post_actions_progress_status, post_actions_progress = _json_request(
                     base_url,
                     "GET",
@@ -361,6 +379,8 @@ class ServiceHttpTransportTests(unittest.TestCase):
                     "terminal": terminal,
                     "review_queue": review_queue,
                     "review_actions": review_actions,
+                    "job_review_history": job_review_history,
+                    "production_review_history": production_review_history,
                     "post_actions_progress": post_actions_progress,
                     "finish_export": finish_export,
                     "missing_job_id": missing_job_id,
@@ -377,6 +397,8 @@ class ServiceHttpTransportTests(unittest.TestCase):
             self.assertEqual(job_preview_status, 200)
             self.assertEqual(production_preview_status, 200)
             self.assertEqual(actions_status, 200)
+            self.assertEqual(job_review_history_status, 200)
+            self.assertEqual(production_review_history_status, 200)
             self.assertEqual(post_actions_progress_status, 200)
             self.assertEqual(finish_status, 200)
             self.assertEqual(missing_job_id_status, 400)
@@ -406,6 +428,15 @@ class ServiceHttpTransportTests(unittest.TestCase):
             self.assertTrue(review_actions["review_actions"]["review_history_written"])
             self.assertEqual(review_actions["review_actions"]["history"]["entry_count"], 1)
             self.assertEqual(review_actions["review_actions"]["history"]["latest_verification_status"], "pass")
+            self.assertEqual(job_review_history["schema_version"], "scan-qc.service-job-review-history.v1")
+            self.assertTrue(job_review_history["provided"])
+            self.assertEqual(job_review_history["review_history"]["entry_count"], 1)
+            self.assertEqual(job_review_history["review_history"]["latest_verification_status"], "pass")
+            self.assertFalse(job_review_history["review_history"]["privacy"]["contains_review_rows"])
+            self.assertFalse(job_review_history["review_history"]["privacy"]["contains_local_ids"])
+            self.assertEqual(production_review_history["view"], "review_history")
+            self.assertEqual(production_review_history["review_history"]["review_history"]["entry_count"], 1)
+            self.assertTrue(production_review_history["privacy"]["public_safe"])
             self.assertEqual(post_actions_progress["job"]["review_actions"]["history"]["entry_count"], 1)
             self.assertNotIn("PRQ000001", raw)
             review_history_path = service_root / "jobs" / "job-productionhttp001" / "review" / "service_job_review_history.json"

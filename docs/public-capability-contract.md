@@ -125,6 +125,7 @@ IDs.
 The prototype local service job API exposes public-safe job polling through
 `POST /api/jobs`, `GET /api/jobs`, `GET /api/jobs/{job_id}`,
 `GET /api/jobs/{job_id}/local-review/{artifact_id}`,
+`GET /api/jobs/{job_id}/review-history`,
 `POST /api/jobs/{job_id}/run`, `POST /api/jobs/{job_id}/start`,
 `POST /api/jobs/{job_id}/retry`, and `POST /api/jobs/{job_id}/cancel`. `run` is synchronous. `start` is a local
 in-process async MVP that returns `running` immediately, publishes only
@@ -140,6 +141,7 @@ The local service API also exposes a production-worker facade with schema
 `POST /api/production/setup`, `POST /api/production/start`,
 `GET /api/production/progress?job_id=...`,
 `GET /api/production/review-queue?job_id=...`,
+`GET /api/production/review-history?job_id=...`,
 `POST /api/production/review-actions`, and
 `POST /api/production/finish-export`. These endpoints wrap the same service job
 boundary and return only public-safe session, job, local-review availability,
@@ -149,6 +151,8 @@ summary, and append-only `service_job_review_history.json` under the job's
 isolated `review` directory, but responses do not return row-level review
 records, local IDs, local preview resources, client-supplied paths, or raw
 decision rows.
+The dedicated review-history endpoints return the same aggregate history status
+without requiring clients to read local history JSON directly.
 Preview image bytes are exposed only through local-only sensitive endpoints:
 `GET /api/jobs/{job_id}/local-preview/{local_id}?source=original|processed` and
 `GET /api/production/preview?job_id=...&local_id=...&source=...`. They resolve

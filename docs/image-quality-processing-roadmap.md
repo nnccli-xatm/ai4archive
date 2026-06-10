@@ -433,9 +433,10 @@ facade around the same job boundary: session, setup, async start, progress,
 aggregate review-queue availability, and finish/export readiness. It remains
 public-safe. Review actions now persist local decision summaries and aggregate
 verification under the job's isolated review directory, append to local-only
-review history, and publish only aggregate history counts. Local-only preview
-resources now resolve authorized `job_id`/`local_id`/`source` requests without
-publishing paths or filenames.
+review history, and publish only aggregate history counts. Dedicated
+review-history endpoints now let clients refresh that aggregate summary without
+reading local history rows. Local-only preview resources now resolve authorized
+`job_id`/`local_id`/`source` requests without publishing paths or filenames.
 Follow-up, 2026-06-09: service job public summaries now include nested
 `scan-qc.service-job-public-timings.v1` timing context. The service layer
 filters production-run stage timings, aggregate processing throughput, and

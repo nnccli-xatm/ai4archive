@@ -1549,6 +1549,7 @@ public-safe facade endpoints: `GET /api/production/session`,
 `POST /api/production/setup`, `POST /api/production/start`,
 `GET /api/production/progress?job_id=...`,
 `GET /api/production/review-queue?job_id=...`,
+`GET /api/production/review-history?job_id=...`,
 `POST /api/production/review-actions`, and
 `POST /api/production/finish-export`. These wrap the same service job boundary.
 Review actions persist the local decision summary, verification summary, and
@@ -1557,6 +1558,9 @@ directory, while API responses return only aggregate session, job, review
 availability, review-decision verification, review-history counts, and
 finish/export readiness summaries. They do not return row-level local review
 records or local IDs.
+Clients that only need review history can also call
+`GET /api/jobs/{job_id}/review-history`; it returns the same aggregate history
+summary without local paths, local IDs, or decision rows.
 HTTP requests for missing jobs return a public-safe 404 `job_not_found` error;
 missing or unauthorized input directories during job creation remain 400
 `input_dir_missing`. Missing service-managed custom rule templates return a

@@ -608,6 +608,40 @@ def write_service_job_review_actions(
     }
 
 
+def read_service_job_review_history_summary(service_root: Path, job_id: str) -> dict[str, Any]:
+    """Return only the public-safe aggregate review history for a service job."""
+
+    summary = recover_service_job(service_root, job_id)
+    record = load_service_job_record(service_root, job_id)
+    job_root = _job_root_from_record(record)
+    review_dir = _service_job_review_dir(record)
+    _require_within(review_dir, job_root)
+    history_path = (review_dir / SERVICE_JOB_REVIEW_HISTORY_JSON).resolve()
+    _require_within(history_path, job_root)
+    history = None
+    if history_path.is_file():
+        history = _read_json(history_path)
+    if history is None:
+        review_actions = record.get("review_actions") if isinstance(record.get("review_actions"), dict) else {}
+        history = review_actions.get("history")
+    public_history = _public_review_history_payload(history)
+    return {
+        "schema_version": SERVICE_JOB_REVIEW_HISTORY_SCHEMA_VERSION,
+        "generated_at": _utc_now(),
+        "job_id": str(record.get("job_id") or job_id),
+        "job_state": str(summary.get("state") or record.get("state") or "unknown"),
+        "provided": bool(public_history.get("provided")),
+        "status": str(public_history.get("status") or "unknown"),
+        "review_history": public_history,
+        "storage": {
+            "managed_by_service": True,
+            "local_only_payload_written": bool(public_history.get("local_only_payload_written")),
+            "path_returned": False,
+        },
+        "privacy": _public_summary_privacy(),
+    }
+
+
 def _validate_service_paths(input_dir: Path, service_root: Path) -> None:
     if not input_dir.is_dir():
         raise FileNotFoundError(f"Service job input directory does not exist: {input_dir}")

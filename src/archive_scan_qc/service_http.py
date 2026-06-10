@@ -16,12 +16,14 @@ from .service_api import (
     create_job_response,
     get_job_local_review_artifact_response,
     get_job_local_preview_response,
+    get_job_review_history_response,
     get_rule_template_response,
     get_job_response,
     list_rule_templates_response,
     production_finish_export_response,
     production_progress_response,
     production_review_actions_response,
+    production_review_history_response,
     production_review_queue_response,
     production_session_response,
     production_setup_response,
@@ -90,6 +92,15 @@ class ServiceApiRequestHandler(BaseHTTPRequestHandler):
                     ),
                 )
                 return
+            if path == "/api/production/review-history":
+                self._send_json(
+                    200,
+                    production_review_history_response(
+                        service_root=self._service_root,
+                        job_id=_required_query_arg(self.path, "job_id"),
+                    ),
+                )
+                return
             if path == "/api/production/preview":
                 self._send_local_preview(
                     get_job_local_preview_response(
@@ -107,6 +118,12 @@ class ServiceApiRequestHandler(BaseHTTPRequestHandler):
                 return
             if len(segments) == 3 and segments[:2] == ["api", "jobs"]:
                 self._send_json(200, get_job_response(service_root=self._service_root, job_id=segments[2]))
+                return
+            if len(segments) == 4 and segments[:2] == ["api", "jobs"] and segments[3] == "review-history":
+                self._send_json(
+                    200,
+                    get_job_review_history_response(service_root=self._service_root, job_id=segments[2]),
+                )
                 return
             if len(segments) == 5 and segments[:2] == ["api", "jobs"] and segments[3] == "local-review":
                 self._send_json(

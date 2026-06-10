@@ -54,13 +54,17 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   `GET /api/production/session`, `POST /api/production/setup`,
   `POST /api/production/start`, `GET /api/production/progress?job_id=...`,
   `GET /api/production/review-queue?job_id=...`,
+  `GET /api/production/review-history?job_id=...`,
   `POST /api/production/review-actions`, and
   `POST /api/production/finish-export` wrap the same service job boundary,
   reject client-managed `service_root`, persist review decisions only under the
   isolated local `review` directory, append review actions to
   `service_job_review_history.json`, and return only public-safe session, job,
   review availability, review-decision verification, review-history counts, and
-  finish/export readiness summaries. Confirm local-only preview endpoints
+  finish/export readiness summaries. Confirm
+  `GET /api/jobs/{job_id}/review-history` never returns local IDs, decision
+  rows, paths, filenames, or the local review history path. Confirm local-only
+  preview endpoints
   `GET /api/jobs/{job_id}/local-preview/{local_id}` and
   `GET /api/production/preview?job_id=...&local_id=...` read image bytes only
   from authorized input or derivative directories, reject invalid `source`

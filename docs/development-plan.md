@@ -114,11 +114,13 @@
 - `GET /api/jobs/{job_id}`
 - `POST /api/jobs/{job_id}/retry`
 - `POST /api/jobs/{job_id}/cancel`
+- `GET /api/jobs/{job_id}/review-history`
 - `GET /api/production/session`
 - `POST /api/production/setup`
 - `POST /api/production/start`
 - `GET /api/production/progress`
 - `GET /api/production/review-queue`
+- `GET /api/production/review-history`
 - `POST /api/production/review-actions`
 - `POST /api/production/finish-export`
 
@@ -155,6 +157,9 @@ public-safe verification summaries, and append-only local review history under
 the isolated job `review` directory. Local-only authorized preview resources now
 resolve `job_id`/`local_id`/`source` through the production review queue; richer
 review UI remains follow-up work.
+The service API also exposes job-level and production-facade review-history
+queries that return only aggregate history counts/latest verification status,
+without local IDs or row-level decision records.
 Per-job roots now include separate `metadata`、`derivatives`、`tmp`、
 `checkpoints`、`review` 和 `logs` 子目录，public summary 只暴露对应隔离
 布尔值，不暴露本地路径。

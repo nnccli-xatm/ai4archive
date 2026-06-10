@@ -35,6 +35,7 @@ from .service_jobs import (
     resolve_service_job_local_preview,
     run_service_job,
     read_service_job_local_review_artifact,
+    read_service_job_review_history_summary,
     start_service_job_async,
     write_service_job_review_actions,
 )
@@ -74,6 +75,7 @@ def service_capabilities() -> dict[str, Any]:
             {"method": "GET", "path": "/api/jobs/{job_id}", "implemented_by_core": True},
             {"method": "GET", "path": "/api/jobs/{job_id}/local-review/{artifact_id}", "implemented_by_core": True},
             {"method": "GET", "path": "/api/jobs/{job_id}/local-preview/{local_id}", "implemented_by_core": True},
+            {"method": "GET", "path": "/api/jobs/{job_id}/review-history", "implemented_by_core": True},
             {"method": "POST", "path": "/api/jobs/{job_id}/run", "implemented_by_core": True},
             {"method": "POST", "path": "/api/jobs/{job_id}/start", "implemented_by_core": True},
             {"method": "POST", "path": "/api/jobs/{job_id}/retry", "implemented_by_core": True},
@@ -83,6 +85,7 @@ def service_capabilities() -> dict[str, Any]:
             {"method": "POST", "path": "/api/production/start", "implemented_by_core": True},
             {"method": "GET", "path": "/api/production/progress", "implemented_by_core": True},
             {"method": "GET", "path": "/api/production/review-queue", "implemented_by_core": True},
+            {"method": "GET", "path": "/api/production/review-history", "implemented_by_core": True},
             {"method": "GET", "path": "/api/production/preview", "implemented_by_core": True},
             {"method": "POST", "path": "/api/production/review-actions", "implemented_by_core": True},
             {"method": "POST", "path": "/api/production/finish-export", "implemented_by_core": True},
@@ -174,6 +177,13 @@ def production_review_actions_response(request: dict[str, Any], *, service_root:
     )
 
 
+def production_review_history_response(*, service_root: Path, job_id: str) -> dict[str, Any]:
+    return _production_response(
+        view="review_history",
+        review_history=read_service_job_review_history_summary(service_root, job_id),
+    )
+
+
 def production_finish_export_response(*, service_root: Path, job_id: str) -> dict[str, Any]:
     summary = get_job_response(service_root=service_root, job_id=job_id)
     state = str(summary.get("state") or "")
@@ -237,6 +247,10 @@ def get_job_local_review_artifact_response(*, service_root: Path, job_id: str, a
     return read_service_job_local_review_artifact(service_root, job_id, artifact_id)
 
 
+def get_job_review_history_response(*, service_root: Path, job_id: str) -> dict[str, Any]:
+    return read_service_job_review_history_summary(service_root, job_id)
+
+
 def get_job_local_preview_response(
     *,
     service_root: Path,
@@ -281,6 +295,7 @@ def _production_response(
     job: dict[str, Any] | None = None,
     session: dict[str, Any] | None = None,
     review_queue: dict[str, Any] | None = None,
+    review_history: dict[str, Any] | None = None,
     review_actions: dict[str, Any] | None = None,
     finish_export: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -315,6 +330,8 @@ def _production_response(
         payload["session"] = session
     if review_queue is not None:
         payload["review_queue"] = review_queue
+    if review_history is not None:
+        payload["review_history"] = review_history
     if review_actions is not None:
         payload["review_actions"] = review_actions
     if finish_export is not None:

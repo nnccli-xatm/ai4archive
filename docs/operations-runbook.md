@@ -239,9 +239,10 @@ response shapes. The prototype local HTTP transport can be started with
 `GET /api/jobs/{job_id}/local-review/{artifact_id}`,
 `POST /api/jobs/{job_id}/run`, `POST /api/jobs/{job_id}/start`,
 `POST /api/jobs/{job_id}/retry`, `POST /api/jobs/{job_id}/cancel`,
+`GET /api/jobs/{job_id}/review-history`,
 `GET /api/production/session`, `POST /api/production/setup`,
 `POST /api/production/start`, `GET /api/production/progress`,
-`GET /api/production/review-queue`, and
+`GET /api/production/review-queue`, `GET /api/production/review-history`, and
 `POST /api/production/finish-export`.
 The rule-template endpoints expose the same public-safe catalog and no-image
 dry-run plan as the CLI rule-template commands. The validate endpoint accepts
@@ -261,6 +262,9 @@ the isolated job `review` directory, and `finish-export` returns a
 completion/export readiness summary. Responses expose only aggregate
 review-history counts and latest verification status; they do not return
 row-level local review records, local IDs, paths, or raw decision rows.
+Use the dedicated review-history endpoints when a frontend only needs to refresh
+aggregate review history after an action; do not read the local history JSON
+directly outside the service boundary.
 Use `GET /api/jobs/{job_id}/local-preview/{local_id}?source=original|processed`
 or `GET /api/production/preview?job_id=...&local_id=...&source=...` only inside
 the local workstation session to show preview image bytes. The service resolves
