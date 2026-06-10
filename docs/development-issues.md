@@ -442,12 +442,25 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 
 ### DEV-403 双层 PDF/OCR 目录方案
 
-状态：`later`
+状态：`done`
 
 范围：
 
 - 调研 JPG 转双层 PDF、PDF/OFD 转换、OCR 目录提取。
 - OCR 低置信度必须人工复核，不作为当前服务边界默认能力。
+
+已完成证据：
+
+- 新增 `docs/ocr-pdf-directory-plan.md`，明确双层 PDF、PDF/OFD provider、
+  OCR 目录候选、人工复核和 public-safe 边界。
+- 方案要求 OCR/PDF/OFD 作为 local-only、path-bearing、可复核的扩展工具进入
+  service job 边界；真实样本聚合验证前不进入默认图像处理、稳定 public CLI/API
+  或 public-safe 摘要。
+- 方案定义了 `ocr_directory_candidates.json` local-only 明细和
+  `ocr_directory_summary.json` public-safe 聚合摘要的分层边界，禁止公开 OCR 文本、
+  目录行、路径、文件名、hash、缩略图、图片内容和 provider 原始日志。
+- 方案给出后续最小实现命令边界：provider probe、searchable PDF plan/apply、
+  OCR directory plan/apply 和 PDF/OFD convert plan/apply。
 
 ## Deferred
 

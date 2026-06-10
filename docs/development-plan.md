@@ -36,7 +36,7 @@
 - 前端仍偏本地工作台/静态页面形态，不是纯 API client。
 - 规则模板还停留在设计层，没有模板 schema、内置模板、参数映射和 dry-run。
 - 实际图像质量提升仍不足，当前处理项主要证明“能安全跑”，还没有形成质量收益指标、模板化增强管线、before/after 本地复核和 public-safe 聚合验收。
-- TIF 转 JPG、JPG 转双层 PDF、PDF/OFD 转换、批量重命名、DPI 修改、Excel 分件、OCR 目录尚未实现。
+- 批量重命名和 Excel 分件已具备 local-only plan/apply 工具；TIF 转 JPG、DPI 修改仍未实现。JPG 转双层 PDF、PDF/OFD 转换和 OCR 目录已有边界方案，但在 provider probe、人工复核和真实样本聚合验证前不进入默认稳定能力。
 - 普通生产入口还需要显式补齐无登录单机流程、单个 JPG 质检、处理项多选、线程数设置和“受控覆盖发布”文案。
 - 崩溃恢复需要统一成后台任务 checkpoint，而不是各功能自行处理。
 - 性能仍未接近长期生产目标。
@@ -537,12 +537,12 @@ OCR 文本、行级记录和图片内容仍只留本地。
 优先顺序：
 
 1. TIF 转 JPG：按输入目录递归转换到指定输出目录，文件基名不变，记录源/目标格式和失败原因。
-2. 批量重命名：先做 dry-run、冲突检测、应用、回滚清单，日志至少包含原名称和新名称。
+2. 批量重命名：已完成 local-only `batch-rename-plan/apply`，包含 dry-run、冲突检测、应用、回滚清单和 JSON/CSV/XLSX 日志。
 3. 批量 DPI 修改：只处理副本或元数据，明确原始 DPI、目标 DPI、实际写入 DPI 和结果。
-4. Excel 案卷分件：按件名、起始页、终止页复制到用户指定目录。
-5. JPG 转双层 PDF：基于文件夹页序生成 OCR 文本层 PDF。
-6. PDF 转 OFD：作为利用副本转换，兼容需求文档中 OPD/OFD 表述差异。
-7. OCR 目录表：默认提取文件编号和题名，识别率先按 70% 目标，低置信度必须人工复核。
+4. Excel 案卷分件：已完成 local-only `case-split-plan/apply`，按件名、起始页、终止页复制到用户指定目录。
+5. JPG 转双层 PDF：已完成边界方案，后续需先做 provider probe 和 plan/apply 骨架。
+6. PDF 转 OFD：已完成边界方案，作为利用副本转换，兼容需求文档中 OPD/OFD 表述差异。
+7. OCR 目录表：已完成边界方案；默认提取文件编号和题名，低置信度必须人工复核。
 
 统一要求：
 
@@ -599,9 +599,9 @@ OCR 文本、行级记录和图片内容仍只留本地。
 8. 规则模板 schema 与 3 个内置模板。
 9. 模板 dry-run 和参数映射到现有处理链。
 10. 生产工作台改为 API client。
-11. 批量重命名 `plan/apply`。
-12. Excel 案卷分件 `plan/apply`。
-13. 双层 PDF/OCR 目录能力调研与最小实现方案。
+11. 批量重命名 `plan/apply`（已完成）。
+12. Excel 案卷分件 `plan/apply`（已完成）。
+13. 双层 PDF/OCR 目录能力调研与最小实现方案（已完成方案，未默认启用 OCR/PDF provider）。
 
 ## 12. 验证策略
 
