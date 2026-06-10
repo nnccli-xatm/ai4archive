@@ -1594,6 +1594,9 @@ quotas in public summaries.
 Recovering the whole service root also writes
 `service_job_index_public_summary.json`, a public-safe aggregate index of job
 states and per-job public summaries for service polling.
+If root-level recovery skips invalid or unreadable checkpoints, the index now
+reports only `skipped_job_count` and aggregate `recovery_issues` codes. It does
+not return skipped job IDs, local paths, checkpoint rows, or exception text.
 
 Treat `service_job.json`, `production_run_summary.json`, progress files, scan
 reports, processing manifests, derivative images, and review queues as local

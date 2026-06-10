@@ -59,7 +59,11 @@ subject to local policy review. Service-job rehearsal cores also write
 `service_job_index_public_summary.json` with schema
 `scan-qc.service-job-index-public-summary.v1`; both are classified as
 `prototype_or_validation` until the HTTP service/API surface is promoted. The
-service job public summary may expose aggregate quality category counts,
+index may expose nested `scan-qc.service-job-index-recovery-issues.v1`
+aggregates for skipped checkpoint recovery issues, limited to skipped counts and
+allowlisted issue-code counts. It must not expose skipped job IDs, checkpoint
+rows, local paths, filenames, hashes, or exception messages. The service job
+public summary may expose aggregate quality category counts,
 whitelisted aggregate `quality_metrics`, blocking codes, and guardrail summaries
 from `processing_quality_summary.json`, plus aggregate local review availability,
 queue counts, processing-review group counts, and nested timing context with schema

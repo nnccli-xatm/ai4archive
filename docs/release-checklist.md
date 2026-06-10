@@ -122,7 +122,9 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   Confirm `service_job_public_summary.json` and
   `service_job_index_public_summary.json` stay free of paths, filenames, hashes,
   OCR text, thumbnails, and image content. Treat `service_job.json` as private
-  checkpoint state.
+  checkpoint state. Confirm root-level recovery issue reporting exposes only
+  skipped counts and aggregate issue codes, not skipped job IDs, checkpoint
+  rows, local paths, or exception messages.
 - Confirm `archive-scan-qc image-processing-capability-smoke --out
   /placeholder/private-validation-output/image-processing-capability-smoke`
   creates `image_processing_capability_smoke.json` with schema

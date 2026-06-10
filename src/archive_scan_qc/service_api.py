@@ -19,6 +19,7 @@ from .rule_templates import (
 )
 from .service_jobs import (
     SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON,
+    SERVICE_JOB_INDEX_RECOVERY_ISSUES_SCHEMA_VERSION,
     LOCAL_REVIEW_ARTIFACT_SCHEMA_VERSION,
     SERVICE_JOB_MAX_ACTIVE_JOBS,
     SERVICE_JOB_MAX_ACTIVE_WORKERS,
@@ -102,6 +103,7 @@ def service_capabilities() -> dict[str, Any]:
             "service_api": SERVICE_API_SCHEMA_VERSION,
             "service_job_public_summary": "scan-qc.service-job-public-summary.v1",
             "service_job_index_public_summary": "scan-qc.service-job-index-public-summary.v1",
+            "service_job_index_recovery_issues": SERVICE_JOB_INDEX_RECOVERY_ISSUES_SCHEMA_VERSION,
             "service_job_local_review_artifact": LOCAL_REVIEW_ARTIFACT_SCHEMA_VERSION,
             "service_job_local_preview": "scan-qc.service-job-local-preview.v1",
             "rule_template_catalog": CATALOG_SCHEMA_VERSION,
@@ -131,6 +133,7 @@ def production_session_response(*, service_root: Path) -> dict[str, Any]:
             "job_count": _safe_int(index.get("job_count")),
             "state_counts": _int_dict(index.get("state_counts")),
             "jobs": index.get("jobs") if isinstance(index.get("jobs"), list) else [],
+            "recovery_issues": index.get("recovery_issues") if isinstance(index.get("recovery_issues"), dict) else {},
         },
     )
 

@@ -44,6 +44,7 @@ from .rule_templates import load_service_rule_template
 SERVICE_JOB_SCHEMA_VERSION = "scan-qc.service-job.v1"
 SERVICE_JOB_PUBLIC_SUMMARY_SCHEMA_VERSION = "scan-qc.service-job-public-summary.v1"
 SERVICE_JOB_INDEX_PUBLIC_SUMMARY_SCHEMA_VERSION = "scan-qc.service-job-index-public-summary.v1"
+SERVICE_JOB_INDEX_RECOVERY_ISSUES_SCHEMA_VERSION = "scan-qc.service-job-index-recovery-issues.v1"
 SERVICE_JOB_PUBLIC_TIMINGS_SCHEMA_VERSION = "scan-qc.service-job-public-timings.v1"
 SERVICE_JOB_SOURCE_INTEGRITY_SCHEMA_VERSION = "scan-qc.service-job-source-integrity.v1"
 LOCAL_REVIEW_ARTIFACT_SCHEMA_VERSION = "scan-qc.service-job-local-review-artifact.v1"
@@ -386,11 +387,13 @@ def recover_service_jobs(service_root: Path) -> dict[str, Any]:
     root.mkdir(parents=True, exist_ok=True)
     jobs_dir = root / SERVICE_JOBS_DIRNAME
     summaries: list[dict[str, Any]] = []
+    recovery_issue_codes: list[str] = []
     if jobs_dir.is_dir():
         for record_path in sorted(jobs_dir.glob(f"*/{SERVICE_JOB_RECORD_JSON}"), key=lambda path: path.parent.name):
             try:
                 summaries.append(recover_service_job(root, record_path.parent.name))
-            except (OSError, ValueError, json.JSONDecodeError):
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                recovery_issue_codes.append(_recovery_issue_code(exc))
                 continue
     state_counts: dict[str, int] = {}
     for summary in summaries:
@@ -402,8 +405,10 @@ def recover_service_jobs(service_root: Path) -> dict[str, Any]:
         "aggregate_only": True,
         "public_safe": True,
         "job_count": len(summaries),
+        "skipped_job_count": len(recovery_issue_codes),
         "state_counts": state_counts,
         "jobs": summaries,
+        "recovery_issues": _public_index_recovery_issues_payload(recovery_issue_codes),
         "privacy": _public_summary_privacy(),
     }
     (root / SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON).write_text(
@@ -1244,6 +1249,40 @@ def _public_event_log_payload(event_log: Any) -> dict[str, Any]:
             "contains_thumbnails": False,
             "contains_ocr_text": False,
             "contains_image_content": False,
+        },
+    }
+
+
+def _recovery_issue_code(exc: Exception) -> str:
+    if isinstance(exc, json.JSONDecodeError):
+        return "invalid_checkpoint_json"
+    if isinstance(exc, OSError):
+        return "checkpoint_unreadable"
+    return "invalid_checkpoint"
+
+
+def _public_index_recovery_issues_payload(issue_codes: list[str]) -> dict[str, Any]:
+    by_code: dict[str, int] = {}
+    for code in issue_codes:
+        safe_code = str(code or "unknown_recovery_issue")
+        by_code[safe_code] = by_code.get(safe_code, 0) + 1
+    issue_count = len(issue_codes)
+    return {
+        "schema_version": SERVICE_JOB_INDEX_RECOVERY_ISSUES_SCHEMA_VERSION,
+        "provided": True,
+        "status": "issues_found" if issue_count else "clear",
+        "issue_count": issue_count,
+        "skipped_job_count": issue_count,
+        "by_code": by_code,
+        "privacy": {
+            "public_safe": True,
+            "aggregate_only": True,
+            "contains_paths": False,
+            "contains_filenames": False,
+            "contains_hashes": False,
+            "contains_job_ids": False,
+            "contains_exception_messages": False,
+            "contains_checkpoint_rows": False,
         },
     }
 

@@ -20,6 +20,7 @@ from archive_scan_qc.service_jobs import (
     SERVICE_JOB_MIN_FREE_SPACE_BYTES,
     SERVICE_JOB_EVENT_LOG_JSON,
     SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON,
+    SERVICE_JOB_INDEX_RECOVERY_ISSUES_SCHEMA_VERSION,
     SERVICE_JOB_PUBLIC_SUMMARY_JSON,
     SERVICE_JOB_RECORD_JSON,
     ServiceJobConfig,
@@ -833,13 +834,78 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             file_raw = json.dumps(file_summary, ensure_ascii=False)
 
             self.assertEqual(summary["job_count"], 2)
+            self.assertEqual(summary["skipped_job_count"], 0)
             self.assertEqual(summary["state_counts"], {"created": 2})
+            self.assertEqual(
+                summary["recovery_issues"]["schema_version"],
+                SERVICE_JOB_INDEX_RECOVERY_ISSUES_SCHEMA_VERSION,
+            )
+            self.assertEqual(summary["recovery_issues"]["status"], "clear")
+            self.assertEqual(summary["recovery_issues"]["issue_count"], 0)
             self.assertEqual(file_summary["schema_version"], "scan-qc.service-job-index-public-summary.v1")
             self.assertEqual(file_summary["job_count"], 2)
+            self.assertEqual(file_summary["skipped_job_count"], 0)
             self.assertEqual(file_summary["state_counts"], {"created": 2})
+            self.assertEqual(file_summary["recovery_issues"]["status"], "clear")
             self.assertEqual({job["job_id"] for job in summary["jobs"]}, {"job-testindex001", "job-testindex002"})
             _assert_public_text_omits(self, raw, str(root.resolve()), "private_page_")
             _assert_public_text_omits(self, file_raw, str(root.resolve()), "private_page_")
+
+    def test_recover_service_jobs_reports_public_safe_skipped_invalid_checkpoints(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-job-index-issues-") as temp_dir:
+            root = Path(temp_dir)
+            service_root = root / "service-root"
+            for index in (1, 2):
+                input_dir = root / f"private-source-{index}"
+                input_dir.mkdir()
+                _write_page(input_dir / f"private_page_{index:03d}.png")
+                create_service_job(
+                    ServiceJobConfig(input_dir=input_dir, service_root=service_root, workers=1),
+                    job_id=f"job-testindexissue00{index}",
+                )
+            bad_job_root = service_root / "jobs" / "job-testindexissue002"
+            record_path = bad_job_root / SERVICE_JOB_RECORD_JSON
+            record = json.loads(record_path.read_text(encoding="utf-8"))
+            record["paths"]["metadata_dir"] = str(root / "escaped-metadata")
+            record_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+            summary = recover_service_jobs(service_root)
+            file_summary = json.loads((service_root / SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON).read_text(encoding="utf-8"))
+            raw = json.dumps(summary, ensure_ascii=False)
+            file_raw = json.dumps(file_summary, ensure_ascii=False)
+
+            self.assertEqual(summary["job_count"], 1)
+            self.assertEqual(summary["skipped_job_count"], 1)
+            self.assertEqual(summary["state_counts"], {"created": 1})
+            self.assertEqual({job["job_id"] for job in summary["jobs"]}, {"job-testindexissue001"})
+            self.assertEqual(
+                summary["recovery_issues"]["schema_version"],
+                SERVICE_JOB_INDEX_RECOVERY_ISSUES_SCHEMA_VERSION,
+            )
+            self.assertEqual(summary["recovery_issues"]["status"], "issues_found")
+            self.assertEqual(summary["recovery_issues"]["issue_count"], 1)
+            self.assertEqual(summary["recovery_issues"]["skipped_job_count"], 1)
+            self.assertEqual(summary["recovery_issues"]["by_code"], {"invalid_checkpoint": 1})
+            self.assertFalse(summary["recovery_issues"]["privacy"]["contains_paths"])
+            self.assertFalse(summary["recovery_issues"]["privacy"]["contains_exception_messages"])
+            self.assertEqual(file_summary["skipped_job_count"], 1)
+            self.assertEqual(file_summary["recovery_issues"]["by_code"], {"invalid_checkpoint": 1})
+            _assert_public_text_omits(
+                self,
+                raw,
+                str(root.resolve()),
+                "private_page_",
+                "escaped-metadata",
+                "job-testindexissue002",
+            )
+            _assert_public_text_omits(
+                self,
+                file_raw,
+                str(root.resolve()),
+                "private_page_",
+                "escaped-metadata",
+                "job-testindexissue002",
+            )
 
 
 def _write_page(path: Path) -> None:

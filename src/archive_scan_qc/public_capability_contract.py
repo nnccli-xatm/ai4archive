@@ -318,6 +318,11 @@ def build_public_capability_contract(generated_at: str | None = None) -> dict[st
                 "scan-qc.service-job-source-integrity.v1",
                 "prototype_or_validation",
             ),
+            _nested_schema(
+                "service_job_index_public_summary.recovery_issues",
+                "scan-qc.service-job-index-recovery-issues.v1",
+                "prototype_or_validation",
+            ),
         ],
         "processing_contract": {
             "source_images_modified": False,

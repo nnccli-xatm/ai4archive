@@ -164,6 +164,10 @@ class ServiceApiCoreTests(unittest.TestCase):
                 capabilities["schemas"]["service_job_event_log"],
                 "scan-qc.service-job-event-log.v1",
             )
+            self.assertEqual(
+                capabilities["schemas"]["service_job_index_recovery_issues"],
+                "scan-qc.service-job-index-recovery-issues.v1",
+            )
             self.assertGreaterEqual(capabilities["resource_limits"]["max_active_async_jobs"], 1)
             self.assertGreaterEqual(capabilities["resource_limits"]["max_active_workers"], 1)
             self.assertGreaterEqual(capabilities["resource_limits"]["min_free_space_bytes"], 1)
@@ -334,6 +338,8 @@ class ServiceApiCoreTests(unittest.TestCase):
             self.assertEqual(status_summary["state"], "created")
             self.assertEqual(cancel_summary["state"], "cancelled")
             self.assertEqual(index_summary["state_counts"], {"cancelled": 1})
+            self.assertEqual(index_summary["skipped_job_count"], 0)
+            self.assertEqual(index_summary["recovery_issues"]["status"], "clear")
             self.assertTrue((service_root / SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON).is_file())
             self.assertTrue(health["job_index_available"])
             _assert_public_text_omits(self, raw, str(root.resolve()), "输入目录", "私有页面001")
@@ -564,6 +570,7 @@ class ServiceApiCoreTests(unittest.TestCase):
             self.assertTrue(finish_export["finish_export"]["ready_for_export"])
             self.assertEqual(final_session["session"]["job_count"], 1)
             self.assertEqual(final_session["session"]["state_counts"], {"finished": 1})
+            self.assertEqual(final_session["session"]["recovery_issues"]["status"], "clear")
             self.assertTrue(finish_export["privacy"]["public_safe"])
             _assert_public_text_omits(self, raw, str(root.resolve()), "private_page_001")
 

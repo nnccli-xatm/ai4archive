@@ -102,6 +102,10 @@ class ServiceHttpTransportTests(unittest.TestCase):
                 ("GET", "/api/jobs/{job_id}/review-history"),
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
+            self.assertEqual(
+                capabilities["schemas"]["service_job_index_recovery_issues"],
+                "scan-qc.service-job-index-recovery-issues.v1",
+            )
             self.assertIn(
                 ("GET", "/api/production/session"),
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
@@ -145,6 +149,8 @@ class ServiceHttpTransportTests(unittest.TestCase):
             self.assertEqual(status["state"], "created")
             self.assertEqual(cancelled["state"], "cancelled")
             self.assertEqual(index["state_counts"], {"cancelled": 1})
+            self.assertEqual(index["skipped_job_count"], 0)
+            self.assertEqual(index["recovery_issues"]["status"], "clear")
             self.assertTrue((service_root / SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON).is_file())
             self.assertTrue(health_after["job_index_available"])
             _assert_public_text_omits(self, raw, str(root.resolve()), "输入目录", "私有页面001")
@@ -406,6 +412,7 @@ class ServiceHttpTransportTests(unittest.TestCase):
             self.assertEqual(managed_root_status, 400)
             self.assertEqual(session["schema_version"], "scan-qc.service-production-session.v1")
             self.assertEqual(session["view"], "session")
+            self.assertEqual(session["session"]["recovery_issues"]["status"], "clear")
             self.assertEqual(setup["view"], "setup")
             self.assertEqual(setup["job"]["state"], "created")
             self.assertEqual(running["view"], "start")

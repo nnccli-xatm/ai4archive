@@ -175,6 +175,10 @@ marks `running` records without progress as `needs_recovery` after restart.
 Root-level recovery now writes `service_job_index_public_summary.json` so an
 external scheduler can poll aggregate job state without reading private
 checkpoints.
+Root-level recovery also reports public-safe `recovery_issues` aggregates when
+individual checkpoints are skipped. The index exposes only skipped counts and
+allowlisted issue codes, not skipped job IDs, paths, checkpoint rows, or
+exception messages.
 The core now supports a `cancelled` terminal state and rejects attempts to rerun
 terminal service jobs.
 It also enforces a per-job worker limit during job creation and reports the
