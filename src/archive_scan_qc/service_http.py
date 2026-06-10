@@ -5,6 +5,7 @@ from __future__ import annotations
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from ipaddress import ip_address
 import json
+import mimetypes
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
@@ -14,6 +15,7 @@ from .service_api import (
     cancel_job_response,
     create_job_response,
     get_job_local_review_artifact_response,
+    get_job_local_preview_response,
     get_rule_template_response,
     get_job_response,
     list_rule_templates_response,
@@ -88,6 +90,16 @@ class ServiceApiRequestHandler(BaseHTTPRequestHandler):
                     ),
                 )
                 return
+            if path == "/api/production/preview":
+                self._send_local_preview(
+                    get_job_local_preview_response(
+                        service_root=self._service_root,
+                        job_id=_required_query_arg(self.path, "job_id"),
+                        local_id=_required_query_arg(self.path, "local_id"),
+                        source=_optional_query_arg(self.path, "source"),
+                    )
+                )
+                return
 
             segments = _path_segments(path)
             if len(segments) == 3 and segments[:2] == ["api", "rule-templates"]:
@@ -104,6 +116,16 @@ class ServiceApiRequestHandler(BaseHTTPRequestHandler):
                         job_id=segments[2],
                         artifact_id=segments[4],
                     ),
+                )
+                return
+            if len(segments) == 5 and segments[:2] == ["api", "jobs"] and segments[3] == "local-preview":
+                self._send_local_preview(
+                    get_job_local_preview_response(
+                        service_root=self._service_root,
+                        job_id=segments[2],
+                        local_id=segments[4],
+                        source=_optional_query_arg(self.path, "source"),
+                    )
                 )
                 return
             raise ServiceHttpError(404, "not_found", "Endpoint not found.")
@@ -321,6 +343,21 @@ class ServiceApiRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_local_preview(self, preview: dict[str, Any]) -> None:
+        path = preview.get("path")
+        if not isinstance(path, Path):
+            raise ServiceHttpError(500, "internal_error", "Local preview could not be resolved.")
+        body = path.read_bytes()
+        content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-AI4-Local-Only", "true")
+        self.send_header("X-AI4-Preview-Source", str(preview.get("source") or "unknown"))
+        self.end_headers()
+        self.wfile.write(body)
+
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002 - stdlib signature
         return
 
@@ -350,6 +387,11 @@ def _required_query_arg(raw_path: str, key: str) -> str:
     if not values or not values[-1]:
         raise ServiceHttpError(400, "missing_request_field", f"Missing query field: {key}.")
     return values[-1]
+
+
+def _optional_query_arg(raw_path: str, key: str) -> str | None:
+    values = parse_qs(urlsplit(raw_path).query, keep_blank_values=False).get(key)
+    return values[-1] if values and values[-1] else None
 
 
 def _required_payload_arg(payload: dict[str, Any], key: str) -> str:

@@ -11,6 +11,7 @@ from PIL import Image, ImageDraw
 from archive_scan_qc.service_api import (
     cancel_job_response,
     create_job_response,
+    get_job_local_preview_response,
     get_job_local_review_artifact_response,
     get_job_response,
     get_rule_template_response,
@@ -84,6 +85,10 @@ class ServiceApiCoreTests(unittest.TestCase):
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
             self.assertIn(
+                ("GET", "/api/jobs/{job_id}/local-preview/{local_id}"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
+            self.assertIn(
                 ("GET", "/api/production/session"),
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
@@ -101,6 +106,10 @@ class ServiceApiCoreTests(unittest.TestCase):
             )
             self.assertIn(
                 ("GET", "/api/production/review-queue"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
+            self.assertIn(
+                ("GET", "/api/production/preview"),
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
             self.assertIn(
@@ -124,6 +133,10 @@ class ServiceApiCoreTests(unittest.TestCase):
             self.assertEqual(
                 capabilities["schemas"]["service_job_local_review_artifact"],
                 "scan-qc.service-job-local-review-artifact.v1",
+            )
+            self.assertEqual(
+                capabilities["schemas"]["service_job_local_preview"],
+                "scan-qc.service-job-local-preview.v1",
             )
             self.assertEqual(
                 capabilities["schemas"]["production_session"],
@@ -430,6 +443,13 @@ class ServiceApiCoreTests(unittest.TestCase):
                 lambda: production_progress_response(service_root=service_root, job_id="job-productionapi001")["job"],
             )
             review_queue = production_review_queue_response(service_root=service_root, job_id="job-productionapi001")
+            _ensure_preview_queue_item(service_root, "job-productionapi001", "private_page_001.png")
+            preview = get_job_local_preview_response(
+                service_root=service_root,
+                job_id="job-productionapi001",
+                local_id="PRQ000001",
+                source="original",
+            )
             review_actions = production_review_actions_response(
                 {
                     "job_id": "job-productionapi001",
@@ -463,6 +483,11 @@ class ServiceApiCoreTests(unittest.TestCase):
             self.assertEqual(review_queue["view"], "review_queue")
             self.assertTrue(review_queue["review_queue"]["available"])
             self.assertEqual(review_queue["review_queue"]["local_review_artifact_id"], "production-review-queue")
+            self.assertEqual(preview["schema_version"], "scan-qc.service-job-local-preview.v1")
+            self.assertEqual(preview["source"], "original")
+            self.assertTrue(preview["local_only"])
+            self.assertFalse(preview["public_safe"])
+            self.assertTrue(Path(preview["path"]).is_file())
             self.assertEqual(review_actions["view"], "review_actions")
             self.assertTrue(review_actions["review_actions"]["saved"])
             self.assertEqual(review_actions["review_actions"]["verification"]["status"], "pass")
@@ -541,6 +566,27 @@ def _review_decision_summary(decisions: tuple[str, ...]) -> dict[str, object]:
         "reviewed_targets": reviewed,
         "decisions": rows,
     }
+
+
+def _ensure_preview_queue_item(service_root: Path, job_id: str, relative_path: str) -> None:
+    queue_path = service_root / "jobs" / job_id / "review" / "production_review_queue.json"
+    queue = json.loads(queue_path.read_text(encoding="utf-8"))
+    items = queue.get("items")
+    if not isinstance(items, list):
+        items = []
+        queue["items"] = items
+    if not any(isinstance(item, dict) and item.get("local_id") == "PRQ000001" for item in items):
+        items.insert(
+            0,
+            {
+                "local_id": "PRQ000001",
+                "relative_path": relative_path,
+                "severity": "P2",
+                "source_category": "processing_failure",
+                "suggested_action": "reprocess",
+            },
+        )
+    queue_path.write_text(json.dumps(queue, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def _wait_for_terminal_summary(testcase: unittest.TestCase, read_summary) -> dict:  # type: ignore[no-untyped-def]

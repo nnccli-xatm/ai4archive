@@ -152,7 +152,9 @@ async execution has landed, and the first production-specific session facade now
 wraps setup/start/progress/review-queue/finish-export around the same job
 boundary. Production review-actions now persist local decision summaries and
 public-safe verification summaries under the isolated job `review` directory.
-Authorized preview resources and richer review history remain follow-up work.
+Local-only authorized preview resources now resolve `job_id`/`local_id`/`source`
+through the production review queue; richer review history and UI remain
+follow-up work.
 Per-job roots now include separate `metadata`、`derivatives`、`tmp`、
 `checkpoints`、`review` 和 `logs` 子目录，public summary 只暴露对应隔离
 布尔值，不暴露本地路径。

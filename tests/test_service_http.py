@@ -95,6 +95,10 @@ class ServiceHttpTransportTests(unittest.TestCase):
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
             self.assertIn(
+                ("GET", "/api/jobs/{job_id}/local-preview/{local_id}"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
+            self.assertIn(
                 ("GET", "/api/production/session"),
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
@@ -112,6 +116,10 @@ class ServiceHttpTransportTests(unittest.TestCase):
             )
             self.assertIn(
                 ("GET", "/api/production/review-queue"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
+            self.assertIn(
+                ("GET", "/api/production/preview"),
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
             self.assertIn(
@@ -295,6 +303,17 @@ class ServiceHttpTransportTests(unittest.TestCase):
                     "GET",
                     "/api/production/review-queue?job_id=job-productionhttp001",
                 )
+                _ensure_preview_queue_item(service_root, "job-productionhttp001", "private_page_001.png")
+                job_preview_status, job_preview_headers, job_preview_body = _raw_request(
+                    base_url,
+                    "GET",
+                    "/api/jobs/job-productionhttp001/local-preview/PRQ000001?source=original",
+                )
+                production_preview_status, production_preview_headers, production_preview_body = _raw_request(
+                    base_url,
+                    "GET",
+                    "/api/production/preview?job_id=job-productionhttp001&local_id=PRQ000001&source=original",
+                )
                 actions_status, review_actions = _json_request(
                     base_url,
                     "POST",
@@ -315,6 +334,11 @@ class ServiceHttpTransportTests(unittest.TestCase):
                     "GET",
                     "/api/production/progress",
                 )
+                invalid_preview_status, invalid_preview = _json_request(
+                    base_url,
+                    "GET",
+                    "/api/production/preview?job_id=job-productionhttp001&local_id=PRQ000001&source=bad",
+                )
                 managed_root_status, managed_root = _json_request(
                     base_url,
                     "POST",
@@ -334,6 +358,7 @@ class ServiceHttpTransportTests(unittest.TestCase):
                     "review_actions": review_actions,
                     "finish_export": finish_export,
                     "missing_job_id": missing_job_id,
+                    "invalid_preview": invalid_preview,
                     "managed_root": managed_root,
                 },
                 ensure_ascii=False,
@@ -343,9 +368,12 @@ class ServiceHttpTransportTests(unittest.TestCase):
             self.assertEqual(setup_status, 201)
             self.assertEqual(start_status, 202)
             self.assertEqual(queue_status, 200)
+            self.assertEqual(job_preview_status, 200)
+            self.assertEqual(production_preview_status, 200)
             self.assertEqual(actions_status, 200)
             self.assertEqual(finish_status, 200)
             self.assertEqual(missing_job_id_status, 400)
+            self.assertEqual(invalid_preview_status, 400)
             self.assertEqual(managed_root_status, 400)
             self.assertEqual(session["schema_version"], "scan-qc.service-production-session.v1")
             self.assertEqual(session["view"], "session")
@@ -357,6 +385,13 @@ class ServiceHttpTransportTests(unittest.TestCase):
             self.assertEqual(review_queue["view"], "review_queue")
             self.assertTrue(review_queue["review_queue"]["available"])
             self.assertEqual(review_queue["review_queue"]["local_review_artifact_id"], "production-review-queue")
+            self.assertEqual(job_preview_headers.get("X-AI4-Local-Only"), "true")
+            self.assertEqual(job_preview_headers.get("X-AI4-Preview-Source"), "original")
+            self.assertIn("image/png", job_preview_headers.get("Content-Type", ""))
+            self.assertNotIn("Content-Disposition", job_preview_headers)
+            self.assertGreater(len(job_preview_body), 20)
+            self.assertEqual(production_preview_headers.get("X-AI4-Preview-Source"), "original")
+            self.assertEqual(job_preview_body, production_preview_body)
             self.assertEqual(review_actions["view"], "review_actions")
             self.assertTrue(review_actions["review_actions"]["saved"])
             self.assertEqual(review_actions["review_actions"]["verification"]["status"], "pass")
@@ -365,6 +400,7 @@ class ServiceHttpTransportTests(unittest.TestCase):
             self.assertEqual(finish_export["view"], "finish_export")
             self.assertTrue(finish_export["finish_export"]["ready_for_export"])
             self.assertEqual(missing_job_id["error"]["code"], "missing_request_field")
+            self.assertEqual(invalid_preview["error"]["code"], "invalid_request")
             self.assertEqual(managed_root["error"]["code"], "service_root_managed_by_server")
             self.assertFalse(review_queue["privacy"]["contains_paths"])
             _assert_public_text_omits(self, raw, str(root.resolve()), "private-input", "private_page_001", "client-root")
@@ -635,6 +671,12 @@ def _json_request(base_url: str, method: str, path: str, payload: dict[str, obje
         return exc.code, json.loads(exc.read().decode("utf-8"))
 
 
+def _raw_request(base_url: str, method: str, path: str) -> tuple[int, dict[str, str], bytes]:
+    request = Request(f"{base_url}{path}", method=method)
+    with urlopen(request, timeout=5) as response:
+        return response.status, dict(response.headers.items()), response.read()
+
+
 def _force_service_job_state(job_root: Path, state: str, *, recovery_status: str) -> None:
     record_path = job_root / SERVICE_JOB_RECORD_JSON
     record = json.loads(record_path.read_text(encoding="utf-8"))
@@ -689,6 +731,27 @@ def _review_decision_summary(decisions: tuple[str, ...]) -> dict[str, object]:
         "reviewed_targets": reviewed,
         "decisions": rows,
     }
+
+
+def _ensure_preview_queue_item(service_root: Path, job_id: str, relative_path: str) -> None:
+    queue_path = service_root / "jobs" / job_id / "review" / "production_review_queue.json"
+    queue = json.loads(queue_path.read_text(encoding="utf-8"))
+    items = queue.get("items")
+    if not isinstance(items, list):
+        items = []
+        queue["items"] = items
+    if not any(isinstance(item, dict) and item.get("local_id") == "PRQ000001" for item in items):
+        items.insert(
+            0,
+            {
+                "local_id": "PRQ000001",
+                "relative_path": relative_path,
+                "severity": "P2",
+                "source_category": "processing_failure",
+                "suggested_action": "reprocess",
+            },
+        )
+    queue_path.write_text(json.dumps(queue, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def _wait_for_terminal_http(testcase: unittest.TestCase, read_summary) -> dict:  # type: ignore[no-untyped-def]

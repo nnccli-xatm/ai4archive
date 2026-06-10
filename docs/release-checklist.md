@@ -59,7 +59,12 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   reject client-managed `service_root`, persist review decisions only under the
   isolated local `review` directory, and return only public-safe session, job,
   review availability, review-decision verification, and finish/export
-  readiness summaries. Confirm async
+  readiness summaries. Confirm local-only preview endpoints
+  `GET /api/jobs/{job_id}/local-preview/{local_id}` and
+  `GET /api/production/preview?job_id=...&local_id=...` read image bytes only
+  from authorized input or derivative directories, reject invalid `source`
+  values, set no-store/local-only response headers, and never return local
+  paths, filenames, review rows, or `Content-Disposition`. Confirm async
   `POST /api/jobs/{job_id}/start` returns `running`, later recovers terminal
   public quality summaries, and keeps active in-process jobs distinct from
   stale `running` checkpoints that must recover as `needs_recovery`. Confirm

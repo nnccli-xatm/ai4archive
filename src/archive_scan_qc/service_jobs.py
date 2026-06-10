@@ -47,6 +47,7 @@ SERVICE_JOB_INDEX_PUBLIC_SUMMARY_SCHEMA_VERSION = "scan-qc.service-job-index-pub
 SERVICE_JOB_PUBLIC_TIMINGS_SCHEMA_VERSION = "scan-qc.service-job-public-timings.v1"
 SERVICE_JOB_SOURCE_INTEGRITY_SCHEMA_VERSION = "scan-qc.service-job-source-integrity.v1"
 LOCAL_REVIEW_ARTIFACT_SCHEMA_VERSION = "scan-qc.service-job-local-review-artifact.v1"
+LOCAL_PREVIEW_SCHEMA_VERSION = "scan-qc.service-job-local-preview.v1"
 SERVICE_JOB_REVIEW_ACTIONS_SCHEMA_VERSION = "scan-qc.service-job-review-actions.v1"
 SERVICE_JOB_RECORD_JSON = "service_job.json"
 SERVICE_JOB_PUBLIC_SUMMARY_JSON = "service_job_public_summary.json"
@@ -137,6 +138,7 @@ PUBLIC_QUALITY_METRIC_IDS = (
     "processed_output_dark_pixel_loss_ratio",
     "processed_output_dark_pixel_lift_ratio",
 )
+LOCAL_PREVIEW_IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp")
 _ASYNC_JOB_LOCK = threading.Lock()
 _ASYNC_JOB_KEYS: set[str] = set()
 _ASYNC_JOB_WORKERS: dict[str, int] = {}
@@ -468,6 +470,70 @@ def read_service_job_local_review_artifact(service_root: Path, job_id: str, arti
     }
 
 
+def resolve_service_job_local_preview(
+    service_root: Path,
+    job_id: str,
+    local_id: str,
+    requested_source: str | None = None,
+) -> dict[str, Any]:
+    """Resolve a local-only preview image path through a queue local_id allowlist."""
+
+    safe_id = str(local_id or "").strip()
+    if not safe_id:
+        raise ValueError("Local preview request requires a local_id.")
+    source_filter = str(requested_source or "").strip()
+    if source_filter and source_filter not in {"original", "processed"}:
+        raise ValueError("Local preview source must be original or processed.")
+
+    recover_service_job(service_root, job_id)
+    record = load_service_job_record(service_root, job_id)
+    local_review = record.get("local_review") if isinstance(record.get("local_review"), dict) else {}
+    artifacts = local_review.get("artifacts") if isinstance(local_review.get("artifacts"), dict) else {}
+    queue_value = artifacts.get("production_review_queue") if isinstance(artifacts, dict) else None
+    if local_review.get("provided") is not True or not queue_value:
+        raise ValueError("Local preview queue is not available.")
+    queue_path = Path(str(queue_value)).resolve()
+    job_root = _job_root_from_record(record)
+    review_dir = _service_job_review_dir(record)
+    _require_within(queue_path, job_root)
+    _require_within(queue_path, review_dir)
+    queue = _read_json(queue_path)
+    items = queue.get("items") if isinstance(queue, dict) else None
+    if not isinstance(items, list):
+        raise ValueError("Local preview queue has no items.")
+    item = next((entry for entry in items if isinstance(entry, dict) and entry.get("local_id") == safe_id), None)
+    if not isinstance(item, dict):
+        raise ValueError("Local preview item was not found.")
+
+    relative_path = _safe_preview_relative_path(str(item.get("relative_path") or ""))
+    input_dir = Path(str(record["paths"]["input_dir"])).resolve()
+    derivatives_dir = Path(str(record["paths"]["derivatives_dir"])).resolve()
+    for candidate, source in _preview_candidates(input_dir, derivatives_dir, relative_path):
+        if source_filter and source != source_filter:
+            continue
+        resolved = candidate.resolve()
+        if _valid_preview_path(resolved, input_dir, derivatives_dir):
+            return {
+                "schema_version": LOCAL_PREVIEW_SCHEMA_VERSION,
+                "job_id": str(record.get("job_id") or job_id),
+                "local_id": safe_id,
+                "source": "original_fallback" if not source_filter and source == "original" else source,
+                "path": resolved,
+                "local_only": True,
+                "sensitive": True,
+                "public_safe": False,
+                "privacy": {
+                    "local_only": True,
+                    "public_safe": False,
+                    "contains_image_content": True,
+                    "contains_paths": False,
+                    "contains_filenames": False,
+                    "path_returned_to_http_client": False,
+                },
+            }
+    raise ValueError("Local preview image is not available.")
+
+
 def write_service_job_review_actions(
     service_root: Path,
     job_id: str,
@@ -583,6 +649,38 @@ def _job_directories(job_root: Path) -> dict[str, Path]:
         "review": job_root / "review",
         "logs": job_root / "logs",
     }
+
+
+def _safe_preview_relative_path(value: str) -> Path:
+    text = value.replace("\\", "/").strip()
+    relative = Path(text)
+    if not text or relative.is_absolute() or relative.drive:
+        raise ValueError("Local preview relative path is invalid.")
+    if any(part in {"", ".", ".."} for part in relative.parts):
+        raise ValueError("Local preview relative path is invalid.")
+    return relative
+
+
+def _preview_candidates(input_dir: Path, derivatives_dir: Path, relative_path: Path) -> list[tuple[Path, str]]:
+    return [
+        (derivatives_dir / "images" / relative_path, "processed"),
+        (derivatives_dir / relative_path, "processed"),
+        (input_dir / relative_path, "original"),
+    ]
+
+
+def _valid_preview_path(candidate: Path, input_dir: Path, derivatives_dir: Path) -> bool:
+    if candidate.suffix.lower() not in LOCAL_PREVIEW_IMAGE_SUFFIXES or not candidate.is_file():
+        return False
+    return _is_within(candidate, input_dir) or _is_within(candidate, derivatives_dir)
+
+
+def _is_within(child: Path, parent: Path) -> bool:
+    try:
+        _require_within(child, parent)
+    except ValueError:
+        return False
+    return True
 
 
 def _require_within(child: Path, parent: Path) -> None:

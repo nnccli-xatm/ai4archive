@@ -31,6 +31,7 @@ from .service_jobs import (
     recover_service_job,
     recover_service_jobs,
     retry_service_job,
+    resolve_service_job_local_preview,
     run_service_job,
     read_service_job_local_review_artifact,
     start_service_job_async,
@@ -71,6 +72,7 @@ def service_capabilities() -> dict[str, Any]:
             {"method": "GET", "path": "/api/jobs", "implemented_by_core": True},
             {"method": "GET", "path": "/api/jobs/{job_id}", "implemented_by_core": True},
             {"method": "GET", "path": "/api/jobs/{job_id}/local-review/{artifact_id}", "implemented_by_core": True},
+            {"method": "GET", "path": "/api/jobs/{job_id}/local-preview/{local_id}", "implemented_by_core": True},
             {"method": "POST", "path": "/api/jobs/{job_id}/run", "implemented_by_core": True},
             {"method": "POST", "path": "/api/jobs/{job_id}/start", "implemented_by_core": True},
             {"method": "POST", "path": "/api/jobs/{job_id}/retry", "implemented_by_core": True},
@@ -80,6 +82,7 @@ def service_capabilities() -> dict[str, Any]:
             {"method": "POST", "path": "/api/production/start", "implemented_by_core": True},
             {"method": "GET", "path": "/api/production/progress", "implemented_by_core": True},
             {"method": "GET", "path": "/api/production/review-queue", "implemented_by_core": True},
+            {"method": "GET", "path": "/api/production/preview", "implemented_by_core": True},
             {"method": "POST", "path": "/api/production/review-actions", "implemented_by_core": True},
             {"method": "POST", "path": "/api/production/finish-export", "implemented_by_core": True},
         ],
@@ -95,6 +98,7 @@ def service_capabilities() -> dict[str, Any]:
             "service_job_public_summary": "scan-qc.service-job-public-summary.v1",
             "service_job_index_public_summary": "scan-qc.service-job-index-public-summary.v1",
             "service_job_local_review_artifact": LOCAL_REVIEW_ARTIFACT_SCHEMA_VERSION,
+            "service_job_local_preview": "scan-qc.service-job-local-preview.v1",
             "rule_template_catalog": CATALOG_SCHEMA_VERSION,
             "rule_template_dry_run": DRY_RUN_SCHEMA_VERSION,
             "rule_template_custom_validation": CUSTOM_TEMPLATE_VALIDATION_SCHEMA_VERSION,
@@ -229,6 +233,16 @@ def get_job_response(*, service_root: Path, job_id: str) -> dict[str, Any]:
 
 def get_job_local_review_artifact_response(*, service_root: Path, job_id: str, artifact_id: str) -> dict[str, Any]:
     return read_service_job_local_review_artifact(service_root, job_id, artifact_id)
+
+
+def get_job_local_preview_response(
+    *,
+    service_root: Path,
+    job_id: str,
+    local_id: str,
+    source: str | None = None,
+) -> dict[str, Any]:
+    return resolve_service_job_local_preview(service_root, job_id, local_id, source)
 
 
 def cancel_job_response(*, service_root: Path, job_id: str) -> dict[str, Any]:

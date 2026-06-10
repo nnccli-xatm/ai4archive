@@ -1516,6 +1516,12 @@ The local-only service API can read those sensitive review JSON artifacts at
 IDs: `processing-review-package` and `production-review-queue`. These responses
 are explicitly `local_only`, `sensitive`, and not public-safe; the HTTP service
 rejects non-loopback bind hosts.
+It can also serve local-only preview image bytes through
+`GET /api/jobs/{job_id}/local-preview/{local_id}?source=original|processed` or
+`GET /api/production/preview?job_id=...&local_id=...&source=...`. The service
+resolves `local_id` through the isolated production review queue, validates the
+resolved file under the job's authorized input or derivatives directories, and
+does not return local paths or filenames in preview headers.
 For a production-worker style client, the local service API also exposes
 public-safe facade endpoints: `GET /api/production/session`,
 `POST /api/production/setup`, `POST /api/production/start`,

@@ -259,6 +259,12 @@ counts, `review-actions` writes the local decision summary plus aggregate
 verification summary under the isolated job `review` directory, and
 `finish-export` returns a completion/export readiness summary. Responses do not
 return row-level local review records, local IDs, paths, or raw decision rows.
+Use `GET /api/jobs/{job_id}/local-preview/{local_id}?source=original|processed`
+or `GET /api/production/preview?job_id=...&local_id=...&source=...` only inside
+the local workstation session to show preview image bytes. The service resolves
+the local ID through the job's production review queue and validates the final
+file under the authorized input or derivatives directory. Do not copy preview
+URLs, image bytes, local IDs, filenames, or headers into public evidence.
 The `run` endpoint is synchronous: clients should expect the request to return
 after the existing production runner reaches a terminal state, then poll the job
 status or index for public-safe counts and quality summary fields. The `start`

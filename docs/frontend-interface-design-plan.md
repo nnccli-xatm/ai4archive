@@ -396,19 +396,21 @@ verification status; it does not return row-level review records.
 
 ### 5.8 预览资源
 
-图片预览必须由后端或本地受控目录提供可访问 URL。前端不得猜测系统绝对路径，不在聚合报告中展示私有路径。推荐后续服务端返回：
+图片预览必须由后端或本地受控目录提供，前端不得猜测系统绝对路径，也不得在聚合报告中展示私有路径。当前服务端提供两个 local-only 预览端点：`GET /api/jobs/{job_id}/local-preview/{local_id}?source=original|processed` 和 `GET /api/production/preview?job_id=...&local_id=...&source=...`。这些 URL 只用于当前本机会话：
 
 ```json
 {
   "job_id": "job-20260609-0001",
-  "batch_id": "batch-001",
-  "relative_path": "A001_0001.jpg",
-  "preview_url": "/api/batches/batch-001/preview?token=...",
-  "source": "original",
-  "width": 1600,
-  "height": 2400
+  "local_id": "PRQ000001",
+  "original_preview_url": "/api/production/preview?job_id=job-20260609-0001&local_id=PRQ000001&source=original",
+  "processed_preview_url": "/api/production/preview?job_id=job-20260609-0001&local_id=PRQ000001&source=processed",
+  "fallback_preview_url": "/api/jobs/job-20260609-0001/local-preview/PRQ000001",
+  "local_only": true,
+  "public_safe": false
 }
 ```
+
+预览接口通过 job 的本地复核队列 `local_id` 反查授权相对路径，服务端只在该 job 的输入目录或派生图目录内读取图片字节。前端不得把 preview URL、`local_id`、图片字节、文件名、响应头或任何可还原原始材料身份的信息写入 public-safe 摘要。
 
 ### 5.9 批量工具任务
 
