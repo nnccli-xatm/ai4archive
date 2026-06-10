@@ -113,6 +113,8 @@ def service_capabilities() -> dict[str, Any]:
             "max_active_workers": SERVICE_JOB_MAX_ACTIVE_WORKERS,
             "min_free_space_bytes": SERVICE_JOB_MIN_FREE_SPACE_BYTES,
             "max_tmp_bytes_per_job": SERVICE_JOB_MAX_TMP_BYTES,
+            "auto_worker_scheduling": True,
+            "worker_scheduling_source": "service_job_heuristic_when_workers_omitted",
         },
         "schemas": {
             "service_api": SERVICE_API_SCHEMA_VERSION,
@@ -509,6 +511,8 @@ def _production_response(
             "max_active_workers": SERVICE_JOB_MAX_ACTIVE_WORKERS,
             "min_free_space_bytes": SERVICE_JOB_MIN_FREE_SPACE_BYTES,
             "max_tmp_bytes_per_job": SERVICE_JOB_MAX_TMP_BYTES,
+            "auto_worker_scheduling": True,
+            "worker_scheduling_source": "service_job_heuristic_when_workers_omitted",
         },
         "privacy": _public_privacy(),
     }

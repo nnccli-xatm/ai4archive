@@ -324,7 +324,7 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 
 ### DEV-203 性能和后端热点迁移
 
-状态：`later`
+状态：`done`
 
 范围：
 
@@ -333,10 +333,22 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 - worker 推荐进入服务调度策略。
 - 保留 CPU/Pillow fallback，直到可选后端通过真实样本聚合验证。
 
-启动条件：
+已完成证据：
 
-- 当前质量提升路径和服务 job 边界保持稳定。
-- private validation 聚合结果支持默认值或后端变化。
+- `despeckle` 已有保守 `fallback`、可选 `numpy` 和可选 `opencv` 后端；回归覆盖
+  同语义候选点、替换结果、backend fallback 和 public-safe backend timing 汇总。
+- `image_io_backend='vips'` 已作为显式可选 IO 后端保留在能力边界内，默认仍走
+  Pillow/fallback；public capability contract 将 OpenCV/libvips 标为可选 backend，
+  不提升为稳定默认能力。
+- `image-processing-capability-smoke`、synthetic performance comparison 和 private
+  validation 聚合链路会汇总 `operation_timings`、backend mode/counts 和质量证据，
+  用于判断是否可以调整默认值。
+- service job 在 `workers` 省略时会按输入图片数量、CPU/内存启发式计算
+  `workers_scheduled`，写入私有 job record 和 public-safe resource summary；
+  异步启动按该 scheduled worker 数扣减 active worker 配额，不再把自动调度 job
+  一律按最大 worker 占用处理。
+- 显式 `workers` 请求仍优先生效；CPU/Pillow fallback 仍是默认稳定路径，真实样本
+  聚合验证前不把可选 backend 设为默认。
 
 ## P3：前端和批量扩展工具
 

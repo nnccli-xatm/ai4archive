@@ -481,6 +481,11 @@ worker limit.
 Follow-up, 2026-06-09: async service reservation now also enforces a
 non-sensitive `max_active_workers` limit before marking a job `running`; jobs
 rejected by the global active-worker quota remain in their prior public state.
+Follow-up, 2026-06-10: when a service job omits `workers`, creation now computes
+a bounded `workers_scheduled` value from input image count plus CPU/memory
+heuristics, stores it in the private job record, and publishes only public-safe
+resource summary fields. Async scheduling deducts this scheduled worker count
+from `max_active_workers`; explicit worker requests still take precedence.
 Follow-up, 2026-06-09: service job creation now checks configured minimum
 service-root free space, and job start checks the isolated temp directory
 against `max_tmp_bytes_per_job` before entering `running`.
@@ -644,6 +649,14 @@ aggregates prohibit job IDs, processing profiles, quality rows, and
 - 质量指标不低于 Pillow baseline。
 - 后端切换不改变 public schema 和模板语义。
 - 处理吞吐不低于当前私有样本基线，失败率不升高。
+
+Implementation note, 2026-06-10: performance backends remain optional and
+bounded. `despeckle` has fallback, NumPy, and OpenCV paths with parity/fallback
+tests and public-safe backend timing summaries; libvips remains an explicit
+optional image IO backend. Service jobs now carry auto worker scheduling into
+the job boundary through `workers_scheduled`, while CPU/Pillow fallback remains
+the stable default until private aggregate validation supports a backend
+default change.
 
 ### M6：生产验收和发布门槛
 

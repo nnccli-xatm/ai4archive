@@ -19,6 +19,7 @@ import time
 from typing import Any
 import uuid
 
+from .concurrency import _detect_memory_gb, recommend_workers
 from .production_runner import (
     PRODUCTION_RUN_PROGRESS_JSON,
     PRODUCTION_RUN_SUMMARY_JSON,
@@ -181,7 +182,13 @@ def create_service_job(config: ServiceJobConfig, *, job_id: str | None = None) -
     service_root = config.service_root.resolve()
     _validate_service_paths(input_dir, service_root)
     _validate_service_root_capacity(service_root)
-    workers = _validate_worker_limit(config.workers)
+    workers_requested = _validate_worker_limit(config.workers)
+    input_candidate_count = _count_service_input_candidates(input_dir)
+    worker_recommendation = _service_worker_recommendation(
+        workers_requested,
+        item_count=input_candidate_count,
+    )
+    workers_scheduled = _scheduled_worker_count(workers_requested, worker_recommendation)
     job_id = _validate_job_id(job_id or _new_job_id())
     job_root = (service_root / SERVICE_JOBS_DIRNAME / job_id).resolve()
     _require_within(job_root, service_root)
@@ -238,14 +245,16 @@ def create_service_job(config: ServiceJobConfig, *, job_id: str | None = None) -
             "processing_profile": _processing_profile_for_job(config.rule_template),
             "processing_defaults": processing_defaults,
             "custom_template_draft": stored_template.get("template") if isinstance(stored_template, dict) else None,
-            "workers": workers,
+            "workers": workers_scheduled,
         },
         "resource_limits": {
             "max_workers_per_job": SERVICE_JOB_MAX_WORKERS,
             "max_active_workers": SERVICE_JOB_MAX_ACTIVE_WORKERS,
             "min_free_space_bytes": SERVICE_JOB_MIN_FREE_SPACE_BYTES,
             "max_tmp_bytes_per_job": SERVICE_JOB_MAX_TMP_BYTES,
-            "workers_requested": workers,
+            "workers_requested": workers_requested,
+            "workers_scheduled": workers_scheduled,
+            "worker_recommendation": worker_recommendation,
         },
         "production_artifacts": _production_artifact_paths(directories["metadata"], directories["derivatives"]),
         "recovery": {
@@ -750,6 +759,49 @@ def _validate_worker_limit(workers: int | None) -> int | None:
     if workers > SERVICE_JOB_MAX_WORKERS:
         raise ValueError(f"Service job workers exceed the per-job limit of {SERVICE_JOB_MAX_WORKERS}.")
     return workers
+
+
+def _count_service_input_candidates(input_dir: Path) -> int:
+    count = 0
+    for path in input_dir.rglob("*"):
+        if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS:
+            count += 1
+    return count
+
+
+def _service_worker_recommendation(workers_requested: int | None, *, item_count: int) -> dict[str, Any]:
+    if workers_requested is not None:
+        return {
+            "recommended_workers": workers_requested,
+            "source": "explicit",
+            "item_count": item_count,
+            "auto_scheduled": False,
+            "capped_by_service_limit": False,
+            "capped_by_memory": False,
+            "capped_by_cpu": False,
+            "memory_gb": None,
+        }
+    recommendation = recommend_workers(memory_gb=_detect_memory_gb(), item_count=item_count)
+    recommended = _safe_int(recommendation.get("recommended_workers")) or 1
+    scheduled = min(max(1, recommended), SERVICE_JOB_MAX_WORKERS)
+    capped_by_service_limit = scheduled < recommended
+    return {
+        "recommended_workers": scheduled,
+        "source": str(recommendation.get("source") or "heuristic"),
+        "item_count": item_count,
+        "auto_scheduled": True,
+        "capped_by_service_limit": capped_by_service_limit,
+        "capped_by_memory": bool(recommendation.get("capped_by_memory")),
+        "capped_by_cpu": bool(recommendation.get("capped_by_cpu")),
+        "memory_gb": _safe_float(recommendation.get("memory_gb")),
+    }
+
+
+def _scheduled_worker_count(workers_requested: int | None, worker_recommendation: dict[str, Any]) -> int:
+    if workers_requested is not None:
+        return workers_requested
+    recommended = _safe_int(worker_recommendation.get("recommended_workers")) or 1
+    return min(max(1, recommended), SERVICE_JOB_MAX_WORKERS)
 
 
 def _new_job_id() -> str:
@@ -1542,8 +1594,9 @@ def _public_retry_payload(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _public_resource_limits(resource_limits: Any) -> dict[str, int | None]:
+def _public_resource_limits(resource_limits: Any) -> dict[str, Any]:
     resource_limits = resource_limits if isinstance(resource_limits, dict) else {}
+    worker_recommendation = resource_limits.get("worker_recommendation")
     return {
         "max_workers_per_job": _safe_int(resource_limits.get("max_workers_per_job")),
         "max_active_workers": (
@@ -1556,6 +1609,21 @@ def _public_resource_limits(resource_limits: Any) -> dict[str, int | None]:
             _safe_int(resource_limits.get("max_tmp_bytes_per_job")) or SERVICE_JOB_MAX_TMP_BYTES
         ),
         "workers_requested": _safe_int(resource_limits.get("workers_requested")),
+        "workers_scheduled": _safe_int(resource_limits.get("workers_scheduled")),
+        "worker_recommendation": _public_worker_recommendation(worker_recommendation),
+    }
+
+
+def _public_worker_recommendation(worker_recommendation: Any) -> dict[str, Any]:
+    worker_recommendation = worker_recommendation if isinstance(worker_recommendation, dict) else {}
+    return {
+        "recommended_workers": _safe_int(worker_recommendation.get("recommended_workers")),
+        "source": str(worker_recommendation.get("source") or "unknown"),
+        "item_count": _safe_int(worker_recommendation.get("item_count")),
+        "auto_scheduled": bool(worker_recommendation.get("auto_scheduled")),
+        "capped_by_service_limit": bool(worker_recommendation.get("capped_by_service_limit")),
+        "capped_by_memory": bool(worker_recommendation.get("capped_by_memory")),
+        "capped_by_cpu": bool(worker_recommendation.get("capped_by_cpu")),
     }
 
 
@@ -2051,7 +2119,9 @@ def _async_job_key_from_parts(service_root: Path, job_id: str) -> str:
 
 def _async_worker_units(record: dict[str, Any]) -> int:
     limits = record.get("resource_limits") if isinstance(record.get("resource_limits"), dict) else {}
-    workers = _safe_int(limits.get("workers_requested")) if isinstance(limits, dict) else None
+    workers = _safe_int(limits.get("workers_scheduled")) if isinstance(limits, dict) else None
+    if workers is None:
+        workers = _safe_int(limits.get("workers_requested")) if isinstance(limits, dict) else None
     if workers is None:
         return SERVICE_JOB_MAX_WORKERS
     return min(max(1, workers), SERVICE_JOB_MAX_WORKERS)

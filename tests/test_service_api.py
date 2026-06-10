@@ -218,6 +218,11 @@ class ServiceApiCoreTests(unittest.TestCase):
             self.assertGreaterEqual(capabilities["resource_limits"]["max_active_workers"], 1)
             self.assertGreaterEqual(capabilities["resource_limits"]["min_free_space_bytes"], 1)
             self.assertGreaterEqual(capabilities["resource_limits"]["max_tmp_bytes_per_job"], 1)
+            self.assertTrue(capabilities["resource_limits"]["auto_worker_scheduling"])
+            self.assertEqual(
+                capabilities["resource_limits"]["worker_scheduling_source"],
+                "service_job_heuristic_when_workers_omitted",
+            )
             self.assertTrue(capabilities["privacy"]["public_safe"])
             self.assertNotIn(str(root), raw)
 

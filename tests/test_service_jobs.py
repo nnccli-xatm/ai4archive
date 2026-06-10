@@ -158,6 +158,47 @@ class ServiceJobBoundaryTests(unittest.TestCase):
                     job_id="job-testworkers002",
                 )
 
+    def test_create_auto_workers_records_public_safe_scheduler_recommendation(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-job-auto-workers-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-source"
+            service_root = root / "service-root"
+            input_dir.mkdir()
+            for index in range(3):
+                _write_page(input_dir / f"private_page_{index + 1:03d}.png")
+
+            with mock.patch(
+                "archive_scan_qc.service_jobs.recommend_workers",
+                return_value={
+                    "recommended_workers": 2,
+                    "source": "heuristic",
+                    "capped_by_memory": False,
+                    "capped_by_cpu": False,
+                    "memory_gb": 16.0,
+                },
+            ):
+                summary = create_service_job(
+                    ServiceJobConfig(input_dir=input_dir, service_root=service_root, workers=None),
+                    job_id="job-testautoworkers001",
+                )
+
+            job_root = service_root / "jobs" / "job-testautoworkers001"
+            record = json.loads((job_root / SERVICE_JOB_RECORD_JSON).read_text(encoding="utf-8"))
+            public_raw = (job_root / SERVICE_JOB_PUBLIC_SUMMARY_JSON).read_text(encoding="utf-8")
+            recommendation = summary["resource_limits"]["worker_recommendation"]
+
+            self.assertIsNone(summary["resource_limits"]["workers_requested"])
+            self.assertEqual(summary["resource_limits"]["workers_scheduled"], 2)
+            self.assertEqual(recommendation["recommended_workers"], 2)
+            self.assertEqual(recommendation["source"], "heuristic")
+            self.assertEqual(recommendation["item_count"], 3)
+            self.assertTrue(recommendation["auto_scheduled"])
+            self.assertEqual(record["template_snapshot"]["workers"], 2)
+            self.assertIsNone(record["resource_limits"]["workers_requested"])
+            self.assertEqual(record["resource_limits"]["workers_scheduled"], 2)
+            self.assertTrue(record["resource_limits"]["worker_recommendation"]["auto_scheduled"])
+            _assert_public_text_omits(self, public_raw, str(root.resolve()), "private_page_001", "sha256")
+
     def test_create_rejects_service_root_below_free_space_minimum(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-job-disk-quota-") as temp_dir:
             root = Path(temp_dir)
@@ -833,6 +874,51 @@ class ServiceJobBoundaryTests(unittest.TestCase):
 
             self.assertEqual(running["state"], "running")
             self.assertEqual(running["resource_limits"]["max_active_workers"], SERVICE_JOB_MAX_ACTIVE_WORKERS)
+            self.assertEqual(second_status["state"], "created")
+
+    def test_start_job_async_uses_auto_scheduled_workers_for_active_worker_limit(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-job-auto-worker-limit-") as temp_dir:
+            root = Path(temp_dir)
+            service_root = root / "service-root"
+            with mock.patch(
+                "archive_scan_qc.service_jobs.recommend_workers",
+                return_value={
+                    "recommended_workers": 2,
+                    "source": "heuristic",
+                    "capped_by_memory": False,
+                    "capped_by_cpu": False,
+                    "memory_gb": 16.0,
+                },
+            ):
+                for index in (1, 2):
+                    input_dir = root / f"private-source-auto-workers-{index}"
+                    input_dir.mkdir()
+                    _write_page(input_dir / f"private_page_{index:03d}.png")
+                    create_service_job(
+                        ServiceJobConfig(input_dir=input_dir, service_root=service_root, workers=None),
+                        job_id=f"job-testautolimit00{index}",
+                    )
+            started = threading.Event()
+            release = threading.Event()
+
+            def _blocking_runner(config):  # type: ignore[no-untyped-def]
+                started.set()
+                release.wait(timeout=5)
+
+            with (
+                mock.patch("archive_scan_qc.service_jobs.SERVICE_JOB_MAX_ACTIVE_WORKERS", 3),
+                mock.patch("archive_scan_qc.service_jobs.run_production_folder", side_effect=_blocking_runner),
+            ):
+                running = start_service_job_async(service_root, "job-testautolimit001")
+                self.assertTrue(started.wait(timeout=5))
+                with self.assertRaisesRegex(RuntimeError, "active worker limit"):
+                    start_service_job_async(service_root, "job-testautolimit002")
+                second_status = recover_service_job(service_root, "job-testautolimit002")
+                release.set()
+                _wait_for_async_job_inactive(self, service_root, "job-testautolimit001")
+
+            self.assertEqual(running["resource_limits"]["workers_scheduled"], 2)
+            self.assertTrue(running["resource_limits"]["worker_recommendation"]["auto_scheduled"])
             self.assertEqual(second_status["state"], "created")
 
     def test_cancel_job_marks_terminal_public_summary_without_private_paths(self) -> None:
