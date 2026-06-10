@@ -810,6 +810,69 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             )
             _assert_public_text_omits(self, public_raw, str(root.resolve()), "private_page_001")
 
+    def test_recover_marks_success_record_without_summary_as_needs_recovery(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-job-missing-summary-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-source"
+            service_root = root / "service-root"
+            input_dir.mkdir()
+            _write_page(input_dir / "private_page_001.png")
+            create_service_job(
+                ServiceJobConfig(input_dir=input_dir, service_root=service_root, workers=1),
+                job_id="job-testmissingsummary001",
+            )
+            job_root = service_root / "jobs" / "job-testmissingsummary001"
+            record_path = job_root / SERVICE_JOB_RECORD_JSON
+            record = json.loads(record_path.read_text(encoding="utf-8"))
+            record["state"] = "finished"
+            record["recovery"]["status"] = "forced_finished_without_summary"
+            record_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+            summary = recover_service_job(service_root, "job-testmissingsummary001")
+            public_raw = (job_root / SERVICE_JOB_PUBLIC_SUMMARY_JSON).read_text(encoding="utf-8")
+
+            self.assertEqual(summary["state"], "needs_recovery")
+            self.assertEqual(summary["recovery"]["status"], "terminal_state_missing_production_summary")
+            self.assertEqual(summary["quality"]["status"], "not_available")
+            _assert_public_text_omits(self, public_raw, str(root.resolve()), "private_page_001")
+
+    def test_recover_marks_success_progress_without_summary_as_needs_recovery(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-job-progress-missing-summary-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-source"
+            service_root = root / "service-root"
+            input_dir.mkdir()
+            _write_page(input_dir / "private_page_001.png")
+            create_service_job(
+                ServiceJobConfig(input_dir=input_dir, service_root=service_root, workers=1),
+                job_id="job-testprogresssummary001",
+            )
+            job_root = service_root / "jobs" / "job-testprogresssummary001"
+            (job_root / "metadata" / "production_run_progress.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "scan-qc.production-run-progress.v1",
+                        "state": "finished",
+                        "aggregate_processing": {
+                            "aggregate_only": True,
+                            "total_images": 1,
+                            "processed_images": 1,
+                            "remaining_images": 0,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            summary = recover_service_job(service_root, "job-testprogresssummary001")
+            public_raw = (job_root / SERVICE_JOB_PUBLIC_SUMMARY_JSON).read_text(encoding="utf-8")
+
+            self.assertEqual(summary["state"], "needs_recovery")
+            self.assertEqual(summary["recovery"]["status"], "terminal_state_missing_production_summary")
+            self.assertEqual(summary["counts"]["processed_files"], 1)
+            self.assertEqual(summary["quality"]["status"], "not_available")
+            _assert_public_text_omits(self, public_raw, str(root.resolve()), "private_page_001")
+
     def test_recover_rejects_tampered_record_paths_outside_job_root(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-job-tamper-") as temp_dir:
             root = Path(temp_dir)

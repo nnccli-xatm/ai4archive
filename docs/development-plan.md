@@ -247,6 +247,11 @@ The service API regression now also runs a completed production job from a
 nested Windows-style path containing Chinese characters and spaces, then checks
 that the source hash is unchanged and public responses omit those private path
 segments.
+Recovery now treats `finished` or `needs_review` checkpoints/progress without a
+terminal `production_run_summary.json` as `needs_recovery`, using the public-safe
+reason code `terminal_state_missing_production_summary`, so schedulers do not
+mistake a success-shaped checkpoint for a completed batch without summary
+evidence.
 Concurrent async service-job regression now forces two real production jobs
 through the runner at the same time and verifies that job state, metadata,
 derivatives, template snapshots, processing manifests, review artifacts, and

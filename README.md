@@ -1579,6 +1579,10 @@ before writing a partial job checkpoint.
 Recovery revalidates the checkpoint input path against the service root and
 marks stale `running` records without progress as `needs_recovery`, so a service
 restart does not leave an orphaned job looking active.
+Successful terminal states (`finished` and `needs_review`) must also have a
+terminal `production_run_summary.json`; if a checkpoint or progress file claims
+success without that summary evidence, recovery marks the job `needs_recovery`
+with a public-safe reason code instead of publishing a hollow success state.
 Terminal recovery also rebuilds missing local review artifacts from the existing
 production summary and processing manifest when possible.
 Service public summaries include a nested `timings` payload with schema

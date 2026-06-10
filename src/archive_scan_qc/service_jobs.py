@@ -63,6 +63,7 @@ SERVICE_JOB_EVENT_LOG_JSON = "service_job_event_log.json"
 SERVICE_JOBS_DIRNAME = "jobs"
 JOB_ID_PATTERN = re.compile(r"^job-[A-Za-z0-9][A-Za-z0-9_-]{2,80}$")
 TERMINAL_STATES = {"finished", "needs_review", "failed", "interrupted", "cancelled"}
+SUMMARY_REQUIRED_TERMINAL_STATES = {"finished", "needs_review"}
 RETRYABLE_STATES = {"failed", "interrupted", "needs_recovery"}
 SERVICE_JOB_MAX_WORKERS = 8
 SERVICE_JOB_MAX_ACTIVE_JOBS = 2
@@ -888,7 +889,8 @@ def _derive_recovered_state(
     production_summary: dict[str, Any] | None,
     production_progress: dict[str, Any] | None,
 ) -> tuple[str, str]:
-    if str(record.get("state") or "") == "cancelled":
+    record_state = str(record.get("state") or "")
+    if record_state == "cancelled":
         return "cancelled", "cancelled_by_service_request"
     if isinstance(production_summary, dict) and isinstance(production_summary.get("status"), str):
         status = str(production_summary["status"])
@@ -897,16 +899,20 @@ def _derive_recovered_state(
     if isinstance(production_progress, dict) and isinstance(production_progress.get("state"), str):
         state = str(production_progress["state"])
         if state in TERMINAL_STATES:
+            if state in SUMMARY_REQUIRED_TERMINAL_STATES:
+                return "needs_recovery", "terminal_state_missing_production_summary"
             return state, "terminal_progress_recovered"
         if state == "running":
-            if str(record.get("state") or "") == "running" and _async_job_is_active(record):
+            if record_state == "running" and _async_job_is_active(record):
                 return "running", "async_running"
             return "needs_recovery", "running_progress_requires_resume_after_service_restart"
-    if str(record.get("state") or "") == "running":
+    if record_state in SUMMARY_REQUIRED_TERMINAL_STATES:
+        return "needs_recovery", "terminal_state_missing_production_summary"
+    if record_state == "running":
         if _async_job_is_active(record):
             return "running", "async_running"
         return "needs_recovery", "running_record_requires_resume_after_service_restart"
-    return str(record.get("state") or "created"), "job_record_recovered"
+    return record_state or "created", "job_record_recovered"
 
 
 def _public_summary_from_record(

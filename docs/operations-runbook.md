@@ -330,6 +330,11 @@ separately; public service summaries may expose only those group counts.
 Recovery also treats a private `service_job.json` checkpoint that still says
 `running` but has no progress file as `needs_recovery`, and it rejects a tampered
 checkpoint whose `input_dir` now overlaps the service root.
+Recovery also requires successful terminal states (`finished` and
+`needs_review`) to have a readable terminal `production_run_summary.json`. If a
+checkpoint or progress file claims success without that summary, the public
+state becomes `needs_recovery` with reason code
+`terminal_state_missing_production_summary`.
 For terminal jobs, recovery also regenerates missing local review artifacts from
 the existing production summary and processing manifest when possible, then
 refreshes the public review availability summary without exposing paths.
