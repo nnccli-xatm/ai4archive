@@ -3138,7 +3138,11 @@ class ScanQcTest(unittest.TestCase):
                     output, True, "synthetic safe background repair", 10.0, 15.0, 5.0, 0.04, 0.04
                 )
 
-            def small_text_edge_change(image: Image.Image) -> processing_module.TextEdgeSharpeningResult:
+            def small_text_edge_change(
+                image: Image.Image,
+                *,
+                processing_profile: str = "standard",
+            ) -> processing_module.TextEdgeSharpeningResult:
                 output = image.copy()
                 draw = ImageDraw.Draw(output)
                 draw.rectangle((20, 20, 27, 27), fill=(228, 228, 228))

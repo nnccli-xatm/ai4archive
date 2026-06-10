@@ -3980,7 +3980,10 @@ def _process_image(
     )
     with _operation_timer(operation_timings, "sharpen_text_edges", enabled=options.sharpen_text_edges):
         if options.sharpen_text_edges:
-            text_edges = _sharpen_text_edges_conservative(processed)
+            text_edges = _sharpen_text_edges_conservative(
+                processed,
+                processing_profile=options.processing_profile,
+            )
             if text_edges.preflight_skipped:
                 operation_timings.setdefault("sharpen_text_edges", {})["candidate_preflight_skip"] = True
             processed = text_edges.image
@@ -10432,7 +10435,11 @@ def _faded_text_sample_candidate_ratio(grayscale: Image.Image, threshold: float,
     return round(_mask_ratio(candidate), 6)
 
 
-def _sharpen_text_edges_conservative(image: Image.Image) -> TextEdgeSharpeningResult:
+def _sharpen_text_edges_conservative(
+    image: Image.Image,
+    *,
+    processing_profile: str = "standard",
+) -> TextEdgeSharpeningResult:
     if image.width < 80 or image.height < 80:
         return _text_edges_noop(image, "text edge sharpening skipped: image too small")
     color_risk = _tone_color_risk_reason(image)
@@ -10575,7 +10582,14 @@ def _sharpen_text_edges_conservative(image: Image.Image) -> TextEdgeSharpeningRe
     if not background["safe"]:
         return _text_edges_noop(image, background["reason"], candidate_ratio)
 
-    sharpened = grayscale.filter(ImageFilter.UnsharpMask(radius=1.0, percent=90, threshold=2))
+    print_clean_profile = processing_profile == "print_clean"
+    sharpen_percent = 130 if print_clean_profile else 90
+    sharpen_threshold = 1 if print_clean_profile else 2
+    max_pixel_delta = 48 if print_clean_profile else 42
+    max_edge_delta = 30 if print_clean_profile else 24
+    sharpened = grayscale.filter(
+        ImageFilter.UnsharpMask(radius=1.0, percent=sharpen_percent, threshold=sharpen_threshold)
+    )
     source_pixels = grayscale.load()
     sharp_pixels = sharpened.load()
     changed = 0
@@ -10585,7 +10599,7 @@ def _sharpen_text_edges_conservative(image: Image.Image) -> TextEdgeSharpeningRe
         output_pixels = output.load()
         for x, y in selected:
             delta = int(sharp_pixels[x, y]) - int(source_pixels[x, y])
-            if 3 <= abs(delta) <= 42:
+            if 3 <= abs(delta) <= max_pixel_delta:
                 output_pixels[x, y] = max(0, min(255, int(source_pixels[x, y]) + delta))
                 changed += 1
                 deltas.append(abs(delta))
@@ -10596,7 +10610,7 @@ def _sharpen_text_edges_conservative(image: Image.Image) -> TextEdgeSharpeningRe
         output_pixels = output.load()
         for x, y in selected:
             delta = int(sharp_pixels[x, y]) - int(source_pixels[x, y])
-            if 3 <= abs(delta) <= 42:
+            if 3 <= abs(delta) <= max_pixel_delta:
                 red_value, green_value, blue_value = output_pixels[x, y]
                 output_pixels[x, y] = (
                     max(0, min(255, red_value + delta)),
@@ -10622,7 +10636,7 @@ def _sharpen_text_edges_conservative(image: Image.Image) -> TextEdgeSharpeningRe
         )
     edge_delta = sum(deltas) / max(1, len(deltas))
     edge_energy_before, edge_energy_after = _text_edge_energy_pair(grayscale, result_image.convert("L"), selected)
-    if edge_delta < 3 or edge_delta > 24:
+    if edge_delta < 3 or edge_delta > max_edge_delta:
         return _text_edges_noop(
             image,
             "text edge sharpening skipped: edge delta outside conservative threshold",
@@ -10642,10 +10656,13 @@ def _sharpen_text_edges_conservative(image: Image.Image) -> TextEdgeSharpeningRe
             candidate_ratio,
         )
 
+    applied_reason = "text edge sharpening applied: stable neutral blurred text edges on light paper"
+    if print_clean_profile:
+        applied_reason = "text edge sharpening applied: print-clean stable blurred text edges on light paper"
     return TextEdgeSharpeningResult(
         result_image,
         True,
-        "text edge sharpening applied: stable neutral blurred text edges on light paper",
+        applied_reason,
         round(edge_delta, 6),
         round(changed_ratio, 6),
         round(candidate_ratio, 6),
@@ -10655,6 +10672,10 @@ def _sharpen_text_edges_conservative(image: Image.Image) -> TextEdgeSharpeningRe
 
 
 _TEXT_EDGES_REASON_DETAILS: dict[str, tuple[str, str]] = {
+    "text edge sharpening applied: print-clean stable blurred text edges on light paper": (
+        "applied_print_clean_blurred_text_edges",
+        "Print-clean profile strengthened stable blurred text edges on light paper.",
+    ),
     "text edge sharpening disabled": ("disabled", "正文边缘锐化未启用。"),
     "text edge sharpening applied: stable neutral blurred text edges on light paper": (
         "applied_stable_blurred_text_edges",

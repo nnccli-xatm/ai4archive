@@ -130,7 +130,10 @@ report when `--scan-report` is provided, but its output remains aggregate-only
 and excludes paths, filenames, hashes, thumbnails, OCR text, image content, and
 row-level evidence. Template catalog/detail payloads may expose a public-safe
 `processing_profile` enum, such as `standard` or `print_clean`, because it is a
-template-level processing intent rather than local evidence.
+template-level processing intent rather than local evidence. The enum may
+select bounded processing strength for safe candidates, such as print-clean
+tone mapping or stable text-edge sharpening, but does not expose local rows,
+paths, filenames, hashes, OCR text, thumbnails, or image content.
 For actual production runs, `photo-mixed-safe-v1` must keep strong cleanup,
 faded-text enhancement, and text-edge sharpening disabled in the production
 summary and processing manifest while still emitting the public-safe

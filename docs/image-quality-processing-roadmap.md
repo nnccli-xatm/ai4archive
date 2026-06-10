@@ -237,6 +237,11 @@ built-ins. Legacy IDs remain supported. `print-clean-v1` now resolves to a
 plan: dry-run/detail payloads, production manifests, and production summaries
 publish the profile, while `print-clean-v1` still adds an overprocessing review
 risk code during dry-run.
+Follow-up, 2026-06-10: the same `print_clean` profile now also reaches stable
+blurred text-edge sharpening. Standard readable runs keep the original
+conservative sharpening strength, while print-clean runs use a stronger bounded
+edge profile and preserve the same candidate screening, content-protection
+checks, source-byte invariant, aggregate audit, and guardrails.
 
 Processing-manifest update, 2026-06-09: `processing_manifest.json` now records
 the selected `rule_template` snapshot when the source scan report carries one.
@@ -287,6 +292,11 @@ text-clean candidate to a whiter background and stronger text contrast for
 print/use copies; the regression compares it against the standard readable
 profile on the same synthetic page and verifies source bytes plus aggregate
 audit privacy remain unchanged.
+Follow-up, 2026-06-10: `print_clean` now also strengthens stable blurred text
+edge sharpening for the same print/use-copy target. The regression compares the
+same synthetic page under `standard` and `print_clean`, requires higher edge
+delta and edge-energy gain for the print-clean derivative, and keeps the local
+source, public-safe audit, and combination/cumulative guardrails unchanged.
 
 Follow-up, 2026-06-09: the synthetic smoke fixtures now also cover a safe narrow
 fold-shadow band, a diffuse reverse-side bleed-through ghost, and a segmented

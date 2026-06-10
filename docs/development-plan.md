@@ -305,7 +305,7 @@ review artifact 读取通道，只接受 `processing-review-package` 和
 - `text-clean-readable-v1`：路线图命名的纯文本可读性模板，默认启用当前已验证的背景、阴影、透印、扫描线、褪色文字和文字边缘增强组合。
 - `print-clean-v1`：面向打印/利用副本的强清洁模板，使用 `print_clean`
   处理 profile，在 dry-run 中提示过处理复核，并对安全浅纸低对比文字页使用更强的
-  tone normalization 映射。
+  tone normalization 映射和更强的稳定模糊正文边缘锐化。
 - `high-fidelity-original`：面向照片、绘画、珍贵档案等，核心区域尽量不处理，只处理边框外或指定区域。
 - `photo-mixed-safe-v1`：路线图命名的照片/混排保护模板，当前复用高保真低风险处理默认值。
 - `custom`：用户自定义模板，必须通过参数校验和样例 dry-run 后才能用于正式批次。
@@ -360,6 +360,9 @@ Follow-up, 2026-06-09: 路线图中的 `archival-safe-v1`,
 的同强度参数；其 `print_clean` profile 在同一浅纸低对比候选上提高白场和文字端
 对比，仍复用颜色、纹理、前景密度和组合变化 guardrail，并用回归测试比较
 standard/profile 差异。
+2026-06-10 补充：同一 `print_clean` profile 现在也增强稳定模糊正文边缘锐化；
+standard 仍保持原保守强度，print-clean 在相同候选筛选和内容保护下提高边缘 delta
+与 edge-energy 增益，并通过源文件不变、public-safe audit 和组合/累计 guardrail 回归。
 `image-processing-capability-smoke` 也开始要求折痕阴影、保守透印弱化和分段扫描线
 在全链路 synthetic fixture 上至少各有一次可量化生效。
 2026-06-10 补充：保守透印弱化已加入 broad thin-paper 窄路径，只在稳定浅纸、
