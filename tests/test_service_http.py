@@ -194,14 +194,37 @@ class ServiceHttpTransportTests(unittest.TestCase):
                     "GET",
                     "/api/jobs/job-testhttprun001/local-review/production_review_queue.json",
                 )
+                escaped_review_path = root / "escaped-review.json"
+                escaped_review_path.write_text(
+                    json.dumps({"schema_version": "private-review.v1"}, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+                record_path = service_root / "jobs" / "job-testhttprun001" / SERVICE_JOB_RECORD_JSON
+                record = json.loads(record_path.read_text(encoding="utf-8"))
+                record["local_review"]["artifacts"]["production_review_queue"] = str(escaped_review_path)
+                record_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+                tampered_artifact_status, tampered_artifact = _json_request(
+                    base_url,
+                    "GET",
+                    "/api/jobs/job-testhttprun001/local-review/production-review-queue",
+                )
                 status_status, status_summary = _json_request(base_url, "GET", "/api/jobs/job-testhttprun001")
-            raw = json.dumps({"run": run_summary, "retry": retry_summary, "status": status_summary}, ensure_ascii=False)
+            raw = json.dumps(
+                {
+                    "run": run_summary,
+                    "retry": retry_summary,
+                    "status": status_summary,
+                    "tampered_artifact": tampered_artifact,
+                },
+                ensure_ascii=False,
+            )
             local_raw = json.dumps(local_review, ensure_ascii=False)
 
             self.assertEqual(run_status, 200)
             self.assertEqual(retry_status, 200)
             self.assertEqual(local_status, 200)
             self.assertEqual(invalid_artifact_status, 400)
+            self.assertEqual(tampered_artifact_status, 400)
             self.assertEqual(status_status, 200)
             self.assertEqual(local_review["schema_version"], "scan-qc.service-job-local-review-artifact.v1")
             self.assertEqual(local_review["artifact_id"], "production-review-queue")
@@ -212,6 +235,7 @@ class ServiceHttpTransportTests(unittest.TestCase):
             self.assertTrue(local_review["privacy"]["contains_paths"])
             self.assertIn("private-input", local_raw)
             self.assertEqual(invalid_artifact["error"]["code"], "invalid_request")
+            self.assertEqual(tampered_artifact["error"]["code"], "invalid_request")
             self.assertEqual(run_summary["state"], "finished")
             self.assertEqual(retry_summary["state"], "finished")
             self.assertEqual(status_summary["state"], "finished")
@@ -239,7 +263,7 @@ class ServiceHttpTransportTests(unittest.TestCase):
             self.assertTrue(run_summary["local_review"]["provided"])
             self.assertTrue(run_summary["local_review"]["production_review_queue_written"])
             self.assertFalse(run_summary["local_review"]["privacy"]["contains_paths"])
-            _assert_public_text_omits(self, raw, str(root.resolve()), "private_page_001")
+            _assert_public_text_omits(self, raw, str(root.resolve()), "private_page_001", "escaped-review")
 
     def test_http_start_job_returns_running_then_terminal_without_private_paths(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-http-start-") as temp_dir:
