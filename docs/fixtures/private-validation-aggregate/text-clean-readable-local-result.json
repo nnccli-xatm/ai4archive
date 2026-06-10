@@ -1,0 +1,42 @@
+{
+  "counts": {
+    "changed_files": 3,
+    "failed_files": 0,
+    "guardrail_failed_files": 0,
+    "overprocessing_risk_files": 0,
+    "processed_files": 3,
+    "quality_gain_files": 3,
+    "total_files": 3,
+    "warning_files": 0
+  },
+  "privacy": {
+    "aggregate_only": true,
+    "contains_filenames": false,
+    "contains_hashes": false,
+    "contains_image_content": false,
+    "contains_ocr_text": false,
+    "contains_paths": false,
+    "contains_thumbnails": false
+  },
+  "public_group_id": "text_clean_readability",
+  "quality_metrics": {
+    "background_uniformity_delta": {
+      "average": 0.18,
+      "count": 3,
+      "max": 0.24
+    },
+    "text_contrast_delta": {
+      "average": 0.31,
+      "count": 3,
+      "max": 0.42
+    }
+  },
+  "quality_signal": {
+    "status": "measured_with_changes"
+  },
+  "risk_codes": [
+    "quality_gain_measured"
+  ],
+  "schema_version": "scan-qc.private-validation-result.local.v1",
+  "status": "pass"
+}

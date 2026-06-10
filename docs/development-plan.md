@@ -506,6 +506,9 @@ public-safe 聚合质量证据：输出该 fixture 的像素变化率、颜色�
 public-safe 聚合报告，只公开 public group ID、聚合 item 计数、allowlisted
 质量指标、quality signal status 计数和风险代码；样本标签、路径、文件名、hash、
 OCR 文本、行级记录和图片内容仍只留本地。
+固定合成聚合 fixture `docs/fixtures/private-validation-aggregate/` 现在用于回归
+验证 release gate 的输入/输出形状；它模拟 operator-approved private validation
+分组结果，但不包含真实私有样本、路径、文件名、hash、OCR、缩略图或图片内容。
 
 ## 7. 阶段 3：前端改为 API Client
 

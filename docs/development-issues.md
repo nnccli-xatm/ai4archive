@@ -257,7 +257,7 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 
 ### DEV-109 私有样本聚合验证
 
-状态：`in-progress`
+状态：`done`
 
 范围：
 
@@ -265,10 +265,14 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
   allowlisted metric summaries、quality-signal status counts 和 risk codes。
 - 不提交样本路径、文件名、hash、标签、OCR 文本、缩略图、图片内容或行级记录。
 
-下一步：
+已完成证据：
 
-- 用固定私有样本跑模板对比，只提交聚合指标。
-- 将结果作为发布前人工门禁输入。
+- `private-validation-aggregate` 已有固定合成聚合 fixture：
+  `docs/fixtures/private-validation-aggregate/`，模拟 operator-approved private
+  validation 的分组结果，但只提交 public group ID、聚合计数、allowlisted
+  metric summaries、quality-signal 状态和 risk codes。
+- 回归通过 CLI 从 fixture 生成 `private_validation_aggregate_summary.json`，
+  并验证输出不包含真实路径、文件名、hash、OCR、缩略图或图片内容。
 
 ## P2：CI、发布和性能
 

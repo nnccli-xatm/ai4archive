@@ -1,0 +1,40 @@
+{
+  "counts": {
+    "changed_files": 1,
+    "failed_files": 0,
+    "guardrail_failed_files": 0,
+    "overprocessing_risk_files": 0,
+    "processed_files": 2,
+    "quality_gain_files": 1,
+    "total_files": 2,
+    "warning_files": 0
+  },
+  "privacy": {
+    "aggregate_only": true,
+    "contains_filenames": false,
+    "contains_hashes": false,
+    "contains_image_content": false,
+    "contains_ocr_text": false,
+    "contains_paths": false,
+    "contains_thumbnails": false
+  },
+  "public_group_id": "photo_mixed_guardrail",
+  "quality_metrics": {
+    "changed_pixel_ratio": {
+      "average": 0.003,
+      "count": 2,
+      "max": 0.005
+    },
+    "color_mean_abs_delta": {
+      "average": 0.12,
+      "count": 2,
+      "max": 0.18
+    }
+  },
+  "quality_signal": {
+    "status": "measured_no_quality_operations"
+  },
+  "risk_codes": [],
+  "schema_version": "scan-qc.private-validation-result.local.v1",
+  "status": "pass"
+}

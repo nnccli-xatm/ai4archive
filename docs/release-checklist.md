@@ -222,7 +222,9 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   aggregate item counts, allowlisted metric summaries, quality-signal status
   counts, risk-code counts, and privacy self-check status without private
   labels, paths, filenames, hashes, OCR text, thumbnails, row-level rows, or
-  image bytes.
+  image bytes. Confirm the synthetic contract fixture under
+  `docs/fixtures/private-validation-aggregate/` also passes this command and
+  remains free of real private sample identifiers.
 - Confirm a synthetic review template can be exported and a privacy-safe
   aggregate `review_summary.json` can be generated with no remaining P0/P1
   findings before acceptance.

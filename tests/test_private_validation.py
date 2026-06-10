@@ -10,6 +10,9 @@ from pathlib import Path
 from archive_scan_qc.cli import main
 from archive_scan_qc.private_validation import build_private_validation_aggregate
 
+ROOT = Path(__file__).resolve().parents[1]
+FIXTURE_DIR = ROOT / "docs" / "fixtures" / "private-validation-aggregate"
+
 
 def _write_json(path: Path, payload: dict[str, object]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
@@ -131,6 +134,38 @@ class PrivateValidationAggregateTests(unittest.TestCase):
         self.assertEqual(payload["status"], "pass")
         self.assertEqual(payload["group_count"], 1)
         self.assertIn("Private validation aggregate summary:", stdout.getvalue())
+
+    def test_private_validation_aggregate_fixture_provides_release_gate_shape(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="private-validation-fixture-") as temp_dir:
+            output_path = Path(temp_dir) / "private_validation_aggregate_summary.json"
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "private-validation-aggregate",
+                        "--input-dir",
+                        str(FIXTURE_DIR),
+                        "--out",
+                        str(output_path),
+                    ]
+                )
+            payload = json.loads(output_path.read_text(encoding="utf-8"))
+            raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["schema_version"], "scan-qc.private-validation-aggregate.v1")
+        self.assertEqual(payload["status"], "pass")
+        self.assertEqual(payload["validation_inputs"]["provided_count"], 2)
+        self.assertEqual(payload["validation_inputs"]["raw_sensitive_payload_count"], 0)
+        self.assertEqual(payload["group_count"], 2)
+        groups = {group["group_id"]: group for group in payload["group_summaries"]}
+        self.assertEqual(groups["text_clean_readability"]["counts"]["quality_gain_items"], 3)
+        self.assertEqual(groups["photo_mixed_guardrail"]["counts"]["overprocessing_risk_items"], 0)
+        text_metrics = {metric["metric_id"]: metric for metric in groups["text_clean_readability"]["metric_summary"]}
+        self.assertEqual(text_metrics["text_contrast_delta"]["average"], 0.31)
+        self.assertIn("Private validation aggregate summary:", stdout.getvalue())
+        for forbidden in ("D:\\", "/Users/", "客户", "abcdef123456", "private OCR text", "blob:http"):
+            self.assertNotIn(forbidden, raw)
 
 
 def _private_validation_payload(
