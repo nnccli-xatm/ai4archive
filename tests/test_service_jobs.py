@@ -1138,6 +1138,34 @@ class ServiceJobBoundaryTests(unittest.TestCase):
                 "job-testindexissue002",
             )
 
+    def test_recover_invalid_checkpoint_json_stays_public_safe(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-job-invalid-json-") as temp_dir:
+            root = Path(temp_dir)
+            service_root = root / "service-root"
+            input_dir = root / "private-source"
+            input_dir.mkdir()
+            _write_page(input_dir / "private_page_001.png")
+            create_service_job(
+                ServiceJobConfig(input_dir=input_dir, service_root=service_root, workers=1),
+                job_id="job-testinvalidjson001",
+            )
+            record_path = service_root / "jobs" / "job-testinvalidjson001" / SERVICE_JOB_RECORD_JSON
+            record_path.write_text("{", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "checkpoint JSON"):
+                recover_service_job(service_root, "job-testinvalidjson001")
+            summary = recover_service_jobs(service_root)
+            file_summary = json.loads((service_root / SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON).read_text(encoding="utf-8"))
+            raw = json.dumps(summary, ensure_ascii=False)
+
+            self.assertEqual(summary["job_count"], 0)
+            self.assertEqual(summary["skipped_job_count"], 1)
+            self.assertEqual(summary["recovery_issues"]["by_code"], {"invalid_checkpoint_json": 1})
+            self.assertEqual(file_summary["recovery_issues"]["by_code"], {"invalid_checkpoint_json": 1})
+            self.assertFalse(summary["recovery_issues"]["privacy"]["contains_paths"])
+            self.assertFalse(summary["recovery_issues"]["privacy"]["contains_exception_messages"])
+            _assert_public_text_omits(self, raw, str(root.resolve()), "private_page_001", "job-testinvalidjson001")
+
 
 def _write_page(path: Path) -> None:
     image = Image.new("RGB", (360, 480), "white")

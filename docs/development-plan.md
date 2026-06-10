@@ -302,6 +302,8 @@ summary 只暴露模板 ID、基础模板 ID、processing mode 和 profile，不
 2026-06-10 补充：service job checkpoint、job public summary 和 root index
 public summary 写入改为同目录临时 JSON 后原子替换，避免 async worker 写状态时
 轮询端读到空文件或半写 JSON。
+若历史或外部损坏的 checkpoint JSON 无法解析，单 job 恢复会报告明确校验错误，
+root-level recovery 只公开 `invalid_checkpoint_json` 聚合计数，不暴露异常文本或路径。
 
 ## 6. 阶段 2：图像处理规则模板系统
 

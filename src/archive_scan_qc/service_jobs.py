@@ -430,7 +430,10 @@ def load_service_job_record(service_root: Path, job_id: str) -> dict[str, Any]:
     record_path = job_root / SERVICE_JOB_RECORD_JSON
     if not record_path.is_file():
         raise ServiceJobNotFoundError("Service job does not exist.")
-    record = json.loads(record_path.read_text(encoding="utf-8"))
+    try:
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError("Service job checkpoint JSON is invalid.") from exc
     if record.get("schema_version") != SERVICE_JOB_SCHEMA_VERSION:
         raise ValueError("Unsupported service job schema.")
     if record.get("job_id") != job_id:
@@ -1292,7 +1295,7 @@ def _public_event_log_payload(event_log: Any) -> dict[str, Any]:
 
 
 def _recovery_issue_code(exc: Exception) -> str:
-    if isinstance(exc, json.JSONDecodeError):
+    if isinstance(exc, json.JSONDecodeError) or isinstance(exc.__cause__, json.JSONDecodeError):
         return "invalid_checkpoint_json"
     if isinstance(exc, OSError):
         return "checkpoint_unreadable"

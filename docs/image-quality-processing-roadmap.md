@@ -532,6 +532,9 @@ Follow-up, 2026-06-10: service-job checkpoint, per-job public summary, and root
 index public summary writes now use same-directory temporary JSON files followed
 by atomic replace. This prevents async status polling from reading empty or
 partially written state files while a worker is updating checkpoints.
+If a legacy or externally damaged checkpoint JSON cannot be parsed, single-job
+recovery returns a validation error and root-level recovery publishes only the
+aggregate `invalid_checkpoint_json` issue code without paths or exception text.
 Follow-up, 2026-06-09: the service API now also exposes a production-worker
 facade around the same job boundary: session, setup, async start, progress,
 aggregate review-queue availability, and finish/export readiness. It remains
