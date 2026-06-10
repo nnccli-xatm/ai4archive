@@ -166,6 +166,12 @@ non-terminal jobs, review-required jobs, failed/interrupted/cancelled jobs,
 recoverable jobs, source-image modification, and quality blockers. It also
 publishes `retryable=true` only for states accepted by the explicit retry
 endpoint, including recovered `needs_recovery` jobs.
+The same `finish-export` facade now includes an aggregate-only `review_gate`:
+if local review queue items exist, export is blocked until a verified complete
+operator-review summary covers the queue and its closure gate allows delivery.
+Only counts, latest verification/completion status, delivery booleans, and
+blocking codes are public; local IDs, paths, filenames, and decision rows stay
+inside local-only review artifacts.
 Service jobs now write local-only event logs under the isolated `logs`
 directory and expose only public-safe event counts/latest event metadata in the
 public summary.
@@ -323,6 +329,9 @@ summary 只暴露模板 ID、基础模板 ID、processing mode 和 profile，不
 2026-06-10 补充：service job checkpoint、job public summary 和 root index
 public summary 写入改为同目录临时 JSON 后原子替换，避免 async worker 写状态时
 轮询端读到空文件或半写 JSON。
+2026-06-10 补充：Windows 下轮询端短暂打开状态 JSON 时，原子替换现在会对
+瞬时 `PermissionError` 做短重试，避免 async worker 在服务状态收尾时留下
+线程异常或半完成 public summary。
 若历史或外部损坏的 checkpoint JSON 无法解析，单 job 恢复会报告明确校验错误，
 root-level recovery 只公开 `invalid_checkpoint_json` 聚合计数，不暴露异常文本或路径。
 

@@ -75,8 +75,12 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   finish/export readiness summaries. Confirm `finish-export` treats
   `ready_for_export=true` as the only export-ready condition and returns
   public-safe `blocking_codes` for non-terminal, review-required,
-  failed/interrupted/cancelled, recoverable, source-modified, and quality-blocked
-  jobs. Confirm `retryable=true` is present only for states accepted by
+  failed/interrupted/cancelled, recoverable, source-modified, review-gate
+  blocked, and quality-blocked jobs. Confirm the nested `review_gate` blocks
+  export when a local review queue has items but no complete verified operator
+  review, while exposing only aggregate counts/statuses and never local IDs,
+  paths, filenames, or decision rows. Confirm `retryable=true` is present only
+  for states accepted by
   `POST /api/jobs/{job_id}/retry`, including recovered `needs_recovery` jobs.
   Confirm
   `GET /api/jobs/{job_id}/review-history` never returns local IDs, decision
@@ -92,6 +96,9 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   `POST /api/jobs/{job_id}/start` returns `running`, later recovers terminal
   public quality summaries, and keeps active in-process jobs distinct from
   stale `running` checkpoints that must recover as `needs_recovery`. Confirm
+  repeated async polling on Windows does not produce transient
+  `PermissionError` failures while checkpoint/public-summary JSON files are
+  atomically replaced. Confirm
   `max_active_async_jobs` and `max_active_workers` are published in
   capabilities and enforced before a second async job is marked `running` when
   either limit is reached. Confirm `min_free_space_bytes` and

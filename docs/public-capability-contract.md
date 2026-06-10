@@ -197,10 +197,14 @@ The `finish-export` summary exposes public-safe `blocking_codes` for export
 readiness. Codes may include whitelisted quality blockers plus service-boundary
 codes such as `job_not_terminal`, `job_requires_review`, `job_failed`,
 `job_interrupted`, `job_cancelled`, `job_needs_recovery`, and
-`source_images_modified`; clients should use these codes instead of inferring
-export readiness from state text alone. The same summary exposes a public-safe
-`retryable` boolean for failed, interrupted, and recovered `needs_recovery`
-jobs that can use the explicit retry endpoint.
+`source_images_modified`; review-gate blockers include
+`operator_review_required`, `operator_review_incomplete`,
+`operator_review_invalid`, and `operator_review_not_closed`. Clients should use
+these codes instead of inferring export readiness from state text alone. The
+same summary exposes a public-safe `review_gate` with only aggregate counts,
+latest verification/completion status, and delivery-closure booleans, plus a
+public-safe `retryable` boolean for failed, interrupted, and recovered
+`needs_recovery` jobs that can use the explicit retry endpoint.
 The dedicated review-history endpoints return the same aggregate history status
 without requiring clients to read local history JSON directly.
 Service job event logs are local-only under the isolated `logs` directory. Public

@@ -400,6 +400,37 @@ def build_public_capability_contract(generated_at: str | None = None) -> dict[st
                     "forbidden_content": _public_forbidden_content()
                     + ["job_ids", "quality_rows", "quality_metrics", "processing_profiles"],
                 },
+                {
+                    "id": "production_finish_export",
+                    "schema_version": "scan-qc.service-production-session.v1",
+                    "scope": "POST /api/production/finish-export export readiness gate",
+                    "may_include_job_id": True,
+                    "may_include_quality_metrics": True,
+                    "may_include_processing_profile": True,
+                    "quality_detail": "job_level_public_safe_aggregate",
+                    "allowed_quality_context": [
+                        "blocking_codes",
+                        "whitelisted_quality_metrics",
+                        "quality_signal_status",
+                        "guardrail_status",
+                    ],
+                    "allowed_review_gate_context": [
+                        "review_item_count",
+                        "reviewed_decision_count",
+                        "latest_verification_status",
+                        "latest_completion_status",
+                        "can_complete_delivery",
+                        "operator_review_blocking_codes",
+                    ],
+                    "allowed_review_gate_blocking_codes": [
+                        "operator_review_required",
+                        "operator_review_incomplete",
+                        "operator_review_invalid",
+                        "operator_review_not_closed",
+                    ],
+                    "forbidden_content": _public_forbidden_content()
+                    + ["local_ids", "review_rows", "raw_decision_rows"],
+                },
             ],
         },
         "processing_contract": {

@@ -11,6 +11,7 @@ from urllib.request import Request, urlopen
 
 from PIL import Image, ImageDraw, ImageFilter
 
+from archive_scan_qc import service_jobs as service_jobs_module
 from archive_scan_qc.service_http import create_service_http_server
 from archive_scan_qc.service_jobs import (
     SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON,
@@ -495,10 +496,26 @@ class ServiceHttpTransportTests(unittest.TestCase):
                         "/api/production/progress?job_id=job-productionhttp001",
                     )[1]["job"],
                 )
+                _wait_for_async_job_inactive(self, service_root, "job-productionhttp001")
+                terminal = _wait_for_source_integrity(
+                    self,
+                    lambda: _json_request(
+                        base_url,
+                        "GET",
+                        "/api/production/progress?job_id=job-productionhttp001",
+                    )[1]["job"],
+                )
+                _force_review_queue_item_count(service_root, "job-productionhttp001", 1)
                 queue_status, review_queue = _json_request(
                     base_url,
                     "GET",
                     "/api/production/review-queue?job_id=job-productionhttp001",
+                )
+                finish_before_actions_status, finish_before_actions = _json_request(
+                    base_url,
+                    "POST",
+                    "/api/production/finish-export",
+                    {"job_id": "job-productionhttp001"},
                 )
                 _ensure_preview_queue_item(service_root, "job-productionhttp001", "private_page_001.png")
                 job_preview_status, job_preview_headers, job_preview_body = _raw_request(
@@ -522,13 +539,14 @@ class ServiceHttpTransportTests(unittest.TestCase):
                     "GET",
                     "/api/production/preview?job_id=job-productionhttp001&local_id=PRQ999999&source=original",
                 )
+                review_item_count = max(1, int(review_queue["review_queue"]["review_item_count"]))
                 actions_status, review_actions = _json_request(
                     base_url,
                     "POST",
                     "/api/production/review-actions",
                     {
                         "job_id": "job-productionhttp001",
-                        "review_decisions": _review_decision_summary(("accepted_issue",)),
+                        "review_decisions": _review_decision_summary(("accepted_issue",) * review_item_count),
                     },
                 )
                 job_review_history_status, job_review_history = _json_request(
@@ -579,6 +597,7 @@ class ServiceHttpTransportTests(unittest.TestCase):
                     "running": running,
                     "terminal": terminal,
                     "review_queue": review_queue,
+                    "finish_before_actions": finish_before_actions,
                     "unsafe_preview": unsafe_preview,
                     "review_actions": review_actions,
                     "job_review_history": job_review_history,
@@ -597,6 +616,7 @@ class ServiceHttpTransportTests(unittest.TestCase):
             self.assertEqual(setup_status, 201)
             self.assertEqual(start_status, 202)
             self.assertEqual(queue_status, 200)
+            self.assertEqual(finish_before_actions_status, 200)
             self.assertEqual(job_preview_status, 200)
             self.assertEqual(production_preview_status, 200)
             self.assertEqual(unsafe_preview_status, 400)
@@ -650,6 +670,15 @@ class ServiceHttpTransportTests(unittest.TestCase):
             self.assertEqual(review_queue["view"], "review_queue")
             self.assertTrue(review_queue["review_queue"]["available"])
             self.assertEqual(review_queue["review_queue"]["local_review_artifact_id"], "production-review-queue")
+            self.assertEqual(finish_before_actions["view"], "finish_export")
+            self.assertFalse(finish_before_actions["finish_export"]["ready_for_export"])
+            self.assertTrue(finish_before_actions["finish_export"]["requires_review"])
+            self.assertIn("operator_review_required", finish_before_actions["finish_export"]["blocking_codes"])
+            self.assertEqual(finish_before_actions["finish_export"]["review_gate"]["status"], "blocked")
+            self.assertEqual(
+                finish_before_actions["finish_export"]["review_gate"]["review_item_count"],
+                review_queue["review_queue"]["review_item_count"],
+            )
             self.assertEqual(job_preview_headers.get("X-AI4-Local-Only"), "true")
             self.assertEqual(job_preview_headers.get("X-AI4-Preview-Source"), "original")
             self.assertIn("image/png", job_preview_headers.get("Content-Type", ""))
@@ -661,7 +690,7 @@ class ServiceHttpTransportTests(unittest.TestCase):
             self.assertEqual(review_actions["view"], "review_actions")
             self.assertTrue(review_actions["review_actions"]["saved"])
             self.assertEqual(review_actions["review_actions"]["verification"]["status"], "pass")
-            self.assertEqual(review_actions["review_actions"]["decision_summary"]["total_decisions"], 1)
+            self.assertEqual(review_actions["review_actions"]["decision_summary"]["total_decisions"], review_item_count)
             self.assertTrue(review_actions["review_actions"]["review_history_written"])
             self.assertEqual(review_actions["review_actions"]["history"]["entry_count"], 1)
             self.assertEqual(review_actions["review_actions"]["history"]["latest_verification_status"], "pass")
@@ -683,6 +712,9 @@ class ServiceHttpTransportTests(unittest.TestCase):
             self.assertIn("PRQ000001", json.dumps(review_history, ensure_ascii=False))
             self.assertEqual(finish_export["view"], "finish_export")
             self.assertTrue(finish_export["finish_export"]["ready_for_export"])
+            self.assertEqual(finish_export["finish_export"]["review_gate"]["status"], "pass")
+            self.assertEqual(finish_export["finish_export"]["review_gate"]["latest_completion_status"], "complete")
+            self.assertEqual(finish_export["finish_export"]["review_gate"]["blocking_codes"], [])
             self.assertEqual(missing_job_id["error"]["code"], "missing_request_field")
             self.assertEqual(invalid_preview["error"]["code"], "invalid_request")
             self.assertEqual(managed_root["error"]["code"], "service_root_managed_by_server")
@@ -1071,6 +1103,25 @@ def _review_decision_summary(decisions: tuple[str, ...]) -> dict[str, object]:
     }
 
 
+def _force_review_queue_item_count(service_root: Path, job_id: str, count: int) -> None:
+    record_path = service_root / "jobs" / job_id / SERVICE_JOB_RECORD_JSON
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    local_review = record.setdefault("local_review", {})
+    local_review["provided"] = True
+    local_review["status"] = "available"
+    artifacts = local_review.setdefault("artifacts", {})
+    artifacts.setdefault(
+        "production_review_queue",
+        str(service_root / "jobs" / job_id / "review" / "production_review_queue.json"),
+    )
+    summary = local_review.setdefault("summary", {})
+    summary["review_item_count"] = count
+    summary["ready_for_operator_review"] = count > 0
+    summary["review_queue_by_source"] = {"processing_review_package": count} if count else {}
+    summary["review_queue_by_recommended_action"] = {"inspect_derivative": count} if count else {}
+    record_path.write_text(json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
 def _ensure_preview_queue_item(
     service_root: Path,
     job_id: str,
@@ -1102,11 +1153,47 @@ def _wait_for_terminal_http(testcase: unittest.TestCase, read_summary) -> dict: 
     deadline = time.monotonic() + 10
     last_summary = None
     while time.monotonic() < deadline:
-        last_summary = read_summary()
+        try:
+            last_summary = read_summary()
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            last_summary = {"transient_read_error": type(exc).__name__}
+            time.sleep(0.05)
+            continue
         if last_summary.get("state") in {"finished", "needs_review", "failed", "interrupted", "cancelled"}:
             return last_summary
         time.sleep(0.05)
     testcase.fail(f"service job did not reach a terminal state: {last_summary}")
+
+
+def _wait_for_async_job_inactive(testcase: unittest.TestCase, service_root: Path, job_id: str) -> None:
+    key = service_jobs_module._async_job_key_from_parts(service_root, job_id)
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        with service_jobs_module._ASYNC_JOB_LOCK:
+            active = key in service_jobs_module._ASYNC_JOB_KEYS
+        if not active:
+            return
+        time.sleep(0.05)
+    testcase.fail(f"service async job did not unregister: {job_id}")
+
+
+def _wait_for_source_integrity(testcase: unittest.TestCase, read_summary) -> dict:  # type: ignore[no-untyped-def]
+    deadline = time.monotonic() + 10
+    last_summary = None
+    while time.monotonic() < deadline:
+        try:
+            last_summary = read_summary()
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            last_summary = {"transient_read_error": type(exc).__name__}
+            time.sleep(0.05)
+            continue
+        source_integrity = (
+            last_summary.get("source_integrity") if isinstance(last_summary.get("source_integrity"), dict) else {}
+        )
+        if last_summary.get("state") in {"finished", "needs_review"} and source_integrity.get("provided") is True:
+            return last_summary
+        time.sleep(0.05)
+    testcase.fail(f"service job source integrity was not available: {last_summary}")
 
 
 def _assert_public_text_omits(testcase: unittest.TestCase, raw: str, *private_values: str) -> None:

@@ -154,6 +154,17 @@ class PublicCapabilityContractTests(unittest.TestCase):
             self.assertIn("quality_metrics", aggregate["forbidden_content"])
             self.assertIn("processing_profiles", aggregate["forbidden_content"])
 
+        finish_export = surfaces["production_finish_export"]
+        self.assertEqual(finish_export["scope"], "POST /api/production/finish-export export readiness gate")
+        self.assertTrue(finish_export["may_include_job_id"])
+        self.assertIn("review_item_count", finish_export["allowed_review_gate_context"])
+        self.assertIn("latest_completion_status", finish_export["allowed_review_gate_context"])
+        self.assertIn("operator_review_required", finish_export["allowed_review_gate_blocking_codes"])
+        self.assertIn("operator_review_incomplete", finish_export["allowed_review_gate_blocking_codes"])
+        self.assertIn("local_ids", finish_export["forbidden_content"])
+        self.assertIn("review_rows", finish_export["forbidden_content"])
+        self.assertIn("raw_decision_rows", finish_export["forbidden_content"])
+
     def test_public_capability_contract_cli_writes_public_safe_json(self) -> None:
         with tempfile.TemporaryDirectory(prefix="public-capability-contract-") as temp_dir:
             out_dir = Path(temp_dir) / "contract"

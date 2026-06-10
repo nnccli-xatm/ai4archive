@@ -15,6 +15,7 @@ from pathlib import Path
 import re
 import shutil
 import threading
+import time
 from typing import Any
 import uuid
 
@@ -2095,7 +2096,14 @@ def _write_json_atomic(path: Path, payload: dict[str, Any]) -> Path:
     temp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
         temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        temp_path.replace(path)
+        for attempt in range(20):
+            try:
+                temp_path.replace(path)
+                break
+            except PermissionError:
+                if attempt == 19:
+                    raise
+                time.sleep(0.025)
     finally:
         try:
             temp_path.unlink()

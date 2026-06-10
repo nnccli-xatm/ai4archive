@@ -275,11 +275,16 @@ The `finish-export` payload is the scheduler handoff gate: treat
 `ready_for_export=true` as the only export-ready condition. When it is false,
 inspect public-safe `blocking_codes` such as `job_not_terminal`,
 `job_requires_review`, `job_failed`, `job_interrupted`, `job_cancelled`,
-`job_needs_recovery`, `source_images_modified`, or quality blocker codes rather
-than parsing local logs or private summaries. If `retryable=true`, the scheduler
-may call `POST /api/jobs/{job_id}/retry`; this applies to failed, interrupted,
-and recovered `needs_recovery` jobs, not to created, cancelled, or already
-export-ready jobs.
+`job_needs_recovery`, `source_images_modified`, review-gate codes
+(`operator_review_required`, `operator_review_incomplete`,
+`operator_review_invalid`, `operator_review_not_closed`), or quality blocker
+codes rather than parsing local logs or private summaries. The nested
+`review_gate` object is aggregate-only and exposes only review item counts,
+latest verification/completion state, and whether delivery can complete; it
+does not expose local IDs, paths, filenames, or decision rows. If
+`retryable=true`, the scheduler may call `POST /api/jobs/{job_id}/retry`; this
+applies to failed, interrupted, and recovered `needs_recovery` jobs, not to
+created, cancelled, or already export-ready jobs.
 Use the dedicated review-history endpoints when a frontend only needs to refresh
 aggregate review history after an action; do not read the local history JSON
 directly outside the service boundary.
@@ -302,6 +307,11 @@ thread. While the service process is alive, polling keeps active jobs in
 service-root free-space threshold. Async `start` checks active-job,
 active-worker, and per-job temp limits before marking a job `running`, so
 rejected jobs remain in their prior public state.
+Checkpoint and public-summary JSON writes use same-directory temporary files
+followed by atomic replacement. On Windows, replacement retries briefly when a
+polling reader holds a transient file lock; clients should still treat polling
+read failures as retryable and poll again instead of reading private records
+directly.
 Use `POST /api/jobs/{job_id}/retry` only for jobs already in `failed`,
 `interrupted`, or `needs_recovery`; it is synchronous in the prototype and
 keeps the same job root so production resume semantics can reuse completed

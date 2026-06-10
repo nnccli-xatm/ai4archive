@@ -215,10 +215,12 @@ def production_finish_export_response(*, service_root: Path, job_id: str) -> dic
     quality_blocking_code_values = quality.get("blocking_codes") if isinstance(quality.get("blocking_codes"), list) else []
     quality_blocking_codes = _public_code_list(quality_blocking_code_values)
     source_images_modified = bool(summary.get("source_images_modified"))
+    review_gate = _finish_export_review_gate(summary)
     blocking_codes = _finish_export_blocking_codes(
         state=state,
         quality_blocking_codes=quality_blocking_codes,
         source_images_modified=source_images_modified,
+        review_blocking_codes=review_gate["blocking_codes"],
     )
     return _production_response(
         view="finish_export",
@@ -227,10 +229,16 @@ def production_finish_export_response(*, service_root: Path, job_id: str) -> dic
             "terminal": state in TERMINAL_STATES,
             "retryable": state in RETRYABLE_STATES,
             "ready_for_export": state == "finished" and not blocking_codes,
-            "requires_review": state == "needs_review" or bool(quality_blocking_codes) or source_images_modified,
+            "requires_review": (
+                state == "needs_review"
+                or bool(quality_blocking_codes)
+                or source_images_modified
+                or review_gate["requires_operator_review"]
+            ),
             "state": state,
             "blocking_codes": blocking_codes,
             "source_images_modified": source_images_modified,
+            "review_gate": review_gate,
         },
     )
 
@@ -370,6 +378,7 @@ def _finish_export_blocking_codes(
     state: str,
     quality_blocking_codes: list[str],
     source_images_modified: bool,
+    review_blocking_codes: list[str] | None = None,
 ) -> list[str]:
     blocking_codes = list(quality_blocking_codes)
     state_blocking_code = _FINISH_EXPORT_STATE_BLOCKING_CODES.get(state)
@@ -381,7 +390,61 @@ def _finish_export_blocking_codes(
         _append_unique(blocking_codes, "job_not_exportable")
     if source_images_modified:
         _append_unique(blocking_codes, "source_images_modified")
+    for code in review_blocking_codes or []:
+        _append_unique(blocking_codes, code)
     return blocking_codes
+
+
+def _finish_export_review_gate(summary: dict[str, Any]) -> dict[str, Any]:
+    local_review = summary.get("local_review") if isinstance(summary.get("local_review"), dict) else {}
+    review_actions = summary.get("review_actions") if isinstance(summary.get("review_actions"), dict) else {}
+    history = review_actions.get("history") if isinstance(review_actions.get("history"), dict) else {}
+    latest_summary = (
+        history.get("latest_decision_summary")
+        if isinstance(history.get("latest_decision_summary"), dict)
+        else {}
+    )
+    closure = (
+        latest_summary.get("closure_gate_summary")
+        if isinstance(latest_summary.get("closure_gate_summary"), dict)
+        else {}
+    )
+    review_item_count = _safe_int(local_review.get("review_item_count"))
+    if review_item_count is None:
+        review_item_count = 0
+    reviewed_decision_count = _safe_int(latest_summary.get("total_decisions")) or 0
+    requires_operator_review = bool(local_review.get("production_review_queue_written")) and review_item_count > 0
+    review_actions_provided = bool(review_actions.get("provided"))
+    latest_verification_status = str(history.get("latest_verification_status") or "not_available")
+    latest_completion_status = str(history.get("latest_completion_status") or "not_available")
+    can_complete_delivery = bool(closure.get("can_complete_delivery"))
+
+    blocking_codes: list[str] = []
+    if requires_operator_review:
+        if not review_actions_provided:
+            _append_unique(blocking_codes, "operator_review_required")
+        elif latest_verification_status != "pass":
+            _append_unique(blocking_codes, "operator_review_invalid")
+        elif latest_completion_status != "complete" or reviewed_decision_count < review_item_count:
+            _append_unique(blocking_codes, "operator_review_incomplete")
+        elif not can_complete_delivery:
+            _append_unique(blocking_codes, "operator_review_not_closed")
+
+    return {
+        "schema_version": "scan-qc.finish-export-review-gate.v1",
+        "aggregate_only": True,
+        "public_safe": True,
+        "requires_operator_review": requires_operator_review,
+        "review_item_count": review_item_count,
+        "review_actions_provided": review_actions_provided,
+        "reviewed_decision_count": reviewed_decision_count,
+        "latest_verification_status": latest_verification_status,
+        "latest_completion_status": latest_completion_status,
+        "can_complete_delivery": can_complete_delivery,
+        "status": "blocked" if blocking_codes else "pass",
+        "blocking_codes": blocking_codes,
+        "privacy": _public_privacy(),
+    }
 
 
 def _public_code_list(values: list[Any]) -> list[str]:

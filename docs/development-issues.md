@@ -241,7 +241,15 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 下一步：
 
 - 增加操作员逐项复核 UI/API 细分动作。
-- 将 review group 结果接入 finish-export 前置检查。
+
+当前进展：
+
+- `finish-export` 已接入 public-safe review gate：当本地 review queue 有待复核
+  条目但没有通过聚合验证的完整操作员复核结论时，返回
+  `operator_review_required`、`operator_review_incomplete`、
+  `operator_review_invalid` 或 `operator_review_not_closed` blocking code；
+  响应只公开复核项数量、最新验证/完成状态和是否允许交付，不公开 local ID、
+  路径、文件名或行级决策。
 
 ### DEV-109 私有样本聚合验证
 

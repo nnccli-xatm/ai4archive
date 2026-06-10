@@ -1279,7 +1279,12 @@ def _wait_for_state(testcase: unittest.TestCase, read_summary, states: set[str])
     deadline = time.monotonic() + 10
     last_summary = None
     while time.monotonic() < deadline:
-        last_summary = read_summary()
+        try:
+            last_summary = read_summary()
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            last_summary = {"transient_read_error": type(exc).__name__}
+            time.sleep(0.05)
+            continue
         if last_summary.get("state") in states:
             return last_summary
         time.sleep(0.05)
