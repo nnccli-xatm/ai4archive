@@ -240,7 +240,7 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 
 下一步：
 
-- 增加操作员逐项复核 UI/API 细分动作。
+- 将操作员逐项复核 API 接入前端工作台 UI。
 
 当前进展：
 
@@ -250,6 +250,11 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
   `operator_review_invalid` 或 `operator_review_not_closed` blocking code；
   响应只公开复核项数量、最新验证/完成状态和是否允许交付，不公开 local ID、
   路径、文件名或行级决策。
+- 服务 API 已提供 local-only 单条复核项读取：
+  `GET /api/jobs/{job_id}/local-review-item/{local_id}` 和
+  `GET /api/production/review-item?job_id=...&local_id=...`。该响应用于本机
+  工作台逐项复核，可返回 `local_id`、相对路径、建议动作、允许动作和操作员
+  提示；它是 sensitive/local-only，不进入 public-safe 摘要。
 
 ### DEV-109 私有样本聚合验证
 

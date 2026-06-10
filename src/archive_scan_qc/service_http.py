@@ -14,6 +14,7 @@ from .rule_templates import RuleTemplateNotFoundError
 from .service_api import (
     cancel_job_response,
     create_job_response,
+    get_job_local_review_item_response,
     get_job_local_review_artifact_response,
     get_job_local_preview_response,
     get_job_review_history_response,
@@ -24,6 +25,7 @@ from .service_api import (
     production_progress_response,
     production_review_actions_response,
     production_review_history_response,
+    production_review_item_response,
     production_review_queue_response,
     production_session_response,
     production_setup_response,
@@ -92,6 +94,16 @@ class ServiceApiRequestHandler(BaseHTTPRequestHandler):
                     ),
                 )
                 return
+            if path == "/api/production/review-item":
+                self._send_json(
+                    200,
+                    production_review_item_response(
+                        service_root=self._service_root,
+                        job_id=_required_query_arg(self.path, "job_id"),
+                        local_id=_required_query_arg(self.path, "local_id"),
+                    ),
+                )
+                return
             if path == "/api/production/review-history":
                 self._send_json(
                     200,
@@ -132,6 +144,16 @@ class ServiceApiRequestHandler(BaseHTTPRequestHandler):
                         service_root=self._service_root,
                         job_id=segments[2],
                         artifact_id=segments[4],
+                    ),
+                )
+                return
+            if len(segments) == 5 and segments[:2] == ["api", "jobs"] and segments[3] == "local-review-item":
+                self._send_json(
+                    200,
+                    get_job_local_review_item_response(
+                        service_root=self._service_root,
+                        job_id=segments[2],
+                        local_id=segments[4],
                     ),
                 )
                 return

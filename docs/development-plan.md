@@ -120,6 +120,7 @@
 - `POST /api/production/start`
 - `GET /api/production/progress`
 - `GET /api/production/review-queue`
+- `GET /api/production/review-item`
 - `GET /api/production/review-history`
 - `POST /api/production/review-actions`
 - `POST /api/production/finish-export`
@@ -160,6 +161,10 @@ review UI remains follow-up work.
 The service API also exposes job-level and production-facade review-history
 queries that return only aggregate history counts/latest verification status,
 without local IDs or row-level decision records.
+Local-only single review item endpoints now let the workstation UI open one
+queue item by `local_id` and retrieve allowed operator actions, suggested
+action, relative path, and operator-facing notes. These responses are sensitive,
+not public-safe, and remain outside scheduler/public summaries.
 The production `finish-export` facade now treats `ready_for_export` as the
 single scheduler export gate and emits public-safe blocking codes for
 non-terminal jobs, review-required jobs, failed/interrupted/cancelled jobs,

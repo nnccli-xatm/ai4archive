@@ -562,5 +562,6 @@ def _public_forbidden_content() -> list[str]:
         "ocr_text",
         "image_content",
         "raw_review_rows",
+        "local_review_items",
         "local_preview_resources",
     ]

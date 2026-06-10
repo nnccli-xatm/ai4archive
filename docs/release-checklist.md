@@ -65,6 +65,7 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   `GET /api/production/session`, `POST /api/production/setup`,
   `POST /api/production/start`, `GET /api/production/progress?job_id=...`,
   `GET /api/production/review-queue?job_id=...`,
+  `GET /api/production/review-item?job_id=...&local_id=...`,
   `GET /api/production/review-history?job_id=...`,
   `POST /api/production/review-actions`, and
   `POST /api/production/finish-export` wrap the same service job boundary,
@@ -85,6 +86,11 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   Confirm
   `GET /api/jobs/{job_id}/review-history` never returns local IDs, decision
   rows, paths, filenames, or the local review history path. Confirm local-only
+  review-item endpoints
+  `GET /api/jobs/{job_id}/local-review-item/{local_id}` and
+  `GET /api/production/review-item?job_id=...&local_id=...` return only one
+  workstation-scoped sensitive item, include no hashes/OCR/image bytes, and are
+  never embedded in public summaries. Confirm local-only
   preview endpoints
   `GET /api/jobs/{job_id}/local-preview/{local_id}` and
   `GET /api/production/preview?job_id=...&local_id=...` read image bytes only

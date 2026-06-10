@@ -140,6 +140,7 @@ class PublicCapabilityContractTests(unittest.TestCase):
         self.assertIn("local_paths", job_summary["forbidden_content"])
         self.assertIn("filenames", job_summary["forbidden_content"])
         self.assertIn("hashes", job_summary["forbidden_content"])
+        self.assertIn("local_review_items", job_summary["forbidden_content"])
 
         for aggregate_id in ("service_job_index_quality", "service_production_session_quality"):
             aggregate = surfaces[aggregate_id]

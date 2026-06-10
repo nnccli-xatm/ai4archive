@@ -246,12 +246,14 @@ response shapes. The prototype local HTTP transport can be started with
 `PUT /api/rule-templates/{template_id}`, `POST /api/jobs`, `GET /api/jobs`,
 `GET /api/jobs/{job_id}`,
 `GET /api/jobs/{job_id}/local-review/{artifact_id}`,
+`GET /api/jobs/{job_id}/local-review-item/{local_id}`,
 `POST /api/jobs/{job_id}/run`, `POST /api/jobs/{job_id}/start`,
 `POST /api/jobs/{job_id}/retry`, `POST /api/jobs/{job_id}/cancel`,
 `GET /api/jobs/{job_id}/review-history`,
 `GET /api/production/session`, `POST /api/production/setup`,
 `POST /api/production/start`, `GET /api/production/progress`,
-`GET /api/production/review-queue`, `GET /api/production/review-history`, and
+`GET /api/production/review-queue`, `GET /api/production/review-item`,
+`GET /api/production/review-history`, and
 `POST /api/production/finish-export`.
 The rule-template endpoints expose the same public-safe catalog and no-image
 dry-run plan as the CLI rule-template commands. The validate endpoint accepts
@@ -288,6 +290,12 @@ created, cancelled, or already export-ready jobs.
 Use the dedicated review-history endpoints when a frontend only needs to refresh
 aggregate review history after an action; do not read the local history JSON
 directly outside the service boundary.
+Use `GET /api/jobs/{job_id}/local-review-item/{local_id}` or
+`GET /api/production/review-item?job_id=...&local_id=...` only inside the local
+workstation UI when the operator opens a single queue item. These responses are
+local-only and sensitive: they may include `local_id`, relative path, suggested
+action, and operator-facing notes, and must never be copied to public summaries
+or scheduler handoff evidence.
 Use `GET /api/jobs/{job_id}/local-preview/{local_id}?source=original|processed`
 or `GET /api/production/preview?job_id=...&local_id=...&source=...` only inside
 the local workstation session to show preview image bytes. The service resolves

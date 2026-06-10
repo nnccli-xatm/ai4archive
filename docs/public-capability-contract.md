@@ -163,6 +163,7 @@ and service template IDs.
 The prototype local service job API exposes public-safe job polling through
 `POST /api/jobs`, `GET /api/jobs`, `GET /api/jobs/{job_id}`,
 `GET /api/jobs/{job_id}/local-review/{artifact_id}`,
+`GET /api/jobs/{job_id}/local-review-item/{local_id}`,
 `GET /api/jobs/{job_id}/review-history`,
 `POST /api/jobs/{job_id}/run`, `POST /api/jobs/{job_id}/start`,
 `POST /api/jobs/{job_id}/retry`, and `POST /api/jobs/{job_id}/cancel`. `run` is synchronous. `start` is a local
@@ -183,6 +184,7 @@ The local service API also exposes a production-worker facade with schema
 `POST /api/production/setup`, `POST /api/production/start`,
 `GET /api/production/progress?job_id=...`,
 `GET /api/production/review-queue?job_id=...`,
+`GET /api/production/review-item?job_id=...&local_id=...`,
 `GET /api/production/review-history?job_id=...`,
 `POST /api/production/review-actions`, and
 `POST /api/production/finish-export`. These endpoints wrap the same service job
@@ -193,6 +195,10 @@ summary, and append-only `service_job_review_history.json` under the job's
 isolated `review` directory, but responses do not return row-level review
 records, local IDs, local preview resources, client-supplied paths, or raw
 decision rows.
+Single review item endpoints are local-only and sensitive. They return one
+queue item, its `local_id`, relative path, operator-facing notes, suggested
+action, and allowed operator actions for the workstation UI; they are not
+public-safe evidence and must not be copied into public summaries.
 The `finish-export` summary exposes public-safe `blocking_codes` for export
 readiness. Codes may include whitelisted quality blockers plus service-boundary
 codes such as `job_not_terminal`, `job_requires_review`, `job_failed`,

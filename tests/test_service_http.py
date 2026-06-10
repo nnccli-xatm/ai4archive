@@ -114,6 +114,10 @@ class ServiceHttpTransportTests(unittest.TestCase):
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
             self.assertIn(
+                ("GET", "/api/jobs/{job_id}/local-review-item/{local_id}"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
+            self.assertIn(
                 ("GET", "/api/jobs/{job_id}/local-preview/{local_id}"),
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
@@ -154,6 +158,10 @@ class ServiceHttpTransportTests(unittest.TestCase):
             )
             self.assertIn(
                 ("GET", "/api/production/review-queue"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
+            self.assertIn(
+                ("GET", "/api/production/review-item"),
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
             self.assertIn(
@@ -518,6 +526,16 @@ class ServiceHttpTransportTests(unittest.TestCase):
                     {"job_id": "job-productionhttp001"},
                 )
                 _ensure_preview_queue_item(service_root, "job-productionhttp001", "private_page_001.png")
+                local_item_status, local_review_item = _json_request(
+                    base_url,
+                    "GET",
+                    "/api/jobs/job-productionhttp001/local-review-item/PRQ000001",
+                )
+                production_item_status, production_review_item = _json_request(
+                    base_url,
+                    "GET",
+                    "/api/production/review-item?job_id=job-productionhttp001&local_id=PRQ000001",
+                )
                 job_preview_status, job_preview_headers, job_preview_body = _raw_request(
                     base_url,
                     "GET",
@@ -611,12 +629,21 @@ class ServiceHttpTransportTests(unittest.TestCase):
                 },
                 ensure_ascii=False,
             )
+            local_item_raw = json.dumps(
+                {
+                    "local_review_item": local_review_item,
+                    "production_review_item": production_review_item,
+                },
+                ensure_ascii=False,
+            )
 
             self.assertEqual(session_status, 200)
             self.assertEqual(setup_status, 201)
             self.assertEqual(start_status, 202)
             self.assertEqual(queue_status, 200)
             self.assertEqual(finish_before_actions_status, 200)
+            self.assertEqual(local_item_status, 200)
+            self.assertEqual(production_item_status, 200)
             self.assertEqual(job_preview_status, 200)
             self.assertEqual(production_preview_status, 200)
             self.assertEqual(unsafe_preview_status, 400)
@@ -679,6 +706,14 @@ class ServiceHttpTransportTests(unittest.TestCase):
                 finish_before_actions["finish_export"]["review_gate"]["review_item_count"],
                 review_queue["review_queue"]["review_item_count"],
             )
+            self.assertEqual(local_review_item["schema_version"], "scan-qc.service-job-local-review-item.v1")
+            self.assertEqual(local_review_item["local_id"], "PRQ000001")
+            self.assertTrue(local_review_item["local_only"])
+            self.assertFalse(local_review_item["public_safe"])
+            self.assertIn("reprocess", production_review_item["allowed_operator_actions"])
+            self.assertEqual(production_review_item["item"]["relative_path"], "private_page_001.png")
+            self.assertTrue(production_review_item["privacy"]["contains_review_rows"])
+            self.assertIn("private_page_001", local_item_raw)
             self.assertEqual(job_preview_headers.get("X-AI4-Local-Only"), "true")
             self.assertEqual(job_preview_headers.get("X-AI4-Preview-Source"), "original")
             self.assertIn("image/png", job_preview_headers.get("Content-Type", ""))

@@ -191,6 +191,7 @@ AI4-148 方向修订：普通生产入口必须是“生产工人批量质检修
 - `POST /api/production/resume`
 - `GET /api/production/progress`
 - `GET /api/production/review-queue`
+- `GET /api/production/review-item`
 - `POST /api/production/review-actions`
 - `POST /api/production/finish-export`
 - `GET /api/rule-templates`
@@ -237,12 +238,17 @@ The first production-worker facade is also implemented:
 `GET /api/production/session`, `POST /api/production/setup`,
 `POST /api/production/start`, `GET /api/production/progress`,
 `GET /api/production/review-queue`,
+`GET /api/production/review-item`,
 `POST /api/production/review-actions`, and
 `POST /api/production/finish-export`. These endpoints are public-safe wrappers
 over job summaries. `review-actions` persists the local review decision summary
 inside the service-owned job review directory, appends local-only review
 history, and returns only aggregate verification/history status; it does not
 return row-level review records or local IDs.
+`review-item` is local-only and sensitive. It opens one queue item by
+`job_id + local_id` for the workstation UI and may return local ID, relative
+path, suggested action, allowed actions, and operator-facing notes; these fields
+must not be written to public summaries or scheduler handoff artifacts.
 
 后续对外接口应补充：
 
@@ -412,6 +418,9 @@ return row-level review records or local IDs.
 ```
 
 预览接口通过 job 的本地复核队列 `local_id` 反查授权相对路径，服务端只在该 job 的输入目录或派生图目录内读取图片字节。前端不得把 preview URL、`local_id`、图片字节、文件名、响应头或任何可还原原始材料身份的信息写入 public-safe 摘要。
+逐项复核面板应先用 `GET /api/production/review-item?job_id=...&local_id=...`
+读取单条 local-only 复核项，再按需请求 preview；该 item 响应同样不得进入
+public-safe 摘要。
 
 ### 5.9 批量工具任务
 

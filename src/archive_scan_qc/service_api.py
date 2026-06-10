@@ -23,6 +23,7 @@ from .service_jobs import (
     SERVICE_JOB_INDEX_RECOVERY_ISSUES_SCHEMA_VERSION,
     SERVICE_JOB_INDEX_SOURCE_INTEGRITY_SCHEMA_VERSION,
     LOCAL_REVIEW_ARTIFACT_SCHEMA_VERSION,
+    LOCAL_REVIEW_ITEM_SCHEMA_VERSION,
     SERVICE_JOB_MAX_ACTIVE_JOBS,
     SERVICE_JOB_MAX_ACTIVE_WORKERS,
     SERVICE_JOB_MAX_TMP_BYTES,
@@ -41,6 +42,7 @@ from .service_jobs import (
     resolve_service_job_local_preview,
     run_service_job,
     read_service_job_local_review_artifact,
+    read_service_job_local_review_item,
     read_service_job_review_history_summary,
     start_service_job_async,
     write_service_job_review_actions,
@@ -87,6 +89,7 @@ def service_capabilities() -> dict[str, Any]:
             {"method": "GET", "path": "/api/jobs", "implemented_by_core": True},
             {"method": "GET", "path": "/api/jobs/{job_id}", "implemented_by_core": True},
             {"method": "GET", "path": "/api/jobs/{job_id}/local-review/{artifact_id}", "implemented_by_core": True},
+            {"method": "GET", "path": "/api/jobs/{job_id}/local-review-item/{local_id}", "implemented_by_core": True},
             {"method": "GET", "path": "/api/jobs/{job_id}/local-preview/{local_id}", "implemented_by_core": True},
             {"method": "GET", "path": "/api/jobs/{job_id}/review-history", "implemented_by_core": True},
             {"method": "POST", "path": "/api/jobs/{job_id}/run", "implemented_by_core": True},
@@ -98,6 +101,7 @@ def service_capabilities() -> dict[str, Any]:
             {"method": "POST", "path": "/api/production/start", "implemented_by_core": True},
             {"method": "GET", "path": "/api/production/progress", "implemented_by_core": True},
             {"method": "GET", "path": "/api/production/review-queue", "implemented_by_core": True},
+            {"method": "GET", "path": "/api/production/review-item", "implemented_by_core": True},
             {"method": "GET", "path": "/api/production/review-history", "implemented_by_core": True},
             {"method": "GET", "path": "/api/production/preview", "implemented_by_core": True},
             {"method": "POST", "path": "/api/production/review-actions", "implemented_by_core": True},
@@ -118,6 +122,7 @@ def service_capabilities() -> dict[str, Any]:
             "service_job_index_recovery_issues": SERVICE_JOB_INDEX_RECOVERY_ISSUES_SCHEMA_VERSION,
             "service_job_index_source_integrity": SERVICE_JOB_INDEX_SOURCE_INTEGRITY_SCHEMA_VERSION,
             "service_job_local_review_artifact": LOCAL_REVIEW_ARTIFACT_SCHEMA_VERSION,
+            "service_job_local_review_item": LOCAL_REVIEW_ITEM_SCHEMA_VERSION,
             "service_job_local_preview": "scan-qc.service-job-local-preview.v1",
             "rule_template_catalog": CATALOG_SCHEMA_VERSION,
             "rule_template_dry_run": DRY_RUN_SCHEMA_VERSION,
@@ -188,6 +193,10 @@ def production_review_queue_response(*, service_root: Path, job_id: str) -> dict
             "local_only_artifact": bool(local_review.get("production_review_queue_written")),
         },
     )
+
+
+def production_review_item_response(*, service_root: Path, job_id: str, local_id: str) -> dict[str, Any]:
+    return read_service_job_local_review_item(service_root, job_id, local_id)
 
 
 def production_review_actions_response(request: dict[str, Any], *, service_root: Path) -> dict[str, Any]:
@@ -285,6 +294,10 @@ def get_job_response(*, service_root: Path, job_id: str) -> dict[str, Any]:
 
 def get_job_local_review_artifact_response(*, service_root: Path, job_id: str, artifact_id: str) -> dict[str, Any]:
     return read_service_job_local_review_artifact(service_root, job_id, artifact_id)
+
+
+def get_job_local_review_item_response(*, service_root: Path, job_id: str, local_id: str) -> dict[str, Any]:
+    return read_service_job_local_review_item(service_root, job_id, local_id)
 
 
 def get_job_review_history_response(*, service_root: Path, job_id: str) -> dict[str, Any]:

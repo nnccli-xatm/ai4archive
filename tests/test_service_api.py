@@ -14,6 +14,7 @@ from archive_scan_qc.service_api import (
     cancel_job_response,
     create_job_response,
     get_job_local_preview_response,
+    get_job_local_review_item_response,
     get_job_local_review_artifact_response,
     get_job_review_history_response,
     get_job_response,
@@ -23,6 +24,7 @@ from archive_scan_qc.service_api import (
     production_progress_response,
     production_review_actions_response,
     production_review_history_response,
+    production_review_item_response,
     production_review_queue_response,
     production_session_response,
     production_setup_response,
@@ -95,6 +97,10 @@ class ServiceApiCoreTests(unittest.TestCase):
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
             self.assertIn(
+                ("GET", "/api/jobs/{job_id}/local-review-item/{local_id}"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
+            self.assertIn(
                 ("GET", "/api/jobs/{job_id}/local-preview/{local_id}"),
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
@@ -120,6 +126,10 @@ class ServiceApiCoreTests(unittest.TestCase):
             )
             self.assertIn(
                 ("GET", "/api/production/review-queue"),
+                {(item["method"], item["path"]) for item in capabilities["endpoints"]},
+            )
+            self.assertIn(
+                ("GET", "/api/production/review-item"),
                 {(item["method"], item["path"]) for item in capabilities["endpoints"]},
             )
             self.assertIn(
@@ -151,6 +161,10 @@ class ServiceApiCoreTests(unittest.TestCase):
             self.assertEqual(
                 capabilities["schemas"]["service_job_local_review_artifact"],
                 "scan-qc.service-job-local-review-artifact.v1",
+            )
+            self.assertEqual(
+                capabilities["schemas"]["service_job_local_review_item"],
+                "scan-qc.service-job-local-review-item.v1",
             )
             self.assertEqual(
                 capabilities["schemas"]["service_job_local_preview"],
@@ -712,6 +726,16 @@ class ServiceApiCoreTests(unittest.TestCase):
                 job_id="job-productionapi001",
             )
             _ensure_preview_queue_item(service_root, "job-productionapi001", "private_page_001.png")
+            local_review_item = get_job_local_review_item_response(
+                service_root=service_root,
+                job_id="job-productionapi001",
+                local_id="PRQ000001",
+            )
+            production_review_item = production_review_item_response(
+                service_root=service_root,
+                job_id="job-productionapi001",
+                local_id="PRQ000001",
+            )
             preview = get_job_local_preview_response(
                 service_root=service_root,
                 job_id="job-productionapi001",
@@ -757,6 +781,13 @@ class ServiceApiCoreTests(unittest.TestCase):
                 },
                 ensure_ascii=False,
             )
+            local_item_raw = json.dumps(
+                {
+                    "local_review_item": local_review_item,
+                    "production_review_item": production_review_item,
+                },
+                ensure_ascii=False,
+            )
 
             self.assertEqual(initial_session["schema_version"], "scan-qc.service-production-session.v1")
             self.assertEqual(initial_session["view"], "session")
@@ -780,6 +811,15 @@ class ServiceApiCoreTests(unittest.TestCase):
                 finish_before_actions["finish_export"]["review_gate"]["review_item_count"],
                 review_queue["review_queue"]["review_item_count"],
             )
+            self.assertEqual(local_review_item["schema_version"], "scan-qc.service-job-local-review-item.v1")
+            self.assertEqual(local_review_item["local_id"], "PRQ000001")
+            self.assertTrue(local_review_item["local_only"])
+            self.assertTrue(local_review_item["sensitive"])
+            self.assertFalse(local_review_item["public_safe"])
+            self.assertIn("reprocess", production_review_item["allowed_operator_actions"])
+            self.assertEqual(production_review_item["item"]["relative_path"], "private_page_001.png")
+            self.assertTrue(production_review_item["privacy"]["contains_local_ids"])
+            self.assertIn("private_page_001", local_item_raw)
             self.assertEqual(preview["schema_version"], "scan-qc.service-job-local-preview.v1")
             self.assertEqual(preview["source"], "original")
             self.assertTrue(preview["local_only"])

@@ -27,7 +27,7 @@ from .production_runner import (
 )
 from .processing_review import write_processing_review_package
 from .processing_quality_summary import PROCESSING_QUALITY_SUMMARY_JSON
-from .production_review_queue import PRODUCTION_REVIEW_QUEUE_JSON, write_production_review_queue
+from .production_review_queue import OPERATOR_ACTIONS, PRODUCTION_REVIEW_QUEUE_JSON, write_production_review_queue
 from .review_decisions import REVIEW_DECISION_VERIFICATION_JSON, build_review_decision_verification_summary
 from .scanner import SUPPORTED_EXTENSIONS
 from .rules import (
@@ -52,6 +52,7 @@ SERVICE_JOB_INDEX_SOURCE_INTEGRITY_SCHEMA_VERSION = "scan-qc.service-job-index-s
 SERVICE_JOB_PUBLIC_TIMINGS_SCHEMA_VERSION = "scan-qc.service-job-public-timings.v1"
 SERVICE_JOB_SOURCE_INTEGRITY_SCHEMA_VERSION = "scan-qc.service-job-source-integrity.v1"
 LOCAL_REVIEW_ARTIFACT_SCHEMA_VERSION = "scan-qc.service-job-local-review-artifact.v1"
+LOCAL_REVIEW_ITEM_SCHEMA_VERSION = "scan-qc.service-job-local-review-item.v1"
 LOCAL_PREVIEW_SCHEMA_VERSION = "scan-qc.service-job-local-preview.v1"
 SERVICE_JOB_REVIEW_ACTIONS_SCHEMA_VERSION = "scan-qc.service-job-review-actions.v1"
 SERVICE_JOB_REVIEW_HISTORY_SCHEMA_VERSION = "scan-qc.service-job-review-history.v1"
@@ -492,6 +493,41 @@ def read_service_job_local_review_artifact(service_root: Path, job_id: str, arti
     }
 
 
+def read_service_job_local_review_item(service_root: Path, job_id: str, local_id: str) -> dict[str, Any]:
+    """Read one local review queue item without exposing it through public summaries."""
+
+    safe_id = str(local_id or "").strip()
+    if not safe_id:
+        raise ValueError("Local review item request requires a local_id.")
+    record, queue = _load_service_job_review_queue(service_root, job_id)
+    items = queue.get("items") if isinstance(queue.get("items"), list) else []
+    item = next((entry for entry in items if isinstance(entry, dict) and entry.get("local_id") == safe_id), None)
+    if not isinstance(item, dict):
+        raise ValueError("Local review item was not found.")
+    return {
+        "schema_version": LOCAL_REVIEW_ITEM_SCHEMA_VERSION,
+        "job_id": str(record.get("job_id") or job_id),
+        "local_id": safe_id,
+        "local_only": True,
+        "sensitive": True,
+        "public_safe": False,
+        "allowed_operator_actions": list(OPERATOR_ACTIONS),
+        "item": item,
+        "privacy": {
+            "local_only": True,
+            "public_safe": False,
+            "contains_paths": True,
+            "contains_filenames": True,
+            "contains_local_ids": True,
+            "contains_review_rows": True,
+            "contains_hashes": False,
+            "contains_thumbnails": False,
+            "contains_ocr_text": False,
+            "contains_image_content": False,
+        },
+    }
+
+
 def resolve_service_job_local_preview(
     service_root: Path,
     job_id: str,
@@ -507,19 +543,7 @@ def resolve_service_job_local_preview(
     if source_filter and source_filter not in {"original", "processed"}:
         raise ValueError("Local preview source must be original or processed.")
 
-    recover_service_job(service_root, job_id)
-    record = load_service_job_record(service_root, job_id)
-    local_review = record.get("local_review") if isinstance(record.get("local_review"), dict) else {}
-    artifacts = local_review.get("artifacts") if isinstance(local_review.get("artifacts"), dict) else {}
-    queue_value = artifacts.get("production_review_queue") if isinstance(artifacts, dict) else None
-    if local_review.get("provided") is not True or not queue_value:
-        raise ValueError("Local preview queue is not available.")
-    queue_path = Path(str(queue_value)).resolve()
-    job_root = _job_root_from_record(record)
-    review_dir = _service_job_review_dir(record)
-    _require_within(queue_path, job_root)
-    _require_within(queue_path, review_dir)
-    queue = _read_json(queue_path)
+    record, queue = _load_service_job_review_queue(service_root, job_id)
     items = queue.get("items") if isinstance(queue, dict) else None
     if not isinstance(items, list):
         raise ValueError("Local preview queue has no items.")
@@ -554,6 +578,25 @@ def resolve_service_job_local_preview(
                 },
             }
     raise ValueError("Local preview image is not available.")
+
+
+def _load_service_job_review_queue(service_root: Path, job_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    recover_service_job(service_root, job_id)
+    record = load_service_job_record(service_root, job_id)
+    local_review = record.get("local_review") if isinstance(record.get("local_review"), dict) else {}
+    artifacts = local_review.get("artifacts") if isinstance(local_review.get("artifacts"), dict) else {}
+    queue_value = artifacts.get("production_review_queue") if isinstance(artifacts, dict) else None
+    if local_review.get("provided") is not True or not queue_value:
+        raise ValueError("Local review queue is not available.")
+    queue_path = Path(str(queue_value)).resolve()
+    job_root = _job_root_from_record(record)
+    review_dir = _service_job_review_dir(record)
+    _require_within(queue_path, job_root)
+    _require_within(queue_path, review_dir)
+    queue = _read_json(queue_path)
+    if not isinstance(queue, dict):
+        raise ValueError("Local review queue is not readable.")
+    return record, queue
 
 
 def write_service_job_review_actions(
