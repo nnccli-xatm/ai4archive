@@ -1613,6 +1613,10 @@ IDs.
 The local HTTP transport has the same regression, so external callers using
 `POST /api/jobs/{job_id}/run` and `GET /api/production/session` see the same
 public-safe quality/status boundary.
+Core recovery/index regression also covers the same `print-clean-v1` cleanup:
+after recovery, the job summary still exposes job-level aggregate stain metrics,
+while the root public index's nested quality aggregate keeps only status counts
+and omits quality rows, paths, filenames, and hashes.
 `POST /api/production/finish-export` returns the scheduler-facing export gate:
 only `ready_for_export=true` is export-ready. When false, public-safe
 `blocking_codes` explain the reason, including whitelisted quality blockers and

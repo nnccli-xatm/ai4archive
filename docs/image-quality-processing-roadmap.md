@@ -616,6 +616,10 @@ session summary still omits job lists and job IDs.
 The local HTTP transport has matching coverage for
 `POST /api/jobs/{job_id}/run` plus `GET /api/production/session`, so external
 callers observe the same public-safe quality/status boundary.
+Core recovery/index regression now covers the same `print-clean-v1` cleanup:
+recovered job summaries preserve job-level aggregate stain metrics, while the
+root public index's nested quality aggregate keeps only status counts and omits
+quality rows, paths, filenames, and hashes.
 
 ### M5：性能和后端实现
 

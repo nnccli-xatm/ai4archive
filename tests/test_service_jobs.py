@@ -10,7 +10,7 @@ from unittest import mock
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 
 from archive_scan_qc import service_jobs as service_jobs_module
 from archive_scan_qc.service_jobs import (
@@ -369,6 +369,68 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertFalse(summary["local_review"]["privacy"]["contains_paths"])
             _assert_public_text_omits(self, public_raw, str(root.resolve()), "private_page_001")
             self.assertFalse(summary["private_paths_exposed"])
+
+    def test_recover_index_preserves_print_clean_quality_evidence_without_quality_rows(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-job-print-clean-index-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private input"
+            service_root = root / "service root"
+            input_dir.mkdir()
+            source_path = input_dir / "private_page_001.png"
+            _write_print_clean_background_stain_page(source_path)
+            source_sha_before = _sha256_for_test(source_path)
+            create_service_job(
+                ServiceJobConfig(
+                    input_dir=input_dir,
+                    service_root=service_root,
+                    rule_template="print-clean-v1",
+                    workers=1,
+                ),
+                job_id="job-printcleanindex001",
+            )
+
+            summary = run_service_job(service_root, "job-printcleanindex001")
+            recovered = recover_service_job(service_root, "job-printcleanindex001")
+            index_summary = recover_service_jobs(service_root)
+            job_root = service_root / "jobs" / "job-printcleanindex001"
+            public_raw = (job_root / SERVICE_JOB_PUBLIC_SUMMARY_JSON).read_text(encoding="utf-8")
+            index_raw = (service_root / SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON).read_text(encoding="utf-8")
+
+            quality_metrics = recovered["quality"]["quality_metrics"]
+            index_quality = index_summary["quality"]
+
+            self.assertEqual(summary["state"], "finished")
+            self.assertEqual(recovered["state"], "finished")
+            self.assertEqual(recovered["template"]["rule_template_id"], "print-clean-v1")
+            self.assertEqual(recovered["template"]["processing_profile"], "print_clean")
+            self.assertEqual(recovered["quality"]["status"], "pass")
+            self.assertEqual(recovered["quality"]["quality_signal_status"], "measured_with_changes")
+            self.assertEqual(recovered["quality"]["background_cleanup_changed_files"], 1)
+            self.assertEqual(recovered["quality"]["guardrail_failed_files"], 0)
+            self.assertGreaterEqual(quality_metrics["background_stains_delta"]["max"], 6.0)
+            self.assertGreater(quality_metrics["background_stains_changed_pixel_ratio"]["max"], 0.02)
+            self.assertLessEqual(quality_metrics["background_stains_changed_pixel_ratio"]["max"], 0.05)
+            self.assertEqual(index_quality["schema_version"], SERVICE_JOB_INDEX_QUALITY_SCHEMA_VERSION)
+            self.assertTrue(index_quality["provided"])
+            self.assertEqual(index_quality["status_counts"], {"pass": 1})
+            self.assertEqual(index_quality["quality_signal_status_counts"], {"measured_with_changes": 1})
+            self.assertEqual(index_quality["processed_files"], 1)
+            self.assertEqual(index_quality["guardrail_failed_files"], 0)
+            self.assertNotIn("quality_metrics", index_quality)
+            self.assertFalse(index_quality["privacy"]["contains_paths"])
+            self.assertFalse(index_quality["privacy"]["contains_job_ids"])
+            self.assertFalse(index_quality["privacy"]["contains_quality_rows"])
+            self.assertEqual(_sha256_for_test(source_path), source_sha_before)
+            _assert_public_source_integrity(self, recovered["source_integrity"], checked_files=1)
+            _assert_public_text_omits(self, public_raw, str(root.resolve()), "private input", "private_page_001")
+            _assert_public_text_omits(
+                self,
+                index_raw,
+                str(root.resolve()),
+                "private input",
+                "service root",
+                "private_page_001",
+            )
 
     def test_retry_job_reuses_existing_derivative_after_failed_state(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-job-retry-") as temp_dir:
@@ -1193,6 +1255,19 @@ def _write_page(path: Path) -> None:
     for index in range(6):
         y = 95 + index * 42
         draw.line((72, y, 288, y), fill=(35, 35, 35), width=2)
+    image.save(path, dpi=(300, 300))
+
+
+def _write_print_clean_background_stain_page(path: Path) -> None:
+    image = Image.new("RGB", (260, 190), (242, 242, 236))
+    draw = ImageDraw.Draw(image)
+    for y in (54, 82, 110):
+        draw.rectangle((42, y, 142, y + 4), fill=(42, 42, 42))
+    mask = Image.new("L", image.size, 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.ellipse((178, 58, 222, 102), fill=150)
+    mask = mask.filter(ImageFilter.GaussianBlur(7))
+    image = Image.composite(Image.new("RGB", image.size, (224, 220, 196)), image, mask)
     image.save(path, dpi=(300, 300))
 
 

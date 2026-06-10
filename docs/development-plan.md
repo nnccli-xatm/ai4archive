@@ -274,6 +274,10 @@ and job IDs.
 The HTTP transport regression now covers the same job/status/session contract
 for callers using `POST /api/jobs/{job_id}/run` and
 `GET /api/production/session`.
+Core recovery/index regression now covers the same `print-clean-v1` cleanup:
+after recovery, the job summary preserves job-level aggregate stain metrics, but
+the root public index's nested quality aggregate keeps only status counts and
+omits quality rows, paths, filenames, and hashes.
 Recovery now treats `finished` or `needs_review` checkpoints/progress without a
 terminal `production_run_summary.json` as `needs_recovery`, using the public-safe
 reason code `terminal_state_missing_production_summary`, so schedulers do not
