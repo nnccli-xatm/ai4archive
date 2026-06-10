@@ -573,6 +573,7 @@ class ServiceJobBoundaryTests(unittest.TestCase):
                 self,
                 lambda: recover_service_job(service_root, "job-testasync001"),
             )
+            _wait_for_async_job_inactive(self, service_root, "job-testasync001")
             job_root = service_root / "jobs" / "job-testasync001"
             public_raw = (job_root / SERVICE_JOB_PUBLIC_SUMMARY_JSON).read_text(encoding="utf-8")
 

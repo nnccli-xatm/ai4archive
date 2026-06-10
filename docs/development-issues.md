@@ -90,6 +90,8 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
   `source_images_modified=false` 和派生图写入独立输出目录。
 - 异步状态 JSON 写入已对 Windows transient file lock 做短重试，测试等待后台
   worker 收尾后再清理临时目录。
+- 异步 start/recover 回归已等待 worker 注销后再退出临时目录，避免 CI 输出目录
+  清理竞态下的后台线程异常栈。
 
 ### DEV-004 CLI 并发隔离
 
