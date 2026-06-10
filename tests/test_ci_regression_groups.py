@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 from scripts import ci_regression_groups as groups
 
@@ -38,6 +42,7 @@ class CiRegressionGroupsTests(unittest.TestCase):
 
         self.assertIn("test_delivery_tooling", external)
         self.assertIn("test_ci_targeted_selector", external)
+        self.assertIn("test_ocr_validation", external)
         self.assertIn("test_private_validation", external)
         self.assertIn("test_scan_qc", deep)
         self.assertIn("test_scan_processing_algorithm_regression", deep)

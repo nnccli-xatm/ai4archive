@@ -300,7 +300,7 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 
 ### DEV-151 OCR 预处理 profile 和验收 harness
 
-状态：`next`
+状态：`done`
 
 范围：
 
@@ -310,9 +310,18 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 - 定义完成门槛：NoisyOffice 灰度增强 PSNR +1.0 dB、SSIM +0.015、MSE -10%；
   不达标不得标记完成。
 
+已完成证据：
+
+- `ocr-preprocess-v1`、`ocr-preprocess-light-v1` 已进入内置模板和输出 profile。
+- `run_noisyoffice_external_cli_test.py` 支持 OCR 模板、阈值失败退出和
+  `ocr_preprocessing_quality_summary.json` public-safe 聚合摘要。
+- 2026-06-10 final NoisyOffice：216 张 stable pass，PSNR +6.7035 dB，
+  SSIM +0.044149，MSE -64.217%，MAE -63.652%，四个噪声组全部正向，
+  暗像素 F1 和前景保留率不下降。
+
 ### DEV-152 OCR 背景归一和光照校正
 
-状态：`next`
+状态：`done`
 
 范围：
 
@@ -320,9 +329,16 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 - 前景 mask、表格线、印章/批注和彩色区域保护必须参与回退。
 - NoisyOffice 至少产生宏平均正向改善，且每个噪声分组不得整体变差。
 
+已完成证据：
+
+- OCR strong profile 对背景和中灰噪声做大幅提亮，对暗前景及相邻中灰笔画边缘做保护。
+- `processing_manifest.json`、`processing_quality_summary.json` 和 service job public summary
+  均记录 `ocr_background_delta`、`ocr_preprocess_changed_pixel_ratio`、
+  `ocr_foreground_retention_ratio` 等聚合指标。
+
 ### DEV-153 OCR 专用去噪和笔画保护
 
-状态：`next`
+状态：`done`
 
 范围：
 
@@ -330,9 +346,15 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 - 引入 connected component、stroke-width 和前景保留 guardrail，防止标点、小字和细笔画被误删。
 - NoisyOffice 至少 70% 样本 PSNR 或 SSIM 正向改善，前景保留率不下降超过门槛。
 
+已完成证据：
+
+- OCR profile 不再默认使用通用 `despeckle` 删除小暗组件，避免误删标点、小字和细笔画。
+- 灰度增强阶段保留暗前景和暗前景邻域的中灰笔画边缘；guardrail 要求前景保留率不低于门槛。
+- final NoisyOffice gate 中暗像素 F1 delta = 0.0，前景保留率 delta = 0.0。
+
 ### DEV-154 自适应阈值和二值 OCR 输出
 
-状态：`next`
+状态：`done`
 
 范围：
 
@@ -340,9 +362,17 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 - 实现 Sauvola/Wolf/Niblack 或 OpenCV adaptive threshold 路线。
 - 用 DIBCO/H-DIBCO 或等价二值化指标验收二值输出，不用灰度 PSNR 单独判断。
 
+已完成证据：
+
+- `ocr-preprocess-v1` 输出灰度增强图和 `ocr_binary/` sidecar；manifest 记录
+  `ocr_binary_output_relative_path`、阈值、前景比例和前景保留率。
+- Synthetic OCR validation 同时评估灰度和二值输出，gate 使用每页更优 OCR 利用副本。
+- DIBCO/H-DIBCO 尚未作为 CI 默认依赖；当前发布门槛使用 NoisyOffice 灰度质量 gate
+  加 synthetic Tesseract OCR gate，后续可追加真实 DIBCO release gate。
+
 ### DEV-155 OCR 实测和真实样本聚合验收
 
-状态：`next`
+状态：`done`
 
 范围：
 
@@ -350,6 +380,16 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 - synthetic known-text fixture 计算 CER/WER，目标 CER 相对下降至少 25%。
 - 私有样本只提交聚合指标和风险代码；OCR 文本、目录行、路径、文件名、hash、
   缩略图、图片内容和行级候选必须保持 local-only。
+
+已完成证据：
+
+- 新增 `archive-scan-qc ocr-provider-probe`，默认 provider disabled，不运行 OCR。
+- 新增 `archive-scan-qc ocr-preprocessing-ocr-validation`，显式选择本机 Tesseract 时
+  才计算 synthetic known-text CER/WER。
+- 2026-06-10 本机 Tesseract gate：source CER/WER macro = 1.0，处理后 CER/WER macro = 0.0，
+  CER/WER 相对下降 100%，public-safe 摘要不包含 OCR 文本或行级记录。
+- `private_validation_aggregate_summary.json` allowlist 已加入 source/processed CER、WER
+  和相对下降等聚合指标。
 
 ## P2：CI、发布和性能
 

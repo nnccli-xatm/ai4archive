@@ -49,6 +49,14 @@ _METRIC_IDS = (
     "text_edges_delta",
     "processed_output_dark_pixel_loss_ratio",
     "processed_output_highlight_clip_delta",
+    "source_cer",
+    "processed_cer",
+    "cer_relative_reduction",
+    "source_wer",
+    "processed_wer",
+    "wer_relative_reduction",
+    "ocr_foreground_retention_ratio",
+    "ocr_background_delta",
 )
 
 

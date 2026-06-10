@@ -96,6 +96,7 @@ EXTERNAL_VALIDATION_TESTS = (
     "test_ci_regression_groups",
     "test_ci_targeted_selector",
     "test_delivery_tooling",
+    "test_ocr_validation",
     "test_private_validation",
 )
 
@@ -246,8 +247,26 @@ def run_external_validation_commands() -> None:
                 "ci-smoke",
                 "--workers",
                 "1",
+                "--rule-template",
+                "ocr-preprocess-v1",
                 "--no-download",
                 "--no-doc-report",
+            ],
+            [
+                sys.executable,
+                "-m",
+                "archive_scan_qc",
+                "ocr-provider-probe",
+                "--out",
+                str(root / "ocr-provider-probe"),
+            ],
+            [
+                sys.executable,
+                "-m",
+                "archive_scan_qc",
+                "ocr-preprocessing-ocr-validation",
+                "--out",
+                str(root / "ocr-preprocessing-ocr-validation"),
             ],
         )
         for command in commands:

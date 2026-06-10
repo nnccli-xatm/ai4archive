@@ -64,6 +64,8 @@ class ProcessingOptions:
     lighten_scanlines: bool = False
     enhance_faded_text: bool = False
     sharpen_text_edges: bool = False
+    ocr_preprocess: bool = False
+    ocr_binary: bool = False
     scanner_gutter_trim: bool = False
     despeckle_content_type_check: bool = True
     despeckle_backend: str = "fallback"
@@ -299,6 +301,38 @@ class TextEdgeSharpeningResult:
 
 
 @dataclass(frozen=True)
+class OcrPreprocessingResult:
+    image: Image.Image
+    applied: bool
+    reason: str
+    reason_code: str
+    output_profile: str
+    changed_pixel_ratio: float
+    background_before: float | None
+    background_after: float | None
+    background_delta: float
+    background_candidate_pixel_ratio: float
+    foreground_dark_loss_ratio: float
+    foreground_dark_lift_ratio: float
+    foreground_retention_ratio: float
+    review_required: bool
+    review_reason_codes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class OcrBinaryResult:
+    image: Image.Image | None
+    applied: bool
+    reason: str
+    reason_code: str
+    threshold: int | None
+    foreground_ratio: float
+    foreground_retention_ratio: float
+    review_required: bool
+    review_reason_codes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class ContentTypeClassification:
     content_type: str
     grid_rows: int
@@ -432,6 +466,10 @@ def process_images(
         "process_dir": str(process_dir),
         "image_root": str(image_root),
         "rule_template": _rule_template_snapshot(report),
+        "output_profile": _output_profile_for_processing_options(options),
+        "ocr_preprocessing_operations": _ocr_preprocessing_operations(options),
+        "ocr_quality_metrics": _ocr_manifest_quality_metrics(records),
+        "ocr_review_required": any(record.get("ocr_review_required") is True for record in records),
         "summary": {
             "total_files": len(records),
             "processed_files": processed_files,
@@ -485,6 +523,8 @@ def process_images(
             "lighten_scanlines_conservative" if options.lighten_scanlines else "lighten_scanlines_disabled",
             "enhance_faded_text_conservative" if options.enhance_faded_text else "enhance_faded_text_disabled",
             "sharpen_text_edges_conservative" if options.sharpen_text_edges else "sharpen_text_edges_disabled",
+            "ocr_preprocess_grayscale" if options.ocr_preprocess else "ocr_preprocess_disabled",
+            "ocr_binary_sidecar" if options.ocr_binary else "ocr_binary_disabled",
             "reuse_scan_measurements" if options.reuse_scan_measurements else "reuse_scan_measurements_disabled",
             "preserve_source_relative_path",
         ],
@@ -988,6 +1028,28 @@ def _process_record(
         "text_edges_candidate_pixel_ratio": 0.0,
         "text_edges_edge_energy_before": 0.0,
         "text_edges_edge_energy_after": 0.0,
+        "output_profile": _output_profile_for_processing_options(options),
+        "ocr_preprocessed": False,
+        "ocr_preprocess_reason": None,
+        "ocr_preprocess_reason_code": None,
+        "ocr_preprocess_changed_pixel_ratio": 0.0,
+        "ocr_background_before": None,
+        "ocr_background_after": None,
+        "ocr_background_delta": 0.0,
+        "ocr_background_candidate_pixel_ratio": 0.0,
+        "ocr_foreground_dark_loss_ratio": 0.0,
+        "ocr_foreground_dark_lift_ratio": 0.0,
+        "ocr_foreground_retention_ratio": 1.0,
+        "ocr_review_required": False,
+        "ocr_review_reason_codes": [],
+        "ocr_binary_created": False,
+        "ocr_binary_output_relative_path": None,
+        "ocr_binary_output_sha256": None,
+        "ocr_binary_reason": None,
+        "ocr_binary_reason_code": None,
+        "ocr_binary_threshold": None,
+        "ocr_binary_foreground_ratio": 0.0,
+        "ocr_binary_foreground_retention_ratio": 1.0,
         "processing_audit": None,
         "processing_warnings": [],
         "operation_timings": {},
@@ -1020,6 +1082,7 @@ def _process_record(
             raise ValueError("derivative target would overwrite the source image")
         with Image.open(source) as image:
             processed, operations, process_info = _process_image(image, options, scan_record=item)
+            ocr_binary_image = process_info.pop("_ocr_binary_image", None)
             guardrail_failures = process_info["processing_audit"].get("guardrail_failures", [])
             if guardrail_failures:
                 raise ValueError("processing guardrail exceeded: " + "; ".join(guardrail_failures))
@@ -1027,10 +1090,22 @@ def _process_record(
             save_meta = _save_image_with_backend(processed, target, image, io_backend=options.image_io_backend)
             if save_meta.get("io_backend_mode"):
                 base["image_io_backend_mode"] = save_meta["io_backend_mode"]
+            binary_output_relative_path = None
+            binary_output_sha256 = None
+            if isinstance(ocr_binary_image, Image.Image):
+                binary_target = _ocr_binary_target_path(image_root, relative_path)
+                if source.resolve() == binary_target.resolve():
+                    raise ValueError("OCR binary derivative target would overwrite the source image")
+                binary_target.parent.mkdir(parents=True, exist_ok=True)
+                _save_image_with_backend(ocr_binary_image, binary_target, image, io_backend=options.image_io_backend)
+                binary_output_relative_path = binary_target.relative_to(image_root.parent).as_posix()
+                binary_output_sha256 = _sha256(binary_target)
         base.update(
             {
                 "output_relative_path": target.relative_to(image_root.parent).as_posix(),
                 "output_sha256": _sha256(target),
+                "ocr_binary_output_relative_path": binary_output_relative_path,
+                "ocr_binary_output_sha256": binary_output_sha256,
                 "original_size": process_info["original_size"],
                 "output_size": process_info["output_size"],
                 "pre_deskew_size": process_info["pre_deskew_size"],
@@ -1158,6 +1233,26 @@ def _process_record(
                 "text_edges_candidate_pixel_ratio": process_info["text_edges_candidate_pixel_ratio"],
                 "text_edges_edge_energy_before": process_info["text_edges_edge_energy_before"],
                 "text_edges_edge_energy_after": process_info["text_edges_edge_energy_after"],
+                "output_profile": process_info["output_profile"],
+                "ocr_preprocessed": process_info["ocr_preprocessed"],
+                "ocr_preprocess_reason": process_info["ocr_preprocess_reason"],
+                "ocr_preprocess_reason_code": process_info["ocr_preprocess_reason_code"],
+                "ocr_preprocess_changed_pixel_ratio": process_info["ocr_preprocess_changed_pixel_ratio"],
+                "ocr_background_before": process_info["ocr_background_before"],
+                "ocr_background_after": process_info["ocr_background_after"],
+                "ocr_background_delta": process_info["ocr_background_delta"],
+                "ocr_background_candidate_pixel_ratio": process_info["ocr_background_candidate_pixel_ratio"],
+                "ocr_foreground_dark_loss_ratio": process_info["ocr_foreground_dark_loss_ratio"],
+                "ocr_foreground_dark_lift_ratio": process_info["ocr_foreground_dark_lift_ratio"],
+                "ocr_foreground_retention_ratio": process_info["ocr_foreground_retention_ratio"],
+                "ocr_review_required": process_info["ocr_review_required"],
+                "ocr_review_reason_codes": process_info["ocr_review_reason_codes"],
+                "ocr_binary_created": process_info["ocr_binary_created"],
+                "ocr_binary_reason": process_info["ocr_binary_reason"],
+                "ocr_binary_reason_code": process_info["ocr_binary_reason_code"],
+                "ocr_binary_threshold": process_info["ocr_binary_threshold"],
+                "ocr_binary_foreground_ratio": process_info["ocr_binary_foreground_ratio"],
+                "ocr_binary_foreground_retention_ratio": process_info["ocr_binary_foreground_retention_ratio"],
                 "processing_audit": process_info["processing_audit"],
                 "processing_warnings": process_info["processing_warnings"],
                 "operation_timings": process_info["operation_timings"],
@@ -1350,6 +1445,22 @@ def _previous_record_is_current(
         return False
     if not output_path.exists() or not output_path.is_file() or _sha256(output_path) != output_sha256:
         return False
+    if options.ocr_binary:
+        binary_relative_path = record.get("ocr_binary_output_relative_path")
+        binary_sha256 = record.get("ocr_binary_output_sha256")
+        if (
+            not isinstance(binary_relative_path, str)
+            or not isinstance(binary_sha256, str)
+            or not binary_sha256
+        ):
+            return False
+        binary_path = image_root.parent / binary_relative_path
+        try:
+            binary_path.resolve().relative_to(image_root.parent.resolve())
+        except ValueError:
+            return False
+        if not binary_path.exists() or not binary_path.is_file() or _sha256(binary_path) != binary_sha256:
+            return False
     source_relative_path = item.get("relative_path")
     if not isinstance(source_relative_path, str) or not source_relative_path:
         return False
@@ -1376,6 +1487,8 @@ def _processing_options_fingerprint(options: ProcessingOptions) -> str:
         "lighten_scanlines": options.lighten_scanlines,
         "enhance_faded_text": options.enhance_faded_text,
         "sharpen_text_edges": options.sharpen_text_edges,
+        "ocr_preprocess": options.ocr_preprocess,
+        "ocr_binary": options.ocr_binary,
         "despeckle_backend": options.despeckle_backend,
         "processing_profile": options.processing_profile,
         "reuse_scan_measurements": options.reuse_scan_measurements,
@@ -1441,11 +1554,71 @@ def _processing_options_public_payload(options: ProcessingOptions) -> dict[str, 
         "lighten_scanlines": options.lighten_scanlines,
         "enhance_faded_text": options.enhance_faded_text,
         "sharpen_text_edges": options.sharpen_text_edges,
+        "ocr_preprocess": _ocr_processing_enabled(options),
+        "ocr_binary": options.ocr_binary,
+        "ocr_preprocess": options.ocr_preprocess,
+        "ocr_binary": options.ocr_binary,
         "despeckle_backend": options.despeckle_backend,
         "processing_profile": options.processing_profile,
         "resume_processing": options.resume_processing,
         "reuse_scan_measurements": options.reuse_scan_measurements,
         "workers": options.workers,
+    }
+
+
+def _output_profile_for_processing_options(options: ProcessingOptions) -> str:
+    if options.processing_profile == "ocr_preprocess":
+        return "ocr_preprocess"
+    if options.processing_profile == "ocr_preprocess_light":
+        return "ocr_preprocess_light"
+    if options.processing_profile == "print_clean":
+        return "print_clean"
+    return "standard"
+
+
+def _ocr_processing_enabled(options: ProcessingOptions) -> bool:
+    return bool(
+        options.ocr_preprocess
+        or options.processing_profile in {"ocr_preprocess", "ocr_preprocess_light"}
+    )
+
+
+def _ocr_binary_target_path(image_root: Path, relative_path: str) -> Path:
+    binary_relative = Path(relative_path).with_suffix(".png")
+    return image_root.parent / "ocr_binary" / binary_relative
+
+
+def _ocr_preprocessing_operations(options: ProcessingOptions) -> list[str]:
+    operations: list[str] = []
+    if _ocr_processing_enabled(options):
+        operations.append("ocr_preprocess_grayscale")
+    if options.ocr_binary:
+        operations.append("ocr_binary_sidecar")
+    return operations
+
+
+def _ocr_manifest_quality_metrics(records: list[dict[str, Any]]) -> dict[str, Any]:
+    processed_records = [record for record in records if record.get("status") in {"processed", "resumed"}]
+    metric_fields = (
+        "ocr_preprocess_changed_pixel_ratio",
+        "ocr_background_delta",
+        "ocr_background_candidate_pixel_ratio",
+        "ocr_foreground_dark_loss_ratio",
+        "ocr_foreground_dark_lift_ratio",
+        "ocr_foreground_retention_ratio",
+        "ocr_binary_foreground_ratio",
+        "ocr_binary_foreground_retention_ratio",
+    )
+    return {
+        "aggregate_only": True,
+        "public_safe": True,
+        "ocr_preprocessed_files": sum(1 for record in processed_records if record.get("ocr_preprocessed") is True),
+        "ocr_binary_created_files": sum(1 for record in processed_records if record.get("ocr_binary_created") is True),
+        "ocr_review_required_files": sum(1 for record in processed_records if record.get("ocr_review_required") is True),
+        "metrics": {
+            field: _aggregate_metric(processed_records, field)
+            for field in metric_fields
+        },
     }
 
 
@@ -1830,6 +2003,8 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "lighten_scanlines": options.lighten_scanlines,
             "enhance_faded_text": options.enhance_faded_text,
             "sharpen_text_edges": options.sharpen_text_edges,
+            "ocr_preprocess": options.ocr_preprocess,
+            "ocr_binary": options.ocr_binary,
             "resume_processing": options.resume_processing,
             "reuse_scan_measurements": options.reuse_scan_measurements,
         },
@@ -2065,6 +2240,17 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "text_edges_sharpened_files": sum(
                 1 for audit in audit_records if audit.get("text_edges_sharpened") is True
             ),
+            "ocr_preprocessed_files": sum(
+                1 for audit in audit_records if audit.get("ocr_preprocessed") is True
+            ),
+            "ocr_binary_created_files": sum(
+                1 for audit in audit_records if audit.get("ocr_binary_created") is True
+            ),
+            "ocr_review_required_files": sum(
+                1
+                for record in processed_records
+                if record.get("ocr_review_required") is True
+            ),
             "text_edges_skipped_files": sum(
                 1
                 for record in processed_records
@@ -2176,6 +2362,31 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             ),
             "text_edges_edge_energy_after": _aggregate_metric(
                 audit_records, "text_edges_edge_energy_after"
+            ),
+            "ocr_preprocess_changed_pixel_ratio": _aggregate_metric(
+                audit_records, "ocr_preprocess_changed_pixel_ratio"
+            ),
+            "ocr_background_delta": _aggregate_metric(audit_records, "ocr_background_delta"),
+            "ocr_background_candidate_pixel_ratio": _aggregate_metric(
+                audit_records,
+                "ocr_background_candidate_pixel_ratio",
+            ),
+            "ocr_foreground_dark_loss_ratio": _aggregate_metric(
+                audit_records,
+                "ocr_foreground_dark_loss_ratio",
+            ),
+            "ocr_foreground_dark_lift_ratio": _aggregate_metric(
+                audit_records,
+                "ocr_foreground_dark_lift_ratio",
+            ),
+            "ocr_foreground_retention_ratio": _aggregate_metric(
+                audit_records,
+                "ocr_foreground_retention_ratio",
+            ),
+            "ocr_binary_foreground_ratio": _aggregate_metric(audit_records, "ocr_binary_foreground_ratio"),
+            "ocr_binary_foreground_retention_ratio": _aggregate_metric(
+                audit_records,
+                "ocr_binary_foreground_retention_ratio",
             ),
             "cumulative_change_score": _aggregate_metric(audit_records, "cumulative_change_score"),
             "cumulative_change_pixel_ratio": _aggregate_metric(audit_records, "cumulative_change_pixel_ratio"),
@@ -3996,6 +4207,63 @@ def _process_image(
         else:
             operations.append("sharpen_text_edges_disabled")
 
+    ocr_preprocess = OcrPreprocessingResult(
+        processed,
+        False,
+        "OCR preprocessing disabled",
+        "disabled",
+        _output_profile_for_processing_options(options),
+        0.0,
+        None,
+        None,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        False,
+        (),
+    )
+    with _operation_timer(operation_timings, "ocr_preprocess", enabled=_ocr_processing_enabled(options)):
+        if _ocr_processing_enabled(options):
+            ocr_preprocess = _ocr_preprocess_grayscale(
+                processed,
+                processing_profile=options.processing_profile,
+            )
+            processed = ocr_preprocess.image
+            operations.append(
+                "ocr_preprocess_grayscale" if ocr_preprocess.applied else "ocr_preprocess_noop"
+            )
+            operation_timings.setdefault("ocr_preprocess", {})["reason_code"] = ocr_preprocess.reason_code
+            operation_timings.setdefault("ocr_preprocess", {})["changed_pixel_ratio"] = (
+                ocr_preprocess.changed_pixel_ratio
+            )
+            operation_timings.setdefault("ocr_preprocess", {})["review_required"] = (
+                ocr_preprocess.review_required
+            )
+        else:
+            operations.append("ocr_preprocess_disabled")
+
+    ocr_binary = OcrBinaryResult(
+        None,
+        False,
+        "OCR binary output disabled",
+        "disabled",
+        None,
+        0.0,
+        1.0,
+        False,
+        (),
+    )
+    with _operation_timer(operation_timings, "ocr_binary", enabled=options.ocr_binary):
+        if options.ocr_binary:
+            ocr_binary = _ocr_binary_sidecar(processed, ocr_preprocess)
+            operations.append("ocr_binary_sidecar" if ocr_binary.applied else "ocr_binary_noop")
+            operation_timings.setdefault("ocr_binary", {})["reason_code"] = ocr_binary.reason_code
+            operation_timings.setdefault("ocr_binary", {})["review_required"] = ocr_binary.review_required
+        else:
+            operations.append("ocr_binary_disabled")
+
     attempted_audit = _processing_audit(
         audit_source,
         processed,
@@ -4054,6 +4322,18 @@ def _process_image(
         text_edges.candidate_pixel_ratio,
         text_edges.edge_energy_before,
         text_edges.edge_energy_after,
+        ocr_preprocess.applied,
+        ocr_preprocess.changed_pixel_ratio,
+        ocr_preprocess.background_delta,
+        ocr_preprocess.background_candidate_pixel_ratio,
+        ocr_preprocess.foreground_dark_loss_ratio,
+        ocr_preprocess.foreground_dark_lift_ratio,
+        ocr_preprocess.foreground_retention_ratio,
+        ocr_preprocess.review_required,
+        ocr_binary.applied,
+        ocr_binary.foreground_ratio,
+        ocr_binary.foreground_retention_ratio,
+        ocr_binary.review_required,
     )
     attempted_audit["bleed_through_reason_code"] = _bleed_through_reason_code(bleed_through.reason)
     cumulative_guard = _cumulative_change_guard(attempted_audit, options)
@@ -4323,9 +4603,40 @@ def _process_image(
         "text_edges_candidate_pixel_ratio": 0.0 if guard_reverted else text_edges.candidate_pixel_ratio,
         "text_edges_edge_energy_before": 0.0 if guard_reverted else text_edges.edge_energy_before,
         "text_edges_edge_energy_after": 0.0 if guard_reverted else text_edges.edge_energy_after,
+        "output_profile": _output_profile_for_processing_options(options),
+        "ocr_preprocessed": False if guard_reverted else ocr_preprocess.applied,
+        "ocr_preprocess_reason": guard_reason if guard_reverted else ocr_preprocess.reason,
+        "ocr_preprocess_reason_code": "guardrail_reverted" if guard_reverted else ocr_preprocess.reason_code,
+        "ocr_preprocess_changed_pixel_ratio": 0.0 if guard_reverted else ocr_preprocess.changed_pixel_ratio,
+        "ocr_background_before": None if guard_reverted else ocr_preprocess.background_before,
+        "ocr_background_after": None if guard_reverted else ocr_preprocess.background_after,
+        "ocr_background_delta": 0.0 if guard_reverted else ocr_preprocess.background_delta,
+        "ocr_background_candidate_pixel_ratio": (
+            0.0 if guard_reverted else ocr_preprocess.background_candidate_pixel_ratio
+        ),
+        "ocr_foreground_dark_loss_ratio": 0.0 if guard_reverted else ocr_preprocess.foreground_dark_loss_ratio,
+        "ocr_foreground_dark_lift_ratio": 0.0 if guard_reverted else ocr_preprocess.foreground_dark_lift_ratio,
+        "ocr_foreground_retention_ratio": 1.0 if guard_reverted else ocr_preprocess.foreground_retention_ratio,
+        "ocr_review_required": (
+            True if guard_reverted else (ocr_preprocess.review_required or ocr_binary.review_required)
+        ),
+        "ocr_review_reason_codes": (
+            ["guardrail_reverted"]
+            if guard_reverted
+            else sorted(set(ocr_preprocess.review_reason_codes + ocr_binary.review_reason_codes))
+        ),
+        "ocr_binary_created": False if guard_reverted else ocr_binary.applied,
+        "ocr_binary_reason": guard_reason if guard_reverted else ocr_binary.reason,
+        "ocr_binary_reason_code": "guardrail_reverted" if guard_reverted else ocr_binary.reason_code,
+        "ocr_binary_threshold": None if guard_reverted else ocr_binary.threshold,
+        "ocr_binary_foreground_ratio": 0.0 if guard_reverted else ocr_binary.foreground_ratio,
+        "ocr_binary_foreground_retention_ratio": (
+            1.0 if guard_reverted else ocr_binary.foreground_retention_ratio
+        ),
         "processing_audit": processing_audit,
         "processing_warnings": processing_warnings,
         "operation_timings": operation_timings,
+        "_ocr_binary_image": None if guard_reverted else ocr_binary.image,
         "scan_measurements_reused": any(
             timing.get("reused_scan_measurement") is True for timing in operation_timings.values()
         ),
@@ -4340,6 +4651,8 @@ def _guard_revert_reason(
 ) -> str:
     if local_content_guard_reverted:
         return "reverted by local content change guard"
+    if processed_output_reason_code == "ocr_foreground_loss_reverted":
+        return "reverted by OCR foreground preservation guard"
     if processed_output_reason_code == "processed_output_quality_reverted":
         return "reverted by processed output safety guard"
     if combination_reason_code == "geometric_risk_reverted":
@@ -4395,6 +4708,317 @@ class _operation_timer:
         if self.enabled:
             timing = self.timings.setdefault(self.operation, {})
             timing["elapsed_seconds"] = max(0.0, round(time.perf_counter() - self.started_at, 6))
+
+
+def _ocr_preprocess_grayscale(
+    image: Image.Image,
+    *,
+    processing_profile: str,
+) -> OcrPreprocessingResult:
+    output_profile = (
+        "ocr_preprocess_light" if processing_profile == "ocr_preprocess_light" else "ocr_preprocess"
+    )
+    if image.width < 30 or image.height < 30:
+        return _ocr_preprocess_noop(image, output_profile, "OCR preprocessing skipped: image too small", "too_small")
+    color_risk = _tone_color_risk_reason(image)
+    if color_risk:
+        return _ocr_preprocess_noop(
+            image,
+            output_profile,
+            "OCR preprocessing skipped: color content, stamp, or annotation risk",
+            "protected_color_content",
+            review_required=True,
+        )
+
+    grayscale = image.convert("L")
+    histogram = grayscale.histogram()
+    total = max(1, image.width * image.height)
+    p05 = _histogram_percentile(histogram, total, 0.05)
+    p95 = _histogram_percentile(histogram, total, 0.95)
+    dark_ratio = sum(histogram[:128]) / total
+    if dark_ratio > 0.45:
+        return _ocr_preprocess_noop(
+            image,
+            output_profile,
+            "OCR preprocessing skipped: foreground too dense",
+            "foreground_too_dense",
+            review_required=True,
+        )
+    if p95 < 150 or p95 - p05 < 28:
+        return _ocr_preprocess_noop(
+            image,
+            output_profile,
+            "OCR preprocessing skipped: insufficient background separation",
+            "low_confidence_background",
+            review_required=True,
+        )
+
+    strong_profile = processing_profile == "ocr_preprocess"
+    result = _ocr_preprocess_grayscale_numpy(grayscale, strong_profile=strong_profile)
+    if result is None:
+        result = _ocr_preprocess_grayscale_fallback(grayscale, strong_profile=strong_profile)
+    output, changed_pixel_ratio, background_candidate_pixel_ratio = result
+    background_before = float(p95)
+    output_histogram = output.histogram()
+    background_after = float(_histogram_percentile(output_histogram, total, 0.95))
+    background_delta = background_after - background_before
+    foreground_dark_loss, foreground_dark_lift, foreground_retention = _ocr_foreground_preservation_metrics(
+        grayscale,
+        output,
+    )
+    review_reasons: list[str] = []
+    if foreground_dark_loss > 0.002:
+        review_reasons.append("foreground_dark_loss")
+    if foreground_dark_lift > 0.01:
+        review_reasons.append("foreground_dark_lift")
+    if foreground_retention < 0.998:
+        review_reasons.append("foreground_retention")
+    if changed_pixel_ratio < 0.01 or background_delta < 4.0:
+        return OcrPreprocessingResult(
+            image,
+            False,
+            "OCR preprocessing skipped: improvement below threshold",
+            "improvement_below_threshold",
+            output_profile,
+            round(changed_pixel_ratio, 6),
+            background_before,
+            background_after,
+            round(background_delta, 6),
+            round(background_candidate_pixel_ratio, 6),
+            round(foreground_dark_loss, 6),
+            round(foreground_dark_lift, 6),
+            round(foreground_retention, 6),
+            bool(review_reasons),
+            tuple(sorted(set(review_reasons))),
+        )
+    return OcrPreprocessingResult(
+        output,
+        True,
+        "OCR preprocessing applied: grayscale background normalization with dark foreground preservation",
+        "applied_background_normalization",
+        output_profile,
+        round(changed_pixel_ratio, 6),
+        background_before,
+        background_after,
+        round(background_delta, 6),
+        round(background_candidate_pixel_ratio, 6),
+        round(foreground_dark_loss, 6),
+        round(foreground_dark_lift, 6),
+        round(foreground_retention, 6),
+        bool(review_reasons),
+        tuple(sorted(set(review_reasons))),
+    )
+
+
+def _ocr_preprocess_noop(
+    image: Image.Image,
+    output_profile: str,
+    reason: str,
+    reason_code: str,
+    *,
+    review_required: bool = False,
+) -> OcrPreprocessingResult:
+    return OcrPreprocessingResult(
+        image,
+        False,
+        reason,
+        reason_code,
+        output_profile,
+        0.0,
+        None,
+        None,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        review_required,
+        (reason_code,) if review_required else (),
+    )
+
+
+def _ocr_preprocess_grayscale_numpy(
+    grayscale: Image.Image,
+    *,
+    strong_profile: bool,
+) -> tuple[Image.Image, float, float] | None:
+    np = _load_numpy()
+    if np is None:
+        return None
+    try:
+        source = np.asarray(grayscale, dtype=np.uint8)
+    except (TypeError, ValueError):
+        return None
+    values = source.astype(np.float32)
+    output = values.copy()
+    if strong_profile:
+        background_floor = 170
+        mid_floor = 130
+        mid_lift = 45.0
+        background_residual = 0.10
+    else:
+        background_floor = 185
+        mid_floor = 145
+        mid_lift = 14.0
+        background_residual = 0.22
+    background = values >= background_floor
+    midtone = (values >= mid_floor) & (values < background_floor)
+    output[background] = 255.0 - ((255.0 - values[background]) * background_residual)
+    output[midtone] = np.minimum(255.0, values[midtone] + mid_lift)
+    dark_foreground = values <= 127
+    padded_dark = np.pad(dark_foreground, 1, mode="constant", constant_values=False)
+    near_dark_foreground = dark_foreground.copy()
+    for y_offset in range(3):
+        for x_offset in range(3):
+            if y_offset == 1 and x_offset == 1:
+                continue
+            near_dark_foreground |= padded_dark[
+                y_offset : y_offset + source.shape[0],
+                x_offset : x_offset + source.shape[1],
+            ]
+    protected_foreground = (values <= 155) & near_dark_foreground
+    output[protected_foreground] = values[protected_foreground]
+    output_u8 = np.clip(np.rint(output), 0, 255).astype(np.uint8)
+    changed = np.abs(output_u8.astype(np.int16) - source.astype(np.int16)) > 8
+    changed_ratio = float(np.count_nonzero(changed)) / max(1, source.size)
+    candidate_ratio = float(np.count_nonzero(background | midtone)) / max(1, source.size)
+    return Image.fromarray(output_u8, mode="L"), changed_ratio, candidate_ratio
+
+
+def _ocr_preprocess_grayscale_fallback(
+    grayscale: Image.Image,
+    *,
+    strong_profile: bool,
+) -> tuple[Image.Image, float, float]:
+    if strong_profile:
+        background_floor = 170
+        mid_floor = 130
+        mid_lift = 45
+        background_residual = 0.10
+    else:
+        background_floor = 185
+        mid_floor = 145
+        mid_lift = 14
+        background_residual = 0.22
+
+    def map_value(value: int) -> int:
+        if value <= 127:
+            return value
+        if value >= background_floor:
+            return max(0, min(255, int(round(255 - ((255 - value) * background_residual)))))
+        if value >= mid_floor:
+            return min(255, value + mid_lift)
+        return value
+
+    output = grayscale.point(map_value, mode="L")
+    changed_ratio = _pixel_change_ratio(grayscale, output)
+    candidate = grayscale.point(lambda value: 255 if value >= mid_floor else 0, mode="L")
+    return output, changed_ratio, _mask_ratio(candidate)
+
+
+def _ocr_foreground_preservation_metrics(source_l: Image.Image, processed_l: Image.Image) -> tuple[float, float, float]:
+    np = _load_numpy()
+    if np is not None:
+        try:
+            source = np.asarray(source_l, dtype=np.uint8)
+            processed = np.asarray(processed_l, dtype=np.uint8)
+            dark = source <= 127
+            dark_pixels = int(np.count_nonzero(dark))
+            if dark_pixels <= 0:
+                return 0.0, 0.0, 1.0
+            lost = int(np.count_nonzero(dark & (processed > 127)))
+            lifted = int(np.count_nonzero(dark & ((processed.astype(np.int16) - source.astype(np.int16)) > 8)))
+            loss_ratio = lost / dark_pixels
+            lift_ratio = lifted / dark_pixels
+            return loss_ratio, lift_ratio, 1.0 - loss_ratio
+        except (TypeError, ValueError):
+            pass
+    source_pixels = source_l.load()
+    processed_pixels = processed_l.load()
+    dark_pixels = 0
+    lost = 0
+    lifted = 0
+    for y in range(source_l.height):
+        for x in range(source_l.width):
+            source_value = int(source_pixels[x, y])
+            if source_value <= 127:
+                dark_pixels += 1
+                processed_value = int(processed_pixels[x, y])
+                if processed_value > 127:
+                    lost += 1
+                if processed_value - source_value > 8:
+                    lifted += 1
+    if dark_pixels <= 0:
+        return 0.0, 0.0, 1.0
+    loss_ratio = lost / dark_pixels
+    return loss_ratio, lifted / dark_pixels, 1.0 - loss_ratio
+
+
+def _ocr_binary_sidecar(image: Image.Image, ocr_preprocess: OcrPreprocessingResult) -> OcrBinaryResult:
+    if not ocr_preprocess.applied:
+        return OcrBinaryResult(
+            None,
+            False,
+            "OCR binary skipped: grayscale preprocessing not applied",
+            "preprocess_not_applied",
+            None,
+            0.0,
+            1.0,
+            ocr_preprocess.review_required,
+            ocr_preprocess.review_reason_codes,
+        )
+    grayscale = image.convert("L")
+    threshold = _otsu_threshold(grayscale.histogram(), max(1, grayscale.width * grayscale.height))
+    threshold = max(96, min(180, threshold))
+    binary = grayscale.point(lambda value: 0 if value <= threshold else 255, mode="L")
+    foreground_ratio = _dark_pixel_ratio(binary, 127)
+    source_dark = grayscale.point(lambda value: 255 if value <= 127 else 0, mode="L")
+    binary_dark = binary.point(lambda value: 255 if value <= 127 else 0, mode="L")
+    source_dark_pixels = _mask_pixel_count(source_dark)
+    retention = (
+        _mask_intersection_count(source_dark, binary_dark) / source_dark_pixels
+        if source_dark_pixels
+        else 1.0
+    )
+    review_reasons = list(ocr_preprocess.review_reason_codes)
+    if foreground_ratio < 0.001 or foreground_ratio > 0.45:
+        review_reasons.append("binary_foreground_ratio")
+    if retention < 0.96:
+        review_reasons.append("binary_foreground_retention")
+    return OcrBinaryResult(
+        binary,
+        True,
+        "OCR binary sidecar applied: Otsu threshold on OCR grayscale derivative",
+        "applied_otsu_threshold",
+        threshold,
+        round(foreground_ratio, 6),
+        round(retention, 6),
+        bool(review_reasons),
+        tuple(sorted(set(review_reasons))),
+    )
+
+
+def _otsu_threshold(histogram: list[int], total: int) -> int:
+    sum_total = sum(index * count for index, count in enumerate(histogram))
+    weight_background = 0
+    sum_background = 0.0
+    max_variance = -1.0
+    threshold = 127
+    for index, count in enumerate(histogram):
+        weight_background += count
+        if weight_background == 0:
+            continue
+        weight_foreground = total - weight_background
+        if weight_foreground == 0:
+            break
+        sum_background += index * count
+        mean_background = sum_background / weight_background
+        mean_foreground = (sum_total - sum_background) / weight_foreground
+        variance = weight_background * weight_foreground * ((mean_background - mean_foreground) ** 2)
+        if variance > max_variance:
+            max_variance = variance
+            threshold = index
+    return threshold
 
 
 def _normalize_tones_conservative(
@@ -11396,6 +12020,18 @@ def _processing_audit(
     text_edges_candidate_pixel_ratio: float = 0.0,
     text_edges_edge_energy_before: float = 0.0,
     text_edges_edge_energy_after: float = 0.0,
+    ocr_preprocessed: bool = False,
+    ocr_preprocess_changed_pixel_ratio: float = 0.0,
+    ocr_background_delta: float = 0.0,
+    ocr_background_candidate_pixel_ratio: float = 0.0,
+    ocr_foreground_dark_loss_ratio: float = 0.0,
+    ocr_foreground_dark_lift_ratio: float = 0.0,
+    ocr_foreground_retention_ratio: float = 1.0,
+    ocr_review_required: bool = False,
+    ocr_binary_created: bool = False,
+    ocr_binary_foreground_ratio: float = 0.0,
+    ocr_binary_foreground_retention_ratio: float = 1.0,
+    ocr_binary_review_required: bool = False,
     cumulative_change_guard: dict[str, Any] | None = None,
     local_content_change_guard: dict[str, Any] | None = None,
     combination_quality_guard: dict[str, Any] | None = None,
@@ -11446,18 +12082,25 @@ def _processing_audit(
         "size_change_ratio": round(size_change_ratio, 6),
         "pixel_change_ratio": round(pixel_change_ratio, 6),
         "pixel_change_guardrail_applied": (
-            not geometric_change_recorded and not tone_normalized and not paper_color_cast_normalized
+            not geometric_change_recorded
+            and not tone_normalized
+            and not paper_color_cast_normalized
+            and not ocr_preprocessed
         ),
         "pixel_change_guardrail_scope": (
-            "same_size_pixel_change"
-            if not geometric_change_recorded and not tone_normalized and not paper_color_cast_normalized
+            "ocr_preprocess_background_normalization"
+            if ocr_preprocessed
             else (
-                "tone_normalization_recorded_by_brightness_and_contrast"
-                if tone_normalized and not geometric_change_recorded
+                "same_size_pixel_change"
+                if not geometric_change_recorded and not tone_normalized and not paper_color_cast_normalized
                 else (
-                    "paper_color_cast_recorded_by_color_delta"
-                    if paper_color_cast_normalized and not geometric_change_recorded
-                    else "geometric_change_recorded_by_size_crop_trim_or_deskew"
+                    "tone_normalization_recorded_by_brightness_and_contrast"
+                    if tone_normalized and not geometric_change_recorded
+                    else (
+                        "paper_color_cast_recorded_by_color_delta"
+                        if paper_color_cast_normalized and not geometric_change_recorded
+                        else "geometric_change_recorded_by_size_crop_trim_or_deskew"
+                    )
                 )
             )
         ),
@@ -11510,6 +12153,18 @@ def _processing_audit(
         "text_edges_candidate_pixel_ratio": round(text_edges_candidate_pixel_ratio, 6),
         "text_edges_edge_energy_before": round(text_edges_edge_energy_before, 6),
         "text_edges_edge_energy_after": round(text_edges_edge_energy_after, 6),
+        "ocr_preprocessed": ocr_preprocessed,
+        "ocr_preprocess_changed_pixel_ratio": round(ocr_preprocess_changed_pixel_ratio, 6),
+        "ocr_background_delta": round(ocr_background_delta, 6),
+        "ocr_background_candidate_pixel_ratio": round(ocr_background_candidate_pixel_ratio, 6),
+        "ocr_foreground_dark_loss_ratio": round(ocr_foreground_dark_loss_ratio, 6),
+        "ocr_foreground_dark_lift_ratio": round(ocr_foreground_dark_lift_ratio, 6),
+        "ocr_foreground_retention_ratio": round(ocr_foreground_retention_ratio, 6),
+        "ocr_review_required": ocr_review_required,
+        "ocr_binary_created": ocr_binary_created,
+        "ocr_binary_foreground_ratio": round(ocr_binary_foreground_ratio, 6),
+        "ocr_binary_foreground_retention_ratio": round(ocr_binary_foreground_retention_ratio, 6),
+        "ocr_binary_review_required": ocr_binary_review_required,
         "scanner_gutter_trimmed": scanner_gutter_bbox is not None,
         "crop_ratio": round(max(0.0, crop_ratio), 6),
         "trim_margins": trim_margins,
@@ -11649,6 +12304,30 @@ def _cumulative_change_guard(metrics: dict[str, Any], options: ProcessingOptions
         _float_metric(metrics, "text_edges_candidate_pixel_ratio"),
         _float_metric(metrics, "paper_color_cast_candidate_pixel_ratio"),
     )
+    if metrics.get("ocr_preprocessed") is True:
+        foreground_reasons: list[str] = []
+        if _float_metric(metrics, "ocr_foreground_dark_loss_ratio") > 0.002:
+            foreground_reasons.append("ocr_foreground_dark_loss")
+        if _float_metric(metrics, "ocr_foreground_dark_lift_ratio") > 0.01:
+            foreground_reasons.append("ocr_foreground_dark_lift")
+        if _float_metric(metrics, "ocr_foreground_retention_ratio") < 0.998:
+            foreground_reasons.append("ocr_foreground_retention")
+        action = "reverted_to_source" if foreground_reasons else "passed"
+        return {
+            "checked": True,
+            "action": action,
+            "reverted": action == "reverted_to_source",
+            "reasons": sorted(set(foreground_reasons)),
+            "score": 0.0,
+            "pixel_ratio": round(pixel_ratio, 6),
+            "brightness_delta": round(brightness_delta, 6),
+            "contrast_delta": round(contrast_delta, 6),
+            "crop_ratio": round(crop_ratio, 6),
+            "candidate_pixel_ratio": round(candidate_ratio, 6),
+            "retouch_changed_pixel_ratio": 0.0,
+            "foreground_weakened_ratio": round(_float_metric(metrics, "ocr_foreground_dark_loss_ratio"), 6),
+            "edge_foreground_weakened_ratio": 0.0,
+        }
     score_components = {
         "pixel_change_ratio": _safe_ratio(pixel_ratio, options.audit_max_cumulative_pixel_change_ratio),
         "brightness_delta": _safe_ratio(brightness_delta, options.audit_max_cumulative_brightness_delta),
@@ -11984,6 +12663,20 @@ def _processed_output_safety_guard(metrics: dict[str, Any], options: ProcessingO
     source_dark_ratio = _float_metric(metrics, "processed_output_source_dark_pixel_ratio")
     dark_loss_ratio = _float_metric(metrics, "processed_output_dark_pixel_loss_ratio")
     dark_lift_ratio = _float_metric(metrics, "processed_output_dark_pixel_lift_ratio")
+
+    if metrics.get("ocr_preprocessed") is True:
+        foreground_reasons: list[str] = []
+        if _float_metric(metrics, "ocr_foreground_dark_loss_ratio") > 0.002:
+            foreground_reasons.append("ocr_foreground_dark_loss")
+        if _float_metric(metrics, "ocr_foreground_dark_lift_ratio") > 0.01:
+            foreground_reasons.append("ocr_foreground_dark_lift")
+        return {
+            "checked": True,
+            "action": "reverted_to_source" if foreground_reasons else "passed",
+            "reverted": bool(foreground_reasons),
+            "reason_code": "ocr_foreground_loss_reverted" if foreground_reasons else "safe_ocr_preprocess_passed",
+            "reasons": sorted(set(foreground_reasons)),
+        }
 
     if (
         near_white_ratio > options.audit_max_processed_near_white_ratio

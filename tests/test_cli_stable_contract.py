@@ -47,6 +47,8 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         readable = builtin_rules_profile("text-clean-readable-v1").metadata()
         readable_defaults = processing_defaults_for_rule_template("text-clean-readable-v1")
         print_clean_defaults = processing_defaults_for_rule_template("print-clean-v1")
+        ocr_defaults = processing_defaults_for_rule_template("ocr-preprocess-v1")
+        ocr_light_defaults = processing_defaults_for_rule_template("ocr-preprocess-light-v1")
         photo_defaults = processing_defaults_for_rule_template("photo-mixed-safe-v1")
 
         self.assertEqual(readable["template"]["id"], "text-clean-readable-v1")
@@ -58,6 +60,12 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         self.assertFalse(print_clean_defaults["despeckle_content_type_check"])
         self.assertEqual(processing_profile_for_rule_template("text-clean-readable-v1"), "standard")
         self.assertEqual(processing_profile_for_rule_template("print-clean-v1"), "print_clean")
+        self.assertEqual(processing_profile_for_rule_template("ocr-preprocess-v1"), "ocr_preprocess")
+        self.assertEqual(processing_profile_for_rule_template("ocr-preprocess-light-v1"), "ocr_preprocess_light")
+        self.assertTrue(ocr_defaults["ocr_preprocess"])
+        self.assertTrue(ocr_defaults["ocr_binary"])
+        self.assertTrue(ocr_light_defaults["ocr_preprocess"])
+        self.assertFalse(ocr_light_defaults["ocr_binary"])
         self.assertTrue(photo_defaults["trim_dark_border"])
         self.assertNotIn("enhance_faded_text", photo_defaults)
 
@@ -598,6 +606,73 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         self.assertFalse(quality_summary["privacy"]["contains_paths"])
         self.assertFalse(summary["source_images_modified"])
 
+    def test_production_run_ocr_preprocess_template_records_profile_and_sidecar(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-cli-ocr-preprocess-template-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            source = input_dir / "OCR001_PAGE_0001.png"
+            _write_ocr_noisy_page(source)
+            source_bytes = source.read_bytes()
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                exit_code = main(
+                    [
+                        "production-run",
+                        "--input",
+                        str(input_dir),
+                        "--derivatives-out",
+                        str(derivatives_dir),
+                        "--metadata-out",
+                        str(metadata_dir),
+                        "--rule-template",
+                        "ocr-preprocess-v1",
+                        "--workers",
+                        "1",
+                    ]
+                )
+
+            summary = json.loads((metadata_dir / "production_run_summary.json").read_text(encoding="utf-8"))
+            processing_manifest = json.loads(
+                (derivatives_dir / "processing_manifest.json").read_text(encoding="utf-8")
+            )
+            quality_summary = json.loads(
+                (derivatives_dir / PROCESSING_QUALITY_SUMMARY_JSON).read_text(encoding="utf-8")
+            )
+            record = processing_manifest["files"][0]
+            binary_path = derivatives_dir / record["ocr_binary_output_relative_path"]
+            source_unchanged = source.read_bytes() == source_bytes
+            binary_exists = binary_path.is_file()
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(source_unchanged)
+        self.assertEqual(summary["rule_template"]["id"], "ocr-preprocess-v1")
+        self.assertEqual(summary["options"]["processing_profile"], "ocr_preprocess")
+        self.assertTrue(summary["options"]["ocr_preprocess"])
+        self.assertTrue(summary["options"]["ocr_binary"])
+        self.assertEqual(processing_manifest["output_profile"], "ocr_preprocess")
+        self.assertIn("ocr_preprocess_grayscale", processing_manifest["ocr_preprocessing_operations"])
+        self.assertIn("ocr_binary_sidecar", processing_manifest["ocr_preprocessing_operations"])
+        self.assertTrue(record["ocr_preprocessed"])
+        self.assertEqual(record["ocr_preprocess_reason_code"], "applied_background_normalization")
+        self.assertGreater(record["ocr_preprocess_changed_pixel_ratio"], 0.20)
+        self.assertGreater(record["ocr_background_delta"], 15.0)
+        self.assertGreaterEqual(record["ocr_foreground_retention_ratio"], 0.998)
+        self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
+        self.assertTrue(record["ocr_binary_created"])
+        self.assertTrue(binary_exists)
+        self.assertEqual(record["ocr_binary_reason_code"], "applied_otsu_threshold")
+        self.assertEqual(quality_summary["status"], "pass")
+        self.assertTrue(quality_summary["public_safe"])
+        self.assertEqual(quality_summary["counts"]["ocr_preprocessed_files"], 1)
+        self.assertEqual(quality_summary["counts"]["ocr_binary_created_files"], 1)
+        self.assertGreater(
+            quality_summary["quality_metrics"]["ocr_background_delta"]["max"],
+            15.0,
+        )
+
     def test_run_plan_accepts_rule_template_and_records_public_batch_choice(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-cli-run-plan-template-") as temp_dir:
             root = Path(temp_dir)
@@ -1113,6 +1188,26 @@ def _write_print_clean_illumination_gradient_page(path: Path) -> None:
     font = ImageFont.load_default()
     for index, line in enumerate(("ARCHIVE", "REGISTER", "PAGE")):
         draw.text((72, 70 + index * 28), line, fill=(90, 90, 90), font=font)
+    image.save(path, dpi=(300, 300))
+
+
+def _write_ocr_noisy_page(path: Path) -> None:
+    width, height = 360, 260
+    image = Image.new("L", (width, height), 214)
+    pixels = image.load()
+    for y in range(height):
+        for x in range(width):
+            if (x * 17 + y * 31) % 23 == 0:
+                pixels[x, y] = 166
+            elif (x * 11 + y * 7) % 19 == 0:
+                pixels[x, y] = 188
+            elif (x + y) % 29 == 0:
+                pixels[x, y] = 226
+    draw = ImageDraw.Draw(image)
+    for index in range(5):
+        y = 54 + index * 32
+        draw.rectangle((54, y, 286, y + 5), fill=42)
+        draw.rectangle((64, y + 12, 220, y + 15), fill=86)
     image.save(path, dpi=(300, 300))
 
 

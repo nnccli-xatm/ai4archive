@@ -31,6 +31,8 @@ PROCESSING_FLAGS = (
     "lighten_scanlines",
     "enhance_faded_text",
     "sharpen_text_edges",
+    "ocr_preprocess",
+    "ocr_binary",
     "resume_processing",
 )
 
@@ -63,6 +65,8 @@ class PreflightConfig:
     lighten_scanlines: bool = False
     enhance_faded_text: bool = False
     sharpen_text_edges: bool = False
+    ocr_preprocess: bool = False
+    ocr_binary: bool = False
     resume_processing: bool = False
 
 

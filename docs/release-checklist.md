@@ -203,6 +203,27 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   evidence so `evidence-bundle-verify`, `public-safe-validation-index`,
   `artifact-readiness-checklist`, and `workbench-summary` can propagate any
   image-quality `blocking_codes` by aggregate code/count.
+- Confirm OCR preprocessing release evidence is present before marking
+  `ocr-preprocess-v1` ready:
+  `python scripts\run_noisyoffice_external_cli_test.py --data-root /placeholder/local-noisyoffice-root --rule-template ocr-preprocess-v1 --enforce-ocr-quality-gate --no-doc-report --no-download`
+  must complete 216 UCI NoisyOffice simulated noisy grayscale images with
+  source images unchanged, no missing outputs, macro PSNR improvement >= +1.0
+  dB, macro SSIM improvement >= +0.015, MSE reduction >= 10%, MAE reduction >=
+  5%, dark-pixel F1 not lower, foreground retention delta >= -0.002, and at
+  least three positive noise groups. Keep only the public-safe
+  `ocr_preprocessing_quality_summary.json` as shared release evidence.
+- Confirm `archive-scan-qc ocr-provider-probe --provider disabled --out
+  /placeholder/private-validation-output/ocr-provider-probe` writes
+  `ocr_provider_probe.json` with provider disabled by default and no image/OCR
+  execution. If a local OCR provider is approved for release validation, confirm
+  `archive-scan-qc ocr-preprocessing-ocr-validation --provider tesseract
+  --require-ocr-metric --min-cer-relative-reduction 0.25
+  --min-wer-relative-reduction 0.0 --out
+  /placeholder/private-validation-output/ocr-preprocessing-ocr-validation`
+  writes `ocr_preprocessing_ocr_validation_summary.json` with only aggregate
+  CER/WER and visual proxy metrics. The summary must contain no expected text,
+  OCR output text, paths, filenames, hashes, image content, or row-level
+  records.
 - Confirm `archive-scan-qc rule-template-catalog --out
   /placeholder/private-validation-output/rule-template-catalog` and
   `archive-scan-qc rule-template-dry-run --rule-template text-clean-readable-v1 --out
@@ -244,7 +265,7 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   snapshot with template ID, version, source, and processing defaults.
 - For external CLI batch-service regression on approved DIBCO/H-DIBCO samples,
   run `python scripts/run_dibco_external_cli_test.py --data-root
-  D:\data-opt\DIBCO-H-DIBCO` from an environment with package requirements plus
+  /placeholder/local-dibco-hdibco-root` from an environment with package requirements plus
   `numpy`, then confirm `stable_cli_passed=true`, zero source-image
   modifications, zero missing processed outputs, and review the generated
   quality/performance report.
@@ -255,7 +276,7 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   evidence.
 - For document-cleanup regression aligned with the current non-binarization
   image-processing scope, run `python scripts/run_noisyoffice_external_cli_test.py
-  --data-root D:\data-opt\NoisyOffice` from an environment with package
+  --data-root /placeholder/local-noisyoffice-root` from an environment with package
   requirements plus `numpy`, then confirm `stable_cli_passed=true`, zero
   source-image modifications, zero missing processed outputs, zero size
   mismatches, and review PSNR/SSIM/MAE deltas against clean grayscale GT.

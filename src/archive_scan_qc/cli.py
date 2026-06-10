@@ -36,6 +36,14 @@ from .evidence_bundle import EVIDENCE_BUNDLE_JSON, write_evidence_bundle_summary
 from .final_handoff import FINAL_HANDOFF_JSON, write_final_handoff_summary
 from .handoff import write_delivery_handoff_manifest
 from .image_processing_capability_smoke import run_image_processing_capability_smoke
+from .ocr_validation import (
+    OCR_PREPROCESSING_OCR_VALIDATION_JSON,
+    OCR_PROVIDER_PROBE_JSON,
+    OcrProviderProbeConfig,
+    OcrValidationConfig,
+    write_ocr_preprocessing_ocr_validation,
+    write_ocr_provider_probe,
+)
 from .preflight import PreflightConfig, run_preflight, write_preflight_report
 from .production_runner import PRODUCTION_RUN_PROGRESS_JSON, PRODUCTION_RUN_SUMMARY_JSON, ProductionRunConfig, run_production_folder
 from .processing import ProcessingOptions, process_images
@@ -144,7 +152,8 @@ def _add_scan_arguments(parser: argparse.ArgumentParser, *, include_scan_overrid
         choices=RULE_TEMPLATE_IDS,
         help=(
             "Optional processing rules template. Built-ins include archival-safe-v1, "
-            "text-clean-readable-v1, print-clean-v1, photo-mixed-safe-v1, and legacy IDs. "
+            "text-clean-readable-v1, print-clean-v1, ocr-preprocess-v1, "
+            "photo-mixed-safe-v1, and legacy IDs. "
             "Use custom with --rules-profile."
         ),
     )
@@ -327,6 +336,10 @@ def main(argv: list[str] | None = None) -> int:
         return _main_public_safe_validation_index(argv[1:])
     if argv and argv[0] == "private-validation-aggregate":
         return _main_private_validation_aggregate(argv[1:])
+    if argv and argv[0] == "ocr-provider-probe":
+        return _main_ocr_provider_probe(argv[1:])
+    if argv and argv[0] == "ocr-preprocessing-ocr-validation":
+        return _main_ocr_preprocessing_ocr_validation(argv[1:])
     if argv and argv[0] == "workbench-summary":
         return _main_workbench_summary(argv[1:])
     if argv and argv[0] == "artifact-readiness-checklist":
@@ -394,10 +407,13 @@ def main(argv: list[str] | None = None) -> int:
                 lighten_scanlines=args.lighten_scanlines,
                 enhance_faded_text=args.enhance_faded_text,
                 sharpen_text_edges=args.sharpen_text_edges,
+                ocr_preprocess=getattr(args, "ocr_preprocess", False),
+                ocr_binary=getattr(args, "ocr_binary", False),
                 despeckle_content_type_check=getattr(args, "despeckle_content_type_check", True),
                 despeckle_backend=args.despeckle_backend,
                 resume_processing=args.resume_processing,
                 reuse_scan_measurements=args.reuse_scan_measurements,
+                processing_profile=_processing_profile_for_args(args),
                 workers=args.workers,
             ),
         )
@@ -516,7 +532,7 @@ def _main_production_run(argv: list[str]) -> int:
         default=None,
         choices=RULE_TEMPLATE_IDS,
         help=(
-            "图像处理规则模板：archival-safe-v1、text-clean-readable-v1、print-clean-v1、"
+            "图像处理规则模板：archival-safe-v1、text-clean-readable-v1、print-clean-v1、ocr-preprocess-v1、"
             "photo-mixed-safe-v1、legacy IDs 或 custom。"
         ),
     )
@@ -597,6 +613,8 @@ def _main_production_run(argv: list[str]) -> int:
                 lighten_scanlines=args.lighten_scanlines,
                 enhance_faded_text=args.enhance_faded_text,
                 sharpen_text_edges=args.sharpen_text_edges,
+                ocr_preprocess=getattr(args, "ocr_preprocess", False),
+                ocr_binary=getattr(args, "ocr_binary", False),
                 despeckle_content_type_check=getattr(args, "despeckle_content_type_check", True),
                 despeckle_backend=args.despeckle_backend,
                 resume_processing=args.resume_processing,
@@ -1272,6 +1290,74 @@ def _main_private_validation_aggregate(argv: list[str]) -> int:
     return 0 if payload["status"] == "pass" else 1
 
 
+def _main_ocr_provider_probe(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="archive-scan-qc ocr-provider-probe",
+        description="Probe a local OCR provider without running OCR on images.",
+    )
+    parser.add_argument("--provider", default="disabled", choices=("disabled", "tesseract"), help="Local OCR provider to probe.")
+    parser.add_argument("--provider-command", default=None, help="Optional provider executable path for local-only probing.")
+    parser.add_argument("--out", default=None, type=Path, help=f"Output JSON path or directory for {OCR_PROVIDER_PROBE_JSON}.")
+    args = parser.parse_args(argv)
+    try:
+        path, payload = write_ocr_provider_probe(
+            output_path=args.out,
+            config=OcrProviderProbeConfig(provider=args.provider, command=args.provider_command),
+        )
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    print(f"OCR provider probe: {path}")
+    print(f"Provider status: {payload['status']}")
+    print("Privacy: provider probe only; no images, OCR text, paths, filenames, hashes, or row-level results are written.")
+    return 0 if payload["status"] in {"available", "disabled"} else 1
+
+
+def _main_ocr_preprocessing_ocr_validation(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="archive-scan-qc ocr-preprocessing-ocr-validation",
+        description="Run synthetic OCR preprocessing validation and write a public-safe aggregate summary.",
+    )
+    parser.add_argument("--out", required=True, type=Path, help=f"Output directory for {OCR_PREPROCESSING_OCR_VALIDATION_JSON}.")
+    parser.add_argument("--provider", default="disabled", choices=("disabled", "tesseract"), help="Optional local OCR provider.")
+    parser.add_argument("--provider-command", default=None, help="Optional provider executable path for local-only OCR validation.")
+    parser.add_argument(
+        "--require-ocr-metric",
+        action="store_true",
+        help="Fail if OCR CER/WER metrics cannot be produced by the selected local provider.",
+    )
+    parser.add_argument(
+        "--min-cer-relative-reduction",
+        default=0.25,
+        type=_non_negative_float,
+        help="Minimum source-to-processed CER reduction required when OCR metrics are available.",
+    )
+    parser.add_argument(
+        "--min-wer-relative-reduction",
+        default=0.0,
+        type=_non_negative_float,
+        help="Minimum source-to-processed WER reduction required when OCR metrics are available.",
+    )
+    args = parser.parse_args(argv)
+    try:
+        path, payload = write_ocr_preprocessing_ocr_validation(
+            OcrValidationConfig(
+                output_dir=args.out,
+                provider=args.provider,
+                provider_command=args.provider_command,
+                require_ocr_metric=args.require_ocr_metric,
+                min_cer_relative_reduction=args.min_cer_relative_reduction,
+                min_wer_relative_reduction=args.min_wer_relative_reduction,
+            )
+        )
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    print(f"OCR preprocessing validation summary: {path}")
+    print(f"Validation status: {payload['status']}")
+    print(f"OCR metrics available: {payload['ocr_text_metrics']['available']}")
+    print("Privacy: public-safe aggregate metrics only; OCR text, paths, filenames, hashes, images, and row-level records are omitted.")
+    return 0 if payload["status"] == "pass" else 1
+
+
 def _main_workbench_summary(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="archive-scan-qc workbench-summary",
@@ -1760,7 +1846,7 @@ def _apply_rule_template_processing_defaults(args: argparse.Namespace) -> None:
     except RulesProfileError:
         return
     for field, enabled in defaults.items():
-        if hasattr(args, field) or field == "despeckle_content_type_check":
+        if hasattr(args, field) or field in {"despeckle_content_type_check", "ocr_preprocess", "ocr_binary"}:
             setattr(args, field, enabled)
 
 

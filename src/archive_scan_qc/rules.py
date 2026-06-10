@@ -18,6 +18,8 @@ BUILTIN_RULE_TEMPLATE_IDS = (
     "text-clean-print",
     "text-clean-readable-v1",
     "print-clean-v1",
+    "ocr-preprocess-light-v1",
+    "ocr-preprocess-v1",
     "high-fidelity-original",
     "photo-mixed-safe-v1",
 )
@@ -49,6 +51,18 @@ TEXT_CLEAN_PROCESSING_DEFAULTS = {
     "sharpen_text_edges": True,
     "reuse_scan_measurements": True,
 }
+OCR_PREPROCESS_LIGHT_PROCESSING_DEFAULTS = {
+    **TEXT_CLEAN_PROCESSING_DEFAULTS,
+    "despeckle": False,
+    "ocr_preprocess": True,
+    "ocr_binary": False,
+}
+OCR_PREPROCESS_PROCESSING_DEFAULTS = {
+    **TEXT_CLEAN_PROCESSING_DEFAULTS,
+    "despeckle": False,
+    "ocr_preprocess": True,
+    "ocr_binary": True,
+}
 PHOTO_MIXED_SAFE_PROCESSING_DEFAULTS = {
     "trim_dark_border": True,
     "scanner_gutter_trim": True,
@@ -70,6 +84,12 @@ RULE_TEMPLATE_PROCESSING_DEFAULTS: dict[str, dict[str, bool]] = {
     "print-clean-v1": {
         **TEXT_CLEAN_PROCESSING_DEFAULTS,
     },
+    "ocr-preprocess-light-v1": {
+        **OCR_PREPROCESS_LIGHT_PROCESSING_DEFAULTS,
+    },
+    "ocr-preprocess-v1": {
+        **OCR_PREPROCESS_PROCESSING_DEFAULTS,
+    },
     "high-fidelity-original": {
         **PHOTO_MIXED_SAFE_PROCESSING_DEFAULTS,
     },
@@ -84,6 +104,8 @@ RULE_TEMPLATE_PROCESSING_PROFILES: dict[str, str] = {
     "text-clean-print": "standard",
     "text-clean-readable-v1": "standard",
     "print-clean-v1": "print_clean",
+    "ocr-preprocess-light-v1": "ocr_preprocess_light",
+    "ocr-preprocess-v1": "ocr_preprocess",
     "high-fidelity-original": "standard",
     "photo-mixed-safe-v1": "standard",
     CUSTOM_RULE_TEMPLATE_ID: "standard",
@@ -223,6 +245,29 @@ def builtin_rules_profile(template_id: str) -> RulesProfile:
             blank_edge_coverage_max=0.0015,
             blank_dark_pixel_ratio_max=0.0003,
             despeckle_max_pixel_change_ratio=0.02,
+            deskew_residual_threshold=0.4,
+        )
+    if template_id in {"ocr-preprocess-light-v1", "ocr-preprocess-v1"}:
+        return RulesProfile(
+            name=template_id,
+            version=RULE_TEMPLATE_VERSION,
+            source=f"builtin-template:{template_id}",
+            template_id=template_id,
+            template_version=RULE_TEMPLATE_VERSION,
+            template_source="builtin",
+            min_dpi=300,
+            dpi_purpose="print",
+            dark_mean_threshold=35.0,
+            bright_mean_threshold=252.0,
+            low_contrast_stddev_threshold=8.0,
+            blur_laplacian_variance_threshold=24.0,
+            blur_min_contrast_stddev=10.0,
+            blank_brightness_min=250.0,
+            blank_contrast_max=5.0,
+            blank_foreground_coverage_max=0.002,
+            blank_edge_coverage_max=0.0015,
+            blank_dark_pixel_ratio_max=0.0003,
+            despeckle_max_pixel_change_ratio=0.035,
             deskew_residual_threshold=0.4,
         )
     if template_id in {"high-fidelity-original", "photo-mixed-safe-v1"}:

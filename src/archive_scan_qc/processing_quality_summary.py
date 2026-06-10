@@ -34,6 +34,9 @@ _COUNT_FIELDS = (
     "scanlines_lightened_files",
     "faded_text_enhanced_files",
     "text_edges_sharpened_files",
+    "ocr_preprocessed_files",
+    "ocr_binary_created_files",
+    "ocr_review_required_files",
 )
 
 _METRIC_FIELDS = (
@@ -70,6 +73,14 @@ _METRIC_FIELDS = (
     "text_edges_changed_pixel_ratio",
     "text_edges_edge_energy_before",
     "text_edges_edge_energy_after",
+    "ocr_preprocess_changed_pixel_ratio",
+    "ocr_background_delta",
+    "ocr_background_candidate_pixel_ratio",
+    "ocr_foreground_dark_loss_ratio",
+    "ocr_foreground_dark_lift_ratio",
+    "ocr_foreground_retention_ratio",
+    "ocr_binary_foreground_ratio",
+    "ocr_binary_foreground_retention_ratio",
     "processed_output_brightness_increase",
     "processed_output_near_white_delta",
     "processed_output_highlight_clip_delta",
@@ -97,6 +108,8 @@ _GEOMETRY_FIELDS = (
 _TEXT_FIELDS = (
     "faded_text_enhanced_files",
     "text_edges_sharpened_files",
+    "ocr_preprocessed_files",
+    "ocr_binary_created_files",
 )
 
 _DEFECT_FIELDS = (

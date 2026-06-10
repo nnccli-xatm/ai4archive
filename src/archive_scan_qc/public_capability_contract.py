@@ -381,7 +381,13 @@ def build_public_capability_contract(generated_at: str | None = None) -> dict[st
                     "may_include_quality_metrics": True,
                     "may_include_processing_profile": True,
                     "quality_detail": "job_level_public_safe_aggregate",
-                    "allowed_processing_profiles": ["standard", "print_clean", "photo_mixed_safe"],
+                    "allowed_processing_profiles": [
+                        "standard",
+                        "print_clean",
+                        "photo_mixed_safe",
+                        "ocr_preprocess_light",
+                        "ocr_preprocess",
+                    ],
                     "allowed_quality_context": [
                         "blocking_codes",
                         "processing_warning_counts",
@@ -394,8 +400,13 @@ def build_public_capability_contract(generated_at: str | None = None) -> dict[st
                     ],
                     "allowed_print_clean_context": [
                         "processing_profile:print_clean",
+                        "processing_profile:ocr_preprocess",
+                        "processing_profile:ocr_preprocess_light",
                         "background_stains_delta",
                         "changed_pixel_ratio",
+                        "ocr_background_delta",
+                        "ocr_foreground_retention_ratio",
+                        "ocr_binary_foreground_ratio",
                         "bleed_through_delta",
                         "scanlines_delta",
                         "illumination_gradient_correction_delta",

@@ -20,6 +20,7 @@ from .rules import (
     RulesProfileError,
     load_rules_profile_selection,
     processing_defaults_for_rule_template,
+    processing_profile_for_rule_template,
 )
 from .scanner import ScanConfig, scan_batch
 
@@ -56,6 +57,8 @@ class PlanBatch:
     lighten_scanlines: bool
     enhance_faded_text: bool
     sharpen_text_edges: bool
+    ocr_preprocess: bool
+    ocr_binary: bool
     despeckle_backend: str
     resume_processing: bool
     reuse_scan_measurements: bool = False
@@ -241,6 +244,8 @@ def _run_batch(project_id: str, batch: PlanBatch, index: int) -> dict[str, Any]:
                 lighten_scanlines=_processing_enabled(batch, template_defaults, "lighten_scanlines"),
                 enhance_faded_text=_processing_enabled(batch, template_defaults, "enhance_faded_text"),
                 sharpen_text_edges=_processing_enabled(batch, template_defaults, "sharpen_text_edges"),
+                ocr_preprocess=_processing_enabled(batch, template_defaults, "ocr_preprocess"),
+                ocr_binary=_processing_enabled(batch, template_defaults, "ocr_binary"),
                 resume_processing=_processing_enabled(batch, template_defaults, "resume_processing"),
             )
         )
@@ -317,6 +322,8 @@ def _run_batch(project_id: str, batch: PlanBatch, index: int) -> dict[str, Any]:
                     lighten_scanlines=_processing_enabled(batch, template_defaults, "lighten_scanlines"),
                     enhance_faded_text=_processing_enabled(batch, template_defaults, "enhance_faded_text"),
                     sharpen_text_edges=_processing_enabled(batch, template_defaults, "sharpen_text_edges"),
+                    ocr_preprocess=_processing_enabled(batch, template_defaults, "ocr_preprocess"),
+                    ocr_binary=_processing_enabled(batch, template_defaults, "ocr_binary"),
                     despeckle_content_type_check=_template_default(
                         template_defaults,
                         "despeckle_content_type_check",
@@ -325,6 +332,7 @@ def _run_batch(project_id: str, batch: PlanBatch, index: int) -> dict[str, Any]:
                     despeckle_backend=batch.despeckle_backend,
                     resume_processing=_processing_enabled(batch, template_defaults, "resume_processing"),
                     reuse_scan_measurements=_processing_enabled(batch, template_defaults, "reuse_scan_measurements"),
+                    processing_profile=_processing_profile_for_batch(batch),
                     workers=batch.workers,
                 ),
             )
@@ -656,6 +664,8 @@ def _batch_from_row(row: dict[str, Any], index: int, plan_dir: Path, output_root
         lighten_scanlines=_bool(normalized.get("lighten_scanlines"), "lighten_scanlines", index),
         enhance_faded_text=_bool(normalized.get("enhance_faded_text"), "enhance_faded_text", index),
         sharpen_text_edges=_bool(normalized.get("sharpen_text_edges"), "sharpen_text_edges", index),
+        ocr_preprocess=_bool(normalized.get("ocr_preprocess"), "ocr_preprocess", index),
+        ocr_binary=_bool(normalized.get("ocr_binary"), "ocr_binary", index),
         despeckle_backend=_despeckle_backend(normalized.get("despeckle_backend"), index),
         resume_processing=_bool(normalized.get("resume_processing"), "resume_processing", index),
         reuse_scan_measurements=_bool(normalized.get("reuse_scan_measurements"), "reuse_scan_measurements", index),
@@ -695,6 +705,12 @@ def _processing_enabled(batch: PlanBatch, template_defaults: dict[str, bool], fi
 
 def _template_default(template_defaults: dict[str, bool], field: str, default: bool) -> bool:
     return bool(template_defaults[field]) if field in template_defaults else default
+
+
+def _processing_profile_for_batch(batch: PlanBatch) -> str:
+    if not batch.rule_template:
+        return "standard"
+    return processing_profile_for_rule_template(batch.rule_template)
 
 
 def _rule_template(value: str, index: int) -> str | None:

@@ -82,6 +82,22 @@ _TEMPLATE_DESCRIPTIONS: dict[str, dict[str, Any]] = {
         "output_profile": "print-clean",
         "review_policy": "默认要求关注过处理、过锐化、背景洗白和文字断裂风险。",
     },
+    "ocr-preprocess-light-v1": {
+        "name_zh": "OCR 预处理轻量 v1",
+        "quality_goal": "生成面向 OCR 的较保守利用副本，提升背景分离、文字对比和可复核质量聚合指标。",
+        "intended_inputs": ["纯文本扫描页", "轻噪声 OCR 预处理批次"],
+        "risk_boundary": "不是档案保真派生图；照片、印章、批注、表格密集或混合内容必须本地复核。",
+        "output_profile": "ocr-preprocess-light",
+        "review_policy": "颜色、混合内容、前景损失风险或 OCR 二值化回退页面必须在生产 OCR 前复核。",
+    },
+    "ocr-preprocess-v1": {
+        "name_zh": "OCR 预处理 v1",
+        "quality_goal": "生成面向 OCR 的强预处理利用副本，执行背景归一、OCR 去噪、笔画保护和可选二值输出。",
+        "intended_inputs": ["纯文本 OCR 批次", "含明显噪声的灰度办公扫描页", "私有验证 OCR 预处理运行"],
+        "risk_boundary": "这是 OCR 利用副本，不是保真派生图；进入发布或生产 OCR 前必须通过质量门槛。",
+        "output_profile": "ocr-preprocess",
+        "review_policy": "颜色、混合内容、前景损失、二值化回退和洗白风险必须在 OCR 生产使用前复核。",
+    },
     "high-fidelity-original": {
         "name_zh": "高保真原貌模板",
         "quality_goal": "尽量保留照片、绘画、印章、批注和历史纸张原貌。",
@@ -117,6 +133,8 @@ _OPERATION_DESCRIPTIONS: dict[str, dict[str, str]] = {
     "lighten_scanlines": {"stage": "defect_cleanup", "intent": "弱化低对比扫描线。"},
     "enhance_faded_text": {"stage": "text_enhancement", "intent": "增强低对比浅墨正文。"},
     "sharpen_text_edges": {"stage": "text_enhancement", "intent": "轻量增强文字边缘清晰度。"},
+    "ocr_preprocess": {"stage": "ocr_preprocessing", "intent": "生成灰度 OCR 预处理利用副本。"},
+    "ocr_binary": {"stage": "ocr_preprocessing", "intent": "生成可复核的 OCR 二值旁路副本。"},
     "despeckle_content_type_check": {"stage": "guardrail", "intent": "保护照片和混合内容免受去黑点误处理。"},
     "reuse_scan_measurements": {"stage": "performance", "intent": "复用安全的扫描阶段测量结果。"},
 }
@@ -550,6 +568,12 @@ def _dry_run_warnings(rule_template: str, scan_summary: dict[str, Any], *, scan_
         warnings.append("mixed_photo_stamp_content_requires_review")
     if rule_template == "print-clean-v1":
         warnings.append("print_clean_requires_overprocessing_review")
+    if rule_template in {"ocr-preprocess-light-v1", "ocr-preprocess-v1"}:
+        warnings.append("ocr_preprocess_not_archival_fidelity_derivative")
+        warnings.append("ocr_preprocess_requires_private_quality_gate")
+        warnings.append("mixed_photo_stamp_content_requires_review")
+    if rule_template == "ocr-preprocess-v1":
+        warnings.append("ocr_binary_output_requires_review_gate")
     if rule_template in {"high-fidelity-original", "photo-mixed-safe-v1"}:
         warnings.append("strong_cleanup_disabled_by_high_fidelity_goal")
     return warnings

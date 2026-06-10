@@ -109,6 +109,8 @@ PUBLIC_OPERATION_TIMING_IDS = (
     "lighten_scanlines",
     "enhance_faded_text",
     "sharpen_text_edges",
+    "ocr_preprocess",
+    "ocr_binary",
 )
 PUBLIC_QUALITY_METRIC_IDS = (
     "brightness_delta",
@@ -144,6 +146,14 @@ PUBLIC_QUALITY_METRIC_IDS = (
     "text_edges_changed_pixel_ratio",
     "text_edges_edge_energy_before",
     "text_edges_edge_energy_after",
+    "ocr_preprocess_changed_pixel_ratio",
+    "ocr_background_delta",
+    "ocr_background_candidate_pixel_ratio",
+    "ocr_foreground_dark_loss_ratio",
+    "ocr_foreground_dark_lift_ratio",
+    "ocr_foreground_retention_ratio",
+    "ocr_binary_foreground_ratio",
+    "ocr_binary_foreground_retention_ratio",
     "processed_output_brightness_increase",
     "processed_output_near_white_delta",
     "processed_output_highlight_clip_delta",
@@ -981,6 +991,8 @@ def _production_config_from_record(record: dict[str, Any]) -> ProductionRunConfi
         lighten_scanlines=bool(defaults.get("lighten_scanlines")),
         enhance_faded_text=bool(defaults.get("enhance_faded_text")),
         sharpen_text_edges=bool(defaults.get("sharpen_text_edges")),
+        ocr_preprocess=bool(defaults.get("ocr_preprocess")),
+        ocr_binary=bool(defaults.get("ocr_binary")),
         despeckle_content_type_check=bool(defaults.get("despeckle_content_type_check", True)),
         reuse_scan_measurements=bool(defaults.get("reuse_scan_measurements")),
     )
@@ -1102,7 +1114,7 @@ def _public_processing_profile(template_snapshot: Any) -> str:
     if not isinstance(template_snapshot, dict):
         return "standard"
     profile = template_snapshot.get("processing_profile")
-    if profile in {"standard", "print_clean"}:
+    if profile in {"standard", "print_clean", "ocr_preprocess", "ocr_preprocess_light"}:
         return str(profile)
     service_template_id = template_snapshot.get("service_template_id")
     if isinstance(service_template_id, str) and service_template_id in BUILTIN_RULE_TEMPLATE_IDS:

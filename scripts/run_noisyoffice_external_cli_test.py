@@ -34,10 +34,19 @@ except ImportError as exc:  # pragma: no cover - environment preflight.
 
 
 SCHEMA_VERSION = "scan-qc.noisyoffice-external-cli-test.v1"
+OCR_QUALITY_SUMMARY_SCHEMA_VERSION = "scan-qc.ocr-preprocessing-quality-summary.v1"
 DEFAULT_DATA_ROOT = Path(r"D:\data-opt\NoisyOffice")
 DEFAULT_OUTPUT_ROOT = Path("generated") / "noisyoffice_external_cli_test"
 DEFAULT_DOC_REPORT = Path("docs") / "noisyoffice-external-cli-test-report.md"
 NOISYOFFICE_URL = "https://archive.ics.uci.edu/static/public/318/noisyoffice.zip"
+RULE_TEMPLATE_CHOICES = (
+    "dat-31-2017-standard",
+    "text-clean-print",
+    "high-fidelity-original",
+    "print-clean-v1",
+    "ocr-preprocess-light-v1",
+    "ocr-preprocess-v1",
+)
 
 
 @dataclass(frozen=True)
@@ -59,8 +68,55 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--rule-template",
         default="text-clean-print",
-        choices=("dat-31-2017-standard", "text-clean-print", "high-fidelity-original"),
+        choices=RULE_TEMPLATE_CHOICES,
         help="Rule template used for production-run.",
+    )
+    parser.add_argument(
+        "--enforce-ocr-quality-gate",
+        action="store_true",
+        help="Fail the script when OCR preprocessing quality thresholds are not met.",
+    )
+    parser.add_argument(
+        "--min-psnr-delta-db",
+        default=1.0,
+        type=float,
+        help="Minimum macro PSNR improvement required by the OCR quality gate.",
+    )
+    parser.add_argument(
+        "--min-ssim-delta",
+        default=0.015,
+        type=float,
+        help="Minimum macro SSIM improvement required by the OCR quality gate.",
+    )
+    parser.add_argument(
+        "--min-mse-reduction-ratio",
+        default=0.10,
+        type=float,
+        help="Minimum macro MSE reduction ratio required by the OCR quality gate.",
+    )
+    parser.add_argument(
+        "--min-mae-reduction-ratio",
+        default=0.05,
+        type=float,
+        help="Minimum macro MAE reduction ratio required by the OCR quality gate.",
+    )
+    parser.add_argument(
+        "--min-dark-f1-delta",
+        default=0.0,
+        type=float,
+        help="Minimum macro dark-pixel F1 change required by the OCR quality gate.",
+    )
+    parser.add_argument(
+        "--min-foreground-retention-delta",
+        default=-0.002,
+        type=float,
+        help="Minimum macro foreground-retention change required by the OCR quality gate.",
+    )
+    parser.add_argument(
+        "--min-positive-noise-groups",
+        default=3,
+        type=_positive_int,
+        help="Minimum NoisyOffice noise groups with positive PSNR or SSIM delta.",
     )
     parser.add_argument("--run-id", default=None, help="Optional stable run id. Defaults to a UTC timestamp.")
     parser.add_argument("--download-url", default=NOISYOFFICE_URL, help="Official NoisyOffice ZIP URL.")
@@ -116,7 +172,11 @@ def main(argv: list[str] | None = None) -> int:
         if not args.no_doc_report:
             print(f"Docs report: {args.report_path.resolve()}")
         print(f"Result JSON: {run_root / 'noisyoffice_external_cli_test_results.json'}")
-        return 0 if payload["summary"]["stable_cli_passed"] else 1
+        print(f"Public OCR quality summary: {run_root / 'ocr_preprocessing_quality_summary.json'}")
+        exit_passed = payload["summary"]["stable_cli_passed"]
+        if args.enforce_ocr_quality_gate:
+            exit_passed = exit_passed and bool(payload["summary"]["quality_gate"]["passed"])
+        return 0 if exit_passed else 1
     finally:
         if temp_context is not None:
             temp_context.cleanup()
@@ -464,6 +524,123 @@ def aggregate_by_noise_type(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def build_ocr_quality_gate(args: argparse.Namespace, quality: dict[str, Any]) -> dict[str, Any]:
+    source = quality.get("source", {})
+    processed = quality.get("processed", {})
+    delta = quality.get("delta", {})
+    by_noise_type = quality.get("by_noise_type", {})
+    thresholds = {
+        "min_psnr_delta_db": args.min_psnr_delta_db,
+        "min_ssim_delta": args.min_ssim_delta,
+        "min_mse_reduction_ratio": args.min_mse_reduction_ratio,
+        "min_mae_reduction_ratio": args.min_mae_reduction_ratio,
+        "min_dark_f1_delta": args.min_dark_f1_delta,
+        "min_foreground_retention_delta": args.min_foreground_retention_delta,
+        "min_positive_noise_groups": args.min_positive_noise_groups,
+        "max_negative_noise_groups": 0,
+    }
+    mse_reduction = reduction_ratio(source.get("mse_macro"), processed.get("mse_macro"))
+    mae_reduction = reduction_ratio(source.get("mae_macro"), processed.get("mae_macro"))
+    noise_group_checks = noise_group_quality_checks(by_noise_type)
+    checks = {
+        "psnr_delta_db": gate_check(delta.get("psnr_db_macro"), args.min_psnr_delta_db, direction="gte"),
+        "ssim_delta": gate_check(delta.get("ssim_macro"), args.min_ssim_delta, direction="gte"),
+        "mse_reduction_ratio": gate_check(mse_reduction, args.min_mse_reduction_ratio, direction="gte"),
+        "mae_reduction_ratio": gate_check(mae_reduction, args.min_mae_reduction_ratio, direction="gte"),
+        "dark_f1_delta": gate_check(delta.get("dark_pixel_f1_macro"), args.min_dark_f1_delta, direction="gte"),
+        "foreground_retention_delta": gate_check(
+            delta.get("foreground_retention_macro"), args.min_foreground_retention_delta, direction="gte"
+        ),
+        "positive_noise_groups": {
+            "actual": noise_group_checks["positive_count"],
+            "threshold": args.min_positive_noise_groups,
+            "passed": noise_group_checks["positive_count"] >= args.min_positive_noise_groups,
+        },
+        "negative_noise_groups": {
+            "actual": noise_group_checks["negative_count"],
+            "threshold": 0,
+            "passed": noise_group_checks["negative_count"] == 0,
+            "groups": noise_group_checks["negative_groups"],
+        },
+    }
+    failed_codes = [key for key, value in checks.items() if isinstance(value, dict) and not value.get("passed")]
+    return {
+        "enabled": bool(args.enforce_ocr_quality_gate),
+        "profile": args.rule_template,
+        "thresholds": thresholds,
+        "checks": checks,
+        "noise_groups": noise_group_checks["groups"],
+        "failed_codes": failed_codes,
+        "passed": not failed_codes,
+    }
+
+
+def noise_group_quality_checks(by_noise_type: dict[str, Any]) -> dict[str, Any]:
+    groups: dict[str, Any] = {}
+    positive_count = 0
+    negative_groups: list[str] = []
+    for noise_type, payload in sorted(by_noise_type.items()):
+        delta = payload.get("delta", {}) if isinstance(payload, dict) else {}
+        psnr_delta = delta.get("psnr_db_macro")
+        ssim_delta = delta.get("ssim_macro")
+        mse_reduction = reduction_ratio(
+            payload.get("source", {}).get("mse_macro") if isinstance(payload, dict) else None,
+            payload.get("processed", {}).get("mse_macro") if isinstance(payload, dict) else None,
+        )
+        mae_reduction = reduction_ratio(
+            payload.get("source", {}).get("mae_macro") if isinstance(payload, dict) else None,
+            payload.get("processed", {}).get("mae_macro") if isinstance(payload, dict) else None,
+        )
+        positive = positive_number(psnr_delta) or positive_number(ssim_delta)
+        negative = negative_number(psnr_delta) or negative_number(ssim_delta)
+        if positive:
+            positive_count += 1
+        if negative:
+            negative_groups.append(str(noise_type))
+        groups[str(noise_type)] = {
+            "image_count": nested_number(payload.get("source", {}), "image_count") if isinstance(payload, dict) else None,
+            "psnr_delta_db": psnr_delta,
+            "ssim_delta": ssim_delta,
+            "mse_reduction_ratio": mse_reduction,
+            "mae_reduction_ratio": mae_reduction,
+            "positive": positive,
+            "negative": negative,
+        }
+    return {
+        "groups": groups,
+        "positive_count": positive_count,
+        "negative_count": len(negative_groups),
+        "negative_groups": negative_groups,
+    }
+
+
+def gate_check(actual: Any, threshold: float, *, direction: str) -> dict[str, Any]:
+    numeric_actual = float(actual) if isinstance(actual, int | float) and math.isfinite(float(actual)) else None
+    if numeric_actual is None:
+        passed = False
+    elif direction == "gte":
+        passed = numeric_actual >= threshold
+    else:
+        raise ValueError(f"unsupported gate direction: {direction}")
+    return {"actual": rounded(numeric_actual), "threshold": threshold, "passed": passed}
+
+
+def reduction_ratio(source: Any, processed: Any) -> float | None:
+    if not isinstance(source, int | float) or not isinstance(processed, int | float):
+        return None
+    if not math.isfinite(float(source)) or not math.isfinite(float(processed)) or float(source) <= 0:
+        return None
+    return rounded((float(source) - float(processed)) / float(source), 6)
+
+
+def positive_number(value: Any) -> bool:
+    return isinstance(value, int | float) and math.isfinite(float(value)) and float(value) > 0
+
+
+def negative_number(value: Any) -> bool:
+    return isinstance(value, int | float) and math.isfinite(float(value)) and float(value) < 0
+
+
 def build_payload(
     *,
     args: argparse.Namespace,
@@ -476,6 +653,7 @@ def build_payload(
     rows: list[dict[str, Any]],
 ) -> dict[str, Any]:
     elapsed_seconds = round((finished_at - started_at).total_seconds(), 6)
+    quality_gate = build_ocr_quality_gate(args, result["quality"])
     return {
         "schema_version": SCHEMA_VERSION,
         "run_id": run_id,
@@ -511,6 +689,7 @@ def build_payload(
             "processed_output_missing_files": sum(1 for row in rows if not row.get("processed_output_found")),
             "processed_size_mismatch_files": result["quality"]["size_mismatch_files"],
             "quality": result["quality"],
+            "quality_gate": quality_gate,
         },
         "dataset": result,
         "worst_cases": worst_cases(rows),
@@ -521,13 +700,81 @@ def write_outputs(payload: dict[str, Any], rows: list[dict[str, Any]], run_root:
     json_path = run_root / "noisyoffice_external_cli_test_results.json"
     csv_path = run_root / "noisyoffice_external_cli_image_metrics.csv"
     report_path = run_root / "noisyoffice_external_cli_test_report.md"
+    public_summary_path = run_root / "ocr_preprocessing_quality_summary.json"
     json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    public_summary_path.write_text(
+        json.dumps(build_public_ocr_quality_summary(payload), ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
     write_csv(csv_path, rows)
     report = render_markdown_report(payload, json_path=json_path, image_csv_path=csv_path)
     report_path.write_text(report, encoding="utf-8")
     if doc_report_path is not None:
         doc_report_path.parent.mkdir(parents=True, exist_ok=True)
         doc_report_path.write_text(report, encoding="utf-8")
+
+
+def build_public_ocr_quality_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    summary = payload["summary"]
+    quality = summary["quality"]
+    return {
+        "schema_version": OCR_QUALITY_SUMMARY_SCHEMA_VERSION,
+        "generated_at": payload["generated_at"],
+        "rule_template": payload["environment"]["rule_template"],
+        "stable_cli_passed": summary["stable_cli_passed"],
+        "image_count": summary["image_count"],
+        "quality_gate": summary["quality_gate"],
+        "quality": public_quality_block(quality),
+        "privacy": {
+            "public_safe": True,
+            "contains_paths": False,
+            "contains_file_names": False,
+            "contains_hashes": False,
+            "contains_ocr_text": False,
+            "contains_image_content": False,
+            "contains_row_level_records": False,
+            "source": "aggregate metrics only",
+        },
+    }
+
+
+def public_quality_block(quality: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "source": metric_subset(quality.get("source", {})),
+        "processed": metric_subset(quality.get("processed", {})),
+        "delta": metric_subset(quality.get("delta", {})),
+        "size_mismatch_files": quality.get("size_mismatch_files"),
+        "by_noise_type": {
+            str(noise_type): {
+                "source": metric_subset(payload.get("source", {}) if isinstance(payload, dict) else {}),
+                "processed": metric_subset(payload.get("processed", {}) if isinstance(payload, dict) else {}),
+                "delta": metric_subset(payload.get("delta", {}) if isinstance(payload, dict) else {}),
+                "mse_reduction_ratio": reduction_ratio(
+                    payload.get("source", {}).get("mse_macro") if isinstance(payload, dict) else None,
+                    payload.get("processed", {}).get("mse_macro") if isinstance(payload, dict) else None,
+                ),
+                "mae_reduction_ratio": reduction_ratio(
+                    payload.get("source", {}).get("mae_macro") if isinstance(payload, dict) else None,
+                    payload.get("processed", {}).get("mae_macro") if isinstance(payload, dict) else None,
+                ),
+            }
+            for noise_type, payload in sorted(quality.get("by_noise_type", {}).items())
+        },
+    }
+
+
+def metric_subset(payload: dict[str, Any]) -> dict[str, Any]:
+    keys = (
+        "image_count",
+        "psnr_db_macro",
+        "ssim_macro",
+        "mse_macro",
+        "mae_macro",
+        "dark_pixel_f1_macro",
+        "foreground_retention_macro",
+        "mean_delta_macro",
+    )
+    return {key: payload.get(key) for key in keys if key in payload}
 
 
 def render_markdown_report(payload: dict[str, Any], *, json_path: Path, image_csv_path: Path) -> str:
@@ -652,7 +899,28 @@ def render_markdown_report(payload: dict[str, Any], *, json_path: Path, image_cs
             "",
         ]
     )
+    lines.extend(render_quality_gate_lines(summary["quality_gate"]))
     return "\n".join(lines)
+
+
+def render_quality_gate_lines(gate: dict[str, Any]) -> list[str]:
+    gate_status = "passed" if gate["passed"] else "failed"
+    lines = [
+        "",
+        "## OCR preprocessing quality gate",
+        "",
+        f"- Gate status: {gate_status}; enforced: {'yes' if gate['enabled'] else 'no'}.",
+        f"- Failed checks: {', '.join(gate['failed_codes']) if gate['failed_codes'] else 'none'}.",
+        "",
+        "| check | actual | threshold | passed |",
+        "|---|---:|---:|---|",
+    ]
+    for key, check in gate["checks"].items():
+        actual = check.get("actual") if isinstance(check, dict) else None
+        threshold = check.get("threshold") if isinstance(check, dict) else None
+        passed = check.get("passed") if isinstance(check, dict) else False
+        lines.append(f"| {key} | {fmt(actual)} | {fmt(threshold)} | {'yes' if passed else 'no'} |")
+    return lines
 
 
 def quality_row(label: str, metrics: dict[str, Any]) -> str:

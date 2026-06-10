@@ -15,6 +15,45 @@
 
 这说明现有 `text-clean-print`/保守档案派生图路线不能满足 OCR 预处理要求。后续必须新增独立的 OCR 预处理 profile 和验收门槛，而不是继续微调现有保守模板。
 
+## 1.1 当前实现进展
+
+2026-06-10 已完成第一版专项实现，`ocr-preprocess-v1` 不再沿用通用档案式
+`despeckle` 作为前置默认处理，而是在 OCR profile 内做灰度背景归一、暗前景及
+相邻中灰笔画保护，并输出 `ocr_binary` sidecar。该 profile 仍然是显式利用副本，
+不作为保真派生图默认模板。
+
+真实 NoisyOffice final gate：
+
+- 命令：`python scripts\run_noisyoffice_external_cli_test.py --data-root <local NoisyOffice root> --rule-template ocr-preprocess-v1 --enforce-ocr-quality-gate --no-doc-report --no-download`
+- 样本：216 张 UCI NoisyOffice simulated noisy grayscale。
+- 结果：stable CLI pass，源图修改 0，输出缺失 0，尺寸不匹配 0。
+- PSNR：15.8252 -> 22.5287，提升 +6.7035 dB。
+- SSIM：0.893610 -> 0.937759，提升 +0.044149。
+- MSE：1939.028962 -> 693.842889，降低 64.217%。
+- MAE：37.260796 -> 13.543558，降低 63.652%。
+- 暗像素 F1：0.895165 -> 0.895165，不下降。
+- 前景保留率：0.984674 -> 0.984674，不下降。
+- 噪声分组：c/f/p/w 四组全部 PSNR 和 SSIM 正向改善。
+- public-safe 摘要：`ocr_preprocessing_quality_summary.json`，只包含聚合指标和 gate
+  状态，不包含路径、文件名、hash、OCR 文本、图片内容或行级记录。
+
+Synthetic OCR gate：
+
+- 命令：`python -m archive_scan_qc.cli ocr-preprocessing-ocr-validation --provider tesseract --require-ocr-metric --min-cer-relative-reduction 0.25 --min-wer-relative-reduction 0.0 --out generated\ocr_preprocessing_ocr_validation`
+- provider probe：本机 Tesseract 可用；默认命令仍为 provider disabled，不自动调用外部 OCR。
+- 结果：3 页 synthetic known-text，source CER/WER macro 均为 1.0，处理后 CER/WER macro
+  均为 0.0，CER/WER 相对下降 100%。
+- 摘要：`ocr_preprocessing_ocr_validation_summary.json` 不写入 expected text、OCR 输出文本、
+  路径、文件名、hash、图片内容或行级记录。
+
+服务化边界：
+
+- `ocr-preprocess-v1` 已接入 production CLI、run-plan、service job create/run/recover/retry
+  所需的 profile/options/manifest。
+- service job public summary 只公开 allowlisted OCR 聚合质量指标，如
+  `ocr_background_delta`、`ocr_foreground_retention_ratio`、`ocr_binary_foreground_ratio`。
+- 私有样本聚合 allowlist 已加入 CER/WER 聚合指标，不接收或输出 OCR 文本。
+
 ## 2. 目标重新定义
 
 新增目标不是“看起来更干净”，而是生成面向 OCR 的利用副本：

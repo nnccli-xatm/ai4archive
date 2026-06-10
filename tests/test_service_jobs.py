@@ -473,6 +473,75 @@ class ServiceJobBoundaryTests(unittest.TestCase):
                 "private_page_001",
             )
 
+    def test_service_job_ocr_preprocess_profile_recovers_public_safe_quality_metrics(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-job-ocr-preprocess-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private ocr source"
+            service_root = root / "service root"
+            input_dir.mkdir()
+            source_path = input_dir / "private_ocr_page_001.png"
+            _write_ocr_noisy_page(source_path)
+            source_sha_before = _sha256_for_test(source_path)
+            create_service_job(
+                ServiceJobConfig(
+                    input_dir=input_dir,
+                    service_root=service_root,
+                    rule_template="ocr-preprocess-v1",
+                    workers=1,
+                ),
+                job_id="job-ocrpreprocess001",
+            )
+
+            summary = run_service_job(service_root, "job-ocrpreprocess001")
+            recovered = recover_service_job(service_root, "job-ocrpreprocess001")
+            index_summary = recover_service_jobs(service_root)
+            job_root = service_root / "jobs" / "job-ocrpreprocess001"
+            public_raw = (job_root / SERVICE_JOB_PUBLIC_SUMMARY_JSON).read_text(encoding="utf-8")
+            index_raw = (service_root / SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON).read_text(encoding="utf-8")
+            processing_manifest = json.loads(
+                (job_root / "derivatives" / "processing_manifest.json").read_text(encoding="utf-8")
+            )
+            record = processing_manifest["files"][0]
+            quality_metrics = recovered["quality"]["quality_metrics"]
+            binary_path = job_root / "derivatives" / record["ocr_binary_output_relative_path"]
+
+            self.assertEqual(summary["state"], "finished")
+            self.assertEqual(recovered["state"], "finished")
+            self.assertEqual(recovered["template"]["rule_template_id"], "ocr-preprocess-v1")
+            self.assertEqual(recovered["template"]["processing_profile"], "ocr_preprocess")
+            self.assertEqual(processing_manifest["options"]["processing_profile"], "ocr_preprocess")
+            self.assertTrue(processing_manifest["options"]["ocr_preprocess"])
+            self.assertTrue(processing_manifest["options"]["ocr_binary"])
+            self.assertFalse(processing_manifest["options"]["despeckle"])
+            self.assertTrue(record["ocr_preprocessed"])
+            self.assertTrue(record["ocr_binary_created"])
+            self.assertTrue(binary_path.is_file())
+            self.assertEqual(record["ocr_foreground_retention_ratio"], 1.0)
+            self.assertTrue(recovered["quality"]["provided"])
+            self.assertEqual(recovered["quality"]["status"], "pass")
+            self.assertEqual(recovered["quality"]["processed_files"], 1)
+            self.assertEqual(recovered["quality"]["guardrail_failed_files"], 0)
+            self.assertGreater(quality_metrics["ocr_background_delta"]["max"], 15.0)
+            self.assertGreater(quality_metrics["ocr_preprocess_changed_pixel_ratio"]["max"], 0.20)
+            self.assertEqual(quality_metrics["ocr_foreground_retention_ratio"]["max"], 1.0)
+            self.assertGreater(quality_metrics["ocr_binary_foreground_ratio"]["max"], 0.0)
+            self.assertEqual(index_summary["quality"]["status_counts"], {"pass": 1})
+            self.assertEqual(index_summary["quality"]["processed_files"], 1)
+            self.assertFalse(index_summary["quality"]["privacy"]["contains_paths"])
+            self.assertFalse(index_summary["quality"]["privacy"]["contains_quality_rows"])
+            self.assertEqual(_sha256_for_test(source_path), source_sha_before)
+            _assert_public_source_integrity(self, recovered["source_integrity"], checked_files=1)
+            _assert_public_text_omits(self, public_raw, str(root.resolve()), "private ocr source", "private_ocr_page_001")
+            _assert_public_text_omits(
+                self,
+                index_raw,
+                str(root.resolve()),
+                "private ocr source",
+                "service root",
+                "private_ocr_page_001",
+            )
+            self.assertFalse(recovered["private_paths_exposed"])
+
     def test_retry_job_reuses_existing_derivative_after_failed_state(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-job-retry-") as temp_dir:
             root = Path(temp_dir)
@@ -1351,6 +1420,21 @@ def _write_print_clean_background_stain_page(path: Path) -> None:
     mask_draw.ellipse((178, 58, 222, 102), fill=150)
     mask = mask.filter(ImageFilter.GaussianBlur(7))
     image = Image.composite(Image.new("RGB", image.size, (224, 220, 196)), image, mask)
+    image.save(path, dpi=(300, 300))
+
+
+def _write_ocr_noisy_page(path: Path) -> None:
+    image = Image.new("L", (360, 210), 186)
+    pixels = image.load()
+    for y in range(image.height):
+        gradient = int((y / max(1, image.height - 1)) * 20)
+        for x in range(image.width):
+            noise = ((x * 19 + y * 23) % 35) - 17
+            pixels[x, y] = max(0, min(255, 176 + gradient + noise))
+    draw = ImageDraw.Draw(image)
+    for y in (56, 84, 112, 140):
+        draw.rectangle((38, y, 250, y + 7), fill=78)
+        draw.rectangle((268, y, 314, y + 7), fill=94)
     image.save(path, dpi=(300, 300))
 
 
