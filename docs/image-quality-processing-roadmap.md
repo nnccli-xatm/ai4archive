@@ -306,6 +306,12 @@ gain once both text-structure and background-stability evidence are strong. It
 raises only the minimum darkening for already-selected safe text pixels, leaving
 candidate detection, protected-content skips, changed-pixel bounds, and
 public-safe aggregate reporting unchanged.
+Follow-up, 2026-06-10: faded-text enhancement now has a narrow low-saturation
+carbon-copy text path. It can conservatively darken stable cool low-saturation
+text components on light paper while keeping red stamps, saturated color marks,
+long form rules, and boxed form structures on the protected no-op path. The
+public audit reports `applied_stable_low_saturation_text` as an aggregate reason
+code without paths, filenames, hashes, thumbnails, OCR text, or image content.
 
 Follow-up, 2026-06-09: the smoke fixture set now includes a light-paper page
 with a low-amplitude illumination gradient and sparse typed text. The public-safe

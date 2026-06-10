@@ -17008,6 +17008,85 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_low_saturation_carbon_text_enhances_while_form_color_risks_noop(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-low-saturation-carbon-text-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            process_dir = root / "processed"
+            input_dir.mkdir()
+            pages = {
+                "A001_low_saturation_carbon_text.png": _low_saturation_carbon_text_page(),
+                "A002_ruled_carbon_form.png": _multipart_carbon_copy_form_guard_page("safe_carbon_copy_control"),
+                "A003_red_stamp_risk.png": _risk_stamp_header_footer_page(),
+            }
+            source_bytes = {}
+            for name, image in pages.items():
+                source = input_dir / name
+                image.save(source, dpi=(300, 300))
+                source_bytes[name] = source.read_bytes()
+
+            safe_before = pages["A001_low_saturation_carbon_text.png"].convert("L")
+            safe_before_text = _mean_luma(safe_before, (44, 48, 248, 126))
+            safe_before_background = _mean_luma(safe_before, (260, 48, 334, 126))
+
+            report = scan_batch(ScanConfig("synthetic-regression", "low-saturation-carbon-text", input_dir, output_dir))
+            manifest = process_images(
+                report,
+                input_dir,
+                process_dir,
+                ProcessingOptions(enhance_faded_text=True, workers=1),
+            )
+            audit_summary_text = (process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+            records = {record["source_relative_path"]: record for record in manifest["files"]}
+
+            for name, original_bytes in source_bytes.items():
+                self.assertEqual((input_dir / name).read_bytes(), original_bytes)
+
+            safe_record = records["A001_low_saturation_carbon_text.png"]
+            safe_audit = safe_record["processing_audit"]
+            with Image.open(process_dir / safe_record["output_relative_path"]) as processed_image:
+                safe_after = processed_image.convert("L")
+                safe_after_text = _mean_luma(safe_after, (44, 48, 248, 126))
+                safe_after_background = _mean_luma(safe_after, (260, 48, 334, 126))
+
+            self.assertTrue(safe_record["faded_text_enhanced"])
+            self.assertEqual(safe_record["faded_text_reason_code"], "applied_stable_low_saturation_text")
+            self.assertGreaterEqual(safe_audit["faded_text_delta"], 12.0)
+            self.assertGreater(safe_audit["faded_text_changed_pixel_ratio"], 0.0)
+            self.assertLessEqual(safe_audit["faded_text_changed_pixel_ratio"], 0.10)
+            self.assertLessEqual(safe_audit["faded_text_candidate_pixel_ratio"], 0.16)
+            self.assertGreater(safe_before_text - safe_after_text, 2.0)
+            self.assertLess(abs(safe_before_background - safe_after_background), 0.5)
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+
+            protected_expected_codes = {
+                "A002_ruled_carbon_form.png": "protected_color_stamp_annotation",
+                "A003_red_stamp_risk.png": "protected_color_stamp_annotation",
+            }
+            for name, expected_code in protected_expected_codes.items():
+                record = records[name]
+                self.assertFalse(record["faded_text_enhanced"], name)
+                self.assertEqual(record["faded_text_reason_code"], expected_code, name)
+                self.assertEqual(record["processing_audit"]["faded_text_changed_pixel_ratio"], 0.0, name)
+                self.assertEqual(record["processing_audit"]["guardrail_failures"], [], name)
+
+            faded_guard = audit_summary["guardrails"]["faded_text"]
+            self.assertEqual(faded_guard["applied_files"], 1)
+            self.assertEqual(faded_guard["skipped_files"], 2)
+            self.assertEqual(
+                faded_guard["reason_code_distribution"]["applied_stable_low_saturation_text"],
+                1,
+            )
+            self.assertEqual(
+                faded_guard["skip_reason_code_distribution"]["protected_color_stamp_annotation"],
+                2,
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            for forbidden in (*pages, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_full_chain_tone_and_faded_text_combination_is_guarded_for_protected_content(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-full-chain-faded-tone-") as temp_dir:
             root = Path(temp_dir)
@@ -23285,6 +23364,16 @@ def _sparse_pale_typed_page() -> Image.Image:
     font = ImageFont.load_default()
     for index, line in enumerate(("ARCHIVE REGISTER 1948", "PALE PRINT LINE")):
         draw.text((48, 52 + index * 32), line, fill=(228, 228, 228), font=font)
+    return image
+
+
+def _low_saturation_carbon_text_page() -> Image.Image:
+    image = Image.new("RGB", (360, 240), (245, 247, 250))
+    draw = ImageDraw.Draw(image)
+    ink = (162, 184, 206)
+    for y in (56, 86, 116):
+        draw.rectangle((48, y, 124, y + 4), fill=ink)
+        draw.rectangle((144, y, 224, y + 4), fill=ink)
     return image
 
 

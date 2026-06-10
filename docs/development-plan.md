@@ -239,6 +239,11 @@ operation category booleans, whitelisted aggregate `quality_metrics` including
 changed-pixel ratios and brightness/contrast deltas, and aggregate guardrail status. These
 fields give the frontend or an external scheduler enough quality state to poll
 without reading private production summaries or path-bearing checkpoints.
+Faded-text enhancement now also includes a narrow low-saturation carbon-copy
+text path for stable cool faded text on light paper. The same guardrail stack
+keeps red stamps, saturated color marks, long form rules, and boxed form
+structures protected, while public audit summaries report only aggregate
+`applied_stable_low_saturation_text` counts.
 Service job public summaries now also carry nested
 `scan-qc.service-job-public-timings.v1` timing context. The payload is
 public-safe: it keeps only whitelisted stage IDs, aggregate processing

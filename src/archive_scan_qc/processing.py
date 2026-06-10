@@ -9720,8 +9720,14 @@ def _enhance_faded_text_conservative(image: Image.Image) -> FadedTextEnhancement
     if image.width < 80 or image.height < 80:
         return _faded_text_noop(image, "faded text enhancement skipped: image too small")
     color_risk = _tone_color_risk_reason(image)
-    if color_risk and not _faded_text_allow_pale_blue_carbon_copy(image):
-        return _faded_text_noop(image, "faded text enhancement skipped: color content, stamp, or annotation risk")
+    low_saturation_color_text = False
+    if color_risk:
+        if _faded_text_allow_pale_blue_carbon_copy(image):
+            pass
+        elif _faded_text_allow_low_saturation_color_text(image):
+            low_saturation_color_text = True
+        else:
+            return _faded_text_noop(image, "faded text enhancement skipped: color content, stamp, or annotation risk")
 
     grayscale = image.convert("L")
     histogram = grayscale.histogram()
@@ -9902,10 +9908,15 @@ def _enhance_faded_text_conservative(image: Image.Image) -> FadedTextEnhancement
             "faded text enhancement skipped: readability delta exceeds conservative threshold",
             candidate_ratio,
         )
+    applied_reason = (
+        "faded text enhancement applied: stable low-saturation text on light paper"
+        if low_saturation_color_text
+        else "faded text enhancement applied: stable low-contrast neutral text on light paper"
+    )
     return FadedTextEnhancementResult(
         result_image,
         True,
-        "faded text enhancement applied: stable low-contrast neutral text on light paper",
+        applied_reason,
         round(text_delta, 6),
         round(selected_ratio, 6),
         round(candidate_ratio, 6),
@@ -9988,6 +9999,130 @@ def _faded_text_allow_pale_blue_carbon_copy(image: Image.Image) -> bool:
     if long_horizontal_lines >= 2 or long_vertical_lines >= 2:
         return False
     return text_like_components >= 4
+
+
+def _faded_text_allow_low_saturation_color_text(image: Image.Image) -> bool:
+    if image.mode == "L":
+        return False
+    sample = image.convert("RGB")
+    sample.thumbnail((600, 600), Image.Resampling.BILINEAR)
+    width, height = sample.size
+    total = max(1, width * height)
+    pixels = sample.load()
+
+    color_mask = Image.new("L", sample.size, 0)
+    mask_pixels = color_mask.load()
+    low_saturation_marks = 0
+    red_risk = 0
+    saturated_color = 0
+    strong_color_content = 0
+    for y in range(height):
+        for x in range(width):
+            red_value, green_value, blue_value = pixels[x, y]
+            high = max(red_value, green_value, blue_value)
+            low = min(red_value, green_value, blue_value)
+            spread = high - low
+            brightness = (red_value + green_value + blue_value) / 3
+            if red_value >= 110 and red_value - green_value >= 30 and red_value - blue_value >= 30:
+                red_risk += 1
+            if spread >= 64 and 45 <= brightness <= 245:
+                saturated_color += 1
+            if spread >= 24 and 70 <= brightness <= 245:
+                strong_color_content += 1
+
+            cool_or_neutral_copy_mark = (
+                138 <= brightness <= 232
+                and 38 <= spread <= 58
+                and blue_value >= red_value + 5
+                and blue_value >= green_value - 6
+                and red_value >= 112
+                and green_value >= 112
+            )
+            if cool_or_neutral_copy_mark:
+                mask_pixels[x, y] = 255
+                low_saturation_marks += 1
+
+    if red_risk / total >= 0.0003:
+        return False
+    if saturated_color / total >= 0.0012:
+        return False
+    low_saturation_ratio = low_saturation_marks / total
+    if low_saturation_ratio < 0.002 or low_saturation_ratio > 0.12:
+        return False
+    if strong_color_content / total >= 0.18:
+        return False
+
+    color_mask = _clear_mask_edges(color_mask, max(2, int(round(min(width, height) * 0.025))))
+    if not _faded_text_low_saturation_prefilter_allows_component_scan(color_mask):
+        return False
+    components = _mask_components(color_mask)
+    if not components:
+        return False
+
+    text_like_components = 0
+    long_horizontal_lines = 0
+    long_vertical_lines = 0
+    y_bands: set[int] = set()
+    for component in components:
+        area = len(component)
+        if area < 4:
+            continue
+        xs = [point[0] for point in component]
+        ys = [point[1] for point in component]
+        box_width = max(xs) - min(xs) + 1
+        box_height = max(ys) - min(ys) + 1
+        if box_height <= 3 and box_width >= width * 0.45:
+            long_horizontal_lines += 1
+            continue
+        if box_width <= 3 and box_height >= height * 0.40:
+            long_vertical_lines += 1
+            continue
+        if area / total > 0.016 or box_width > width * 0.46 or box_height > height * 0.20:
+            continue
+        fill_ratio = area / max(1, box_width * box_height)
+        if fill_ratio > 0.86 and area > 28 and box_height > 8:
+            continue
+        aspect = max(box_width / max(1, box_height), box_height / max(1, box_width))
+        if aspect <= 64:
+            text_like_components += 1
+            y_bands.add(min(15, int((min(ys) + box_height / 2) / max(1, height) * 16)))
+
+    if long_horizontal_lines >= 2 or long_vertical_lines >= 2:
+        return False
+    return text_like_components >= 6 and len(y_bands) >= 2
+
+
+def _faded_text_low_saturation_prefilter_allows_component_scan(color_mask: Image.Image) -> bool:
+    width, height = color_mask.size
+    if width <= 0 or height <= 0:
+        return False
+    pixels = color_mask.load()
+    long_horizontal_rows = 0
+    long_vertical_columns = 0
+    long_row_threshold = max(32, int(round(width * 0.52)))
+    long_column_threshold = max(28, int(round(height * 0.52)))
+
+    for y in range(height):
+        row_count = 0
+        for x in range(width):
+            if pixels[x, y]:
+                row_count += 1
+        if row_count >= long_row_threshold:
+            long_horizontal_rows += 1
+
+    for x in range(width):
+        column_count = 0
+        for y in range(height):
+            if pixels[x, y]:
+                column_count += 1
+        if column_count >= long_column_threshold:
+            long_vertical_columns += 1
+
+    if long_horizontal_rows >= 4 or long_vertical_columns >= 4:
+        return False
+    if long_horizontal_rows >= 2 and long_vertical_columns >= 2:
+        return False
+    return True
 
 
 def _faded_text_pale_blue_prefilter_allows_component_scan(blue_mask: Image.Image, pale_blue_ratio: float) -> bool:
@@ -10140,6 +10275,10 @@ def _faded_text_background_is_stable(
 
 
 _FADED_TEXT_REASON_DETAILS: dict[str, tuple[str, str]] = {
+    "faded text enhancement applied: stable low-saturation text on light paper": (
+        "applied_stable_low_saturation_text",
+        "Conservatively darkened stable low-saturation faded text on light paper.",
+    ),
     "faded text enhancement disabled": ("disabled", "褪色正文加深未启用。"),
     "faded text enhancement applied: stable low-contrast neutral text on light paper": (
         "applied_stable_low_contrast_text",
