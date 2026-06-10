@@ -353,6 +353,17 @@ Follow-up, 2026-06-09: service-managed custom template writes now save
 validated drafts under server-owned storage. Catalog/detail responses include
 saved custom templates without returning paths or rule rows, and service jobs
 can use the saved template ID with a private template snapshot.
+Follow-up, 2026-06-10: `print_clean` now also strengthens stable faded-text
+darkening inside the existing faded-text guardrails. The regression compares the
+same pale typed page under `standard` and `print_clean`, requires
+`applied_print_clean_stable_low_contrast_text`, a higher text-darkening delta,
+unchanged source bytes, public-safe aggregate audit output, and passed
+cumulative/combination guards. The public smoke reason-code allowlist also
+includes the print-clean low-saturation faded-text code as aggregate-only
+evidence.
+The faded-text preflight also protects sparse stable dark foreground text, which
+keeps already-dark blurred text on the text-edge sharpening path instead of
+classifying it as faded text.
 Follow-up, 2026-06-09: 路线图中的 `archival-safe-v1`,
 `text-clean-readable-v1`, `print-clean-v1`, and `photo-mixed-safe-v1` 已作为
 内置模板 ID 落地；legacy ID 继续兼容。`print-clean-v1` 现在解析为

@@ -11364,7 +11364,11 @@ class ScanQcTest(unittest.TestCase):
                     0.45,
                 )
 
-            def broad_faded_text_change(current: Image.Image) -> processing_module.FadedTextEnhancementResult:
+            def broad_faded_text_change(
+                current: Image.Image,
+                *,
+                processing_profile: str = "standard",
+            ) -> processing_module.FadedTextEnhancementResult:
                 changed = current.copy()
                 changed.paste((214, 214, 211), (82, 0, 98, current.height))
                 return processing_module.FadedTextEnhancementResult(

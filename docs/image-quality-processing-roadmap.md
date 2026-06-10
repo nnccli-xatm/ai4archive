@@ -303,6 +303,18 @@ page and requires the processing manifest to show the `print_clean` profile plus
 `applied_print_clean_blurred_text_edges` evidence, while the source image bytes
 remain unchanged.
 
+Follow-up, 2026-06-10: the same `print_clean` profile now strengthens stable
+faded-text darkening after the existing color, density, component-structure, and
+background-stability checks have passed. The core regression runs the same pale
+typed page under `standard` and `print_clean`, requires
+`applied_print_clean_stable_low_contrast_text`, a larger text-darkening delta,
+unchanged source bytes, and passed cumulative/combination guardrails. Public
+smoke reason-code aggregation also allowlists the print-clean low-saturation
+faded-text code without exposing paths, filenames, hashes, or image content.
+The faded-text preflight now also treats sparse stable dark foreground text as a
+protected no-op so already-dark blurred text can continue into the text-edge
+sharpening path instead of being reclassified as faded text.
+
 Follow-up, 2026-06-09: the synthetic smoke fixtures now also cover a safe narrow
 fold-shadow band, a diffuse reverse-side bleed-through ghost, and a segmented
 neutral scanline. The public-safe smoke must show at least one applied file and

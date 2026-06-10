@@ -16733,6 +16733,78 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             for forbidden in (source_name, str(input_dir), "source_relative_path", "source_sha256"):
                 self.assertNotIn(forbidden, audit_summary_text)
 
+    def test_print_clean_profile_strengthens_stable_faded_text_darkening(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-processing-print-clean-faded-text-profile-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "reports"
+            readable_process_dir = root / "readable"
+            print_process_dir = root / "print-clean"
+            input_dir.mkdir()
+
+            source_name = "synthetic_print_clean_faded_text.png"
+            source = _sparse_pale_typed_page()
+            source_path = input_dir / source_name
+            source.save(source_path, dpi=(300, 300))
+            source_bytes = source_path.read_bytes()
+
+            report = scan_batch(ScanConfig("synthetic-regression", "print-clean-faded-text-profile", input_dir, output_dir))
+            readable_manifest = process_images(
+                report,
+                input_dir,
+                readable_process_dir,
+                ProcessingOptions(enhance_faded_text=True, workers=1),
+            )
+            print_manifest = process_images(
+                report,
+                input_dir,
+                print_process_dir,
+                ProcessingOptions(enhance_faded_text=True, processing_profile="print_clean", workers=1),
+            )
+            readable_record = readable_manifest["files"][0]
+            print_record = print_manifest["files"][0]
+            readable_audit = readable_record["processing_audit"]
+            print_audit = print_record["processing_audit"]
+            audit_summary_text = (print_process_dir / "processing_audit_summary.json").read_text(encoding="utf-8")
+            audit_summary = json.loads(audit_summary_text)
+
+            with Image.open(readable_process_dir / readable_record["output_relative_path"]) as readable_output:
+                readable_text_mean = _mean_luma(readable_output, (46, 48, 210, 94))
+            with Image.open(print_process_dir / print_record["output_relative_path"]) as print_output:
+                print_text_mean = _mean_luma(print_output, (46, 48, 210, 94))
+                print_background_mean = _mean_luma(print_output, (248, 48, 330, 94))
+
+            self.assertEqual(source_path.read_bytes(), source_bytes)
+            self.assertTrue(readable_record["faded_text_enhanced"])
+            self.assertTrue(print_record["faded_text_enhanced"])
+            self.assertEqual(readable_record["faded_text_reason_code"], "applied_stable_low_contrast_text")
+            self.assertEqual(print_record["faded_text_reason_code"], "applied_print_clean_stable_low_contrast_text")
+            self.assertGreaterEqual(print_audit["faded_text_delta"], readable_audit["faded_text_delta"] + 3.0)
+            self.assertLess(print_text_mean, readable_text_mean)
+            self.assertLess(abs(_mean_luma(source, (248, 48, 330, 94)) - print_background_mean), 1.0)
+            self.assertGreaterEqual(
+                print_audit["faded_text_changed_pixel_ratio"],
+                readable_audit["faded_text_changed_pixel_ratio"],
+            )
+            self.assertLessEqual(print_audit["faded_text_changed_pixel_ratio"], 0.10)
+            self.assertLessEqual(print_audit["faded_text_candidate_pixel_ratio"], 0.16)
+            self.assertEqual(print_audit["guardrail_failures"], [])
+            self.assertEqual(readable_audit["guardrail_failures"], [])
+            self.assertEqual(print_audit["combination_quality_guard_action"], "passed")
+            self.assertEqual(print_audit["cumulative_change_guard_action"], "passed")
+
+            faded_guard = audit_summary["guardrails"]["faded_text"]
+            self.assertEqual(audit_summary["counts"]["faded_text_enhanced_files"], 1)
+            self.assertEqual(
+                faded_guard["reason_code_distribution"]["applied_print_clean_stable_low_contrast_text"],
+                1,
+            )
+            self.assertTrue(audit_summary["privacy"]["aggregate_only"])
+            self.assertFalse(audit_summary["privacy"]["contains_paths"])
+            self.assertFalse(audit_summary["privacy"]["contains_hashes"])
+            for forbidden in (source_name, str(input_dir), "source_relative_path", "source_sha256"):
+                self.assertNotIn(forbidden, audit_summary_text)
+
     def test_sharpen_text_edges_skips_mildly_blurred_ruled_table_background(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-processing-text-edge-ruled-table-") as temp_dir:
             root = Path(temp_dir)

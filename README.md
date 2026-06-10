@@ -744,8 +744,8 @@ Template payloads also expose a public-safe `processing_profile`. `print-clean-v
 uses `print_clean`, so production manifests and summaries can distinguish it
 from `text-clean-readable-v1`; in that profile, light-paper low-contrast tone
 normalization uses a stronger bounded mapping for print/use copies, and stable
-blurred text-edge sharpening uses a stronger bounded edge profile under the same
-content-protection guardrails.
+faded-text darkening plus blurred text-edge sharpening use stronger bounded
+profiles under the same content-protection guardrails.
 `photo-mixed-safe-v1` is covered by a production-run contract test with a
 synthetic mixed photo/stamp/table page; the production summary and processing
 manifest must keep strong background cleanup, faded-text enhancement, and text

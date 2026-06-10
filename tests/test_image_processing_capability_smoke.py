@@ -406,7 +406,12 @@ def _passing_quality_summary() -> dict[str, object]:
 
 
 def _passing_operation_reason_code_counts() -> dict[str, dict[str, int]]:
-    return {"faded_text": {"applied_stable_low_saturation_text": 1}}
+    return {
+        "faded_text": {
+            "applied_stable_low_saturation_text": 1,
+            "applied_print_clean_stable_low_saturation_text": 0,
+        }
+    }
 
 
 if __name__ == "__main__":

@@ -266,7 +266,8 @@ blocking codes if any declared required quality operation has zero applied files
 in the aggregate audit counts, if required whitelisted operation reason evidence
 is absent, or if the matching allowlisted aggregate quality metric maxima stay
 below required evidence thresholds. The whitelisted reason evidence is limited
-to aggregate stable reason codes such as `applied_stable_low_saturation_text`;
+to aggregate stable reason codes such as `applied_stable_low_saturation_text`
+and `applied_print_clean_stable_low_saturation_text`;
 it must not publish arbitrary reason text, filenames, paths, hashes, OCR text,
 image content, or row-level audit records. The
 quality summary records aggregate before/after quality signals, changed-file

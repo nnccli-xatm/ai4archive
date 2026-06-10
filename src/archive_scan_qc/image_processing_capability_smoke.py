@@ -66,6 +66,7 @@ _SYNTHETIC_FIXTURE_GROUPS = (
 _PUBLIC_OPERATION_REASON_CODE_KEYS = {
     "faded_text": (
         "applied_stable_low_saturation_text",
+        "applied_print_clean_stable_low_saturation_text",
     ),
 }
 

@@ -3967,7 +3967,10 @@ def _process_image(
     )
     with _operation_timer(operation_timings, "enhance_faded_text", enabled=options.enhance_faded_text):
         if options.enhance_faded_text:
-            faded_text = _enhance_faded_text_conservative(processed)
+            faded_text = _enhance_faded_text_conservative(
+                processed,
+                processing_profile=options.processing_profile,
+            )
             processed = faded_text.image
             operations.append(
                 "enhance_faded_text_conservative" if faded_text.applied else "enhance_faded_text_noop"
@@ -9738,7 +9741,11 @@ def _scanlines_noop(
     )
 
 
-def _enhance_faded_text_conservative(image: Image.Image) -> FadedTextEnhancementResult:
+def _enhance_faded_text_conservative(
+    image: Image.Image,
+    *,
+    processing_profile: str = "standard",
+) -> FadedTextEnhancementResult:
     if image.width < 80 or image.height < 80:
         return _faded_text_noop(image, "faded text enhancement skipped: image too small")
     color_risk = _tone_color_risk_reason(image)
@@ -9762,6 +9769,8 @@ def _enhance_faded_text_conservative(image: Image.Image) -> FadedTextEnhancement
     if p95 < 220 or p50 < 210:
         return _faded_text_noop(image, "faded text enhancement skipped: page is not a light paper background")
     if p05 < 105:
+        return _faded_text_noop(image, "faded text enhancement skipped: dark foreground already present")
+    if sum(histogram[:105]) / max(1, total) >= 0.001 and _faded_text_has_sparse_dark_foreground_text(grayscale):
         return _faded_text_noop(image, "faded text enhancement skipped: dark foreground already present")
     if p95 - p05 > 92:
         return _faded_text_noop(image, "faded text enhancement skipped: contrast already normal or mixed content risk")
@@ -9880,9 +9889,18 @@ def _enhance_faded_text_conservative(image: Image.Image) -> FadedTextEnhancement
     stable_background = _faded_text_background_is_stable(grayscale, candidate, p95)
     if not stable_background["safe"]:
         return _faded_text_noop(image, stable_background["reason"], candidate_ratio)
-    enhancement_scale = 0.56 if structure["strong"] and stable_background["strong"] else 0.46
-    min_delta = 14 if structure["strong"] and stable_background["strong"] else 8
-    max_delta = 30 if structure["strong"] and stable_background["strong"] else 24
+    strong_candidate = structure["strong"] and stable_background["strong"]
+    print_clean_profile = processing_profile == "print_clean"
+    if print_clean_profile:
+        enhancement_scale = 0.68 if strong_candidate else 0.54
+        min_delta = 18 if strong_candidate else 10
+        max_delta = 36 if strong_candidate else 30
+        max_allowed_text_delta = 36
+    else:
+        enhancement_scale = 0.56 if strong_candidate else 0.46
+        min_delta = 14 if strong_candidate else 8
+        max_delta = 30 if strong_candidate else 24
+        max_allowed_text_delta = 30
 
     before_values: list[int] = []
     after_values: list[int] = []
@@ -9924,17 +9942,24 @@ def _enhance_faded_text_conservative(image: Image.Image) -> FadedTextEnhancement
             "faded text enhancement skipped: readability delta below conservative threshold",
             candidate_ratio,
         )
-    if text_delta > 30:
+    if text_delta > max_allowed_text_delta:
         return _faded_text_noop(
             image,
             "faded text enhancement skipped: readability delta exceeds conservative threshold",
             candidate_ratio,
         )
-    applied_reason = (
-        "faded text enhancement applied: stable low-saturation text on light paper"
-        if low_saturation_color_text
-        else "faded text enhancement applied: stable low-contrast neutral text on light paper"
-    )
+    if print_clean_profile:
+        applied_reason = (
+            "faded text enhancement applied: print-clean stable low-saturation text on light paper"
+            if low_saturation_color_text
+            else "faded text enhancement applied: print-clean stable low-contrast neutral text on light paper"
+        )
+    else:
+        applied_reason = (
+            "faded text enhancement applied: stable low-saturation text on light paper"
+            if low_saturation_color_text
+            else "faded text enhancement applied: stable low-contrast neutral text on light paper"
+        )
     return FadedTextEnhancementResult(
         result_image,
         True,
@@ -10301,6 +10326,14 @@ _FADED_TEXT_REASON_DETAILS: dict[str, tuple[str, str]] = {
         "applied_stable_low_saturation_text",
         "Conservatively darkened stable low-saturation faded text on light paper.",
     ),
+    "faded text enhancement applied: print-clean stable low-saturation text on light paper": (
+        "applied_print_clean_stable_low_saturation_text",
+        "Darkened stable low-saturation faded text on light paper using the print-clean profile.",
+    ),
+    "faded text enhancement applied: print-clean stable low-contrast neutral text on light paper": (
+        "applied_print_clean_stable_low_contrast_text",
+        "Darkened stable low-contrast neutral text on light paper using the print-clean profile.",
+    ),
     "faded text enhancement disabled": ("disabled", "褪色正文加深未启用。"),
     "faded text enhancement applied: stable low-contrast neutral text on light paper": (
         "applied_stable_low_contrast_text",
@@ -10433,6 +10466,36 @@ def _faded_text_sample_candidate_ratio(grayscale: Image.Image, threshold: float,
     )
     candidate = _clear_mask_edges(candidate, max(2, int(round(min(sample.width, sample.height) * 0.025))))
     return round(_mask_ratio(candidate), 6)
+
+
+def _faded_text_has_sparse_dark_foreground_text(grayscale: Image.Image) -> bool:
+    dark_mask = grayscale.point(lambda value: 255 if value < 105 else 0, mode="L")
+    dark_mask = _clear_mask_edges(dark_mask, max(3, int(round(min(grayscale.width, grayscale.height) * 0.025))))
+    dark_ratio = _mask_ratio(dark_mask)
+    if dark_ratio < 0.001:
+        return False
+
+    total = grayscale.width * grayscale.height
+    text_like_components = 0
+    selected_area = 0
+    for component in _mask_components(dark_mask):
+        area = len(component)
+        if area < 3:
+            continue
+        xs = [point[0] for point in component]
+        ys = [point[1] for point in component]
+        width = max(xs) - min(xs) + 1
+        height = max(ys) - min(ys) + 1
+        if width > grayscale.width * 0.65 or height > grayscale.height * 0.18:
+            continue
+        fill_ratio = area / max(1, width * height)
+        aspect = max(width / max(1, height), height / max(1, width))
+        if aspect <= 60 and (fill_ratio <= 0.82 or area <= 12):
+            text_like_components += 1
+            selected_area += area
+        if text_like_components >= 3 and selected_area / max(1, total) >= 0.0008:
+            return True
+    return False
 
 
 def _sharpen_text_edges_conservative(
