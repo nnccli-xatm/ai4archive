@@ -1864,6 +1864,10 @@
       return localBridgeRoutes[name];
     }
 
+    function reviewActionsRequest(reviewDecisions) {
+      return { job_id: state.jobId, review_decisions: reviewDecisions };
+    }
+
     function productionReviewItemUrl(localId) {
       if (!localApi.enabled || !state.jobId || !localId) return "";
       return productionApiPath("reviewItem", { job_id: state.jobId, local_id: localId });
@@ -3237,6 +3241,7 @@
     function applyServerStatus(payload, options = {}) {
       if (!payload) return;
       const forcePaths = Boolean(options.forcePaths);
+      if (payload.job_id) state.jobId = payload.job_id;
       if (state.waitingForNewSetup && !payload.configured) return;
       if (state.waitingForNewSetup && (payload.summary || payload.progress || payload.queue || payload.draft_decisions)) return;
       if (payload.last_error_zh) {
@@ -3670,7 +3675,11 @@
 
     async function saveDraftDecisions() {
       try {
-        const payload = await apiPost(localBridgePath("saveDraftDecisions"), draftDecisionArtifact());
+        const draft = draftDecisionArtifact();
+        const payload = state.jobId
+          ? await apiPost(productionApiPath("reviewActions"), reviewActionsRequest(draft))
+          : await apiPost(localBridgePath("saveDraftDecisions"), draft);
+        const saved = payload.review_actions || payload;
         state.lastDraftMessage = payload.message_zh || "已自动保存";
         els.loadStatus.textContent = state.lastDraftMessage;
       } catch (error) {
@@ -3694,7 +3703,13 @@
       try {
         state.finishConfirmationVisible = false;
         els.loadStatus.textContent = "正在完成并导出结果。";
-        const payload = await apiPost(localBridgePath("finishDecisions"), decisionArtifact());
+        let payload;
+        if (state.jobId) {
+          await apiPost(productionApiPath("reviewActions"), reviewActionsRequest(decisionArtifact()));
+          payload = await apiPost(productionApiPath("finishExport"), { job_id: state.jobId });
+        } else {
+          payload = await apiPost(localBridgePath("finishDecisions"), decisionArtifact());
+        }
         clearFinishBlocker();
         applyCompletionPanel(payload.completion_panel);
         if (payload.saved && (payload.saved.decision_summary || payload.saved.verification_summary)) state.decisionSaveSummary = DECISION_SAVE_LABEL;

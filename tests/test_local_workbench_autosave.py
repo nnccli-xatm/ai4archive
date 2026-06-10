@@ -2167,6 +2167,31 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             verification = json.loads((metadata_dir / REVIEW_DECISION_VERIFICATION_JSON).read_text(encoding="utf-8"))
             self.assertEqual(verification["status"], "pass")
 
+    def test_production_review_actions_then_finish_export_completes_local_batch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            controller = WorkbenchController()
+            controller.configure(input_dir, output_dir, metadata_dir)
+            job_id = controller.status()["job_id"]
+            review_decisions = decision_summary([])
+
+            actions = controller.production_review_actions(
+                {"job_id": job_id, "review_decisions": review_decisions}
+            )
+            finish = controller.production_finish_export({"job_id": job_id})
+
+            self.assertEqual(actions["view"], "review_actions")
+            self.assertTrue((metadata_dir / REVIEW_DECISION_DRAFT_JSON).exists())
+            self.assertEqual(finish["view"], "finish_export")
+            self.assertTrue(finish["finished"])
+            self.assertTrue(finish["finish_export"]["ready_for_export"])
+            self.assertEqual(finish["completion_panel"]["total_review_items"], 0)
+            self.assertTrue((metadata_dir / COMPLETION_NOTE_TXT).exists())
+
     def test_final_completion_allows_handoff_when_aggregates_are_consistent(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

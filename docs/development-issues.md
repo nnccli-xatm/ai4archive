@@ -357,9 +357,13 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
   使用当前 local job id 校验批次边界，并以 local-only header 返回预览图片，
   避免 route client 改造后回退到旧
   `/api/preview/` 调用。
+- 本地 loopback workbench 已提供 `/api/production/review-actions` 和
+  `/api/production/finish-export` 兼容路由；前端自动保存和完成导出在有
+  `job_id` 时走 production facade，两步流为先保存 review actions，再执行
+  finish-export，旧 local bridge 仅作为无 job id 回退。
 - 前端守护测试已覆盖 production facade route helper、local bridge route helper
-  和 local-only review/preview URL 构造，后续可逐项把 setup/start/progress、
-  review-actions 与 finish-export 从 local bridge 切换到服务 facade。
+  和 local-only review/preview URL 构造，后续剩余重点是把 setup/start/progress
+  与 session restore 从 local bridge 切换到服务 facade。
 
 ### DEV-401 批量重命名 plan/apply
 

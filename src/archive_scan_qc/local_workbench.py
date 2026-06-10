@@ -594,6 +594,44 @@ class WorkbenchController:
             "decision_summary": verification.get("decision_summary"),
         }
 
+    def production_review_actions(self, request: dict[str, Any]) -> dict[str, Any]:
+        job_id = str(request.get("job_id") or "").strip()
+        self._require_local_job_id(job_id)
+        review_decisions = request.get("review_decisions")
+        if not isinstance(review_decisions, dict):
+            raise ValueError("missing_review_decisions")
+        saved = self.save_draft_review_decisions(review_decisions)
+        return {
+            "schema_version": SERVER_SCHEMA,
+            "view": "review_actions",
+            "job_id": job_id,
+            "message_zh": saved.get("message_zh"),
+            "review_actions": saved,
+        }
+
+    def production_finish_export(self, request: dict[str, Any]) -> dict[str, Any]:
+        job_id = str(request.get("job_id") or "").strip()
+        self._require_local_job_id(job_id)
+        with self._lock:
+            metadata_dir = self.metadata_dir
+        if metadata_dir is None:
+            raise ValueError("local_workbench_not_configured")
+        review_decisions = _read_json(metadata_dir / REVIEW_DECISION_DRAFT_JSON)
+        if not isinstance(review_decisions, dict):
+            raise ValueError("review_actions_required_before_finish_export")
+        finished = self.save_review_decisions(review_decisions)
+        return {
+            **finished,
+            "view": "finish_export",
+            "job_id": job_id,
+            "finish_export": {
+                "ready_for_export": True,
+                "requires_review": False,
+                "blocking_codes": [],
+                "local_only_completion": True,
+            },
+        }
+
     def open_output_folder(self) -> dict[str, Any]:
         with self._lock:
             derivatives_dir = self.derivatives_dir
@@ -894,6 +932,10 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
                 result = self.workbench_controller.retry()
             elif self.path == "/api/reset-batch":
                 result = self.workbench_controller.reset_for_next_batch()
+            elif self.path == "/api/production/review-actions":
+                result = self.workbench_controller.production_review_actions(payload)
+            elif self.path == "/api/production/finish-export":
+                result = self.workbench_controller.production_finish_export(payload)
             elif self.path == "/api/finish-decisions":
                 result = self.workbench_controller.save_review_decisions(payload)
             elif self.path == "/api/save-draft-decisions":
