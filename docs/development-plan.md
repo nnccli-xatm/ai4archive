@@ -210,6 +210,10 @@ capabilities response exposes both global limits and the per-job worker limit.
 Job creation checks configured minimum service-root free space, and job start
 checks the isolated temp directory against the per-job temp quota before the job
 can enter `running`.
+The production session facade now also forwards the root index's public-safe
+`quality` and `source_integrity` aggregate blocks so clients can poll
+batch-level quality/source-change status without expanding each job or reading
+private checkpoints.
 The new `POST /api/jobs/{job_id}/retry` endpoint is an explicit synchronous
 retry boundary for `failed`, `interrupted`, and `needs_recovery` jobs. It keeps
 the same job root and relies on production resume semantics so completed

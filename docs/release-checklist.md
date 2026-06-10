@@ -122,14 +122,16 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   Confirm `service_job_public_summary.json` and
   `service_job_index_public_summary.json` stay free of paths, filenames, hashes,
   OCR text, thumbnails, and image content. Treat `service_job.json` as private
-  checkpoint state. Confirm root-level quality reporting exposes only aggregate
-  quality availability, status counts, quality signal status counts, file
-  counts, and blocking-code counts. Confirm root-level source-integrity
-  reporting exposes only aggregate checked/unchanged/modified/missing/added
-  counts and source-change booleans, not source hashes, file lists, filenames, or
-  paths. Confirm root-level recovery issue reporting exposes only skipped counts
-  and aggregate issue codes, not skipped job IDs, checkpoint rows, local paths,
-  or exception messages.
+  checkpoint state. Confirm root-level quality reporting and
+  `GET /api/production/session` expose only aggregate quality availability,
+  status counts, quality signal status counts, file counts, and blocking-code
+  counts. Confirm root-level source-integrity reporting and
+  `GET /api/production/session` expose only aggregate
+  checked/unchanged/modified/missing/added counts and source-change booleans,
+  not source hashes, file lists, filenames, or paths. Confirm root-level
+  recovery issue reporting exposes only skipped counts and aggregate issue
+  codes, not skipped job IDs, checkpoint rows, local paths, or exception
+  messages.
   Confirm the service API path regression completes a production job from a
   nested Chinese/space path, leaves source hashes unchanged, and omits private
   path segments from public responses.

@@ -137,6 +137,10 @@ def production_session_response(*, service_root: Path) -> dict[str, Any]:
             "job_count": _safe_int(index.get("job_count")),
             "state_counts": _int_dict(index.get("state_counts")),
             "jobs": index.get("jobs") if isinstance(index.get("jobs"), list) else [],
+            "quality": index.get("quality") if isinstance(index.get("quality"), dict) else {},
+            "source_integrity": (
+                index.get("source_integrity") if isinstance(index.get("source_integrity"), dict) else {}
+            ),
             "recovery_issues": index.get("recovery_issues") if isinstance(index.get("recovery_issues"), dict) else {},
         },
     )

@@ -74,8 +74,12 @@ also expose nested `scan-qc.service-job-index-source-integrity.v1` aggregates fo
 source-integrity availability, status counts, aggregate source-image counts
 (checked, unchanged, modified, missing, and added), and source-change booleans
 only; it must not expose file
-lists, paths, filenames, hashes, OCR text, thumbnails, or image content. The service job
-public summary may expose aggregate quality category counts,
+lists, paths, filenames, hashes, OCR text, thumbnails, or image content.
+`GET /api/production/session` may mirror those same root index `quality` and
+`source_integrity` aggregate blocks under `session`; it inherits the same
+prohibition on job IDs, quality rows, file lists, paths, filenames, hashes,
+thumbnails, OCR text, and image content. The service job public summary may
+expose aggregate quality category counts,
 whitelisted aggregate `quality_metrics`, blocking codes, quality signal status,
 and guardrail summaries from `processing_quality_summary.json`, plus aggregate
 local review availability, queue counts, processing-review group counts, and

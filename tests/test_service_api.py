@@ -35,7 +35,12 @@ from archive_scan_qc.service_api import (
     validate_rule_template_response,
 )
 from archive_scan_qc.rule_templates import RuleTemplateNotFoundError
-from archive_scan_qc.service_jobs import SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON, ServiceJobNotFoundError
+from archive_scan_qc.service_jobs import (
+    SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON,
+    SERVICE_JOB_INDEX_QUALITY_SCHEMA_VERSION,
+    SERVICE_JOB_INDEX_SOURCE_INTEGRITY_SCHEMA_VERSION,
+    ServiceJobNotFoundError,
+)
 
 
 class ServiceApiCoreTests(unittest.TestCase):
@@ -451,6 +456,26 @@ class ServiceApiCoreTests(unittest.TestCase):
             self.assertEqual(status["state"], "finished")
             self.assertEqual(session["session"]["state_counts"], {"finished": 1})
             self.assertEqual(session["session"]["jobs"][0]["quality"]["provided"], True)
+            index_quality = session["session"]["quality"]
+            self.assertEqual(index_quality["schema_version"], SERVICE_JOB_INDEX_QUALITY_SCHEMA_VERSION)
+            self.assertTrue(index_quality["provided"])
+            self.assertEqual(index_quality["status_counts"], {"pass": 1})
+            self.assertEqual(index_quality["provided_job_count"], 1)
+            self.assertFalse(index_quality["privacy"]["contains_paths"])
+            self.assertFalse(index_quality["privacy"]["contains_quality_rows"])
+            index_source_integrity = session["session"]["source_integrity"]
+            self.assertEqual(
+                index_source_integrity["schema_version"],
+                SERVICE_JOB_INDEX_SOURCE_INTEGRITY_SCHEMA_VERSION,
+            )
+            self.assertTrue(index_source_integrity["provided"])
+            self.assertEqual(index_source_integrity["status"], "pass")
+            self.assertEqual(index_source_integrity["checked_files"], 1)
+            self.assertEqual(index_source_integrity["unchanged_files"], 1)
+            self.assertFalse(index_source_integrity["source_images_modified"])
+            self.assertFalse(index_source_integrity["privacy"]["contains_paths"])
+            self.assertFalse(index_source_integrity["privacy"]["contains_hashes"])
+            self.assertFalse(index_source_integrity["privacy"]["contains_file_lists"])
             self.assertEqual(_sha256_for_test(source_path), source_sha_before)
             self.assertFalse(summary["source_images_modified"])
             _assert_public_source_integrity(self, summary["source_integrity"], checked_files=1)
@@ -573,6 +598,8 @@ class ServiceApiCoreTests(unittest.TestCase):
 
             self.assertEqual(initial_session["schema_version"], "scan-qc.service-production-session.v1")
             self.assertEqual(initial_session["view"], "session")
+            self.assertEqual(initial_session["session"]["quality"]["status"], "not_available")
+            self.assertEqual(initial_session["session"]["source_integrity"]["status"], "not_available")
             self.assertEqual(setup["view"], "setup")
             self.assertEqual(setup["job"]["state"], "created")
             self.assertEqual(running["view"], "start")
@@ -630,6 +657,30 @@ class ServiceApiCoreTests(unittest.TestCase):
             self.assertEqual(final_session["session"]["job_count"], 1)
             self.assertEqual(final_session["session"]["state_counts"], {"finished": 1})
             self.assertEqual(final_session["session"]["recovery_issues"]["status"], "clear")
+            final_quality = final_session["session"]["quality"]
+            self.assertEqual(final_quality["schema_version"], SERVICE_JOB_INDEX_QUALITY_SCHEMA_VERSION)
+            self.assertTrue(final_quality["provided"])
+            self.assertEqual(final_quality["provided_job_count"], 1)
+            self.assertEqual(final_quality["processed_files"], 1)
+            self.assertEqual(final_quality["status_counts"], {"pass": 1})
+            self.assertFalse(final_quality["privacy"]["contains_paths"])
+            self.assertFalse(final_quality["privacy"]["contains_job_ids"])
+            self.assertFalse(final_quality["privacy"]["contains_quality_rows"])
+            final_source_integrity = final_session["session"]["source_integrity"]
+            self.assertEqual(
+                final_source_integrity["schema_version"],
+                SERVICE_JOB_INDEX_SOURCE_INTEGRITY_SCHEMA_VERSION,
+            )
+            self.assertTrue(final_source_integrity["provided"])
+            self.assertEqual(final_source_integrity["status"], "pass")
+            self.assertEqual(final_source_integrity["checked_files"], 1)
+            self.assertEqual(final_source_integrity["unchanged_files"], 1)
+            self.assertEqual(final_source_integrity["modified_files"], 0)
+            self.assertFalse(final_source_integrity["source_images_modified"])
+            self.assertFalse(final_source_integrity["source_tree_changed"])
+            self.assertFalse(final_source_integrity["privacy"]["contains_paths"])
+            self.assertFalse(final_source_integrity["privacy"]["contains_hashes"])
+            self.assertFalse(final_source_integrity["privacy"]["contains_file_lists"])
             self.assertTrue(finish_export["privacy"]["public_safe"])
             _assert_public_text_omits(self, raw, str(root.resolve()), "private_page_001")
 

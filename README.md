@@ -1558,6 +1558,10 @@ public-safe facade endpoints: `GET /api/production/session`,
 `GET /api/production/review-history?job_id=...`,
 `POST /api/production/review-actions`, and
 `POST /api/production/finish-export`. These wrap the same service job boundary.
+`GET /api/production/session` mirrors the root service index's public-safe
+`quality` and `source_integrity` aggregate blocks so a production client can see
+batch-level quality availability, status counts, file counts, and source-change
+booleans without expanding every job.
 Review actions persist the local decision summary, verification summary, and
 append-only `service_job_review_history.json` under the job's isolated `review`
 directory, while API responses return only aggregate session, job, review
