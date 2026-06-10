@@ -69,7 +69,7 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 
 ### DEV-004 CLI 并发隔离
 
-状态：`next`
+状态：`in-progress`
 
 范围：
 
@@ -82,6 +82,18 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 - 至少两个并发 CLI job 同时运行。
 - 输出目录冲突测试返回明确错误或恢复策略。
 - 两个 job 的 public/private artifacts 均归属正确目录。
+
+当前进展：
+
+- `production-run` 已拒绝 metadata 和 derivatives 指向同一目录。
+- `production-run` 已在 metadata 和 derivatives 目录中创建独占
+  `.archive_scan_qc_production_run.lock`，同一输出目录被另一个运行占用时
+  直接拒绝，并保持既有 progress/summary 不被覆盖。
+
+剩余缺口：
+
+- 增加两个真实 CLI 进程使用不同输出目录并发运行的回归。
+- 增加 run-plan 层面的输出目录冲突预检。
 
 ### DEV-005 后台服务 MVP
 

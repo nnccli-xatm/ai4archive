@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import time
 from typing import Any
@@ -45,6 +46,7 @@ PROCESSING_MODE_OUTPUTS_ZH = {
     "qc_only": "不会生成处理后优化图片。",
     "light": "会生成轻度处理后的优化图片，原图不覆盖。",
 }
+PRODUCTION_RUN_LOCK_JSON = ".archive_scan_qc_production_run.lock"
 
 
 @dataclass(frozen=True)
@@ -88,9 +90,11 @@ def run_production_folder(config: ProductionRunConfig) -> dict[str, Any]:
     """Run scan QC and derivative processing for a local image folder."""
     metadata_dir = config.metadata_output_dir.resolve()
     derivative_dir = config.derivative_output_dir.resolve()
+    _ensure_distinct_output_dirs(metadata_dir, derivative_dir)
     admin_report_dir = metadata_dir / "admin_reports"
     metadata_dir.mkdir(parents=True, exist_ok=True)
     derivative_dir.mkdir(parents=True, exist_ok=True)
+    lock_paths = _acquire_production_run_locks(metadata_dir, derivative_dir, config)
 
     steps = [
         _step("scan", STEP_LABELS["scan"], "pending"),
@@ -206,6 +210,52 @@ def run_production_folder(config: ProductionRunConfig) -> dict[str, Any]:
     except Exception as exc:
         _write_terminal_run_failure(config, metadata_dir, steps, "failed", current_step, stage_timings, exc)
         raise
+    finally:
+        _release_production_run_locks(lock_paths)
+
+
+def _ensure_distinct_output_dirs(metadata_dir: Path, derivative_dir: Path) -> None:
+    if metadata_dir == derivative_dir:
+        raise RuntimeError("Production metadata and derivative output directories must be different.")
+
+
+def _acquire_production_run_locks(
+    metadata_dir: Path,
+    derivative_dir: Path,
+    config: ProductionRunConfig,
+) -> list[Path]:
+    lock_dirs = {metadata_dir, derivative_dir}
+    acquired: list[Path] = []
+    payload = {
+        "schema_version": "scan-qc.production-run-lock.v1",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "project_id": config.project_id,
+        "batch_id": config.batch_id,
+        "process_id": os.getpid(),
+    }
+    for output_dir in sorted(lock_dirs, key=lambda path: str(path)):
+        lock_path = output_dir / PRODUCTION_RUN_LOCK_JSON
+        try:
+            fd = os.open(str(lock_path), os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+        except FileExistsError as exc:
+            _release_production_run_locks(acquired)
+            raise RuntimeError(
+                "Production output directory is locked by another run; "
+                "use separate metadata/derivative directories or wait for the running job to finish."
+            ) from exc
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+        acquired.append(lock_path)
+    return acquired
+
+
+def _release_production_run_locks(lock_paths: list[Path]) -> None:
+    for lock_path in reversed(lock_paths):
+        try:
+            lock_path.unlink()
+        except FileNotFoundError:
+            continue
 
 
 def build_production_run_summary(

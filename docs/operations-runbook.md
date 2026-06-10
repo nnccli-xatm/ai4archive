@@ -188,6 +188,14 @@ archive-scan-qc production-run \
   --workers 2
 ```
 
+`--metadata-out` and `--derivatives-out` must be different directories. During a
+run, `production-run` writes a transient `.archive_scan_qc_production_run.lock`
+under each output root. A second run that targets either locked output directory
+is rejected before overwriting progress or summary files. Use separate metadata
+and derivatives directories for concurrent external CLI jobs; use
+`--resume-processing` only after the previous run has finished or been
+explicitly recovered.
+
 Built-in rule templates include `archival-safe-v1`,
 `text-clean-readable-v1`, `print-clean-v1`, and `photo-mixed-safe-v1`. Legacy
 IDs `dat-31-2017-standard`, `text-clean-print`, and `high-fidelity-original`

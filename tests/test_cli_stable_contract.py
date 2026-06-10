@@ -11,7 +11,13 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from archive_scan_qc.cli import main
 from archive_scan_qc.processing_quality_summary import PROCESSING_QUALITY_SUMMARY_JSON, SCHEMA_VERSION as QUALITY_SCHEMA_VERSION
-from archive_scan_qc.production_runner import ProductionRunConfig, run_production_folder
+from archive_scan_qc.production_runner import (
+    PRODUCTION_RUN_LOCK_JSON,
+    PRODUCTION_RUN_PROGRESS_JSON,
+    PRODUCTION_RUN_SUMMARY_JSON,
+    ProductionRunConfig,
+    run_production_folder,
+)
 from archive_scan_qc.rules import (
     builtin_rules_profile,
     processing_defaults_for_rule_template,
@@ -753,6 +759,65 @@ class StableCliRuleTemplateTests(unittest.TestCase):
 
 
 class StableCliFailureStateTests(unittest.TestCase):
+    def test_production_run_rejects_locked_output_directory_without_overwriting_state(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-cli-output-lock-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            metadata_dir = root / "metadata"
+            derivative_dir = root / "derivatives"
+            input_dir.mkdir()
+            metadata_dir.mkdir()
+            derivative_dir.mkdir()
+            _write_clean_page(input_dir / "page-001.png")
+            (metadata_dir / PRODUCTION_RUN_LOCK_JSON).write_text("locked\n", encoding="utf-8")
+            existing_progress = {"state": "running", "sentinel": "keep-existing-progress"}
+            existing_summary = {"status": "running", "sentinel": "keep-existing-summary"}
+            (metadata_dir / PRODUCTION_RUN_PROGRESS_JSON).write_text(
+                json.dumps(existing_progress, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            (metadata_dir / PRODUCTION_RUN_SUMMARY_JSON).write_text(
+                json.dumps(existing_summary, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+
+            config = ProductionRunConfig(
+                input_dir=input_dir,
+                derivative_output_dir=derivative_dir,
+                metadata_output_dir=metadata_dir,
+                workers=1,
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "locked by another run"):
+                run_production_folder(config)
+
+            progress = json.loads((metadata_dir / PRODUCTION_RUN_PROGRESS_JSON).read_text(encoding="utf-8"))
+            summary = json.loads((metadata_dir / PRODUCTION_RUN_SUMMARY_JSON).read_text(encoding="utf-8"))
+            self.assertEqual(progress, existing_progress)
+            self.assertEqual(summary, existing_summary)
+            self.assertFalse((derivative_dir / PRODUCTION_RUN_LOCK_JSON).exists())
+
+    def test_production_run_rejects_same_metadata_and_derivative_directory(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-cli-output-same-dir-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "shared-output"
+            input_dir.mkdir()
+            _write_clean_page(input_dir / "page-001.png")
+
+            config = ProductionRunConfig(
+                input_dir=input_dir,
+                derivative_output_dir=output_dir,
+                metadata_output_dir=output_dir,
+                workers=1,
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "must be different"):
+                run_production_folder(config)
+
+            self.assertFalse((output_dir / PRODUCTION_RUN_PROGRESS_JSON).exists())
+            self.assertFalse((output_dir / PRODUCTION_RUN_SUMMARY_JSON).exists())
+
     def test_production_run_writes_failed_progress_and_summary_on_input_error(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-cli-failure-") as temp_dir:
             root = Path(temp_dir)

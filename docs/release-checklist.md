@@ -42,6 +42,10 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   `POST /api/jobs/{job_id}/run` quality summaries. Confirm synchronous
   rule-template validation accepts only inline drafts, writes no templates, and
   does not echo name patterns, rule rows, local paths, or file identifiers.
+  Confirm CLI `production-run` rejects identical `--metadata-out` and
+  `--derivatives-out` directories and rejects locked metadata or derivatives
+  directories without overwriting existing `production_run_progress.json` or
+  `production_run_summary.json`.
   Confirm synchronous
   `POST /api/jobs/{job_id}/retry` only accepts failed, interrupted, or
   recoverable jobs, keeps ordinary terminal reruns rejected, and reuses existing
