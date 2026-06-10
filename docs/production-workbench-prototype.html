@@ -3457,7 +3457,7 @@
     async function pollServerStatus() {
       if (!localApi.enabled) return;
       try {
-        const response = await fetch(localBridgePath("status"));
+        const response = await fetch(state.jobId ? productionApiPath("progress", { job_id: state.jobId }) : localBridgePath("status"));
         if (!response.ok) return;
         const payload = await response.json();
         applyServerStatus(payload);

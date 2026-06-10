@@ -413,6 +413,10 @@ class WorkbenchController:
             },
         }
 
+    def production_progress(self, job_id: str) -> dict[str, Any]:
+        self._require_local_job_id(job_id)
+        return {**self.status(), "view": "progress"}
+
     def _require_local_job_id(self, job_id: str) -> None:
         safe_id = str(job_id or "").strip()
         with self._lock:
@@ -899,6 +903,9 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/status":
             self._send_json(self.workbench_controller.status())
             return
+        if parsed.path == "/api/production/progress":
+            self._serve_production_progress(parse_qs(parsed.query))
+            return
         if parsed.path == "/api/production/review-item":
             self._serve_production_review_item(parse_qs(parsed.query))
             return
@@ -998,6 +1005,14 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
                 _first_query_value(params, "job_id"),
                 _first_query_value(params, "local_id"),
             )
+        except ValueError as exc:
+            self._send_json({"error_zh": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+        self._send_json(payload)
+
+    def _serve_production_progress(self, params: dict[str, list[str]]) -> None:
+        try:
+            payload = self.workbench_controller.production_progress(_first_query_value(params, "job_id"))
         except ValueError as exc:
             self._send_json({"error_zh": str(exc)}, HTTPStatus.BAD_REQUEST)
             return

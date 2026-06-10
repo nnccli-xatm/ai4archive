@@ -1743,7 +1743,10 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             self.assertEqual(controller.preview_path("PRQ000001", "processed")[1], "processed")
             job_id = status["job_id"]
             review_queue = controller.production_review_queue(job_id)
+            progress = controller.production_progress(job_id)
             self.assertEqual(review_queue["view"], "review_queue")
+            self.assertEqual(progress["view"], "progress")
+            self.assertEqual(progress["job_id"], job_id)
             self.assertEqual(review_queue["review_queue"]["review_item_count"], 2)
             self.assertTrue(review_queue["review_queue"]["local_only_artifact"])
             self.assertEqual(review_queue["local_review_queue"]["items"][0]["preview_source"], "comparison")
@@ -1797,6 +1800,14 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
                     .read()
                     .decode("utf-8")
                 )
+                progress = json.loads(
+                    urlopen(
+                        f"{base_url}/api/production/progress?job_id={job_id}",
+                        timeout=5,
+                    )
+                    .read()
+                    .decode("utf-8")
+                )
                 review_item = json.loads(
                     urlopen(
                         f"{base_url}/api/production/review-item?job_id={job_id}&local_id=PRQ000001",
@@ -1821,6 +1832,8 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
                 thread.join(timeout=5)
 
             self.assertEqual(review_queue["view"], "review_queue")
+            self.assertEqual(progress["view"], "progress")
+            self.assertEqual(progress["job_id"], job_id)
             self.assertEqual(review_queue["review_queue"]["review_item_count"], 1)
             self.assertTrue(review_queue["review_queue"]["local_only_artifact"])
             self.assertEqual(review_queue["local_review_queue"]["items"][0]["preview_source"], "comparison")

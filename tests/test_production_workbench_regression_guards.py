@@ -213,6 +213,7 @@ class ProductionWorkbenchRegressionGuardTests(unittest.TestCase):
             "/api/production/preview",
             'return productionApiPath("preview", { job_id: state.jobId, local_id: localId, source });',
             "function reviewActionsRequest(reviewDecisions)",
+            'productionApiPath("progress", { job_id: state.jobId })',
             'productionApiPath("reviewActions")',
             'productionApiPath("finishExport")',
             "reviewItemUrl: productionReviewItemUrl(item.local_id || \"\")",
@@ -328,8 +329,10 @@ class ProductionWorkbenchRegressionGuardTests(unittest.TestCase):
         for required in [
             'elif self.path == "/api/open-output-folder":',
             'parsed.path == "/api/production/review-queue"',
+            'parsed.path == "/api/production/progress"',
             'parsed.path == "/api/production/review-item"',
             'parsed.path == "/api/production/preview"',
+            "production_progress",
             "production_review_queue",
             "production_review_item",
             "production_preview_path",
