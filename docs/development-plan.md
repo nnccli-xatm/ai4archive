@@ -278,6 +278,11 @@ Core recovery/index regression now covers the same `print-clean-v1` cleanup:
 after recovery, the job summary preserves job-level aggregate stain metrics, but
 the root public index's nested quality aggregate keeps only status counts and
 omits quality rows, paths, filenames, and hashes.
+The machine-readable public capability contract now mirrors this boundary in
+`service_contract.public_surfaces`: job-level public summaries may expose
+`print_clean` profile and whitelisted aggregate quality metrics, while
+production session and root index quality aggregates remain counts-only and
+prohibit job IDs, processing profiles, quality rows, and `quality_metrics`.
 Recovery now treats `finished` or `needs_review` checkpoints/progress without a
 terminal `production_run_summary.json` as `needs_recovery`, using the public-safe
 reason code `terminal_state_missing_production_summary`, so schedulers do not

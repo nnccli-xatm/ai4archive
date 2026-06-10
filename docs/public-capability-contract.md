@@ -105,7 +105,12 @@ template snapshot used for recovery, including local-only review roots.
 
 Use `public_capability_contract.json` as the stable index of supported schema
 names and artifact classifications before sharing validation evidence outside
-the approved local environment.
+the approved local environment. Its machine-readable `service_contract` block
+also enumerates prototype service public surfaces, including the single-job
+summary boundary that may expose `print_clean` profile and whitelisted
+aggregate quality metrics, plus the root index and production-session quality
+aggregates that are limited to status counts, quality-signal counts, aggregate
+file counts, and blocking-code counts.
 
 ## Rule Template Catalog And Dry-Run
 

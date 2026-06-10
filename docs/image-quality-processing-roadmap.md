@@ -620,6 +620,12 @@ Core recovery/index regression now covers the same `print-clean-v1` cleanup:
 recovered job summaries preserve job-level aggregate stain metrics, while the
 root public index's nested quality aggregate keeps only status counts and omits
 quality rows, paths, filenames, and hashes.
+Follow-up, 2026-06-10: `public_capability_contract.json` now includes a
+machine-readable `service_contract.public_surfaces` block for the same quality
+boundary: job summaries may expose `print_clean` profile and whitelisted
+aggregate quality metrics, while production-session and root-index quality
+aggregates prohibit job IDs, processing profiles, quality rows, and
+`quality_metrics`.
 
 ### M5：性能和后端实现
 
