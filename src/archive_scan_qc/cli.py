@@ -19,6 +19,7 @@ from .batch_rename import (
     write_batch_rename_plan,
 )
 from .calibration import CALIBRATION_JSON, write_rules_calibration_summary
+from .case_split import CASE_SPLIT_APPLY_JSON, CASE_SPLIT_PLAN_JSON, apply_case_split_plan, write_case_split_plan
 from .capability_probe import CapabilityProbeConfig, run_capability_probe, write_capability_probe
 from .deep_inspection_provider import (
     DeepInspectionProviderConfigError,
@@ -342,6 +343,10 @@ def main(argv: list[str] | None = None) -> int:
         return _main_batch_rename_plan(argv[1:])
     if argv and argv[0] == "batch-rename-apply":
         return _main_batch_rename_apply(argv[1:])
+    if argv and argv[0] == "case-split-plan":
+        return _main_case_split_plan(argv[1:])
+    if argv and argv[0] == "case-split-apply":
+        return _main_case_split_apply(argv[1:])
     parser = build_parser()
     args = parser.parse_args(argv)
     _validate_processing_flags(parser, args)
@@ -1616,6 +1621,73 @@ def _main_batch_rename_apply(argv: list[str]) -> int:
     print(f"Batch rename rollback manifest: {rollback_path}")
     print(f"Rows applied: {payload['summary']['applied_count']}")
     print("Sensitivity: LOCAL-ONLY path-bearing rename logs; not public-safe.")
+    return 0
+
+
+def _main_case_split_plan(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="archive-scan-qc case-split-plan",
+        description="Dry-run copying page ranges into case folders from a CSV/XLSX case map.",
+    )
+    parser.add_argument("--input", required=True, type=Path, help="Root directory containing source page images.")
+    parser.add_argument(
+        "--case-map",
+        required=True,
+        type=Path,
+        help="CSV/XLSX with case_name, start_page, and end_page columns.",
+    )
+    parser.add_argument("--target", required=True, type=Path, help="Destination root for case folders.")
+    parser.add_argument("--out", required=True, type=Path, help="Output directory for case split plan logs.")
+    args = parser.parse_args(argv)
+    try:
+        json_path, csv_path, xlsx_path, payload = write_case_split_plan(
+            args.input,
+            args.case_map,
+            args.target,
+            args.out,
+        )
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    print(f"Case split plan JSON: {json_path}")
+    print(f"Case split plan CSV: {csv_path}")
+    print(f"Case split plan Excel: {xlsx_path}")
+    print(f"Status: {payload['status']}")
+    print(f"Cases ready: {payload['summary']['ready_count']}")
+    print(f"Cases blocked: {payload['summary']['blocking_count']}")
+    print(f"Planned copied files: {payload['summary']['planned_copy_count']}")
+    print("Sensitivity: LOCAL-ONLY path-bearing case split plan; not public-safe.")
+    return 0 if payload["status"] == "ready" else 1
+
+
+def _main_case_split_apply(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="archive-scan-qc case-split-apply",
+        description="Apply a local case split plan and write apply plus rollback manifests.",
+    )
+    parser.add_argument(
+        "--plan-json",
+        required=True,
+        type=Path,
+        help=f"Path to {CASE_SPLIT_PLAN_JSON} written by case-split-plan.",
+    )
+    parser.add_argument(
+        "--out",
+        default=None,
+        type=Path,
+        help=f"Optional output directory for {CASE_SPLIT_APPLY_JSON}; defaults to the plan directory.",
+    )
+    args = parser.parse_args(argv)
+    try:
+        json_path, csv_path, xlsx_path, rollback_path, payload = apply_case_split_plan(args.plan_json, args.out)
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    print(f"Case split apply JSON: {json_path}")
+    print(f"Case split apply CSV: {csv_path}")
+    print(f"Case split apply Excel: {xlsx_path}")
+    print(f"Case split rollback manifest: {rollback_path}")
+    print(f"Cases applied: {payload['summary']['applied_case_count']}")
+    print(f"Files copied: {payload['summary']['copied_file_count']}")
+    print("Sensitivity: LOCAL-ONLY path-bearing case split logs; not public-safe.")
     return 0
 
 

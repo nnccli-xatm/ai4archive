@@ -49,6 +49,7 @@ DEEP_FULL_ONLY_TESTS = (
 PRODUCTION_CLI_TESTS = (
     "test_acceptance",
     "test_batch_rename",
+    "test_case_split",
     "test_cli_smoke",
     "test_cli_stable_contract",
     "test_dat_9_4_tiered_resolution",

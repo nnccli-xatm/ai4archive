@@ -244,6 +244,31 @@ ready plans, writes `batch_rename_apply.json`, `.csv`, `.xlsx`, and
 `batch_rename_rollback.json`. These rename logs are local-only and path-bearing;
 they are not public-safe artifacts.
 
+### Local case split plan/apply
+
+Use `case-split-plan` to copy a sorted page-image sequence into case folders
+from a CSV or `.xlsx` case map. The case map must include `case_name`,
+`start_page`, and `end_page` columns. Page numbers are 1-based against the
+deterministic filename order under `--input`.
+
+```bash
+archive-scan-qc case-split-plan \
+  --input /path/to/batch-images \
+  --case-map /path/to/cases.xlsx \
+  --target /path/to/case-output \
+  --out /path/to/case-split-plan
+
+archive-scan-qc case-split-apply \
+  --plan-json /path/to/case-split-plan/case_split_plan.json
+```
+
+The plan command writes `case_split_plan.json`, `.csv`, and `.xlsx` logs. It
+blocks unsafe case folder names, invalid or out-of-bounds page ranges,
+overlapping ranges, duplicate case names, and existing target files. Apply
+copies files only for ready plans and writes `case_split_apply.json`, `.csv`,
+`.xlsx`, plus `case_split_rollback.json` listing copied target files. These
+logs are local-only and path-bearing; they are not public-safe artifacts.
+
 ### Local private sample integration
 
 Use `scripts/run_private_integration.py` only inside the internal/local

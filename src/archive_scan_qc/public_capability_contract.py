@@ -169,6 +169,18 @@ def build_public_capability_contract(generated_at: str | None = None) -> dict[st
                     "scan-qc.batch-rename-apply.v1",
                     sensitive_outputs=True,
                 ),
+                _command(
+                    "archive-scan-qc case-split-plan",
+                    "Dry-run copying page ranges into case folders from a CSV/XLSX case map.",
+                    "scan-qc.case-split-plan.v1",
+                    sensitive_outputs=True,
+                ),
+                _command(
+                    "archive-scan-qc case-split-apply",
+                    "Apply a local case split plan and write apply plus rollback manifests.",
+                    "scan-qc.case-split-apply.v1",
+                    sensitive_outputs=True,
+                ),
             ],
             "public_safe_aggregate_commands": [
                 _command(
@@ -288,6 +300,13 @@ def build_public_capability_contract(generated_at: str | None = None) -> dict[st
             _artifact("batch_rename_apply.csv", "scan-qc.batch-rename-apply.v1", "stable_sensitive_local"),
             _artifact("batch_rename_apply.xlsx", "scan-qc.batch-rename-apply.v1", "stable_sensitive_local"),
             _artifact("batch_rename_rollback.json", "scan-qc.batch-rename-rollback.v1", "stable_sensitive_local"),
+            _artifact("case_split_plan.json", "scan-qc.case-split-plan.v1", "stable_sensitive_local"),
+            _artifact("case_split_plan.csv", "scan-qc.case-split-plan.v1", "stable_sensitive_local"),
+            _artifact("case_split_plan.xlsx", "scan-qc.case-split-plan.v1", "stable_sensitive_local"),
+            _artifact("case_split_apply.json", "scan-qc.case-split-apply.v1", "stable_sensitive_local"),
+            _artifact("case_split_apply.csv", "scan-qc.case-split-apply.v1", "stable_sensitive_local"),
+            _artifact("case_split_apply.xlsx", "scan-qc.case-split-apply.v1", "stable_sensitive_local"),
+            _artifact("case_split_rollback.json", "scan-qc.case-split-rollback.v1", "stable_sensitive_local"),
             _artifact("production_run_progress.json", "scan-qc.production-run-progress.v1", "stable_sensitive_local"),
             _artifact("production_run_summary.json", "scan-qc.production-run.v1", "stable_sensitive_local"),
             _artifact("processing_audit_summary.json", "scan-qc.processing.audit.v1", "stable_public_safe_aggregate"),

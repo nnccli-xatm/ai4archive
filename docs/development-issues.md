@@ -420,11 +420,25 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 
 ### DEV-402 Excel 案卷分件 plan/apply
 
-状态：`later`
+状态：`done`
 
 范围：
 
 - 按件名、起始页、终止页复制到指定目录，记录聚合结果和失败原因。
+
+已完成证据：
+
+- 新增 `archive-scan-qc case-split-plan`：从 CSV 或 `.xlsx` 分件表读取
+  `case_name`、`start_page`、`end_page`，按输入目录图片文件名稳定排序生成分件复制计划。
+- plan 阶段检测不安全件名、非法页码、起止页倒置、页码越界、页码范围重叠、重复件名
+  和目标文件已存在；blocked plan 以非零退出，不复制文件。
+- 新增 `archive-scan-qc case-split-apply`：只接受 ready plan，将页码范围复制到指定
+  case folder，写入 `case_split_apply.json`、`.csv`、`.xlsx` 和
+  `case_split_rollback.json`。
+- 分件 manifest 明确标记 `local_only=true`、`public_safe=false`；它是 path-bearing
+  本地生产工具，不进入 public-safe 交付摘要。
+- `production-cli` CI 分组纳入 `test_case_split`，覆盖 CSV/XLSX 输入、ready apply、
+  blocked plan、Excel 日志和 CLI blocked exit code。
 
 ### DEV-403 双层 PDF/OCR 目录方案
 
