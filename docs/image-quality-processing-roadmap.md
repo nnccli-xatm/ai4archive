@@ -284,6 +284,11 @@ requires many stable small components and a tight changed area, and keeps broad
 line-like low-confidence pages, handwriting, tables, stamps, photos, and texture
 risks on the skip path. The public-safe `image-processing-capability-smoke`
 fixture set now includes this ultra-pale typed-glyph case.
+Follow-up, 2026-06-10: the same faded-text path now requires a stronger visible
+gain once both text-structure and background-stability evidence are strong. It
+raises only the minimum darkening for already-selected safe text pixels, leaving
+candidate detection, protected-content skips, changed-pixel bounds, and
+public-safe aggregate reporting unchanged.
 
 Follow-up, 2026-06-09: the smoke fixture set now includes a light-paper page
 with a low-amplitude illumination gradient and sparse typed text. The public-safe

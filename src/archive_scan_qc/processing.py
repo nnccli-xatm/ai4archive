@@ -9853,7 +9853,7 @@ def _enhance_faded_text_conservative(image: Image.Image) -> FadedTextEnhancement
     if not stable_background["safe"]:
         return _faded_text_noop(image, stable_background["reason"], candidate_ratio)
     enhancement_scale = 0.56 if structure["strong"] and stable_background["strong"] else 0.46
-    min_delta = 10 if structure["strong"] and stable_background["strong"] else 8
+    min_delta = 14 if structure["strong"] and stable_background["strong"] else 8
     max_delta = 30 if structure["strong"] and stable_background["strong"] else 24
 
     before_values: list[int] = []
