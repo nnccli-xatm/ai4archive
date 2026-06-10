@@ -224,9 +224,12 @@ class ServiceJobBoundaryTests(unittest.TestCase):
 
             self.assertEqual(created["template"]["rule_template_id"], "custom-readable001")
             self.assertEqual(created["template"]["base_rule_template_id"], "custom")
+            self.assertEqual(created["template"]["processing_profile"], "standard")
             self.assertEqual(summary["template"]["rule_template_id"], "custom-readable001")
             self.assertEqual(summary["template"]["base_rule_template_id"], "custom")
+            self.assertEqual(summary["template"]["processing_profile"], "standard")
             self.assertEqual(record["template_snapshot"]["service_template_id"], "custom-readable001")
+            self.assertEqual(record["template_snapshot"]["processing_profile"], "standard")
             self.assertTrue(record["template_snapshot"]["processing_defaults"]["normalize_tones"])
             self.assertIsInstance(record["template_snapshot"]["custom_template_draft"], dict)
             self.assertEqual(processing_manifest["rule_template"]["id"], "custom")
@@ -484,8 +487,9 @@ class ServiceJobBoundaryTests(unittest.TestCase):
                     "source_name": "\u79c1\u6709_alpha_001.png",
                     "project_id": "project-alpha",
                     "batch_id": "batch-alpha",
-                    "rule_template": "text-clean-print",
+                    "rule_template": "print-clean-v1",
                     "processing_mode": "standard",
+                    "processing_profile": "print_clean",
                 },
                 "job-testconcurrent002": {
                     "input_dir": root / "\u8f93\u5165-beta",
@@ -494,6 +498,7 @@ class ServiceJobBoundaryTests(unittest.TestCase):
                     "batch_id": "batch-beta",
                     "rule_template": "dat-31-2017-standard",
                     "processing_mode": "light",
+                    "processing_profile": "standard",
                 },
             }
             source_hashes: dict[str, str] = {}
@@ -573,6 +578,7 @@ class ServiceJobBoundaryTests(unittest.TestCase):
                 self.assertEqual(summary["state"], "finished")
                 self.assertEqual(summary["template"]["rule_template_id"], spec["rule_template"])
                 self.assertEqual(summary["template"]["processing_mode"], spec["processing_mode"])
+                self.assertEqual(summary["template"]["processing_profile"], spec["processing_profile"])
                 self.assertEqual(summary["counts"]["processed_files"], 1)
                 self.assertTrue(summary["quality"]["provided"])
                 self.assertTrue(summary["local_review"]["provided"])
@@ -583,11 +589,17 @@ class ServiceJobBoundaryTests(unittest.TestCase):
 
                 self.assertEqual(record["template_snapshot"]["rule_template"]["id"], spec["rule_template"])
                 self.assertEqual(record["template_snapshot"]["processing_mode"], spec["processing_mode"])
+                self.assertEqual(record["template_snapshot"]["processing_profile"], spec["processing_profile"])
                 self.assertEqual(record["project"]["project_id"], spec["project_id"])
                 self.assertEqual(record["project"]["batch_id"], spec["batch_id"])
                 self.assertEqual(processing_manifest["rule_template"]["id"], spec["rule_template"])
+                self.assertEqual(processing_manifest["options"]["processing_profile"], spec["processing_profile"])
                 self.assertEqual(production_summary["rule_template"]["id"], spec["rule_template"])
                 self.assertEqual(production_summary["operator_summary"]["processing_mode"], spec["processing_mode"])
+                self.assertEqual(
+                    production_summary["operator_summary"]["processing_profile"],
+                    spec["processing_profile"],
+                )
                 if spec["processing_mode"] == "standard":
                     self.assertTrue(processing_manifest["options"]["lighten_scanlines"])
                     self.assertTrue(processing_manifest["options"]["enhance_faded_text"])

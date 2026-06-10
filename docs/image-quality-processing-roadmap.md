@@ -514,6 +514,11 @@ Follow-up, 2026-06-09: missing service-managed custom rule templates now return
 explicit public-safe 404 `rule_template_not_found` errors. Job creation validates
 the requested custom template before writing job directories or checkpoints, so
 failed template references do not create stale recoverable jobs.
+Follow-up, 2026-06-10: service job public summaries now expose the resolved
+public-safe `processing_profile` in their template block. Checkpoints still hold
+the private template snapshot for recovery, while public summaries expose only
+template IDs, processing mode, and profile enum without local paths, filenames,
+hashes, OCR text, thumbnails, image content, or template rule rows.
 Follow-up, 2026-06-09: the service API now also exposes a production-worker
 facade around the same job boundary: session, setup, async start, progress,
 aggregate review-queue availability, and finish/export readiness. It remains

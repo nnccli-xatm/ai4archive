@@ -165,6 +165,10 @@ expose local manifest rows or retry lists in the public response. The capabiliti
 response publishes non-sensitive resource limits, including
 `max_active_async_jobs`, `max_active_workers`, `min_free_space_bytes`,
 `max_tmp_bytes_per_job`, and the per-job worker limit.
+Service job public summaries expose only template-level identifiers and enums in
+their `template` block: rule template ID, base rule template ID, processing
+mode, and processing profile. They do not expose template rule rows, checkpoint
+paths, local source names, hashes, OCR text, thumbnails, or image content.
 The local service API also exposes a production-worker facade with schema
 `scan-qc.service-production-session.v1`: `GET /api/production/session`,
 `POST /api/production/setup`, `POST /api/production/start`,

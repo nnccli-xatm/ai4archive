@@ -292,6 +292,10 @@ review artifact 读取通道，只接受 `processing-review-package` 和
 缺失的 service-managed custom rule template 现在通过 public-safe 404
 `rule_template_not_found` 表达；引用缺失模板创建 job 会在写入 job checkpoint
 或 job 目录前失败，避免恢复器看到半成品任务。
+2026-06-10 补充：service job public summary 的 `template` 区现在公开
+public-safe `processing_profile` 枚举；checkpoint 仍保存完整模板快照，public
+summary 只暴露模板 ID、基础模板 ID、processing mode 和 profile，不暴露规则行、
+本地路径、文件名、hash、OCR、缩略图或图片内容。
 
 ## 6. 阶段 2：图像处理规则模板系统
 

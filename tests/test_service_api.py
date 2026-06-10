@@ -360,7 +360,9 @@ class ServiceApiCoreTests(unittest.TestCase):
 
             self.assertEqual(create_summary["state"], "created")
             self.assertEqual(create_summary["template"]["rule_template_id"], "text-clean-print")
+            self.assertEqual(create_summary["template"]["processing_profile"], "standard")
             self.assertEqual(status_summary["state"], "created")
+            self.assertEqual(status_summary["template"]["processing_profile"], "standard")
             self.assertFalse(not_ready_finish_export["finish_export"]["terminal"])
             self.assertFalse(not_ready_finish_export["finish_export"]["retryable"])
             self.assertFalse(not_ready_finish_export["finish_export"]["ready_for_export"])

@@ -950,6 +950,7 @@ def _public_summary_from_record(
             or record["template_snapshot"]["rule_template"]["id"],
             "base_rule_template_id": record["template_snapshot"]["rule_template"]["id"],
             "processing_mode": record["template_snapshot"]["processing_mode"],
+            "processing_profile": _public_processing_profile(record.get("template_snapshot")),
         },
         "resource_limits": _public_resource_limits(record.get("resource_limits")),
         "isolation": {
@@ -995,6 +996,23 @@ def _public_counts(
         "p1_findings": _safe_int(summary_counts.get("p1_findings")),
         "p2_findings": _safe_int(summary_counts.get("p2_findings")),
     }
+
+
+def _public_processing_profile(template_snapshot: Any) -> str:
+    if not isinstance(template_snapshot, dict):
+        return "standard"
+    profile = template_snapshot.get("processing_profile")
+    if profile in {"standard", "print_clean"}:
+        return str(profile)
+    service_template_id = template_snapshot.get("service_template_id")
+    if isinstance(service_template_id, str) and service_template_id in BUILTIN_RULE_TEMPLATE_IDS:
+        return _processing_profile_for_job(service_template_id)
+    rule_template = template_snapshot.get("rule_template")
+    if isinstance(rule_template, dict):
+        template_id = rule_template.get("id")
+        if isinstance(template_id, str) and template_id in BUILTIN_RULE_TEMPLATE_IDS:
+            return _processing_profile_for_job(template_id)
+    return "standard"
 
 
 def _safe_int(value: Any) -> int | None:
