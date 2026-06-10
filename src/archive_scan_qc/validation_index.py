@@ -45,6 +45,11 @@ KNOWN_PUBLIC_SAFE_ARTIFACTS = (
         "scan-qc.review-decision-verification-summary.",
     ),
     KnownAggregateArtifact(
+        "private_validation_aggregate_summary.json",
+        "private_validation_aggregate",
+        "scan-qc.private-validation-aggregate.",
+    ),
+    KnownAggregateArtifact(
         "final_production_handoff_summary.json",
         "final_production_handoff",
         "scan-qc.final-production-handoff-summary.",

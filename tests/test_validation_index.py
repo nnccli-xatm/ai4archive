@@ -84,6 +84,7 @@ def _write_public_safe_validation_index_fixtures(root: Path) -> None:
     _write_json(root / "release_candidate_summary.json", _release_candidate_bundle_payload())
     _write_json(root / "aggregate_evidence_bundle_summary.json", _aggregate_evidence_bundle_payload(status="pass"))
     _write_json(root / "review_decision_verification_summary.json", _review_decision_verification_bundle_payload())
+    _write_json(root / "private_validation_aggregate_summary.json", _private_validation_aggregate_payload())
     _write_json(root / "final_production_handoff_summary.json", _final_handoff_bundle_payload())
 
 
@@ -100,7 +101,7 @@ class ValidationIndexTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(summary["status"], "pass")
-        self.assertEqual(summary["summary"]["artifacts_present"], 6)
+        self.assertEqual(summary["summary"]["artifacts_present"], 7)
         self.assertEqual(summary["summary"]["artifacts_failed"], 0)
         self.assertEqual(summary["artifact_presence"]["frontend_workbench_validation.json"]["status"], "pass")
         self.assertEqual(summary["artifact_presence"]["review_decision_verification_summary.json"]["status"], "pass")
@@ -148,7 +149,7 @@ class ValidationIndexTests(unittest.TestCase):
             raw = json.dumps(summary, ensure_ascii=False, sort_keys=True)
 
         self.assertEqual(summary["status"], "pass")
-        self.assertEqual(summary["summary"]["known_artifacts"], 6)
+        self.assertEqual(summary["summary"]["known_artifacts"], 7)
         review_decisions = summary["artifacts"]["review_decision_verification_summary.json"]
         self.assertEqual(review_decisions["schema_version"], "scan-qc.review-decision-verification-summary.v1")
         self.assertEqual(review_decisions["reported_status"], "pass")
@@ -300,6 +301,53 @@ class ValidationIndexTests(unittest.TestCase):
             self.assertFalse(summary["privacy"]["contains_raw_model_output"])
             for value in forbidden_private_values:
                 self.assertNotIn(value, raw)
+
+
+def _private_validation_aggregate_payload() -> dict[str, object]:
+    return {
+        "schema_version": "scan-qc.private-validation-aggregate.v1",
+        "status": "pass",
+        "blocking_codes": [],
+        "validation_inputs": {
+            "provided_count": 2,
+            "invalid_payload_count": 0,
+            "raw_sensitive_payload_count": 2,
+        },
+        "group_count": 1,
+        "group_summaries": [
+            {
+                "group_id": "low_contrast_text",
+                "validation_input_count": 2,
+                "passed_validation_inputs": 2,
+                "failed_validation_inputs": 0,
+                "unknown_validation_inputs": 0,
+                "counts": {"total_items": 4, "processed_items": 4, "failed_items": 0},
+                "metric_summary": [{"metric_id": "text_contrast_delta", "count": 4, "average": 0.2, "max": 0.4}],
+            }
+        ],
+        "risk_code_counts": [],
+        "quality_measurement": {
+            "method": "private_validation_aggregate_only",
+            "before_after_evidence": "group_metrics_only",
+            "row_level_evidence_included": False,
+            "binary_payload_included": False,
+        },
+        "privacy": {
+            "aggregate_only": True,
+            "public_safe": True,
+            "contains_paths": False,
+            "contains_filenames": False,
+            "contains_hashes": False,
+            "contains_ocr_text": False,
+            "contains_thumbnails": False,
+            "contains_image_content": False,
+            "contains_row_level_findings": False,
+            "contains_row_level_evidence": False,
+            "self_check_status": "pass",
+            "self_check_failure_count": 0,
+        },
+    }
+
 
 if __name__ == "__main__":
     unittest.main()

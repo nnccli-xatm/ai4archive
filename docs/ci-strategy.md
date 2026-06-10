@@ -161,7 +161,7 @@ main push 的完整回归在 Python 3.11 上按 4 个语义组并行：
 - `privacy-boundary`
   - 覆盖 public-safe 聚合输出、aggregate baseline 自检、provider 边界、证据/交接/复核摘要、校准和公共验证索引。
 - `external-validation`
-  - 覆盖 CI/交付脚本、targeted selector，以及在临时目录内生成的 DIBCO/NoisyOffice 形状合成外部 CLI smoke。
+  - 覆盖 CI/交付脚本、targeted selector、private validation 聚合报告，以及在临时目录内生成的 DIBCO/NoisyOffice 形状合成外部 CLI smoke。
 
 `scripts/ci_regression_groups.py` 是分组事实来源。它提供：
 

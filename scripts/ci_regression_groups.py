@@ -94,6 +94,7 @@ EXTERNAL_VALIDATION_TESTS = (
     "test_ci_regression_groups",
     "test_ci_targeted_selector",
     "test_delivery_tooling",
+    "test_private_validation",
 )
 
 REGRESSION_GROUPS = {

@@ -195,6 +195,11 @@ def build_public_capability_contract(generated_at: str | None = None) -> dict[st
                     "scan-qc.public-safe-validation-index.v1",
                 ),
                 _command(
+                    "archive-scan-qc private-validation-aggregate",
+                    "Aggregate operator-approved private validation results by public group and risk code.",
+                    "scan-qc.private-validation-aggregate.v1",
+                ),
+                _command(
                     "archive-scan-qc artifact-readiness-checklist",
                     "Check aggregate/public-safe artifact readiness.",
                     "scan-qc-artifact-readiness-checklist.v1",
@@ -289,6 +294,7 @@ def build_public_capability_contract(generated_at: str | None = None) -> dict[st
             _artifact("aggregate_evidence_bundle_summary.json", "scan-qc.aggregate-evidence-bundle.v1", "stable_public_safe_aggregate"),
             _artifact("final_production_handoff_summary.json", "scan-qc.final-production-handoff-summary.v1", "stable_public_safe_aggregate"),
             _artifact("public_safe_validation_index.json", "scan-qc.public-safe-validation-index.v1", "stable_public_safe_aggregate"),
+            _artifact("private_validation_aggregate_summary.json", "scan-qc.private-validation-aggregate.v1", "stable_public_safe_aggregate"),
             _artifact("artifact_readiness_checklist.json", "scan-qc-artifact-readiness-checklist.v1", "stable_public_safe_aggregate"),
             _artifact("workbench_public_summary.json", "scan-qc.workbench-public-summary.v1", "stable_public_safe_aggregate"),
             _artifact(RULE_TEMPLATE_CATALOG_JSON, "scan-qc.rule-template-catalog.v1", "stable_public_safe_aggregate"),

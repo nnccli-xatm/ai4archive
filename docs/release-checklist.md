@@ -144,6 +144,13 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   JSON, HTML, CSV, a processing manifest, a processing retry manifest, an
   aggregate processing audit summary, and derivative images from synthetic
   temporary inputs.
+- Confirm `archive-scan-qc private-validation-aggregate` creates
+  `private_validation_aggregate_summary.json` with schema
+  `scan-qc.private-validation-aggregate.v1` from operator-approved private
+  validation JSON inputs, and that it publishes only public group IDs,
+  aggregate item counts, allowlisted metric summaries, risk-code counts, and
+  privacy self-check status without private labels, paths, filenames, hashes,
+  OCR text, thumbnails, row-level rows, or image bytes.
 - Confirm a synthetic review template can be exported and a privacy-safe
   aggregate `review_summary.json` can be generated with no remaining P0/P1
   findings before acceptance.

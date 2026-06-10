@@ -36,6 +36,7 @@ from .processing_plan import write_processing_plan
 from .processing_review import write_processing_review_package
 from .production_review_queue import PRODUCTION_REVIEW_QUEUE_JSON, write_production_review_queue
 from .production_rehearsal import ProductionRehearsalConfig, run_production_rehearsal
+from .private_validation import PRIVATE_VALIDATION_AGGREGATE_JSON, write_private_validation_aggregate
 from .public_capability_contract import build_public_capability_contract, write_public_capability_contract
 from .reports import write_reports, write_review_export, write_review_summary
 from .review_decisions import write_review_decision_verification_summary
@@ -316,6 +317,8 @@ def main(argv: list[str] | None = None) -> int:
         return _main_final_handoff_summary(argv[1:])
     if argv and argv[0] == "public-safe-validation-index":
         return _main_public_safe_validation_index(argv[1:])
+    if argv and argv[0] == "private-validation-aggregate":
+        return _main_private_validation_aggregate(argv[1:])
     if argv and argv[0] == "workbench-summary":
         return _main_workbench_summary(argv[1:])
     if argv and argv[0] == "artifact-readiness-checklist":
@@ -1222,6 +1225,33 @@ def _main_public_safe_validation_index(argv: list[str]) -> int:
     print(f"Checks passed: {payload['checks_passed']}")
     print(f"Checks failed: {payload['checks_failed']}")
     print("Privacy: public-safe aggregate index only; private indicators are reported by filename/category/code/count only.")
+    return 0 if payload["status"] == "pass" else 1
+
+
+def _main_private_validation_aggregate(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="archive-scan-qc private-validation-aggregate",
+        description="Build a public-safe aggregate report from operator-approved private validation JSON inputs.",
+    )
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--input-dir", default=None, type=Path, help="Directory containing private validation JSON inputs.")
+    source.add_argument(
+        "--file",
+        default=[],
+        action="append",
+        type=Path,
+        help="Private validation JSON input. Repeat for multiple files.",
+    )
+    parser.add_argument("--out", default=None, type=Path, help=f"Output JSON path or directory for {PRIVATE_VALIDATION_AGGREGATE_JSON}.")
+    args = parser.parse_args(argv)
+    try:
+        path, payload = write_private_validation_aggregate(input_dir=args.input_dir, files=args.file, output_path=args.out)
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    print(f"Private validation aggregate summary: {path}")
+    print(f"Validation status: {payload['status']}")
+    print(f"Validation groups: {payload['group_count']}")
+    print("Privacy: public-safe aggregate metrics only; private labels, paths, filenames, hashes, OCR text, and images are omitted.")
     return 0 if payload["status"] == "pass" else 1
 
 

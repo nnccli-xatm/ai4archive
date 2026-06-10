@@ -31,6 +31,7 @@ Public-safe aggregate CLI commands currently also include:
 
 - `archive-scan-qc rule-template-catalog`
 - `archive-scan-qc rule-template-dry-run`
+- `archive-scan-qc private-validation-aggregate`
 
 Normal scan reports, processing manifests, local review exports, and delivery
 manifests can include row-level private evidence. Treat them as local-only
@@ -50,6 +51,7 @@ Public-safe aggregate outputs include release and handoff summaries such as
 `review_decision_verification_summary.json`, `acceptance_summary.json`,
 `aggregate_evidence_bundle_summary.json`,
 `final_production_handoff_summary.json`, `public_safe_validation_index.json`,
+`private_validation_aggregate_summary.json`,
 `artifact_readiness_checklist.json`, and `workbench_public_summary.json`,
 subject to local policy review. Service-job rehearsal cores also write
 `service_job_public_summary.json` with schema

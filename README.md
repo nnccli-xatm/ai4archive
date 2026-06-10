@@ -779,6 +779,24 @@ color-delta, and edge-energy drift metrics with limits. They do not
 publish paths, filenames, hashes, thumbnails, OCR text, image content, or
 environment values.
 
+### Private validation aggregate
+
+For operator-approved private validation runs, keep raw per-image results local
+and reduce them before sharing:
+
+```bash
+archive-scan-qc private-validation-aggregate \
+  --input-dir /placeholder/private-validation-output/private-results \
+  --out /placeholder/private-validation-output/release-candidate
+```
+
+The command writes `private_validation_aggregate_summary.json` with schema
+`scan-qc.private-validation-aggregate.v1`. It accepts private local JSON inputs
+but publishes only public group IDs, aggregate item counts, allowlisted quality
+metric summaries, risk-code counts, and privacy self-check status. It omits
+private labels, paths, filenames, hashes, OCR text, thumbnails, row-level rows,
+and image bytes.
+
 ### Review and rule calibration
 
 After a local scan, treat `scan_qc_report.json`, HTML, CSVs, and review
@@ -1413,6 +1431,10 @@ After `release_candidate_summary.json` and
 `aggregate_evidence_bundle_summary.json` are available, run:
 
 ```bash
+archive-scan-qc private-validation-aggregate \
+  --input-dir /placeholder/private-validation-output/private-results \
+  --out /placeholder/private-validation-output/release-candidate
+
 archive-scan-qc final-handoff-summary \
   --evidence-dir /placeholder/private-validation-output/release-candidate
 

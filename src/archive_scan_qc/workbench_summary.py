@@ -108,6 +108,12 @@ KNOWN_WORKBENCH_ARTIFACTS = (
         "scan-qc.public-safe-validation-index.",
     ),
     WorkbenchArtifact(
+        "private_validation_aggregate_summary.json",
+        "private_validation_aggregate",
+        "Private validation aggregate summary",
+        "scan-qc.private-validation-aggregate.",
+    ),
+    WorkbenchArtifact(
         "artifact_readiness_checklist.json",
         "artifact_readiness_checklist",
         "Public-safe artifact readiness checklist",

@@ -72,6 +72,7 @@ SOURCE_TEST_MAP: dict[str, set[str]] = {
         "tests/test_image_processing_capability_smoke.py",
         "tests/test_public_capability_contract.py",
         "tests/test_production_review_queue.py",
+        "tests/test_private_validation.py",
         "tests/test_scan_background_stains.py",
         "tests/test_scan_processing_combo.py",
         "tests/test_scan_processing_reuse.py",
@@ -93,6 +94,7 @@ SOURCE_TEST_MAP: dict[str, set[str]] = {
     },
     "manifest.py": {"tests/test_manifest.py"},
     "preflight.py": {"tests/test_preflight_run_plan.py"},
+    "private_validation.py": {"tests/test_private_validation.py"},
     "processing.py": set(PROCESSING_TARGETED_TESTS),
     "processing_plan.py": {
         "tests/test_scan_background_stains.py",
@@ -146,7 +148,7 @@ SOURCE_TEST_MAP: dict[str, set[str]] = {
     "service_api.py": {"tests/test_service_api.py"},
     "service_http.py": {"tests/test_service_http.py"},
     "service_jobs.py": {"tests/test_service_jobs.py"},
-    "validation_index.py": {"tests/test_validation_index.py"},
+    "validation_index.py": {"tests/test_private_validation.py", "tests/test_validation_index.py"},
     "workbench_summary.py": {"tests/test_workbench_summary.py"},
 }
 

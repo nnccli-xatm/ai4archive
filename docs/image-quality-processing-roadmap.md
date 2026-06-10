@@ -479,6 +479,14 @@ review artifacts, source-integrity counts, and public-safe summaries.
 - 质量收益、过处理风险、处理失败、隐私自检和 cleanup 均有明确结果。
 - 任何算法默认值变化必须更新模板版本和 migration note。
 
+Implementation note, 2026-06-10: `archive-scan-qc private-validation-aggregate`
+now writes `private_validation_aggregate_summary.json` with schema
+`scan-qc.private-validation-aggregate.v1`. It reduces operator-approved private
+validation JSON inputs to public group IDs, aggregate item counts, allowlisted
+quality metric summaries, and risk-code counts. Raw private labels, paths,
+filenames, hashes, OCR text, row-level rows, thumbnails, and image bytes remain
+local.
+
 ## 6. 第一批建议 Issue
 
 1. 定义 `processing_quality_summary.json` schema 和 public-safe 字段。

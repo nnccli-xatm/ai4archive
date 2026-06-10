@@ -167,6 +167,7 @@ class TargetedSelectorTests(unittest.TestCase):
                     "src/archive_scan_qc/handoff.py",
                     "src/archive_scan_qc/image_processing_capability_smoke.py",
                     "src/archive_scan_qc/preflight.py",
+                    "src/archive_scan_qc/private_validation.py",
                     "src/archive_scan_qc/production_rehearsal.py",
                     "src/archive_scan_qc/processing_review.py",
                     "src/archive_scan_qc/public_capability_contract.py",
@@ -195,6 +196,7 @@ class TargetedSelectorTests(unittest.TestCase):
         self.assertIn("test_handoff_manifest", selected)
         self.assertIn("test_image_processing_capability_smoke", selected)
         self.assertIn("test_preflight_run_plan", selected)
+        self.assertIn("test_private_validation", selected)
         self.assertIn("test_production_rehearsal", selected)
         self.assertIn("test_processing_review", selected)
         self.assertIn("test_public_capability_contract", selected)

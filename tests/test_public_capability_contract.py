@@ -34,6 +34,7 @@ class PublicCapabilityContractTests(unittest.TestCase):
         public_safe_commands = {item["command"] for item in contract["public_cli"]["public_safe_aggregate_commands"]}
         self.assertIn("archive-scan-qc rule-template-catalog", public_safe_commands)
         self.assertIn("archive-scan-qc rule-template-dry-run", public_safe_commands)
+        self.assertIn("archive-scan-qc private-validation-aggregate", public_safe_commands)
         prototype_commands = {item["command"] for item in contract["public_cli"]["prototype_or_validation_commands"]}
         self.assertIn("archive-scan-qc service-api", prototype_commands)
 
@@ -85,6 +86,14 @@ class PublicCapabilityContractTests(unittest.TestCase):
             "scan-qc.image-processing-capability-smoke.v1",
         )
         self.assertEqual(artifacts["public_capability_contract.json"]["stability"], "stable_public_safe_aggregate")
+        self.assertEqual(
+            artifacts["private_validation_aggregate_summary.json"]["schema_version"],
+            "scan-qc.private-validation-aggregate.v1",
+        )
+        self.assertEqual(
+            artifacts["private_validation_aggregate_summary.json"]["stability"],
+            "stable_public_safe_aggregate",
+        )
 
     def test_contract_separates_public_and_experimental_processing_backends(self) -> None:
         contract = build_public_capability_contract(generated_at="2026-06-09T00:00:00+00:00")

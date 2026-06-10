@@ -168,6 +168,7 @@ EXPECTED_ARTIFACTS = (
     ExpectedArtifact("deep_inspection_provider_probe.json", False, "scan-qc.deep-inspection-provider."),
     ExpectedArtifact("deep_inspection_candidate_summary.json", False, "scan-qc.deep-inspection-candidates."),
     ExpectedArtifact("review_decision_verification_summary.json", False, "scan-qc.review-decision-verification-summary."),
+    ExpectedArtifact("private_validation_aggregate_summary.json", False, "scan-qc.private-validation-aggregate."),
 )
 
 

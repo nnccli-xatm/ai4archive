@@ -331,7 +331,11 @@ M3 的第一片保护契约也已补齐：`photo-mixed-safe-v1` 通过生产 CLI
 public-safe 质量摘要。`image-processing-capability-smoke` 也已把混排保护变成
 public-safe 聚合质量证据：输出该 fixture 的像素变化率、颜色均值漂移和边缘能量漂移
 及对应阈值。本地 processing review package 已按背景清理、可读性提升、缺陷清理和
-原貌风险分组；更深的操作员逐项复核 UI 和预览授权仍属于后续前端/API 工作。
+原貌风险分组；更深的操作员逐项复核 UI 仍属于后续前端/API 工作。
+2026-06-10 补充：`private-validation-aggregate` 已提供私有样本验证的
+public-safe 聚合报告，只公开 public group ID、聚合 item 计数、allowlisted
+质量指标和风险代码；样本标签、路径、文件名、hash、OCR 文本、行级记录和图片内容
+仍只留本地。
 
 ## 7. 阶段 3：前端改为 API Client
 

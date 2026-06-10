@@ -939,6 +939,10 @@ archive-scan-qc review-decisions-verify \
   --summary /placeholder/private-review-decisions/review_decisions.json \
   --out /placeholder/private-validation-output/review_decision_verification_summary.json
 
+archive-scan-qc private-validation-aggregate \
+  --input-dir /placeholder/private-validation-output/private-results \
+  --out /placeholder/private-validation-output
+
 archive-scan-qc evidence-bundle-verify \
   --evidence-dir /placeholder/private-validation-output
 
@@ -969,6 +973,13 @@ decision counts, privacy status, blocking and warning counts by code, and final
 handoff readiness. It must not include private filenames, source roots, hashes,
 OCR text, thumbnails, row-level findings, reviewer notes, prompts, provider
 commands, raw model output, object URLs, or actual sample data.
+
+`private_validation_aggregate_summary.json` is designed for operator-approved
+private image-quality validation. Raw private validation rows remain local; the
+published artifact may include only public group IDs, aggregate item counts,
+allowlisted metric summaries, risk-code counts, and privacy self-check status.
+It must not include private labels, local paths, filenames, hashes, OCR text,
+thumbnails, row-level rows, or image bytes.
 
 `aggregate_evidence_bundle_summary.json` and
 `final_production_handoff_summary.json` are public-safe aggregate summaries
