@@ -294,6 +294,63 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 - 回归通过 CLI 从 fixture 生成 `private_validation_aggregate_summary.json`，
   并验证输出不包含真实路径、文件名、hash、OCR、缩略图或图片内容。
 
+## P1b：OCR 预处理质量专项
+
+专项计划见 `docs/ocr-preprocessing-image-quality-plan.md`。本组任务目标是让扫描图片输出对 OCR 有显著质量改善，不能再以“稳定运行但质量不提升”作为完成口径。
+
+### DEV-151 OCR 预处理 profile 和验收 harness
+
+状态：`next`
+
+范围：
+
+- 新增 `ocr-preprocess-v1` 和 `ocr-preprocess-light-v1` 模板/输出 profile。
+- 扩展 NoisyOffice runner，支持 profile 对比和质量阈值失败退出。
+- 增加 `ocr_preprocessing_quality_summary.json` public-safe 聚合摘要。
+- 定义完成门槛：NoisyOffice 灰度增强 PSNR +1.0 dB、SSIM +0.015、MSE -10%；
+  不达标不得标记完成。
+
+### DEV-152 OCR 背景归一和光照校正
+
+状态：`next`
+
+范围：
+
+- 实现 tile-based 背景估计、光照场校正、灰底/阴影/泛黄背景归一。
+- 前景 mask、表格线、印章/批注和彩色区域保护必须参与回退。
+- NoisyOffice 至少产生宏平均正向改善，且每个噪声分组不得整体变差。
+
+### DEV-153 OCR 专用去噪和笔画保护
+
+状态：`next`
+
+范围：
+
+- 从孤立 speckle 扩展到椒盐噪声、轻纹理噪声和扫描噪声。
+- 引入 connected component、stroke-width 和前景保留 guardrail，防止标点、小字和细笔画被误删。
+- NoisyOffice 至少 70% 样本 PSNR 或 SSIM 正向改善，前景保留率不下降超过门槛。
+
+### DEV-154 自适应阈值和二值 OCR 输出
+
+状态：`next`
+
+范围：
+
+- 输出 `ocr_gray_enhanced` 与 `ocr_binary` 两类 OCR 派生图。
+- 实现 Sauvola/Wolf/Niblack 或 OpenCV adaptive threshold 路线。
+- 用 DIBCO/H-DIBCO 或等价二值化指标验收二值输出，不用灰度 PSNR 单独判断。
+
+### DEV-155 OCR 实测和真实样本聚合验收
+
+状态：`next`
+
+范围：
+
+- 增加本机 OCR provider probe，默认不调用外部 OCR。
+- synthetic known-text fixture 计算 CER/WER，目标 CER 相对下降至少 25%。
+- 私有样本只提交聚合指标和风险代码；OCR 文本、目录行、路径、文件名、hash、
+  缩略图、图片内容和行级候选必须保持 local-only。
+
 ## P2：CI、发布和性能
 
 ### DEV-201 CI 四组稳定回归
