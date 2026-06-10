@@ -324,6 +324,84 @@ def build_public_capability_contract(generated_at: str | None = None) -> dict[st
                 "prototype_or_validation",
             ),
         ],
+        "service_contract": {
+            "status": "prototype_or_validation",
+            "source_images_modified": False,
+            "job_state_isolation": {
+                "private_checkpoint": "service_job.json",
+                "public_summary": "service_job_public_summary.json",
+                "public_index": "service_job_index_public_summary.json",
+                "private_checkpoint_contains_local_paths": True,
+                "public_surfaces_contain_local_paths": False,
+            },
+            "public_surfaces": [
+                {
+                    "id": "service_job_public_summary",
+                    "schema_version": "scan-qc.service-job-public-summary.v1",
+                    "scope": "single job polling and handoff",
+                    "may_include_job_id": True,
+                    "may_include_quality_metrics": True,
+                    "may_include_processing_profile": True,
+                    "quality_detail": "job_level_public_safe_aggregate",
+                    "allowed_processing_profiles": ["standard", "print_clean", "photo_mixed_safe"],
+                    "allowed_quality_context": [
+                        "blocking_codes",
+                        "processing_warning_counts",
+                        "processing_retry_counts",
+                        "quality_category_counts",
+                        "quality_operation_category_booleans",
+                        "whitelisted_quality_metrics",
+                        "quality_signal_status",
+                        "guardrail_status",
+                    ],
+                    "allowed_print_clean_context": [
+                        "processing_profile:print_clean",
+                        "background_stains_delta",
+                        "changed_pixel_ratio",
+                        "bleed_through_delta",
+                        "scanlines_delta",
+                        "illumination_gradient_correction_delta",
+                    ],
+                    "forbidden_content": _public_forbidden_content(),
+                },
+                {
+                    "id": "service_job_index_quality",
+                    "schema_version": "scan-qc.service-job-index-quality.v1",
+                    "scope": "root job index nested quality aggregate",
+                    "may_include_job_id": False,
+                    "may_include_quality_metrics": False,
+                    "may_include_processing_profile": False,
+                    "quality_detail": "index_level_counts_only",
+                    "allowed_quality_context": [
+                        "quality_availability",
+                        "job_status_counts",
+                        "quality_signal_status_counts",
+                        "aggregate_file_counts",
+                        "blocking_code_counts",
+                    ],
+                    "forbidden_content": _public_forbidden_content()
+                    + ["job_ids", "quality_rows", "quality_metrics", "processing_profiles"],
+                },
+                {
+                    "id": "service_production_session_quality",
+                    "schema_version": "scan-qc.service-production-session.v1",
+                    "scope": "GET /api/production/session nested quality aggregate",
+                    "may_include_job_id": False,
+                    "may_include_quality_metrics": False,
+                    "may_include_processing_profile": False,
+                    "quality_detail": "session_level_counts_only",
+                    "allowed_quality_context": [
+                        "quality_availability",
+                        "job_status_counts",
+                        "quality_signal_status_counts",
+                        "aggregate_file_counts",
+                        "blocking_code_counts",
+                    ],
+                    "forbidden_content": _public_forbidden_content()
+                    + ["job_ids", "quality_rows", "quality_metrics", "processing_profiles"],
+                },
+            ],
+        },
         "processing_contract": {
             "source_images_modified": False,
             "derivative_processing_requires_process_out": True,
@@ -441,3 +519,17 @@ def _nested_schema(name: str, schema_version: str, stability: str) -> dict[str, 
         "schema_version": schema_version,
         "stability": stability,
     }
+
+
+def _public_forbidden_content() -> list[str]:
+    return [
+        "local_paths",
+        "file_lists",
+        "filenames",
+        "hashes",
+        "thumbnails",
+        "ocr_text",
+        "image_content",
+        "raw_review_rows",
+        "local_preview_resources",
+    ]

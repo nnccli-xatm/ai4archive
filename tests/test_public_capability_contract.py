@@ -118,6 +118,42 @@ class PublicCapabilityContractTests(unittest.TestCase):
         self.assertIn("built_in_ocr", processing["explicitly_out_of_scope"])
         self.assertFalse(processing["source_images_modified"])
 
+    def test_contract_declares_service_quality_public_boundaries(self) -> None:
+        contract = build_public_capability_contract(generated_at="2026-06-09T00:00:00+00:00")
+        service = contract["service_contract"]
+
+        self.assertEqual(service["status"], "prototype_or_validation")
+        self.assertFalse(service["source_images_modified"])
+        self.assertTrue(service["job_state_isolation"]["private_checkpoint_contains_local_paths"])
+        self.assertFalse(service["job_state_isolation"]["public_surfaces_contain_local_paths"])
+
+        surfaces = {item["id"]: item for item in service["public_surfaces"]}
+        job_summary = surfaces["service_job_public_summary"]
+        self.assertEqual(job_summary["schema_version"], "scan-qc.service-job-public-summary.v1")
+        self.assertTrue(job_summary["may_include_job_id"])
+        self.assertTrue(job_summary["may_include_quality_metrics"])
+        self.assertIn("print_clean", job_summary["allowed_processing_profiles"])
+        self.assertIn("processing_profile:print_clean", job_summary["allowed_print_clean_context"])
+        self.assertIn("background_stains_delta", job_summary["allowed_print_clean_context"])
+        self.assertIn("changed_pixel_ratio", job_summary["allowed_print_clean_context"])
+        self.assertIn("whitelisted_quality_metrics", job_summary["allowed_quality_context"])
+        self.assertIn("local_paths", job_summary["forbidden_content"])
+        self.assertIn("filenames", job_summary["forbidden_content"])
+        self.assertIn("hashes", job_summary["forbidden_content"])
+
+        for aggregate_id in ("service_job_index_quality", "service_production_session_quality"):
+            aggregate = surfaces[aggregate_id]
+            self.assertFalse(aggregate["may_include_job_id"])
+            self.assertFalse(aggregate["may_include_quality_metrics"])
+            self.assertFalse(aggregate["may_include_processing_profile"])
+            self.assertIn("quality_signal_status_counts", aggregate["allowed_quality_context"])
+            self.assertIn("aggregate_file_counts", aggregate["allowed_quality_context"])
+            self.assertIn("blocking_code_counts", aggregate["allowed_quality_context"])
+            self.assertIn("job_ids", aggregate["forbidden_content"])
+            self.assertIn("quality_rows", aggregate["forbidden_content"])
+            self.assertIn("quality_metrics", aggregate["forbidden_content"])
+            self.assertIn("processing_profiles", aggregate["forbidden_content"])
+
     def test_public_capability_contract_cli_writes_public_safe_json(self) -> None:
         with tempfile.TemporaryDirectory(prefix="public-capability-contract-") as temp_dir:
             out_dir = Path(temp_dir) / "contract"
