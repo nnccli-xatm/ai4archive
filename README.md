@@ -1599,8 +1599,8 @@ per-job worker, global active-worker, minimum free-space, and per-job temp
 quotas in public summaries.
 Recovering the whole service root also writes
 `service_job_index_public_summary.json`, a public-safe aggregate index of job
-states, index-level quality status counts, and per-job public summaries for
-service polling.
+states, index-level quality status counts, index-level source-integrity counts,
+and per-job public summaries for service polling.
 If root-level recovery skips invalid or unreadable checkpoints, the index now
 reports only `skipped_job_count` and aggregate `recovery_issues` codes. It does
 not return skipped job IDs, local paths, checkpoint rows, or exception text.

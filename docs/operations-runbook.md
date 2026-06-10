@@ -360,8 +360,8 @@ event count, latest event type, latest state, and latest recovery status only.
 Do not publish event rows or the local log path.
 When recovering the full service root, read
 `service_job_index_public_summary.json` for aggregate job state counts and
-index-level quality status counts plus per-job public summaries; it is designed
-for polling without exposing local paths.
+index-level quality/source-integrity status counts plus per-job public
+summaries; it is designed for polling without exposing local paths.
 If individual checkpoints are invalid or unreadable, the same index reports
 only `skipped_job_count` and aggregate `recovery_issues.by_code`. Treat those
 codes as restart triage signals; do not publish skipped job IDs, checkpoint

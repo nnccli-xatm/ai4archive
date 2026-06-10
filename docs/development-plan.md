@@ -177,6 +177,10 @@ external scheduler can poll aggregate job state without reading private
 checkpoints. The index now also carries nested public-safe quality aggregates:
 quality availability, status counts, quality signal status counts, aggregate
 file counts, and blocking-code counts.
+It also carries nested source-integrity aggregates so schedulers can see
+checked/unchanged/modified/missing/added source-image counts and source-change
+booleans without reading source hashes, filenames, file lists, paths, or private
+checkpoints.
 Root-level recovery also reports public-safe `recovery_issues` aggregates when
 individual checkpoints are skipped. The index exposes only skipped counts and
 allowlisted issue codes, not skipped job IDs, paths, checkpoint rows, or

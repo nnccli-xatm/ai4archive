@@ -443,6 +443,10 @@ aggregates for quality availability, status counts, quality-signal status
 counts, aggregate file counts, and blocking-code counts, without exposing job
 IDs, paths, filenames, hashes, quality rows, OCR text, thumbnails, or image
 content.
+Follow-up, 2026-06-10: the public index now also includes nested source-integrity
+aggregates for checked/unchanged/modified/missing/added source-image counts and
+source-change booleans, without exposing file lists, paths, filenames, hashes,
+OCR text, thumbnails, or image content.
 Follow-up, 2026-06-09: the service API now exposes a local-only review artifact
 reader at `GET /api/jobs/{job_id}/local-review/{artifact_id}`. It accepts only
 `processing-review-package` and `production-review-queue`, validates the

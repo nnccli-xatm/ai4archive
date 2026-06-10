@@ -69,7 +69,12 @@ rows, local paths, filenames, hashes, or exception messages. The index may also
 expose nested `scan-qc.service-job-index-quality.v1` aggregates for quality
 availability, status counts, quality-signal status counts, aggregate file
 counts, and blocking-code counts only; it must not expose job IDs, quality rows,
-paths, filenames, hashes, OCR text, thumbnails, or image content. The service job
+paths, filenames, hashes, OCR text, thumbnails, or image content. The index may
+also expose nested `scan-qc.service-job-index-source-integrity.v1` aggregates for
+source-integrity availability, status counts, aggregate source-image counts
+(checked, unchanged, modified, missing, and added), and source-change booleans
+only; it must not expose file
+lists, paths, filenames, hashes, OCR text, thumbnails, or image content. The service job
 public summary may expose aggregate quality category counts,
 whitelisted aggregate `quality_metrics`, blocking codes, quality signal status,
 and guardrail summaries from `processing_quality_summary.json`, plus aggregate

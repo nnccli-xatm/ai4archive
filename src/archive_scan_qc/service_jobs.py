@@ -46,6 +46,7 @@ SERVICE_JOB_PUBLIC_SUMMARY_SCHEMA_VERSION = "scan-qc.service-job-public-summary.
 SERVICE_JOB_INDEX_PUBLIC_SUMMARY_SCHEMA_VERSION = "scan-qc.service-job-index-public-summary.v1"
 SERVICE_JOB_INDEX_RECOVERY_ISSUES_SCHEMA_VERSION = "scan-qc.service-job-index-recovery-issues.v1"
 SERVICE_JOB_INDEX_QUALITY_SCHEMA_VERSION = "scan-qc.service-job-index-quality.v1"
+SERVICE_JOB_INDEX_SOURCE_INTEGRITY_SCHEMA_VERSION = "scan-qc.service-job-index-source-integrity.v1"
 SERVICE_JOB_PUBLIC_TIMINGS_SCHEMA_VERSION = "scan-qc.service-job-public-timings.v1"
 SERVICE_JOB_SOURCE_INTEGRITY_SCHEMA_VERSION = "scan-qc.service-job-source-integrity.v1"
 LOCAL_REVIEW_ARTIFACT_SCHEMA_VERSION = "scan-qc.service-job-local-review-artifact.v1"
@@ -410,6 +411,7 @@ def recover_service_jobs(service_root: Path) -> dict[str, Any]:
         "state_counts": state_counts,
         "jobs": summaries,
         "quality": _public_index_quality_payload(summaries),
+        "source_integrity": _public_index_source_integrity_payload(summaries),
         "recovery_issues": _public_index_recovery_issues_payload(recovery_issue_codes),
         "privacy": _public_summary_privacy(),
     }
@@ -1353,6 +1355,78 @@ def _public_index_quality_payload(summaries: list[dict[str, Any]]) -> dict[str, 
 def _increment_count(counts: dict[str, int], key: str) -> None:
     safe_key = key.strip() or "unknown"
     counts[safe_key] = counts.get(safe_key, 0) + 1
+
+
+def _public_index_source_integrity_payload(summaries: list[dict[str, Any]]) -> dict[str, Any]:
+    status_counts: dict[str, int] = {}
+    reason_code_counts: dict[str, int] = {}
+    provided_job_count = 0
+    total_checked_files = 0
+    total_unchanged_files = 0
+    total_modified_files = 0
+    total_missing_files = 0
+    total_added_files = 0
+    jobs_with_source_images_modified = 0
+    jobs_with_source_tree_changed = 0
+
+    for summary in summaries:
+        source_integrity = (
+            summary.get("source_integrity") if isinstance(summary.get("source_integrity"), dict) else {}
+        )
+        provided = source_integrity.get("provided") is True
+        if provided:
+            provided_job_count += 1
+        status = str(source_integrity.get("status") or "unknown")
+        _increment_count(status_counts, status)
+        reason_code = source_integrity.get("reason_code")
+        if isinstance(reason_code, str) and reason_code:
+            _increment_count(reason_code_counts, reason_code)
+        total_checked_files += _safe_int(source_integrity.get("checked_files")) or 0
+        total_unchanged_files += _safe_int(source_integrity.get("unchanged_files")) or 0
+        total_modified_files += _safe_int(source_integrity.get("modified_files")) or 0
+        total_missing_files += _safe_int(source_integrity.get("missing_files")) or 0
+        total_added_files += _safe_int(source_integrity.get("added_files")) or 0
+        if bool(source_integrity.get("source_images_modified")):
+            jobs_with_source_images_modified += 1
+        if bool(source_integrity.get("source_tree_changed")):
+            jobs_with_source_tree_changed += 1
+
+    return {
+        "schema_version": SERVICE_JOB_INDEX_SOURCE_INTEGRITY_SCHEMA_VERSION,
+        "provided": provided_job_count > 0,
+        "status": "pass" if provided_job_count and jobs_with_source_tree_changed == 0 else (
+            "not_available" if provided_job_count == 0 else "fail"
+        ),
+        "aggregate_only": True,
+        "public_safe": True,
+        "job_count": len(summaries),
+        "provided_job_count": provided_job_count,
+        "not_provided_job_count": max(0, len(summaries) - provided_job_count),
+        "checked_files": total_checked_files,
+        "unchanged_files": total_unchanged_files,
+        "modified_files": total_modified_files,
+        "missing_files": total_missing_files,
+        "added_files": total_added_files,
+        "jobs_with_source_images_modified": jobs_with_source_images_modified,
+        "jobs_with_source_tree_changed": jobs_with_source_tree_changed,
+        "source_images_modified": jobs_with_source_images_modified > 0,
+        "source_tree_changed": jobs_with_source_tree_changed > 0,
+        "status_counts": status_counts,
+        "reason_code_counts": reason_code_counts,
+        "hashes_recorded_in_public_summary": False,
+        "privacy": {
+            "public_safe": True,
+            "aggregate_only": True,
+            "contains_paths": False,
+            "contains_filenames": False,
+            "contains_hashes": False,
+            "contains_thumbnails": False,
+            "contains_ocr_text": False,
+            "contains_image_content": False,
+            "contains_job_ids": False,
+            "contains_file_lists": False,
+        },
+    }
 
 
 def _public_recovery_payload(recovery: Any) -> dict[str, Any]:

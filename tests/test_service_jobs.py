@@ -22,6 +22,7 @@ from archive_scan_qc.service_jobs import (
     SERVICE_JOB_INDEX_QUALITY_SCHEMA_VERSION,
     SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON,
     SERVICE_JOB_INDEX_RECOVERY_ISSUES_SCHEMA_VERSION,
+    SERVICE_JOB_INDEX_SOURCE_INTEGRITY_SCHEMA_VERSION,
     SERVICE_JOB_PUBLIC_SUMMARY_JSON,
     SERVICE_JOB_RECORD_JSON,
     ServiceJobConfig,
@@ -307,6 +308,25 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertEqual(index_quality["blocking_code_counts"], {})
             self.assertFalse(index_quality["privacy"]["contains_paths"])
             self.assertFalse(index_quality["privacy"]["contains_quality_rows"])
+            index_source_integrity = index_summary["source_integrity"]
+            self.assertEqual(
+                index_source_integrity["schema_version"],
+                SERVICE_JOB_INDEX_SOURCE_INTEGRITY_SCHEMA_VERSION,
+            )
+            self.assertTrue(index_source_integrity["provided"])
+            self.assertEqual(index_source_integrity["status"], "pass")
+            self.assertEqual(index_source_integrity["job_count"], 1)
+            self.assertEqual(index_source_integrity["provided_job_count"], 1)
+            self.assertEqual(index_source_integrity["checked_files"], 1)
+            self.assertEqual(index_source_integrity["unchanged_files"], 1)
+            self.assertEqual(index_source_integrity["modified_files"], 0)
+            self.assertEqual(index_source_integrity["missing_files"], 0)
+            self.assertEqual(index_source_integrity["added_files"], 0)
+            self.assertFalse(index_source_integrity["source_images_modified"])
+            self.assertFalse(index_source_integrity["source_tree_changed"])
+            self.assertFalse(index_source_integrity["privacy"]["contains_paths"])
+            self.assertFalse(index_source_integrity["privacy"]["contains_hashes"])
+            self.assertFalse(index_source_integrity["privacy"]["contains_file_lists"])
             review_package = json.loads(
                 (job_root / "review" / "processing_review_package.json").read_text(encoding="utf-8")
             )
@@ -865,6 +885,21 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertFalse(summary["quality"]["privacy"]["contains_paths"])
             self.assertFalse(summary["quality"]["privacy"]["contains_quality_rows"])
             self.assertEqual(
+                summary["source_integrity"]["schema_version"],
+                SERVICE_JOB_INDEX_SOURCE_INTEGRITY_SCHEMA_VERSION,
+            )
+            self.assertFalse(summary["source_integrity"]["provided"])
+            self.assertEqual(summary["source_integrity"]["status"], "not_available")
+            self.assertEqual(summary["source_integrity"]["job_count"], 2)
+            self.assertEqual(summary["source_integrity"]["provided_job_count"], 0)
+            self.assertEqual(summary["source_integrity"]["not_provided_job_count"], 2)
+            self.assertEqual(summary["source_integrity"]["checked_files"], 0)
+            self.assertEqual(summary["source_integrity"]["status_counts"], {"not_available": 2})
+            self.assertFalse(summary["source_integrity"]["source_images_modified"])
+            self.assertFalse(summary["source_integrity"]["source_tree_changed"])
+            self.assertFalse(summary["source_integrity"]["privacy"]["contains_paths"])
+            self.assertFalse(summary["source_integrity"]["privacy"]["contains_file_lists"])
+            self.assertEqual(
                 summary["recovery_issues"]["schema_version"],
                 SERVICE_JOB_INDEX_RECOVERY_ISSUES_SCHEMA_VERSION,
             )
@@ -875,6 +910,7 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertEqual(file_summary["skipped_job_count"], 0)
             self.assertEqual(file_summary["state_counts"], {"created": 2})
             self.assertEqual(file_summary["quality"]["status_counts"], {"not_available": 2})
+            self.assertEqual(file_summary["source_integrity"]["status_counts"], {"not_available": 2})
             self.assertEqual(file_summary["recovery_issues"]["status"], "clear")
             self.assertEqual({job["job_id"] for job in summary["jobs"]}, {"job-testindex001", "job-testindex002"})
             _assert_public_text_omits(self, raw, str(root.resolve()), "private_page_")

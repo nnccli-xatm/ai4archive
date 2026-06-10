@@ -173,6 +173,10 @@ class ServiceApiCoreTests(unittest.TestCase):
                 capabilities["schemas"]["service_job_index_recovery_issues"],
                 "scan-qc.service-job-index-recovery-issues.v1",
             )
+            self.assertEqual(
+                capabilities["schemas"]["service_job_index_source_integrity"],
+                "scan-qc.service-job-index-source-integrity.v1",
+            )
             self.assertGreaterEqual(capabilities["resource_limits"]["max_active_async_jobs"], 1)
             self.assertGreaterEqual(capabilities["resource_limits"]["max_active_workers"], 1)
             self.assertGreaterEqual(capabilities["resource_limits"]["min_free_space_bytes"], 1)
