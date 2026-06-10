@@ -328,6 +328,10 @@ Follow-up, 2026-06-10: `print-clean-v1` production CLI coverage now includes a
 stable low-contrast neutral scanline page as well. The manifest and public-safe
 quality summary must show bounded positive scanline deltas and changed-pixel
 ratios while keeping source bytes unchanged.
+Follow-up, 2026-06-10: `print-clean-v1` production CLI coverage now also includes
+a faint reverse-side bleed-through page. The contract requires
+`applied_faint_reverse_ghost`, bounded positive bleed-through deltas,
+public-safe quality metrics, no guardrail failures, and unchanged source bytes.
 
 Follow-up, 2026-06-09: the synthetic smoke fixtures now also cover a safe narrow
 fold-shadow band, a diffuse reverse-side bleed-through ghost, and a segmented
