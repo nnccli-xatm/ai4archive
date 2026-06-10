@@ -342,7 +342,7 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 
 ### DEV-301 生产工作台改为 API client
 
-状态：`next`
+状态：`in-progress`
 
 范围：
 
@@ -365,9 +365,12 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
   finish-export，旧 local bridge 仅作为无 job id 回退。
 - 本地 loopback workbench 已提供 `/api/production/progress` 兼容路由；前端轮询
   在已有 `job_id` 后走 production progress，初始恢复才回退旧 `/api/status`。
+- 本地 loopback workbench 已提供 `/api/production/setup` 和
+  `/api/production/start` 兼容路由；前端保存文件夹走 production setup，
+  启动处理在已有 `job_id` 后走 production start。
 - 前端守护测试已覆盖 production facade route helper、local bridge route helper
-  和 local-only review/preview URL 构造，后续剩余重点是把 setup/start 与
-  session restore 从 local bridge 切换到服务 facade。
+  和 local-only review/preview URL 构造，后续剩余重点是把 session restore
+  从 local bridge 切换到服务 facade。
 
 ### DEV-401 批量重命名 plan/apply
 

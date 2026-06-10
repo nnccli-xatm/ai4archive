@@ -3379,7 +3379,7 @@
       let payload;
       try {
         els.loadStatus.textContent = duringLaunch ? runningGuidanceText(null) : "正在保存文件夹。";
-        payload = await apiPost(localBridgePath("configure"), {
+        payload = await apiPost(productionApiPath("setup"), {
           input_dir: els.inputPath.value.trim(),
           derivatives_dir: els.outputPath.value.trim(),
           processing_mode: selectedProcessingMode()
@@ -3503,11 +3503,13 @@
           render();
           return;
         }
-        const payload = await apiPost(localBridgePath("start"), {
-          input_dir: els.inputPath.value.trim(),
-          derivatives_dir: els.outputPath.value.trim(),
-          processing_mode: selectedProcessingMode()
-        });
+        const payload = state.jobId
+          ? await apiPost(productionApiPath("start"), { job_id: state.jobId })
+          : await apiPost(localBridgePath("start"), {
+              input_dir: els.inputPath.value.trim(),
+              derivatives_dir: els.outputPath.value.trim(),
+              processing_mode: selectedProcessingMode()
+            });
         state.launchLocked = false;
         applyServerStatus(payload);
         els.loadStatus.textContent = runningGuidanceText();

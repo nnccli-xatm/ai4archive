@@ -213,6 +213,8 @@ class ProductionWorkbenchRegressionGuardTests(unittest.TestCase):
             "/api/production/preview",
             'return productionApiPath("preview", { job_id: state.jobId, local_id: localId, source });',
             "function reviewActionsRequest(reviewDecisions)",
+            'productionApiPath("setup")',
+            'productionApiPath("start")',
             'productionApiPath("progress", { job_id: state.jobId })',
             'productionApiPath("reviewActions")',
             'productionApiPath("finishExport")',
@@ -328,10 +330,14 @@ class ProductionWorkbenchRegressionGuardTests(unittest.TestCase):
             self.assertIn(required, html)
         for required in [
             'elif self.path == "/api/open-output-folder":',
+            'elif self.path == "/api/production/setup"',
+            'elif self.path == "/api/production/start"',
             'parsed.path == "/api/production/review-queue"',
             'parsed.path == "/api/production/progress"',
             'parsed.path == "/api/production/review-item"',
             'parsed.path == "/api/production/preview"',
+            "production_setup",
+            "production_start",
             "production_progress",
             "production_review_queue",
             "production_review_item",

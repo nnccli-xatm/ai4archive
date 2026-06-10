@@ -425,6 +425,20 @@ class WorkbenchController:
         if not configured or safe_id != current_job_id:
             raise ValueError("local_job_id_mismatch")
 
+    def production_setup(
+        self,
+        input_dir: Path | str,
+        derivatives_dir: Path | str,
+        metadata_dir: Path | str | None = None,
+        processing_mode: str | None = None,
+    ) -> dict[str, Any]:
+        return {**self.configure(input_dir, derivatives_dir, metadata_dir, processing_mode), "view": "setup"}
+
+    def production_start(self, request: dict[str, Any]) -> dict[str, Any]:
+        job_id = str(request.get("job_id") or "").strip()
+        self._require_local_job_id(job_id)
+        return {**self.start(), "view": "start"}
+
     def save_review_decisions(self, summary: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
             derivatives_dir = self.derivatives_dir
@@ -931,10 +945,19 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
                     _optional_path(payload, "metadata_dir", "本机状态文件夹"),
                     str(payload.get("processing_mode") or DEFAULT_PROCESSING_MODE),
                 )
+            elif self.path == "/api/production/setup":
+                result = self.workbench_controller.production_setup(
+                    _required_path(payload, "input_dir", "scan input folder"),
+                    _required_path(payload, "derivatives_dir", "derivatives output folder"),
+                    _optional_path(payload, "metadata_dir", "metadata folder"),
+                    str(payload.get("processing_mode") or DEFAULT_PROCESSING_MODE),
+                )
             elif self.path == "/api/pick-folder":
                 result = _pick_operator_folder(payload)
             elif self.path == "/api/start":
                 result = self.workbench_controller.start()
+            elif self.path == "/api/production/start":
+                result = self.workbench_controller.production_start(payload)
             elif self.path == "/api/retry":
                 result = self.workbench_controller.retry()
             elif self.path == "/api/reset-batch":

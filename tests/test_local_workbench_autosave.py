@@ -1105,7 +1105,8 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
                         "artifacts": {},
                         "counts": {"total_files": 1, "processed_files": 1, "resumed_files": 0, "failed_files": 0, "retry_list_files": 0},
                     }
-                    controller.start()
+                    started = controller.production_start({"job_id": controller.status()["job_id"]})
+                    self.assertEqual(started["view"], "start")
                     if controller._thread:
                         controller._thread.join(timeout=5)
 
@@ -1790,6 +1791,18 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             thread.start()
             base_url = f"http://127.0.0.1:{server.server_port}"
             try:
+                setup_response = urlopen(
+                    f"{base_url}/api/production/setup",
+                    data=json.dumps(
+                        {
+                            "input_dir": str(input_dir),
+                            "derivatives_dir": str(output_dir),
+                            "metadata_dir": str(metadata_dir),
+                        }
+                    ).encode("utf-8"),
+                    timeout=5,
+                )
+                setup = json.loads(setup_response.read().decode("utf-8"))
                 status = json.loads(urlopen(f"{base_url}/api/status", timeout=5).read().decode("utf-8"))
                 job_id = status["job_id"]
                 review_queue = json.loads(
@@ -1831,6 +1844,8 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=5)
 
+            self.assertEqual(setup["view"], "setup")
+            self.assertTrue(setup["job_id"].startswith("job-local-workbench-"))
             self.assertEqual(review_queue["view"], "review_queue")
             self.assertEqual(progress["view"], "progress")
             self.assertEqual(progress["job_id"], job_id)
