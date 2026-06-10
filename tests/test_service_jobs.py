@@ -790,11 +790,9 @@ class ServiceJobBoundaryTests(unittest.TestCase):
                     start_service_job_async(service_root, "job-testasynclimit002")
                 second_status = recover_service_job(service_root, "job-testasynclimit002")
                 release.set()
-                _wait_for_state(
-                    self,
-                    lambda: recover_service_job(service_root, "job-testasynclimit001"),
-                    {"needs_recovery", "failed", "finished"},
-                )
+                _wait_for_async_job_inactive(self, service_root, "job-testasynclimit001")
+                terminal = recover_service_job(service_root, "job-testasynclimit001")
+                self.assertIn(terminal["state"], {"needs_recovery", "failed", "finished"})
 
             self.assertEqual(running["state"], "running")
             self.assertEqual(second_status["state"], "created")
@@ -828,11 +826,9 @@ class ServiceJobBoundaryTests(unittest.TestCase):
                     start_service_job_async(service_root, "job-testworkerlimit002")
                 second_status = recover_service_job(service_root, "job-testworkerlimit002")
                 release.set()
-                _wait_for_state(
-                    self,
-                    lambda: recover_service_job(service_root, "job-testworkerlimit001"),
-                    {"needs_recovery", "failed", "finished"},
-                )
+                _wait_for_async_job_inactive(self, service_root, "job-testworkerlimit001")
+                terminal = recover_service_job(service_root, "job-testworkerlimit001")
+                self.assertIn(terminal["state"], {"needs_recovery", "failed", "finished"})
 
             self.assertEqual(running["state"], "running")
             self.assertEqual(running["resource_limits"]["max_active_workers"], SERVICE_JOB_MAX_ACTIVE_WORKERS)
@@ -1288,6 +1284,18 @@ def _wait_for_state(testcase: unittest.TestCase, read_summary, states: set[str])
             return last_summary
         time.sleep(0.05)
     testcase.fail(f"service job did not reach one of {sorted(states)}: {last_summary}")
+
+
+def _wait_for_async_job_inactive(testcase: unittest.TestCase, service_root: Path, job_id: str) -> None:
+    key = service_jobs_module._async_job_key_from_parts(service_root, job_id)
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        with service_jobs_module._ASYNC_JOB_LOCK:
+            active = key in service_jobs_module._ASYNC_JOB_KEYS
+        if not active:
+            return
+        time.sleep(0.05)
+    testcase.fail(f"service async job did not unregister: {job_id}")
 
 
 def _assert_public_text_omits(testcase: unittest.TestCase, raw: str, *private_values: str) -> None:
