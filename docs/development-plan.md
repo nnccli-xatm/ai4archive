@@ -259,6 +259,9 @@ Concurrent async service-job regression now forces two real production jobs
 through the runner at the same time and verifies that job state, metadata,
 derivatives, template snapshots, processing manifests, review artifacts, and
 public summaries stay isolated per job.
+2026-06-10 补充：运行中的 async service job 取消竞态已增加回归；即使后台
+runner 随后完成，public summary 和 checkpoint 仍保持 `cancelled`，同时 source
+integrity 聚合会在 worker 收尾后刷新，且不泄露路径或文件名。
 本地 processing review package 已按背景清理、可读性提升、缺陷清理和原貌风险
 分组；service public summary 只透出这些分组的聚合计数，仍不暴露行级路径。
 终态 service job 的恢复现在会在本地 review artifact 缺失时，基于已有

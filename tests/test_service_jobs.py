@@ -740,6 +740,67 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "already terminal"):
                 run_service_job(service_root, "job-testcancel001")
 
+    def test_cancel_running_async_job_remains_cancelled_after_worker_finishes(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-job-cancel-running-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private-source"
+            service_root = root / "service-root"
+            input_dir.mkdir()
+            _write_page(input_dir / "private_page_001.png")
+            create_service_job(
+                ServiceJobConfig(input_dir=input_dir, service_root=service_root, workers=1),
+                job_id="job-testrunningcancel001",
+            )
+
+            started = threading.Event()
+            release = threading.Event()
+
+            def slow_production_run(config: Any) -> dict[str, Any]:
+                started.set()
+                self.assertTrue(release.wait(timeout=5), "test runner was not released")
+                return {
+                    "schema_version": "scan-qc.production-run-summary.v1",
+                    "state": "finished",
+                    "status": "finished",
+                    "counts": {
+                        "total_files": 1,
+                        "processed_files": 1,
+                        "failed_files": 0,
+                        "remaining_files": 0,
+                    },
+                    "artifacts": {},
+                }
+
+            with mock.patch.object(service_jobs_module, "run_production_folder", side_effect=slow_production_run):
+                running = start_service_job_async(service_root, "job-testrunningcancel001")
+                self.assertTrue(started.wait(timeout=5))
+                cancelled = cancel_service_job(service_root, "job-testrunningcancel001")
+                release.set()
+
+                deadline = time.monotonic() + 10
+                terminal = cancelled
+                while time.monotonic() < deadline:
+                    terminal = recover_service_job(service_root, "job-testrunningcancel001")
+                    if terminal["state"] == "cancelled" and terminal["source_integrity"]["provided"]:
+                        break
+                    time.sleep(0.05)
+                else:
+                    self.fail(f"cancelled async job did not publish source integrity: {terminal}")
+
+            job_root = service_root / "jobs" / "job-testrunningcancel001"
+            public_raw = (job_root / SERVICE_JOB_PUBLIC_SUMMARY_JSON).read_text(encoding="utf-8")
+            record = json.loads((job_root / SERVICE_JOB_RECORD_JSON).read_text(encoding="utf-8"))
+
+            self.assertEqual(running["state"], "running")
+            self.assertEqual(cancelled["state"], "cancelled")
+            self.assertEqual(terminal["state"], "cancelled")
+            self.assertEqual(terminal["recovery"]["status"], "cancelled_by_service_request")
+            self.assertEqual(record["state"], "cancelled")
+            self.assertTrue(terminal["source_integrity"]["provided"])
+            self.assertEqual(terminal["source_integrity"]["checked_files"], 1)
+            self.assertFalse(terminal["source_images_modified"])
+            _assert_public_text_omits(self, public_raw, str(root.resolve()), "private_page_001")
+
     def test_recover_marks_stale_running_progress_without_leaking_paths(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-job-recover-") as temp_dir:
             root = Path(temp_dir)

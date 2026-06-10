@@ -497,6 +497,10 @@ Follow-up, 2026-06-09: service-job boundary regression now forces two async
 jobs into the production runner concurrently and verifies per-job isolation for
 state, metadata, derivatives, template snapshots, processing manifests, local
 review artifacts, source-integrity counts, and public-safe summaries.
+Follow-up, 2026-06-10: async cancellation race coverage now verifies that a
+running job remains `cancelled` after the background worker finishes and still
+refreshes public-safe source-integrity aggregates without exposing private
+paths or filenames.
 
 ### M5：性能和后端实现
 
