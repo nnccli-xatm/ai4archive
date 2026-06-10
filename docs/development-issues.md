@@ -398,11 +398,25 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 
 ### DEV-401 批量重命名 plan/apply
 
-状态：`later`
+状态：`done`
 
 范围：
 
 - dry-run、冲突检测、apply、rollback manifest、JSON/CSV/Excel 日志。
+
+已完成证据：
+
+- 新增 `archive-scan-qc batch-rename-plan`：读取本地 mapping CSV，生成
+  `batch_rename_plan.json`、`.csv` 和 `.xlsx` dry-run 日志。
+- plan 阶段检测空路径、绝对/越界路径、重复 source、重复 target、source missing、
+  target exists 和 source/target 相同；blocked plan 以非零退出，不改动文件。
+- 新增 `archive-scan-qc batch-rename-apply`：只接受 ready plan，执行本地 rename，
+  写入 `batch_rename_apply.json`、`.csv`、`.xlsx` 和
+  `batch_rename_rollback.json`。
+- 批量重命名 manifest 明确标记 `local_only=true`、`public_safe=false`；它是
+  path-bearing 本地生产工具，不进入 public-safe 交付摘要。
+- `production-cli` CI 分组纳入 `test_batch_rename`，覆盖 ready apply、blocked
+  plan、unsafe path、Excel 日志和 CLI blocked exit code。
 
 ### DEV-402 Excel 案卷分件 plan/apply
 

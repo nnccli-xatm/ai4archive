@@ -63,10 +63,12 @@ SOURCE_TEST_MAP: dict[str, set[str]] = {
     },
     "analysis_provider.py": {"tests/test_analysis_provider.py"},
     "artifact_readiness.py": {"tests/test_artifact_readiness.py"},
+    "batch_rename.py": {"tests/test_batch_rename.py"},
     "benchmark.py": {"tests/test_performance_suite.py", "tests/test_worker_recommendation.py"},
     "calibration.py": {"tests/test_rules_calibration.py"},
     "capability_probe.py": {"tests/test_capability_probe.py"},
     "cli.py": {
+        "tests/test_batch_rename.py",
         "tests/test_cli_smoke.py",
         "tests/test_cli_stable_contract.py",
         "tests/test_image_processing_capability_smoke.py",

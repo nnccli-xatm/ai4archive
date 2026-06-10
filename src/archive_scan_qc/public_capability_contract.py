@@ -157,6 +157,18 @@ def build_public_capability_contract(generated_at: str | None = None) -> dict[st
                     "scan-qc.delivery-handoff-manifest.v1",
                     sensitive_outputs=True,
                 ),
+                _command(
+                    "archive-scan-qc batch-rename-plan",
+                    "Dry-run local filename changes and write path-bearing JSON/CSV/XLSX logs.",
+                    "scan-qc.batch-rename-plan.v1",
+                    sensitive_outputs=True,
+                ),
+                _command(
+                    "archive-scan-qc batch-rename-apply",
+                    "Apply a local batch rename plan and write apply plus rollback manifests.",
+                    "scan-qc.batch-rename-apply.v1",
+                    sensitive_outputs=True,
+                ),
             ],
             "public_safe_aggregate_commands": [
                 _command(
@@ -269,6 +281,13 @@ def build_public_capability_contract(generated_at: str | None = None) -> dict[st
             _artifact("rework_action_list.csv", "scan-qc.rework-action-list.v1", "stable_sensitive_local"),
             _artifact("delivery_handoff_manifest.json", "scan-qc.delivery-handoff-manifest.v1", "stable_sensitive_local"),
             _artifact("delivery_handoff_manifest.csv", "scan-qc.delivery-handoff-manifest.v1", "stable_sensitive_local"),
+            _artifact("batch_rename_plan.json", "scan-qc.batch-rename-plan.v1", "stable_sensitive_local"),
+            _artifact("batch_rename_plan.csv", "scan-qc.batch-rename-plan.v1", "stable_sensitive_local"),
+            _artifact("batch_rename_plan.xlsx", "scan-qc.batch-rename-plan.v1", "stable_sensitive_local"),
+            _artifact("batch_rename_apply.json", "scan-qc.batch-rename-apply.v1", "stable_sensitive_local"),
+            _artifact("batch_rename_apply.csv", "scan-qc.batch-rename-apply.v1", "stable_sensitive_local"),
+            _artifact("batch_rename_apply.xlsx", "scan-qc.batch-rename-apply.v1", "stable_sensitive_local"),
+            _artifact("batch_rename_rollback.json", "scan-qc.batch-rename-rollback.v1", "stable_sensitive_local"),
             _artifact("production_run_progress.json", "scan-qc.production-run-progress.v1", "stable_sensitive_local"),
             _artifact("production_run_summary.json", "scan-qc.production-run.v1", "stable_sensitive_local"),
             _artifact("processing_audit_summary.json", "scan-qc.processing.audit.v1", "stable_public_safe_aggregate"),

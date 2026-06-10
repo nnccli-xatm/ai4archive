@@ -12,6 +12,12 @@ from ._version import __version__
 from .acceptance import ACCEPTANCE_JSON, write_acceptance_summary
 from .analysis_provider import AnalysisProviderError
 from .artifact_readiness import ARTIFACT_READINESS_JSON, write_artifact_readiness_checklist
+from .batch_rename import (
+    BATCH_RENAME_APPLY_JSON,
+    BATCH_RENAME_PLAN_JSON,
+    apply_batch_rename_plan,
+    write_batch_rename_plan,
+)
 from .calibration import CALIBRATION_JSON, write_rules_calibration_summary
 from .capability_probe import CapabilityProbeConfig, run_capability_probe, write_capability_probe
 from .deep_inspection_provider import (
@@ -332,6 +338,10 @@ def main(argv: list[str] | None = None) -> int:
         return _main_rework_action_list(argv[1:])
     if argv and argv[0] == "production-review-queue":
         return _main_production_review_queue(argv[1:])
+    if argv and argv[0] == "batch-rename-plan":
+        return _main_batch_rename_plan(argv[1:])
+    if argv and argv[0] == "batch-rename-apply":
+        return _main_batch_rename_apply(argv[1:])
     parser = build_parser()
     args = parser.parse_args(argv)
     _validate_processing_flags(parser, args)
@@ -1548,6 +1558,65 @@ def _delivery_manifest_artifacts(args: argparse.Namespace) -> list[tuple[str, Pa
             artifacts.append((role, path))
     artifacts.extend(("artifact", path) for path in args.artifact)
     return artifacts
+
+
+def _main_batch_rename_plan(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="archive-scan-qc batch-rename-plan",
+        description="Dry-run a local batch rename mapping and write JSON/CSV/XLSX logs.",
+    )
+    parser.add_argument("--input", required=True, type=Path, help="Root directory containing files to rename.")
+    parser.add_argument(
+        "--mapping-csv",
+        required=True,
+        type=Path,
+        help="CSV with source_relative_path and target_relative_path/new_relative_path columns.",
+    )
+    parser.add_argument("--out", required=True, type=Path, help="Output directory for the rename plan logs.")
+    args = parser.parse_args(argv)
+    try:
+        json_path, csv_path, xlsx_path, payload = write_batch_rename_plan(args.input, args.mapping_csv, args.out)
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    print(f"Batch rename plan JSON: {json_path}")
+    print(f"Batch rename plan CSV: {csv_path}")
+    print(f"Batch rename plan Excel: {xlsx_path}")
+    print(f"Status: {payload['status']}")
+    print(f"Rows ready: {payload['summary']['ready_count']}")
+    print(f"Rows blocked: {payload['summary']['blocking_count']}")
+    print("Sensitivity: LOCAL-ONLY path-bearing rename plan; not public-safe.")
+    return 0 if payload["status"] == "ready" else 1
+
+
+def _main_batch_rename_apply(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="archive-scan-qc batch-rename-apply",
+        description="Apply a local batch rename plan and write apply plus rollback manifests.",
+    )
+    parser.add_argument(
+        "--plan-json",
+        required=True,
+        type=Path,
+        help=f"Path to {BATCH_RENAME_PLAN_JSON} written by batch-rename-plan.",
+    )
+    parser.add_argument(
+        "--out",
+        default=None,
+        type=Path,
+        help=f"Optional output directory for {BATCH_RENAME_APPLY_JSON}; defaults to the plan directory.",
+    )
+    args = parser.parse_args(argv)
+    try:
+        json_path, csv_path, xlsx_path, rollback_path, payload = apply_batch_rename_plan(args.plan_json, args.out)
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    print(f"Batch rename apply JSON: {json_path}")
+    print(f"Batch rename apply CSV: {csv_path}")
+    print(f"Batch rename apply Excel: {xlsx_path}")
+    print(f"Batch rename rollback manifest: {rollback_path}")
+    print(f"Rows applied: {payload['summary']['applied_count']}")
+    print("Sensitivity: LOCAL-ONLY path-bearing rename logs; not public-safe.")
+    return 0
 
 
 def _validate_processing_flags(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:

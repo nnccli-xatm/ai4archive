@@ -220,6 +220,30 @@ By default, `run-plan` stops at the first failed batch and exits non-zero. Add
 `--continue-on-error` to keep running later batches while still recording the
 failed batch in the project summary and returning non-zero at the end.
 
+### Local batch rename plan/apply
+
+Use `batch-rename-plan` before renaming production files. The mapping CSV must
+include `source_relative_path` and either `target_relative_path` or
+`new_relative_path`; all paths are resolved under `--input` and must stay
+relative.
+
+```bash
+archive-scan-qc batch-rename-plan \
+  --input /path/to/batch-images \
+  --mapping-csv /path/to/rename-map.csv \
+  --out /path/to/rename-plan
+
+archive-scan-qc batch-rename-apply \
+  --plan-json /path/to/rename-plan/batch_rename_plan.json
+```
+
+The plan command writes `batch_rename_plan.json`, `.csv`, and `.xlsx` logs with
+dry-run conflict detection for duplicate sources, duplicate targets, existing
+targets, missing sources, and unsafe paths. Apply refuses blocked plans and, for
+ready plans, writes `batch_rename_apply.json`, `.csv`, `.xlsx`, and
+`batch_rename_rollback.json`. These rename logs are local-only and path-bearing;
+they are not public-safe artifacts.
+
 ### Local private sample integration
 
 Use `scripts/run_private_integration.py` only inside the internal/local

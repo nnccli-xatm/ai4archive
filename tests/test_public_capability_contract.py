@@ -35,6 +35,9 @@ class PublicCapabilityContractTests(unittest.TestCase):
         self.assertIn("archive-scan-qc rule-template-catalog", public_safe_commands)
         self.assertIn("archive-scan-qc rule-template-dry-run", public_safe_commands)
         self.assertIn("archive-scan-qc private-validation-aggregate", public_safe_commands)
+        sensitive_commands = {item["command"] for item in contract["public_cli"]["sensitive_local_commands"]}
+        self.assertIn("archive-scan-qc batch-rename-plan", sensitive_commands)
+        self.assertIn("archive-scan-qc batch-rename-apply", sensitive_commands)
         prototype_commands = {item["command"] for item in contract["public_cli"]["prototype_or_validation_commands"]}
         self.assertIn("archive-scan-qc service-api", prototype_commands)
 
@@ -53,6 +56,10 @@ class PublicCapabilityContractTests(unittest.TestCase):
         self.assertEqual(artifacts["rule_template_dry_run.json"]["schema_version"], "scan-qc.rule-template-dry-run.v1")
         self.assertEqual(artifacts["rule_template_catalog.json"]["stability"], "stable_public_safe_aggregate")
         self.assertEqual(artifacts["rule_template_dry_run.json"]["stability"], "stable_public_safe_aggregate")
+        self.assertEqual(artifacts["batch_rename_plan.json"]["schema_version"], "scan-qc.batch-rename-plan.v1")
+        self.assertEqual(artifacts["batch_rename_plan.json"]["stability"], "stable_sensitive_local")
+        self.assertEqual(artifacts["batch_rename_rollback.json"]["schema_version"], "scan-qc.batch-rename-rollback.v1")
+        self.assertEqual(artifacts["batch_rename_rollback.json"]["stability"], "stable_sensitive_local")
         self.assertEqual(artifacts["artifact_readiness_checklist.json"]["schema_version"], "scan-qc-artifact-readiness-checklist.v1")
         self.assertEqual(
             artifacts["service_job_public_summary.json"]["schema_version"],
