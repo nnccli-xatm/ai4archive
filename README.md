@@ -1610,6 +1610,9 @@ must expose only public-safe `print_clean` profile, job-level aggregate stain
 metrics, and session-level quality status counts, with no private paths,
 filenames, or source hashes; the session summary still omits job lists and job
 IDs.
+The local HTTP transport has the same regression, so external callers using
+`POST /api/jobs/{job_id}/run` and `GET /api/production/session` see the same
+public-safe quality/status boundary.
 `POST /api/production/finish-export` returns the scheduler-facing export gate:
 only `ready_for_export=true` is export-ready. When false, public-safe
 `blocking_codes` explain the reason, including whitelisted quality blockers and

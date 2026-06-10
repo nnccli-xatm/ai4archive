@@ -9,7 +9,7 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 
 from archive_scan_qc.service_http import create_service_http_server
 from archive_scan_qc.service_jobs import (
@@ -344,6 +344,71 @@ class ServiceHttpTransportTests(unittest.TestCase):
             self.assertTrue(run_summary["local_review"]["production_review_queue_written"])
             self.assertFalse(run_summary["local_review"]["privacy"]["contains_paths"])
             _assert_public_text_omits(self, raw, str(root.resolve()), "private_page_001", "escaped-review")
+
+    def test_http_print_clean_job_exposes_quality_evidence_without_private_paths(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-http-print-clean-quality-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private input"
+            service_root = root / "service root"
+            input_dir.mkdir()
+            source = input_dir / "private_page_001.png"
+            _write_print_clean_background_stain_page(source)
+            source_bytes = source.read_bytes()
+
+            with _running_server(service_root) as base_url:
+                create_status, _created = _json_request(
+                    base_url,
+                    "POST",
+                    "/api/jobs",
+                    {
+                        "job_id": "job-printcleanhttp001",
+                        "input_dir": str(input_dir),
+                        "rule_template": "print-clean-v1",
+                        "workers": 1,
+                    },
+                )
+                run_status, run_summary = _json_request(base_url, "POST", "/api/jobs/job-printcleanhttp001/run")
+                status_status, status_summary = _json_request(base_url, "GET", "/api/jobs/job-printcleanhttp001")
+                session_status, session = _json_request(base_url, "GET", "/api/production/session")
+            raw = json.dumps(
+                {
+                    "run": run_summary,
+                    "status": status_summary,
+                    "session": session,
+                },
+                ensure_ascii=False,
+            )
+            quality_metrics = run_summary["quality"]["quality_metrics"]
+            session_quality = session["session"]["quality"]
+
+            self.assertEqual(create_status, 201)
+            self.assertEqual(run_status, 200)
+            self.assertEqual(status_status, 200)
+            self.assertEqual(session_status, 200)
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(run_summary["state"], "finished")
+            self.assertEqual(status_summary["state"], "finished")
+            self.assertEqual(run_summary["template"]["rule_template_id"], "print-clean-v1")
+            self.assertEqual(run_summary["template"]["processing_profile"], "print_clean")
+            self.assertEqual(status_summary["template"]["processing_profile"], "print_clean")
+            self.assertEqual(run_summary["quality"]["status"], "pass")
+            self.assertEqual(run_summary["quality"]["quality_signal_status"], "measured_with_changes")
+            self.assertEqual(run_summary["quality"]["background_cleanup_changed_files"], 1)
+            self.assertEqual(run_summary["quality"]["guardrail_failed_files"], 0)
+            self.assertGreaterEqual(quality_metrics["background_stains_delta"]["max"], 6.0)
+            self.assertGreater(quality_metrics["background_stains_changed_pixel_ratio"]["max"], 0.02)
+            self.assertLessEqual(quality_metrics["background_stains_changed_pixel_ratio"]["max"], 0.05)
+            self.assertEqual(session["session"]["state_counts"], {"finished": 1})
+            self.assertNotIn("jobs", session["session"])
+            self.assertEqual(session_quality["status_counts"], {"pass": 1})
+            self.assertEqual(session_quality["quality_signal_status_counts"], {"measured_with_changes": 1})
+            self.assertNotIn("quality_metrics", session_quality)
+            self.assertFalse(session_quality["privacy"]["contains_paths"])
+            self.assertFalse(session_quality["privacy"]["contains_job_ids"])
+            self.assertFalse(session_quality["privacy"]["contains_quality_rows"])
+            self.assertFalse(run_summary["source_images_modified"])
+            _assert_public_source_integrity(self, run_summary["source_integrity"], checked_files=1)
+            _assert_public_text_omits(self, raw, str(root.resolve()), "private input", "service root", "private_page_001")
 
     def test_http_start_job_returns_running_then_terminal_without_private_paths(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-http-start-") as temp_dir:
@@ -942,6 +1007,19 @@ def _write_page(path: Path) -> None:
     image = Image.new("RGB", (220, 160), "white")
     draw = ImageDraw.Draw(image)
     draw.rectangle((32, 42, 188, 46), fill=(40, 40, 40))
+    image.save(path, dpi=(300, 300))
+
+
+def _write_print_clean_background_stain_page(path: Path) -> None:
+    image = Image.new("RGB", (260, 190), (242, 242, 236))
+    draw = ImageDraw.Draw(image)
+    for y in (54, 82, 110):
+        draw.rectangle((42, y, 142, y + 4), fill=(42, 42, 42))
+    mask = Image.new("L", image.size, 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.ellipse((178, 58, 222, 102), fill=150)
+    mask = mask.filter(ImageFilter.GaussianBlur(7))
+    image = Image.composite(Image.new("RGB", image.size, (224, 220, 196)), image, mask)
     image.save(path, dpi=(300, 300))
 
 

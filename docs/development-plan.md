@@ -271,6 +271,9 @@ session summaries expose only public-safe `print_clean` profile, job-level
 aggregate stain metrics, and session-level quality status counts, while omitting
 private paths, filenames, and hashes; the session summary still omits job lists
 and job IDs.
+The HTTP transport regression now covers the same job/status/session contract
+for callers using `POST /api/jobs/{job_id}/run` and
+`GET /api/production/session`.
 Recovery now treats `finished` or `needs_review` checkpoints/progress without a
 terminal `production_run_summary.json` as `needs_recovery`, using the public-safe
 reason code `terminal_state_missing_production_summary`, so schedulers do not

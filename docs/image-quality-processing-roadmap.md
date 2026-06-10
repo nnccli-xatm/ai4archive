@@ -613,6 +613,9 @@ job status plus production session summaries expose only public-safe
 `print_clean` profile, job-level aggregate stain metrics, and session-level
 quality status counts, with no private paths, filenames, or source hashes; the
 session summary still omits job lists and job IDs.
+The local HTTP transport has matching coverage for
+`POST /api/jobs/{job_id}/run` plus `GET /api/production/session`, so external
+callers observe the same public-safe quality/status boundary.
 
 ### M5：性能和后端实现
 
