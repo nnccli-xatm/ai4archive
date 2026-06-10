@@ -342,7 +342,7 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 
 ### DEV-301 生产工作台改为 API client
 
-状态：`in-progress`
+状态：`done`
 
 范围：
 
@@ -368,9 +368,21 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 - 本地 loopback workbench 已提供 `/api/production/setup` 和
   `/api/production/start` 兼容路由；前端保存文件夹走 production setup，
   启动处理在已有 `job_id` 后走 production start。
+- 本地 loopback workbench 已提供 `/api/production/session` 兼容路由；前端初始
+  状态恢复走 production session，不再直接轮询旧 `/api/status`。
 - 前端守护测试已覆盖 production facade route helper、local bridge route helper
-  和 local-only review/preview URL 构造，后续剩余重点是把 session restore
-  从 local bridge 切换到服务 facade。
+  和 local-only review/preview URL 构造；旧 local bridge 保留给系统选文件夹、
+  打开输出文件夹、重置批次等本机外壳动作，不再承担核心生产 job 状态流。
+
+已完成证据：
+
+- 前端核心生产流 setup/start/session/progress/review-queue/review-item/preview/
+  review-actions/finish-export 均通过 `productionApiPath` route helper 访问
+  production facade。
+- 本地 loopback workbench 为上述 production facade 提供兼容路由，并通过
+  local job id 校验批次边界；local-only 队列和预览响应仍显式标记非 public-safe。
+- `production-cli` 分组覆盖 workbench 静态验证、本地 HTTP facade、自动保存、
+  完成交接、预览和服务 API 回归。
 
 ### DEV-401 批量重命名 plan/apply
 

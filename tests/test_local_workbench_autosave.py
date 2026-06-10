@@ -1745,9 +1745,12 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
             job_id = status["job_id"]
             review_queue = controller.production_review_queue(job_id)
             progress = controller.production_progress(job_id)
+            session = controller.production_session()
             self.assertEqual(review_queue["view"], "review_queue")
             self.assertEqual(progress["view"], "progress")
             self.assertEqual(progress["job_id"], job_id)
+            self.assertEqual(session["view"], "session")
+            self.assertEqual(session["job_id"], job_id)
             self.assertEqual(review_queue["review_queue"]["review_item_count"], 2)
             self.assertTrue(review_queue["review_queue"]["local_only_artifact"])
             self.assertEqual(review_queue["local_review_queue"]["items"][0]["preview_source"], "comparison")
@@ -1805,6 +1808,7 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
                 setup = json.loads(setup_response.read().decode("utf-8"))
                 status = json.loads(urlopen(f"{base_url}/api/status", timeout=5).read().decode("utf-8"))
                 job_id = status["job_id"]
+                session = json.loads(urlopen(f"{base_url}/api/production/session", timeout=5).read().decode("utf-8"))
                 review_queue = json.loads(
                     urlopen(
                         f"{base_url}/api/production/review-queue?job_id={job_id}",
@@ -1846,6 +1850,8 @@ class LocalWorkbenchAutosaveTests(unittest.TestCase):
 
             self.assertEqual(setup["view"], "setup")
             self.assertTrue(setup["job_id"].startswith("job-local-workbench-"))
+            self.assertEqual(session["view"], "session")
+            self.assertEqual(session["job_id"], job_id)
             self.assertEqual(review_queue["view"], "review_queue")
             self.assertEqual(progress["view"], "progress")
             self.assertEqual(progress["job_id"], job_id)

@@ -417,6 +417,9 @@ class WorkbenchController:
         self._require_local_job_id(job_id)
         return {**self.status(), "view": "progress"}
 
+    def production_session(self) -> dict[str, Any]:
+        return {**self.status(), "view": "session"}
+
     def _require_local_job_id(self, job_id: str) -> None:
         safe_id = str(job_id or "").strip()
         with self._lock:
@@ -916,6 +919,9 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/status":
             self._send_json(self.workbench_controller.status())
+            return
+        if parsed.path == "/api/production/session":
+            self._send_json(self.workbench_controller.production_session())
             return
         if parsed.path == "/api/production/progress":
             self._serve_production_progress(parse_qs(parsed.query))
