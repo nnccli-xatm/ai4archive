@@ -127,8 +127,9 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   quality baseline with small-angle deskew, dark-border trim,
   scanner-gutter trim, tone, paper color-cast, edge-shadow, corner-shadow,
   background-stain, fold-shadow,
-  bleed-through, scanline, faded-text, illumination-gradient, ultra-pale
-  typed-glyph, and text-edge aggregate deltas from synthetic fixtures, includes
+  diffuse bleed-through, broad thin-paper bleed-through, scanline, faded-text,
+  illumination-gradient, ultra-pale typed-glyph, and text-edge aggregate deltas
+  from synthetic fixtures, includes
   protected mixed photo/stamp/table changed-pixel, color-delta, and edge-energy
   drift checks within limits, and contains no paths, filenames, hashes, OCR
   text, thumbnails, or image content.

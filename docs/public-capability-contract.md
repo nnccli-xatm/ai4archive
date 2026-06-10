@@ -217,7 +217,8 @@ quality summary records aggregate before/after quality signals, changed-file
 counts, guardrails, and metric averages/maxima, including localized
 small-angle deskew, paired dark-edge trim, scanner-gutter trim, paper
 color-cast normalization, edge/corner shadow cleanup, background-stain cleanup,
-illumination-gradient leveling, and the ultra-pale typed glyph fixture group.
+illumination-gradient leveling, diffuse bleed-through cleanup, broad thin-paper
+bleed-through cleanup, and the ultra-pale typed glyph fixture group.
 It also records a
 protected mixed photo/stamp/table fixture check as
 aggregate changed-pixel, color-delta, and edge-energy drift metrics with

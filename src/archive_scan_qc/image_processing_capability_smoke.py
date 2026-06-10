@@ -53,6 +53,7 @@ _SYNTHETIC_FIXTURE_GROUPS = (
     "illumination_gradient_page",
     "scanline_page",
     "bleed_through_page",
+    "broad_thin_paper_bleed_through_page",
     "corner_shadow_page",
     "background_stain_page",
     "fold_shadow_page",
@@ -446,6 +447,7 @@ def _write_synthetic_fixtures(input_dir: Path) -> int:
         _illumination_gradient_page(),
         _scanline_page(),
         _bleed_through_page(),
+        _broad_thin_paper_bleed_through_page(),
         _corner_shadow_page(),
         _background_stain_page(),
         _fold_shadow_page(),
@@ -578,6 +580,27 @@ def _bleed_through_page() -> Image.Image:
     mask = mask.filter(ImageFilter.GaussianBlur(2.4))
     ghost = Image.new("RGB", image.size, (232, 232, 228))
     image.paste(ghost, (0, 0), mask.point(lambda value: int(value * 0.55)))
+    return image
+
+
+def _broad_thin_paper_bleed_through_page() -> Image.Image:
+    image = Image.new("RGB", (300, 210), (245, 242, 238))
+    draw = ImageDraw.Draw(image)
+    for y in (30, 56, 82, 108, 134):
+        draw.line((30, y, 140, y), fill=(76, 76, 76), width=1)
+
+    ghost_mask = Image.new("L", image.size, 0)
+    ghost_draw = ImageDraw.Draw(ghost_mask)
+    ghost_draw.rectangle((106, 54, 264, 146), fill=118)
+    ghost_draw.text((148, 70), "741", fill=186)
+    ghost_draw.text((166, 98), "852", fill=186)
+    ghost_draw.text((154, 126), "963", fill=186)
+    ghost_mask = ghost_mask.filter(ImageFilter.GaussianBlur(6.2))
+    ghost_overlay = Image.new("RGB", image.size, (236, 233, 226))
+    image.paste(ghost_overlay, (0, 0), ghost_mask)
+
+    draw.rectangle((40, 38, 128, 42), fill=(66, 66, 66))
+    draw.rectangle((40, 92, 128, 96), fill=(66, 66, 66))
     return image
 
 

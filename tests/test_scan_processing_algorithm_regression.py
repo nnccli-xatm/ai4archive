@@ -11777,30 +11777,19 @@ class ScanProcessingAlgorithmRegressionTest(unittest.TestCase):
             safe_name = "synthetic_safe_duplex_reverse_ghost_control.png"
             safe_record = records[safe_name]
             safe_audit = safe_record["processing_audit"]
-            self.assertIn(
-                safe_record["bleed_through_reason_code"],
-                {
-                    "applied_faint_reverse_ghost",
-                    "low_confidence",
-                    "protected_line_or_annotation",
-                    "conservative_scope_risk",
-                },
-            )
-            self.assertIn(
-                safe_audit["bleed_through_reason_code"],
-                {
-                    "applied_faint_reverse_ghost",
-                    "low_confidence",
-                    "protected_line_or_annotation",
-                    "conservative_scope_risk",
-                },
-            )
+            safe_processed = Image.open(process_dir / safe_record["output_relative_path"]).convert("RGB")
+            self.assertTrue(safe_record["bleed_through_cleaned"])
+            self.assertEqual(safe_record["bleed_through_reason_code"], "applied_faint_reverse_ghost")
+            self.assertEqual(safe_audit["bleed_through_reason_code"], "applied_faint_reverse_ghost")
+            self.assertGreater(safe_audit["bleed_through_delta"], 3.0)
+            self.assertGreater(safe_audit["bleed_through_changed_pixel_ratio"], 0.003)
             self.assertLessEqual(safe_audit["bleed_through_changed_pixel_ratio"], 0.045)
-            if safe_record["bleed_through_cleaned"]:
-                self.assertEqual(safe_record["bleed_through_reason_code"], "applied_faint_reverse_ghost")
-                self.assertGreater(safe_audit["bleed_through_changed_pixel_ratio"], 0.003)
-            else:
-                self.assertEqual(safe_audit["bleed_through_changed_pixel_ratio"], 0.0)
+            self.assertLessEqual(safe_audit["bleed_through_candidate_pixel_ratio"], 0.065)
+            self.assertEqual(safe_audit["guardrail_failures"], [])
+            self.assertGreater(
+                _mean_luma(safe_processed, (144, 64, 264, 148)),
+                _mean_luma(pages[safe_name], (144, 64, 264, 148)) + 0.02,
+            )
 
             protected_regions = {
                 "synthetic_protected_hairline_form_rules_crossing_ghost.png": {

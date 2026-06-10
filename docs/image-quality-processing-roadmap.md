@@ -156,9 +156,10 @@ the smoke payload. It covers aggregate changed-file counts, before/after metric
 averages/maxima, guardrails, fixture context, and privacy flags without paths,
 filenames, hashes, thumbnails, OCR text, or image content.
 
-Fixture update, 2026-06-09: the synthetic smoke baseline now covers 16 generated
-fixture groups: clean text, dark border, scanner gutter, speckles, faded edge
-shadow, color cast, low-contrast text, illumination gradient, scanlines,
+Fixture update, 2026-06-10: the synthetic smoke baseline now covers 18 generated
+fixture groups: clean text, small-angle skewed text, dark border, scanner
+gutter, speckles, faded edge shadow, color cast, low-contrast text,
+illumination gradient, scanlines, diffuse bleed-through, broad thin-paper
 bleed-through, corner shadow, localized background stain, fold shadow, blurred
 text edges, ultra-pale typed text, and mixed photo/stamp/table content. This
 remains public-safe because the images are generated at runtime and only
@@ -250,6 +251,13 @@ Follow-up, 2026-06-09: the synthetic smoke fixtures now also cover a safe narrow
 fold-shadow band, a diffuse reverse-side bleed-through ghost, and a segmented
 neutral scanline. The public-safe smoke must show at least one applied file and
 positive aggregate delta for each of those three M2 cleanup stages.
+
+Follow-up, 2026-06-10: conservative bleed-through cleanup now has a narrow
+broad thin-paper path. It allows a single wide, stable light-paper show-through
+candidate only when protected/edge/mid-gray mark density stays low, then shrinks
+the acted area to the darkest diffuse core so changed and candidate pixel ratios
+remain inside the existing guardrails. The public-safe smoke fixture set now
+includes this broad thin-paper bleed-through case.
 
 Follow-up, 2026-06-09: the smoke fixture set now includes a mildly blurred typed
 body-text page. The public-safe smoke must show both faded-text enhancement and

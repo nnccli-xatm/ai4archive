@@ -298,6 +298,10 @@ Follow-up, 2026-06-09: 路线图中的 `archival-safe-v1`,
 交给局部阴影清理，避免和 guardrail 冲突。
 `image-processing-capability-smoke` 也开始要求折痕阴影、保守透印弱化和分段扫描线
 在全链路 synthetic fixture 上至少各有一次可量化生效。
+2026-06-10 补充：保守透印弱化已加入 broad thin-paper 窄路径，只在稳定浅纸、
+单个宽散候选且保护/边缘/中灰标记密度较低时启用，并把实际处理区域收缩到最深
+扩散核心；`image-processing-capability-smoke` 同步加入该 fixture，要求 public-safe
+基线覆盖这类薄纸宽散透影。
 随后补入轻微发虚正文夹具，要求浅墨正文增强和文字边缘锐化也产生 public-safe
 聚合增益。
 最新补充：褪色正文增强已增加极浅打印字形窄路径，只在稳定小组件数量足够、

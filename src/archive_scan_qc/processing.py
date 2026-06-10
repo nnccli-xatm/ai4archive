@@ -8311,11 +8311,28 @@ def _clean_bleed_through_conservative(image: Image.Image) -> BleedThroughCleanup
     if candidate_ratio < min_candidate_ratio:
         return _bleed_through_noop(image, "bleed-through cleanup skipped: no confident faint reverse-side ghosts")
     if candidate_ratio > 0.065:
-        return _bleed_through_noop(
-            image,
-            "bleed-through cleanup skipped: broad uneven background is outside conservative scope",
-            candidate_ratio,
+        if not very_stable_light_paper:
+            return _bleed_through_noop(
+                image,
+                "bleed-through cleanup skipped: broad uneven background is outside conservative scope",
+                candidate_ratio,
+            )
+        broad_core_candidate = _bleed_through_broad_diffuse_core_candidate(
+            candidate,
+            grayscale=grayscale,
+            protected=protected,
+            edge_signal=edge_signal,
+            background=background,
+            edge_margin=edge_margin,
         )
+        if broad_core_candidate is None:
+            return _bleed_through_noop(
+                image,
+                "bleed-through cleanup skipped: broad uneven background is outside conservative scope",
+                candidate_ratio,
+            )
+        candidate = broad_core_candidate
+        candidate_ratio = _mask_ratio(candidate)
     if _bleed_through_line_risk(candidate):
         return _bleed_through_noop(
             image,
@@ -8785,6 +8802,84 @@ def _bleed_through_expand_diffuse_halo(
     if len(expanded) / max(1, total) > 0.018:
         return selected
     return expanded
+
+
+def _bleed_through_broad_diffuse_core_candidate(
+    candidate: Image.Image,
+    grayscale: Image.Image,
+    protected: Image.Image,
+    edge_signal: Image.Image,
+    background: int,
+    edge_margin: int,
+) -> Image.Image | None:
+    total = candidate.width * candidate.height
+    components = [component for component in _mask_components(candidate) if len(component) >= 4]
+    if not components or len(components) > 3:
+        return None
+    all_points = [point for component in components for point in component]
+    broad_ratio = len(all_points) / max(1, total)
+    if broad_ratio <= 0.065 or broad_ratio > 0.26:
+        return None
+
+    xs = [point[0] for point in all_points]
+    ys = [point[1] for point in all_points]
+    left = min(xs)
+    top = min(ys)
+    right = max(xs)
+    bottom = max(ys)
+    if (
+        left < edge_margin * 3
+        or top < max(edge_margin * 3, int(round(candidate.height * 0.18)))
+        or right >= candidate.width - edge_margin * 3
+        or bottom >= candidate.height - max(edge_margin * 3, int(round(candidate.height * 0.18)))
+    ):
+        return None
+    width = right - left + 1
+    height = bottom - top + 1
+    if width < candidate.width * 0.30 or height < candidate.height * 0.22:
+        return None
+    if width > candidate.width * 0.70 or height > candidate.height * 0.62:
+        return None
+    aspect = max(width / max(1, height), height / max(1, width))
+    if aspect > 3.0:
+        return None
+
+    box_area = max(1, width * height)
+    protected_pixels = protected.load()
+    edge_pixels = edge_signal.load()
+    source_pixels = grayscale.load()
+    mid_mark_count = 0
+    protected_count = 0
+    edge_count = 0
+    for y in range(top, bottom + 1):
+        for x in range(left, right + 1):
+            value = int(source_pixels[x, y])
+            if 130 <= value <= background - 20:
+                mid_mark_count += 1
+            if protected_pixels[x, y]:
+                protected_count += 1
+            if int(edge_pixels[x, y]) >= 22:
+                edge_count += 1
+    if mid_mark_count / box_area > 0.010:
+        return None
+    if protected_count / box_area > 0.30:
+        return None
+    if edge_count / box_area > 0.032:
+        return None
+
+    core = Image.new("L", candidate.size, 0)
+    candidate_pixels = candidate.load()
+    core_pixels = core.load()
+    selected_count = 0
+    for x, y in all_points:
+        value = int(source_pixels[x, y])
+        if candidate_pixels[x, y] and background - value >= 5 and int(edge_pixels[x, y]) < 18:
+            core_pixels[x, y] = 255
+            selected_count += 1
+    selected_ratio = selected_count / max(1, total)
+    if selected_ratio < 0.003 or selected_ratio > 0.018:
+        return None
+    return core
 
 
 def _bleed_through_sparse_real_mark_risk(
