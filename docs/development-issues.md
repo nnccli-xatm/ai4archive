@@ -89,11 +89,13 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 - `production-run` 已在 metadata 和 derivatives 目录中创建独占
   `.archive_scan_qc_production_run.lock`，同一输出目录被另一个运行占用时
   直接拒绝，并保持既有 progress/summary 不被覆盖。
+- `run-plan` 已在加载计划时拒绝任意两个批次复用同一个 `report_dir` 或
+  `process_out`，也拒绝一个批次的 report 目录撞上另一个批次的 process
+  目录。
 
 剩余缺口：
 
 - 增加两个真实 CLI 进程使用不同输出目录并发运行的回归。
-- 增加 run-plan 层面的输出目录冲突预检。
 
 ### DEV-005 后台服务 MVP
 

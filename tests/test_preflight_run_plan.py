@@ -316,6 +316,54 @@ class PreflightRunPlanTests(unittest.TestCase):
                 self.assertEqual(raised.exception.code, 2)
                 self.assertIn("field 'workers' must be a positive integer", stderr.getvalue())
 
+    def test_run_plan_rejects_output_directory_conflicts_before_running(self) -> None:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                output_root = root / "project-out"
+                input_one = root / "input-one"
+                input_two = root / "input-two"
+                input_one.mkdir()
+                input_two.mkdir()
+                Image.new("RGB", (48, 36), "white").save(input_one / "page-one.png", dpi=(300, 300))
+                Image.new("RGB", (48, 36), "white").save(input_two / "page-two.png", dpi=(300, 300))
+
+                cases = [
+                    (
+                        "duplicate-report.csv",
+                        "batch_id,input_dir,report_dir,process_out\n"
+                        f"batch-one,{input_one},shared-report,processed-one\n"
+                        f"batch-two,{input_two},shared-report,processed-two\n",
+                        "batch-two.report_dir uses the same directory as batch-one.report_dir",
+                    ),
+                    (
+                        "duplicate-process.csv",
+                        "batch_id,input_dir,report_dir,process_out\n"
+                        f"batch-one,{input_one},report-one,shared-process\n"
+                        f"batch-two,{input_two},report-two,shared-process\n",
+                        "batch-two.process_out uses the same directory as batch-one.process_out",
+                    ),
+                    (
+                        "report-process-collision.csv",
+                        "batch_id,input_dir,report_dir,process_out\n"
+                        f"batch-one,{input_one},shared-dir,processed-one\n"
+                        f"batch-two,{input_two},report-two,shared-dir\n",
+                        "batch-two.process_out uses the same directory as batch-one.report_dir",
+                    ),
+                ]
+
+                for filename, contents, expected_error in cases:
+                    with self.subTest(filename=filename):
+                        plan_path = root / filename
+                        plan_path.write_text(contents, encoding="utf-8")
+                        stderr = io.StringIO()
+                        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+                            main(["run-plan", "--plan-csv", str(plan_path), "--out", str(output_root)])
+                        self.assertEqual(raised.exception.code, 2)
+                        self.assertIn("Run plan output directory conflict", stderr.getvalue())
+                        self.assertIn(expected_error, stderr.getvalue())
+
+                self.assertFalse((output_root / "run_plan_summary.json").exists())
+
     def test_run_plan_resume_processing_is_compatible(self) -> None:
             with tempfile.TemporaryDirectory() as temp_dir:
                 root = Path(temp_dir)

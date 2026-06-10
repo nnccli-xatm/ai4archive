@@ -474,6 +474,10 @@ JSON plans may be a top-level list of batch objects or an object with
 `resume_processing`.
 Relative input, manifest, and rules-profile paths resolve relative to the plan file; relative
 report and processing-output paths resolve under the project `--out` root.
+Before executing batches, `run-plan` rejects output directory conflicts across
+all rows: duplicate `report_dir`, duplicate `process_out`, or a `report_dir`
+that equals another row's `process_out`. Fix the plan rather than relying on
+resume semantics when two batches point at the same output root.
 
 `run-plan` performs preflight first for every batch it attempts. A preflight
 failure prevents that batch's scan and processing steps. Without

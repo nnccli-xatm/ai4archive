@@ -124,7 +124,29 @@ def load_run_plan(args: argparse.Namespace) -> RunPlan:
     duplicates = sorted({batch_id for batch_id in batch_ids if batch_ids.count(batch_id) > 1})
     if duplicates:
         raise ValueError(f"Run plan contains duplicate batch_id values: {', '.join(duplicates)}.")
+    _validate_batch_output_isolation(batches)
     return RunPlan(project_id=args.project, batches=batches)
+
+
+def _validate_batch_output_isolation(batches: list[PlanBatch]) -> None:
+    seen: dict[Path, str] = {}
+    for batch in batches:
+        outputs: list[tuple[str, Path | None]] = [
+            ("report_dir", batch.report_dir),
+            ("process_out", batch.process_out),
+        ]
+        for field, output in outputs:
+            if output is None:
+                continue
+            output_key = output.resolve()
+            label = f"{batch.batch_id}.{field}"
+            previous = seen.get(output_key)
+            if previous:
+                raise ValueError(
+                    "Run plan output directory conflict: "
+                    f"{label} uses the same directory as {previous}."
+                )
+            seen[output_key] = label
 
 
 def run_plan(plan: RunPlan, output_root: Path, *, continue_on_error: bool) -> dict[str, Any]:

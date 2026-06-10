@@ -46,6 +46,8 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   `--derivatives-out` directories and rejects locked metadata or derivatives
   directories without overwriting existing `production_run_progress.json` or
   `production_run_summary.json`.
+  Confirm `run-plan` rejects duplicate `report_dir`, duplicate `process_out`,
+  and cross-row `report_dir`/`process_out` collisions before any batch runs.
   Confirm synchronous
   `POST /api/jobs/{job_id}/retry` only accepts failed, interrupted, or
   recoverable jobs, keeps ordinary terminal reruns rejected, and reuses existing
