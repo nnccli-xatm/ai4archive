@@ -165,6 +165,9 @@ Local-only single review item endpoints now let the workstation UI open one
 queue item by `local_id` and retrieve allowed operator actions, suggested
 action, relative path, and operator-facing notes. These responses are sensitive,
 not public-safe, and remain outside scheduler/public summaries.
+The production workbench prototype now builds those service-facade review-item
+and preview URLs from the active `job_id` and clears the job ID when preparing
+the next batch, so local-only review resources do not bleed between batches.
 The production `finish-export` facade now treats `ready_for_export` as the
 single scheduler export gate and emits public-safe blocking codes for
 non-terminal jobs, review-required jobs, failed/interrupted/cancelled jobs,

@@ -231,16 +231,12 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 
 ### DEV-108 本地 before/after review package 分组
 
-状态：`in-progress`
+状态：`done`
 
 范围：
 
 - 本地 review package 按背景清理、可读性提升、缺陷清理和原貌风险分组。
 - 不嵌入图片字节；预览只能通过 local-only preview endpoint 授权读取。
-
-下一步：
-
-- 将操作员逐项复核 API 接入前端工作台 UI。
 
 当前进展：
 
@@ -255,6 +251,9 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
   `GET /api/production/review-item?job_id=...&local_id=...`。该响应用于本机
   工作台逐项复核，可返回 `local_id`、相对路径、建议动作、允许动作和操作员
   提示；它是 sensitive/local-only，不进入 public-safe 摘要。
+- 生产工作台原型已生成 service facade 的 review-item 和 preview URL，并在准备
+  下一批时清空 `job_id`，避免复用上一批 local-only URL。完整前端 API client
+  改造继续归入 DEV-301。
 
 ### DEV-109 私有样本聚合验证
 

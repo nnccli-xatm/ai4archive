@@ -196,6 +196,25 @@ class ProductionWorkbenchRegressionGuardTests(unittest.TestCase):
         ]:
             self.assertIn(required, html)
 
+    def test_review_items_use_service_local_only_item_and_preview_urls(self) -> None:
+        html = WORKBENCH_HTML.read_text(encoding="utf-8")
+
+        for required in [
+            "function serviceQuery(params)",
+            "function productionReviewItemUrl(localId)",
+            "/api/production/review-item?",
+            "function productionPreviewUrl(localId, source)",
+            "/api/production/preview?",
+            "reviewItemUrl: productionReviewItemUrl(item.local_id || \"\")",
+            "originalPreviewUrl: hasOriginal ? productionPreviewUrl(item.local_id || \"\", \"original\") : \"\"",
+            "processedPreviewUrl: hasProcessed ? productionPreviewUrl(item.local_id || \"\", \"processed\") : \"\"",
+            "state.jobId = summary.job_id || (progress && progress.job_id) || state.jobId || \"\";",
+            "state.jobId = \"\";",
+        ]:
+            self.assertIn(required, html)
+
+        self.assertNotIn("/api/preview/", html)
+
     def test_windows_path_display_and_internal_wsl_path_stay_separate(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

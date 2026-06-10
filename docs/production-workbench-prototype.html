@@ -1546,6 +1546,7 @@
       completionSteps: INITIAL_COMPLETION_STEPS.slice(),
       finishConfirmationVisible: false,
       finishBlocker: null,
+      jobId: "",
       lastDraftMessage: "",
       operatorMessage: "",
       reviewQueueText: "",
@@ -1817,6 +1818,23 @@
       polling: null,
       saveTimer: null
     };
+
+    function serviceQuery(params) {
+      return Object.entries(params)
+        .filter(([, value]) => typeof value === "string" && value.length > 0)
+        .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+        .join("&");
+    }
+
+    function productionReviewItemUrl(localId) {
+      if (!localApi.enabled || !state.jobId || !localId) return "";
+      return `/api/production/review-item?${serviceQuery({ job_id: state.jobId, local_id: localId })}`;
+    }
+
+    function productionPreviewUrl(localId, source) {
+      if (!localApi.enabled || !state.jobId || !localId || !source) return "";
+      return `/api/production/preview?${serviceQuery({ job_id: state.jobId, local_id: localId, source })}`;
+    }
 
     function pendingCount() {
       return state.reviewItems.filter((item) => !item.decision).length;
@@ -3051,8 +3069,9 @@
         sourceCategory: item.source_category || "",
         sourceRef: item.source_ref || "",
         previewSource: item.preview_source || "",
-        originalPreviewUrl: localApi.enabled && item.local_id && hasOriginal ? `/api/preview/${encodeURIComponent(item.local_id)}/original` : "",
-        processedPreviewUrl: localApi.enabled && item.local_id && hasProcessed ? `/api/preview/${encodeURIComponent(item.local_id)}/processed` : "",
+        reviewItemUrl: productionReviewItemUrl(item.local_id || ""),
+        originalPreviewUrl: hasOriginal ? productionPreviewUrl(item.local_id || "", "original") : "",
+        processedPreviewUrl: hasProcessed ? productionPreviewUrl(item.local_id || "", "processed") : "",
         decision: null,
         note: "",
         decidedAt: ""
@@ -3128,6 +3147,7 @@
 
     function applyRunStatus(summary, progress, queue, draftDecisions) {
       const operator = summary.operator_summary || {};
+      state.jobId = summary.job_id || (progress && progress.job_id) || state.jobId || "";
       const summaryMode = summary.options && summary.options.processing_mode;
       const summaryModeLabel = (summary.options && summary.options.processing_mode_label_zh) || operator.processing_mode_label_zh;
       const summaryModePurpose = (summary.options && summary.options.processing_mode_purpose_zh) || operator.processing_mode_purpose_zh;
@@ -3830,6 +3850,7 @@
       state.waitingForNewSetup = true;
       state.openOutputFolderAvailable = false;
       state.openOutputFolderStatus = "完成本批并保存输出文件夹后可以打开检查。";
+      state.jobId = "";
       state.lastDraftMessage = "";
       state.operatorMessage = "";
       state.reviewQueueText = "";
