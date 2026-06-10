@@ -750,6 +750,10 @@ profiles under the same content-protection guardrails.
 synthetic mixed photo/stamp/table page; the production summary and processing
 manifest must keep strong background cleanup, faded-text enhancement, and text
 edge sharpening disabled while still writing a public-safe quality summary.
+`print-clean-v1` is covered by production-run contracts for both stable faded
+text (`applied_print_clean_stable_low_contrast_text`) and stable blurred text
+edges (`applied_print_clean_blurred_text_edges`) while keeping source image bytes
+unchanged.
 The dry-run can optionally read a local `scan_qc_report.json`, but the output is
 aggregate-only: it reports file/finding counts, planned operation stages, and
 risk codes without paths, filenames, hashes, thumbnails, OCR text, image

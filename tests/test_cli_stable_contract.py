@@ -194,6 +194,55 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         self.assertGreater(record["text_edges_delta"], 10.0)
         self.assertGreater(record["text_edges_edge_energy_after"], record["text_edges_edge_energy_before"])
 
+    def test_production_run_print_clean_template_records_faded_text_profile_evidence(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-cli-print-clean-faded-text-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            source = input_dir / "BATCH001_PAGE_0001.png"
+            _write_print_clean_faded_text_page(source)
+            source_bytes = source.read_bytes()
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "production-run",
+                        "--input",
+                        str(input_dir),
+                        "--derivatives-out",
+                        str(derivatives_dir),
+                        "--metadata-out",
+                        str(metadata_dir),
+                        "--rule-template",
+                        "print-clean-v1",
+                        "--workers",
+                        "1",
+                    ]
+                )
+
+            summary = json.loads((metadata_dir / "production_run_summary.json").read_text(encoding="utf-8"))
+            processing_manifest = json.loads(
+                (derivatives_dir / "processing_manifest.json").read_text(encoding="utf-8")
+            )
+            record = processing_manifest["files"][0]
+            source_bytes_after = source.read_bytes()
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(source_bytes_after, source_bytes)
+        self.assertEqual(summary["rule_template"]["id"], "print-clean-v1")
+        self.assertEqual(processing_manifest["rule_template"]["id"], "print-clean-v1")
+        self.assertEqual(summary["options"]["processing_profile"], "print_clean")
+        self.assertEqual(processing_manifest["options"]["processing_profile"], "print_clean")
+        self.assertTrue(record["faded_text_enhanced"])
+        self.assertEqual(record["faded_text_reason_code"], "applied_print_clean_stable_low_contrast_text")
+        self.assertGreaterEqual(record["faded_text_delta"], 18.0)
+        self.assertGreater(record["faded_text_changed_pixel_ratio"], 0.0)
+        self.assertLessEqual(record["faded_text_changed_pixel_ratio"], 0.10)
+        self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
+
     def test_production_run_photo_mixed_safe_template_keeps_strong_cleanup_disabled(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-cli-photo-safe-template-") as temp_dir:
             root = Path(temp_dir)
@@ -516,6 +565,16 @@ def _write_blurred_text_edges_page(path: Path) -> None:
     for index, line in enumerate(lines):
         draw.text((64, 100 + index * 34), line, fill=(72, 72, 72), font=font)
     image.filter(ImageFilter.GaussianBlur(radius=0.75)).save(path, dpi=(300, 300))
+
+
+def _write_print_clean_faded_text_page(path: Path) -> None:
+    image = Image.new("RGB", (360, 240), (244, 244, 244))
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default()
+    lines = ("ARCHIVE REGISTER 1948", "PALE PRINT LINE", "FILING COPY TEXT")
+    for index, line in enumerate(lines):
+        draw.text((48, 52 + index * 32), line, fill=(228, 228, 228), font=font)
+    image.save(path, dpi=(300, 300))
 
 
 def _write_mixed_photo_safe_page(path: Path) -> None:

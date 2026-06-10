@@ -314,6 +314,11 @@ faded-text code without exposing paths, filenames, hashes, or image content.
 The faded-text preflight now also treats sparse stable dark foreground text as a
 protected no-op so already-dark blurred text can continue into the text-edge
 sharpening path instead of being reclassified as faded text.
+Follow-up, 2026-06-10: the production CLI contract now also runs a stable faded
+text page under `production-run --rule-template print-clean-v1`, requiring the
+processing manifest to show `print_clean`,
+`applied_print_clean_stable_low_contrast_text`, a positive bounded changed-pixel
+ratio, no guardrail failures, and unchanged source bytes.
 
 Follow-up, 2026-06-09: the synthetic smoke fixtures now also cover a safe narrow
 fold-shadow band, a diffuse reverse-side bleed-through ghost, and a segmented
