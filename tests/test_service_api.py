@@ -165,6 +165,10 @@ class ServiceApiCoreTests(unittest.TestCase):
                 "scan-qc.service-job-event-log.v1",
             )
             self.assertEqual(
+                capabilities["schemas"]["service_job_index_quality"],
+                "scan-qc.service-job-index-quality.v1",
+            )
+            self.assertEqual(
                 capabilities["schemas"]["service_job_index_recovery_issues"],
                 "scan-qc.service-job-index-recovery-issues.v1",
             )

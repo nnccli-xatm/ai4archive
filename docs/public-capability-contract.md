@@ -65,7 +65,11 @@ Service-job rehearsal cores also write
 index may expose nested `scan-qc.service-job-index-recovery-issues.v1`
 aggregates for skipped checkpoint recovery issues, limited to skipped counts and
 allowlisted issue-code counts. It must not expose skipped job IDs, checkpoint
-rows, local paths, filenames, hashes, or exception messages. The service job
+rows, local paths, filenames, hashes, or exception messages. The index may also
+expose nested `scan-qc.service-job-index-quality.v1` aggregates for quality
+availability, status counts, quality-signal status counts, aggregate file
+counts, and blocking-code counts only; it must not expose job IDs, quality rows,
+paths, filenames, hashes, OCR text, thumbnails, or image content. The service job
 public summary may expose aggregate quality category counts,
 whitelisted aggregate `quality_metrics`, blocking codes, quality signal status,
 and guardrail summaries from `processing_quality_summary.json`, plus aggregate

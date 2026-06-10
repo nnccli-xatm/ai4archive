@@ -432,6 +432,11 @@ Follow-up, 2026-06-10: root-level service recovery now keeps valid jobs
 recoverable even when another checkpoint is invalid or unreadable. The public
 index exposes only skipped counts and aggregate recovery issue codes, not
 skipped job IDs, local paths, checkpoint rows, or exception messages.
+Follow-up, 2026-06-10: the same public index now includes nested quality
+aggregates for quality availability, status counts, quality-signal status
+counts, aggregate file counts, and blocking-code counts, without exposing job
+IDs, paths, filenames, hashes, quality rows, OCR text, thumbnails, or image
+content.
 Follow-up, 2026-06-09: the service API now exposes a local-only review artifact
 reader at `GET /api/jobs/{job_id}/local-review/{artifact_id}`. It accepts only
 `processing-review-package` and `production-review-queue`, validates the

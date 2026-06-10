@@ -45,6 +45,7 @@ SERVICE_JOB_SCHEMA_VERSION = "scan-qc.service-job.v1"
 SERVICE_JOB_PUBLIC_SUMMARY_SCHEMA_VERSION = "scan-qc.service-job-public-summary.v1"
 SERVICE_JOB_INDEX_PUBLIC_SUMMARY_SCHEMA_VERSION = "scan-qc.service-job-index-public-summary.v1"
 SERVICE_JOB_INDEX_RECOVERY_ISSUES_SCHEMA_VERSION = "scan-qc.service-job-index-recovery-issues.v1"
+SERVICE_JOB_INDEX_QUALITY_SCHEMA_VERSION = "scan-qc.service-job-index-quality.v1"
 SERVICE_JOB_PUBLIC_TIMINGS_SCHEMA_VERSION = "scan-qc.service-job-public-timings.v1"
 SERVICE_JOB_SOURCE_INTEGRITY_SCHEMA_VERSION = "scan-qc.service-job-source-integrity.v1"
 LOCAL_REVIEW_ARTIFACT_SCHEMA_VERSION = "scan-qc.service-job-local-review-artifact.v1"
@@ -408,6 +409,7 @@ def recover_service_jobs(service_root: Path) -> dict[str, Any]:
         "skipped_job_count": len(recovery_issue_codes),
         "state_counts": state_counts,
         "jobs": summaries,
+        "quality": _public_index_quality_payload(summaries),
         "recovery_issues": _public_index_recovery_issues_payload(recovery_issue_codes),
         "privacy": _public_summary_privacy(),
     }
@@ -1285,6 +1287,72 @@ def _public_index_recovery_issues_payload(issue_codes: list[str]) -> dict[str, A
             "contains_checkpoint_rows": False,
         },
     }
+
+
+def _public_index_quality_payload(summaries: list[dict[str, Any]]) -> dict[str, Any]:
+    status_counts: dict[str, int] = {}
+    signal_status_counts: dict[str, int] = {}
+    blocking_code_counts: dict[str, int] = {}
+    total_processed_files = 0
+    total_failed_files = 0
+    total_guardrail_failed_files = 0
+    provided_job_count = 0
+    public_safe_job_count = 0
+    jobs_with_blocking_codes = 0
+
+    for summary in summaries:
+        quality = summary.get("quality") if isinstance(summary.get("quality"), dict) else {}
+        provided = quality.get("provided") is True
+        if provided:
+            provided_job_count += 1
+        if bool(quality.get("public_safe", True)):
+            public_safe_job_count += 1
+        _increment_count(status_counts, str(quality.get("status") or "unknown"))
+        _increment_count(signal_status_counts, str(quality.get("quality_signal_status") or "unknown"))
+        total_processed_files += _safe_int(quality.get("processed_files")) or 0
+        total_failed_files += _safe_int(quality.get("failed_files")) or 0
+        total_guardrail_failed_files += _safe_int(quality.get("guardrail_failed_files")) or 0
+        blocking_codes = _string_list(quality.get("blocking_codes"))
+        if blocking_codes:
+            jobs_with_blocking_codes += 1
+        for code in blocking_codes:
+            _increment_count(blocking_code_counts, code)
+
+    return {
+        "schema_version": SERVICE_JOB_INDEX_QUALITY_SCHEMA_VERSION,
+        "provided": provided_job_count > 0,
+        "status": "available" if provided_job_count else "not_available",
+        "aggregate_only": True,
+        "public_safe": True,
+        "job_count": len(summaries),
+        "provided_job_count": provided_job_count,
+        "not_provided_job_count": max(0, len(summaries) - provided_job_count),
+        "public_safe_job_count": public_safe_job_count,
+        "processed_files": total_processed_files,
+        "failed_files": total_failed_files,
+        "guardrail_failed_files": total_guardrail_failed_files,
+        "jobs_with_blocking_codes": jobs_with_blocking_codes,
+        "status_counts": status_counts,
+        "quality_signal_status_counts": signal_status_counts,
+        "blocking_code_counts": blocking_code_counts,
+        "privacy": {
+            "public_safe": True,
+            "aggregate_only": True,
+            "contains_paths": False,
+            "contains_filenames": False,
+            "contains_hashes": False,
+            "contains_thumbnails": False,
+            "contains_ocr_text": False,
+            "contains_image_content": False,
+            "contains_job_ids": False,
+            "contains_quality_rows": False,
+        },
+    }
+
+
+def _increment_count(counts: dict[str, int], key: str) -> None:
+    safe_key = key.strip() or "unknown"
+    counts[safe_key] = counts.get(safe_key, 0) + 1
 
 
 def _public_recovery_payload(recovery: Any) -> dict[str, Any]:

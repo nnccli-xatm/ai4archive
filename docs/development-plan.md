@@ -174,7 +174,9 @@ The checkpoint loader also revalidates `input_dir` against the service root and
 marks `running` records without progress as `needs_recovery` after restart.
 Root-level recovery now writes `service_job_index_public_summary.json` so an
 external scheduler can poll aggregate job state without reading private
-checkpoints.
+checkpoints. The index now also carries nested public-safe quality aggregates:
+quality availability, status counts, quality signal status counts, aggregate
+file counts, and blocking-code counts.
 Root-level recovery also reports public-safe `recovery_issues` aggregates when
 individual checkpoints are skipped. The index exposes only skipped counts and
 allowlisted issue codes, not skipped job IDs, paths, checkpoint rows, or

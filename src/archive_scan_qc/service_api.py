@@ -19,6 +19,7 @@ from .rule_templates import (
 )
 from .service_jobs import (
     SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON,
+    SERVICE_JOB_INDEX_QUALITY_SCHEMA_VERSION,
     SERVICE_JOB_INDEX_RECOVERY_ISSUES_SCHEMA_VERSION,
     LOCAL_REVIEW_ARTIFACT_SCHEMA_VERSION,
     SERVICE_JOB_MAX_ACTIVE_JOBS,
@@ -103,6 +104,7 @@ def service_capabilities() -> dict[str, Any]:
             "service_api": SERVICE_API_SCHEMA_VERSION,
             "service_job_public_summary": "scan-qc.service-job-public-summary.v1",
             "service_job_index_public_summary": "scan-qc.service-job-index-public-summary.v1",
+            "service_job_index_quality": SERVICE_JOB_INDEX_QUALITY_SCHEMA_VERSION,
             "service_job_index_recovery_issues": SERVICE_JOB_INDEX_RECOVERY_ISSUES_SCHEMA_VERSION,
             "service_job_local_review_artifact": LOCAL_REVIEW_ARTIFACT_SCHEMA_VERSION,
             "service_job_local_preview": "scan-qc.service-job-local-preview.v1",

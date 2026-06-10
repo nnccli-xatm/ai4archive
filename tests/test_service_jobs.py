@@ -19,6 +19,7 @@ from archive_scan_qc.service_jobs import (
     SERVICE_JOB_MAX_TMP_BYTES,
     SERVICE_JOB_MIN_FREE_SPACE_BYTES,
     SERVICE_JOB_EVENT_LOG_JSON,
+    SERVICE_JOB_INDEX_QUALITY_SCHEMA_VERSION,
     SERVICE_JOB_INDEX_PUBLIC_SUMMARY_JSON,
     SERVICE_JOB_INDEX_RECOVERY_ISSUES_SCHEMA_VERSION,
     SERVICE_JOB_PUBLIC_SUMMARY_JSON,
@@ -290,6 +291,22 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             event_log = json.loads((job_root / "logs" / SERVICE_JOB_EVENT_LOG_JSON).read_text(encoding="utf-8"))
             self.assertGreaterEqual(event_log["event_count"], 3)
             self.assertTrue(event_log["privacy"]["contains_event_rows"])
+            index_summary = recover_service_jobs(service_root)
+            index_quality = index_summary["quality"]
+            self.assertEqual(index_quality["schema_version"], SERVICE_JOB_INDEX_QUALITY_SCHEMA_VERSION)
+            self.assertTrue(index_quality["provided"])
+            self.assertEqual(index_quality["job_count"], 1)
+            self.assertEqual(index_quality["provided_job_count"], 1)
+            self.assertEqual(index_quality["not_provided_job_count"], 0)
+            self.assertEqual(index_quality["processed_files"], 1)
+            self.assertEqual(index_quality["failed_files"], 0)
+            self.assertEqual(index_quality["guardrail_failed_files"], 0)
+            self.assertEqual(index_quality["jobs_with_blocking_codes"], 0)
+            self.assertEqual(index_quality["status_counts"], {"pass": 1})
+            self.assertEqual(index_quality["quality_signal_status_counts"], {summary["quality"]["quality_signal_status"]: 1})
+            self.assertEqual(index_quality["blocking_code_counts"], {})
+            self.assertFalse(index_quality["privacy"]["contains_paths"])
+            self.assertFalse(index_quality["privacy"]["contains_quality_rows"])
             review_package = json.loads(
                 (job_root / "review" / "processing_review_package.json").read_text(encoding="utf-8")
             )
@@ -836,6 +853,17 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertEqual(summary["job_count"], 2)
             self.assertEqual(summary["skipped_job_count"], 0)
             self.assertEqual(summary["state_counts"], {"created": 2})
+            self.assertEqual(summary["quality"]["schema_version"], SERVICE_JOB_INDEX_QUALITY_SCHEMA_VERSION)
+            self.assertFalse(summary["quality"]["provided"])
+            self.assertEqual(summary["quality"]["status"], "not_available")
+            self.assertEqual(summary["quality"]["job_count"], 2)
+            self.assertEqual(summary["quality"]["provided_job_count"], 0)
+            self.assertEqual(summary["quality"]["not_provided_job_count"], 2)
+            self.assertEqual(summary["quality"]["status_counts"], {"not_available": 2})
+            self.assertEqual(summary["quality"]["quality_signal_status_counts"], {"not_available": 2})
+            self.assertEqual(summary["quality"]["blocking_code_counts"], {})
+            self.assertFalse(summary["quality"]["privacy"]["contains_paths"])
+            self.assertFalse(summary["quality"]["privacy"]["contains_quality_rows"])
             self.assertEqual(
                 summary["recovery_issues"]["schema_version"],
                 SERVICE_JOB_INDEX_RECOVERY_ISSUES_SCHEMA_VERSION,
@@ -846,6 +874,7 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertEqual(file_summary["job_count"], 2)
             self.assertEqual(file_summary["skipped_job_count"], 0)
             self.assertEqual(file_summary["state_counts"], {"created": 2})
+            self.assertEqual(file_summary["quality"]["status_counts"], {"not_available": 2})
             self.assertEqual(file_summary["recovery_issues"]["status"], "clear")
             self.assertEqual({job["job_id"] for job in summary["jobs"]}, {"job-testindex001", "job-testindex002"})
             _assert_public_text_omits(self, raw, str(root.resolve()), "private_page_")
