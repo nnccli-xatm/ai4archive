@@ -156,14 +156,14 @@ the smoke payload. It covers aggregate changed-file counts, before/after metric
 averages/maxima, guardrails, fixture context, and privacy flags without paths,
 filenames, hashes, thumbnails, OCR text, or image content.
 
-Fixture update, 2026-06-10: the synthetic smoke baseline now covers 18 generated
+Fixture update, 2026-06-10: the synthetic smoke baseline now covers 19 generated
 fixture groups: clean text, small-angle skewed text, dark border, scanner
 gutter, speckles, faded edge shadow, color cast, low-contrast text,
 illumination gradient, scanlines, diffuse bleed-through, broad thin-paper
 bleed-through, corner shadow, localized background stain, fold shadow, blurred
-text edges, ultra-pale typed text, and mixed photo/stamp/table content. This
-remains public-safe because the images are generated at runtime and only
-aggregate fixture group IDs are published.
+text edges, ultra-pale typed text, low-saturation carbon-copy text, and mixed
+photo/stamp/table content. This remains public-safe because the images are
+generated at runtime and only aggregate fixture group IDs are published.
 Follow-up, 2026-06-10: `image-processing-capability-smoke` now treats declared
 required quality operations as status blockers. If aggregate audit counts show
 zero applied files for a required operation, the public-safe smoke fails with a
@@ -312,6 +312,10 @@ text components on light paper while keeping red stamps, saturated color marks,
 long form rules, and boxed form structures on the protected no-op path. The
 public audit reports `applied_stable_low_saturation_text` as an aggregate reason
 code without paths, filenames, hashes, thumbnails, OCR text, or image content.
+`image-processing-capability-smoke` now includes a matching synthetic fixture,
+publishes the whitelisted reason code/count under
+`operation_reason_code_counts`, and fails with
+`low_saturation_faded_text_reason_not_observed` if the evidence disappears.
 
 Follow-up, 2026-06-09: the smoke fixture set now includes a light-paper page
 with a low-amplitude illumination gradient and sparse typed text. The public-safe

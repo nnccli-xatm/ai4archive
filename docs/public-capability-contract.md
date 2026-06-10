@@ -250,18 +250,23 @@ The command creates synthetic images in a temporary directory, runs
 `scan-qc.image-processing-capability-smoke.v1` and
 `processing_quality_summary.json` with schema
 `scan-qc.processing-quality-summary.v1`. The smoke JSON records aggregate
-fixture counts, processing counts, guardrail counts, operation counts, timing
-summaries, backend counts, and the embedded public-safe quality baseline. The
-smoke status fails with explicit blocking codes if any declared required quality
-operation has zero applied files in the aggregate audit counts or if the
-matching allowlisted aggregate quality metric maxima stay below required
-evidence thresholds. The
+fixture counts, processing counts, guardrail counts, operation counts,
+whitelisted operation reason code/counts, timing summaries, backend counts, and
+the embedded public-safe quality baseline. The smoke status fails with explicit
+blocking codes if any declared required quality operation has zero applied files
+in the aggregate audit counts, if required whitelisted operation reason evidence
+is absent, or if the matching allowlisted aggregate quality metric maxima stay
+below required evidence thresholds. The whitelisted reason evidence is limited
+to aggregate stable reason codes such as `applied_stable_low_saturation_text`;
+it must not publish arbitrary reason text, filenames, paths, hashes, OCR text,
+image content, or row-level audit records. The
 quality summary records aggregate before/after quality signals, changed-file
 counts, guardrails, and metric averages/maxima, including localized
 small-angle deskew, paired dark-edge trim, scanner-gutter trim, paper
 color-cast normalization, edge/corner shadow cleanup, background-stain cleanup,
 illumination-gradient leveling, diffuse bleed-through cleanup, broad thin-paper
-bleed-through cleanup, and the ultra-pale typed glyph fixture group.
+bleed-through cleanup, ultra-pale typed glyphs, and low-saturation carbon-copy
+faded text.
 Text-edge evidence includes an aggregate before/after edge-energy comparison.
 It also records a
 protected mixed photo/stamp/table fixture check as

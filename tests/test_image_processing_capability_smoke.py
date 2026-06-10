@@ -21,7 +21,7 @@ from archive_scan_qc.processing_quality_summary import (
     SCHEMA_VERSION as QUALITY_SCHEMA_VERSION,
 )
 
-EXPECTED_SYNTHETIC_FIXTURES = 18
+EXPECTED_SYNTHETIC_FIXTURES = 19
 
 
 class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
@@ -86,6 +86,15 @@ class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
             self.assertIn("scanner_gutter_page", quality_payload["fixture_context"]["fixture_groups"])
             self.assertIn("illumination_gradient_page", quality_payload["fixture_context"]["fixture_groups"])
             self.assertIn("ultra_pale_typed_text_page", quality_payload["fixture_context"]["fixture_groups"])
+            self.assertIn("low_saturation_carbon_text_page", quality_payload["fixture_context"]["fixture_groups"])
+            self.assertIn(
+                "low_saturation_carbon_text_page",
+                payload["synthetic_fixture_summary"]["fixture_groups"],
+            )
+            self.assertGreaterEqual(
+                payload["operation_reason_code_counts"]["faded_text"]["applied_stable_low_saturation_text"],
+                1,
+            )
             protected_checks = quality_payload["fixture_context"]["protected_content_checks"]
             self.assertEqual(payload["protected_content_checks"], protected_checks)
             self.assertEqual(len(protected_checks), 1)
@@ -211,6 +220,7 @@ class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
                     audit_privacy=audit_privacy,
                     quality_summary=_passing_quality_summary(),
                     protected_content_checks=[{"status": "pass"}],
+                    operation_reason_code_counts=_passing_operation_reason_code_counts(),
                     source_images_modified=False,
                 )
 
@@ -244,10 +254,43 @@ class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
             audit_privacy=audit_privacy,
             quality_summary=quality_summary,
             protected_content_checks=[{"status": "pass"}],
+            operation_reason_code_counts=_passing_operation_reason_code_counts(),
             source_images_modified=False,
         )
 
         self.assertIn("tone_contrast_delta_below_min", blockers)
+
+    def test_blocking_codes_require_low_saturation_faded_text_reason_evidence(self) -> None:
+        audit_counts = {field: 1 for field in _REQUIRED_OPERATION_COUNT_BLOCKERS}
+        audit_counts["guardrail_failed_files"] = 0
+        audit_privacy = {
+            "aggregate_only": True,
+            "contains_paths": False,
+            "contains_hashes": False,
+            "contains_thumbnails": False,
+            "contains_ocr_text": False,
+        }
+
+        blockers = _blocking_codes(
+            fixture_count=EXPECTED_SYNTHETIC_FIXTURES,
+            scan_summary={
+                "total_files": EXPECTED_SYNTHETIC_FIXTURES,
+                "openable_files": EXPECTED_SYNTHETIC_FIXTURES,
+            },
+            processing_summary={
+                "processed_files": EXPECTED_SYNTHETIC_FIXTURES,
+                "failed_files": 0,
+                "retry_list_files": 0,
+            },
+            audit_counts=audit_counts,
+            audit_privacy=audit_privacy,
+            quality_summary=_passing_quality_summary(),
+            protected_content_checks=[{"status": "pass"}],
+            operation_reason_code_counts={"faded_text": {"applied_stable_low_saturation_text": 0}},
+            source_images_modified=False,
+        )
+
+        self.assertIn("low_saturation_faded_text_reason_not_observed", blockers)
 
     def test_blocking_codes_require_text_edge_energy_to_improve(self) -> None:
         audit_counts = {field: 1 for field in _REQUIRED_OPERATION_COUNT_BLOCKERS}
@@ -278,6 +321,7 @@ class ImageProcessingCapabilitySmokeTests(unittest.TestCase):
             audit_privacy=audit_privacy,
             quality_summary=quality_summary,
             protected_content_checks=[{"status": "pass"}],
+            operation_reason_code_counts=_passing_operation_reason_code_counts(),
             source_images_modified=False,
         )
 
@@ -359,6 +403,10 @@ def _passing_quality_summary() -> dict[str, object]:
     payload["quality_metrics"]["text_edges_edge_energy_before"]["max"] = 20.0
     payload["quality_metrics"]["text_edges_edge_energy_after"]["max"] = 30.0
     return payload
+
+
+def _passing_operation_reason_code_counts() -> dict[str, dict[str, int]]:
+    return {"faded_text": {"applied_stable_low_saturation_text": 1}}
 
 
 if __name__ == "__main__":

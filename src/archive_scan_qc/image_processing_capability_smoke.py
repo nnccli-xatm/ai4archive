@@ -59,7 +59,22 @@ _SYNTHETIC_FIXTURE_GROUPS = (
     "fold_shadow_page",
     "blurred_text_edges_page",
     "ultra_pale_typed_text_page",
+    "low_saturation_carbon_text_page",
     "mixed_photo_stamp_table_page",
+)
+
+_PUBLIC_OPERATION_REASON_CODE_KEYS = {
+    "faded_text": (
+        "applied_stable_low_saturation_text",
+    ),
+}
+
+_REQUIRED_OPERATION_REASON_CODE_BLOCKERS = (
+    (
+        "faded_text",
+        "applied_stable_low_saturation_text",
+        "low_saturation_faded_text_reason_not_observed",
+    ),
 )
 
 _REQUIRED_OPERATION_COUNT_BLOCKERS = {
@@ -241,6 +256,7 @@ def _build_summary(
     audit_counts = audit_summary.get("counts", {}) if isinstance(audit_summary.get("counts"), dict) else {}
     audit_privacy = audit_summary.get("privacy", {}) if isinstance(audit_summary.get("privacy"), dict) else {}
     operation_timings = _public_operation_timings(audit_summary)
+    operation_reason_code_counts = _public_operation_reason_code_counts(audit_summary)
     blockers = _blocking_codes(
         fixture_count=fixture_count,
         scan_summary=scan_summary,
@@ -249,6 +265,7 @@ def _build_summary(
         audit_privacy=audit_privacy,
         quality_summary=quality_summary,
         protected_content_checks=protected_content_checks,
+        operation_reason_code_counts=operation_reason_code_counts,
         source_images_modified=source_images_modified,
     )
 
@@ -310,6 +327,7 @@ def _build_summary(
             "guardrail_failed_files": _safe_int(audit_counts.get("guardrail_failed_files")),
         },
         "operation_counts": _operation_counts(audit_counts),
+        "operation_reason_code_counts": operation_reason_code_counts,
         "backend_summary": {
             "despeckle_backend_requested": despeckle_backend,
             "despeckle_backend_modes": _despeckle_backend_counts(operation_timings),
@@ -332,6 +350,7 @@ def _blocking_codes(
     audit_privacy: dict[str, Any],
     quality_summary: dict[str, Any] | None = None,
     protected_content_checks: list[dict[str, Any]],
+    operation_reason_code_counts: dict[str, dict[str, int]],
     source_images_modified: bool,
 ) -> list[str]:
     blockers: list[str] = []
@@ -347,6 +366,11 @@ def _blocking_codes(
         blockers.append("processing_retry_list_not_empty")
     for field, blocker in _REQUIRED_OPERATION_COUNT_BLOCKERS.items():
         if _safe_int(audit_counts.get(field)) <= 0:
+            blockers.append(blocker)
+    reason_counts = operation_reason_code_counts if isinstance(operation_reason_code_counts, dict) else {}
+    for operation, reason_code, blocker in _REQUIRED_OPERATION_REASON_CODE_BLOCKERS:
+        operation_counts = reason_counts.get(operation)
+        if not isinstance(operation_counts, dict) or _safe_int(operation_counts.get(reason_code)) <= 0:
             blockers.append(blocker)
     blockers.extend(_quality_metric_blockers(quality_summary))
     if _safe_int(audit_counts.get("guardrail_failed_files")) != 0:
@@ -435,6 +459,22 @@ def _operation_counts(audit_counts: dict[str, Any]) -> dict[str, int]:
         "text_edges_sharpened_files",
     )
     return {field: _safe_int(audit_counts.get(field)) for field in fields}
+
+
+def _public_operation_reason_code_counts(audit_summary: dict[str, Any]) -> dict[str, dict[str, int]]:
+    guardrails = audit_summary.get("guardrails")
+    guardrails = guardrails if isinstance(guardrails, dict) else {}
+    payload: dict[str, dict[str, int]] = {}
+    for operation, reason_codes in _PUBLIC_OPERATION_REASON_CODE_KEYS.items():
+        operation_summary = guardrails.get(operation)
+        operation_summary = operation_summary if isinstance(operation_summary, dict) else {}
+        reason_distribution = operation_summary.get("reason_code_distribution")
+        reason_distribution = reason_distribution if isinstance(reason_distribution, dict) else {}
+        payload[operation] = {
+            reason_code: _safe_int(reason_distribution.get(reason_code))
+            for reason_code in reason_codes
+        }
+    return payload
 
 
 def _despeckle_backend_counts(operation_timings: dict[str, Any]) -> dict[str, int]:
@@ -537,6 +577,7 @@ def _write_synthetic_fixtures(input_dir: Path) -> int:
         _fold_shadow_page(),
         _blurred_text_edges_page(),
         _ultra_pale_typed_text_page(),
+        _low_saturation_carbon_text_page(),
         _mixed_photo_stamp_table_page(),
     )
     for index, image in enumerate(fixtures, start=1):
@@ -750,6 +791,16 @@ def _ultra_pale_typed_text_page() -> Image.Image:
     )
     for index, line in enumerate(lines):
         draw.text((64, 104 + index * 34), line, fill=(232, 232, 232), font=font)
+    return image
+
+
+def _low_saturation_carbon_text_page() -> Image.Image:
+    image = Image.new("RGB", (360, 240), (245, 247, 250))
+    draw = ImageDraw.Draw(image)
+    ink = (162, 184, 206)
+    for y in (56, 86, 116):
+        draw.rectangle((48, y, 124, y + 4), fill=ink)
+        draw.rectangle((144, y, 224, y + 4), fill=ink)
     return image
 
 

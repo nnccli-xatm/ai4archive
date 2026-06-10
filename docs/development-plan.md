@@ -243,7 +243,11 @@ Faded-text enhancement now also includes a narrow low-saturation carbon-copy
 text path for stable cool faded text on light paper. The same guardrail stack
 keeps red stamps, saturated color marks, long form rules, and boxed form
 structures protected, while public audit summaries report only aggregate
-`applied_stable_low_saturation_text` counts.
+`applied_stable_low_saturation_text` counts. The synthetic
+`image-processing-capability-smoke` run now includes a matching generated
+fixture, publishes that whitelisted reason code/count through
+`operation_reason_code_counts`, and blocks with
+`low_saturation_faded_text_reason_not_observed` if the evidence disappears.
 Service job public summaries now also carry nested
 `scan-qc.service-job-public-timings.v1` timing context. The payload is
 public-safe: it keeps only whitelisted stage IDs, aggregate processing
@@ -362,6 +366,10 @@ Follow-up, 2026-06-09: 路线图中的 `archival-safe-v1`,
 候选面积受控时放宽到极浅文字；过淡条状页、手写、表格、印章、照片和纹理仍保持跳过。
 `image-processing-capability-smoke` 同步加入极浅打印字形 fixture，要求该能力进入
 public-safe 聚合质量基线。
+最新补充：`image-processing-capability-smoke` 已加入低饱和碳复写文字 fixture，
+要求褪色文字增强公开输出 `applied_stable_low_saturation_text` 聚合 reason
+code/count；若该证据为 0，smoke 会以
+`low_saturation_faded_text_reason_not_observed` 失败。
 最新补充：`image-processing-capability-smoke` 已加入低幅度照明梯度 fixture，要求
 全链路产生至少一次照明梯度校正，并在 public-safe 聚合质量基线中输出校正幅度和
 像素变化比例指标。
