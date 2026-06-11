@@ -362,6 +362,9 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 - 2026-06-11 清晰度修复：OCR 背景归一/低对比增强后新增受控文字边缘恢复，禁止抬亮原深色前景；
   manifest、processing quality summary 和 service public-safe allowlist 新增
   `ocr_text_edge_energy_before`、`ocr_text_edge_energy_after`、`ocr_text_edge_energy_ratio`。
+- 2026-06-11 软边修复：`ocr-preprocess-v1` 主灰度派生图改为 `.ocr.png` lossless 输出，
+  并新增高置信文字/表格线 edge snap；聚合指标新增
+  `ocr_text_soft_edge_ratio_before`、`ocr_text_soft_edge_ratio_after`、`ocr_text_soft_edge_ratio_delta`。
 
 ### DEV-154 自适应阈值和二值 OCR 输出
 
@@ -408,6 +411,10 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 - 真实扫描第三次复测：12/12 OCR 灰度增强和 `ocr_binary` sidecar，11/12 实际纠偏；
   `ocr_text_edge_energy_ratio` 平均 1.687265，最小 1.428797，最大 2.480872；
   失败 0、guardrail failure 0、processing warning 0、源图修改 0。
+- 真实扫描第四次复测：12/12 主灰度增强输出为 `.ocr.png`，12/12 `ocr_binary` sidecar，
+  11/12 实际纠偏；`ocr_text_soft_edge_ratio_after` 平均/最大均为 0，
+  `ocr_text_soft_edge_ratio_delta` 平均 0.434424；失败 0、guardrail failure 0、
+  processing warning 0、源图修改 0。
 
 ## P2：CI、发布和性能
 

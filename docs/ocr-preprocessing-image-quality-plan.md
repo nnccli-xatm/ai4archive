@@ -89,6 +89,13 @@ Synthetic OCR gate：
 - 真实扫描样本 `fix7` 复测结果：12/12 生成 OCR 灰度增强，12/12 生成 `ocr_binary` sidecar；
   11/12 实际纠偏，失败 0、guardrail failure 0、processing warning 0，源图修改 0；
   `ocr_text_edge_energy_ratio` 平均 1.687265，最小 1.428797，最大 2.480872。
+- 2026-06-11 第四次清晰度修复：`ocr-preprocess-v1` 主灰度派生图改为 `.ocr.png`
+  lossless 输出，并在强 OCR profile 中加入高置信文字/表格线 edge snap。该步骤不再只加深颜色，
+  而是把抗锯齿软边收敛为 OCR 更容易识别的硬边。
+- 真实扫描样本 `fix8` 复测结果：12/12 生成 `.ocr.png` OCR 灰度增强，12/12 生成
+  `ocr_binary` sidecar；11/12 实际纠偏，失败 0、guardrail failure 0、processing warning 0，
+  源图修改 0；`ocr_text_soft_edge_ratio_after` 平均/最大均为 0，
+  `ocr_text_soft_edge_ratio_delta` 平均 0.434424，最大 0.825201。
 
 ## 2. 目标重新定义
 
@@ -183,6 +190,9 @@ OCR 预处理管线必须独立于保真派生图管线，输出 `ocr_derivative
 - 断笔风险控制：二值化后连通域数量、笔画宽度分布和前景保留率必须受控。
 - OCR 利用副本必须有文字清晰度保底：以文字前景邻域平均梯度记录输出/原图边缘能量比，
   当 `ocr_text_edge_energy_ratio` 低于 0.95 时进入处理输出安全 guard，避免把纠偏或背景净化后的利用副本交付成模糊文字图。
+- OCR 利用副本还必须记录软边比例：`ocr_text_soft_edge_ratio_before/after/delta`
+  用于约束“只把字加黑但边缘仍糊”的假改善；`ocr-preprocess-v1` 的目标是降低软边比例并生成
+  lossless `.ocr.png` 主输出。
 
 ### 4.6 透印、扫描线和表格保护
 

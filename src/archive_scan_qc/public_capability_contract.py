@@ -407,6 +407,7 @@ def build_public_capability_contract(generated_at: str | None = None) -> dict[st
                         "ocr_background_delta",
                         "ocr_foreground_retention_ratio",
                         "ocr_text_edge_energy_ratio",
+                        "ocr_text_soft_edge_ratio_delta",
                         "ocr_binary_foreground_ratio",
                         "bleed_through_delta",
                         "scanlines_delta",

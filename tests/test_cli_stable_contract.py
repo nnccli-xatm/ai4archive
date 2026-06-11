@@ -642,8 +642,10 @@ class StableCliRuleTemplateTests(unittest.TestCase):
                 (derivatives_dir / PROCESSING_QUALITY_SUMMARY_JSON).read_text(encoding="utf-8")
             )
             record = processing_manifest["files"][0]
+            output_path = derivatives_dir / record["output_relative_path"]
             binary_path = derivatives_dir / record["ocr_binary_output_relative_path"]
             source_unchanged = source.read_bytes() == source_bytes
+            output_exists = output_path.is_file()
             binary_exists = binary_path.is_file()
 
         self.assertEqual(exit_code, 0)
@@ -656,10 +658,14 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         self.assertIn("ocr_preprocess_grayscale", processing_manifest["ocr_preprocessing_operations"])
         self.assertIn("ocr_binary_sidecar", processing_manifest["ocr_preprocessing_operations"])
         self.assertTrue(record["ocr_preprocessed"])
+        self.assertTrue(record["output_relative_path"].endswith(".ocr.png"))
+        self.assertTrue(output_exists)
         self.assertEqual(record["ocr_preprocess_reason_code"], "applied_background_normalization")
         self.assertGreater(record["ocr_preprocess_changed_pixel_ratio"], 0.20)
         self.assertGreater(record["ocr_background_delta"], 15.0)
         self.assertGreaterEqual(record["ocr_foreground_retention_ratio"], 0.998)
+        self.assertLessEqual(record["ocr_text_soft_edge_ratio_after"], 0.05)
+        self.assertGreater(record["ocr_text_soft_edge_ratio_delta"], 0.05)
         self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
         self.assertTrue(record["ocr_binary_created"])
         self.assertTrue(binary_exists)
@@ -795,8 +801,12 @@ class StableCliRuleTemplateTests(unittest.TestCase):
             form_output = derivatives_dir / form_record["output_relative_path"]
             sparse_edge_energy_before = _ocr_text_edge_energy_for_test(sparse_source)
             sparse_edge_energy_after = _ocr_text_edge_energy_for_test(sparse_output)
+            sparse_soft_edge_before = _ocr_text_soft_edge_ratio_for_test(sparse_source)
+            sparse_soft_edge_after = _ocr_text_soft_edge_ratio_for_test(sparse_output)
             form_edge_energy_before = _ocr_text_edge_energy_for_test(form_source)
             form_edge_energy_after = _ocr_text_edge_energy_for_test(form_output)
+            form_soft_edge_before = _ocr_text_soft_edge_ratio_for_test(form_source)
+            form_soft_edge_after = _ocr_text_soft_edge_ratio_for_test(form_output)
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(quality_summary["counts"]["ocr_preprocessed_files"], 2)
@@ -810,6 +820,8 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         self.assertLess(sparse_record["ocr_binary_foreground_ratio"], 0.03)
         self.assertGreaterEqual(sparse_record["ocr_text_edge_energy_ratio"], 0.95)
         self.assertGreaterEqual(sparse_edge_energy_after, sparse_edge_energy_before * 0.95)
+        self.assertLessEqual(sparse_record["ocr_text_soft_edge_ratio_after"], 0.05)
+        self.assertLessEqual(sparse_soft_edge_after, sparse_soft_edge_before * 0.50)
         self.assertEqual(sparse_record["processing_audit"]["guardrail_failures"], [])
         self.assertTrue(form_record["deskewed"])
         self.assertEqual(form_record["deskew_reason"], "deskew applied")
@@ -818,6 +830,8 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         self.assertTrue(form_record["ocr_binary_created"])
         self.assertGreaterEqual(form_record["ocr_text_edge_energy_ratio"], 0.95)
         self.assertGreaterEqual(form_edge_energy_after, form_edge_energy_before * 0.95)
+        self.assertLessEqual(form_record["ocr_text_soft_edge_ratio_after"], 0.05)
+        self.assertLessEqual(form_soft_edge_after, form_soft_edge_before * 0.50)
         self.assertEqual(form_record["processing_audit"]["guardrail_failures"], [])
 
     def test_run_plan_accepts_rule_template_and_records_public_batch_choice(self) -> None:
@@ -1278,6 +1292,38 @@ def _ocr_text_edge_energy_for_test(path: Path) -> float:
     if pair_count < max(8, int(area * 0.00002)):
         return 0.0
     return gradient_total / pair_count
+
+
+def _ocr_text_soft_edge_ratio_for_test(path: Path) -> float:
+    image = Image.open(path).convert("L")
+    histogram = image.histogram()
+    area = max(1, image.width * image.height)
+    running = 0
+    background = 255
+    for value, count in enumerate(histogram):
+        running += count
+        if running >= area * 0.9:
+            background = value
+            break
+    threshold = max(90, min(220, background - 35))
+    content = image.point(lambda value: 255 if value <= min(235, threshold + 45) else 0, mode="L").filter(
+        ImageFilter.MaxFilter(3)
+    )
+    content_pixels = content.load()
+    source_pixels = image.load()
+    total = 0
+    soft = 0
+    for y in range(image.height):
+        for x in range(image.width):
+            if not content_pixels[x, y]:
+                continue
+            total += 1
+            value = int(source_pixels[x, y])
+            if 32 < value < 224:
+                soft += 1
+    if total < max(8, int(area * 0.00002)):
+        return 0.0
+    return soft / total
 
 
 def _write_clean_page(path: Path) -> None:

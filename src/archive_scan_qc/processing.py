@@ -786,7 +786,7 @@ def _reuse_duplicate_record(
     if not source.is_file() or _sha256(source) != item.get("sha256"):
         return _process_record(item, input_dir, image_root, options)
 
-    target = image_root / relative_path
+    target = _derivative_target_path(image_root, relative_path, options)
     source_output_relative = source_record.get("output_relative_path")
     if not isinstance(source_output_relative, str) or not source_output_relative:
         record = dict(source_record)
@@ -1043,6 +1043,9 @@ def _process_record(
         "ocr_text_edge_energy_before": 0.0,
         "ocr_text_edge_energy_after": 0.0,
         "ocr_text_edge_energy_ratio": 1.0,
+        "ocr_text_soft_edge_ratio_before": 0.0,
+        "ocr_text_soft_edge_ratio_after": 0.0,
+        "ocr_text_soft_edge_ratio_delta": 0.0,
         "ocr_review_required": False,
         "ocr_review_reason_codes": [],
         "ocr_binary_created": False,
@@ -1079,7 +1082,7 @@ def _process_record(
         return base
 
     source = input_dir / relative_path
-    target = image_root / relative_path
+    target = _derivative_target_path(image_root, relative_path, options)
     try:
         if source.resolve() == target.resolve():
             raise ValueError("derivative target would overwrite the source image")
@@ -1251,6 +1254,9 @@ def _process_record(
                 "ocr_text_edge_energy_before": process_info["ocr_text_edge_energy_before"],
                 "ocr_text_edge_energy_after": process_info["ocr_text_edge_energy_after"],
                 "ocr_text_edge_energy_ratio": process_info["ocr_text_edge_energy_ratio"],
+                "ocr_text_soft_edge_ratio_before": process_info["ocr_text_soft_edge_ratio_before"],
+                "ocr_text_soft_edge_ratio_after": process_info["ocr_text_soft_edge_ratio_after"],
+                "ocr_text_soft_edge_ratio_delta": process_info["ocr_text_soft_edge_ratio_delta"],
                 "ocr_review_required": process_info["ocr_review_required"],
                 "ocr_review_reason_codes": process_info["ocr_review_reason_codes"],
                 "ocr_binary_created": process_info["ocr_binary_created"],
@@ -1594,6 +1600,13 @@ def _ocr_binary_target_path(image_root: Path, relative_path: str) -> Path:
     return image_root.parent / "ocr_binary" / binary_relative
 
 
+def _derivative_target_path(image_root: Path, relative_path: str, options: ProcessingOptions) -> Path:
+    derivative_relative = Path(relative_path)
+    if _ocr_processing_enabled(options):
+        derivative_relative = derivative_relative.with_suffix(".ocr.png")
+    return image_root / derivative_relative
+
+
 def _ocr_preprocessing_operations(options: ProcessingOptions) -> list[str]:
     operations: list[str] = []
     if _ocr_processing_enabled(options):
@@ -1615,6 +1628,9 @@ def _ocr_manifest_quality_metrics(records: list[dict[str, Any]]) -> dict[str, An
         "ocr_text_edge_energy_before",
         "ocr_text_edge_energy_after",
         "ocr_text_edge_energy_ratio",
+        "ocr_text_soft_edge_ratio_before",
+        "ocr_text_soft_edge_ratio_after",
+        "ocr_text_soft_edge_ratio_delta",
         "ocr_binary_foreground_ratio",
         "ocr_binary_foreground_retention_ratio",
     )
@@ -2403,6 +2419,18 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "ocr_text_edge_energy_ratio": _aggregate_metric(
                 audit_records,
                 "ocr_text_edge_energy_ratio",
+            ),
+            "ocr_text_soft_edge_ratio_before": _aggregate_metric(
+                audit_records,
+                "ocr_text_soft_edge_ratio_before",
+            ),
+            "ocr_text_soft_edge_ratio_after": _aggregate_metric(
+                audit_records,
+                "ocr_text_soft_edge_ratio_after",
+            ),
+            "ocr_text_soft_edge_ratio_delta": _aggregate_metric(
+                audit_records,
+                "ocr_text_soft_edge_ratio_delta",
             ),
             "ocr_binary_foreground_ratio": _aggregate_metric(audit_records, "ocr_binary_foreground_ratio"),
             "ocr_binary_foreground_retention_ratio": _aggregate_metric(
@@ -4655,6 +4683,15 @@ def _process_image(
         "ocr_text_edge_energy_ratio": (
             1.0 if guard_reverted else processing_audit.get("ocr_text_edge_energy_ratio", 1.0)
         ),
+        "ocr_text_soft_edge_ratio_before": (
+            0.0 if guard_reverted else processing_audit.get("ocr_text_soft_edge_ratio_before", 0.0)
+        ),
+        "ocr_text_soft_edge_ratio_after": (
+            0.0 if guard_reverted else processing_audit.get("ocr_text_soft_edge_ratio_after", 0.0)
+        ),
+        "ocr_text_soft_edge_ratio_delta": (
+            0.0 if guard_reverted else processing_audit.get("ocr_text_soft_edge_ratio_delta", 0.0)
+        ),
         "ocr_review_required": (
             True if guard_reverted else (ocr_preprocess.review_required or ocr_binary.review_required)
         ),
@@ -4817,6 +4854,7 @@ def _ocr_preprocess_grayscale(
         low_contrast_mode=low_contrast_mode,
         strong_profile=strong_profile,
     )
+    output = _ocr_snap_text_edges_for_ocr(output, strong_profile=strong_profile)
     changed_pixel_ratio = _pixel_change_ratio(grayscale, output)
     background_before = float(p95)
     output_histogram = output.histogram()
@@ -5144,6 +5182,47 @@ def _ocr_restore_text_edge_clarity(
     return sharpened
 
 
+def _ocr_snap_text_edges_for_ocr(processed_l: Image.Image, *, strong_profile: bool) -> Image.Image:
+    if not strong_profile:
+        return processed_l
+    grayscale = processed_l.convert("L")
+    histogram = grayscale.histogram()
+    total = max(1, grayscale.width * grayscale.height)
+    threshold = max(96, min(205, _otsu_threshold(histogram, total) + 18))
+    foreground_pixels = sum(histogram[: threshold + 1])
+    foreground_ratio = foreground_pixels / total
+    if foreground_ratio < 0.0002 or foreground_ratio > 0.45:
+        return processed_l
+
+    np = _load_numpy()
+    if np is not None:
+        try:
+            values = np.asarray(grayscale, dtype=np.uint8)
+            snapped = np.full(values.shape, 255, dtype=np.uint8)
+            foreground = values <= threshold
+            dark_core = values <= max(0, threshold - 18)
+            snapped[foreground & dark_core] = 0
+            snapped[foreground & ~dark_core] = 24
+            pale_background = (~foreground) & (values < 235)
+            snapped[pale_background] = np.maximum(values[pale_background], 245)
+            return Image.fromarray(snapped, mode="L")
+        except (TypeError, ValueError):
+            pass
+
+    output = Image.new("L", grayscale.size, 255)
+    source_pixels = grayscale.load()
+    output_pixels = output.load()
+    dark_core_threshold = max(0, threshold - 18)
+    for y in range(grayscale.height):
+        for x in range(grayscale.width):
+            value = int(source_pixels[x, y])
+            if value <= threshold:
+                output_pixels[x, y] = 0 if value <= dark_core_threshold else 24
+            elif value < 235:
+                output_pixels[x, y] = max(value, 245)
+    return output
+
+
 def _ocr_foreground_preservation_metrics(source_l: Image.Image, processed_l: Image.Image) -> tuple[float, float, float]:
     np = _load_numpy()
     if np is not None:
@@ -5186,10 +5265,15 @@ def _ocr_text_edge_clarity_metrics(source_l: Image.Image, processed_l: Image.Ima
     before = _ocr_text_edge_energy(source_l)
     after = _ocr_text_edge_energy(processed_l)
     ratio = after / before if before > 0 else 1.0
+    soft_before = _ocr_text_soft_edge_ratio(source_l)
+    soft_after = _ocr_text_soft_edge_ratio(processed_l)
     return {
         "ocr_text_edge_energy_before": round(before, 6),
         "ocr_text_edge_energy_after": round(after, 6),
         "ocr_text_edge_energy_ratio": round(ratio, 6),
+        "ocr_text_soft_edge_ratio_before": round(soft_before, 6),
+        "ocr_text_soft_edge_ratio_after": round(soft_after, 6),
+        "ocr_text_soft_edge_ratio_delta": round(soft_before - soft_after, 6),
     }
 
 
@@ -5233,6 +5317,43 @@ def _ocr_text_edge_energy(grayscale: Image.Image) -> float:
     if pair_count < max(8, int(area * 0.00002)):
         return 0.0
     return gradient_total / pair_count
+
+
+def _ocr_text_soft_edge_ratio(grayscale: Image.Image) -> float:
+    image_l = grayscale.convert("L")
+    histogram = image_l.histogram()
+    area = max(1, image_l.width * image_l.height)
+    threshold = _high_contrast_content_threshold(histogram, image_l.size)
+    content = image_l.point(lambda value: 255 if value <= min(235, threshold + 45) else 0, mode="L")
+    content = content.filter(ImageFilter.MaxFilter(3))
+    np = _load_numpy()
+    if np is not None:
+        try:
+            values = np.asarray(image_l, dtype=np.uint8)
+            mask = np.asarray(content, dtype=bool)
+            content_pixels = int(mask.sum())
+            if content_pixels < max(8, int(area * 0.00002)):
+                return 0.0
+            soft = mask & (values > 32) & (values < 224)
+            return float(np.count_nonzero(soft)) / content_pixels
+        except (TypeError, ValueError):
+            pass
+
+    content_pixels = content.load()
+    source_pixels = image_l.load()
+    total = 0
+    soft = 0
+    for y in range(image_l.height):
+        for x in range(image_l.width):
+            if not content_pixels[x, y]:
+                continue
+            total += 1
+            value = int(source_pixels[x, y])
+            if 32 < value < 224:
+                soft += 1
+    if total < max(8, int(area * 0.00002)):
+        return 0.0
+    return soft / total
 
 
 def _ocr_binary_sidecar(image: Image.Image, ocr_preprocess: OcrPreprocessingResult) -> OcrBinaryResult:
@@ -12348,6 +12469,9 @@ def _processing_audit(
             "ocr_text_edge_energy_before": 0.0,
             "ocr_text_edge_energy_after": 0.0,
             "ocr_text_edge_energy_ratio": 1.0,
+            "ocr_text_soft_edge_ratio_before": 0.0,
+            "ocr_text_soft_edge_ratio_after": 0.0,
+            "ocr_text_soft_edge_ratio_delta": 0.0,
         }
     )
     deskew_abs_angle = round(abs(skew_angle_degrees or 0.0), 6)
@@ -12963,6 +13087,11 @@ def _processed_output_safety_guard(metrics: dict[str, Any], options: ProcessingO
             foreground_reasons.append("ocr_foreground_dark_lift")
         if _float_metric(metrics, "ocr_text_edge_energy_ratio") < 0.95:
             foreground_reasons.append("ocr_text_edge_clarity_loss")
+        if (
+            _float_metric(metrics, "ocr_text_soft_edge_ratio_after") > 0.12
+            and _float_metric(metrics, "ocr_text_soft_edge_ratio_delta") < 0.02
+        ):
+            foreground_reasons.append("ocr_text_soft_edge_not_reduced")
         return {
             "checked": True,
             "action": "reverted_to_source" if foreground_reasons else "passed",

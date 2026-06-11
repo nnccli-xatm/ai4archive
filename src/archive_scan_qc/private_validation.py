@@ -58,6 +58,7 @@ _METRIC_IDS = (
     "ocr_foreground_retention_ratio",
     "ocr_background_delta",
     "ocr_text_edge_energy_ratio",
+    "ocr_text_soft_edge_ratio_delta",
 )
 
 
