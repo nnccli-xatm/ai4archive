@@ -489,6 +489,44 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
   默认纠偏且源图不变。
 - service job 全文件回归通过，覆盖创建、运行、恢复、自定义模板、并发隔离和 public-safe summary。
 
+### DEV-158 OpenCV local OCR 预处理并列路径
+
+状态：`done`
+
+范围：
+
+- 新增 `ocr-preprocess-opencv-local-v1` 模板、`ocr_preprocess_opencv_local` 输出 profile 和
+  `ocr-preprocess-opencv-local-v1` processing path。
+- 路径通过现有 `--rule-template` 或 service job `rule_template` 选择，外部接口不变；运行时只执行
+  该 path，不混入 Leptonica path 的输出。
+- 主灰度 OCR 利用副本保留源图画布尺寸，默认尝试 preserve-canvas deskew，不默认裁切、锐化、
+  hard snap 或超采样扩张。
+- OpenCV/NumPy 阶段包含 morphology/Gaussian 背景估计、受保护前景 mask、保守背景推白和
+  adaptive/Otsu `ocr_binary` sidecar。
+- 如果 OpenCV/NumPy 后端不可用，路径会受控回退到内部背景归一 fallback，并用
+  `applied_opencv_local_fallback_background_normalization` reason code 标记，不能误当成完整 OpenCV 效果。
+- public capability contract、service API 和 service job public summary allowlist 新增
+  `ocr_preprocess_opencv_local`，仍只暴露枚举和聚合质量信息，不暴露路径、文件名、hash、
+  OCR 文本或图片内容。
+
+已完成证据：
+
+- CLI 稳定契约回归确认模板 defaults、processing profile、processing path、manifest 顶层/options/record
+  均记录 `ocr-preprocess-opencv-local-v1`，并确认 `.ocr.png` 与 `ocr_binary/` 输出尺寸等于源图。
+- service job 回归确认 create/run/recover 后保留 `processing_profile=ocr_preprocess_opencv_local`
+  和 `processing_path=ocr-preprocess-opencv-local-v1`，public summary 不泄露私有路径或文件名。
+- 2026-06-11 local-only 真实扫描样本复测：12/12 输出，11/12 实际纠偏，10/12 触发
+  `applied_opencv_local_background_normalization`，2/12 因 `low_confidence_background` 保持
+  灰度主图 no-op；12/12 生成 `ocr_binary` sidecar。源图修改 0、尺寸不匹配 0、失败 0、
+  guardrail failure 0。
+- 该批次端到端 scan 4.057102 秒、processing 8.869903 秒，处理吞吐约 81.17 张/分钟。
+  `ocr_preprocess_changed_pixel_ratio` 平均 0.067691，`ocr_foreground_retention_ratio` 平均 1.0，
+  `ocr_text_edge_energy_ratio` 最小 0.855566、平均 0.914977、最大 1.0；12/12 仍需 OCR review，
+  review reason 包括 `low_confidence_background`、`binary_foreground_retention`、
+  `color_rich_document_review` 和 `red_mark_review`。
+- 结论：该路径满足“并列独立、可纠偏、尺寸稳定、源图安全”的工程边界，但文字清晰度聚合指标
+  尚未明显优于 `ocr-preprocess-leptonica-v1`，因此仅作为实验候选保留，不能标为默认推荐路径。
+
 ## P2：CI、发布和性能
 
 ### DEV-201 CI 四组稳定回归

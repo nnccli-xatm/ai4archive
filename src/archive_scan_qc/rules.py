@@ -22,6 +22,7 @@ BUILTIN_RULE_TEMPLATE_IDS = (
     "print-clean-v1",
     "ocr-preprocess-light-v1",
     "ocr-preprocess-leptonica-v1",
+    "ocr-preprocess-opencv-local-v1",
     "ocr-preprocess-v1",
     "high-fidelity-original",
     "photo-mixed-safe-v1",
@@ -72,6 +73,12 @@ OCR_PREPROCESS_LEPTONICA_PROCESSING_DEFAULTS = {
     "ocr_binary": True,
     "reuse_scan_measurements": True,
 }
+OCR_PREPROCESS_OPENCV_LOCAL_PROCESSING_DEFAULTS = {
+    "deskew": True,
+    "ocr_preprocess": True,
+    "ocr_binary": True,
+    "reuse_scan_measurements": True,
+}
 PHOTO_MIXED_SAFE_PROCESSING_DEFAULTS = {
     "trim_dark_border": True,
     "scanner_gutter_trim": True,
@@ -99,6 +106,9 @@ RULE_TEMPLATE_PROCESSING_DEFAULTS: dict[str, dict[str, bool]] = {
     "ocr-preprocess-leptonica-v1": {
         **OCR_PREPROCESS_LEPTONICA_PROCESSING_DEFAULTS,
     },
+    "ocr-preprocess-opencv-local-v1": {
+        **OCR_PREPROCESS_OPENCV_LOCAL_PROCESSING_DEFAULTS,
+    },
     "ocr-preprocess-v1": {
         **OCR_PREPROCESS_PROCESSING_DEFAULTS,
     },
@@ -118,6 +128,7 @@ RULE_TEMPLATE_PROCESSING_PROFILES: dict[str, str] = {
     "print-clean-v1": "print_clean",
     "ocr-preprocess-light-v1": "ocr_preprocess_light",
     "ocr-preprocess-leptonica-v1": "ocr_preprocess_leptonica",
+    "ocr-preprocess-opencv-local-v1": "ocr_preprocess_opencv_local",
     "ocr-preprocess-v1": "ocr_preprocess",
     "high-fidelity-original": "standard",
     "photo-mixed-safe-v1": "standard",
@@ -262,7 +273,12 @@ def builtin_rules_profile(template_id: str) -> RulesProfile:
             despeckle_max_pixel_change_ratio=0.02,
             deskew_residual_threshold=0.4,
         )
-    if template_id in {"ocr-preprocess-light-v1", "ocr-preprocess-leptonica-v1", "ocr-preprocess-v1"}:
+    if template_id in {
+        "ocr-preprocess-light-v1",
+        "ocr-preprocess-leptonica-v1",
+        "ocr-preprocess-opencv-local-v1",
+        "ocr-preprocess-v1",
+    }:
         return RulesProfile(
             name=template_id,
             version=RULE_TEMPLATE_VERSION,

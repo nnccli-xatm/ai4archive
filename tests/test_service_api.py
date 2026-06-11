@@ -206,6 +206,10 @@ class ServiceApiCoreTests(unittest.TestCase):
             self.assertTrue(quality_boundary["public_safe"])
             self.assertTrue(quality_boundary["job_summary"]["may_include_quality_metrics"])
             self.assertIn("print_clean", quality_boundary["job_summary"]["allowed_processing_profiles"])
+            self.assertIn(
+                "ocr_preprocess_opencv_local",
+                quality_boundary["job_summary"]["allowed_processing_profiles"],
+            )
             self.assertFalse(quality_boundary["session_and_index_quality"]["may_include_job_id"])
             self.assertFalse(quality_boundary["session_and_index_quality"]["may_include_quality_metrics"])
             self.assertIn(

@@ -597,6 +597,71 @@ class ServiceJobBoundaryTests(unittest.TestCase):
                 "private_ocr_page_001",
             )
 
+    def test_service_job_ocr_preprocess_opencv_local_profile_is_public_safe(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-job-ocr-opencv-local-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private ocr source"
+            service_root = root / "service root"
+            input_dir.mkdir()
+            source_path = input_dir / "private_ocr_page_001.png"
+            _write_ocr_noisy_page(source_path)
+            create_service_job(
+                ServiceJobConfig(
+                    input_dir=input_dir,
+                    service_root=service_root,
+                    rule_template="ocr-preprocess-opencv-local-v1",
+                    workers=1,
+                ),
+                job_id="job-ocropencv001",
+            )
+
+            summary = run_service_job(service_root, "job-ocropencv001")
+            recovered = recover_service_job(service_root, "job-ocropencv001")
+            job_root = service_root / "jobs" / "job-ocropencv001"
+            public_raw = (job_root / SERVICE_JOB_PUBLIC_SUMMARY_JSON).read_text(encoding="utf-8")
+            processing_manifest = json.loads(
+                (job_root / "derivatives" / "processing_manifest.json").read_text(encoding="utf-8")
+            )
+            record = processing_manifest["files"][0]
+
+            self.assertEqual(summary["state"], "finished")
+            self.assertEqual(recovered["state"], "finished")
+            self.assertEqual(recovered["template"]["rule_template_id"], "ocr-preprocess-opencv-local-v1")
+            self.assertEqual(recovered["template"]["processing_profile"], "ocr_preprocess_opencv_local")
+            self.assertEqual(recovered["template"]["processing_path"], "ocr-preprocess-opencv-local-v1")
+            self.assertEqual(processing_manifest["options"]["processing_profile"], "ocr_preprocess_opencv_local")
+            self.assertEqual(processing_manifest["options"]["processing_path"], "ocr-preprocess-opencv-local-v1")
+            self.assertEqual(processing_manifest["processing_path"]["path_id"], "ocr-preprocess-opencv-local-v1")
+            self.assertTrue(processing_manifest["options"]["ocr_preprocess"])
+            self.assertTrue(processing_manifest["options"]["ocr_binary"])
+            self.assertTrue(processing_manifest["options"]["deskew"])
+            self.assertTrue(record["ocr_preprocessed"])
+            self.assertTrue(record["ocr_binary_created"])
+            self.assertIn(
+                record["ocr_preprocess_reason_code"],
+                {
+                    "applied_opencv_local_background_normalization",
+                    "applied_opencv_local_fallback_background_normalization",
+                },
+            )
+            self.assertIn(
+                record["ocr_binary_reason_code"],
+                {
+                    "applied_opencv_local_adaptive_threshold",
+                    "applied_opencv_local_otsu_threshold",
+                },
+            )
+            self.assertTrue(recovered["quality"]["provided"])
+            self.assertEqual(recovered["quality"]["status"], "pass")
+            self.assertFalse(recovered["private_paths_exposed"])
+            _assert_public_text_omits(
+                self,
+                public_raw,
+                str(root.resolve()),
+                "private ocr source",
+                "private_ocr_page_001",
+            )
+
     def test_retry_job_reuses_existing_derivative_after_failed_state(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-job-retry-") as temp_dir:
             root = Path(temp_dir)

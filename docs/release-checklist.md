@@ -222,6 +222,15 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   summary, processing manifest, per-record processing data, service job summary,
   and any public-safe template catalog/dry-run evidence. Any alternative OCR
   preprocessing path must be reported against this baseline.
+- For `ocr-preprocess-opencv-local-v1`, treat release evidence as experimental
+  path comparison only until it beats the retained Leptonica baseline on real
+  scans and NoisyOffice/OCR gates. Confirm source images unchanged, output and
+  binary sidecar dimensions equal to source dimensions, preserve-canvas deskew
+  attempted by default, guardrail failures at zero, and production/service
+  artifacts report `processing_profile=ocr_preprocess_opencv_local` plus
+  `processing_path=ocr-preprocess-opencv-local-v1`. Do not promote this path to
+  default/recommended if text-edge energy, table-line continuity, or OCR metrics
+  trail the Leptonica baseline.
 - Confirm `archive-scan-qc ocr-provider-probe --provider disabled --out
   /placeholder/private-validation-output/ocr-provider-probe` writes
   `ocr_provider_probe.json` with provider disabled by default and no image/OCR

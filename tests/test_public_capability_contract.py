@@ -146,7 +146,12 @@ class PublicCapabilityContractTests(unittest.TestCase):
         self.assertTrue(job_summary["may_include_job_id"])
         self.assertTrue(job_summary["may_include_quality_metrics"])
         self.assertIn("print_clean", job_summary["allowed_processing_profiles"])
+        self.assertIn("ocr_preprocess_opencv_local", job_summary["allowed_processing_profiles"])
         self.assertIn("processing_profile:print_clean", job_summary["allowed_print_clean_context"])
+        self.assertIn(
+            "processing_profile:ocr_preprocess_opencv_local",
+            job_summary["allowed_print_clean_context"],
+        )
         self.assertIn("background_stains_delta", job_summary["allowed_print_clean_context"])
         self.assertIn("changed_pixel_ratio", job_summary["allowed_print_clean_context"])
         self.assertIn("whitelisted_quality_metrics", job_summary["allowed_quality_context"])

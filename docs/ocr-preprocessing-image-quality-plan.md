@@ -125,6 +125,15 @@ Synthetic OCR gate：
   MAE -16.565967、前景保留率 -0.000002；OCR gray/binary 均生成 176/216，40 张被输出安全 guard
   回退，54 张需 OCR review。该结果明显优于旧保守模板，但仍未通过当前 OCR gate：SSIM 未达到
   +0.015，且 `c` 噪声组 SSIM -0.009725。后续优化必须针对 `c` 组和 SSIM 损失继续改进。
+- 2026-06-11 OpenCV local 并列路径首版落地：新增 `ocr-preprocess-opencv-local-v1` 模板、
+  `ocr_preprocess_opencv_local` profile 和独立 `processing_path`，不替换 Leptonica 基线。
+  算法采用 preserve-canvas deskew、OpenCV morphology/Gaussian 局部背景估计、受保护前景 mask、
+  保守背景推白和 adaptive/Otsu binary sidecar。真实扫描样本 12 张复测：12/12 输出，11/12
+  实际纠偏，10/12 触发 `applied_opencv_local_background_normalization`，12/12 生成 binary sidecar，
+  源图修改 0、尺寸不匹配 0、guardrail failure 0；处理阶段 8.869903 秒，约 81.17 张/分钟。
+  质量指标显示该路径没有破坏尺寸和纠偏边界，但仍未显著超过基线：`ocr_text_edge_energy_ratio`
+  最小 0.855566、平均 0.914977、最大 1.0，12/12 仍需 OCR review。因此该路径只作为实验候选，
+  后续必须继续用 NoisyOffice、真实样本目检和 OCR 指标与 `ocr-preprocess-leptonica-v1` 并列比较。
 
 ## 2. 目标重新定义
 
@@ -143,6 +152,8 @@ Synthetic OCR gate：
 - `ocr-preprocess-leptonica-v1`：并列的保守 OCR 灰度主图路径，默认尝试保留画布尺寸的纠偏；
   不默认裁切/锐化，只做背景归一和前景笔画保护，二值化输出为可复核 sidecar。2026-06-11
   人工目检确认该路径为当前真实扫描样本最佳保留基线。
+- `ocr-preprocess-opencv-local-v1`：并列实验路径，使用 OpenCV/NumPy 局部背景估计、受保护前景
+  mask 和 adaptive/Otsu 二值 sidecar；当前用于算法对照，不作为默认 OCR 或保真派生图路径。
 - `archival-safe-v1`、`photo-mixed-safe-v1` 继续以保真为目标，不承担 OCR 最大化目标。
 
 ## 3. 达成标准

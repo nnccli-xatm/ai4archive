@@ -228,12 +228,12 @@
 - 直接引入大型 OCR/深度学习系统作为默认图片处理依赖。
 - 把 unpaper/OCRmyPDF 等外部 CLI 的 aggressive clean 直接暴露为稳定生产开关。
 
-## 7. 下一步工程建议
+## 7. 工程落地状态
 
-下一步应启动 `ocr-preprocess-opencv-local-v1` 实验路径：
+2026-06-11 已先落地 `ocr-preprocess-opencv-local-v1` 实验路径：
 
-- 先只处理 OCR 利用副本，不影响保真派生图。
-- 默认继承 `ocr-preprocess-leptonica-v1` 的 preserve-canvas deskew 和尺寸约束。
-- 把 adaptive threshold、Sauvola/Otsu、morphology 背景估计和轻 denoise 做成候选阶段。
-- 在同一批真实扫描样本和 NoisyOffice 上输出 path 对照报告。
-- 如果不能在不降低文字/表格清晰度的前提下超过 Leptonica baseline，则不提升为推荐路径。
+- 该路径通过独立 `processing_path` 注册和 rule template 选择进入，不替换 `ocr-preprocess-leptonica-v1`。
+- 主灰度 OCR 利用副本继续使用 preserve-canvas deskew 和源图尺寸约束，不做默认裁切、锐化或画布扩张。
+- 背景处理采用 OpenCV/NumPy 局部背景估计、受保护前景 mask 和保守背景推白；二值输出作为 `ocr_binary/` sidecar，使用 adaptive/Otsu 阈值。
+- 真实扫描样本 12 张 local-only 复测已完成：12/12 输出，11/12 实际纠偏，10/12 触发 OpenCV local 背景归一，12/12 生成 binary sidecar，源图修改 0，尺寸不匹配 0，guardrail failure 0。
+- 该路径仍是实验路径：`ocr_text_edge_energy_ratio` 平均约 0.915，说明保留清晰度没有明显优于 Leptonica 基线；12/12 均标记 OCR review required。后续必须继续与 `ocr-preprocess-leptonica-v1` 并列对照，不能提升为默认推荐路径。

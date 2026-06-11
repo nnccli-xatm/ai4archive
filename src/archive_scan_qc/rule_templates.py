@@ -99,6 +99,14 @@ _TEMPLATE_DESCRIPTIONS: dict[str, dict[str, Any]] = {
         "output_profile": "ocr-preprocess-leptonica",
         "review_policy": "颜色、混合内容、前景损失、二值化异常和 OCR 指标退化必须在生产使用前复核。",
     },
+    "ocr-preprocess-opencv-local-v1": {
+        "name_zh": "OCR OpenCV 局部预处理 v1",
+        "quality_goal": "并列生成面向 OCR 的 OpenCV/NumPy 局部处理利用副本：保留画布尺寸纠偏，使用局部背景估计、受保护前景 mask 和 adaptive/Otsu 二值旁路。",
+        "intended_inputs": ["实际扫描 OCR 批次", "灰底或光照不均的文本页", "需要与 Leptonica 基线对照的算法验证批次"],
+        "risk_boundary": "这是实验性 OCR 利用副本，不是保真派生图；不得扩张画布，不默认裁切/锐化，局部阈值和去噪只能作为受保护候选并进入复核指标。",
+        "output_profile": "ocr-preprocess-opencv-local",
+        "review_policy": "局部阈值异常、表格线/笔画保护风险、前景损失、二值化异常和 OCR 指标退化必须在生产使用前复核。",
+    },
     "ocr-preprocess-v1": {
         "name_zh": "OCR 预处理 v1",
         "quality_goal": "生成面向 OCR 的强预处理利用副本，执行背景归一、OCR 去噪、笔画保护和可选二值输出。",
@@ -581,11 +589,16 @@ def _dry_run_warnings(rule_template: str, scan_summary: dict[str, Any], *, scan_
         warnings.append("mixed_photo_stamp_content_requires_review")
     if rule_template == "print-clean-v1":
         warnings.append("print_clean_requires_overprocessing_review")
-    if rule_template in {"ocr-preprocess-light-v1", "ocr-preprocess-leptonica-v1", "ocr-preprocess-v1"}:
+    if rule_template in {
+        "ocr-preprocess-light-v1",
+        "ocr-preprocess-leptonica-v1",
+        "ocr-preprocess-opencv-local-v1",
+        "ocr-preprocess-v1",
+    }:
         warnings.append("ocr_preprocess_not_archival_fidelity_derivative")
         warnings.append("ocr_preprocess_requires_private_quality_gate")
         warnings.append("mixed_photo_stamp_content_requires_review")
-    if rule_template in {"ocr-preprocess-leptonica-v1", "ocr-preprocess-v1"}:
+    if rule_template in {"ocr-preprocess-leptonica-v1", "ocr-preprocess-opencv-local-v1", "ocr-preprocess-v1"}:
         warnings.append("ocr_binary_output_requires_review_gate")
     if rule_template in {"high-fidelity-original", "photo-mixed-safe-v1"}:
         warnings.append("strong_cleanup_disabled_by_high_fidelity_goal")
