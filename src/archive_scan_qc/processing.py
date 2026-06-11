@@ -67,6 +67,7 @@ class ProcessingOptions:
     sharpen_text_edges: bool = False
     ocr_preprocess: bool = False
     ocr_binary: bool = False
+    ocr_force_grayscale: bool = False
     scanner_gutter_trim: bool = False
     despeckle_content_type_check: bool = True
     despeckle_backend: str = "fallback"
@@ -1505,6 +1506,7 @@ def _processing_options_fingerprint(options: ProcessingOptions) -> str:
         "sharpen_text_edges": options.sharpen_text_edges,
         "ocr_preprocess": options.ocr_preprocess,
         "ocr_binary": options.ocr_binary,
+        "ocr_force_grayscale": options.ocr_force_grayscale,
         "despeckle_backend": options.despeckle_backend,
         "processing_profile": options.processing_profile,
         "processing_path": _processing_path_id_for_options(options),
@@ -1571,10 +1573,9 @@ def _processing_options_public_payload(options: ProcessingOptions) -> dict[str, 
         "lighten_scanlines": options.lighten_scanlines,
         "enhance_faded_text": options.enhance_faded_text,
         "sharpen_text_edges": options.sharpen_text_edges,
-        "ocr_preprocess": _ocr_processing_enabled(options),
-        "ocr_binary": options.ocr_binary,
         "ocr_preprocess": options.ocr_preprocess,
         "ocr_binary": options.ocr_binary,
+        "ocr_force_grayscale": options.ocr_force_grayscale,
         "despeckle_backend": options.despeckle_backend,
         "processing_profile": options.processing_profile,
         "processing_path": _processing_path_id_for_options(options),
@@ -3975,7 +3976,11 @@ def _process_image_standard_path(
                 )
                 operation_timings.setdefault("deskew", {})["fallback_detection"] = True
         if options.deskew and _ocr_processing_enabled(options):
-            ocr_skew = _detect_ocr_profile_skew(processed, options.processing_profile)
+            ocr_skew = _detect_ocr_profile_skew(
+                processed,
+                options.processing_profile,
+                force_grayscale=options.ocr_force_grayscale,
+            )
             selected_skew = _select_ocr_profile_skew(skew, ocr_skew)
             if selected_skew is not skew:
                 skew = selected_skew
@@ -4398,6 +4403,7 @@ def _process_image_standard_path(
             ocr_preprocess = _ocr_preprocess_grayscale(
                 processed,
                 processing_profile=options.processing_profile,
+                force_grayscale=options.ocr_force_grayscale,
             )
             processed = ocr_preprocess.image
             operations.append(
@@ -4902,21 +4908,32 @@ def _ocr_preprocess_grayscale(
     image: Image.Image,
     *,
     processing_profile: str,
+    force_grayscale: bool = False,
 ) -> OcrPreprocessingResult:
     if processing_profile == "ocr_preprocess_leptonica":
-        return _ocr_preprocess_leptonica_grayscale(image)
+        return _ocr_preprocess_leptonica_grayscale(image, force_grayscale=force_grayscale)
     if processing_profile == "ocr_preprocess_opencv_local":
-        return _ocr_preprocess_opencv_local_grayscale(image)
+        return _ocr_preprocess_opencv_local_grayscale(image, force_grayscale=force_grayscale)
     if processing_profile == "ocr_preprocess_sauvola_wolf":
-        return _ocr_preprocess_sauvola_wolf_grayscale(image)
+        return _ocr_preprocess_sauvola_wolf_grayscale(image, force_grayscale=force_grayscale)
     if processing_profile == "ocr_preprocess_stroke_bg":
-        return _ocr_preprocess_stroke_bg_grayscale(image)
+        return _ocr_preprocess_stroke_bg_grayscale(image, force_grayscale=force_grayscale)
     output_profile = (
         "ocr_preprocess_light" if processing_profile == "ocr_preprocess_light" else "ocr_preprocess"
     )
     if image.width < 30 or image.height < 30:
         return _ocr_preprocess_noop(image, output_profile, "OCR preprocessing skipped: image too small", "too_small")
     color_review_reasons = _ocr_color_review_reason_codes(image)
+    color_conversion_block = _ocr_color_grayscale_block_reason_codes(image, force_grayscale=force_grayscale)
+    if color_conversion_block:
+        return _ocr_preprocess_noop(
+            image,
+            output_profile,
+            "OCR grayscale preprocessing skipped: color input requires explicit grayscale opt-in",
+            "color_input_requires_explicit_grayscale",
+            review_required=True,
+            review_reason_codes=tuple(sorted(set(color_conversion_block + color_review_reasons))),
+        )
 
     grayscale = image.convert("L")
     histogram = grayscale.histogram()
@@ -5041,7 +5058,9 @@ def _ocr_preprocess_noop(
     reason_code: str,
     *,
     review_required: bool = False,
+    review_reason_codes: tuple[str, ...] | None = None,
 ) -> OcrPreprocessingResult:
+    reasons = review_reason_codes if review_reason_codes is not None else ((reason_code,) if review_required else ())
     return OcrPreprocessingResult(
         image,
         False,
@@ -5057,7 +5076,7 @@ def _ocr_preprocess_noop(
         0.0,
         1.0,
         review_required,
-        (reason_code,) if review_required else (),
+        reasons,
     )
 
 
@@ -5089,12 +5108,55 @@ def _ocr_color_review_reason_codes(image: Image.Image) -> list[str]:
     return review_reasons
 
 
-def _ocr_preprocess_leptonica_grayscale(image: Image.Image) -> OcrPreprocessingResult:
+def _ocr_color_grayscale_block_reason_codes(
+    image: Image.Image,
+    *,
+    force_grayscale: bool,
+) -> list[str]:
+    if force_grayscale or image.mode == "L":
+        return []
+    sample = image.convert("RGB")
+    sample.thumbnail((600, 600), Image.Resampling.BILINEAR)
+    total = max(1, sample.width * sample.height)
+    colored = 0
+    red = 0
+    pixel_data = sample.get_flattened_data() if hasattr(sample, "get_flattened_data") else sample.getdata()
+    for red_value, green_value, blue_value in pixel_data:
+        high = max(red_value, green_value, blue_value)
+        low = min(red_value, green_value, blue_value)
+        spread = high - low
+        brightness = (red_value + green_value + blue_value) / 3
+        if spread > 12 and 20 < brightness < 252:
+            colored += 1
+        if red_value >= 100 and red_value - green_value >= 24 and red_value - blue_value >= 24:
+            red += 1
+    colored_ratio = colored / total
+    red_ratio = red / total
+    if colored_ratio >= 0.005 or red_ratio >= 0.001:
+        return ["color_input_requires_explicit_grayscale"]
+    return []
+
+
+def _ocr_preprocess_leptonica_grayscale(
+    image: Image.Image,
+    *,
+    force_grayscale: bool = False,
+) -> OcrPreprocessingResult:
     output_profile = "ocr_preprocess_leptonica"
     if image.width < 30 or image.height < 30:
         return _ocr_preprocess_noop(image, output_profile, "OCR preprocessing skipped: image too small", "too_small")
 
     color_review_reasons = _ocr_color_review_reason_codes(image)
+    color_conversion_block = _ocr_color_grayscale_block_reason_codes(image, force_grayscale=force_grayscale)
+    if color_conversion_block:
+        return _ocr_preprocess_noop(
+            image,
+            output_profile,
+            "OCR grayscale preprocessing skipped: color input requires explicit grayscale opt-in",
+            "color_input_requires_explicit_grayscale",
+            review_required=True,
+            review_reason_codes=tuple(sorted(set(color_conversion_block + color_review_reasons))),
+        )
     grayscale = image.convert("L")
     histogram = grayscale.histogram()
     total = max(1, grayscale.width * grayscale.height)
@@ -5175,12 +5237,26 @@ def _ocr_preprocess_leptonica_grayscale(image: Image.Image) -> OcrPreprocessingR
     )
 
 
-def _ocr_preprocess_opencv_local_grayscale(image: Image.Image) -> OcrPreprocessingResult:
+def _ocr_preprocess_opencv_local_grayscale(
+    image: Image.Image,
+    *,
+    force_grayscale: bool = False,
+) -> OcrPreprocessingResult:
     output_profile = "ocr_preprocess_opencv_local"
     if image.width < 30 or image.height < 30:
         return _ocr_preprocess_noop(image, output_profile, "OCR preprocessing skipped: image too small", "too_small")
 
     color_review_reasons = _ocr_color_review_reason_codes(image)
+    color_conversion_block = _ocr_color_grayscale_block_reason_codes(image, force_grayscale=force_grayscale)
+    if color_conversion_block:
+        return _ocr_preprocess_noop(
+            image,
+            output_profile,
+            "OCR grayscale preprocessing skipped: color input requires explicit grayscale opt-in",
+            "color_input_requires_explicit_grayscale",
+            review_required=True,
+            review_reason_codes=tuple(sorted(set(color_conversion_block + color_review_reasons))),
+        )
     grayscale = image.convert("L")
     histogram = grayscale.histogram()
     total = max(1, grayscale.width * grayscale.height)
@@ -5347,12 +5423,26 @@ def _ocr_opencv_local_background_normalize_numpy(
     return Image.fromarray(output_u8, mode="L"), changed_ratio, candidate_ratio
 
 
-def _ocr_preprocess_sauvola_wolf_grayscale(image: Image.Image) -> OcrPreprocessingResult:
+def _ocr_preprocess_sauvola_wolf_grayscale(
+    image: Image.Image,
+    *,
+    force_grayscale: bool = False,
+) -> OcrPreprocessingResult:
     output_profile = "ocr_preprocess_sauvola_wolf"
     if image.width < 30 or image.height < 30:
         return _ocr_preprocess_noop(image, output_profile, "OCR preprocessing skipped: image too small", "too_small")
 
     color_review_reasons = _ocr_color_review_reason_codes(image)
+    color_conversion_block = _ocr_color_grayscale_block_reason_codes(image, force_grayscale=force_grayscale)
+    if color_conversion_block:
+        return _ocr_preprocess_noop(
+            image,
+            output_profile,
+            "OCR grayscale preprocessing skipped: color input requires explicit grayscale opt-in",
+            "color_input_requires_explicit_grayscale",
+            review_required=True,
+            review_reason_codes=tuple(sorted(set(color_conversion_block + color_review_reasons))),
+        )
     grayscale = image.convert("L")
     histogram = grayscale.histogram()
     total = max(1, grayscale.width * grayscale.height)
@@ -5437,12 +5527,26 @@ def _ocr_preprocess_sauvola_wolf_grayscale(image: Image.Image) -> OcrPreprocessi
     )
 
 
-def _ocr_preprocess_stroke_bg_grayscale(image: Image.Image) -> OcrPreprocessingResult:
+def _ocr_preprocess_stroke_bg_grayscale(
+    image: Image.Image,
+    *,
+    force_grayscale: bool = False,
+) -> OcrPreprocessingResult:
     output_profile = "ocr_preprocess_stroke_bg"
     if image.width < 30 or image.height < 30:
         return _ocr_preprocess_noop(image, output_profile, "OCR preprocessing skipped: image too small", "too_small")
 
     color_review_reasons = _ocr_color_review_reason_codes(image)
+    color_conversion_block = _ocr_color_grayscale_block_reason_codes(image, force_grayscale=force_grayscale)
+    if color_conversion_block:
+        return _ocr_preprocess_noop(
+            image,
+            output_profile,
+            "OCR grayscale preprocessing skipped: color input requires explicit grayscale opt-in",
+            "color_input_requires_explicit_grayscale",
+            review_required=True,
+            review_reason_codes=tuple(sorted(set(color_conversion_block + color_review_reasons))),
+        )
     grayscale = image.convert("L")
     histogram = grayscale.histogram()
     total = max(1, grayscale.width * grayscale.height)
@@ -6153,31 +6257,24 @@ def _ocr_text_soft_edge_ratio(grayscale: Image.Image) -> float:
 
 
 def _ocr_binary_sidecar(image: Image.Image, ocr_preprocess: OcrPreprocessingResult) -> OcrBinaryResult:
+    sidecar_allowed_noop_reasons = {
+        "improvement_below_threshold",
+        "low_confidence_background",
+        "color_input_requires_explicit_grayscale",
+    }
     if ocr_preprocess.output_profile == "ocr_preprocess_leptonica":
-        if ocr_preprocess.applied or ocr_preprocess.reason_code in {
-            "improvement_below_threshold",
-            "low_confidence_background",
-        }:
+        if ocr_preprocess.applied or ocr_preprocess.reason_code in sidecar_allowed_noop_reasons:
             return _ocr_leptonica_binary_sidecar(image, ocr_preprocess)
     if ocr_preprocess.output_profile == "ocr_preprocess_opencv_local":
-        if ocr_preprocess.applied or ocr_preprocess.reason_code in {
-            "improvement_below_threshold",
-            "low_confidence_background",
-        }:
+        if ocr_preprocess.applied or ocr_preprocess.reason_code in sidecar_allowed_noop_reasons:
             return _ocr_opencv_local_binary_sidecar(image, ocr_preprocess)
     if ocr_preprocess.output_profile == "ocr_preprocess_sauvola_wolf":
-        if ocr_preprocess.applied or ocr_preprocess.reason_code in {
-            "improvement_below_threshold",
-            "low_confidence_background",
-        }:
+        if ocr_preprocess.applied or ocr_preprocess.reason_code in sidecar_allowed_noop_reasons:
             return _ocr_sauvola_wolf_binary_sidecar(image, ocr_preprocess)
     if ocr_preprocess.output_profile == "ocr_preprocess_stroke_bg":
-        if ocr_preprocess.applied or ocr_preprocess.reason_code in {
-            "improvement_below_threshold",
-            "low_confidence_background",
-        }:
+        if ocr_preprocess.applied or ocr_preprocess.reason_code in sidecar_allowed_noop_reasons:
             return _ocr_stroke_bg_binary_sidecar(image, ocr_preprocess)
-    if not ocr_preprocess.applied:
+    if not ocr_preprocess.applied and ocr_preprocess.reason_code not in sidecar_allowed_noop_reasons:
         return OcrBinaryResult(
             None,
             False,
@@ -14999,9 +15096,18 @@ def _deskew_min_confidence_for_options(options: ProcessingOptions) -> float:
     return options.deskew_min_confidence
 
 
-def _detect_ocr_profile_skew(image: Image.Image, processing_profile: str) -> SkewDetection | None:
+def _detect_ocr_profile_skew(
+    image: Image.Image,
+    processing_profile: str,
+    *,
+    force_grayscale: bool = False,
+) -> SkewDetection | None:
     candidates: list[SkewDetection] = []
-    ocr_preprocess = _ocr_preprocess_grayscale(image, processing_profile=processing_profile)
+    ocr_preprocess = _ocr_preprocess_grayscale(
+        image,
+        processing_profile=processing_profile,
+        force_grayscale=force_grayscale,
+    )
     if ocr_preprocess.applied:
         enhanced_skew = _detect_skew(ocr_preprocess.image)
         if enhanced_skew.angle_degrees is not None:

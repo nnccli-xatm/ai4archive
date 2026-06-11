@@ -1007,6 +1007,7 @@ def _production_config_from_record(record: dict[str, Any]) -> ProductionRunConfi
         sharpen_text_edges=bool(defaults.get("sharpen_text_edges")),
         ocr_preprocess=bool(defaults.get("ocr_preprocess")),
         ocr_binary=bool(defaults.get("ocr_binary")),
+        ocr_force_grayscale=bool(defaults.get("ocr_force_grayscale")),
         despeckle_content_type_check=bool(defaults.get("despeckle_content_type_check", True)),
         reuse_scan_measurements=bool(defaults.get("reuse_scan_measurements")),
     )

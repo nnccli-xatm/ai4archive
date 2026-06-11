@@ -246,6 +246,14 @@ def _add_scan_arguments(parser: argparse.ArgumentParser, *, include_scan_overrid
         help="Conservatively sharpen stable neutral blurred text edges on light paper. Requires --process-out.",
     )
     parser.add_argument(
+        "--ocr-force-grayscale",
+        action="store_true",
+        help=(
+            "Explicitly allow OCR preprocessing to convert color input pages to grayscale in the main derivative. "
+            "Requires --process-out."
+        ),
+    )
+    parser.add_argument(
         "--despeckle-backend",
         choices=("fallback", "numpy"),
         default="fallback",
@@ -411,6 +419,7 @@ def main(argv: list[str] | None = None) -> int:
                 sharpen_text_edges=args.sharpen_text_edges,
                 ocr_preprocess=getattr(args, "ocr_preprocess", False),
                 ocr_binary=getattr(args, "ocr_binary", False),
+                ocr_force_grayscale=getattr(args, "ocr_force_grayscale", False),
                 despeckle_content_type_check=getattr(args, "despeckle_content_type_check", True),
                 despeckle_backend=args.despeckle_backend,
                 resume_processing=args.resume_processing,
@@ -557,6 +566,11 @@ def _main_production_run(argv: list[str]) -> int:
     parser.add_argument("--enhance-faded-text", action="store_true", help="保守增强浅色纸面上的低对比浅墨正文。")
     parser.add_argument("--sharpen-text-edges", action="store_true", help="保守增强浅色纸面上轻微发虚正文的文字边缘清晰度。")
     parser.add_argument(
+        "--ocr-force-grayscale",
+        action="store_true",
+        help="显式允许 OCR 主输出把彩色输入转换为灰度；默认保留彩色主输出。",
+    )
+    parser.add_argument(
         "--despeckle-backend",
         choices=("fallback", "numpy"),
         default="fallback",
@@ -619,6 +633,7 @@ def _main_production_run(argv: list[str]) -> int:
                 sharpen_text_edges=args.sharpen_text_edges,
                 ocr_preprocess=getattr(args, "ocr_preprocess", False),
                 ocr_binary=getattr(args, "ocr_binary", False),
+                ocr_force_grayscale=getattr(args, "ocr_force_grayscale", False),
                 despeckle_content_type_check=getattr(args, "despeckle_content_type_check", True),
                 despeckle_backend=args.despeckle_backend,
                 resume_processing=args.resume_processing,
@@ -1814,6 +1829,8 @@ def _validate_processing_flags(parser: argparse.ArgumentParser, args: argparse.N
         parser.error("--enhance-faded-text requires --process-out")
     if args.sharpen_text_edges and not args.process_out:
         parser.error("--sharpen-text-edges requires --process-out")
+    if getattr(args, "ocr_force_grayscale", False) and not args.process_out:
+        parser.error("--ocr-force-grayscale requires --process-out")
     if args.resume_processing and not args.process_out:
         parser.error("--resume-processing requires --process-out")
 
@@ -1850,7 +1867,14 @@ def _apply_rule_template_processing_defaults(args: argparse.Namespace) -> None:
     except RulesProfileError:
         return
     for field, enabled in defaults.items():
-        if hasattr(args, field) or field in {"despeckle_content_type_check", "ocr_preprocess", "ocr_binary"}:
+        if hasattr(args, field) or field in {
+            "despeckle_content_type_check",
+            "ocr_preprocess",
+            "ocr_binary",
+            "ocr_force_grayscale",
+        }:
+            if field == "ocr_force_grayscale" and getattr(args, field, False) and enabled is False:
+                continue
             setattr(args, field, enabled)
 
 

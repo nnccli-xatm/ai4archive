@@ -10,6 +10,9 @@ Date: 2026-06-11
 - Output profile: `ocr_preprocess_stroke_bg`
 - Main output suffix: `.ocr.png`
 - Binary sidecar directory: `ocr_binary/`
+- Color-to-grayscale opt-in: `ocr_force_grayscale=false` by default;
+  CLI callers must pass `--ocr-force-grayscale` to allow true color input pages
+  to be converted to grayscale in the main derivative.
 
 This path is an independent OCR preprocessing route. It does not replace
 `ocr-preprocess-leptonica-v1`, `ocr-preprocess-opencv-local-v1`, or
@@ -24,6 +27,10 @@ not destroy text or table strokes.
 Processing behavior:
 
 - Preserve source canvas size during deskew.
+- Preserve true color main derivatives by default. When a page contains actual
+  color content, OCR grayscale preprocessing records
+  `color_input_requires_explicit_grayscale` and leaves the main `.ocr.png` in
+  color unless `ocr_force_grayscale` is explicitly enabled.
 - Do not crop, upscale, or hard-threshold the grayscale main image.
 - Detect protected strokes from local contrast, Sobel gradients, connected
   components, and horizontal/vertical line morphology.

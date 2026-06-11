@@ -101,28 +101,34 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         )
         self.assertTrue(ocr_defaults["ocr_preprocess"])
         self.assertTrue(ocr_defaults["ocr_binary"])
+        self.assertFalse(ocr_defaults["ocr_force_grayscale"])
         self.assertTrue(ocr_light_defaults["ocr_preprocess"])
         self.assertFalse(ocr_light_defaults["ocr_binary"])
+        self.assertFalse(ocr_light_defaults["ocr_force_grayscale"])
         self.assertTrue(ocr_leptonica_defaults["ocr_preprocess"])
         self.assertTrue(ocr_leptonica_defaults["ocr_binary"])
+        self.assertFalse(ocr_leptonica_defaults["ocr_force_grayscale"])
         self.assertTrue(ocr_leptonica_defaults["reuse_scan_measurements"])
         self.assertTrue(ocr_leptonica_defaults["deskew"])
         self.assertFalse(ocr_leptonica_defaults.get("auto_crop", False))
         self.assertFalse(ocr_leptonica_defaults.get("sharpen_text_edges", False))
         self.assertTrue(ocr_opencv_local_defaults["ocr_preprocess"])
         self.assertTrue(ocr_opencv_local_defaults["ocr_binary"])
+        self.assertFalse(ocr_opencv_local_defaults["ocr_force_grayscale"])
         self.assertTrue(ocr_opencv_local_defaults["reuse_scan_measurements"])
         self.assertTrue(ocr_opencv_local_defaults["deskew"])
         self.assertFalse(ocr_opencv_local_defaults.get("auto_crop", False))
         self.assertFalse(ocr_opencv_local_defaults.get("sharpen_text_edges", False))
         self.assertTrue(ocr_sauvola_wolf_defaults["ocr_preprocess"])
         self.assertTrue(ocr_sauvola_wolf_defaults["ocr_binary"])
+        self.assertFalse(ocr_sauvola_wolf_defaults["ocr_force_grayscale"])
         self.assertTrue(ocr_sauvola_wolf_defaults["reuse_scan_measurements"])
         self.assertTrue(ocr_sauvola_wolf_defaults["deskew"])
         self.assertFalse(ocr_sauvola_wolf_defaults.get("auto_crop", False))
         self.assertFalse(ocr_sauvola_wolf_defaults.get("sharpen_text_edges", False))
         self.assertTrue(ocr_stroke_bg_defaults["ocr_preprocess"])
         self.assertTrue(ocr_stroke_bg_defaults["ocr_binary"])
+        self.assertFalse(ocr_stroke_bg_defaults["ocr_force_grayscale"])
         self.assertTrue(ocr_stroke_bg_defaults["reuse_scan_measurements"])
         self.assertTrue(ocr_stroke_bg_defaults["deskew"])
         self.assertFalse(ocr_stroke_bg_defaults.get("auto_crop", False))
@@ -1170,6 +1176,124 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         self.assertTrue(quality_summary["public_safe"])
         self.assertEqual(quality_summary["counts"]["ocr_binary_created_files"], 1)
 
+    def test_production_run_ocr_preprocess_preserves_true_color_by_default(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-cli-ocr-color-preserve-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            source = input_dir / "OCR001_COLOR_MARKED.png"
+            _write_ocr_color_marked_page(source)
+            source_bytes = source.read_bytes()
+            with Image.open(source) as source_image:
+                source_size = source_image.size
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                exit_code = main(
+                    [
+                        "production-run",
+                        "--input",
+                        str(input_dir),
+                        "--derivatives-out",
+                        str(derivatives_dir),
+                        "--metadata-out",
+                        str(metadata_dir),
+                        "--rule-template",
+                        "ocr-preprocess-stroke-bg-v1",
+                        "--workers",
+                        "1",
+                    ]
+                )
+
+            summary = json.loads((metadata_dir / "production_run_summary.json").read_text(encoding="utf-8"))
+            processing_manifest = json.loads(
+                (derivatives_dir / "processing_manifest.json").read_text(encoding="utf-8")
+            )
+            record = processing_manifest["files"][0]
+            output_path = derivatives_dir / record["output_relative_path"]
+            binary_path = derivatives_dir / record["ocr_binary_output_relative_path"]
+            with Image.open(output_path) as output_image:
+                output_mode = output_image.mode
+                output_size = output_image.size
+            output_has_color = _image_has_color_pixels(output_path)
+            with Image.open(binary_path) as binary_image:
+                binary_mode = binary_image.mode
+                binary_size = binary_image.size
+            source_unchanged = source.read_bytes() == source_bytes
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(source_unchanged)
+        self.assertFalse(summary["options"]["ocr_force_grayscale"])
+        self.assertFalse(record["ocr_preprocessed"])
+        self.assertEqual(record["ocr_preprocess_reason_code"], "color_input_requires_explicit_grayscale")
+        self.assertIn("color_input_requires_explicit_grayscale", record["ocr_review_reason_codes"])
+        self.assertIn("ocr_preprocess_noop", record["operations"])
+        self.assertNotIn("ocr_preprocess_stroke_bg_grayscale", record["operations"])
+        self.assertEqual(output_mode, "RGB")
+        self.assertEqual(output_size, source_size)
+        self.assertTrue(output_has_color)
+        self.assertTrue(record["ocr_binary_created"])
+        self.assertEqual(binary_mode, "RGB")
+        self.assertEqual(binary_size, source_size)
+
+    def test_production_run_ocr_force_grayscale_allows_color_conversion(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-cli-ocr-force-grayscale-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            source = input_dir / "OCR001_LIGHT_COLOR.png"
+            _write_ocr_light_color_scan_page(source)
+            with Image.open(source) as source_image:
+                source_size = source_image.size
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                exit_code = main(
+                    [
+                        "production-run",
+                        "--input",
+                        str(input_dir),
+                        "--derivatives-out",
+                        str(derivatives_dir),
+                        "--metadata-out",
+                        str(metadata_dir),
+                        "--rule-template",
+                        "ocr-preprocess-stroke-bg-v1",
+                        "--ocr-force-grayscale",
+                        "--workers",
+                        "1",
+                    ]
+                )
+
+            summary = json.loads((metadata_dir / "production_run_summary.json").read_text(encoding="utf-8"))
+            processing_manifest = json.loads(
+                (derivatives_dir / "processing_manifest.json").read_text(encoding="utf-8")
+            )
+            record = processing_manifest["files"][0]
+            output_path = derivatives_dir / record["output_relative_path"]
+            with Image.open(output_path) as output_image:
+                output_mode = output_image.mode
+                output_size = output_image.size
+            output_has_color = _image_has_color_pixels(output_path)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(summary["options"]["ocr_force_grayscale"])
+        self.assertTrue(processing_manifest["options"]["ocr_force_grayscale"])
+        self.assertTrue(record["ocr_preprocessed"])
+        self.assertIn(
+            record["ocr_preprocess_reason_code"],
+            {
+                "applied_stroke_bg_background_normalization",
+                "applied_stroke_bg_fallback_background_normalization",
+            },
+        )
+        self.assertIn("ocr_preprocess_stroke_bg_grayscale", record["operations"])
+        self.assertEqual(output_mode, "RGB")
+        self.assertEqual(output_size, source_size)
+        self.assertFalse(output_has_color)
+
     def test_production_run_ocr_preprocess_leptonica_deskews_sparse_handwriting(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-cli-ocr-leptonica-sparse-deskew-") as temp_dir:
             root = Path(temp_dir)
@@ -1331,7 +1455,7 @@ class StableCliRuleTemplateTests(unittest.TestCase):
             source_hashes_after[light_color_source.name],
             source_hashes[light_color_source.name],
         )
-        self.assertEqual(quality_summary["counts"]["ocr_preprocessed_files"], 2)
+        self.assertEqual(quality_summary["counts"]["ocr_preprocessed_files"], 1)
         self.assertEqual(quality_summary["counts"]["ocr_binary_created_files"], 2)
         low_contrast_record = records[low_contrast_source.name]
         light_color_record = records[light_color_source.name]
@@ -1344,10 +1468,16 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         self.assertTrue(low_contrast_record["ocr_binary_created"])
         self.assertGreater(low_contrast_record["ocr_binary_foreground_ratio"], 0.005)
         self.assertEqual(low_contrast_record["processing_audit"]["guardrail_failures"], [])
-        self.assertTrue(light_color_record["ocr_preprocessed"])
-        self.assertNotEqual(light_color_record["ocr_preprocess_reason_code"], "protected_color_content")
-        self.assertNotIn("protected_color_content", light_color_record["ocr_review_reason_codes"])
-        self.assertGreater(light_color_record["ocr_preprocess_changed_pixel_ratio"], 0.01)
+        self.assertFalse(light_color_record["ocr_preprocessed"])
+        self.assertEqual(
+            light_color_record["ocr_preprocess_reason_code"],
+            "color_input_requires_explicit_grayscale",
+        )
+        self.assertIn(
+            "color_input_requires_explicit_grayscale",
+            light_color_record["ocr_review_reason_codes"],
+        )
+        self.assertEqual(light_color_record["ocr_preprocess_changed_pixel_ratio"], 0.0)
         self.assertTrue(light_color_record["ocr_binary_created"])
         self.assertEqual(light_color_record["processing_audit"]["guardrail_failures"], [])
 
@@ -1871,6 +2001,16 @@ def _sha256_for_test(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _image_has_color_pixels(path: Path, *, spread_threshold: int = 8) -> bool:
+    with Image.open(path) as image:
+        sample = image.convert("RGB")
+        sample.thumbnail((300, 300), Image.Resampling.BILINEAR)
+        return any(
+            max(red, green, blue) - min(red, green, blue) > spread_threshold
+            for red, green, blue in sample.getdata()
+        )
+
+
 def _ocr_text_edge_energy_for_test(path: Path) -> float:
     image = Image.open(path).convert("L")
     histogram = image.histogram()
@@ -2154,6 +2294,26 @@ def _write_ocr_light_color_scan_page(path: Path) -> None:
         draw.rectangle((70, y + 15, 250, y + 17), fill=(132, 132, 132))
     draw.rectangle((92, 418, 334, 421), fill=(214, 231, 236))
     draw.rectangle((110, 438, 278, 440), fill=(238, 224, 204))
+    image.save(path, dpi=(300, 300))
+
+
+def _write_ocr_color_marked_page(path: Path) -> None:
+    width, height = 360, 260
+    image = Image.new("RGB", (width, height), (247, 247, 244))
+    pixels = image.load()
+    for y in range(height):
+        for x in range(width):
+            if (x * 17 + y * 31) % 29 == 0:
+                pixels[x, y] = (231, 231, 229)
+            elif (x + y) % 37 == 0:
+                pixels[x, y] = (252, 252, 250)
+    draw = ImageDraw.Draw(image)
+    for index in range(5):
+        y = 54 + index * 32
+        draw.rectangle((54, y, 286, y + 5), fill=(42, 42, 42))
+        draw.rectangle((64, y + 12, 220, y + 15), fill=(86, 86, 86))
+    draw.rectangle((258, 176, 318, 215), fill=(71, 113, 192))
+    draw.line((262, 186, 313, 207), fill=(206, 82, 64), width=2)
     image.save(path, dpi=(300, 300))
 
 

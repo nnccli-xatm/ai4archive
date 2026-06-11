@@ -62,35 +62,41 @@ OCR_PREPROCESS_LIGHT_PROCESSING_DEFAULTS = {
     "despeckle": False,
     "ocr_preprocess": True,
     "ocr_binary": False,
+    "ocr_force_grayscale": False,
 }
 OCR_PREPROCESS_PROCESSING_DEFAULTS = {
     **TEXT_CLEAN_PROCESSING_DEFAULTS,
     "despeckle": False,
     "ocr_preprocess": True,
     "ocr_binary": True,
+    "ocr_force_grayscale": False,
 }
 OCR_PREPROCESS_LEPTONICA_PROCESSING_DEFAULTS = {
     "deskew": True,
     "ocr_preprocess": True,
     "ocr_binary": True,
+    "ocr_force_grayscale": False,
     "reuse_scan_measurements": True,
 }
 OCR_PREPROCESS_OPENCV_LOCAL_PROCESSING_DEFAULTS = {
     "deskew": True,
     "ocr_preprocess": True,
     "ocr_binary": True,
+    "ocr_force_grayscale": False,
     "reuse_scan_measurements": True,
 }
 OCR_PREPROCESS_SAUVOLA_WOLF_PROCESSING_DEFAULTS = {
     "deskew": True,
     "ocr_preprocess": True,
     "ocr_binary": True,
+    "ocr_force_grayscale": False,
     "reuse_scan_measurements": True,
 }
 OCR_PREPROCESS_STROKE_BG_PROCESSING_DEFAULTS = {
     "deskew": True,
     "ocr_preprocess": True,
     "ocr_binary": True,
+    "ocr_force_grayscale": False,
     "reuse_scan_measurements": True,
 }
 PHOTO_MIXED_SAFE_PROCESSING_DEFAULTS = {

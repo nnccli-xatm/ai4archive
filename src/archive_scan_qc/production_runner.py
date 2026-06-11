@@ -79,6 +79,7 @@ class ProductionRunConfig:
     sharpen_text_edges: bool = False
     ocr_preprocess: bool = False
     ocr_binary: bool = False
+    ocr_force_grayscale: bool = False
     despeckle_content_type_check: bool = True
     despeckle_backend: str = "fallback"
     resume_processing: bool = True
@@ -156,6 +157,7 @@ def run_production_folder(config: ProductionRunConfig) -> dict[str, Any]:
                 sharpen_text_edges=config.sharpen_text_edges,
                 ocr_preprocess=config.ocr_preprocess,
                 ocr_binary=config.ocr_binary,
+                ocr_force_grayscale=config.ocr_force_grayscale,
                 despeckle_content_type_check=config.despeckle_content_type_check,
                 despeckle_backend=config.despeckle_backend,
                 resume_processing=config.resume_processing,
@@ -630,6 +632,7 @@ def _options_payload(config: ProductionRunConfig) -> dict[str, Any]:
         "sharpen_text_edges": config.sharpen_text_edges,
         "ocr_preprocess": config.ocr_preprocess,
         "ocr_binary": config.ocr_binary,
+        "ocr_force_grayscale": config.ocr_force_grayscale,
         "despeckle_content_type_check": config.despeckle_content_type_check,
         "despeckle_backend": config.despeckle_backend,
         "resume_processing": config.resume_processing,
