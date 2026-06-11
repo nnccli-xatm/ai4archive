@@ -6,6 +6,11 @@
 
 2026-06-10 的真实 NoisyOffice 外部 CLI 验证表明，当前 `text-clean-print` 对 OCR 预处理意义上的质量改善不成立：216 张图稳定处理完成，但 PSNR、SSIM、MSE、MAE、暗像素 F1 和前景保留率均出现宏平均微幅变差。面向 OCR 的强预处理必须作为独立专项推进，详见 `docs/ocr-preprocessing-image-quality-plan.md`。该专项计划新增 `ocr-preprocess-v1` 目标 profile，并要求以 NoisyOffice、DIBCO/OCR 指标和私有样本聚合门槛作为完成标准。
 
+2026-06-11 的真实扫描样本人工目检确认，`ocr-preprocess-leptonica-v1` 的 preserve-canvas
+deskew 路径是当前最佳保留基线：它保留源图尺寸、执行必须纠偏，并避免旧强 OCR 路线造成的
+水波纹、笔画/表格线扭曲和尺寸膨胀。后续 OCR 图像优化应在该路径上继续提升可读性，或至少
+与该路径并列对照；不得用无纠偏输出或破坏文字结构的强处理结果替代该基线。
+
 后续开发不能继续无边界增加修图开关。正确主线是：先建立服务化 job 边界、路径隔离、状态恢复和 public-safe 摘要，再在这个边界内建设可度量、可回滚、模板驱动的图像增强管线。
 
 ## 1. 产品目标
@@ -52,7 +57,7 @@
 - `text-clean-readable-v1`：面向纯文本材料，强调灰底清理、文字对比、扫描线和透印控制。
 - `print-clean-v1`：面向后续打印/利用副本，允许更强的背景均衡和文字锐化，但必须有过处理复核。
 - `ocr-preprocess-v1`：面向 OCR 的强预处理利用副本，允许更强背景归一、去噪、局部阈值、二值/准二值输出和文字增强；不作为保真派生图默认模板，必须通过 NoisyOffice、DIBCO/OCR 和复核门槛。
-- `ocr-preprocess-leptonica-v1`：与旧 OCR profile 并列的保守 OCR 灰度主图路径，默认尝试保留画布尺寸的纠偏，不默认裁切/锐化，只做背景归一和前景笔画保护，二值化作为 sidecar 复核。
+- `ocr-preprocess-leptonica-v1`：与旧 OCR profile 并列的保守 OCR 灰度主图路径，默认尝试保留画布尺寸的纠偏，不默认裁切/锐化，只做背景归一和前景笔画保护，二值化作为 sidecar 复核；当前作为真实扫描样本人工目检最佳保留基线。
 - `photo-mixed-safe-v1`：照片、图像、印章、彩色批注和混合版面保护优先。
 - `custom`：用户自定义模板必须通过 schema 校验、dry-run 和参数边界检查。
 

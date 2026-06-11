@@ -35,7 +35,7 @@
 - 标准后台服务尚未独立成为产品 API。
 - 前端仍偏本地工作台/静态页面形态，不是纯 API client。
 - 规则模板还停留在设计层，没有模板 schema、内置模板、参数映射和 dry-run。
-- 实际图像质量提升仍不足，当前处理项主要证明“能安全跑”。2026-06-10 NoisyOffice 验证显示当前处理对 OCR 预处理质量没有改善，后续必须新增 `ocr-preprocess-v1` 专项 profile，并以 NoisyOffice、DIBCO/OCR 和私有样本聚合指标作为完成门槛。
+- 实际图像质量提升仍不足，当前处理项主要证明“能安全跑”。2026-06-10 NoisyOffice 验证显示当前处理对 OCR 预处理质量没有改善，后续必须新增 `ocr-preprocess-v1` 专项 profile，并以 NoisyOffice、DIBCO/OCR 和私有样本聚合指标作为完成门槛。2026-06-11 真实扫描样本人工目检确认 `ocr-preprocess-leptonica-v1` 的 preserve-canvas deskew 路径是当前最佳保留基线：必须保留并用于后续 OCR 优化对照，但仍需继续提升可读性和 OCR 实测收益。
 - 批量重命名和 Excel 分件已具备 local-only plan/apply 工具；TIF 转 JPG、DPI 修改仍未实现。JPG 转双层 PDF、PDF/OFD 转换和 OCR 目录已有边界方案，但在 provider probe、人工复核和真实样本聚合验证前不进入默认稳定能力。
 - 普通生产入口还需要显式补齐无登录单机流程、单个 JPG 质检、处理项多选、线程数设置和“受控覆盖发布”文案。
 - 崩溃恢复需要统一成后台任务 checkpoint，而不是各功能自行处理。

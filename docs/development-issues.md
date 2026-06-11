@@ -454,6 +454,10 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
   `low_confidence_background` 保持灰度主图 no-op；12/12 生成 `ocr_binary` sidecar。
   `.ocr.png` 与 binary sidecar 尺寸均与源图一致，guardrail failure 0，纠偏后回退 0；
   `ocr_text_edge_energy_ratio` 最小 0.854554、平均 0.915506、最大 1.002376。
+- 人工目检确认该批次是截至目前最佳处理结果：文字和表格线清晰度没有被旧强处理路线破坏，
+  同时完成必须纠偏且不扩张画布。`ocr-preprocess-leptonica-v1` 保留为后续 OCR 预处理
+  真实扫描样本基线；任何替代算法都必须与该路径并列对照，不能以无纠偏、hard snap 或
+  超采样扩张输出作为成功结果。
 
 ## P2：CI、发布和性能
 

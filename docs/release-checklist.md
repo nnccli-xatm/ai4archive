@@ -212,6 +212,13 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   5%, dark-pixel F1 not lower, foreground retention delta >= -0.002, and at
   least three positive noise groups. Keep only the public-safe
   `ocr_preprocessing_quality_summary.json` as shared release evidence.
+- For `ocr-preprocess-leptonica-v1`, keep the local-only real-scan validation
+  evidence as the retained OCR preprocessing baseline: source images unchanged,
+  `.ocr.png` and `ocr_binary/` sidecar dimensions equal to source dimensions,
+  preserve-canvas deskew attempted by default, required deskew not skipped,
+  guardrail failures/reverts at zero, and manual review showing no waterwave,
+  hard-snap stroke loss, table-line distortion, or canvas expansion. Any
+  alternative OCR preprocessing path must be reported against this baseline.
 - Confirm `archive-scan-qc ocr-provider-probe --provider disabled --out
   /placeholder/private-validation-output/ocr-provider-probe` writes
   `ocr_provider_probe.json` with provider disabled by default and no image/OCR
