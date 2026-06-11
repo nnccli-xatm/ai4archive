@@ -92,9 +92,9 @@ _TEMPLATE_DESCRIPTIONS: dict[str, dict[str, Any]] = {
     },
     "ocr-preprocess-leptonica-v1": {
         "name_zh": "OCR Leptonica 风格预处理 v1",
-        "quality_goal": "并列生成面向 OCR 的保守灰度利用副本：保持源尺寸，不默认纠偏/裁切/锐化，只做背景归一和前景笔画保护，并输出可复核二值旁路。",
+        "quality_goal": "并列生成面向 OCR 的保守灰度利用副本：默认执行保留画布尺寸的纠偏，不默认裁切/锐化，只做背景归一和前景笔画保护，并输出可复核二值旁路。",
         "intended_inputs": ["实际扫描 OCR 批次", "文字和表格线清晰度优先的灰度或彩色文档页", "需要与旧 OCR 预处理并行对比的验证批次"],
-        "risk_boundary": "这是 OCR 利用副本，不是保真派生图；主灰度图不得改变几何尺寸，二值结果必须作为 sidecar 复核，不替代源图。",
+        "risk_boundary": "这是 OCR 利用副本，不是保真派生图；纠偏必须尝试但主灰度图不得放大画布，二值结果必须作为 sidecar 复核，不替代源图。",
         "output_profile": "ocr-preprocess-leptonica",
         "review_policy": "颜色、混合内容、前景损失、二值化异常和 OCR 指标退化必须在生产使用前复核。",
     },

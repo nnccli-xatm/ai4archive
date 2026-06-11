@@ -104,11 +104,15 @@ Synthetic OCR gate：
   笔画/表格线扭曲或缺失、纠偏/超采样可能引入清晰度损失、输出像素尺寸膨胀”的问题。该路线不能再继续
   通过微调旧 `ocr-preprocess-v1` 的锐化、吸附和纠偏参数空转。
 - 新增并列路径 `ocr-preprocess-leptonica-v1`：参考 Leptonica/Tesseract OCR 预处理思路，将主灰度
-  OCR 图限定为“源尺寸 + 背景归一 + 前景笔画保护”。默认不做 deskew、crop、despeckle、sharpen 或
-  超采样旋转；连续文字笔画和表格线按连通组件原样保留，孤立噪声和背景纹理只在背景候选区域被推白。
+  OCR 图限定为“保留画布尺寸纠偏 + 背景归一 + 前景笔画保护”。默认必须尝试 deskew，但不做
+  crop、despeckle、sharpen 或超采样旋转；连续文字笔画和表格线按连通组件原样保留，孤立噪声和背景纹理只在背景候选区域被推白。
   二值化能力保留为 `ocr_binary/` sidecar，先用 Otsu，前景比例异常时回退到 OpenCV adaptive threshold。
   该路径与旧 `ocr-preprocess-v1` 并列，不替换旧算法，后续真实样本和 NoisyOffice 对比必须同时报告两个
   profile。
+- 2026-06-11 纠偏强制修正：`ocr-preprocess-leptonica-v1` 的默认 `deskew=True`，纠偏采用
+  preserve-canvas 旋转，不扩张输出尺寸；OCR 几何纠偏后的边缘能量和软边指标作为诊断值，不再按
+  未纠偏原图的同坐标比较触发回退。真实扫描样本复测为 11/12 实际纠偏，1/12 角度低于阈值，
+  12/12 生成二值 sidecar，输出尺寸不变，guardrail failure 0。
 
 ## 2. 目标重新定义
 
@@ -124,8 +128,8 @@ Synthetic OCR gate：
 
 - `ocr-preprocess-v1`：面向 OCR 的强预处理，允许背景重建、局部阈值、去噪、文字增强和可复核二值化。
 - `ocr-preprocess-light-v1`：较保守 OCR 预处理，用于轻噪声或混合版面。
-- `ocr-preprocess-leptonica-v1`：并列的保守 OCR 灰度主图路径，保持源尺寸，不默认纠偏/裁切/锐化；
-  只做背景归一和前景笔画保护，二值化输出为可复核 sidecar。
+- `ocr-preprocess-leptonica-v1`：并列的保守 OCR 灰度主图路径，默认尝试保留画布尺寸的纠偏；
+  不默认裁切/锐化，只做背景归一和前景笔画保护，二值化输出为可复核 sidecar。
 - `archival-safe-v1`、`photo-mixed-safe-v1` 继续以保真为目标，不承担 OCR 最大化目标。
 
 ## 3. 达成标准

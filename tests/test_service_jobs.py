@@ -576,7 +576,7 @@ class ServiceJobBoundaryTests(unittest.TestCase):
             self.assertEqual(processing_manifest["options"]["processing_profile"], "ocr_preprocess_leptonica")
             self.assertTrue(processing_manifest["options"]["ocr_preprocess"])
             self.assertTrue(processing_manifest["options"]["ocr_binary"])
-            self.assertFalse(processing_manifest["options"]["deskew"])
+            self.assertTrue(processing_manifest["options"]["deskew"])
             self.assertTrue(record["ocr_preprocessed"])
             self.assertTrue(record["ocr_binary_created"])
             self.assertEqual(record["ocr_preprocess_reason_code"], "applied_leptonica_style_background_normalization")

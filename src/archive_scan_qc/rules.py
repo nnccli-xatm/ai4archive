@@ -65,6 +65,7 @@ OCR_PREPROCESS_PROCESSING_DEFAULTS = {
     "ocr_binary": True,
 }
 OCR_PREPROCESS_LEPTONICA_PROCESSING_DEFAULTS = {
+    "deskew": True,
     "ocr_preprocess": True,
     "ocr_binary": True,
     "reuse_scan_measurements": True,

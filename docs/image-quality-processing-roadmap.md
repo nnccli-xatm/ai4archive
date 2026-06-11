@@ -52,7 +52,7 @@
 - `text-clean-readable-v1`：面向纯文本材料，强调灰底清理、文字对比、扫描线和透印控制。
 - `print-clean-v1`：面向后续打印/利用副本，允许更强的背景均衡和文字锐化，但必须有过处理复核。
 - `ocr-preprocess-v1`：面向 OCR 的强预处理利用副本，允许更强背景归一、去噪、局部阈值、二值/准二值输出和文字增强；不作为保真派生图默认模板，必须通过 NoisyOffice、DIBCO/OCR 和复核门槛。
-- `ocr-preprocess-leptonica-v1`：与旧 OCR profile 并列的保守 OCR 灰度主图路径，保持源尺寸，不默认纠偏/裁切/锐化，只做背景归一和前景笔画保护，二值化作为 sidecar 复核。
+- `ocr-preprocess-leptonica-v1`：与旧 OCR profile 并列的保守 OCR 灰度主图路径，默认尝试保留画布尺寸的纠偏，不默认裁切/锐化，只做背景归一和前景笔画保护，二值化作为 sidecar 复核。
 - `photo-mixed-safe-v1`：照片、图像、印章、彩色批注和混合版面保护优先。
 - `custom`：用户自定义模板必须通过 schema 校验、dry-run 和参数边界检查。
 

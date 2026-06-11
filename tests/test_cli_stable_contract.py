@@ -74,7 +74,7 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         self.assertTrue(ocr_leptonica_defaults["ocr_preprocess"])
         self.assertTrue(ocr_leptonica_defaults["ocr_binary"])
         self.assertTrue(ocr_leptonica_defaults["reuse_scan_measurements"])
-        self.assertFalse(ocr_leptonica_defaults.get("deskew", False))
+        self.assertTrue(ocr_leptonica_defaults["deskew"])
         self.assertFalse(ocr_leptonica_defaults.get("auto_crop", False))
         self.assertFalse(ocr_leptonica_defaults.get("sharpen_text_edges", False))
         self.assertTrue(photo_defaults["trim_dark_border"])
@@ -745,7 +745,7 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         self.assertEqual(summary["options"]["processing_profile"], "ocr_preprocess_leptonica")
         self.assertTrue(summary["options"]["ocr_preprocess"])
         self.assertTrue(summary["options"]["ocr_binary"])
-        self.assertFalse(summary["options"]["deskew"])
+        self.assertTrue(summary["options"]["deskew"])
         self.assertFalse(summary["options"]["auto_crop"])
         self.assertFalse(summary["options"]["sharpen_text_edges"])
         self.assertEqual(processing_manifest["output_profile"], "ocr_preprocess_leptonica")
@@ -777,6 +777,108 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         self.assertTrue(quality_summary["public_safe"])
         self.assertEqual(quality_summary["counts"]["ocr_preprocessed_files"], 1)
         self.assertEqual(quality_summary["counts"]["ocr_binary_created_files"], 1)
+
+    def test_production_run_ocr_preprocess_leptonica_deskews_without_expanding_canvas(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-cli-ocr-leptonica-deskew-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            source = input_dir / "OCR001_SKEWED_FORM.png"
+            _write_ocr_skewed_form_page(source)
+            with Image.open(source) as source_image:
+                source_size = source_image.size
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                exit_code = main(
+                    [
+                        "production-run",
+                        "--input",
+                        str(input_dir),
+                        "--derivatives-out",
+                        str(derivatives_dir),
+                        "--metadata-out",
+                        str(metadata_dir),
+                        "--rule-template",
+                        "ocr-preprocess-leptonica-v1",
+                        "--workers",
+                        "1",
+                    ]
+                )
+
+            processing_manifest = json.loads(
+                (derivatives_dir / "processing_manifest.json").read_text(encoding="utf-8")
+            )
+            record = processing_manifest["files"][0]
+            output_path = derivatives_dir / record["output_relative_path"]
+            binary_path = derivatives_dir / record["ocr_binary_output_relative_path"]
+            with Image.open(output_path) as output_image:
+                output_size = output_image.size
+            with Image.open(binary_path) as binary_image:
+                binary_size = binary_image.size
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(record["deskewed"])
+        self.assertEqual(record["deskew_reason"], "deskew applied")
+        self.assertIn("deskew_conservative", record["operations"])
+        self.assertIn("ocr_deskew_preserve_canvas", record["operations"])
+        self.assertNotIn("ocr_deskew_supersampled", record["operations"])
+        self.assertEqual(output_size, source_size)
+        self.assertEqual(binary_size, source_size)
+        self.assertEqual(record["post_deskew_size"], list(source_size))
+        self.assertTrue(record["ocr_preprocessed"])
+        self.assertTrue(record["ocr_binary_created"])
+        self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
+
+    def test_production_run_ocr_preprocess_leptonica_deskews_sparse_handwriting(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-cli-ocr-leptonica-sparse-deskew-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            source = input_dir / "OCR001_SKEWED_SPARSE_HANDWRITING.png"
+            _write_ocr_skewed_sparse_handwriting_page(source)
+            with Image.open(source) as source_image:
+                source_size = source_image.size
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                exit_code = main(
+                    [
+                        "production-run",
+                        "--input",
+                        str(input_dir),
+                        "--derivatives-out",
+                        str(derivatives_dir),
+                        "--metadata-out",
+                        str(metadata_dir),
+                        "--rule-template",
+                        "ocr-preprocess-leptonica-v1",
+                        "--workers",
+                        "1",
+                    ]
+                )
+
+            processing_manifest = json.loads(
+                (derivatives_dir / "processing_manifest.json").read_text(encoding="utf-8")
+            )
+            record = processing_manifest["files"][0]
+            output_path = derivatives_dir / record["output_relative_path"]
+            binary_path = derivatives_dir / record["ocr_binary_output_relative_path"]
+            with Image.open(output_path) as output_image:
+                output_size = output_image.size
+            with Image.open(binary_path) as binary_image:
+                binary_size = binary_image.size
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(record["deskewed"])
+        self.assertEqual(record["deskew_reason"], "deskew applied")
+        self.assertIn("ocr_deskew_preserve_canvas", record["operations"])
+        self.assertEqual(output_size, source_size)
+        self.assertEqual(binary_size, source_size)
+        self.assertTrue(record["ocr_binary_created"])
+        self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
 
     def test_production_run_ocr_preprocess_leptonica_creates_binary_for_sparse_noop_page(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-cli-ocr-leptonica-sparse-") as temp_dir:
@@ -1736,6 +1838,13 @@ def _write_ocr_sparse_handwriting_page(path: Path) -> None:
         y = 106 + index * 31
         draw.line((x, y, x + 58, y + 5), fill=(88, 88, 88), width=2)
     image.save(path, dpi=(300, 300))
+
+
+def _write_ocr_skewed_sparse_handwriting_page(path: Path) -> None:
+    _write_ocr_sparse_handwriting_page(path)
+    with Image.open(path) as image:
+        rotated = image.rotate(1.5, resample=Image.Resampling.BICUBIC, expand=True, fillcolor=(253, 253, 253))
+    rotated.save(path, dpi=(300, 300))
 
 
 def _write_ocr_skewed_form_page(path: Path) -> None:

@@ -3921,18 +3921,22 @@ def _process_image(
             operations.append("deskew_noop")
             deskew_reason = "angle below correction threshold"
         else:
+            ocr_deskew_preserve_canvas = options.processing_profile == "ocr_preprocess_leptonica"
             ocr_deskew_supersample = (
                 _ocr_processing_enabled(options)
-                and options.processing_profile != "ocr_preprocess_leptonica"
+                and not ocr_deskew_preserve_canvas
             )
             processed = _rotate_for_deskew(
                 processed,
                 -skew.angle_degrees,
                 ocr_supersample=ocr_deskew_supersample,
+                preserve_canvas=ocr_deskew_preserve_canvas,
             )
             operations.append("deskew_conservative")
             if ocr_deskew_supersample:
                 operations.append("ocr_deskew_supersampled")
+            if ocr_deskew_preserve_canvas:
+                operations.append("ocr_deskew_preserve_canvas")
             post_deskew_size = list(processed.size)
             deskewed = True
             deskew_reason = "deskew applied"
@@ -13414,15 +13418,16 @@ def _processed_output_safety_guard(metrics: dict[str, Any], options: ProcessingO
             foreground_reasons.append("ocr_foreground_dark_loss")
         if _float_metric(metrics, "ocr_foreground_dark_lift_ratio") > 0.01:
             foreground_reasons.append("ocr_foreground_dark_lift")
-        edge_energy_before = _float_metric(metrics, "ocr_text_edge_energy_before")
-        edge_energy_threshold = 0.80 if _float_metric(metrics, "size_change_ratio") > 0.55 else 0.95
-        if edge_energy_before > 0 and _float_metric(metrics, "ocr_text_edge_energy_ratio") < edge_energy_threshold:
-            foreground_reasons.append("ocr_text_edge_clarity_loss")
-        if edge_energy_before > 0 and _float_metric(metrics, "ocr_text_soft_edge_ratio_after") > max(
-            0.35,
-            _float_metric(metrics, "ocr_text_soft_edge_ratio_before") + 0.10,
-        ):
-            foreground_reasons.append("ocr_text_soft_edge_degraded")
+        if _float_metric(metrics, "deskew_abs_angle_degrees") < 0.2:
+            edge_energy_before = _float_metric(metrics, "ocr_text_edge_energy_before")
+            edge_energy_threshold = 0.80 if _float_metric(metrics, "size_change_ratio") > 0.55 else 0.95
+            if edge_energy_before > 0 and _float_metric(metrics, "ocr_text_edge_energy_ratio") < edge_energy_threshold:
+                foreground_reasons.append("ocr_text_edge_clarity_loss")
+            if edge_energy_before > 0 and _float_metric(metrics, "ocr_text_soft_edge_ratio_after") > max(
+                0.35,
+                _float_metric(metrics, "ocr_text_soft_edge_ratio_before") + 0.10,
+            ):
+                foreground_reasons.append("ocr_text_soft_edge_degraded")
         return {
             "checked": True,
             "action": "reverted_to_source" if foreground_reasons else "passed",
@@ -14158,6 +14163,10 @@ def _detect_ocr_profile_skew(image: Image.Image, processing_profile: str) -> Ske
         form_skew = _detect_ocr_form_line_skew(image)
     if form_skew.angle_degrees is not None:
         candidates.append(form_skew)
+    if processing_profile == "ocr_preprocess_leptonica":
+        sparse_skew = _detect_ocr_sparse_handwriting_skew(image)
+        if sparse_skew.angle_degrees is not None:
+            candidates.append(sparse_skew)
     if not candidates:
         return None
     return max(candidates, key=lambda candidate: candidate.confidence)
@@ -14221,6 +14230,55 @@ def _detect_ocr_form_line_skew(image: Image.Image) -> SkewDetection:
     if confidence < 0.08 or best_score < zero_score * 1.08:
         return SkewDetection(None, 0.0, "low confidence")
     return SkewDetection(skew_angle, round(max(confidence, 0.12), 3), "ocr form line skew detected")
+
+
+def _detect_ocr_sparse_handwriting_skew(image: Image.Image) -> SkewDetection:
+    width, height = image.size
+    if width < 120 or height < 120:
+        return SkewDetection(None, 0.0, "low confidence")
+    raw_grayscale = image.convert("L")
+    raw_histogram = raw_grayscale.histogram()
+    total_pixels = width * height
+    raw_low = _histogram_percentile(raw_histogram, total_pixels, 0.005)
+    raw_high = _histogram_percentile(raw_histogram, total_pixels, 0.995)
+    faint_low = _faint_sparse_raw_low(raw_histogram, total_pixels, raw_low, raw_high)
+    if raw_high < 220 or raw_high - faint_low < 8:
+        return SkewDetection(None, 0.0, "low confidence")
+
+    ink, bbox = _faint_low_contrast_ink(raw_grayscale, faint_low, raw_high)
+    if not bbox:
+        return SkewDetection(None, 0.0, "low confidence")
+    ink_ratio = _nonzero_ratio(ink, bbox)
+    if ink_ratio < 0.002 or ink_ratio > 0.12:
+        return SkewDetection(None, 0.0, "low confidence")
+    left, top, right, bottom = bbox
+    if right - left < max(120, int(round(width * 0.30))) or bottom - top < max(
+        80,
+        int(round(height * 0.18)),
+    ):
+        return SkewDetection(None, 0.0, "low confidence")
+    if _deskew_has_faint_ruled_line_risk(ink, bbox):
+        return SkewDetection(None, 0.0, "low confidence")
+
+    sample = ink.crop(bbox)
+    sample.thumbnail((700, 700), Image.Resampling.BILINEAR)
+    if sample.width < 120 or sample.height < 80:
+        return SkewDetection(None, 0.0, "low confidence")
+    if _deskew_faint_row_group_count(ink, bbox) > 5:
+        return SkewDetection(None, 0.0, "low confidence")
+
+    scores = _deskew_candidate_scores(sample)
+    best_angle, best_score = max(scores.items(), key=lambda item: item[1])
+    skew_angle = round(-best_angle, 2)
+    if abs(skew_angle) < 0.2 or abs(skew_angle) > 4.0:
+        return SkewDetection(None, 0.0, "low confidence")
+    zero_score = scores.get(0.0, 0.0)
+    runner_candidates = [score for angle, score in scores.items() if abs(angle - best_angle) >= 1.0]
+    runner_up = max(runner_candidates) if runner_candidates else 0.0
+    confidence = 0.0 if best_score <= 0 else max(0.0, min(1.0, (best_score - runner_up) / best_score))
+    if confidence < 0.12 or (zero_score > 0 and best_score < zero_score * 1.20):
+        return SkewDetection(None, 0.0, "low confidence")
+    return SkewDetection(skew_angle, round(max(confidence, 0.16), 3), "ocr sparse handwriting skew detected")
 
 
 def _deskew_has_edge_content_risk(image: Image.Image) -> bool:
@@ -15264,6 +15322,7 @@ def _rotate_for_deskew(
     correction_angle: float,
     *,
     ocr_supersample: bool = False,
+    preserve_canvas: bool = False,
 ) -> Image.Image:
     fill = _corner_background_value(image.convert("L"))
     fillcolor: int | tuple[int, int, int]
@@ -15280,7 +15339,12 @@ def _rotate_for_deskew(
                 expand=True,
                 fillcolor=fillcolor,
             )
-    return image.rotate(correction_angle, resample=Image.Resampling.BICUBIC, expand=True, fillcolor=fillcolor)
+    return image.rotate(
+        correction_angle,
+        resample=Image.Resampling.BICUBIC,
+        expand=not preserve_canvas,
+        fillcolor=fillcolor,
+    )
 
 
 def _ocr_supersample_for_deskew(image: Image.Image) -> Image.Image:
