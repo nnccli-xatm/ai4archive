@@ -83,6 +83,12 @@ Synthetic OCR gate：
 - 真实扫描样本复测结果：12/12 生成 OCR 灰度增强，12/12 生成 `ocr_binary` sidecar；
   11/12 实际纠偏，剩余 1 张检测角度低于 0.2 度阈值未旋转；失败 0、guardrail failure 0、
   processing warning 0，源图修改 0。
+- 2026-06-11 第三次清晰度修复：OCR 灰度增强在背景归一/低对比前景增强后执行受控文字边缘恢复，
+  对原本深色前景禁止抬亮，并新增 `ocr_text_edge_energy_before`、
+  `ocr_text_edge_energy_after`、`ocr_text_edge_energy_ratio` 聚合指标。
+- 真实扫描样本 `fix7` 复测结果：12/12 生成 OCR 灰度增强，12/12 生成 `ocr_binary` sidecar；
+  11/12 实际纠偏，失败 0、guardrail failure 0、processing warning 0，源图修改 0；
+  `ocr_text_edge_energy_ratio` 平均 1.687265，最小 1.428797，最大 2.480872。
 
 ## 2. 目标重新定义
 
@@ -175,6 +181,8 @@ OCR 预处理管线必须独立于保真派生图管线，输出 `ocr_derivative
 - 局部对比增强：CLAHE 或受限局部拉伸。
 - 细笔画增强：轻量 unsharp/形态学增强，避免光晕。
 - 断笔风险控制：二值化后连通域数量、笔画宽度分布和前景保留率必须受控。
+- OCR 利用副本必须有文字清晰度保底：以文字前景邻域平均梯度记录输出/原图边缘能量比，
+  当 `ocr_text_edge_energy_ratio` 低于 0.95 时进入处理输出安全 guard，避免把纠偏或背景净化后的利用副本交付成模糊文字图。
 
 ### 4.6 透印、扫描线和表格保护
 

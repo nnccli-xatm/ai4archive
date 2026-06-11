@@ -57,6 +57,7 @@ _METRIC_IDS = (
     "wer_relative_reduction",
     "ocr_foreground_retention_ratio",
     "ocr_background_delta",
+    "ocr_text_edge_energy_ratio",
 )
 
 

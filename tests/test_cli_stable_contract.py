@@ -789,11 +789,18 @@ class StableCliRuleTemplateTests(unittest.TestCase):
                 Path(record["source_relative_path"]).name: record
                 for record in processing_manifest["files"]
             }
+            sparse_record = records[sparse_source.name]
+            form_record = records[form_source.name]
+            sparse_output = derivatives_dir / sparse_record["output_relative_path"]
+            form_output = derivatives_dir / form_record["output_relative_path"]
+            sparse_edge_energy_before = _ocr_text_edge_energy_for_test(sparse_source)
+            sparse_edge_energy_after = _ocr_text_edge_energy_for_test(sparse_output)
+            form_edge_energy_before = _ocr_text_edge_energy_for_test(form_source)
+            form_edge_energy_after = _ocr_text_edge_energy_for_test(form_output)
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(quality_summary["counts"]["ocr_preprocessed_files"], 2)
         self.assertEqual(quality_summary["counts"]["ocr_binary_created_files"], 2)
-        sparse_record = records[sparse_source.name]
         self.assertTrue(sparse_record["ocr_preprocessed"])
         self.assertEqual(
             sparse_record["ocr_preprocess_reason_code"],
@@ -801,13 +808,16 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         )
         self.assertLess(sparse_record["ocr_background_candidate_pixel_ratio"], 0.03)
         self.assertLess(sparse_record["ocr_binary_foreground_ratio"], 0.03)
+        self.assertGreaterEqual(sparse_record["ocr_text_edge_energy_ratio"], 0.95)
+        self.assertGreaterEqual(sparse_edge_energy_after, sparse_edge_energy_before * 0.95)
         self.assertEqual(sparse_record["processing_audit"]["guardrail_failures"], [])
-        form_record = records[form_source.name]
         self.assertTrue(form_record["deskewed"])
         self.assertEqual(form_record["deskew_reason"], "deskew applied")
         self.assertGreater(abs(form_record["skew_angle_degrees"]), 1.0)
         self.assertTrue(form_record["ocr_preprocessed"])
         self.assertTrue(form_record["ocr_binary_created"])
+        self.assertGreaterEqual(form_record["ocr_text_edge_energy_ratio"], 0.95)
+        self.assertGreaterEqual(form_edge_energy_after, form_edge_energy_before * 0.95)
         self.assertEqual(form_record["processing_audit"]["guardrail_failures"], [])
 
     def test_run_plan_accepts_rule_template_and_records_public_batch_choice(self) -> None:
@@ -1233,6 +1243,41 @@ def _sha256_for_test(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _ocr_text_edge_energy_for_test(path: Path) -> float:
+    image = Image.open(path).convert("L")
+    histogram = image.histogram()
+    area = max(1, image.width * image.height)
+    running = 0
+    background = 255
+    for value, count in enumerate(histogram):
+        running += count
+        if running >= area * 0.9:
+            background = value
+            break
+    threshold = max(90, min(220, background - 35))
+    foreground = image.point(lambda value: 255 if value <= threshold else 0, mode="L").filter(
+        ImageFilter.MaxFilter(3)
+    )
+    foreground_pixels = foreground.load()
+    source_pixels = image.load()
+    width, height = image.size
+    gradient_total = 0
+    pair_count = 0
+    for y in range(height):
+        for x in range(1, width):
+            if foreground_pixels[x, y] or foreground_pixels[x - 1, y]:
+                gradient_total += abs(int(source_pixels[x, y]) - int(source_pixels[x - 1, y]))
+                pair_count += 1
+    for y in range(1, height):
+        for x in range(width):
+            if foreground_pixels[x, y] or foreground_pixels[x, y - 1]:
+                gradient_total += abs(int(source_pixels[x, y]) - int(source_pixels[x, y - 1]))
+                pair_count += 1
+    if pair_count < max(8, int(area * 0.00002)):
+        return 0.0
+    return gradient_total / pair_count
 
 
 def _write_clean_page(path: Path) -> None:

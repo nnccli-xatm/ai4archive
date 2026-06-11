@@ -359,6 +359,9 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
   `applied_low_contrast_foreground_enhancement`，暗前景损失和暗前景抬亮最大值均为 0。
 - OCR profile 现在可使用 OCR 预增强图重新检测低对比页倾斜；该能力仅用于 OCR 利用副本，
   不改变保真派生图的保护策略。
+- 2026-06-11 清晰度修复：OCR 背景归一/低对比增强后新增受控文字边缘恢复，禁止抬亮原深色前景；
+  manifest、processing quality summary 和 service public-safe allowlist 新增
+  `ocr_text_edge_energy_before`、`ocr_text_edge_energy_after`、`ocr_text_edge_energy_ratio`。
 
 ### DEV-154 自适应阈值和二值 OCR 输出
 
@@ -402,6 +405,9 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
   OCR review required 仅 1/12，原因是高彩/红色占比页面，复核原因只记录聚合安全代码。
 - 真实扫描二次复测：11/12 实际纠偏，剩余 1 张因角度低于 0.2 度阈值不旋转；失败 0、
   guardrail failure 0、processing warning 0、源图修改 0。
+- 真实扫描第三次复测：12/12 OCR 灰度增强和 `ocr_binary` sidecar，11/12 实际纠偏；
+  `ocr_text_edge_energy_ratio` 平均 1.687265，最小 1.428797，最大 2.480872；
+  失败 0、guardrail failure 0、processing warning 0、源图修改 0。
 
 ## P2：CI、发布和性能
 

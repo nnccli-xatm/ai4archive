@@ -1040,6 +1040,9 @@ def _process_record(
         "ocr_foreground_dark_loss_ratio": 0.0,
         "ocr_foreground_dark_lift_ratio": 0.0,
         "ocr_foreground_retention_ratio": 1.0,
+        "ocr_text_edge_energy_before": 0.0,
+        "ocr_text_edge_energy_after": 0.0,
+        "ocr_text_edge_energy_ratio": 1.0,
         "ocr_review_required": False,
         "ocr_review_reason_codes": [],
         "ocr_binary_created": False,
@@ -1245,6 +1248,9 @@ def _process_record(
                 "ocr_foreground_dark_loss_ratio": process_info["ocr_foreground_dark_loss_ratio"],
                 "ocr_foreground_dark_lift_ratio": process_info["ocr_foreground_dark_lift_ratio"],
                 "ocr_foreground_retention_ratio": process_info["ocr_foreground_retention_ratio"],
+                "ocr_text_edge_energy_before": process_info["ocr_text_edge_energy_before"],
+                "ocr_text_edge_energy_after": process_info["ocr_text_edge_energy_after"],
+                "ocr_text_edge_energy_ratio": process_info["ocr_text_edge_energy_ratio"],
                 "ocr_review_required": process_info["ocr_review_required"],
                 "ocr_review_reason_codes": process_info["ocr_review_reason_codes"],
                 "ocr_binary_created": process_info["ocr_binary_created"],
@@ -1606,6 +1612,9 @@ def _ocr_manifest_quality_metrics(records: list[dict[str, Any]]) -> dict[str, An
         "ocr_foreground_dark_loss_ratio",
         "ocr_foreground_dark_lift_ratio",
         "ocr_foreground_retention_ratio",
+        "ocr_text_edge_energy_before",
+        "ocr_text_edge_energy_after",
+        "ocr_text_edge_energy_ratio",
         "ocr_binary_foreground_ratio",
         "ocr_binary_foreground_retention_ratio",
     )
@@ -2382,6 +2391,18 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "ocr_foreground_retention_ratio": _aggregate_metric(
                 audit_records,
                 "ocr_foreground_retention_ratio",
+            ),
+            "ocr_text_edge_energy_before": _aggregate_metric(
+                audit_records,
+                "ocr_text_edge_energy_before",
+            ),
+            "ocr_text_edge_energy_after": _aggregate_metric(
+                audit_records,
+                "ocr_text_edge_energy_after",
+            ),
+            "ocr_text_edge_energy_ratio": _aggregate_metric(
+                audit_records,
+                "ocr_text_edge_energy_ratio",
             ),
             "ocr_binary_foreground_ratio": _aggregate_metric(audit_records, "ocr_binary_foreground_ratio"),
             "ocr_binary_foreground_retention_ratio": _aggregate_metric(
@@ -4625,6 +4646,15 @@ def _process_image(
         "ocr_foreground_dark_loss_ratio": 0.0 if guard_reverted else ocr_preprocess.foreground_dark_loss_ratio,
         "ocr_foreground_dark_lift_ratio": 0.0 if guard_reverted else ocr_preprocess.foreground_dark_lift_ratio,
         "ocr_foreground_retention_ratio": 1.0 if guard_reverted else ocr_preprocess.foreground_retention_ratio,
+        "ocr_text_edge_energy_before": (
+            0.0 if guard_reverted else processing_audit.get("ocr_text_edge_energy_before", 0.0)
+        ),
+        "ocr_text_edge_energy_after": (
+            0.0 if guard_reverted else processing_audit.get("ocr_text_edge_energy_after", 0.0)
+        ),
+        "ocr_text_edge_energy_ratio": (
+            1.0 if guard_reverted else processing_audit.get("ocr_text_edge_energy_ratio", 1.0)
+        ),
         "ocr_review_required": (
             True if guard_reverted else (ocr_preprocess.review_required or ocr_binary.review_required)
         ),
@@ -4780,7 +4810,14 @@ def _ocr_preprocess_grayscale(
             result = _ocr_preprocess_grayscale_fallback(grayscale, strong_profile=strong_profile)
         applied_reason = "OCR preprocessing applied: grayscale background normalization with dark foreground preservation"
         applied_reason_code = "applied_background_normalization"
-    output, changed_pixel_ratio, background_candidate_pixel_ratio = result
+    output, _changed_pixel_ratio, background_candidate_pixel_ratio = result
+    output = _ocr_restore_text_edge_clarity(
+        grayscale,
+        output,
+        low_contrast_mode=low_contrast_mode,
+        strong_profile=strong_profile,
+    )
+    changed_pixel_ratio = _pixel_change_ratio(grayscale, output)
     background_before = float(p95)
     output_histogram = output.histogram()
     background_after = float(_histogram_percentile(output_histogram, total, 0.95))
@@ -5074,6 +5111,39 @@ def _ocr_preprocess_low_contrast_grayscale_fallback(
     return output, _pixel_change_ratio(grayscale, output), _mask_ratio(candidate)
 
 
+def _ocr_restore_text_edge_clarity(
+    source_l: Image.Image,
+    processed_l: Image.Image,
+    *,
+    low_contrast_mode: bool,
+    strong_profile: bool,
+) -> Image.Image:
+    percent = 220 if strong_profile else 150
+    if low_contrast_mode:
+        percent = 180 if strong_profile else 130
+    sharpened = processed_l.filter(ImageFilter.UnsharpMask(radius=0.75, percent=percent, threshold=1))
+    np = _load_numpy()
+    if np is not None:
+        try:
+            source = np.asarray(source_l, dtype=np.uint8)
+            processed = np.asarray(processed_l, dtype=np.uint8)
+            sharp = np.asarray(sharpened, dtype=np.uint8).copy()
+            dark_foreground = source <= 127
+            sharp[dark_foreground] = np.minimum(sharp[dark_foreground], processed[dark_foreground])
+            return Image.fromarray(sharp, mode="L")
+        except (TypeError, ValueError):
+            pass
+
+    source_pixels = source_l.load()
+    processed_pixels = processed_l.load()
+    sharp_pixels = sharpened.load()
+    for y in range(source_l.height):
+        for x in range(source_l.width):
+            if int(source_pixels[x, y]) <= 127:
+                sharp_pixels[x, y] = min(int(sharp_pixels[x, y]), int(processed_pixels[x, y]))
+    return sharpened
+
+
 def _ocr_foreground_preservation_metrics(source_l: Image.Image, processed_l: Image.Image) -> tuple[float, float, float]:
     np = _load_numpy()
     if np is not None:
@@ -5110,6 +5180,59 @@ def _ocr_foreground_preservation_metrics(source_l: Image.Image, processed_l: Ima
         return 0.0, 0.0, 1.0
     loss_ratio = lost / dark_pixels
     return loss_ratio, lifted / dark_pixels, 1.0 - loss_ratio
+
+
+def _ocr_text_edge_clarity_metrics(source_l: Image.Image, processed_l: Image.Image) -> dict[str, float]:
+    before = _ocr_text_edge_energy(source_l)
+    after = _ocr_text_edge_energy(processed_l)
+    ratio = after / before if before > 0 else 1.0
+    return {
+        "ocr_text_edge_energy_before": round(before, 6),
+        "ocr_text_edge_energy_after": round(after, 6),
+        "ocr_text_edge_energy_ratio": round(ratio, 6),
+    }
+
+
+def _ocr_text_edge_energy(grayscale: Image.Image) -> float:
+    image_l = grayscale.convert("L")
+    histogram = image_l.histogram()
+    area = max(1, image_l.width * image_l.height)
+    threshold = _high_contrast_content_threshold(histogram, image_l.size)
+    foreground = _high_contrast_content_mask(image_l, threshold).filter(ImageFilter.MaxFilter(3))
+    np = _load_numpy()
+    if np is not None:
+        try:
+            values = np.asarray(image_l, dtype=np.int16)
+            mask = np.asarray(foreground, dtype=bool)
+            horizontal_mask = mask[:, 1:] | mask[:, :-1]
+            vertical_mask = mask[1:, :] | mask[:-1, :]
+            pair_count = int(horizontal_mask.sum() + vertical_mask.sum())
+            if pair_count < max(8, int(area * 0.00002)):
+                return 0.0
+            horizontal = np.abs(values[:, 1:] - values[:, :-1])
+            vertical = np.abs(values[1:, :] - values[:-1, :])
+            return float(horizontal[horizontal_mask].sum() + vertical[vertical_mask].sum()) / pair_count
+        except (TypeError, ValueError):
+            pass
+
+    foreground_pixels = foreground.load()
+    source_pixels = image_l.load()
+    width, height = image_l.size
+    gradient_total = 0
+    pair_count = 0
+    for y in range(height):
+        for x in range(1, width):
+            if foreground_pixels[x, y] or foreground_pixels[x - 1, y]:
+                gradient_total += abs(int(source_pixels[x, y]) - int(source_pixels[x - 1, y]))
+                pair_count += 1
+    for y in range(1, height):
+        for x in range(width):
+            if foreground_pixels[x, y] or foreground_pixels[x, y - 1]:
+                gradient_total += abs(int(source_pixels[x, y]) - int(source_pixels[x, y - 1]))
+                pair_count += 1
+    if pair_count < max(8, int(area * 0.00002)):
+        return 0.0
+    return gradient_total / pair_count
 
 
 def _ocr_binary_sidecar(image: Image.Image, ocr_preprocess: OcrPreprocessingResult) -> OcrBinaryResult:
@@ -12218,6 +12341,15 @@ def _processing_audit(
     brightness_delta, contrast_delta = _tonal_deltas(source_l, processed_l)
     pixel_change_ratio = _pixel_change_ratio(source_l, processed_l)
     processed_output_metrics = _processed_output_safety_metrics(source_l, processed_l)
+    ocr_text_edge_metrics = (
+        _ocr_text_edge_clarity_metrics(source_l, processed_l)
+        if ocr_preprocessed
+        else {
+            "ocr_text_edge_energy_before": 0.0,
+            "ocr_text_edge_energy_after": 0.0,
+            "ocr_text_edge_energy_ratio": 1.0,
+        }
+    )
     deskew_abs_angle = round(abs(skew_angle_degrees or 0.0), 6)
     despeckle_pixel_ratio = despeckle_pixels_changed / source_area
     geometric_change_recorded = (
@@ -12318,6 +12450,7 @@ def _processing_audit(
         "ocr_foreground_dark_loss_ratio": round(ocr_foreground_dark_loss_ratio, 6),
         "ocr_foreground_dark_lift_ratio": round(ocr_foreground_dark_lift_ratio, 6),
         "ocr_foreground_retention_ratio": round(ocr_foreground_retention_ratio, 6),
+        **ocr_text_edge_metrics,
         "ocr_review_required": ocr_review_required,
         "ocr_binary_created": ocr_binary_created,
         "ocr_binary_foreground_ratio": round(ocr_binary_foreground_ratio, 6),
@@ -12828,6 +12961,8 @@ def _processed_output_safety_guard(metrics: dict[str, Any], options: ProcessingO
             foreground_reasons.append("ocr_foreground_dark_loss")
         if _float_metric(metrics, "ocr_foreground_dark_lift_ratio") > 0.01:
             foreground_reasons.append("ocr_foreground_dark_lift")
+        if _float_metric(metrics, "ocr_text_edge_energy_ratio") < 0.95:
+            foreground_reasons.append("ocr_text_edge_clarity_loss")
         return {
             "checked": True,
             "action": "reverted_to_source" if foreground_reasons else "passed",
