@@ -137,6 +137,28 @@ _TEMPLATE_DESCRIPTIONS: dict[str, dict[str, Any]] = {
             "and OCR regression before production promotion."
         ),
     },
+    "ocr-preprocess-structure-v1": {
+        "name_zh": "OCR structure-preserving v1",
+        "quality_goal": (
+            "Independent OCR preprocessing path that explicitly protects text strokes, "
+            "horizontal and vertical table rules, and edge structure while improving background separation."
+        ),
+        "intended_inputs": [
+            "real scanned OCR batches with tables or forms",
+            "text pages where edge clarity and straight ruled lines are core requirements",
+            "validation batches compared against stroke-bg, Leptonica, OpenCV, and Sauvola paths",
+        ],
+        "risk_boundary": (
+            "Experimental OCR derivative, not an archival-fidelity output. The main image must preserve "
+            "canvas size, must not crop or hard-threshold, and must preserve true color unless grayscale "
+            "conversion is explicitly enabled."
+        ),
+        "output_profile": "ocr-preprocess-structure",
+        "review_policy": (
+            "Review text edge energy, foreground retention, table-line continuity, binary foreground ratio, "
+            "and OCR regression before production promotion."
+        ),
+    },
     "ocr-preprocess-v1": {
         "name_zh": "OCR 预处理 v1",
         "quality_goal": "生成面向 OCR 的强预处理利用副本，执行背景归一、OCR 去噪、笔画保护和可选二值输出。",
@@ -625,6 +647,7 @@ def _dry_run_warnings(rule_template: str, scan_summary: dict[str, Any], *, scan_
         "ocr-preprocess-opencv-local-v1",
         "ocr-preprocess-sauvola-wolf-v1",
         "ocr-preprocess-stroke-bg-v1",
+        "ocr-preprocess-structure-v1",
         "ocr-preprocess-v1",
     }:
         warnings.append("ocr_preprocess_not_archival_fidelity_derivative")
@@ -635,6 +658,7 @@ def _dry_run_warnings(rule_template: str, scan_summary: dict[str, Any], *, scan_
         "ocr-preprocess-opencv-local-v1",
         "ocr-preprocess-sauvola-wolf-v1",
         "ocr-preprocess-stroke-bg-v1",
+        "ocr-preprocess-structure-v1",
         "ocr-preprocess-v1",
     }:
         warnings.append("ocr_binary_output_requires_review_gate")

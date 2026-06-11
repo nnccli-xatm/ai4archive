@@ -803,6 +803,82 @@ class ServiceJobBoundaryTests(unittest.TestCase):
                 "private_ocr_page_001",
             )
 
+    def test_service_job_ocr_preprocess_structure_profile_is_public_safe(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="service-job-ocr-structure-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "private ocr source"
+            service_root = root / "service root"
+            input_dir.mkdir()
+            source_path = input_dir / "private_ocr_page_001.png"
+            _write_ocr_noisy_page(source_path)
+            with Image.open(source_path) as source_image:
+                rotated = source_image.rotate(
+                    1.4,
+                    resample=Image.Resampling.BICUBIC,
+                    expand=True,
+                    fillcolor=214,
+                )
+            rotated.save(source_path, dpi=(300, 300))
+            create_service_job(
+                ServiceJobConfig(
+                    input_dir=input_dir,
+                    service_root=service_root,
+                    rule_template="ocr-preprocess-structure-v1",
+                    workers=1,
+                ),
+                job_id="job-ocrstructure001",
+            )
+
+            summary = run_service_job(service_root, "job-ocrstructure001")
+            recovered = recover_service_job(service_root, "job-ocrstructure001")
+            job_root = service_root / "jobs" / "job-ocrstructure001"
+            public_raw = (job_root / SERVICE_JOB_PUBLIC_SUMMARY_JSON).read_text(encoding="utf-8")
+            processing_manifest = json.loads(
+                (job_root / "derivatives" / "processing_manifest.json").read_text(encoding="utf-8")
+            )
+            record = processing_manifest["files"][0]
+
+            self.assertEqual(summary["state"], "finished")
+            self.assertEqual(recovered["state"], "finished")
+            self.assertEqual(recovered["template"]["rule_template_id"], "ocr-preprocess-structure-v1")
+            self.assertEqual(recovered["template"]["processing_profile"], "ocr_preprocess_structure")
+            self.assertEqual(recovered["template"]["processing_path"], "ocr-preprocess-structure-v1")
+            self.assertEqual(processing_manifest["options"]["processing_profile"], "ocr_preprocess_structure")
+            self.assertEqual(processing_manifest["options"]["processing_path"], "ocr-preprocess-structure-v1")
+            self.assertEqual(processing_manifest["processing_path"]["path_id"], "ocr-preprocess-structure-v1")
+            self.assertTrue(processing_manifest["options"]["ocr_preprocess"])
+            self.assertTrue(processing_manifest["options"]["ocr_binary"])
+            self.assertTrue(processing_manifest["options"]["deskew"])
+            self.assertTrue(record["ocr_preprocessed"])
+            self.assertTrue(record["ocr_binary_created"])
+            self.assertIn("ocr_deskew_preserve_canvas", record["operations"])
+            self.assertIn(
+                record["ocr_preprocess_reason_code"],
+                {
+                    "applied_structure_preserving_background_normalization",
+                    "applied_structure_preserving_fallback_background_normalization",
+                    "applied_structure_preserving_grayscale_fallback",
+                },
+            )
+            self.assertIn(
+                record["ocr_binary_reason_code"],
+                {
+                    "applied_structure_otsu_threshold",
+                    "applied_structure_adaptive_threshold",
+                    "applied_structure_fallback_otsu_threshold",
+                },
+            )
+            self.assertTrue(recovered["quality"]["provided"])
+            self.assertEqual(recovered["quality"]["status"], "pass")
+            self.assertFalse(recovered["private_paths_exposed"])
+            _assert_public_text_omits(
+                self,
+                public_raw,
+                str(root.resolve()),
+                "private ocr source",
+                "private_ocr_page_001",
+            )
+
     def test_retry_job_reuses_existing_derivative_after_failed_state(self) -> None:
         with tempfile.TemporaryDirectory(prefix="service-job-retry-") as temp_dir:
             root = Path(temp_dir)

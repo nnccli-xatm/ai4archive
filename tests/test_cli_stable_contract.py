@@ -54,6 +54,7 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         ocr_opencv_local_defaults = processing_defaults_for_rule_template("ocr-preprocess-opencv-local-v1")
         ocr_sauvola_wolf_defaults = processing_defaults_for_rule_template("ocr-preprocess-sauvola-wolf-v1")
         ocr_stroke_bg_defaults = processing_defaults_for_rule_template("ocr-preprocess-stroke-bg-v1")
+        ocr_structure_defaults = processing_defaults_for_rule_template("ocr-preprocess-structure-v1")
         photo_defaults = processing_defaults_for_rule_template("photo-mixed-safe-v1")
 
         self.assertEqual(readable["template"]["id"], "text-clean-readable-v1")
@@ -84,6 +85,10 @@ class StableCliRuleTemplateTests(unittest.TestCase):
             "ocr_preprocess_stroke_bg",
         )
         self.assertEqual(
+            processing_profile_for_rule_template("ocr-preprocess-structure-v1"),
+            "ocr_preprocess_structure",
+        )
+        self.assertEqual(
             processing_path_for_rule_template("ocr-preprocess-leptonica-v1"),
             "ocr-preprocess-leptonica-v1",
         )
@@ -98,6 +103,10 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         self.assertEqual(
             processing_path_for_rule_template("ocr-preprocess-stroke-bg-v1"),
             "ocr-preprocess-stroke-bg-v1",
+        )
+        self.assertEqual(
+            processing_path_for_rule_template("ocr-preprocess-structure-v1"),
+            "ocr-preprocess-structure-v1",
         )
         self.assertTrue(ocr_defaults["ocr_preprocess"])
         self.assertTrue(ocr_defaults["ocr_binary"])
@@ -133,6 +142,13 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         self.assertTrue(ocr_stroke_bg_defaults["deskew"])
         self.assertFalse(ocr_stroke_bg_defaults.get("auto_crop", False))
         self.assertFalse(ocr_stroke_bg_defaults.get("sharpen_text_edges", False))
+        self.assertTrue(ocr_structure_defaults["ocr_preprocess"])
+        self.assertTrue(ocr_structure_defaults["ocr_binary"])
+        self.assertFalse(ocr_structure_defaults["ocr_force_grayscale"])
+        self.assertTrue(ocr_structure_defaults["reuse_scan_measurements"])
+        self.assertTrue(ocr_structure_defaults["deskew"])
+        self.assertFalse(ocr_structure_defaults.get("auto_crop", False))
+        self.assertFalse(ocr_structure_defaults.get("sharpen_text_edges", False))
         self.assertTrue(photo_defaults["trim_dark_border"])
         self.assertNotIn("enhance_faded_text", photo_defaults)
 
@@ -1176,6 +1192,97 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         self.assertTrue(quality_summary["public_safe"])
         self.assertEqual(quality_summary["counts"]["ocr_binary_created_files"], 1)
 
+    def test_production_run_ocr_preprocess_structure_uses_independent_path(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-cli-ocr-structure-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            source = input_dir / "OCR001_RULED_FORM.png"
+            _write_ocr_structure_table_page(source)
+            source_bytes = source.read_bytes()
+            with Image.open(source) as source_image:
+                source_size = source_image.size
+            source_line_ratio = _table_line_dark_pixel_ratio_for_test(source)
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                exit_code = main(
+                    [
+                        "production-run",
+                        "--input",
+                        str(input_dir),
+                        "--derivatives-out",
+                        str(derivatives_dir),
+                        "--metadata-out",
+                        str(metadata_dir),
+                        "--rule-template",
+                        "ocr-preprocess-structure-v1",
+                        "--workers",
+                        "1",
+                    ]
+                )
+
+            summary = json.loads((metadata_dir / "production_run_summary.json").read_text(encoding="utf-8"))
+            processing_manifest = json.loads(
+                (derivatives_dir / "processing_manifest.json").read_text(encoding="utf-8")
+            )
+            quality_summary = json.loads(
+                (derivatives_dir / PROCESSING_QUALITY_SUMMARY_JSON).read_text(encoding="utf-8")
+            )
+            record = processing_manifest["files"][0]
+            output_path = derivatives_dir / record["output_relative_path"]
+            binary_path = derivatives_dir / record["ocr_binary_output_relative_path"]
+            with Image.open(output_path) as output_image:
+                output_size = output_image.size
+            with Image.open(binary_path) as binary_image:
+                binary_size = binary_image.size
+            output_line_ratio = _table_line_dark_pixel_ratio_for_test(output_path)
+            source_unchanged = source.read_bytes() == source_bytes
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(source_unchanged)
+        self.assertEqual(summary["rule_template"]["id"], "ocr-preprocess-structure-v1")
+        self.assertEqual(summary["options"]["processing_profile"], "ocr_preprocess_structure")
+        self.assertEqual(summary["options"]["processing_path"], "ocr-preprocess-structure-v1")
+        self.assertEqual(processing_manifest["output_profile"], "ocr_preprocess_structure")
+        self.assertEqual(processing_manifest["processing_path"]["path_id"], "ocr-preprocess-structure-v1")
+        self.assertEqual(record["processing_path"], "ocr-preprocess-structure-v1")
+        self.assertIn(
+            "ocr_preprocess_structure_grayscale",
+            processing_manifest["ocr_preprocessing_operations"],
+        )
+        self.assertIn("ocr_binary_sidecar", processing_manifest["ocr_preprocessing_operations"])
+        self.assertIn("ocr_preprocess_structure_grayscale", processing_manifest["operations"])
+        self.assertNotIn("ocr_deskew_supersampled", record["operations"])
+        self.assertTrue(record["ocr_preprocessed"])
+        self.assertIn(
+            record["ocr_preprocess_reason_code"],
+            {
+                "applied_structure_preserving_background_normalization",
+                "applied_structure_preserving_fallback_background_normalization",
+                "applied_structure_preserving_grayscale_fallback",
+            },
+        )
+        self.assertTrue(record["ocr_binary_created"])
+        self.assertIn(
+            record["ocr_binary_reason_code"],
+            {
+                "applied_structure_otsu_threshold",
+                "applied_structure_adaptive_threshold",
+                "applied_structure_fallback_otsu_threshold",
+            },
+        )
+        self.assertEqual(output_size, source_size)
+        self.assertEqual(binary_size, source_size)
+        self.assertGreater(record["ocr_preprocess_changed_pixel_ratio"], 0.01)
+        self.assertGreaterEqual(record["ocr_foreground_retention_ratio"], 0.998)
+        self.assertGreaterEqual(record["ocr_text_edge_energy_ratio"], 0.95)
+        self.assertGreaterEqual(output_line_ratio, source_line_ratio * 0.98)
+        self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
+        self.assertTrue(quality_summary["public_safe"])
+        self.assertEqual(quality_summary["counts"]["ocr_binary_created_files"], 1)
+
     def test_production_run_ocr_preprocess_preserves_true_color_by_default(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-cli-ocr-color-preserve-") as temp_dir:
             root = Path(temp_dir)
@@ -2078,6 +2185,24 @@ def _ocr_text_soft_edge_ratio_for_test(path: Path) -> float:
     return soft / total
 
 
+def _table_line_dark_pixel_ratio_for_test(path: Path) -> float:
+    image = Image.open(path).convert("L")
+    pixels = image.load()
+    dark = 0
+    total = 0
+    for y in range(70, 292, 44):
+        for x in range(42, 379):
+            total += 1
+            if int(pixels[x, y]) <= 118:
+                dark += 1
+    for x in (42, 122, 236, 378):
+        for y in range(70, 292):
+            total += 1
+            if int(pixels[x, y]) <= 118:
+                dark += 1
+    return dark / max(1, total)
+
+
 def _ocr_dark_component_summary_for_test(path: Path) -> dict[str, int]:
     image = Image.open(path).convert("L")
     histogram = image.histogram()
@@ -2252,6 +2377,28 @@ def _write_ocr_noisy_page(path: Path) -> None:
         y = 54 + index * 32
         draw.rectangle((54, y, 286, y + 5), fill=42)
         draw.rectangle((64, y + 12, 220, y + 15), fill=86)
+    image.save(path, dpi=(300, 300))
+
+
+def _write_ocr_structure_table_page(path: Path) -> None:
+    width, height = 420, 320
+    image = Image.new("L", (width, height), 222)
+    pixels = image.load()
+    for y in range(height):
+        for x in range(width):
+            if (x * 17 + y * 31) % 41 == 0:
+                pixels[x, y] = 194
+            elif (x + y) % 37 == 0:
+                pixels[x, y] = 235
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default()
+    for y in range(70, 292, 44):
+        draw.line((42, y, 378, y), fill=68, width=2)
+    for x in (42, 122, 236, 378):
+        draw.line((x, 70, x, 290), fill=68, width=2)
+    for index, text in enumerate(("FORM", "DATE", "NAME", "AMOUNT", "NOTE")):
+        draw.text((62, 82 + index * 42), text, fill=92, font=font)
+        draw.rectangle((142, 88 + index * 42, 220, 91 + index * 42), fill=104)
     image.save(path, dpi=(300, 300))
 
 

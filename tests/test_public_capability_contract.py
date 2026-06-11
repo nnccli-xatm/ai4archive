@@ -149,6 +149,7 @@ class PublicCapabilityContractTests(unittest.TestCase):
         self.assertIn("ocr_preprocess_opencv_local", job_summary["allowed_processing_profiles"])
         self.assertIn("ocr_preprocess_sauvola_wolf", job_summary["allowed_processing_profiles"])
         self.assertIn("ocr_preprocess_stroke_bg", job_summary["allowed_processing_profiles"])
+        self.assertIn("ocr_preprocess_structure", job_summary["allowed_processing_profiles"])
         self.assertIn("processing_profile:print_clean", job_summary["allowed_print_clean_context"])
         self.assertIn(
             "processing_profile:ocr_preprocess_opencv_local",
@@ -160,6 +161,10 @@ class PublicCapabilityContractTests(unittest.TestCase):
         )
         self.assertIn(
             "processing_profile:ocr_preprocess_stroke_bg",
+            job_summary["allowed_print_clean_context"],
+        )
+        self.assertIn(
+            "processing_profile:ocr_preprocess_structure",
             job_summary["allowed_print_clean_context"],
         )
         self.assertIn("background_stains_delta", job_summary["allowed_print_clean_context"])

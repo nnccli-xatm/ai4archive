@@ -1,5 +1,15 @@
 # Image Quality Processing Roadmap
 
+Update, 2026-06-11: `ocr-preprocess-structure-v1` is now an experimental
+parallel OCR path focused on preserving text strokes and table/grid lines. It
+uses protected-structure morphology and line masks, keeps preserve-canvas
+deskew, preserves color by default unless `--ocr-force-grayscale` is passed,
+and writes OCR binary sidecars. Real-sample validation is recorded in
+`docs/ocr-structure-path-validation.md`. On the 12-image real sample set it
+improved average text-edge energy versus `ocr-preprocess-stroke-bg-v1`
+(0.942257 vs 0.913637), while still trailing the original-image baseline of
+1.0; it remains a candidate path, not the default.
+
 Update, 2026-06-11: `ocr-preprocess-stroke-bg-v1` is now an experimental
 parallel OCR path. It protects text/table strokes, normalizes only background
 regions, keeps source-sized output, and writes binary sidecars. Real-sample

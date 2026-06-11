@@ -140,16 +140,17 @@ and excludes paths, filenames, hashes, thumbnails, OCR text, image content, and
 row-level evidence. Template catalog/detail payloads may expose public-safe
 `processing_profile` and `processing_path` enums, such as `standard`,
 `print_clean`, `ocr_preprocess_opencv_local`, `ocr_preprocess_sauvola_wolf`,
-`ocr_preprocess_stroke_bg`,
+`ocr_preprocess_stroke_bg`, `ocr_preprocess_structure`,
 `standard-conservative-v1`, `ocr-preprocess-leptonica-v1`,
 `ocr-preprocess-opencv-local-v1`, `ocr-preprocess-sauvola-wolf-v1`, or
-`ocr-preprocess-stroke-bg-v1`,
+`ocr-preprocess-stroke-bg-v1`, or `ocr-preprocess-structure-v1`,
 because they are template-level processing intent and algorithm-route IDs
 rather than local evidence. These enums may select bounded processing strength
 or a stable algorithm path for safe candidates, such as print-clean tone mapping,
 stable text-edge sharpening, a Leptonica-style OCR preprocessing route, an
 OpenCV-local experimental OCR preprocessing route, or a Sauvola/Wolf OCR binary
-sidecar route, or a stroke-protected background normalization route, but they do not expose local rows, paths, filenames, hashes, OCR
+sidecar route, a stroke-protected background normalization route, or a
+structure-preserving OCR route for text/table-line preservation, but they do not expose local rows, paths, filenames, hashes, OCR
 text, thumbnails, or image content.
 For actual production runs, `photo-mixed-safe-v1` must keep strong cleanup,
 faded-text enhancement, and text-edge sharpening disabled in the production

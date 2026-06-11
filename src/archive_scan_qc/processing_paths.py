@@ -89,6 +89,14 @@ PROCESSING_PATHS: dict[str, ProcessingPathSpec] = {
         description="Stroke-protected OCR background normalization path with preserve-canvas deskew.",
         independent_route=True,
     ),
+    "ocr-preprocess-structure-v1": ProcessingPathSpec(
+        path_id="ocr-preprocess-structure-v1",
+        family="ocr-preprocessing",
+        implementation="archive_scan_qc.processing.ocr_preprocess_structure",
+        output_profile="ocr_preprocess_structure",
+        description="Structure-preserving OCR path for text strokes and table lines.",
+        independent_route=True,
+    ),
 }
 
 PROCESSING_PROFILE_TO_PATH_ID: dict[str, str] = {
@@ -100,6 +108,7 @@ PROCESSING_PROFILE_TO_PATH_ID: dict[str, str] = {
     "ocr_preprocess_opencv_local": "ocr-preprocess-opencv-local-v1",
     "ocr_preprocess_sauvola_wolf": "ocr-preprocess-sauvola-wolf-v1",
     "ocr_preprocess_stroke_bg": "ocr-preprocess-stroke-bg-v1",
+    "ocr_preprocess_structure": "ocr-preprocess-structure-v1",
 }
 
 
