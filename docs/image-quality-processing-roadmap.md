@@ -1,5 +1,13 @@
 # Image Quality Processing Roadmap
 
+Update, 2026-06-11: `ocr-preprocess-stroke-bg-v1` is now an experimental
+parallel OCR path. It protects text/table strokes, normalizes only background
+regions, keeps source-sized output, and writes binary sidecars. Real-sample
+validation is recorded in `docs/ocr-stroke-bg-path-validation.md`. The path is
+not promoted as the clarity solution because average text-edge energy still
+trails the source baseline; the next quality focus is deskew-related clarity
+loss.
+
 日期：2026-06-09
 
 本文档定义后续真实图像质量优化的工程路线。当前系统已经具备扫描质检、保守派生处理、生产 CLI、服务 job 原型、隐私边界和 CI 分组，但实际修图提升仍偏弱：多数处理项以“不破坏”为第一目标，质量改善缺少可量化基线、模板化参数、局部内容保护、真实样本验收和服务化恢复边界。

@@ -1136,6 +1136,7 @@ def _public_processing_profile(template_snapshot: Any) -> str:
         "ocr_preprocess_leptonica",
         "ocr_preprocess_opencv_local",
         "ocr_preprocess_sauvola_wolf",
+        "ocr_preprocess_stroke_bg",
         "ocr_preprocess_light",
     }:
         return str(profile)

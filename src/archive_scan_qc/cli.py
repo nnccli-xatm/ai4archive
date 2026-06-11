@@ -153,7 +153,8 @@ def _add_scan_arguments(parser: argparse.ArgumentParser, *, include_scan_overrid
         help=(
             "Optional processing rules template. Built-ins include archival-safe-v1, "
             "text-clean-readable-v1, print-clean-v1, ocr-preprocess-leptonica-v1, "
-            "ocr-preprocess-opencv-local-v1, ocr-preprocess-sauvola-wolf-v1, ocr-preprocess-v1, "
+            "ocr-preprocess-opencv-local-v1, ocr-preprocess-sauvola-wolf-v1, "
+            "ocr-preprocess-stroke-bg-v1, ocr-preprocess-v1, "
             "photo-mixed-safe-v1, and legacy IDs. "
             "Use custom with --rules-profile."
         ),
@@ -534,7 +535,8 @@ def _main_production_run(argv: list[str]) -> int:
         choices=RULE_TEMPLATE_IDS,
         help=(
             "图像处理规则模板：archival-safe-v1、text-clean-readable-v1、print-clean-v1、ocr-preprocess-leptonica-v1、"
-            "ocr-preprocess-opencv-local-v1、ocr-preprocess-sauvola-wolf-v1、ocr-preprocess-v1、"
+            "ocr-preprocess-opencv-local-v1、ocr-preprocess-sauvola-wolf-v1、"
+            "ocr-preprocess-stroke-bg-v1、ocr-preprocess-v1、"
             "photo-mixed-safe-v1、legacy IDs 或 custom。"
         ),
     )

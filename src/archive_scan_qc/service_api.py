@@ -367,6 +367,7 @@ def _service_quality_public_boundary() -> dict[str, Any]:
                 "ocr_preprocess_leptonica",
                 "ocr_preprocess_opencv_local",
                 "ocr_preprocess_sauvola_wolf",
+                "ocr_preprocess_stroke_bg",
                 "ocr_preprocess",
             ],
             "allowed_quality_context": [
