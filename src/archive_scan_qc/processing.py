@@ -1050,6 +1050,12 @@ def _process_record(
         "ocr_text_soft_edge_ratio_before": 0.0,
         "ocr_text_soft_edge_ratio_after": 0.0,
         "ocr_text_soft_edge_ratio_delta": 0.0,
+        "ocr_deskew_clarity_selected": None,
+        "ocr_deskew_clarity_candidate_count": 0,
+        "ocr_deskew_clarity_score": 0.0,
+        "ocr_deskew_clarity_edge_energy": 0.0,
+        "ocr_deskew_clarity_soft_edge_ratio": 0.0,
+        "ocr_deskew_clarity_table_line_score": 0.0,
         "ocr_review_required": False,
         "ocr_review_reason_codes": [],
         "ocr_binary_created": False,
@@ -1262,6 +1268,12 @@ def _process_record(
                 "ocr_text_soft_edge_ratio_before": process_info["ocr_text_soft_edge_ratio_before"],
                 "ocr_text_soft_edge_ratio_after": process_info["ocr_text_soft_edge_ratio_after"],
                 "ocr_text_soft_edge_ratio_delta": process_info["ocr_text_soft_edge_ratio_delta"],
+                "ocr_deskew_clarity_selected": process_info["ocr_deskew_clarity_selected"],
+                "ocr_deskew_clarity_candidate_count": process_info["ocr_deskew_clarity_candidate_count"],
+                "ocr_deskew_clarity_score": process_info["ocr_deskew_clarity_score"],
+                "ocr_deskew_clarity_edge_energy": process_info["ocr_deskew_clarity_edge_energy"],
+                "ocr_deskew_clarity_soft_edge_ratio": process_info["ocr_deskew_clarity_soft_edge_ratio"],
+                "ocr_deskew_clarity_table_line_score": process_info["ocr_deskew_clarity_table_line_score"],
                 "ocr_review_required": process_info["ocr_review_required"],
                 "ocr_review_reason_codes": process_info["ocr_review_reason_codes"],
                 "ocr_binary_created": process_info["ocr_binary_created"],
@@ -1598,6 +1610,8 @@ def _output_profile_for_processing_options(options: ProcessingOptions) -> str:
         return "ocr_preprocess_stroke_bg"
     if options.processing_profile == "ocr_preprocess_structure":
         return "ocr_preprocess_structure"
+    if options.processing_profile == "ocr_preprocess_deskew_clarity":
+        return "ocr_preprocess_deskew_clarity"
     if options.processing_profile == "ocr_preprocess_light":
         return "ocr_preprocess_light"
     if options.processing_profile == "print_clean":
@@ -1621,6 +1635,7 @@ def _ocr_processing_enabled(options: ProcessingOptions) -> bool:
         "ocr_preprocess_sauvola_wolf",
         "ocr_preprocess_stroke_bg",
         "ocr_preprocess_structure",
+        "ocr_preprocess_deskew_clarity",
         "ocr_preprocess_light",
     }
     return bool(options.ocr_preprocess or options.processing_profile in ocr_profiles)
@@ -1658,6 +1673,8 @@ def _ocr_preprocess_operation_name(options: ProcessingOptions) -> str:
         return "ocr_preprocess_stroke_bg_grayscale"
     if options.processing_profile == "ocr_preprocess_structure":
         return "ocr_preprocess_structure_grayscale"
+    if options.processing_profile == "ocr_preprocess_deskew_clarity":
+        return "ocr_preprocess_deskew_clarity_grayscale"
     return "ocr_preprocess_grayscale"
 
 
@@ -1676,6 +1693,11 @@ def _ocr_manifest_quality_metrics(records: list[dict[str, Any]]) -> dict[str, An
         "ocr_text_soft_edge_ratio_before",
         "ocr_text_soft_edge_ratio_after",
         "ocr_text_soft_edge_ratio_delta",
+        "ocr_deskew_clarity_candidate_count",
+        "ocr_deskew_clarity_score",
+        "ocr_deskew_clarity_edge_energy",
+        "ocr_deskew_clarity_soft_edge_ratio",
+        "ocr_deskew_clarity_table_line_score",
         "ocr_binary_foreground_ratio",
         "ocr_binary_foreground_retention_ratio",
     )
@@ -2476,6 +2498,26 @@ def _audit_summary(manifest: dict[str, Any], options: ProcessingOptions) -> dict
             "ocr_text_soft_edge_ratio_delta": _aggregate_metric(
                 audit_records,
                 "ocr_text_soft_edge_ratio_delta",
+            ),
+            "ocr_deskew_clarity_candidate_count": _aggregate_metric(
+                audit_records,
+                "ocr_deskew_clarity_candidate_count",
+            ),
+            "ocr_deskew_clarity_score": _aggregate_metric(
+                audit_records,
+                "ocr_deskew_clarity_score",
+            ),
+            "ocr_deskew_clarity_edge_energy": _aggregate_metric(
+                audit_records,
+                "ocr_deskew_clarity_edge_energy",
+            ),
+            "ocr_deskew_clarity_soft_edge_ratio": _aggregate_metric(
+                audit_records,
+                "ocr_deskew_clarity_soft_edge_ratio",
+            ),
+            "ocr_deskew_clarity_table_line_score": _aggregate_metric(
+                audit_records,
+                "ocr_deskew_clarity_table_line_score",
             ),
             "ocr_binary_foreground_ratio": _aggregate_metric(audit_records, "ocr_binary_foreground_ratio"),
             "ocr_binary_foreground_retention_ratio": _aggregate_metric(
@@ -3885,6 +3927,8 @@ def _process_image(
         return _process_image_ocr_stroke_bg_path(image, options, scan_record=scan_record)
     if path_id == "ocr-preprocess-structure-v1":
         return _process_image_ocr_structure_path(image, options, scan_record=scan_record)
+    if path_id == "ocr-preprocess-deskew-clarity-v1":
+        return _process_image_ocr_deskew_clarity_path(image, options, scan_record=scan_record)
     return _process_image_standard_path(image, options, scan_record=scan_record)
 
 
@@ -3925,6 +3969,15 @@ def _process_image_ocr_stroke_bg_path(
 
 
 def _process_image_ocr_structure_path(
+    image: Image.Image,
+    options: ProcessingOptions,
+    *,
+    scan_record: dict[str, Any] | None = None,
+) -> tuple[Image.Image, list[str], dict[str, Any]]:
+    return _process_image_standard_path(image, options, scan_record=scan_record)
+
+
+def _process_image_ocr_deskew_clarity_path(
     image: Image.Image,
     options: ProcessingOptions,
     *,
@@ -4035,22 +4088,33 @@ def _process_image_standard_path(
                 "ocr_preprocess_sauvola_wolf",
                 "ocr_preprocess_stroke_bg",
                 "ocr_preprocess_structure",
+                "ocr_preprocess_deskew_clarity",
             }
             ocr_deskew_supersample = (
                 _ocr_processing_enabled(options)
                 and not ocr_deskew_preserve_canvas
             )
-            processed = _rotate_for_deskew(
-                processed,
-                -skew.angle_degrees,
-                ocr_supersample=ocr_deskew_supersample,
-                preserve_canvas=ocr_deskew_preserve_canvas,
-            )
+            if options.processing_profile == "ocr_preprocess_deskew_clarity":
+                clarity_result = _rotate_for_ocr_deskew_clarity(
+                    processed,
+                    -skew.angle_degrees,
+                )
+                processed = clarity_result["image"]
+                operation_timings.setdefault("deskew", {})["clarity_selection"] = clarity_result["selection"]
+            else:
+                processed = _rotate_for_deskew(
+                    processed,
+                    -skew.angle_degrees,
+                    ocr_supersample=ocr_deskew_supersample,
+                    preserve_canvas=ocr_deskew_preserve_canvas,
+                )
             operations.append("deskew_conservative")
             if ocr_deskew_supersample:
                 operations.append("ocr_deskew_supersampled")
             if ocr_deskew_preserve_canvas:
                 operations.append("ocr_deskew_preserve_canvas")
+            if options.processing_profile == "ocr_preprocess_deskew_clarity":
+                operations.append("ocr_deskew_clarity_select")
             post_deskew_size = list(processed.size)
             deskewed = True
             deskew_reason = "deskew applied"
@@ -4646,6 +4710,10 @@ def _process_image_standard_path(
     text_edges_reason = guard_reason if guard_reverted else text_edges.reason
     text_edges_reason_code = _text_edges_reason_code(text_edges_reason)
     text_edges_reason_zh = _text_edges_reason_zh(text_edges_reason_code)
+    deskew_clarity_selection = {}
+    deskew_timing = operation_timings.get("deskew")
+    if isinstance(deskew_timing, dict) and isinstance(deskew_timing.get("clarity_selection"), dict):
+        deskew_clarity_selection = deskew_timing["clarity_selection"]
     crop_info = {
         "original_size": original_size,
         "output_size": list(processed.size),
@@ -4828,6 +4896,22 @@ def _process_image_standard_path(
         "ocr_text_soft_edge_ratio_delta": (
             0.0 if guard_reverted else processing_audit.get("ocr_text_soft_edge_ratio_delta", 0.0)
         ),
+        "ocr_deskew_clarity_selected": None if guard_reverted else deskew_clarity_selection.get("selected"),
+        "ocr_deskew_clarity_candidate_count": (
+            0 if guard_reverted else int(deskew_clarity_selection.get("candidate_count") or 0)
+        ),
+        "ocr_deskew_clarity_score": (
+            0.0 if guard_reverted else float(deskew_clarity_selection.get("score") or 0.0)
+        ),
+        "ocr_deskew_clarity_edge_energy": (
+            0.0 if guard_reverted else float(deskew_clarity_selection.get("edge_energy") or 0.0)
+        ),
+        "ocr_deskew_clarity_soft_edge_ratio": (
+            0.0 if guard_reverted else float(deskew_clarity_selection.get("soft_edge_ratio") or 0.0)
+        ),
+        "ocr_deskew_clarity_table_line_score": (
+            0.0 if guard_reverted else float(deskew_clarity_selection.get("table_line_score") or 0.0)
+        ),
         "ocr_review_required": (
             True if guard_reverted else (ocr_preprocess.review_required or ocr_binary.review_required)
         ),
@@ -4937,6 +5021,8 @@ def _ocr_preprocess_grayscale(
         return _ocr_preprocess_stroke_bg_grayscale(image, force_grayscale=force_grayscale)
     if processing_profile == "ocr_preprocess_structure":
         return _ocr_preprocess_structure_grayscale(image, force_grayscale=force_grayscale)
+    if processing_profile == "ocr_preprocess_deskew_clarity":
+        return _ocr_preprocess_deskew_clarity_grayscale(image, force_grayscale=force_grayscale)
     output_profile = (
         "ocr_preprocess_light" if processing_profile == "ocr_preprocess_light" else "ocr_preprocess"
     )
@@ -5861,6 +5947,34 @@ def _ocr_preprocess_structure_grayscale(
     )
 
 
+def _ocr_preprocess_deskew_clarity_grayscale(
+    image: Image.Image,
+    *,
+    force_grayscale: bool = False,
+) -> OcrPreprocessingResult:
+    result = _ocr_preprocess_structure_grayscale(image, force_grayscale=force_grayscale)
+    reason_code = result.reason_code
+    if reason_code.startswith("applied_structure_preserving"):
+        reason_code = reason_code.replace("applied_structure_preserving", "applied_deskew_clarity", 1)
+    return OcrPreprocessingResult(
+        result.image,
+        result.applied,
+        result.reason.replace("structure-preserving", "deskew-clarity"),
+        reason_code,
+        "ocr_preprocess_deskew_clarity",
+        result.changed_pixel_ratio,
+        result.background_before,
+        result.background_after,
+        result.background_delta,
+        result.background_candidate_pixel_ratio,
+        result.foreground_dark_loss_ratio,
+        result.foreground_dark_lift_ratio,
+        result.foreground_retention_ratio,
+        result.review_required,
+        result.review_reason_codes,
+    )
+
+
 def _ocr_structure_background_normalize_numpy(
     grayscale: Image.Image,
 ) -> tuple[Image.Image, float, float] | None:
@@ -6530,6 +6644,9 @@ def _ocr_binary_sidecar(image: Image.Image, ocr_preprocess: OcrPreprocessingResu
     if ocr_preprocess.output_profile == "ocr_preprocess_structure":
         if ocr_preprocess.applied or ocr_preprocess.reason_code in sidecar_allowed_noop_reasons:
             return _ocr_structure_binary_sidecar(image, ocr_preprocess)
+    if ocr_preprocess.output_profile == "ocr_preprocess_deskew_clarity":
+        if ocr_preprocess.applied or ocr_preprocess.reason_code in sidecar_allowed_noop_reasons:
+            return _ocr_deskew_clarity_binary_sidecar(image, ocr_preprocess)
     if not ocr_preprocess.applied and ocr_preprocess.reason_code not in sidecar_allowed_noop_reasons:
         return OcrBinaryResult(
             None,
@@ -6818,6 +6935,27 @@ def _ocr_structure_binary_sidecar(
         round(retention, 6),
         bool(review_reasons),
         tuple(sorted(set(review_reasons))),
+    )
+
+
+def _ocr_deskew_clarity_binary_sidecar(
+    image: Image.Image,
+    ocr_preprocess: OcrPreprocessingResult,
+) -> OcrBinaryResult:
+    result = _ocr_structure_binary_sidecar(image, ocr_preprocess)
+    reason_code = result.reason_code
+    if reason_code.startswith("applied_structure"):
+        reason_code = reason_code.replace("applied_structure", "applied_deskew_clarity", 1)
+    return OcrBinaryResult(
+        result.image,
+        result.applied,
+        result.reason.replace("structure-preserving", "deskew-clarity"),
+        reason_code,
+        result.threshold,
+        result.foreground_ratio,
+        result.foreground_retention_ratio,
+        result.review_required,
+        result.review_reason_codes,
     )
 
 
@@ -15492,6 +15630,7 @@ def _detect_ocr_profile_skew(
         "ocr_preprocess_sauvola_wolf",
         "ocr_preprocess_stroke_bg",
         "ocr_preprocess_structure",
+        "ocr_preprocess_deskew_clarity",
     }:
         sparse_skew = _detect_ocr_sparse_handwriting_skew(image)
         if sparse_skew.angle_degrees is not None:
@@ -16674,6 +16813,168 @@ def _rotate_for_deskew(
         expand=not preserve_canvas,
         fillcolor=fillcolor,
     )
+
+
+def _rotate_for_ocr_deskew_clarity(
+    image: Image.Image,
+    correction_angle: float,
+) -> dict[str, Any]:
+    candidates: list[tuple[str, Image.Image]] = [
+        (
+            "pillow_bicubic",
+            _rotate_for_deskew(image, correction_angle, preserve_canvas=True),
+        ),
+        (
+            "pillow_bilinear",
+            _rotate_for_deskew_resample(
+                image,
+                correction_angle,
+                Image.Resampling.BILINEAR,
+                preserve_canvas=True,
+            ),
+        ),
+    ]
+    for name, rotated in _opencv_deskew_clarity_candidates(image, correction_angle):
+        candidates.append((name, rotated))
+
+    scored: list[dict[str, Any]] = []
+    for name, candidate in candidates:
+        grayscale = candidate.convert("L")
+        edge_energy = _ocr_text_edge_energy(grayscale)
+        soft_edge_ratio = _ocr_text_soft_edge_ratio(grayscale)
+        line_score = _ocr_table_line_structure_score(grayscale)
+        score = edge_energy + (line_score * 35.0) - (soft_edge_ratio * 20.0)
+        scored.append(
+            {
+                "name": name,
+                "image": candidate,
+                "score": score,
+                "edge_energy": edge_energy,
+                "soft_edge_ratio": soft_edge_ratio,
+                "table_line_score": line_score,
+            }
+        )
+    selected = max(scored, key=lambda item: (item["score"], item["edge_energy"], item["table_line_score"]))
+    return {
+        "image": selected["image"],
+        "selection": {
+            "selected": selected["name"],
+            "candidate_count": len(scored),
+            "angle_degrees": round(correction_angle, 4),
+            "score": round(float(selected["score"]), 6),
+            "edge_energy": round(float(selected["edge_energy"]), 6),
+            "soft_edge_ratio": round(float(selected["soft_edge_ratio"]), 6),
+            "table_line_score": round(float(selected["table_line_score"]), 6),
+            "candidates": [
+                {
+                    "name": item["name"],
+                    "score": round(float(item["score"]), 6),
+                    "edge_energy": round(float(item["edge_energy"]), 6),
+                    "soft_edge_ratio": round(float(item["soft_edge_ratio"]), 6),
+                    "table_line_score": round(float(item["table_line_score"]), 6),
+                }
+                for item in scored
+            ],
+        },
+    }
+
+
+def _rotate_for_deskew_resample(
+    image: Image.Image,
+    correction_angle: float,
+    resample: Image.Resampling,
+    *,
+    preserve_canvas: bool,
+) -> Image.Image:
+    fill = _corner_background_value(image.convert("L"))
+    fillcolor: int | tuple[int, int, int]
+    if image.mode == "RGB":
+        fillcolor = (fill, fill, fill)
+    else:
+        fillcolor = fill
+    return image.rotate(
+        correction_angle,
+        resample=resample,
+        expand=not preserve_canvas,
+        fillcolor=fillcolor,
+    )
+
+
+def _opencv_deskew_clarity_candidates(
+    image: Image.Image,
+    correction_angle: float,
+) -> list[tuple[str, Image.Image]]:
+    np = _load_numpy()
+    cv2 = _load_opencv()
+    if np is None or cv2 is None:
+        return []
+    try:
+        source = np.asarray(image.convert("RGB") if image.mode == "RGB" else image.convert("L"))
+    except (TypeError, ValueError):
+        return []
+    height, width = source.shape[:2]
+    if width <= 0 or height <= 0:
+        return []
+    center = (width / 2.0, height / 2.0)
+    matrix = cv2.getRotationMatrix2D(center, correction_angle, 1.0)
+    fill = _corner_background_value(image.convert("L"))
+    border_value: int | tuple[int, int, int]
+    if image.mode == "RGB":
+        border_value = (fill, fill, fill)
+    else:
+        border_value = fill
+    interpolation_flags = (
+        ("opencv_linear", cv2.INTER_LINEAR),
+        ("opencv_cubic", cv2.INTER_CUBIC),
+        ("opencv_lanczos4", cv2.INTER_LANCZOS4),
+    )
+    candidates: list[tuple[str, Image.Image]] = []
+    for name, interpolation in interpolation_flags:
+        try:
+            rotated = cv2.warpAffine(
+                source,
+                matrix,
+                (width, height),
+                flags=interpolation,
+                borderMode=cv2.BORDER_CONSTANT,
+                borderValue=border_value,
+            )
+        except cv2.error:
+            continue
+        if image.mode == "RGB":
+            candidates.append((name, Image.fromarray(rotated.astype(np.uint8), mode="RGB")))
+        else:
+            candidates.append((name, Image.fromarray(rotated.astype(np.uint8), mode="L")))
+    return candidates
+
+
+def _ocr_table_line_structure_score(grayscale: Image.Image) -> float:
+    np = _load_numpy()
+    cv2 = _load_opencv()
+    if np is None or cv2 is None:
+        return 0.0
+    try:
+        source = np.asarray(grayscale.convert("L"), dtype=np.uint8)
+    except (TypeError, ValueError):
+        return 0.0
+    if source.ndim != 2:
+        return 0.0
+    height, width = source.shape
+    if width < 40 or height < 40:
+        return 0.0
+    histogram = grayscale.convert("L").histogram()
+    threshold = _high_contrast_content_threshold(histogram, grayscale.size)
+    dark = (source <= min(220, threshold + 35)).astype(np.uint8) * 255
+    dark_pixels = int(np.count_nonzero(dark))
+    if dark_pixels <= 0:
+        return 0.0
+    horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(12, width // 18), 1))
+    vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(12, height // 18)))
+    horizontal = cv2.morphologyEx(dark, cv2.MORPH_OPEN, horizontal_kernel)
+    vertical = cv2.morphologyEx(dark, cv2.MORPH_OPEN, vertical_kernel)
+    lines = cv2.bitwise_or(horizontal, vertical)
+    line_pixels = int(np.count_nonzero(lines))
+    return min(1.0, line_pixels / max(1, dark_pixels))
 
 
 def _ocr_supersample_for_deskew(image: Image.Image) -> Image.Image:

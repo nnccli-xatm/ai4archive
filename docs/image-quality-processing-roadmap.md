@@ -1,5 +1,14 @@
 # Image Quality Processing Roadmap
 
+Update, 2026-06-11: `ocr-preprocess-deskew-clarity-v1` is now an experimental
+parallel OCR path focused on deskew-induced text/table softness. It evaluates
+multiple preserve-canvas rotation implementations and selects the candidate by
+text-edge, soft-edge, and table-line structure metrics. Real-sample validation
+is recorded in `docs/ocr-deskew-clarity-path-validation.md`. On the 12-image
+real sample set it improved average text-edge energy versus
+`ocr-preprocess-structure-v1` (0.952887 vs 0.942257), with a throughput cost
+(36.89 files/minute). It remains a candidate path, not the default.
+
 Update, 2026-06-11: `ocr-preprocess-structure-v1` is now an experimental
 parallel OCR path focused on preserving text strokes and table/grid lines. It
 uses protected-structure morphology and line masks, keeps preserve-canvas

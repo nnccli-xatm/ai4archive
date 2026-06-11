@@ -26,6 +26,7 @@ BUILTIN_RULE_TEMPLATE_IDS = (
     "ocr-preprocess-sauvola-wolf-v1",
     "ocr-preprocess-stroke-bg-v1",
     "ocr-preprocess-structure-v1",
+    "ocr-preprocess-deskew-clarity-v1",
     "ocr-preprocess-v1",
     "high-fidelity-original",
     "photo-mixed-safe-v1",
@@ -107,6 +108,13 @@ OCR_PREPROCESS_STRUCTURE_PROCESSING_DEFAULTS = {
     "ocr_force_grayscale": False,
     "reuse_scan_measurements": True,
 }
+OCR_PREPROCESS_DESKEW_CLARITY_PROCESSING_DEFAULTS = {
+    "deskew": True,
+    "ocr_preprocess": True,
+    "ocr_binary": True,
+    "ocr_force_grayscale": False,
+    "reuse_scan_measurements": True,
+}
 PHOTO_MIXED_SAFE_PROCESSING_DEFAULTS = {
     "trim_dark_border": True,
     "scanner_gutter_trim": True,
@@ -146,6 +154,9 @@ RULE_TEMPLATE_PROCESSING_DEFAULTS: dict[str, dict[str, bool]] = {
     "ocr-preprocess-structure-v1": {
         **OCR_PREPROCESS_STRUCTURE_PROCESSING_DEFAULTS,
     },
+    "ocr-preprocess-deskew-clarity-v1": {
+        **OCR_PREPROCESS_DESKEW_CLARITY_PROCESSING_DEFAULTS,
+    },
     "ocr-preprocess-v1": {
         **OCR_PREPROCESS_PROCESSING_DEFAULTS,
     },
@@ -169,6 +180,7 @@ RULE_TEMPLATE_PROCESSING_PROFILES: dict[str, str] = {
     "ocr-preprocess-sauvola-wolf-v1": "ocr_preprocess_sauvola_wolf",
     "ocr-preprocess-stroke-bg-v1": "ocr_preprocess_stroke_bg",
     "ocr-preprocess-structure-v1": "ocr_preprocess_structure",
+    "ocr-preprocess-deskew-clarity-v1": "ocr_preprocess_deskew_clarity",
     "ocr-preprocess-v1": "ocr_preprocess",
     "high-fidelity-original": "standard",
     "photo-mixed-safe-v1": "standard",
@@ -320,6 +332,7 @@ def builtin_rules_profile(template_id: str) -> RulesProfile:
         "ocr-preprocess-sauvola-wolf-v1",
         "ocr-preprocess-stroke-bg-v1",
         "ocr-preprocess-structure-v1",
+        "ocr-preprocess-deskew-clarity-v1",
         "ocr-preprocess-v1",
     }:
         return RulesProfile(

@@ -369,6 +369,7 @@ def _service_quality_public_boundary() -> dict[str, Any]:
                 "ocr_preprocess_sauvola_wolf",
                 "ocr_preprocess_stroke_bg",
                 "ocr_preprocess_structure",
+                "ocr_preprocess_deskew_clarity",
                 "ocr_preprocess",
             ],
             "allowed_quality_context": [

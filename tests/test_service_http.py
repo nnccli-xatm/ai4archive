@@ -147,6 +147,10 @@ class ServiceHttpTransportTests(unittest.TestCase):
                 "ocr_preprocess_structure",
                 quality_boundary["job_summary"]["allowed_processing_profiles"],
             )
+            self.assertIn(
+                "ocr_preprocess_deskew_clarity",
+                quality_boundary["job_summary"]["allowed_processing_profiles"],
+            )
             self.assertTrue(quality_boundary["job_summary"]["may_include_quality_metrics"])
             self.assertFalse(quality_boundary["session_and_index_quality"]["may_include_job_id"])
             self.assertFalse(quality_boundary["session_and_index_quality"]["may_include_quality_metrics"])

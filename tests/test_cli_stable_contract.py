@@ -55,6 +55,7 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         ocr_sauvola_wolf_defaults = processing_defaults_for_rule_template("ocr-preprocess-sauvola-wolf-v1")
         ocr_stroke_bg_defaults = processing_defaults_for_rule_template("ocr-preprocess-stroke-bg-v1")
         ocr_structure_defaults = processing_defaults_for_rule_template("ocr-preprocess-structure-v1")
+        ocr_deskew_clarity_defaults = processing_defaults_for_rule_template("ocr-preprocess-deskew-clarity-v1")
         photo_defaults = processing_defaults_for_rule_template("photo-mixed-safe-v1")
 
         self.assertEqual(readable["template"]["id"], "text-clean-readable-v1")
@@ -89,6 +90,10 @@ class StableCliRuleTemplateTests(unittest.TestCase):
             "ocr_preprocess_structure",
         )
         self.assertEqual(
+            processing_profile_for_rule_template("ocr-preprocess-deskew-clarity-v1"),
+            "ocr_preprocess_deskew_clarity",
+        )
+        self.assertEqual(
             processing_path_for_rule_template("ocr-preprocess-leptonica-v1"),
             "ocr-preprocess-leptonica-v1",
         )
@@ -107,6 +112,10 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         self.assertEqual(
             processing_path_for_rule_template("ocr-preprocess-structure-v1"),
             "ocr-preprocess-structure-v1",
+        )
+        self.assertEqual(
+            processing_path_for_rule_template("ocr-preprocess-deskew-clarity-v1"),
+            "ocr-preprocess-deskew-clarity-v1",
         )
         self.assertTrue(ocr_defaults["ocr_preprocess"])
         self.assertTrue(ocr_defaults["ocr_binary"])
@@ -149,6 +158,13 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         self.assertTrue(ocr_structure_defaults["deskew"])
         self.assertFalse(ocr_structure_defaults.get("auto_crop", False))
         self.assertFalse(ocr_structure_defaults.get("sharpen_text_edges", False))
+        self.assertTrue(ocr_deskew_clarity_defaults["ocr_preprocess"])
+        self.assertTrue(ocr_deskew_clarity_defaults["ocr_binary"])
+        self.assertFalse(ocr_deskew_clarity_defaults["ocr_force_grayscale"])
+        self.assertTrue(ocr_deskew_clarity_defaults["reuse_scan_measurements"])
+        self.assertTrue(ocr_deskew_clarity_defaults["deskew"])
+        self.assertFalse(ocr_deskew_clarity_defaults.get("auto_crop", False))
+        self.assertFalse(ocr_deskew_clarity_defaults.get("sharpen_text_edges", False))
         self.assertTrue(photo_defaults["trim_dark_border"])
         self.assertNotIn("enhance_faded_text", photo_defaults)
 
@@ -1279,6 +1295,116 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         self.assertGreaterEqual(record["ocr_foreground_retention_ratio"], 0.998)
         self.assertGreaterEqual(record["ocr_text_edge_energy_ratio"], 0.95)
         self.assertGreaterEqual(output_line_ratio, source_line_ratio * 0.98)
+        self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
+        self.assertTrue(quality_summary["public_safe"])
+        self.assertEqual(quality_summary["counts"]["ocr_binary_created_files"], 1)
+
+    def test_production_run_ocr_preprocess_deskew_clarity_selects_deskew_candidate(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-cli-ocr-deskew-clarity-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            source = input_dir / "OCR001_ROTATED_FORM.png"
+            _write_ocr_structure_table_page(source)
+            with Image.open(source) as source_image:
+                rotated = source_image.rotate(
+                    1.4,
+                    resample=Image.Resampling.BICUBIC,
+                    expand=True,
+                    fillcolor=222,
+                )
+            rotated.save(source, dpi=(300, 300))
+            source_bytes = source.read_bytes()
+            with Image.open(source) as source_image:
+                source_size = source_image.size
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                exit_code = main(
+                    [
+                        "production-run",
+                        "--input",
+                        str(input_dir),
+                        "--derivatives-out",
+                        str(derivatives_dir),
+                        "--metadata-out",
+                        str(metadata_dir),
+                        "--rule-template",
+                        "ocr-preprocess-deskew-clarity-v1",
+                        "--workers",
+                        "1",
+                    ]
+                )
+
+            summary = json.loads((metadata_dir / "production_run_summary.json").read_text(encoding="utf-8"))
+            processing_manifest = json.loads(
+                (derivatives_dir / "processing_manifest.json").read_text(encoding="utf-8")
+            )
+            quality_summary = json.loads(
+                (derivatives_dir / PROCESSING_QUALITY_SUMMARY_JSON).read_text(encoding="utf-8")
+            )
+            record = processing_manifest["files"][0]
+            output_path = derivatives_dir / record["output_relative_path"]
+            binary_path = derivatives_dir / record["ocr_binary_output_relative_path"]
+            with Image.open(output_path) as output_image:
+                output_size = output_image.size
+            with Image.open(binary_path) as binary_image:
+                binary_size = binary_image.size
+            source_unchanged = source.read_bytes() == source_bytes
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(source_unchanged)
+        self.assertEqual(summary["rule_template"]["id"], "ocr-preprocess-deskew-clarity-v1")
+        self.assertEqual(summary["options"]["processing_profile"], "ocr_preprocess_deskew_clarity")
+        self.assertEqual(summary["options"]["processing_path"], "ocr-preprocess-deskew-clarity-v1")
+        self.assertEqual(processing_manifest["output_profile"], "ocr_preprocess_deskew_clarity")
+        self.assertEqual(processing_manifest["processing_path"]["path_id"], "ocr-preprocess-deskew-clarity-v1")
+        self.assertEqual(record["processing_path"], "ocr-preprocess-deskew-clarity-v1")
+        self.assertIn(
+            "ocr_preprocess_deskew_clarity_grayscale",
+            processing_manifest["ocr_preprocessing_operations"],
+        )
+        self.assertIn("ocr_preprocess_deskew_clarity_grayscale", processing_manifest["operations"])
+        self.assertTrue(record["deskewed"])
+        self.assertIn("ocr_deskew_preserve_canvas", record["operations"])
+        self.assertIn("ocr_deskew_clarity_select", record["operations"])
+        self.assertNotIn("ocr_deskew_supersampled", record["operations"])
+        self.assertIn(
+            record["ocr_deskew_clarity_selected"],
+            {
+                "pillow_bicubic",
+                "pillow_bilinear",
+                "opencv_linear",
+                "opencv_cubic",
+                "opencv_lanczos4",
+            },
+        )
+        self.assertGreaterEqual(record["ocr_deskew_clarity_candidate_count"], 2)
+        self.assertGreater(record["ocr_deskew_clarity_edge_energy"], 0.0)
+        self.assertTrue(record["ocr_preprocessed"])
+        self.assertIn(
+            record["ocr_preprocess_reason_code"],
+            {
+                "applied_deskew_clarity_background_normalization",
+                "applied_deskew_clarity_fallback_background_normalization",
+                "applied_deskew_clarity_grayscale_fallback",
+            },
+        )
+        self.assertTrue(record["ocr_binary_created"])
+        self.assertIn(
+            record["ocr_binary_reason_code"],
+            {
+                "applied_deskew_clarity_otsu_threshold",
+                "applied_deskew_clarity_adaptive_threshold",
+                "applied_deskew_clarity_fallback_otsu_threshold",
+            },
+        )
+        self.assertEqual(output_size, source_size)
+        self.assertEqual(binary_size, source_size)
+        self.assertGreaterEqual(record["ocr_foreground_retention_ratio"], 0.998)
+        self.assertGreater(record["ocr_deskew_clarity_score"], 0.0)
+        self.assertGreaterEqual(record["ocr_text_edge_energy_ratio"], 0.40)
         self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
         self.assertTrue(quality_summary["public_safe"])
         self.assertEqual(quality_summary["counts"]["ocr_binary_created_files"], 1)

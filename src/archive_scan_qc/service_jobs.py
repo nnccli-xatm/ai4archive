@@ -159,6 +159,11 @@ PUBLIC_QUALITY_METRIC_IDS = (
     "ocr_text_soft_edge_ratio_before",
     "ocr_text_soft_edge_ratio_after",
     "ocr_text_soft_edge_ratio_delta",
+    "ocr_deskew_clarity_candidate_count",
+    "ocr_deskew_clarity_score",
+    "ocr_deskew_clarity_edge_energy",
+    "ocr_deskew_clarity_soft_edge_ratio",
+    "ocr_deskew_clarity_table_line_score",
     "ocr_binary_foreground_ratio",
     "ocr_binary_foreground_retention_ratio",
     "processed_output_brightness_increase",
@@ -1139,6 +1144,7 @@ def _public_processing_profile(template_snapshot: Any) -> str:
         "ocr_preprocess_sauvola_wolf",
         "ocr_preprocess_stroke_bg",
         "ocr_preprocess_structure",
+        "ocr_preprocess_deskew_clarity",
         "ocr_preprocess_light",
     }:
         return str(profile)
