@@ -45,6 +45,7 @@ RULE_TEMPLATE_CHOICES = (
     "high-fidelity-original",
     "print-clean-v1",
     "ocr-preprocess-light-v1",
+    "ocr-preprocess-leptonica-v1",
     "ocr-preprocess-v1",
 )
 
@@ -330,6 +331,7 @@ def run_external_cli(
     progress = load_json(metadata_dir / "production_run_progress.json")
     manifest = load_json(derivative_dir / "processing_manifest.json")
     audit = load_json(derivative_dir / "processing_audit_summary.json")
+    processing_quality_summary = load_json(derivative_dir / "processing_quality_summary.json")
     manifest_by_source = {
         record.get("source_relative_path"): record
         for record in manifest.get("files", [])
@@ -362,6 +364,13 @@ def run_external_cli(
         "production_counts": summary.get("counts", {}),
         "production_performance": summary.get("performance", {}),
         "processing_audit_counts": audit.get("counts", {}),
+        "processing_quality_summary": {
+            "schema_version": processing_quality_summary.get("schema_version"),
+            "status": processing_quality_summary.get("status"),
+            "quality_signal": processing_quality_summary.get("quality_signal", {}),
+            "counts": processing_quality_summary.get("counts", {}),
+            "quality_metrics": processing_quality_summary.get("quality_metrics", {}),
+        },
         "operation_timings": manifest.get("summary", {}).get("performance", {}).get("operation_timings", {}),
         "rule_template": summary.get("rule_template"),
         "quality": {
@@ -708,10 +717,10 @@ def write_outputs(payload: dict[str, Any], rows: list[dict[str, Any]], run_root:
     )
     write_csv(csv_path, rows)
     report = render_markdown_report(payload, json_path=json_path, image_csv_path=csv_path)
-    report_path.write_text(report, encoding="utf-8")
+    report_path.write_text(report + "\n", encoding="utf-8")
     if doc_report_path is not None:
         doc_report_path.parent.mkdir(parents=True, exist_ok=True)
-        doc_report_path.write_text(report, encoding="utf-8")
+        doc_report_path.write_text(report + "\n", encoding="utf-8")
 
 
 def build_public_ocr_quality_summary(payload: dict[str, Any]) -> dict[str, Any]:
@@ -784,6 +793,13 @@ def render_markdown_report(payload: dict[str, Any], *, json_path: Path, image_cs
     perf = production.get("production_performance", {})
     scan_perf = perf.get("scan", {}) if isinstance(perf, dict) else {}
     proc_perf = perf.get("processing", {}) if isinstance(perf, dict) else {}
+    processing_quality = production.get("processing_quality_summary", {})
+    processing_quality_counts = (
+        processing_quality.get("counts", {}) if isinstance(processing_quality, dict) else {}
+    )
+    processing_quality_metrics = (
+        processing_quality.get("quality_metrics", {}) if isinstance(processing_quality, dict) else {}
+    )
     stable = "通过" if summary["stable_cli_passed"] else "未通过"
     lines = [
         "# NoisyOffice 外部 CLI 批量质检修图测试报告",
@@ -863,6 +879,32 @@ def render_markdown_report(payload: dict[str, Any], *, json_path: Path, image_cs
                 sharpen=production.get("processing_audit_counts", {}).get("text_edges_sharpened_files"),
             ),
             "",
+            "## OCR 处理聚合指标",
+            "",
+            "| OCR gray | OCR binary | OCR review | guardrail failed | output safety reverted | deskewed | deskew safe-skip |",
+            "|---:|---:|---:|---:|---:|---:|---:|",
+            "| {ocr_gray} | {ocr_binary} | {ocr_review} | {guardrail} | {safety_reverted} | {deskewed} | {deskew_safe_skip} |".format(
+                ocr_gray=processing_quality_counts.get("ocr_preprocessed_files"),
+                ocr_binary=processing_quality_counts.get("ocr_binary_created_files"),
+                ocr_review=processing_quality_counts.get("ocr_review_required_files"),
+                guardrail=processing_quality_counts.get("guardrail_failed_files"),
+                safety_reverted=production.get("processing_audit_counts", {}).get(
+                    "processed_output_safety_guard_reverted_files"
+                ),
+                deskewed=processing_quality_counts.get("deskewed_files"),
+                deskew_safe_skip=production.get("processing_audit_counts", {}).get("deskew_safe_skip_files"),
+            ),
+            "",
+            "| metric | average | max |",
+            "|---|---:|---:|",
+            ocr_metric_row(processing_quality_metrics, "ocr_preprocess_changed_pixel_ratio"),
+            ocr_metric_row(processing_quality_metrics, "ocr_background_delta"),
+            ocr_metric_row(processing_quality_metrics, "ocr_foreground_retention_ratio"),
+            ocr_metric_row(processing_quality_metrics, "ocr_text_edge_energy_ratio"),
+            ocr_metric_row(processing_quality_metrics, "ocr_text_soft_edge_ratio_delta"),
+            ocr_metric_row(processing_quality_metrics, "ocr_binary_foreground_ratio"),
+            ocr_metric_row(processing_quality_metrics, "ocr_binary_foreground_retention_ratio"),
+            "",
             "## 质量变化最差样本",
             "",
             "| 文件 | 噪声类型 | 输入 PSNR | 处理后 PSNR | PSNR 变化 | 输入 SSIM | 处理后 SSIM | SSIM 变化 |",
@@ -937,6 +979,12 @@ def delta_row(label: str, metrics: dict[str, Any]) -> str:
         f"{fmt(metrics.get('mse_macro'), signed=True)} | {fmt(metrics.get('mae_macro'), signed=True)} | "
         f"{fmt(metrics.get('dark_pixel_f1_macro'), signed=True)} | {fmt(metrics.get('foreground_retention_macro'), signed=True)} |"
     )
+
+
+def ocr_metric_row(metrics: dict[str, Any], key: str) -> str:
+    value = metrics.get(key) if isinstance(metrics, dict) else None
+    value = value if isinstance(value, dict) else {}
+    return f"| {key} | {fmt(value.get('average'))} | {fmt(value.get('max'))} |"
 
 
 def worst_cases(rows: list[dict[str, Any]]) -> dict[str, Any]:
