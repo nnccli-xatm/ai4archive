@@ -523,7 +523,7 @@ def process_images(
             "lighten_scanlines_conservative" if options.lighten_scanlines else "lighten_scanlines_disabled",
             "enhance_faded_text_conservative" if options.enhance_faded_text else "enhance_faded_text_disabled",
             "sharpen_text_edges_conservative" if options.sharpen_text_edges else "sharpen_text_edges_disabled",
-            "ocr_preprocess_grayscale" if options.ocr_preprocess else "ocr_preprocess_disabled",
+            _ocr_preprocess_operation_name(options) if _ocr_processing_enabled(options) else "ocr_preprocess_disabled",
             "ocr_binary_sidecar" if options.ocr_binary else "ocr_binary_disabled",
             "reuse_scan_measurements" if options.reuse_scan_measurements else "reuse_scan_measurements_disabled",
             "preserve_source_relative_path",
@@ -1581,6 +1581,8 @@ def _processing_options_public_payload(options: ProcessingOptions) -> dict[str, 
 def _output_profile_for_processing_options(options: ProcessingOptions) -> str:
     if options.processing_profile == "ocr_preprocess":
         return "ocr_preprocess"
+    if options.processing_profile == "ocr_preprocess_leptonica":
+        return "ocr_preprocess_leptonica"
     if options.processing_profile == "ocr_preprocess_light":
         return "ocr_preprocess_light"
     if options.processing_profile == "print_clean":
@@ -1589,10 +1591,8 @@ def _output_profile_for_processing_options(options: ProcessingOptions) -> str:
 
 
 def _ocr_processing_enabled(options: ProcessingOptions) -> bool:
-    return bool(
-        options.ocr_preprocess
-        or options.processing_profile in {"ocr_preprocess", "ocr_preprocess_light"}
-    )
+    ocr_profiles = {"ocr_preprocess", "ocr_preprocess_leptonica", "ocr_preprocess_light"}
+    return bool(options.ocr_preprocess or options.processing_profile in ocr_profiles)
 
 
 def _ocr_binary_target_path(image_root: Path, relative_path: str) -> Path:
@@ -1610,10 +1610,16 @@ def _derivative_target_path(image_root: Path, relative_path: str, options: Proce
 def _ocr_preprocessing_operations(options: ProcessingOptions) -> list[str]:
     operations: list[str] = []
     if _ocr_processing_enabled(options):
-        operations.append("ocr_preprocess_grayscale")
+        operations.append(_ocr_preprocess_operation_name(options))
     if options.ocr_binary:
         operations.append("ocr_binary_sidecar")
     return operations
+
+
+def _ocr_preprocess_operation_name(options: ProcessingOptions) -> str:
+    if options.processing_profile == "ocr_preprocess_leptonica":
+        return "ocr_preprocess_leptonica_grayscale"
+    return "ocr_preprocess_grayscale"
 
 
 def _ocr_manifest_quality_metrics(records: list[dict[str, Any]]) -> dict[str, Any]:
@@ -3915,7 +3921,10 @@ def _process_image(
             operations.append("deskew_noop")
             deskew_reason = "angle below correction threshold"
         else:
-            ocr_deskew_supersample = _ocr_processing_enabled(options)
+            ocr_deskew_supersample = (
+                _ocr_processing_enabled(options)
+                and options.processing_profile != "ocr_preprocess_leptonica"
+            )
             processed = _rotate_for_deskew(
                 processed,
                 -skew.angle_degrees,
@@ -4296,7 +4305,7 @@ def _process_image(
             )
             processed = ocr_preprocess.image
             operations.append(
-                "ocr_preprocess_grayscale" if ocr_preprocess.applied else "ocr_preprocess_noop"
+                _ocr_preprocess_operation_name(options) if ocr_preprocess.applied else "ocr_preprocess_noop"
             )
             operation_timings.setdefault("ocr_preprocess", {})["reason_code"] = ocr_preprocess.reason_code
             operation_timings.setdefault("ocr_preprocess", {})["changed_pixel_ratio"] = (
@@ -4797,6 +4806,8 @@ def _ocr_preprocess_grayscale(
     *,
     processing_profile: str,
 ) -> OcrPreprocessingResult:
+    if processing_profile == "ocr_preprocess_leptonica":
+        return _ocr_preprocess_leptonica_grayscale(image)
     output_profile = (
         "ocr_preprocess_light" if processing_profile == "ocr_preprocess_light" else "ocr_preprocess"
     )
@@ -4973,6 +4984,220 @@ def _ocr_color_review_reason_codes(image: Image.Image) -> list[str]:
     if red_ratio >= 0.03:
         review_reasons.append("red_mark_review")
     return review_reasons
+
+
+def _ocr_preprocess_leptonica_grayscale(image: Image.Image) -> OcrPreprocessingResult:
+    output_profile = "ocr_preprocess_leptonica"
+    if image.width < 30 or image.height < 30:
+        return _ocr_preprocess_noop(image, output_profile, "OCR preprocessing skipped: image too small", "too_small")
+
+    color_review_reasons = _ocr_color_review_reason_codes(image)
+    grayscale = image.convert("L")
+    histogram = grayscale.histogram()
+    total = max(1, grayscale.width * grayscale.height)
+    p05 = _histogram_percentile(histogram, total, 0.05)
+    p95 = _histogram_percentile(histogram, total, 0.95)
+    if sum(histogram[:96]) / total > 0.45:
+        return _ocr_preprocess_noop(
+            image,
+            output_profile,
+            "OCR preprocessing skipped: foreground too dense",
+            "foreground_too_dense",
+            review_required=True,
+        )
+    if p95 - p05 < 12:
+        return _ocr_preprocess_noop(
+            image,
+            output_profile,
+            "OCR preprocessing skipped: insufficient background separation",
+            "low_confidence_background",
+            review_required=True,
+        )
+
+    result = _ocr_leptonica_background_normalize_numpy(grayscale)
+    if result is None:
+        result = _ocr_leptonica_background_normalize_fallback(grayscale)
+    output, _changed_pixel_ratio, background_candidate_pixel_ratio = result
+    changed_pixel_ratio = _pixel_change_ratio(grayscale, output)
+    background_before = float(p95)
+    output_histogram = output.histogram()
+    background_after = float(_histogram_percentile(output_histogram, total, 0.95))
+    background_delta = background_after - background_before
+    foreground_dark_loss, foreground_dark_lift, foreground_retention = _ocr_foreground_preservation_metrics(
+        grayscale,
+        output,
+    )
+    review_reasons: list[str] = []
+    if foreground_dark_loss > 0.002:
+        review_reasons.append("foreground_dark_loss")
+    if foreground_dark_lift > 0.01:
+        review_reasons.append("foreground_dark_lift")
+    if foreground_retention < 0.998:
+        review_reasons.append("foreground_retention")
+    review_reasons.extend(color_review_reasons)
+    if changed_pixel_ratio < 0.002 and background_delta < 1.0:
+        return OcrPreprocessingResult(
+            image,
+            False,
+            "OCR preprocessing skipped: improvement below threshold",
+            "improvement_below_threshold",
+            output_profile,
+            round(changed_pixel_ratio, 6),
+            background_before,
+            background_after,
+            round(background_delta, 6),
+            round(background_candidate_pixel_ratio, 6),
+            round(foreground_dark_loss, 6),
+            round(foreground_dark_lift, 6),
+            round(foreground_retention, 6),
+            bool(review_reasons),
+            tuple(sorted(set(review_reasons))),
+        )
+    return OcrPreprocessingResult(
+        output,
+        True,
+        "OCR preprocessing applied: Leptonica-style background normalization with foreground preservation",
+        "applied_leptonica_style_background_normalization",
+        output_profile,
+        round(changed_pixel_ratio, 6),
+        background_before,
+        background_after,
+        round(background_delta, 6),
+        round(background_candidate_pixel_ratio, 6),
+        round(foreground_dark_loss, 6),
+        round(foreground_dark_lift, 6),
+        round(foreground_retention, 6),
+        bool(review_reasons),
+        tuple(sorted(set(review_reasons))),
+    )
+
+
+def _ocr_leptonica_background_normalize_numpy(
+    grayscale: Image.Image,
+) -> tuple[Image.Image, float, float] | None:
+    np = _load_numpy()
+    cv2 = _load_opencv()
+    if np is None or cv2 is None:
+        return None
+    try:
+        source = np.asarray(grayscale, dtype=np.uint8)
+    except (TypeError, ValueError):
+        return None
+    if source.ndim != 2:
+        return None
+    height, width = source.shape
+    min_dim = max(1, min(width, height))
+    kernel_size = _odd_window_size(min(101, max(15, int(round(min_dim / 10)))))
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_size, kernel_size))
+    closed = cv2.morphologyEx(source, cv2.MORPH_CLOSE, kernel)
+    background = cv2.GaussianBlur(
+        closed,
+        (0, 0),
+        sigmaX=max(1.5, kernel_size / 5.0),
+        sigmaY=max(1.5, kernel_size / 5.0),
+    )
+    values = source.astype(np.float32)
+    background_values = np.maximum(background.astype(np.float32), values + 1.0)
+    local_contrast = background_values - values
+    contrast_foreground = (values <= 235.0) & (local_contrast >= 18.0)
+    if float(np.count_nonzero(contrast_foreground)) / max(1, source.size) > 0.35:
+        contrast_foreground = contrast_foreground & (values <= 170.0)
+    strong_foreground = (values <= 150.0) | (contrast_foreground & (local_contrast >= 34.0))
+    foreground_seed = _ocr_leptonica_foreground_component_mask(
+        np,
+        cv2,
+        strong_foreground=strong_foreground,
+        candidate_foreground=strong_foreground | contrast_foreground,
+    )
+    protected = cv2.dilate(
+        foreground_seed.astype(np.uint8),
+        np.ones((3, 3), dtype=np.uint8),
+        iterations=1,
+    ).astype(bool)
+    output = values.copy()
+    background_mask = ~protected
+    lifted = values + np.clip(250.0 - background_values, 0.0, 70.0)
+    whitened = 255.0 - ((255.0 - lifted) * 0.14)
+    output[background_mask] = np.maximum(values[background_mask], whitened[background_mask])
+    output[protected] = values[protected]
+    output_u8 = np.clip(np.rint(output), 0, 255).astype(np.uint8)
+    changed = np.abs(output_u8.astype(np.int16) - source.astype(np.int16)) > 8
+    changed_ratio = float(np.count_nonzero(changed)) / max(1, source.size)
+    candidate_ratio = float(np.count_nonzero(changed & background_mask)) / max(1, source.size)
+    return Image.fromarray(output_u8, mode="L"), changed_ratio, candidate_ratio
+
+
+def _ocr_leptonica_foreground_component_mask(
+    np: Any,
+    cv2: Any,
+    *,
+    strong_foreground: Any,
+    candidate_foreground: Any,
+) -> Any:
+    seed = candidate_foreground.astype(np.uint8)
+    label_count, labels, stats, _centroids = cv2.connectedComponentsWithStats(seed, connectivity=8)
+    if label_count <= 1:
+        return candidate_foreground & False
+    strong_counts = np.bincount(labels[strong_foreground].ravel(), minlength=label_count)
+    keep_labels = np.zeros(label_count, dtype=bool)
+    for label in range(1, label_count):
+        area = int(stats[label, cv2.CC_STAT_AREA])
+        width = int(stats[label, cv2.CC_STAT_WIDTH])
+        height = int(stats[label, cv2.CC_STAT_HEIGHT])
+        strong_overlap = bool(strong_counts[label])
+        if area >= 4 or max(width, height) >= 4 or (strong_overlap and area >= 2):
+            keep_labels[label] = True
+    return keep_labels[labels]
+
+
+def _ocr_leptonica_background_normalize_fallback(
+    grayscale: Image.Image,
+) -> tuple[Image.Image, float, float]:
+    width, height = grayscale.size
+    kernel_size = _odd_window_size(min(101, max(15, int(round(min(width, height) / 10)))))
+    background = grayscale.filter(ImageFilter.MaxFilter(kernel_size)).filter(
+        ImageFilter.GaussianBlur(radius=max(1.5, kernel_size / 5.0))
+    )
+    source_pixels = grayscale.load()
+    background_pixels = background.load()
+    contrast_pixels = 0
+    total = max(1, width * height)
+    for y in range(height):
+        for x in range(width):
+            value = int(source_pixels[x, y])
+            background_value = max(value + 1, int(background_pixels[x, y]))
+            if value <= 235 and background_value - value >= 18:
+                contrast_pixels += 1
+    dense_contrast = contrast_pixels / total > 0.35
+    output = Image.new("L", grayscale.size)
+    output_pixels = output.load()
+    changed = 0
+    background_changed = 0
+    for y in range(height):
+        for x in range(width):
+            value = int(source_pixels[x, y])
+            background_value = max(value + 1, int(background_pixels[x, y]))
+            local_contrast = background_value - value
+            contrast_protected = value <= 235 and local_contrast >= 18
+            if dense_contrast:
+                contrast_protected = contrast_protected and value <= 170
+            protected = value <= 150 or contrast_protected
+            if protected:
+                output_value = value
+            else:
+                lifted = value + max(0, min(70, 250 - background_value))
+                output_value = max(value, int(round(255 - ((255 - lifted) * 0.14))))
+            output_pixels[x, y] = max(0, min(255, output_value))
+            if abs(output_pixels[x, y] - value) > 8:
+                changed += 1
+                if not protected:
+                    background_changed += 1
+    return output, changed / total, background_changed / total
+
+
+def _odd_window_size(value: int) -> int:
+    value = max(3, int(value))
+    return value if value % 2 == 1 else value + 1
 
 
 def _ocr_preprocess_grayscale_numpy(
@@ -5370,6 +5595,12 @@ def _ocr_text_soft_edge_ratio(grayscale: Image.Image) -> float:
 
 
 def _ocr_binary_sidecar(image: Image.Image, ocr_preprocess: OcrPreprocessingResult) -> OcrBinaryResult:
+    if ocr_preprocess.output_profile == "ocr_preprocess_leptonica":
+        if ocr_preprocess.applied or ocr_preprocess.reason_code in {
+            "improvement_below_threshold",
+            "low_confidence_background",
+        }:
+            return _ocr_leptonica_binary_sidecar(image, ocr_preprocess)
     if not ocr_preprocess.applied:
         return OcrBinaryResult(
             None,
@@ -5411,6 +5642,91 @@ def _ocr_binary_sidecar(image: Image.Image, ocr_preprocess: OcrPreprocessingResu
         bool(review_reasons),
         tuple(sorted(set(review_reasons))),
     )
+
+
+def _ocr_leptonica_binary_sidecar(
+    image: Image.Image,
+    ocr_preprocess: OcrPreprocessingResult,
+) -> OcrBinaryResult:
+    grayscale = image.convert("L")
+    result = _ocr_leptonica_binary_numpy(grayscale)
+    if result is None:
+        threshold = _otsu_threshold(grayscale.histogram(), max(1, grayscale.width * grayscale.height))
+        threshold = max(80, min(235, threshold))
+        binary = grayscale.point(lambda value: 0 if value <= threshold else 255, mode="L")
+        reason = "OCR binary sidecar applied: Leptonica-style Otsu threshold on protected grayscale derivative"
+        reason_code = "applied_leptonica_style_otsu_threshold"
+    else:
+        binary, threshold, reason, reason_code = result
+    foreground_ratio = _dark_pixel_ratio(binary, 127)
+    source_dark = grayscale.point(lambda value: 255 if value <= 127 else 0, mode="L")
+    binary_dark = binary.point(lambda value: 255 if value <= 127 else 0, mode="L")
+    source_dark_pixels = _mask_pixel_count(source_dark)
+    retention = (
+        _mask_intersection_count(source_dark, binary_dark) / source_dark_pixels
+        if source_dark_pixels
+        else 1.0
+    )
+    review_reasons = list(ocr_preprocess.review_reason_codes)
+    if foreground_ratio < 0.001 or foreground_ratio > 0.45:
+        review_reasons.append("binary_foreground_ratio")
+    if retention < 0.96:
+        review_reasons.append("binary_foreground_retention")
+    return OcrBinaryResult(
+        binary,
+        True,
+        reason,
+        reason_code,
+        threshold,
+        round(foreground_ratio, 6),
+        round(retention, 6),
+        bool(review_reasons),
+        tuple(sorted(set(review_reasons))),
+    )
+
+
+def _ocr_leptonica_binary_numpy(
+    grayscale: Image.Image,
+) -> tuple[Image.Image, int | None, str, str] | None:
+    np = _load_numpy()
+    cv2 = _load_opencv()
+    if np is None or cv2 is None:
+        return None
+    try:
+        source = np.asarray(grayscale, dtype=np.uint8)
+    except (TypeError, ValueError):
+        return None
+    if source.ndim != 2:
+        return None
+    blurred = cv2.GaussianBlur(source, (3, 3), 0)
+    threshold_value, binary_array = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    threshold: int | None = int(round(float(threshold_value)))
+    reason = "OCR binary sidecar applied: Leptonica-style Otsu threshold on protected grayscale derivative"
+    reason_code = "applied_leptonica_style_otsu_threshold"
+    foreground_ratio = float(np.count_nonzero(binary_array <= 127)) / max(1, source.size)
+    if foreground_ratio < 0.001 or foreground_ratio > 0.45:
+        min_dim = max(3, min(source.shape))
+        block_size = _odd_adaptive_threshold_window(min(101, max(31, int(round(min_dim / 12)))), min_dim)
+        binary_array = cv2.adaptiveThreshold(
+            source,
+            255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY,
+            block_size,
+            9,
+        )
+        threshold = None
+        reason = "OCR binary sidecar applied: Leptonica-style adaptive threshold on protected grayscale derivative"
+        reason_code = "applied_leptonica_style_adaptive_threshold"
+    return Image.fromarray(binary_array.astype(np.uint8), mode="L"), threshold, reason, reason_code
+
+
+def _odd_adaptive_threshold_window(value: int, min_dim: int) -> int:
+    upper = max(3, min_dim if min_dim % 2 == 1 else min_dim - 1)
+    window = min(_odd_window_size(value), upper)
+    if window % 2 == 0:
+        window -= 1
+    return max(3, window)
 
 
 def _otsu_threshold(histogram: list[int], total: int) -> int:

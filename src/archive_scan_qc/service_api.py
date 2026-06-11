@@ -359,7 +359,14 @@ def _service_quality_public_boundary() -> dict[str, Any]:
             "may_include_job_id": True,
             "may_include_processing_profile": True,
             "may_include_quality_metrics": True,
-            "allowed_processing_profiles": ["standard", "print_clean", "photo_mixed_safe"],
+            "allowed_processing_profiles": [
+                "standard",
+                "print_clean",
+                "photo_mixed_safe",
+                "ocr_preprocess_light",
+                "ocr_preprocess_leptonica",
+                "ocr_preprocess",
+            ],
             "allowed_quality_context": [
                 "blocking_codes",
                 "quality_signal_status",

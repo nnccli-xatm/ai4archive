@@ -90,6 +90,14 @@ _TEMPLATE_DESCRIPTIONS: dict[str, dict[str, Any]] = {
         "output_profile": "ocr-preprocess-light",
         "review_policy": "颜色、混合内容、前景损失风险或 OCR 二值化回退页面必须在生产 OCR 前复核。",
     },
+    "ocr-preprocess-leptonica-v1": {
+        "name_zh": "OCR Leptonica 风格预处理 v1",
+        "quality_goal": "并列生成面向 OCR 的保守灰度利用副本：保持源尺寸，不默认纠偏/裁切/锐化，只做背景归一和前景笔画保护，并输出可复核二值旁路。",
+        "intended_inputs": ["实际扫描 OCR 批次", "文字和表格线清晰度优先的灰度或彩色文档页", "需要与旧 OCR 预处理并行对比的验证批次"],
+        "risk_boundary": "这是 OCR 利用副本，不是保真派生图；主灰度图不得改变几何尺寸，二值结果必须作为 sidecar 复核，不替代源图。",
+        "output_profile": "ocr-preprocess-leptonica",
+        "review_policy": "颜色、混合内容、前景损失、二值化异常和 OCR 指标退化必须在生产使用前复核。",
+    },
     "ocr-preprocess-v1": {
         "name_zh": "OCR 预处理 v1",
         "quality_goal": "生成面向 OCR 的强预处理利用副本，执行背景归一、OCR 去噪、笔画保护和可选二值输出。",
@@ -568,11 +576,11 @@ def _dry_run_warnings(rule_template: str, scan_summary: dict[str, Any], *, scan_
         warnings.append("mixed_photo_stamp_content_requires_review")
     if rule_template == "print-clean-v1":
         warnings.append("print_clean_requires_overprocessing_review")
-    if rule_template in {"ocr-preprocess-light-v1", "ocr-preprocess-v1"}:
+    if rule_template in {"ocr-preprocess-light-v1", "ocr-preprocess-leptonica-v1", "ocr-preprocess-v1"}:
         warnings.append("ocr_preprocess_not_archival_fidelity_derivative")
         warnings.append("ocr_preprocess_requires_private_quality_gate")
         warnings.append("mixed_photo_stamp_content_requires_review")
-    if rule_template == "ocr-preprocess-v1":
+    if rule_template in {"ocr-preprocess-leptonica-v1", "ocr-preprocess-v1"}:
         warnings.append("ocr_binary_output_requires_review_gate")
     if rule_template in {"high-fidelity-original", "photo-mixed-safe-v1"}:
         warnings.append("strong_cleanup_disabled_by_high_fidelity_goal")

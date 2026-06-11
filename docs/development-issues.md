@@ -426,6 +426,32 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
   源图修改 0；`ocr_text_edge_energy_ratio` 最小 0.970019、平均 1.206026、最大 1.525531；
   小暗组件密度平均从 source 1510/Mpix、fix8 1672/Mpix 降至 fix9 604/Mpix。
 
+### DEV-156 Leptonica 风格 OCR 预处理并列路径
+
+状态：`done`
+
+范围：
+
+- 新增 `ocr-preprocess-leptonica-v1` 模板和 `ocr_preprocess_leptonica` 输出 profile。
+- 主灰度 OCR 派生图保持源像素尺寸，不默认启用 deskew、crop、despeckle、sharpen 或超采样旋转。
+- 算法只在背景候选区域做背景归一；连续文字笔画、表格线和深色前景组件原样保护。
+- `ocr_binary` sidecar 使用独立 Leptonica-style reason code：先 Otsu，前景比例异常时回退到 adaptive threshold。
+- service job recover/public summary allowlist 保留 `ocr_preprocess_leptonica`，不降级成 `standard`。
+
+已完成证据：
+
+- production-run manifest 记录 `output_profile=ocr_preprocess_leptonica`、
+  `ocr_preprocess_leptonica_grayscale` 和 `ocr_binary_sidecar`。
+- 新增 CLI 回归确认 `.ocr.png` 与 `ocr_binary/` 输出尺寸均等于源图，源图未修改，
+  `deskew/auto_crop/sharpen_text_edges` 默认关闭，guardrail failure 为 0。
+- 新增 service job 回归确认 public-safe summary 不泄露路径/文件名，恢复后的
+  `processing_profile` 保持 `ocr_preprocess_leptonica`。
+- 2026-06-11 local-only 真实扫描样本复测：12/12 处理完成，10/12 触发
+  `applied_leptonica_style_background_normalization`，2/12 因
+  `low_confidence_background` 保持灰度主图 no-op；12/12 生成 `ocr_binary` sidecar。
+  `.ocr.png` 与 binary sidecar 尺寸均与源图一致，guardrail failure 0；
+  `ocr_text_edge_energy_ratio` 最小 0.955653、平均 0.985904、最大 1.002376。
+
 ## P2：CI、发布和性能
 
 ### DEV-201 CI 四组稳定回归

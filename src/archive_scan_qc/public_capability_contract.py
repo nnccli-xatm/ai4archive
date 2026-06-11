@@ -386,6 +386,7 @@ def build_public_capability_contract(generated_at: str | None = None) -> dict[st
                         "print_clean",
                         "photo_mixed_safe",
                         "ocr_preprocess_light",
+                        "ocr_preprocess_leptonica",
                         "ocr_preprocess",
                     ],
                     "allowed_quality_context": [
@@ -401,6 +402,7 @@ def build_public_capability_contract(generated_at: str | None = None) -> dict[st
                     "allowed_print_clean_context": [
                         "processing_profile:print_clean",
                         "processing_profile:ocr_preprocess",
+                        "processing_profile:ocr_preprocess_leptonica",
                         "processing_profile:ocr_preprocess_light",
                         "background_stains_delta",
                         "changed_pixel_ratio",

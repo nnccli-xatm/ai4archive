@@ -1120,7 +1120,7 @@ def _public_processing_profile(template_snapshot: Any) -> str:
     if not isinstance(template_snapshot, dict):
         return "standard"
     profile = template_snapshot.get("processing_profile")
-    if profile in {"standard", "print_clean", "ocr_preprocess", "ocr_preprocess_light"}:
+    if profile in {"standard", "print_clean", "ocr_preprocess", "ocr_preprocess_leptonica", "ocr_preprocess_light"}:
         return str(profile)
     service_template_id = template_snapshot.get("service_template_id")
     if isinstance(service_template_id, str) and service_template_id in BUILTIN_RULE_TEMPLATE_IDS:

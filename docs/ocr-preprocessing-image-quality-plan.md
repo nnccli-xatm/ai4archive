@@ -100,6 +100,15 @@ Synthetic OCR gate：
   `ocr_binary` sidecar；11/12 实际纠偏且均使用 OCR 超采样纠偏；失败 0、guardrail failure 0、
   processing warning 0，源图修改 0；`ocr_text_edge_energy_ratio` 最小 0.970019、平均 1.206026、
   最大 1.525531；小暗组件密度平均从 source 1510/Mpix、fix8 1672/Mpix 降至 fix9 604/Mpix。
+- 2026-06-11 目检否定结论：虽然 fix9 聚合指标不差，但真实扫描图仍存在“字色加深但边缘模糊、
+  笔画/表格线扭曲或缺失、纠偏/超采样可能引入清晰度损失、输出像素尺寸膨胀”的问题。该路线不能再继续
+  通过微调旧 `ocr-preprocess-v1` 的锐化、吸附和纠偏参数空转。
+- 新增并列路径 `ocr-preprocess-leptonica-v1`：参考 Leptonica/Tesseract OCR 预处理思路，将主灰度
+  OCR 图限定为“源尺寸 + 背景归一 + 前景笔画保护”。默认不做 deskew、crop、despeckle、sharpen 或
+  超采样旋转；连续文字笔画和表格线按连通组件原样保留，孤立噪声和背景纹理只在背景候选区域被推白。
+  二值化能力保留为 `ocr_binary/` sidecar，先用 Otsu，前景比例异常时回退到 OpenCV adaptive threshold。
+  该路径与旧 `ocr-preprocess-v1` 并列，不替换旧算法，后续真实样本和 NoisyOffice 对比必须同时报告两个
+  profile。
 
 ## 2. 目标重新定义
 
@@ -115,6 +124,8 @@ Synthetic OCR gate：
 
 - `ocr-preprocess-v1`：面向 OCR 的强预处理，允许背景重建、局部阈值、去噪、文字增强和可复核二值化。
 - `ocr-preprocess-light-v1`：较保守 OCR 预处理，用于轻噪声或混合版面。
+- `ocr-preprocess-leptonica-v1`：并列的保守 OCR 灰度主图路径，保持源尺寸，不默认纠偏/裁切/锐化；
+  只做背景归一和前景笔画保护，二值化输出为可复核 sidecar。
 - `archival-safe-v1`、`photo-mixed-safe-v1` 继续以保真为目标，不承担 OCR 最大化目标。
 
 ## 3. 达成标准
@@ -226,6 +237,7 @@ OCR 预处理管线必须独立于保真派生图管线，输出 `ocr_derivative
 任务：
 
 - 新增 `ocr-preprocess-v1` 和 `ocr-preprocess-light-v1` 模板。
+- 新增 `ocr-preprocess-leptonica-v1` 作为独立并列模板，不改变旧 `ocr-preprocess-v1` 默认行为。
 - `ProcessingOptions` 增加 OCR 输出 profile，但不污染现有保真派生图默认行为。
 - manifest 增加 `output_profile`、`ocr_preprocessing_operations`、`ocr_quality_metrics`、`ocr_review_required`。
 - service job public summary 只公开聚合质量指标和 blocking codes。
