@@ -71,6 +71,19 @@ Synthetic OCR gate：
 - 该批次 production status 仍为 `needs_review`，原因来自扫描 QC 的 P0 复核项；OCR 处理本身
   失败 0、guardrail failure 0、processing warning 0。
 
+真实扫描样本二次修复，2026-06-11：
+
+- 第一张极稀疏手写数字页在初版低对比增强中出现点状/水波纹伪影，原因是近白纸面下
+  `p95 - separation` 阈值过宽，把纸面微纹和压缩浅灰噪声纳入淡前景。修复后对
+  `p01 >= 200`、`p05 >= 240`、`p95 >= 245` 的极稀疏近白页使用 `p01` 附近的窄阈值，
+  只增强真实前景，不再把大面积浅纹理压暗。
+- OCR profile 新增专用纠偏边界：可用 OCR 预增强图重新检测低对比页倾斜，并对表格/横线页
+  使用 form-line projection fallback；颜色、表格线和边缘内容保护仍保留给保真派生图，
+  但不再阻止 OCR 利用副本纠偏。
+- 真实扫描样本复测结果：12/12 生成 OCR 灰度增强，12/12 生成 `ocr_binary` sidecar；
+  11/12 实际纠偏，剩余 1 张检测角度低于 0.2 度阈值未旋转；失败 0、guardrail failure 0、
+  processing warning 0，源图修改 0。
+
 ## 2. 目标重新定义
 
 新增目标不是“看起来更干净”，而是生成面向 OCR 的利用副本：

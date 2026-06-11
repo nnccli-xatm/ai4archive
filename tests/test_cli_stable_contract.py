@@ -750,6 +750,66 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         self.assertTrue(light_color_record["ocr_binary_created"])
         self.assertEqual(light_color_record["processing_audit"]["guardrail_failures"], [])
 
+    def test_production_run_ocr_preprocess_deskews_forms_and_limits_sparse_handwriting_noise(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-cli-ocr-preprocess-deskew-form-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            sparse_source = input_dir / "OCR001_SPARSE_HANDWRITING.png"
+            form_source = input_dir / "OCR002_SKEWED_FORM.png"
+            _write_ocr_sparse_handwriting_page(sparse_source)
+            _write_ocr_skewed_form_page(form_source)
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                exit_code = main(
+                    [
+                        "production-run",
+                        "--input",
+                        str(input_dir),
+                        "--derivatives-out",
+                        str(derivatives_dir),
+                        "--metadata-out",
+                        str(metadata_dir),
+                        "--rule-template",
+                        "ocr-preprocess-v1",
+                        "--workers",
+                        "1",
+                    ]
+                )
+
+            processing_manifest = json.loads(
+                (derivatives_dir / "processing_manifest.json").read_text(encoding="utf-8")
+            )
+            quality_summary = json.loads(
+                (derivatives_dir / PROCESSING_QUALITY_SUMMARY_JSON).read_text(encoding="utf-8")
+            )
+            records = {
+                Path(record["source_relative_path"]).name: record
+                for record in processing_manifest["files"]
+            }
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(quality_summary["counts"]["ocr_preprocessed_files"], 2)
+        self.assertEqual(quality_summary["counts"]["ocr_binary_created_files"], 2)
+        sparse_record = records[sparse_source.name]
+        self.assertTrue(sparse_record["ocr_preprocessed"])
+        self.assertEqual(
+            sparse_record["ocr_preprocess_reason_code"],
+            "applied_low_contrast_foreground_enhancement",
+        )
+        self.assertLess(sparse_record["ocr_background_candidate_pixel_ratio"], 0.03)
+        self.assertLess(sparse_record["ocr_binary_foreground_ratio"], 0.03)
+        self.assertEqual(sparse_record["processing_audit"]["guardrail_failures"], [])
+        form_record = records[form_source.name]
+        self.assertTrue(form_record["deskewed"])
+        self.assertEqual(form_record["deskew_reason"], "deskew applied")
+        self.assertGreater(abs(form_record["skew_angle_degrees"]), 1.0)
+        self.assertTrue(form_record["ocr_preprocessed"])
+        self.assertTrue(form_record["ocr_binary_created"])
+        self.assertEqual(form_record["processing_audit"]["guardrail_failures"], [])
+
     def test_run_plan_accepts_rule_template_and_records_public_batch_choice(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-cli-run-plan-template-") as temp_dir:
             root = Path(temp_dir)
@@ -1317,6 +1377,44 @@ def _write_ocr_light_color_scan_page(path: Path) -> None:
         draw.rectangle((70, y + 15, 250, y + 17), fill=(132, 132, 132))
     draw.rectangle((92, 418, 334, 421), fill=(214, 231, 236))
     draw.rectangle((110, 438, 278, 440), fill=(238, 224, 204))
+    image.save(path, dpi=(300, 300))
+
+
+def _write_ocr_sparse_handwriting_page(path: Path) -> None:
+    image = Image.new("RGB", (420, 560), (253, 253, 253))
+    pixels = image.load()
+    for y in range(image.height):
+        for x in range(image.width):
+            if (x * 17 + y * 31) % 251 == 0:
+                pixels[x, y] = (223, 223, 223)
+            elif (x * 19 + y * 23) % 97 == 0:
+                pixels[x, y] = (249, 249, 249)
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default()
+    for index, text in enumerate(("5 A", "6.", "8 5", "2. 5+5 K", "6.", "3", "4+6", "7")):
+        x = 72 + (index % 2) * 130
+        y = 86 + index * 34
+        draw.text((x, y), text, fill=(72, 72, 72), font=font)
+        draw.line((x + 3, y + 15, x + 28, y + 13), fill=(84, 84, 84), width=2)
+        draw.arc((x + 38, y + 2, x + 58, y + 24), start=90, end=260, fill=(84, 84, 84), width=2)
+    for index in range(10):
+        x = 64 + (index % 2) * 135
+        y = 106 + index * 31
+        draw.line((x, y, x + 58, y + 5), fill=(88, 88, 88), width=2)
+    image.save(path, dpi=(300, 300))
+
+
+def _write_ocr_skewed_form_page(path: Path) -> None:
+    image = Image.new("RGB", (420, 560), (248, 248, 248))
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default()
+    for y in range(70, 492, 42):
+        draw.line((42, y, 378, y), fill=(58, 58, 58), width=2)
+    for x in (42, 122, 236, 378):
+        draw.line((x, 70, x, 490), fill=(58, 58, 58), width=2)
+    for index, text in enumerate(("FORM A", "NAME", "PHONE", "ADDRESS", "WORK", "NOTES")):
+        draw.text((64, 86 + index * 58), text, fill=(80, 80, 80), font=font)
+    image = image.rotate(2.4, resample=Image.Resampling.BICUBIC, expand=True, fillcolor=(248, 248, 248))
     image.save(path, dpi=(300, 300))
 
 

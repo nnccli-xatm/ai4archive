@@ -3832,6 +3832,14 @@ def _process_image(
                     "fallback_reason", "scan measurements unavailable"
                 )
                 operation_timings.setdefault("deskew", {})["fallback_detection"] = True
+        if options.deskew and _ocr_processing_enabled(options):
+            ocr_skew = _detect_ocr_profile_skew(processed, options.processing_profile)
+            selected_skew = _select_ocr_profile_skew(skew, ocr_skew)
+            if selected_skew is not skew:
+                skew = selected_skew
+                skew_from_projection = True
+                operations.append("skew_detect_ocr_preprocess")
+                operation_timings.setdefault("deskew", {})["ocr_preprocess_detection"] = True
         deskewed = False
         deskew_reason = skew.reason
         if not options.deskew:
@@ -3839,16 +3847,16 @@ def _process_image(
             deskew_reason = "deskew disabled"
         elif skew.angle_degrees is None:
             operations.append("deskew_noop")
-        elif skew.confidence < options.deskew_min_confidence:
+        elif skew.confidence < _deskew_min_confidence_for_options(options):
             operations.append("deskew_noop")
             deskew_reason = "low confidence"
         elif abs(skew.angle_degrees) > options.deskew_max_degrees:
             operations.append("deskew_noop")
             deskew_reason = "angle exceeds conservative threshold"
-        elif skew_from_projection and _deskew_has_edge_content_risk(processed):
+        elif skew_from_projection and not _ocr_processing_enabled(options) and _deskew_has_edge_content_risk(processed):
             operations.append("deskew_noop")
             deskew_reason = "edge content near rotation boundary"
-        elif _deskew_has_color_or_table_risk(
+        elif not _ocr_processing_enabled(options) and _deskew_has_color_or_table_risk(
             processed,
             correction_angle=-skew.angle_degrees if skew_from_projection else None,
         ):
@@ -4752,6 +4760,7 @@ def _ocr_preprocess_grayscale(
         result = _ocr_preprocess_low_contrast_grayscale_numpy(
             grayscale,
             p01=p01,
+            p05=p05,
             p95=p95,
             strong_profile=strong_profile,
         )
@@ -4759,6 +4768,7 @@ def _ocr_preprocess_grayscale(
             result = _ocr_preprocess_low_contrast_grayscale_fallback(
                 grayscale,
                 p01=p01,
+                p05=p05,
                 p95=p95,
                 strong_profile=strong_profile,
             )
@@ -4963,7 +4973,17 @@ def _ocr_preprocess_grayscale_fallback(
     return output, changed_ratio, _mask_ratio(candidate)
 
 
-def _ocr_low_contrast_foreground_threshold(p01: int, p95: int, *, strong_profile: bool) -> int:
+def _ocr_low_contrast_foreground_threshold(
+    p01: int,
+    p05: int,
+    p95: int,
+    *,
+    strong_profile: bool,
+) -> int:
+    if p01 >= 200 and p05 >= 240 and p95 >= 245:
+        sparse_margin = 2 if strong_profile else 4
+        threshold = min(p01 + sparse_margin, p95 - 24)
+        return max(0, min(254, int(max(p01 + 1, threshold))))
     separation = 42 if strong_profile else 34
     faint_margin = 18 if strong_profile else 14
     upper_margin = 10 if strong_profile else 8
@@ -4976,6 +4996,7 @@ def _ocr_preprocess_low_contrast_grayscale_numpy(
     grayscale: Image.Image,
     *,
     p01: int,
+    p05: int,
     p95: int,
     strong_profile: bool,
 ) -> tuple[Image.Image, float, float] | None:
@@ -4990,6 +5011,7 @@ def _ocr_preprocess_low_contrast_grayscale_numpy(
     output = values.copy()
     foreground_threshold = _ocr_low_contrast_foreground_threshold(
         p01,
+        p05,
         p95,
         strong_profile=strong_profile,
     )
@@ -5022,11 +5044,13 @@ def _ocr_preprocess_low_contrast_grayscale_fallback(
     grayscale: Image.Image,
     *,
     p01: int,
+    p05: int,
     p95: int,
     strong_profile: bool,
 ) -> tuple[Image.Image, float, float]:
     foreground_threshold = _ocr_low_contrast_foreground_threshold(
         p01,
+        p05,
         p95,
         strong_profile=strong_profile,
     )
@@ -13517,6 +13541,89 @@ def _detect_skew(image: Image.Image) -> SkewDetection:
         if shallow.angle_degrees is not None:
             return shallow
     return SkewDetection(skew_angle, round(confidence, 3), "skew detected")
+
+
+def _deskew_min_confidence_for_options(options: ProcessingOptions) -> float:
+    if _ocr_processing_enabled(options):
+        return min(options.deskew_min_confidence, 0.01)
+    return options.deskew_min_confidence
+
+
+def _detect_ocr_profile_skew(image: Image.Image, processing_profile: str) -> SkewDetection | None:
+    candidates: list[SkewDetection] = []
+    ocr_preprocess = _ocr_preprocess_grayscale(image, processing_profile=processing_profile)
+    if ocr_preprocess.applied:
+        enhanced_skew = _detect_skew(ocr_preprocess.image)
+        if enhanced_skew.angle_degrees is not None:
+            candidates.append(enhanced_skew)
+        form_skew = _detect_ocr_form_line_skew(ocr_preprocess.image)
+    else:
+        form_skew = _detect_ocr_form_line_skew(image)
+    if form_skew.angle_degrees is not None:
+        candidates.append(form_skew)
+    if not candidates:
+        return None
+    return max(candidates, key=lambda candidate: candidate.confidence)
+
+
+def _select_ocr_profile_skew(current: SkewDetection, candidate: SkewDetection | None) -> SkewDetection:
+    if candidate is None or candidate.angle_degrees is None:
+        return current
+    if current.angle_degrees is None:
+        return candidate
+    if abs(candidate.angle_degrees) < 0.2:
+        return current
+    if abs(current.angle_degrees) < 0.2:
+        return candidate
+    angle_delta = abs(candidate.angle_degrees - current.angle_degrees)
+    if current.confidence < 0.01 and candidate.confidence >= 0.08:
+        return candidate
+    if angle_delta <= 0.75 and candidate.confidence >= current.confidence + 0.05:
+        return candidate
+    return current
+
+
+def _detect_ocr_form_line_skew(image: Image.Image) -> SkewDetection:
+    width, height = image.size
+    if width < 80 or height < 80:
+        return SkewDetection(None, 0.0, "low confidence")
+    raw_grayscale = image.convert("L")
+    grayscale = ImageOps.autocontrast(raw_grayscale, cutoff=1)
+    histogram = grayscale.histogram()
+    raw_histogram = raw_grayscale.histogram()
+    total_pixels = width * height
+    low = _histogram_percentile(histogram, total_pixels, 0.05)
+    high = _histogram_percentile(histogram, total_pixels, 0.95)
+    if high - low < 35:
+        raw_high = _histogram_percentile(raw_histogram, total_pixels, 0.995)
+        threshold = max(0, raw_high - 35)
+        threshold_source = raw_grayscale
+    else:
+        threshold = max(0, min(255, low + int((high - low) * 0.35)))
+        threshold_source = grayscale
+    ink = threshold_source.point(lambda value: 255 if value <= threshold else 0, mode="L")
+    bbox = ink.getbbox()
+    if not bbox:
+        return SkewDetection(None, 0.0, "blank page")
+    ink_ratio = _nonzero_ratio(ink, bbox)
+    if ink_ratio < 0.01 or ink_ratio > 0.35:
+        return SkewDetection(None, 0.0, "low confidence")
+
+    sample = ink.crop(bbox)
+    sample.thumbnail((700, 700), Image.Resampling.BILINEAR)
+    if sample.width < 120 or sample.height < 80:
+        return SkewDetection(None, 0.0, "low confidence")
+    scores = _deskew_candidate_scores(sample)
+    best_angle, best_score = max(scores.items(), key=lambda item: item[1])
+    runner_up = max(score for angle, score in scores.items() if abs(angle - best_angle) >= 1.0)
+    zero_score = scores.get(0.0, 0.0)
+    confidence = 0.0 if best_score <= 0 else max(0.0, min(1.0, (best_score - runner_up) / best_score))
+    skew_angle = round(-best_angle, 2)
+    if abs(skew_angle) < 0.2 or abs(skew_angle) > 5.0:
+        return SkewDetection(None, 0.0, "low confidence")
+    if confidence < 0.08 or best_score < zero_score * 1.08:
+        return SkewDetection(None, 0.0, "low confidence")
+    return SkewDetection(skew_angle, round(max(confidence, 0.12), 3), "ocr form line skew detected")
 
 
 def _deskew_has_edge_content_risk(image: Image.Image) -> bool:
