@@ -527,6 +527,39 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 - 结论：该路径满足“并列独立、可纠偏、尺寸稳定、源图安全”的工程边界，但文字清晰度聚合指标
   尚未明显优于 `ocr-preprocess-leptonica-v1`，因此仅作为实验候选保留，不能标为默认推荐路径。
 
+### DEV-159 Sauvola/Wolf OCR binary sidecar 并列路径
+
+状态：`done`
+
+范围：
+
+- 新增 `ocr-preprocess-sauvola-wolf-v1` 模板、`ocr_preprocess_sauvola_wolf` 输出 profile 和
+  `ocr-preprocess-sauvola-wolf-v1` processing path。
+- 外部 CLI/service 接口形状不变，仍通过 rule template 选择；运行时只执行该 path。
+- 灰度主图保留 preserve-canvas deskew 和保守背景归一，不做 hard snap、默认裁切/锐化或画布扩张。
+- 强处理只进入 `ocr_binary` sidecar，使用 Sauvola/Wolf 局部阈值候选；只有局部候选无效时才回退
+  Otsu。
+- public capability contract、service API、service HTTP 和 service job public summary allowlist 新增
+  `ocr_preprocess_sauvola_wolf`，只暴露 public-safe profile/path 枚举和聚合质量信息。
+
+已完成证据：
+
+- CLI 稳定契约回归确认模板 defaults、processing profile、processing path、manifest 顶层/options/record
+  均记录 `ocr-preprocess-sauvola-wolf-v1`，并确认 `.ocr.png` 与 `ocr_binary/` 输出尺寸等于源图。
+- service job 回归确认 create/run/recover 后保留 `processing_profile=ocr_preprocess_sauvola_wolf`
+  和 `processing_path=ocr-preprocess-sauvola-wolf-v1`，public summary 不泄露私有路径或文件名。
+- 2026-06-11 local-only 真实扫描样本复测：12/12 输出，11/12 实际纠偏，10/12 触发
+  `applied_sauvola_wolf_gray_baseline_normalization`，2/12 因 `low_confidence_background` 保持灰度主图
+  no-op；12/12 生成 `ocr_binary` sidecar，其中 11 张使用 Wolf threshold、1 张使用 Sauvola
+  threshold。源图修改 0、尺寸不匹配 0、失败 0、guardrail failure 0。
+- 该批次 scan 3.963031 秒、processing 8.535154 秒，处理吞吐约 84.36 张/分钟。
+  `ocr_preprocess_changed_pixel_ratio` 平均 0.089713，`ocr_foreground_retention_ratio` 平均 1.0，
+  `ocr_text_edge_energy_ratio` 最小 0.854554、平均 0.915506、最大 1.002376；
+  `ocr_binary_foreground_ratio` 平均 0.071562，`ocr_binary_foreground_retention_ratio` 平均 0.919135。
+- 结论：该路径工程边界成立，灰度主图目测与 Leptonica 基线相当；差异主要在 binary sidecar。
+  由于 10/12 仍触发 `binary_foreground_retention` review，是否优于基线必须继续用 OCR CER/WER、
+  二值化指标和人工复核判断，不得仅凭二值图更黑视为成功。
+
 ## P2：CI、发布和性能
 
 ### DEV-201 CI 四组稳定回归

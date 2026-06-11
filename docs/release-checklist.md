@@ -231,6 +231,16 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   `processing_path=ocr-preprocess-opencv-local-v1`. Do not promote this path to
   default/recommended if text-edge energy, table-line continuity, or OCR metrics
   trail the Leptonica baseline.
+- For `ocr-preprocess-sauvola-wolf-v1`, treat release evidence as experimental
+  binary-sidecar comparison only until local-threshold output improves OCR or
+  binarization metrics without degrading the retained grayscale baseline.
+  Confirm source images unchanged, grayscale and binary sidecar dimensions equal
+  to source dimensions, preserve-canvas deskew attempted by default, guardrail
+  failures at zero, and production/service artifacts report
+  `processing_profile=ocr_preprocess_sauvola_wolf` plus
+  `processing_path=ocr-preprocess-sauvola-wolf-v1`. Do not promote this path if
+  local thresholding absorbs background texture, damages table lines, or trails
+  Leptonica on OCR metrics.
 - Confirm `archive-scan-qc ocr-provider-probe --provider disabled --out
   /placeholder/private-validation-output/ocr-provider-probe` writes
   `ocr_provider_probe.json` with provider disabled by default and no image/OCR

@@ -107,6 +107,14 @@ _TEMPLATE_DESCRIPTIONS: dict[str, dict[str, Any]] = {
         "output_profile": "ocr-preprocess-opencv-local",
         "review_policy": "局部阈值异常、表格线/笔画保护风险、前景损失、二值化异常和 OCR 指标退化必须在生产使用前复核。",
     },
+    "ocr-preprocess-sauvola-wolf-v1": {
+        "name_zh": "OCR Sauvola/Wolf 二值预处理 v1",
+        "quality_goal": "并列生成面向 OCR 的局部二值 sidecar：保留画布尺寸纠偏和保守灰度主图，使用 Sauvola/Wolf 局部阈值候选提升文字/背景分离。",
+        "intended_inputs": ["灰底或光照不均的文本页", "低对比 OCR 扫描页", "需要二值化/OCR 指标对照的算法验证批次"],
+        "risk_boundary": "这是实验性 OCR 二值利用副本，不是保真派生图；强局部阈值只能进入 ocr_binary sidecar，灰度主图不得 hard snap、扩张画布或默认裁切/锐化。",
+        "output_profile": "ocr-preprocess-sauvola-wolf",
+        "review_policy": "二值前景比例异常、表格线/笔画断裂、低对比误吸入和 OCR 指标退化必须在生产使用前复核。",
+    },
     "ocr-preprocess-v1": {
         "name_zh": "OCR 预处理 v1",
         "quality_goal": "生成面向 OCR 的强预处理利用副本，执行背景归一、OCR 去噪、笔画保护和可选二值输出。",
@@ -593,12 +601,18 @@ def _dry_run_warnings(rule_template: str, scan_summary: dict[str, Any], *, scan_
         "ocr-preprocess-light-v1",
         "ocr-preprocess-leptonica-v1",
         "ocr-preprocess-opencv-local-v1",
+        "ocr-preprocess-sauvola-wolf-v1",
         "ocr-preprocess-v1",
     }:
         warnings.append("ocr_preprocess_not_archival_fidelity_derivative")
         warnings.append("ocr_preprocess_requires_private_quality_gate")
         warnings.append("mixed_photo_stamp_content_requires_review")
-    if rule_template in {"ocr-preprocess-leptonica-v1", "ocr-preprocess-opencv-local-v1", "ocr-preprocess-v1"}:
+    if rule_template in {
+        "ocr-preprocess-leptonica-v1",
+        "ocr-preprocess-opencv-local-v1",
+        "ocr-preprocess-sauvola-wolf-v1",
+        "ocr-preprocess-v1",
+    }:
         warnings.append("ocr_binary_output_requires_review_gate")
     if rule_template in {"high-fidelity-original", "photo-mixed-safe-v1"}:
         warnings.append("strong_cleanup_disabled_by_high_fidelity_goal")

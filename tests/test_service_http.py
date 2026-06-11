@@ -135,6 +135,10 @@ class ServiceHttpTransportTests(unittest.TestCase):
                 "scan-qc.service-quality-public-boundary.v1",
             )
             self.assertIn("print_clean", quality_boundary["job_summary"]["allowed_processing_profiles"])
+            self.assertIn(
+                "ocr_preprocess_sauvola_wolf",
+                quality_boundary["job_summary"]["allowed_processing_profiles"],
+            )
             self.assertTrue(quality_boundary["job_summary"]["may_include_quality_metrics"])
             self.assertFalse(quality_boundary["session_and_index_quality"]["may_include_job_id"])
             self.assertFalse(quality_boundary["session_and_index_quality"]["may_include_quality_metrics"])

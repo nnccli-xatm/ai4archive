@@ -1591,6 +1591,8 @@ def _output_profile_for_processing_options(options: ProcessingOptions) -> str:
         return "ocr_preprocess_leptonica"
     if options.processing_profile == "ocr_preprocess_opencv_local":
         return "ocr_preprocess_opencv_local"
+    if options.processing_profile == "ocr_preprocess_sauvola_wolf":
+        return "ocr_preprocess_sauvola_wolf"
     if options.processing_profile == "ocr_preprocess_light":
         return "ocr_preprocess_light"
     if options.processing_profile == "print_clean":
@@ -1611,6 +1613,7 @@ def _ocr_processing_enabled(options: ProcessingOptions) -> bool:
         "ocr_preprocess",
         "ocr_preprocess_leptonica",
         "ocr_preprocess_opencv_local",
+        "ocr_preprocess_sauvola_wolf",
         "ocr_preprocess_light",
     }
     return bool(options.ocr_preprocess or options.processing_profile in ocr_profiles)
@@ -1642,6 +1645,8 @@ def _ocr_preprocess_operation_name(options: ProcessingOptions) -> str:
         return "ocr_preprocess_leptonica_grayscale"
     if options.processing_profile == "ocr_preprocess_opencv_local":
         return "ocr_preprocess_opencv_local_grayscale"
+    if options.processing_profile == "ocr_preprocess_sauvola_wolf":
+        return "ocr_preprocess_sauvola_wolf_grayscale"
     return "ocr_preprocess_grayscale"
 
 
@@ -3863,6 +3868,8 @@ def _process_image(
         return _process_image_ocr_leptonica_path(image, options, scan_record=scan_record)
     if path_id == "ocr-preprocess-opencv-local-v1":
         return _process_image_ocr_opencv_local_path(image, options, scan_record=scan_record)
+    if path_id == "ocr-preprocess-sauvola-wolf-v1":
+        return _process_image_ocr_sauvola_wolf_path(image, options, scan_record=scan_record)
     return _process_image_standard_path(image, options, scan_record=scan_record)
 
 
@@ -3876,6 +3883,15 @@ def _process_image_ocr_leptonica_path(
 
 
 def _process_image_ocr_opencv_local_path(
+    image: Image.Image,
+    options: ProcessingOptions,
+    *,
+    scan_record: dict[str, Any] | None = None,
+) -> tuple[Image.Image, list[str], dict[str, Any]]:
+    return _process_image_standard_path(image, options, scan_record=scan_record)
+
+
+def _process_image_ocr_sauvola_wolf_path(
     image: Image.Image,
     options: ProcessingOptions,
     *,
@@ -3979,6 +3995,7 @@ def _process_image_standard_path(
             ocr_deskew_preserve_canvas = options.processing_profile in {
                 "ocr_preprocess_leptonica",
                 "ocr_preprocess_opencv_local",
+                "ocr_preprocess_sauvola_wolf",
             }
             ocr_deskew_supersample = (
                 _ocr_processing_enabled(options)
@@ -4873,6 +4890,8 @@ def _ocr_preprocess_grayscale(
         return _ocr_preprocess_leptonica_grayscale(image)
     if processing_profile == "ocr_preprocess_opencv_local":
         return _ocr_preprocess_opencv_local_grayscale(image)
+    if processing_profile == "ocr_preprocess_sauvola_wolf":
+        return _ocr_preprocess_sauvola_wolf_grayscale(image)
     output_profile = (
         "ocr_preprocess_light" if processing_profile == "ocr_preprocess_light" else "ocr_preprocess"
     )
@@ -5307,6 +5326,96 @@ def _ocr_opencv_local_background_normalize_numpy(
     changed_ratio = float(np.count_nonzero(changed)) / max(1, source.size)
     candidate_ratio = float(np.count_nonzero(changed & background_mask)) / max(1, source.size)
     return Image.fromarray(output_u8, mode="L"), changed_ratio, candidate_ratio
+
+
+def _ocr_preprocess_sauvola_wolf_grayscale(image: Image.Image) -> OcrPreprocessingResult:
+    output_profile = "ocr_preprocess_sauvola_wolf"
+    if image.width < 30 or image.height < 30:
+        return _ocr_preprocess_noop(image, output_profile, "OCR preprocessing skipped: image too small", "too_small")
+
+    color_review_reasons = _ocr_color_review_reason_codes(image)
+    grayscale = image.convert("L")
+    histogram = grayscale.histogram()
+    total = max(1, grayscale.width * grayscale.height)
+    p05 = _histogram_percentile(histogram, total, 0.05)
+    p95 = _histogram_percentile(histogram, total, 0.95)
+    if sum(histogram[:96]) / total > 0.45:
+        return _ocr_preprocess_noop(
+            image,
+            output_profile,
+            "OCR preprocessing skipped: foreground too dense",
+            "foreground_too_dense",
+            review_required=True,
+        )
+    if p95 - p05 < 12:
+        return _ocr_preprocess_noop(
+            image,
+            output_profile,
+            "OCR preprocessing skipped: insufficient background separation",
+            "low_confidence_background",
+            review_required=True,
+        )
+
+    result = _ocr_leptonica_background_normalize_numpy(grayscale)
+    reason = "OCR preprocessing applied: Sauvola/Wolf conservative grayscale baseline"
+    reason_code = "applied_sauvola_wolf_gray_baseline_normalization"
+    if result is None:
+        result = _ocr_leptonica_background_normalize_fallback(grayscale)
+        reason = "OCR preprocessing applied: Sauvola/Wolf fallback grayscale baseline"
+        reason_code = "applied_sauvola_wolf_fallback_gray_baseline_normalization"
+    output, _changed_pixel_ratio, background_candidate_pixel_ratio = result
+    changed_pixel_ratio = _pixel_change_ratio(grayscale, output)
+    background_before = float(p95)
+    output_histogram = output.histogram()
+    background_after = float(_histogram_percentile(output_histogram, total, 0.95))
+    background_delta = background_after - background_before
+    foreground_dark_loss, foreground_dark_lift, foreground_retention = _ocr_foreground_preservation_metrics(
+        grayscale,
+        output,
+    )
+    review_reasons: list[str] = []
+    if foreground_dark_loss > 0.002:
+        review_reasons.append("foreground_dark_loss")
+    if foreground_dark_lift > 0.01:
+        review_reasons.append("foreground_dark_lift")
+    if foreground_retention < 0.998:
+        review_reasons.append("foreground_retention")
+    review_reasons.extend(color_review_reasons)
+    if changed_pixel_ratio < 0.002 and background_delta < 1.0:
+        return OcrPreprocessingResult(
+            image,
+            False,
+            "OCR preprocessing skipped: improvement below threshold",
+            "improvement_below_threshold",
+            output_profile,
+            round(changed_pixel_ratio, 6),
+            background_before,
+            background_after,
+            round(background_delta, 6),
+            round(background_candidate_pixel_ratio, 6),
+            round(foreground_dark_loss, 6),
+            round(foreground_dark_lift, 6),
+            round(foreground_retention, 6),
+            bool(review_reasons),
+            tuple(sorted(set(review_reasons))),
+        )
+    return OcrPreprocessingResult(
+        output,
+        True,
+        reason,
+        reason_code,
+        output_profile,
+        round(changed_pixel_ratio, 6),
+        background_before,
+        background_after,
+        round(background_delta, 6),
+        round(background_candidate_pixel_ratio, 6),
+        round(foreground_dark_loss, 6),
+        round(foreground_dark_lift, 6),
+        round(foreground_retention, 6),
+        bool(review_reasons),
+        tuple(sorted(set(review_reasons))),
+    )
 
 
 def _ocr_leptonica_background_normalize_numpy(
@@ -5844,6 +5953,12 @@ def _ocr_binary_sidecar(image: Image.Image, ocr_preprocess: OcrPreprocessingResu
             "low_confidence_background",
         }:
             return _ocr_opencv_local_binary_sidecar(image, ocr_preprocess)
+    if ocr_preprocess.output_profile == "ocr_preprocess_sauvola_wolf":
+        if ocr_preprocess.applied or ocr_preprocess.reason_code in {
+            "improvement_below_threshold",
+            "low_confidence_background",
+        }:
+            return _ocr_sauvola_wolf_binary_sidecar(image, ocr_preprocess)
     if not ocr_preprocess.applied:
         return OcrBinaryResult(
             None,
@@ -6009,6 +6124,116 @@ def _ocr_opencv_local_binary_numpy(
         "OCR binary sidecar applied: OpenCV-local Otsu threshold",
         "applied_opencv_local_otsu_threshold",
     )
+
+
+def _ocr_sauvola_wolf_binary_sidecar(
+    image: Image.Image,
+    ocr_preprocess: OcrPreprocessingResult,
+) -> OcrBinaryResult:
+    grayscale = image.convert("L")
+    result = _ocr_sauvola_wolf_binary_numpy(grayscale)
+    if result is None:
+        threshold = _otsu_threshold(grayscale.histogram(), max(1, grayscale.width * grayscale.height))
+        threshold = max(80, min(235, threshold))
+        binary = grayscale.point(lambda value: 0 if value <= threshold else 255, mode="L")
+        reason = "OCR binary sidecar applied: Sauvola/Wolf fallback Otsu threshold"
+        reason_code = "applied_sauvola_wolf_fallback_otsu_threshold"
+    else:
+        binary, threshold, reason, reason_code = result
+    foreground_ratio = _dark_pixel_ratio(binary, 127)
+    source_dark = grayscale.point(lambda value: 255 if value <= 127 else 0, mode="L")
+    binary_dark = binary.point(lambda value: 255 if value <= 127 else 0, mode="L")
+    source_dark_pixels = _mask_pixel_count(source_dark)
+    retention = (
+        _mask_intersection_count(source_dark, binary_dark) / source_dark_pixels
+        if source_dark_pixels
+        else 1.0
+    )
+    review_reasons = list(ocr_preprocess.review_reason_codes)
+    if foreground_ratio < 0.001 or foreground_ratio > 0.45:
+        review_reasons.append("binary_foreground_ratio")
+    if retention < 0.96:
+        review_reasons.append("binary_foreground_retention")
+    return OcrBinaryResult(
+        binary,
+        True,
+        reason,
+        reason_code,
+        threshold,
+        round(foreground_ratio, 6),
+        round(retention, 6),
+        bool(review_reasons),
+        tuple(sorted(set(review_reasons))),
+    )
+
+
+def _ocr_sauvola_wolf_binary_numpy(
+    grayscale: Image.Image,
+) -> tuple[Image.Image, int | None, str, str] | None:
+    np = _load_numpy()
+    cv2 = _load_opencv()
+    if np is None or cv2 is None:
+        return None
+    try:
+        source = np.asarray(grayscale, dtype=np.uint8)
+    except (TypeError, ValueError):
+        return None
+    if source.ndim != 2:
+        return None
+
+    blurred = cv2.medianBlur(source, 3)
+    values = blurred.astype(np.float32)
+    min_dim = max(3, min(source.shape))
+    window = _odd_adaptive_threshold_window(min(151, max(35, int(round(min_dim / 8)))), min_dim)
+    mean = cv2.boxFilter(values, -1, (window, window), normalize=True, borderType=cv2.BORDER_REPLICATE)
+    square_mean = cv2.boxFilter(
+        values * values,
+        -1,
+        (window, window),
+        normalize=True,
+        borderType=cv2.BORDER_REPLICATE,
+    )
+    stddev = np.sqrt(np.maximum(square_mean - mean * mean, 0.0))
+
+    sauvola_threshold = mean * (1.0 + 0.34 * ((stddev / 128.0) - 1.0))
+    sauvola_binary = np.where(values <= sauvola_threshold, 0, 255).astype(np.uint8)
+
+    dark_floor = float(np.percentile(values, 0.5))
+    max_stddev = max(float(np.percentile(stddev, 99.0)), 1.0)
+    wolf_threshold = mean + 0.5 * ((stddev / max_stddev) - 1.0) * (mean - dark_floor)
+    wolf_binary = np.where(values <= wolf_threshold, 0, 255).astype(np.uint8)
+
+    otsu_threshold, otsu_binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    otsu_ratio = float(np.count_nonzero(otsu_binary <= 127)) / max(1, source.size)
+    target_ratio = min(0.22, max(0.006, otsu_ratio * 1.25))
+    candidates: list[tuple[float, np.ndarray, int | None, str, str]] = []
+    for name, binary, threshold in (
+        ("wolf", wolf_binary, None),
+        ("sauvola", sauvola_binary, None),
+    ):
+        foreground_ratio = float(np.count_nonzero(binary <= 127)) / max(1, source.size)
+        if foreground_ratio < 0.001 or foreground_ratio > 0.45:
+            continue
+        density_penalty = 0.2 if foreground_ratio > 0.25 else 0.0
+        score = abs(foreground_ratio - target_ratio) + density_penalty
+        candidates.append(
+            (
+                score,
+                binary,
+                threshold,
+                f"OCR binary sidecar applied: Sauvola/Wolf {name} threshold",
+                f"applied_sauvola_wolf_{name}_threshold",
+            )
+        )
+    if not candidates:
+        return (
+            Image.fromarray(otsu_binary.astype(np.uint8), mode="L"),
+            int(round(float(otsu_threshold))),
+            "OCR binary sidecar applied: Sauvola/Wolf Otsu threshold",
+            "applied_sauvola_wolf_otsu_threshold",
+        )
+    _score, binary, threshold, reason, reason_code = min(candidates, key=lambda candidate: candidate[0])
+    return Image.fromarray(binary.astype(np.uint8), mode="L"), threshold, reason, reason_code
 
 
 def _ocr_leptonica_binary_numpy(
@@ -14485,7 +14710,11 @@ def _detect_ocr_profile_skew(image: Image.Image, processing_profile: str) -> Ske
         form_skew = _detect_ocr_form_line_skew(image)
     if form_skew.angle_degrees is not None:
         candidates.append(form_skew)
-    if processing_profile in {"ocr_preprocess_leptonica", "ocr_preprocess_opencv_local"}:
+    if processing_profile in {
+        "ocr_preprocess_leptonica",
+        "ocr_preprocess_opencv_local",
+        "ocr_preprocess_sauvola_wolf",
+    }:
         sparse_skew = _detect_ocr_sparse_handwriting_skew(image)
         if sparse_skew.angle_degrees is not None:
             candidates.append(sparse_skew)

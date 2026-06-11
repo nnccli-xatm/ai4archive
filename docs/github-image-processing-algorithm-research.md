@@ -7,8 +7,8 @@
 ## 1. 调研结论
 
 1. 当前应保留 `ocr-preprocess-leptonica-v1` 作为真实扫描样本的保守基线。它与 Leptonica/Tesseract 的 OCR 前处理思路一致：先保证纠偏、尺寸稳定、背景归一和笔画保护，再把强二值化放到 sidecar。
-2. 下一条最值得实现的并列路径不是继续微调旧 `ocr-preprocess-v1`，而是新增 `ocr-preprocess-opencv-local-v1` 或类似 path：以 OpenCV/NumPy 为主体，组合 preserve-canvas deskew、背景估计、局部阈值、形态学保护和受控 denoise。
-3. Sauvola/Niblack 适合做局部阈值候选，尤其是背景不均匀文本页，但不应直接替代灰度主图；更适合作为 `ocr_binary` sidecar 或候选 mask 生成器。
+2. `ocr-preprocess-opencv-local-v1` 已作为并列实验 path 落地：以 OpenCV/NumPy 为主体，组合 preserve-canvas deskew、背景估计、局部阈值、形态学保护和受控 denoise，但首轮真实样本结果仍未明显超过 Leptonica 基线。
+3. `ocr-preprocess-sauvola-wolf-v1` 已作为下一条并列实验 path 落地：Sauvola/Wolf 局部阈值只进入 `ocr_binary` sidecar，不直接替代灰度主图；后续验收重点是 OCR/二值化指标和背景误吸入风险。
 4. unpaper 的思路对黑边、双页、版面居中、deskew 和边缘清理有参考价值，但它会移动/重排页面内容，直接接入为生产依赖风险较高。短期应吸收其算法思想，不直接把 unpaper CLI 作为默认处理路径。
 5. ocropy/kraken 的非线性二值化和历史文献 OCR 方向有参考价值，但依赖更重、目标更偏 OCR 引擎/历史文献训练系统，当前不适合作为默认图片处理路径。
 6. 深度学习修复、超分、去模糊等路线暂不进入默认实现。它们可能改善观感，但更容易改变笔画结构，且需要模型、硬件、隐私和可解释性边界，不符合当前“文档 OCR 预处理工具”的近期目标。
@@ -87,11 +87,11 @@
 - 表格线连续性不能下降。
 - NoisyOffice 至少达到 Leptonica path 的宏平均 PSNR/MSE 改善，并补齐 SSIM gate。
 
-### 3.3 Sauvola/Niblack 局部二值化路径
+### 3.3 Sauvola/Wolf/Niblack 局部二值化路径
 
 适配度：中高，适合作为 binary sidecar 或局部 mask，不适合作为灰度主图默认。
 
-候选 path：`ocr-preprocess-sauvola-binary-v1`。
+候选 path：`ocr-preprocess-sauvola-wolf-v1`。
 
 核心思路：
 
@@ -114,6 +114,15 @@
 
 - 必须用 DIBCO/H-DIBCO 或 synthetic binary/OCR gate 验收，不能只用灰度 PSNR。
 - 低置信二值输出必须进入 review，不得覆盖灰度主图。
+
+当前状态，2026-06-11：
+
+- 已落地为 `ocr-preprocess-sauvola-wolf-v1` 独立 path，外部仍通过 rule template 选择。
+- 真实扫描样本 12 张复测中，灰度主图保持 Leptonica 基线级保守处理，12/12 生成 binary sidecar；
+  binary reason code 为 11 张 `applied_sauvola_wolf_wolf_threshold` 和 1 张
+  `applied_sauvola_wolf_sauvola_threshold`。
+- 该路径的首要后续验证不应再看灰度主图 PSNR，而应看二值化指标、OCR CER/WER 和人工复核中
+  背景纹理误吸入/表格线断裂风险。
 
 ### 3.4 unpaper-inspired 扫描页清理路径
 
@@ -237,3 +246,5 @@
 - 背景处理采用 OpenCV/NumPy 局部背景估计、受保护前景 mask 和保守背景推白；二值输出作为 `ocr_binary/` sidecar，使用 adaptive/Otsu 阈值。
 - 真实扫描样本 12 张 local-only 复测已完成：12/12 输出，11/12 实际纠偏，10/12 触发 OpenCV local 背景归一，12/12 生成 binary sidecar，源图修改 0，尺寸不匹配 0，guardrail failure 0。
 - 该路径仍是实验路径：`ocr_text_edge_energy_ratio` 平均约 0.915，说明保留清晰度没有明显优于 Leptonica 基线；12/12 均标记 OCR review required。后续必须继续与 `ocr-preprocess-leptonica-v1` 并列对照，不能提升为默认推荐路径。
+- 同日已继续落地 `ocr-preprocess-sauvola-wolf-v1`，把下一阶段比较重点转到 binary sidecar 的
+  OCR/二值化收益，而不是继续微调灰度主图。

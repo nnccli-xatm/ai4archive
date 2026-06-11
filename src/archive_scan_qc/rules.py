@@ -23,6 +23,7 @@ BUILTIN_RULE_TEMPLATE_IDS = (
     "ocr-preprocess-light-v1",
     "ocr-preprocess-leptonica-v1",
     "ocr-preprocess-opencv-local-v1",
+    "ocr-preprocess-sauvola-wolf-v1",
     "ocr-preprocess-v1",
     "high-fidelity-original",
     "photo-mixed-safe-v1",
@@ -79,6 +80,12 @@ OCR_PREPROCESS_OPENCV_LOCAL_PROCESSING_DEFAULTS = {
     "ocr_binary": True,
     "reuse_scan_measurements": True,
 }
+OCR_PREPROCESS_SAUVOLA_WOLF_PROCESSING_DEFAULTS = {
+    "deskew": True,
+    "ocr_preprocess": True,
+    "ocr_binary": True,
+    "reuse_scan_measurements": True,
+}
 PHOTO_MIXED_SAFE_PROCESSING_DEFAULTS = {
     "trim_dark_border": True,
     "scanner_gutter_trim": True,
@@ -109,6 +116,9 @@ RULE_TEMPLATE_PROCESSING_DEFAULTS: dict[str, dict[str, bool]] = {
     "ocr-preprocess-opencv-local-v1": {
         **OCR_PREPROCESS_OPENCV_LOCAL_PROCESSING_DEFAULTS,
     },
+    "ocr-preprocess-sauvola-wolf-v1": {
+        **OCR_PREPROCESS_SAUVOLA_WOLF_PROCESSING_DEFAULTS,
+    },
     "ocr-preprocess-v1": {
         **OCR_PREPROCESS_PROCESSING_DEFAULTS,
     },
@@ -129,6 +139,7 @@ RULE_TEMPLATE_PROCESSING_PROFILES: dict[str, str] = {
     "ocr-preprocess-light-v1": "ocr_preprocess_light",
     "ocr-preprocess-leptonica-v1": "ocr_preprocess_leptonica",
     "ocr-preprocess-opencv-local-v1": "ocr_preprocess_opencv_local",
+    "ocr-preprocess-sauvola-wolf-v1": "ocr_preprocess_sauvola_wolf",
     "ocr-preprocess-v1": "ocr_preprocess",
     "high-fidelity-original": "standard",
     "photo-mixed-safe-v1": "standard",
@@ -277,6 +288,7 @@ def builtin_rules_profile(template_id: str) -> RulesProfile:
         "ocr-preprocess-light-v1",
         "ocr-preprocess-leptonica-v1",
         "ocr-preprocess-opencv-local-v1",
+        "ocr-preprocess-sauvola-wolf-v1",
         "ocr-preprocess-v1",
     }:
         return RulesProfile(

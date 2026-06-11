@@ -52,6 +52,7 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         ocr_light_defaults = processing_defaults_for_rule_template("ocr-preprocess-light-v1")
         ocr_leptonica_defaults = processing_defaults_for_rule_template("ocr-preprocess-leptonica-v1")
         ocr_opencv_local_defaults = processing_defaults_for_rule_template("ocr-preprocess-opencv-local-v1")
+        ocr_sauvola_wolf_defaults = processing_defaults_for_rule_template("ocr-preprocess-sauvola-wolf-v1")
         photo_defaults = processing_defaults_for_rule_template("photo-mixed-safe-v1")
 
         self.assertEqual(readable["template"]["id"], "text-clean-readable-v1")
@@ -74,12 +75,20 @@ class StableCliRuleTemplateTests(unittest.TestCase):
             "ocr_preprocess_opencv_local",
         )
         self.assertEqual(
+            processing_profile_for_rule_template("ocr-preprocess-sauvola-wolf-v1"),
+            "ocr_preprocess_sauvola_wolf",
+        )
+        self.assertEqual(
             processing_path_for_rule_template("ocr-preprocess-leptonica-v1"),
             "ocr-preprocess-leptonica-v1",
         )
         self.assertEqual(
             processing_path_for_rule_template("ocr-preprocess-opencv-local-v1"),
             "ocr-preprocess-opencv-local-v1",
+        )
+        self.assertEqual(
+            processing_path_for_rule_template("ocr-preprocess-sauvola-wolf-v1"),
+            "ocr-preprocess-sauvola-wolf-v1",
         )
         self.assertTrue(ocr_defaults["ocr_preprocess"])
         self.assertTrue(ocr_defaults["ocr_binary"])
@@ -97,6 +106,12 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         self.assertTrue(ocr_opencv_local_defaults["deskew"])
         self.assertFalse(ocr_opencv_local_defaults.get("auto_crop", False))
         self.assertFalse(ocr_opencv_local_defaults.get("sharpen_text_edges", False))
+        self.assertTrue(ocr_sauvola_wolf_defaults["ocr_preprocess"])
+        self.assertTrue(ocr_sauvola_wolf_defaults["ocr_binary"])
+        self.assertTrue(ocr_sauvola_wolf_defaults["reuse_scan_measurements"])
+        self.assertTrue(ocr_sauvola_wolf_defaults["deskew"])
+        self.assertFalse(ocr_sauvola_wolf_defaults.get("auto_crop", False))
+        self.assertFalse(ocr_sauvola_wolf_defaults.get("sharpen_text_edges", False))
         self.assertTrue(photo_defaults["trim_dark_border"])
         self.assertNotIn("enhance_faded_text", photo_defaults)
 
@@ -944,6 +959,102 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         self.assertEqual(output_size, source_size)
         self.assertEqual(binary_size, source_size)
         self.assertGreater(record["ocr_preprocess_changed_pixel_ratio"], 0.05)
+        self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
+        self.assertTrue(quality_summary["public_safe"])
+        self.assertEqual(quality_summary["counts"]["ocr_binary_created_files"], 1)
+
+    def test_production_run_ocr_preprocess_sauvola_wolf_uses_independent_path(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-cli-ocr-sauvola-wolf-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            source = input_dir / "OCR001_SKEWED_NOISY.png"
+            _write_ocr_noisy_page(source)
+            with Image.open(source) as source_image:
+                rotated = source_image.rotate(
+                    1.4,
+                    resample=Image.Resampling.BICUBIC,
+                    expand=True,
+                    fillcolor=214,
+                )
+            rotated.save(source, dpi=(300, 300))
+            source_bytes = source.read_bytes()
+            with Image.open(source) as source_image:
+                source_size = source_image.size
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                exit_code = main(
+                    [
+                        "production-run",
+                        "--input",
+                        str(input_dir),
+                        "--derivatives-out",
+                        str(derivatives_dir),
+                        "--metadata-out",
+                        str(metadata_dir),
+                        "--rule-template",
+                        "ocr-preprocess-sauvola-wolf-v1",
+                        "--workers",
+                        "1",
+                    ]
+                )
+
+            summary = json.loads((metadata_dir / "production_run_summary.json").read_text(encoding="utf-8"))
+            processing_manifest = json.loads(
+                (derivatives_dir / "processing_manifest.json").read_text(encoding="utf-8")
+            )
+            quality_summary = json.loads(
+                (derivatives_dir / PROCESSING_QUALITY_SUMMARY_JSON).read_text(encoding="utf-8")
+            )
+            record = processing_manifest["files"][0]
+            output_path = derivatives_dir / record["output_relative_path"]
+            binary_path = derivatives_dir / record["ocr_binary_output_relative_path"]
+            with Image.open(output_path) as output_image:
+                output_size = output_image.size
+            with Image.open(binary_path) as binary_image:
+                binary_size = binary_image.size
+            source_unchanged = source.read_bytes() == source_bytes
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(source_unchanged)
+        self.assertEqual(summary["rule_template"]["id"], "ocr-preprocess-sauvola-wolf-v1")
+        self.assertEqual(summary["options"]["processing_profile"], "ocr_preprocess_sauvola_wolf")
+        self.assertEqual(summary["options"]["processing_path"], "ocr-preprocess-sauvola-wolf-v1")
+        self.assertEqual(processing_manifest["output_profile"], "ocr_preprocess_sauvola_wolf")
+        self.assertEqual(processing_manifest["processing_path"]["path_id"], "ocr-preprocess-sauvola-wolf-v1")
+        self.assertEqual(record["processing_path"], "ocr-preprocess-sauvola-wolf-v1")
+        self.assertIn(
+            "ocr_preprocess_sauvola_wolf_grayscale",
+            processing_manifest["ocr_preprocessing_operations"],
+        )
+        self.assertIn("ocr_binary_sidecar", processing_manifest["ocr_preprocessing_operations"])
+        self.assertIn("ocr_preprocess_sauvola_wolf_grayscale", processing_manifest["operations"])
+        self.assertTrue(record["deskewed"])
+        self.assertIn("ocr_deskew_preserve_canvas", record["operations"])
+        self.assertNotIn("ocr_deskew_supersampled", record["operations"])
+        self.assertTrue(record["ocr_preprocessed"])
+        self.assertIn(
+            record["ocr_preprocess_reason_code"],
+            {
+                "applied_sauvola_wolf_gray_baseline_normalization",
+                "applied_sauvola_wolf_fallback_gray_baseline_normalization",
+            },
+        )
+        self.assertTrue(record["ocr_binary_created"])
+        self.assertIn(
+            record["ocr_binary_reason_code"],
+            {
+                "applied_sauvola_wolf_wolf_threshold",
+                "applied_sauvola_wolf_sauvola_threshold",
+                "applied_sauvola_wolf_otsu_threshold",
+                "applied_sauvola_wolf_fallback_otsu_threshold",
+            },
+        )
+        self.assertEqual(output_size, source_size)
+        self.assertEqual(binary_size, source_size)
+        self.assertGreater(record["ocr_binary_foreground_ratio"], 0.001)
         self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
         self.assertTrue(quality_summary["public_safe"])
         self.assertEqual(quality_summary["counts"]["ocr_binary_created_files"], 1)

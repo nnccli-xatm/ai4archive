@@ -61,6 +61,7 @@ OCR 图像处理 path 时以该文档的候选路线和风险判断为输入。
 - `ocr-preprocess-v1`：面向 OCR 的强预处理利用副本，允许更强背景归一、去噪、局部阈值、二值/准二值输出和文字增强；不作为保真派生图默认模板，必须通过 NoisyOffice、DIBCO/OCR 和复核门槛。
 - `ocr-preprocess-leptonica-v1`：与旧 OCR profile 并列的保守 OCR 灰度主图路径，默认尝试保留画布尺寸的纠偏，不默认裁切/锐化，只做背景归一和前景笔画保护，二值化作为 sidecar 复核；当前作为真实扫描样本人工目检最佳保留基线。
 - `ocr-preprocess-opencv-local-v1`：实验性并列 OCR 路径，使用 OpenCV/NumPy 局部背景估计、受保护前景 mask 和 adaptive/Otsu binary sidecar；外部接口不变，通过模板/path 选择运行，当前只作为与 Leptonica 基线对照的候选路线。
+- `ocr-preprocess-sauvola-wolf-v1`：实验性并列 OCR binary sidecar 路径，灰度主图保持 preserve-canvas 纠偏和保守背景归一，差异点集中在 Sauvola/Wolf 局部阈值二值副本；当前用于 OCR/二值化指标对照，不作为默认保真或默认 OCR 路径。
 - `photo-mixed-safe-v1`：照片、图像、印章、彩色批注和混合版面保护优先。
 - `custom`：用户自定义模板必须通过 schema 校验、dry-run 和参数边界检查。
 
@@ -73,7 +74,8 @@ OCR 图像处理 path 时以该文档的候选路线和风险判断为输入。
 - 外部 CLI/API 形状保持不变，生产运行仍通过 `--rule-template` 或 service job
   `rule_template` 选择处理路线。
 - 内部由模板解析出 `processing_profile`，再解析到 `processing_path`，例如
-  `ocr-preprocess-leptonica-v1` 或 `ocr-preprocess-opencv-local-v1`。
+  `ocr-preprocess-leptonica-v1`、`ocr-preprocess-opencv-local-v1` 或
+  `ocr-preprocess-sauvola-wolf-v1`。
 - `processing_path` 是 public-safe 枚举，不是本地文件路径；可以写入 catalog、
   dry-run、生产摘要、service job public summary、processing manifest 和 plan
   fingerprint。
@@ -87,6 +89,10 @@ manifest、service job checkpoint/public summary 和 public capability contract 
 `processing_profile=ocr_preprocess_opencv_local` 与 path ID。真实扫描样本 12 张复测显示它能在
 不扩张画布、不修改源图的前提下完成 11/12 纠偏和 12/12 binary sidecar，但平均文字边缘能量仍未
 超过 Leptonica 基线，因此暂不提升为默认 OCR 路径。
+同日新增 `ocr-preprocess-sauvola-wolf-v1`，专门把 Sauvola/Wolf 局部阈值放入 binary
+sidecar，而灰度主图保持基线级保守处理。真实扫描样本 12 张复测显示它同样保留 11/12 纠偏、
+尺寸不变和源图只读，并产生 11 张 Wolf、1 张 Sauvola binary sidecar；是否优于基线必须继续用
+OCR 或二值化指标判定，不能只靠二值图目测。
 
 ### 3.3 质量收益必须可度量
 

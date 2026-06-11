@@ -134,6 +134,15 @@ Synthetic OCR gate：
   质量指标显示该路径没有破坏尺寸和纠偏边界，但仍未显著超过基线：`ocr_text_edge_energy_ratio`
   最小 0.855566、平均 0.914977、最大 1.0，12/12 仍需 OCR review。因此该路径只作为实验候选，
   后续必须继续用 NoisyOffice、真实样本目检和 OCR 指标与 `ocr-preprocess-leptonica-v1` 并列比较。
+- 2026-06-11 Sauvola/Wolf 并列路径首版落地：新增 `ocr-preprocess-sauvola-wolf-v1` 模板、
+  `ocr_preprocess_sauvola_wolf` profile 和独立 `processing_path`。该路径把灰度主图限制为
+  preserve-canvas deskew + 保守背景归一，把强局部阈值放到 `ocr_binary` sidecar。真实扫描样本
+  12 张复测：12/12 输出，11/12 实际纠偏，10/12 触发灰度基线归一，12/12 生成 binary sidecar，
+  其中 11 张使用 Wolf threshold、1 张使用 Sauvola threshold；源图修改 0、尺寸不匹配 0、
+  guardrail failure 0；处理阶段 8.535154 秒，约 84.36 张/分钟。灰度主图指标与 Leptonica 基线
+  基本相当：`ocr_text_edge_energy_ratio` 最小 0.854554、平均 0.915506、最大 1.002376。
+  binary sidecar 前景比例平均 0.071562，前景保留率平均 0.919135，仍有 10/12 触发
+  `binary_foreground_retention` review。该路径价值在 OCR/二值指标对照，不得仅凭二值图变黑视为成功。
 
 ## 2. 目标重新定义
 
@@ -154,6 +163,8 @@ Synthetic OCR gate：
   人工目检确认该路径为当前真实扫描样本最佳保留基线。
 - `ocr-preprocess-opencv-local-v1`：并列实验路径，使用 OpenCV/NumPy 局部背景估计、受保护前景
   mask 和 adaptive/Otsu 二值 sidecar；当前用于算法对照，不作为默认 OCR 或保真派生图路径。
+- `ocr-preprocess-sauvola-wolf-v1`：并列实验路径，灰度主图保持保守，二值 sidecar 使用
+  Sauvola/Wolf 局部阈值候选；当前用于 OCR/二值化指标对照，不作为默认 OCR 或保真派生图路径。
 - `archival-safe-v1`、`photo-mixed-safe-v1` 继续以保真为目标，不承担 OCR 最大化目标。
 
 ## 3. 达成标准
@@ -257,7 +268,7 @@ public summary 和 plan fingerprint 必须记录 path ID。真实扫描样本、
 任务：
 
 - 固化 NoisyOffice 当前负结果为 baseline。
-- 扩展 `run_noisyoffice_external_cli_test.py`，支持比较不同 profile/path：`text-clean-print`、`ocr-preprocess-light-v1`、`ocr-preprocess-v1`、`ocr-preprocess-leptonica-v1`。
+- 扩展 `run_noisyoffice_external_cli_test.py`，支持比较不同 profile/path：`text-clean-print`、`ocr-preprocess-light-v1`、`ocr-preprocess-v1`、`ocr-preprocess-leptonica-v1`、`ocr-preprocess-opencv-local-v1`、`ocr-preprocess-sauvola-wolf-v1`。
 - 增加 OCR 指标 harness：synthetic known text + 可选本机 OCR provider。
 - 输出 `ocr_preprocessing_quality_summary.json` public-safe 聚合摘要。
 
@@ -271,6 +282,7 @@ public summary 和 plan fingerprint 必须记录 path ID。真实扫描样本、
 
 - 新增 `ocr-preprocess-v1` 和 `ocr-preprocess-light-v1` 模板。
 - 新增 `ocr-preprocess-leptonica-v1` 作为独立并列模板和 `processing_path`，不改变旧 `ocr-preprocess-v1` 默认行为。
+- 新增 `ocr-preprocess-sauvola-wolf-v1` 作为独立并列模板和 `processing_path`，不改变 Leptonica/OpenCV local 路径默认行为。
 - `ProcessingOptions` 增加 OCR 输出 profile，但不污染现有保真派生图默认行为。
 - manifest 增加 `output_profile`、`processing_path`、`ocr_preprocessing_operations`、`ocr_quality_metrics`、`ocr_review_required`。
 - service job public summary 只公开聚合质量指标和 blocking codes。

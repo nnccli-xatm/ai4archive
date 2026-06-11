@@ -73,6 +73,14 @@ PROCESSING_PATHS: dict[str, ProcessingPathSpec] = {
         description="OpenCV local-threshold OCR preprocessing path with preserve-canvas deskew.",
         independent_route=True,
     ),
+    "ocr-preprocess-sauvola-wolf-v1": ProcessingPathSpec(
+        path_id="ocr-preprocess-sauvola-wolf-v1",
+        family="ocr-preprocessing",
+        implementation="archive_scan_qc.processing.ocr_preprocess_sauvola_wolf",
+        output_profile="ocr_preprocess_sauvola_wolf",
+        description="Sauvola/Wolf OCR binary sidecar path with conservative grayscale derivative.",
+        independent_route=True,
+    ),
 }
 
 PROCESSING_PROFILE_TO_PATH_ID: dict[str, str] = {
@@ -82,6 +90,7 @@ PROCESSING_PROFILE_TO_PATH_ID: dict[str, str] = {
     "ocr_preprocess": "ocr-preprocess-v1",
     "ocr_preprocess_leptonica": "ocr-preprocess-leptonica-v1",
     "ocr_preprocess_opencv_local": "ocr-preprocess-opencv-local-v1",
+    "ocr_preprocess_sauvola_wolf": "ocr-preprocess-sauvola-wolf-v1",
 }
 
 
