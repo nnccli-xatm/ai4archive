@@ -3915,8 +3915,15 @@ def _process_image(
             operations.append("deskew_noop")
             deskew_reason = "angle below correction threshold"
         else:
-            processed = _rotate_for_deskew(processed, -skew.angle_degrees)
+            ocr_deskew_supersample = _ocr_processing_enabled(options)
+            processed = _rotate_for_deskew(
+                processed,
+                -skew.angle_degrees,
+                ocr_supersample=ocr_deskew_supersample,
+            )
             operations.append("deskew_conservative")
+            if ocr_deskew_supersample:
+                operations.append("ocr_deskew_supersampled")
             post_deskew_size = list(processed.size)
             deskewed = True
             deskew_reason = "deskew applied"
@@ -4854,7 +4861,6 @@ def _ocr_preprocess_grayscale(
         low_contrast_mode=low_contrast_mode,
         strong_profile=strong_profile,
     )
-    output = _ocr_snap_text_edges_for_ocr(output, strong_profile=strong_profile)
     changed_pixel_ratio = _pixel_change_ratio(grayscale, output)
     background_before = float(p95)
     output_histogram = output.histogram()
@@ -5055,7 +5061,7 @@ def _ocr_low_contrast_foreground_threshold(
     *,
     strong_profile: bool,
 ) -> int:
-    if p01 >= 200 and p05 >= 240 and p95 >= 245:
+    if _ocr_sparse_near_white_low_contrast_page(p01, p05, p95):
         sparse_margin = 2 if strong_profile else 4
         threshold = min(p01 + sparse_margin, p95 - 24)
         return max(0, min(254, int(max(p01 + 1, threshold))))
@@ -5065,6 +5071,10 @@ def _ocr_low_contrast_foreground_threshold(
     threshold = max(p01 + faint_margin, p95 - separation)
     threshold = min(threshold, p95 - upper_margin)
     return max(0, min(254, int(max(p01 + 4, threshold))))
+
+
+def _ocr_sparse_near_white_low_contrast_page(p01: int, p05: int, p95: int) -> bool:
+    return p01 >= 200 and p05 >= 240 and p95 >= 245
 
 
 def _ocr_preprocess_low_contrast_grayscale_numpy(
@@ -5091,6 +5101,8 @@ def _ocr_preprocess_low_contrast_grayscale_numpy(
         strong_profile=strong_profile,
     )
     foreground = values <= foreground_threshold
+    if _ocr_sparse_near_white_low_contrast_page(p01, p05, p95):
+        foreground = _ocr_supported_low_contrast_foreground_numpy(foreground, np)
     foreground_pixels = int(np.count_nonzero(foreground))
     if foreground_pixels < max(24, int(source.size * 0.0005)):
         return Image.fromarray(source.copy(), mode="L"), 0.0, 0.0
@@ -5113,6 +5125,18 @@ def _ocr_preprocess_low_contrast_grayscale_numpy(
     changed_ratio = float(np.count_nonzero(changed)) / max(1, source.size)
     candidate_ratio = foreground_pixels / max(1, source.size)
     return Image.fromarray(output_u8, mode="L"), changed_ratio, candidate_ratio
+
+
+def _ocr_supported_low_contrast_foreground_numpy(mask: Any, np: Any) -> Any:
+    padded = np.pad(mask, 1, mode="constant", constant_values=False)
+    neighbor_count = np.zeros(mask.shape, dtype=np.uint8)
+    for y_offset in range(3):
+        for x_offset in range(3):
+            neighbor_count += padded[
+                y_offset : y_offset + mask.shape[0],
+                x_offset : x_offset + mask.shape[1],
+            ]
+    return mask & (neighbor_count >= 2)
 
 
 def _ocr_preprocess_low_contrast_grayscale_fallback(
@@ -5143,10 +5167,40 @@ def _ocr_preprocess_low_contrast_grayscale_fallback(
         return max(0, min(255, int(round(255 - ((255 - value) * background_residual)))))
 
     candidate = grayscale.point(lambda value: 255 if value <= foreground_threshold else 0, mode="L")
+    if _ocr_sparse_near_white_low_contrast_page(p01, p05, p95):
+        candidate = _ocr_supported_low_contrast_foreground_fallback(candidate)
     if _mask_pixel_count(candidate) < max(24, int(grayscale.width * grayscale.height * 0.0005)):
         return grayscale.copy(), 0.0, 0.0
-    output = grayscale.point(map_value, mode="L")
+    mapped = grayscale.point(map_value, mode="L")
+    output = grayscale.copy()
+    output.paste(mapped, mask=candidate)
+    background = candidate.point(lambda value: 0 if value else 255, mode="L")
+    cleaned_background = grayscale.point(
+        lambda value: max(0, min(255, int(round(255 - ((255 - value) * background_residual))))),
+        mode="L",
+    )
+    output.paste(cleaned_background, mask=background)
     return output, _pixel_change_ratio(grayscale, output), _mask_ratio(candidate)
+
+
+def _ocr_supported_low_contrast_foreground_fallback(candidate: Image.Image) -> Image.Image:
+    source = candidate.convert("L")
+    output = Image.new("L", source.size, 0)
+    source_pixels = source.load()
+    output_pixels = output.load()
+    width, height = source.size
+    for y in range(height):
+        for x in range(width):
+            if not source_pixels[x, y]:
+                continue
+            count = 0
+            for next_y in range(max(0, y - 1), min(height, y + 2)):
+                for next_x in range(max(0, x - 1), min(width, x + 2)):
+                    if source_pixels[next_x, next_y]:
+                        count += 1
+            if count >= 2:
+                output_pixels[x, y] = 255
+    return output
 
 
 def _ocr_restore_text_edge_clarity(
@@ -5180,47 +5234,6 @@ def _ocr_restore_text_edge_clarity(
             if int(source_pixels[x, y]) <= 127:
                 sharp_pixels[x, y] = min(int(sharp_pixels[x, y]), int(processed_pixels[x, y]))
     return sharpened
-
-
-def _ocr_snap_text_edges_for_ocr(processed_l: Image.Image, *, strong_profile: bool) -> Image.Image:
-    if not strong_profile:
-        return processed_l
-    grayscale = processed_l.convert("L")
-    histogram = grayscale.histogram()
-    total = max(1, grayscale.width * grayscale.height)
-    threshold = max(96, min(205, _otsu_threshold(histogram, total) + 18))
-    foreground_pixels = sum(histogram[: threshold + 1])
-    foreground_ratio = foreground_pixels / total
-    if foreground_ratio < 0.0002 or foreground_ratio > 0.45:
-        return processed_l
-
-    np = _load_numpy()
-    if np is not None:
-        try:
-            values = np.asarray(grayscale, dtype=np.uint8)
-            snapped = np.full(values.shape, 255, dtype=np.uint8)
-            foreground = values <= threshold
-            dark_core = values <= max(0, threshold - 18)
-            snapped[foreground & dark_core] = 0
-            snapped[foreground & ~dark_core] = 24
-            pale_background = (~foreground) & (values < 235)
-            snapped[pale_background] = np.maximum(values[pale_background], 245)
-            return Image.fromarray(snapped, mode="L")
-        except (TypeError, ValueError):
-            pass
-
-    output = Image.new("L", grayscale.size, 255)
-    source_pixels = grayscale.load()
-    output_pixels = output.load()
-    dark_core_threshold = max(0, threshold - 18)
-    for y in range(grayscale.height):
-        for x in range(grayscale.width):
-            value = int(source_pixels[x, y])
-            if value <= threshold:
-                output_pixels[x, y] = 0 if value <= dark_core_threshold else 24
-            elif value < 235:
-                output_pixels[x, y] = max(value, 245)
-    return output
 
 
 def _ocr_foreground_preservation_metrics(source_l: Image.Image, processed_l: Image.Image) -> tuple[float, float, float]:
@@ -13085,13 +13098,15 @@ def _processed_output_safety_guard(metrics: dict[str, Any], options: ProcessingO
             foreground_reasons.append("ocr_foreground_dark_loss")
         if _float_metric(metrics, "ocr_foreground_dark_lift_ratio") > 0.01:
             foreground_reasons.append("ocr_foreground_dark_lift")
-        if _float_metric(metrics, "ocr_text_edge_energy_ratio") < 0.95:
+        edge_energy_before = _float_metric(metrics, "ocr_text_edge_energy_before")
+        edge_energy_threshold = 0.80 if _float_metric(metrics, "size_change_ratio") > 0.55 else 0.95
+        if edge_energy_before > 0 and _float_metric(metrics, "ocr_text_edge_energy_ratio") < edge_energy_threshold:
             foreground_reasons.append("ocr_text_edge_clarity_loss")
-        if (
-            _float_metric(metrics, "ocr_text_soft_edge_ratio_after") > 0.12
-            and _float_metric(metrics, "ocr_text_soft_edge_ratio_delta") < 0.02
+        if edge_energy_before > 0 and _float_metric(metrics, "ocr_text_soft_edge_ratio_after") > max(
+            0.35,
+            _float_metric(metrics, "ocr_text_soft_edge_ratio_before") + 0.10,
         ):
-            foreground_reasons.append("ocr_text_soft_edge_not_reduced")
+            foreground_reasons.append("ocr_text_soft_edge_degraded")
         return {
             "checked": True,
             "action": "reverted_to_source" if foreground_reasons else "passed",
@@ -13728,6 +13743,8 @@ def _audit_guardrail_failures(metrics: dict[str, Any], options: ProcessingOption
     ]
     failures = []
     for key, threshold in checks:
+        if key == "size_change_ratio" and metrics.get("ocr_preprocessed") is True:
+            continue
         if key == "pixel_change_ratio" and metrics.get("pixel_change_guardrail_applied") is False:
             continue
         if key.startswith("faded_text_") and metrics.get("faded_text_enhanced") is not True:
@@ -14926,14 +14943,43 @@ def _vertical_projection_variance(image: Image.Image) -> float:
     return sum((count - mean) ** 2 for count in column_counts) / len(column_counts)
 
 
-def _rotate_for_deskew(image: Image.Image, correction_angle: float) -> Image.Image:
+def _rotate_for_deskew(
+    image: Image.Image,
+    correction_angle: float,
+    *,
+    ocr_supersample: bool = False,
+) -> Image.Image:
     fill = _corner_background_value(image.convert("L"))
     fillcolor: int | tuple[int, int, int]
     if image.mode == "RGB":
         fillcolor = (fill, fill, fill)
     else:
         fillcolor = fill
+    if ocr_supersample:
+        enlarged = _ocr_supersample_for_deskew(image)
+        if enlarged is not image:
+            return enlarged.rotate(
+                correction_angle,
+                resample=Image.Resampling.BICUBIC,
+                expand=True,
+                fillcolor=fillcolor,
+            )
     return image.rotate(correction_angle, resample=Image.Resampling.BICUBIC, expand=True, fillcolor=fillcolor)
+
+
+def _ocr_supersample_for_deskew(image: Image.Image) -> Image.Image:
+    pixels = image.width * image.height
+    if pixels <= 0:
+        return image
+    max_supersampled_pixels = 48_000_000
+    if pixels * 4 <= max_supersampled_pixels:
+        scale = 2.0
+    elif int(pixels * 2.25) <= max_supersampled_pixels:
+        scale = 1.5
+    else:
+        return image
+    enlarged_size = (max(1, int(round(image.width * scale))), max(1, int(round(image.height * scale))))
+    return image.resize(enlarged_size, Image.Resampling.LANCZOS)
 
 
 def _detect_post_deskew_canvas_crop_bbox(image: Image.Image) -> CropDetection:

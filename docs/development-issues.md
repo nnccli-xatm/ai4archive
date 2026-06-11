@@ -362,9 +362,14 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 - 2026-06-11 清晰度修复：OCR 背景归一/低对比增强后新增受控文字边缘恢复，禁止抬亮原深色前景；
   manifest、processing quality summary 和 service public-safe allowlist 新增
   `ocr_text_edge_energy_before`、`ocr_text_edge_energy_after`、`ocr_text_edge_energy_ratio`。
-- 2026-06-11 软边修复：`ocr-preprocess-v1` 主灰度派生图改为 `.ocr.png` lossless 输出，
-  并新增高置信文字/表格线 edge snap；聚合指标新增
-  `ocr_text_soft_edge_ratio_before`、`ocr_text_soft_edge_ratio_after`、`ocr_text_soft_edge_ratio_delta`。
+- 2026-06-11 软边修复尝试：`ocr-preprocess-v1` 主灰度派生图改为 `.ocr.png` lossless 输出，
+  并曾新增高置信文字/表格线 edge snap；真实扫描目检和连通域诊断显示 edge snap 会造成手写数字
+  水波纹、笔画碎片化和表格线断裂，该 hard snap 已撤销。聚合指标保留
+  `ocr_text_soft_edge_ratio_before`、`ocr_text_soft_edge_ratio_after`、`ocr_text_soft_edge_ratio_delta`，
+  但仅作为诊断信号，不再要求灰度主图软边比例归零。
+- 2026-06-11 结构保真修复：OCR 灰度主图改为保留灰度边缘的背景净化/轻锐化路径；OCR profile
+  纠偏在像素上限内使用 2x/1.5x 超采样旋转；近白低对比稀疏页的候选前景必须有 3x3 邻域连通支持，
+  防止纸纹噪声被增强为孤立暗组件。
 
 ### DEV-154 自适应阈值和二值 OCR 输出
 
@@ -414,7 +419,12 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 - 真实扫描第四次复测：12/12 主灰度增强输出为 `.ocr.png`，12/12 `ocr_binary` sidecar，
   11/12 实际纠偏；`ocr_text_soft_edge_ratio_after` 平均/最大均为 0，
   `ocr_text_soft_edge_ratio_delta` 平均 0.434424；失败 0、guardrail failure 0、
-  processing warning 0、源图修改 0。
+  processing warning 0、源图修改 0。该结果后续被目检否定，因为软边归零来自 hard snap，
+  不是结构清晰度提升。
+- 真实扫描第五次复测：12/12 主灰度增强输出为 `.ocr.png`，12/12 `ocr_binary` sidecar，
+  11/12 实际纠偏且均使用 OCR 超采样纠偏；失败 0、guardrail failure 0、processing warning 0、
+  源图修改 0；`ocr_text_edge_energy_ratio` 最小 0.970019、平均 1.206026、最大 1.525531；
+  小暗组件密度平均从 source 1510/Mpix、fix8 1672/Mpix 降至 fix9 604/Mpix。
 
 ## P2：CI、发布和性能
 

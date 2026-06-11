@@ -664,8 +664,11 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         self.assertGreater(record["ocr_preprocess_changed_pixel_ratio"], 0.20)
         self.assertGreater(record["ocr_background_delta"], 15.0)
         self.assertGreaterEqual(record["ocr_foreground_retention_ratio"], 0.998)
-        self.assertLessEqual(record["ocr_text_soft_edge_ratio_after"], 0.05)
-        self.assertGreater(record["ocr_text_soft_edge_ratio_delta"], 0.05)
+        self.assertGreaterEqual(record["ocr_text_edge_energy_ratio"], 0.95)
+        self.assertLessEqual(
+            record["ocr_text_soft_edge_ratio_after"],
+            max(0.35, record["ocr_text_soft_edge_ratio_before"] + 0.10),
+        )
         self.assertEqual(record["processing_audit"]["guardrail_failures"], [])
         self.assertTrue(record["ocr_binary_created"])
         self.assertTrue(binary_exists)
@@ -801,12 +804,16 @@ class StableCliRuleTemplateTests(unittest.TestCase):
             form_output = derivatives_dir / form_record["output_relative_path"]
             sparse_edge_energy_before = _ocr_text_edge_energy_for_test(sparse_source)
             sparse_edge_energy_after = _ocr_text_edge_energy_for_test(sparse_output)
-            sparse_soft_edge_before = _ocr_text_soft_edge_ratio_for_test(sparse_source)
-            sparse_soft_edge_after = _ocr_text_soft_edge_ratio_for_test(sparse_output)
+            sparse_components_before = _ocr_dark_component_summary_for_test(sparse_source)
+            sparse_components_after = _ocr_dark_component_summary_for_test(sparse_output)
             form_edge_energy_before = _ocr_text_edge_energy_for_test(form_source)
             form_edge_energy_after = _ocr_text_edge_energy_for_test(form_output)
-            form_soft_edge_before = _ocr_text_soft_edge_ratio_for_test(form_source)
-            form_soft_edge_after = _ocr_text_soft_edge_ratio_for_test(form_output)
+            form_components_before = _ocr_dark_component_summary_for_test(form_source)
+            form_components_after = _ocr_dark_component_summary_for_test(form_output)
+            with Image.open(form_source) as form_source_image:
+                form_source_size = form_source_image.size
+            with Image.open(form_output) as form_output_image:
+                form_output_size = form_output_image.size
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(quality_summary["counts"]["ocr_preprocessed_files"], 2)
@@ -820,18 +827,29 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         self.assertLess(sparse_record["ocr_binary_foreground_ratio"], 0.03)
         self.assertGreaterEqual(sparse_record["ocr_text_edge_energy_ratio"], 0.95)
         self.assertGreaterEqual(sparse_edge_energy_after, sparse_edge_energy_before * 0.95)
-        self.assertLessEqual(sparse_record["ocr_text_soft_edge_ratio_after"], 0.05)
-        self.assertLessEqual(sparse_soft_edge_after, sparse_soft_edge_before * 0.50)
+        self.assertLessEqual(
+            sparse_components_after["small_components"],
+            max(12, sparse_components_before["small_components"] + 8),
+        )
+        self.assertLessEqual(
+            sparse_components_after["components"],
+            max(24, int(sparse_components_before["components"] * 1.50)),
+        )
         self.assertEqual(sparse_record["processing_audit"]["guardrail_failures"], [])
         self.assertTrue(form_record["deskewed"])
         self.assertEqual(form_record["deskew_reason"], "deskew applied")
         self.assertGreater(abs(form_record["skew_angle_degrees"]), 1.0)
+        self.assertIn("ocr_deskew_supersampled", form_record["operations"])
+        self.assertGreater(form_output_size[0], form_source_size[0] * 1.5)
+        self.assertGreater(form_output_size[1], form_source_size[1] * 1.5)
         self.assertTrue(form_record["ocr_preprocessed"])
         self.assertTrue(form_record["ocr_binary_created"])
-        self.assertGreaterEqual(form_record["ocr_text_edge_energy_ratio"], 0.95)
-        self.assertGreaterEqual(form_edge_energy_after, form_edge_energy_before * 0.95)
-        self.assertLessEqual(form_record["ocr_text_soft_edge_ratio_after"], 0.05)
-        self.assertLessEqual(form_soft_edge_after, form_soft_edge_before * 0.50)
+        self.assertGreaterEqual(form_record["ocr_text_edge_energy_ratio"], 0.80)
+        self.assertGreaterEqual(form_edge_energy_after, form_edge_energy_before * 0.80)
+        self.assertLessEqual(
+            form_components_after["small_components"],
+            max(18, form_components_before["small_components"] + 12),
+        )
         self.assertEqual(form_record["processing_audit"]["guardrail_failures"], [])
 
     def test_run_plan_accepts_rule_template_and_records_public_batch_choice(self) -> None:
@@ -1324,6 +1342,70 @@ def _ocr_text_soft_edge_ratio_for_test(path: Path) -> float:
     if total < max(8, int(area * 0.00002)):
         return 0.0
     return soft / total
+
+
+def _ocr_dark_component_summary_for_test(path: Path) -> dict[str, int]:
+    image = Image.open(path).convert("L")
+    histogram = image.histogram()
+    area = max(1, image.width * image.height)
+    running = 0
+    background = 255
+    for value, count in enumerate(histogram):
+        running += count
+        if running >= area * 0.9:
+            background = value
+            break
+    threshold = max(90, min(220, background - 35))
+    pixels = image.load()
+    width, height = image.size
+    visited = bytearray(width * height)
+    components = 0
+    small_components = 0
+    dark_pixels = 0
+    small_component_limit = max(8, int(area * 0.000015))
+    neighbors = (
+        (-1, -1),
+        (0, -1),
+        (1, -1),
+        (-1, 0),
+        (1, 0),
+        (-1, 1),
+        (0, 1),
+        (1, 1),
+    )
+    for y in range(height):
+        for x in range(width):
+            offset = y * width + x
+            if visited[offset]:
+                continue
+            visited[offset] = 1
+            if int(pixels[x, y]) > threshold:
+                continue
+            components += 1
+            component_area = 0
+            stack = [(x, y)]
+            while stack:
+                current_x, current_y = stack.pop()
+                component_area += 1
+                for dx, dy in neighbors:
+                    next_x = current_x + dx
+                    next_y = current_y + dy
+                    if next_x < 0 or next_y < 0 or next_x >= width or next_y >= height:
+                        continue
+                    next_offset = next_y * width + next_x
+                    if visited[next_offset]:
+                        continue
+                    visited[next_offset] = 1
+                    if int(pixels[next_x, next_y]) <= threshold:
+                        stack.append((next_x, next_y))
+            dark_pixels += component_area
+            if component_area <= small_component_limit:
+                small_components += 1
+    return {
+        "components": components,
+        "small_components": small_components,
+        "dark_pixels": dark_pixels,
+    }
 
 
 def _write_clean_page(path: Path) -> None:

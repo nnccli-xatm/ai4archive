@@ -89,13 +89,17 @@ Synthetic OCR gate：
 - 真实扫描样本 `fix7` 复测结果：12/12 生成 OCR 灰度增强，12/12 生成 `ocr_binary` sidecar；
   11/12 实际纠偏，失败 0、guardrail failure 0、processing warning 0，源图修改 0；
   `ocr_text_edge_energy_ratio` 平均 1.687265，最小 1.428797，最大 2.480872。
-- 2026-06-11 第四次清晰度修复：`ocr-preprocess-v1` 主灰度派生图改为 `.ocr.png`
-  lossless 输出，并在强 OCR profile 中加入高置信文字/表格线 edge snap。该步骤不再只加深颜色，
-  而是把抗锯齿软边收敛为 OCR 更容易识别的硬边。
-- 真实扫描样本 `fix8` 复测结果：12/12 生成 `.ocr.png` OCR 灰度增强，12/12 生成
-  `ocr_binary` sidecar；11/12 实际纠偏，失败 0、guardrail failure 0、processing warning 0，
-  源图修改 0；`ocr_text_soft_edge_ratio_after` 平均/最大均为 0，
-  `ocr_text_soft_edge_ratio_delta` 平均 0.434424，最大 0.825201。
+- 2026-06-11 第四次清晰度尝试：`ocr-preprocess-v1` 主灰度派生图改为 `.ocr.png`
+  lossless 输出，并在强 OCR profile 中加入高置信文字/表格线 edge snap。后续真实样本目检和
+  连通域诊断否定了该路线：`ocr_text_soft_edge_ratio_after = 0` 主要来自硬阈值吸附，
+  会造成手写数字水波纹、笔画碎片化以及表格线断裂，不能作为 OCR 灰度主图的成功指标。
+- 2026-06-11 第五次结构保真修复：撤销 OCR 灰度主图 hard edge snap；OCR profile 的纠偏在像素
+  上限内使用 2x/1.5x 超采样旋转，避免原分辨率插值吞掉小字和表格线；近白低对比稀疏页的候选
+  前景必须有 3x3 邻域连通支持，单像素纸纹和压缩浅噪声不再被增强成暗碎片。
+- 真实扫描样本 `fix9` 复测结果：12/12 生成 `.ocr.png` OCR 灰度增强，12/12 生成
+  `ocr_binary` sidecar；11/12 实际纠偏且均使用 OCR 超采样纠偏；失败 0、guardrail failure 0、
+  processing warning 0，源图修改 0；`ocr_text_edge_energy_ratio` 最小 0.970019、平均 1.206026、
+  最大 1.525531；小暗组件密度平均从 source 1510/Mpix、fix8 1672/Mpix 降至 fix9 604/Mpix。
 
 ## 2. 目标重新定义
 
@@ -188,11 +192,13 @@ OCR 预处理管线必须独立于保真派生图管线，输出 `ocr_derivative
 - 局部对比增强：CLAHE 或受限局部拉伸。
 - 细笔画增强：轻量 unsharp/形态学增强，避免光晕。
 - 断笔风险控制：二值化后连通域数量、笔画宽度分布和前景保留率必须受控。
-- OCR 利用副本必须有文字清晰度保底：以文字前景邻域平均梯度记录输出/原图边缘能量比，
-  当 `ocr_text_edge_energy_ratio` 低于 0.95 时进入处理输出安全 guard，避免把纠偏或背景净化后的利用副本交付成模糊文字图。
+- OCR 利用副本必须有文字清晰度保底：以文字前景邻域平均梯度记录输出/原图边缘能量比。
+  同尺寸 OCR 灰度增强低于 `ocr_text_edge_energy_ratio = 0.95` 时进入处理输出安全 guard；
+  OCR 超采样纠偏输出因像素尺度不同，使用 0.80 作为最低保底，并同时用连通域碎片计数防止
+  笔画/表格线被拆碎。
 - OCR 利用副本还必须记录软边比例：`ocr_text_soft_edge_ratio_before/after/delta`
-  用于约束“只把字加黑但边缘仍糊”的假改善；`ocr-preprocess-v1` 的目标是降低软边比例并生成
-  lossless `.ocr.png` 主输出。
+  用于诊断“只把字加黑但边缘仍糊”的假改善；它不得再被用作“越接近 0 越好”的硬目标。
+  只有源图已有可检测边缘且输出软边比例超过 `max(0.35, before + 0.10)` 时才按退化处理。
 
 ### 4.6 透印、扫描线和表格保护
 
