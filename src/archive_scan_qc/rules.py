@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .processing_paths import processing_path_id_for_profile
+
 
 VALID_SEVERITIES = {"P0", "P1", "P2"}
 VALID_DPI_PURPOSES = {"standard", "com", "reproduction", "print"}
@@ -213,6 +215,8 @@ class RulesProfile:
                 "version": self.template_version or self.version,
                 "source": self.template_source or self.source,
                 "processing_defaults": processing_defaults_for_rule_template(self.template_id),
+                "processing_profile": processing_profile_for_rule_template(self.template_id),
+                "processing_path": processing_path_for_rule_template(self.template_id),
             }
         return payload
 
@@ -335,6 +339,10 @@ def processing_profile_for_rule_template(template_id: str | None) -> str:
             f"Unknown rule template '{template_id}'. Expected one of {', '.join(RULE_TEMPLATE_IDS)}."
         )
     return RULE_TEMPLATE_PROCESSING_PROFILES[template_id]
+
+
+def processing_path_for_rule_template(template_id: str | None) -> str:
+    return processing_path_id_for_profile(processing_profile_for_rule_template(template_id))
 
 
 def load_rules_profile_selection(

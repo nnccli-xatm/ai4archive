@@ -465,6 +465,30 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
   Gate 未通过，原因是 `ssim_delta` 未达 +0.015 且 `c` 噪声组 SSIM 下降；后续改进必须继续以
   该路径为基线，重点降低 `c` 组结构损失。
 
+### DEV-157 多路径图像处理路由和对照边界
+
+状态：`done`
+
+范围：
+
+- 新增 `processing_path` registry，把外部模板选择、processing profile 和内部算法路径解耦。
+- 外部 CLI/API 形状保持不变：生产 CLI 继续使用 `--rule-template`，service job 继续使用
+  `rule_template`；内部由模板解析到稳定 path ID。
+- `processing_path` 是 public-safe 枚举，不是本地文件路径；允许出现在 catalog、dry-run、
+  生产摘要、service job public summary 和 processing manifest 的非敏感摘要字段中。
+- processing plan 和处理选项 fingerprint 纳入 `processing_path`，防止恢复时混用不同算法路径的
+  旧派生图。
+- `_process_image` 增加按 path ID 分发的入口，`ocr-preprocess-leptonica-v1` 保留为单独路由，
+  后续候选算法必须注册新 path 并接入独立 dispatch，不能用旧 path 的隐藏开关替换。
+
+已完成证据：
+
+- rule-template catalog/dry-run、production summary/options、processing manifest 顶层/options/records、
+  service job checkpoint/public summary 均记录 `processing_path`。
+- CLI 定向回归确认 `ocr-preprocess-leptonica-v1` 的 production run 输出 path ID、保留源图尺寸、
+  默认纠偏且源图不变。
+- service job 全文件回归通过，覆盖创建、运行、恢复、自定义模板、并发隔离和 public-safe summary。
+
 ## P2：CI、发布和性能
 
 ### DEV-201 CI 四组稳定回归

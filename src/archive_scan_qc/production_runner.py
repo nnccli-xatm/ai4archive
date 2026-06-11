@@ -10,6 +10,7 @@ from pathlib import Path
 import time
 from typing import Any
 
+from .processing_paths import processing_path_id_for_profile
 from .processing import ProcessingOptions, process_images
 from .processing_quality_summary import (
     PROCESSING_QUALITY_SUMMARY_JSON,
@@ -345,6 +346,7 @@ def build_production_run_summary(
             "message_zh": operator_message,
             "processing_mode": config.processing_mode,
             "processing_profile": config.processing_profile,
+            "processing_path": _processing_path_for_config(config),
             "processing_mode_label_zh": PROCESSING_MODE_LABELS_ZH.get(config.processing_mode, config.processing_mode),
             "processing_mode_purpose_zh": PROCESSING_MODE_PURPOSES_ZH.get(config.processing_mode, ""),
             "processing_mode_output_zh": PROCESSING_MODE_OUTPUTS_ZH.get(config.processing_mode, ""),
@@ -606,6 +608,7 @@ def _options_payload(config: ProductionRunConfig) -> dict[str, Any]:
     return {
         "processing_mode": config.processing_mode,
         "processing_profile": config.processing_profile,
+        "processing_path": _processing_path_for_config(config),
         "processing_mode_label_zh": PROCESSING_MODE_LABELS_ZH.get(config.processing_mode, config.processing_mode),
         "processing_mode_purpose_zh": PROCESSING_MODE_PURPOSES_ZH.get(config.processing_mode, ""),
         "processing_mode_output_zh": PROCESSING_MODE_OUTPUTS_ZH.get(config.processing_mode, ""),
@@ -632,6 +635,10 @@ def _options_payload(config: ProductionRunConfig) -> dict[str, Any]:
         "resume_processing": config.resume_processing,
         "reuse_scan_measurements": config.reuse_scan_measurements,
     }
+
+
+def _processing_path_for_config(config: ProductionRunConfig) -> str:
+    return processing_path_id_for_profile(config.processing_profile)
 
 
 def _rules_profile_metadata(config: ProductionRunConfig, report: dict[str, Any] | None = None) -> dict[str, Any] | None:

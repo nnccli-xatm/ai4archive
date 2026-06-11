@@ -137,12 +137,15 @@ The commands write `rule_template_catalog.json` with schema
 derivative images. `rule-template-dry-run` may read a local sensitive scan
 report when `--scan-report` is provided, but its output remains aggregate-only
 and excludes paths, filenames, hashes, thumbnails, OCR text, image content, and
-row-level evidence. Template catalog/detail payloads may expose a public-safe
-`processing_profile` enum, such as `standard` or `print_clean`, because it is a
-template-level processing intent rather than local evidence. The enum may
-select bounded processing strength for safe candidates, such as print-clean
-tone mapping or stable text-edge sharpening, but does not expose local rows,
-paths, filenames, hashes, OCR text, thumbnails, or image content.
+row-level evidence. Template catalog/detail payloads may expose public-safe
+`processing_profile` and `processing_path` enums, such as `standard`,
+`print_clean`, `standard-conservative-v1`, or `ocr-preprocess-leptonica-v1`,
+because they are template-level processing intent and algorithm-route IDs
+rather than local evidence. These enums may select bounded processing strength
+or a stable algorithm path for safe candidates, such as print-clean tone mapping,
+stable text-edge sharpening, or a Leptonica-style OCR preprocessing route, but
+they do not expose local rows, paths, filenames, hashes, OCR text, thumbnails,
+or image content.
 For actual production runs, `photo-mixed-safe-v1` must keep strong cleanup,
 faded-text enhancement, and text-edge sharpening disabled in the production
 summary and processing manifest while still emitting the public-safe
@@ -158,7 +161,7 @@ reports. Service-managed custom template validation and writes are available
 through `POST /api/rule-templates/validate`, `POST /api/rule-templates`, and
 `PUT /api/rule-templates/{template_id}`; those responses expose only public-safe
 validation counts, risk codes, processing-default booleans, processing profile,
-and service template IDs.
+processing path, and service template IDs.
 
 The prototype local service job API exposes public-safe job polling through
 `POST /api/jobs`, `GET /api/jobs`, `GET /api/jobs/{job_id}`,
@@ -177,8 +180,9 @@ response publishes non-sensitive resource limits, including
 `max_tmp_bytes_per_job`, and the per-job worker limit.
 Service job public summaries expose only template-level identifiers and enums in
 their `template` block: rule template ID, base rule template ID, processing
-mode, and processing profile. They do not expose template rule rows, checkpoint
-paths, local source names, hashes, OCR text, thumbnails, or image content.
+mode, processing profile, and processing path. They do not expose template rule
+rows, checkpoint paths, local source names, hashes, OCR text, thumbnails, or
+image content.
 The local service API also exposes a production-worker facade with schema
 `scan-qc.service-production-session.v1`: `GET /api/production/session`,
 `POST /api/production/setup`, `POST /api/production/start`,

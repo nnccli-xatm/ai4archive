@@ -63,6 +63,22 @@ deskew 路径是当前最佳保留基线：它保留源图尺寸、执行必须�
 
 公开 CLI/API 接受模板 ID 和少数高层意图，不接受无限组合的底层滤镜参数。
 
+### 3.2.1 稳定处理路径
+
+为比较算法效果，模板和处理实现之间必须有稳定的 `processing_path` 层：
+
+- 外部 CLI/API 形状保持不变，生产运行仍通过 `--rule-template` 或 service job
+  `rule_template` 选择处理路线。
+- 内部由模板解析出 `processing_profile`，再解析到 `processing_path`，例如
+  `ocr-preprocess-leptonica-v1`。
+- `processing_path` 是 public-safe 枚举，不是本地文件路径；可以写入 catalog、
+  dry-run、生产摘要、service job public summary、processing manifest 和 plan
+  fingerprint。
+- 新算法必须先注册为新的 path ID，再接入独立 dispatch 入口；不得通过复用旧 path
+  的隐藏开关来替换算法，否则无法做真实批次对照和恢复隔离。
+- 同一批真实样本比较算法时，报告必须按 `processing_path` 分组记录质量指标、性能、
+  guardrail、review 和源文件安全结果。
+
 ### 3.3 质量收益必须可度量
 
 每个处理阶段都要记录 before/after 聚合指标：

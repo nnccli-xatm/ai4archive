@@ -217,8 +217,11 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   `.ocr.png` and `ocr_binary/` sidecar dimensions equal to source dimensions,
   preserve-canvas deskew attempted by default, required deskew not skipped,
   guardrail failures/reverts at zero, and manual review showing no waterwave,
-  hard-snap stroke loss, table-line distortion, or canvas expansion. Any
-  alternative OCR preprocessing path must be reported against this baseline.
+  hard-snap stroke loss, table-line distortion, or canvas expansion. Confirm the
+  run reports `processing_path=ocr-preprocess-leptonica-v1` in the production
+  summary, processing manifest, per-record processing data, service job summary,
+  and any public-safe template catalog/dry-run evidence. Any alternative OCR
+  preprocessing path must be reported against this baseline.
 - Confirm `archive-scan-qc ocr-provider-probe --provider disabled --out
   /placeholder/private-validation-output/ocr-provider-probe` writes
   `ocr_provider_probe.json` with provider disabled by default and no image/OCR
@@ -237,8 +240,10 @@ Run this checklist before tagging or publishing an `ai4archive` package build.
   /placeholder/private-validation-output/rule-template-dry-run` create
   `rule_template_catalog.json` and `rule_template_dry_run.json` with schemas
   `scan-qc.rule-template-catalog.v1` and `scan-qc.rule-template-dry-run.v1`,
-  report `Derivative images written: no`, and contain no paths, filenames,
-  hashes, OCR text, thumbnails, image content, or row-level evidence.
+  report `Derivative images written: no`, expose only public-safe
+  `processing_profile` and `processing_path` enums for algorithm selection, and
+  contain no paths, filenames, hashes, OCR text, thumbnails, image content, or
+  row-level evidence.
 - Confirm the validator's examples-based dry-run created `preflight_report.json`,
   JSON, HTML, CSV, a processing manifest, a processing retry manifest, an
   aggregate processing audit summary, and derivative images from synthetic

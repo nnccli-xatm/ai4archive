@@ -391,6 +391,16 @@ Follow-up, 2026-06-09: service-managed custom template writes now save
 validated drafts under server-owned storage. Catalog/detail responses include
 saved custom templates without returning paths or rule rows, and service jobs
 can use the saved template ID with a private template snapshot.
+Follow-up, 2026-06-11: image processing selection now has three layers:
+external callers continue to select a `rule_template`, the template resolves to
+a public-safe `processing_profile`, and that profile resolves to a stable
+`processing_path`. The `processing_path` is recorded in rule-template catalog
+and dry-run payloads, production summaries, processing manifests, per-file
+processing records, processing plans, service job checkpoints, and service job
+public summaries. The path ID is also included in processing fingerprints so a
+resume cannot silently reuse artifacts created by another algorithm route. This
+keeps CLI/API shapes stable while allowing future algorithms to be compared by
+running the same batch under different templates/paths.
 Follow-up, 2026-06-10: `print_clean` now also strengthens stable faded-text
 darkening inside the existing faded-text guardrails. The regression compares the
 same pale typed page under `standard` and `print_clean`, requires

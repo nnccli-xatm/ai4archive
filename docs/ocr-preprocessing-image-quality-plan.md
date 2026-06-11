@@ -185,6 +185,11 @@ OCR 预处理最终以 OCR 效果验收：
 
 OCR 预处理管线必须独立于保真派生图管线，输出 `ocr_derivatives/` 或 manifest 中明确的 `output_profile=ocr_preprocess`。
 
+新增 OCR 算法不能继续作为旧 profile 的隐藏开关。每个候选算法必须注册为稳定
+`processing_path`，由现有 `rule_template` 选择进入；manifest、生产摘要、service job
+public summary 和 plan fingerprint 必须记录 path ID。真实扫描样本、NoisyOffice、DIBCO/OCR
+和人工复核报告均按 `processing_path` 对照，避免把不同算法输出混在同一 profile 下比较。
+
 ### 4.1 版面与文字区域建模
 
 - EXIF transpose、DPI/尺寸标准化、灰度转换。
@@ -241,7 +246,7 @@ OCR 预处理管线必须独立于保真派生图管线，输出 `ocr_derivative
 任务：
 
 - 固化 NoisyOffice 当前负结果为 baseline。
-- 扩展 `run_noisyoffice_external_cli_test.py`，支持比较不同 profile：`text-clean-print`、`ocr-preprocess-light-v1`、`ocr-preprocess-v1`。
+- 扩展 `run_noisyoffice_external_cli_test.py`，支持比较不同 profile/path：`text-clean-print`、`ocr-preprocess-light-v1`、`ocr-preprocess-v1`、`ocr-preprocess-leptonica-v1`。
 - 增加 OCR 指标 harness：synthetic known text + 可选本机 OCR provider。
 - 输出 `ocr_preprocessing_quality_summary.json` public-safe 聚合摘要。
 
@@ -254,9 +259,9 @@ OCR 预处理管线必须独立于保真派生图管线，输出 `ocr_derivative
 任务：
 
 - 新增 `ocr-preprocess-v1` 和 `ocr-preprocess-light-v1` 模板。
-- 新增 `ocr-preprocess-leptonica-v1` 作为独立并列模板，不改变旧 `ocr-preprocess-v1` 默认行为。
+- 新增 `ocr-preprocess-leptonica-v1` 作为独立并列模板和 `processing_path`，不改变旧 `ocr-preprocess-v1` 默认行为。
 - `ProcessingOptions` 增加 OCR 输出 profile，但不污染现有保真派生图默认行为。
-- manifest 增加 `output_profile`、`ocr_preprocessing_operations`、`ocr_quality_metrics`、`ocr_review_required`。
+- manifest 增加 `output_profile`、`processing_path`、`ocr_preprocessing_operations`、`ocr_quality_metrics`、`ocr_review_required`。
 - service job public summary 只公开聚合质量指标和 blocking codes。
 
 完成标准：

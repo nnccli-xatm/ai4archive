@@ -21,6 +21,7 @@ from typing import Any
 from PIL import Image, ImageChops, ImageFilter, ImageOps, ImageStat, UnidentifiedImageError
 
 from .concurrency import resolve_worker_count, worker_metadata
+from .processing_paths import processing_path_id_for_profile, processing_path_payload_for_profile
 
 
 def _load_numpy() -> Any | None:
@@ -467,6 +468,7 @@ def process_images(
         "image_root": str(image_root),
         "rule_template": _rule_template_snapshot(report),
         "output_profile": _output_profile_for_processing_options(options),
+        "processing_path": _processing_path_payload_for_options(options),
         "ocr_preprocessing_operations": _ocr_preprocessing_operations(options),
         "ocr_quality_metrics": _ocr_manifest_quality_metrics(records),
         "ocr_review_required": any(record.get("ocr_review_required") is True for record in records),
@@ -1029,6 +1031,7 @@ def _process_record(
         "text_edges_edge_energy_before": 0.0,
         "text_edges_edge_energy_after": 0.0,
         "output_profile": _output_profile_for_processing_options(options),
+        "processing_path": _processing_path_id_for_options(options),
         "ocr_preprocessed": False,
         "ocr_preprocess_reason": None,
         "ocr_preprocess_reason_code": None,
@@ -1240,6 +1243,7 @@ def _process_record(
                 "text_edges_edge_energy_before": process_info["text_edges_edge_energy_before"],
                 "text_edges_edge_energy_after": process_info["text_edges_edge_energy_after"],
                 "output_profile": process_info["output_profile"],
+                "processing_path": process_info["processing_path"],
                 "ocr_preprocessed": process_info["ocr_preprocessed"],
                 "ocr_preprocess_reason": process_info["ocr_preprocess_reason"],
                 "ocr_preprocess_reason_code": process_info["ocr_preprocess_reason_code"],
@@ -1503,6 +1507,7 @@ def _processing_options_fingerprint(options: ProcessingOptions) -> str:
         "ocr_binary": options.ocr_binary,
         "despeckle_backend": options.despeckle_backend,
         "processing_profile": options.processing_profile,
+        "processing_path": _processing_path_id_for_options(options),
         "reuse_scan_measurements": options.reuse_scan_measurements,
         "deskew_max_degrees": options.deskew_max_degrees,
         "deskew_min_confidence": options.deskew_min_confidence,
@@ -1572,6 +1577,7 @@ def _processing_options_public_payload(options: ProcessingOptions) -> dict[str, 
         "ocr_binary": options.ocr_binary,
         "despeckle_backend": options.despeckle_backend,
         "processing_profile": options.processing_profile,
+        "processing_path": _processing_path_id_for_options(options),
         "resume_processing": options.resume_processing,
         "reuse_scan_measurements": options.reuse_scan_measurements,
         "workers": options.workers,
@@ -1588,6 +1594,14 @@ def _output_profile_for_processing_options(options: ProcessingOptions) -> str:
     if options.processing_profile == "print_clean":
         return "print_clean"
     return "standard"
+
+
+def _processing_path_id_for_options(options: ProcessingOptions) -> str:
+    return processing_path_id_for_profile(options.processing_profile)
+
+
+def _processing_path_payload_for_options(options: ProcessingOptions) -> dict[str, Any]:
+    return processing_path_payload_for_profile(options.processing_profile)
 
 
 def _ocr_processing_enabled(options: ProcessingOptions) -> bool:
@@ -3835,6 +3849,27 @@ def _process_image(
     *,
     scan_record: dict[str, Any] | None = None,
 ) -> tuple[Image.Image, list[str], dict[str, Any]]:
+    path_id = _processing_path_id_for_options(options)
+    if path_id == "ocr-preprocess-leptonica-v1":
+        return _process_image_ocr_leptonica_path(image, options, scan_record=scan_record)
+    return _process_image_standard_path(image, options, scan_record=scan_record)
+
+
+def _process_image_ocr_leptonica_path(
+    image: Image.Image,
+    options: ProcessingOptions,
+    *,
+    scan_record: dict[str, Any] | None = None,
+) -> tuple[Image.Image, list[str], dict[str, Any]]:
+    return _process_image_standard_path(image, options, scan_record=scan_record)
+
+
+def _process_image_standard_path(
+    image: Image.Image,
+    options: ProcessingOptions,
+    *,
+    scan_record: dict[str, Any] | None = None,
+) -> tuple[Image.Image, list[str], dict[str, Any]]:
     operations: list[str] = []
     operation_timings: dict[str, dict[str, Any]] = {}
     processed = ImageOps.exif_transpose(image)
@@ -4681,6 +4716,7 @@ def _process_image(
         "text_edges_edge_energy_before": 0.0 if guard_reverted else text_edges.edge_energy_before,
         "text_edges_edge_energy_after": 0.0 if guard_reverted else text_edges.edge_energy_after,
         "output_profile": _output_profile_for_processing_options(options),
+        "processing_path": _processing_path_id_for_options(options),
         "ocr_preprocessed": False if guard_reverted else ocr_preprocess.applied,
         "ocr_preprocess_reason": guard_reason if guard_reverted else ocr_preprocess.reason,
         "ocr_preprocess_reason_code": "guardrail_reverted" if guard_reverted else ocr_preprocess.reason_code,

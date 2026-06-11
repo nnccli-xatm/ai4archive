@@ -38,6 +38,7 @@ from .rules import (
     attach_rule_template,
     builtin_rules_profile,
     processing_defaults_for_rule_template,
+    processing_path_for_rule_template,
     processing_profile_for_rule_template,
     rules_profile_from_mapping,
 )
@@ -259,6 +260,7 @@ def create_service_job(config: ServiceJobConfig, *, job_id: str | None = None) -
             "rule_template": template_metadata,
             "processing_mode": config.processing_mode,
             "processing_profile": _processing_profile_for_job(config.rule_template),
+            "processing_path": _processing_path_for_job(config.rule_template),
             "processing_defaults": processing_defaults,
             "custom_template_draft": stored_template.get("template") if isinstance(stored_template, dict) else None,
             "workers": workers_scheduled,
@@ -950,6 +952,12 @@ def _processing_profile_for_job(rule_template: str) -> str:
     return "standard"
 
 
+def _processing_path_for_job(rule_template: str) -> str:
+    if rule_template in BUILTIN_RULE_TEMPLATE_IDS:
+        return processing_path_for_rule_template(rule_template)
+    return "standard-conservative-v1"
+
+
 def _production_config_from_record(record: dict[str, Any]) -> ProductionRunConfig:
     template_snapshot = record["template_snapshot"]
     template = template_snapshot["rule_template"]["id"]
@@ -1069,6 +1077,7 @@ def _public_summary_from_record(
             "base_rule_template_id": record["template_snapshot"]["rule_template"]["id"],
             "processing_mode": record["template_snapshot"]["processing_mode"],
             "processing_profile": _public_processing_profile(record.get("template_snapshot")),
+            "processing_path": _public_processing_path(record.get("template_snapshot")),
         },
         "resource_limits": _public_resource_limits(record.get("resource_limits")),
         "isolation": {
@@ -1131,6 +1140,23 @@ def _public_processing_profile(template_snapshot: Any) -> str:
         if isinstance(template_id, str) and template_id in BUILTIN_RULE_TEMPLATE_IDS:
             return _processing_profile_for_job(template_id)
     return "standard"
+
+
+def _public_processing_path(template_snapshot: Any) -> str:
+    if not isinstance(template_snapshot, dict):
+        return "standard-conservative-v1"
+    path = template_snapshot.get("processing_path")
+    if isinstance(path, str) and path:
+        return path
+    service_template_id = template_snapshot.get("service_template_id")
+    if isinstance(service_template_id, str):
+        return _processing_path_for_job(service_template_id)
+    rule_template = template_snapshot.get("rule_template")
+    if isinstance(rule_template, dict):
+        template_id = rule_template.get("id")
+        if isinstance(template_id, str):
+            return _processing_path_for_job(template_id)
+    return "standard-conservative-v1"
 
 
 def _safe_int(value: Any) -> int | None:

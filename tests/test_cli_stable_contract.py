@@ -26,6 +26,7 @@ from archive_scan_qc.production_runner import (
 from archive_scan_qc.rules import (
     builtin_rules_profile,
     processing_defaults_for_rule_template,
+    processing_path_for_rule_template,
     processing_profile_for_rule_template,
 )
 
@@ -66,6 +67,10 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         self.assertEqual(
             processing_profile_for_rule_template("ocr-preprocess-leptonica-v1"),
             "ocr_preprocess_leptonica",
+        )
+        self.assertEqual(
+            processing_path_for_rule_template("ocr-preprocess-leptonica-v1"),
+            "ocr-preprocess-leptonica-v1",
         )
         self.assertTrue(ocr_defaults["ocr_preprocess"])
         self.assertTrue(ocr_defaults["ocr_binary"])
@@ -743,12 +748,15 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         self.assertTrue(source_unchanged)
         self.assertEqual(summary["rule_template"]["id"], "ocr-preprocess-leptonica-v1")
         self.assertEqual(summary["options"]["processing_profile"], "ocr_preprocess_leptonica")
+        self.assertEqual(summary["options"]["processing_path"], "ocr-preprocess-leptonica-v1")
         self.assertTrue(summary["options"]["ocr_preprocess"])
         self.assertTrue(summary["options"]["ocr_binary"])
         self.assertTrue(summary["options"]["deskew"])
         self.assertFalse(summary["options"]["auto_crop"])
         self.assertFalse(summary["options"]["sharpen_text_edges"])
         self.assertEqual(processing_manifest["output_profile"], "ocr_preprocess_leptonica")
+        self.assertEqual(processing_manifest["processing_path"]["path_id"], "ocr-preprocess-leptonica-v1")
+        self.assertEqual(record["processing_path"], "ocr-preprocess-leptonica-v1")
         self.assertIn(
             "ocr_preprocess_leptonica_grayscale",
             processing_manifest["ocr_preprocessing_operations"],
@@ -1237,9 +1245,11 @@ class StableCliRuleTemplateTests(unittest.TestCase):
         self.assertEqual(text_payload["template"]["id"], "text-clean-readable-v1")
         self.assertEqual(text_payload["template"]["output_profile"], "text-clean-readable")
         self.assertEqual(text_payload["template"]["processing_profile"], "standard")
+        self.assertEqual(text_payload["template"]["processing_path"], "standard-conservative-v1")
         self.assertIn("text_clean_requires_pure_text_batch_confirmation", text_payload["risk_codes"])
         self.assertEqual(print_payload["template"]["output_profile"], "print-clean")
         self.assertEqual(print_payload["template"]["processing_profile"], "print_clean")
+        self.assertEqual(print_payload["template"]["processing_path"], "print-clean-v1")
         self.assertIn("print_clean_requires_overprocessing_review", print_payload["risk_codes"])
         self.assertEqual(photo_payload["template"]["output_profile"], "photo-mixed-safe")
         self.assertIn("strong_cleanup_disabled_by_high_fidelity_goal", photo_payload["risk_codes"])

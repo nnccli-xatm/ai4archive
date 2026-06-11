@@ -17,6 +17,7 @@ from .rules import (
     attach_rule_template,
     builtin_rules_profile,
     processing_defaults_for_rule_template,
+    processing_path_for_rule_template,
     processing_profile_for_rule_template,
     rules_profile_from_mapping,
 )
@@ -353,6 +354,8 @@ def _stored_template_summary_payload(stored: dict[str, Any]) -> dict[str, Any]:
         "validation": _safe_validation_counts(validation_counts),
         "risk_codes": [str(code) for code in risk_codes if isinstance(code, str)],
         "processing_defaults": _bool_dict(stored.get("processing_defaults")),
+        "processing_profile": "standard",
+        "processing_path": "standard-conservative-v1",
     }
 
 
@@ -410,6 +413,7 @@ def _template_payload(template_id: str) -> dict[str, Any]:
         "thresholds": metadata["thresholds"],
         "processing_defaults": processing_defaults_for_rule_template(template_id),
         "processing_profile": processing_profile_for_rule_template(template_id),
+        "processing_path": processing_path_for_rule_template(template_id),
         "stable": True,
         "customizable": False,
     }
@@ -428,6 +432,7 @@ def _custom_template_payload() -> dict[str, Any]:
         "thresholds": {},
         "processing_defaults": {},
         "processing_profile": "standard",
+        "processing_path": "standard-conservative-v1",
         "stable": False,
         "customizable": True,
     }
